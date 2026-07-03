@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <!-- connect-src must allow Tauri's IPC endpoint (ipc: / http://ipc.localhost),
+       or every invoke falls back to the slower postMessage transport with a
+       console error per call. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'" />
   <title>Spectra PDF</title>
 </head>
 <body>
