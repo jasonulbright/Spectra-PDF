@@ -26,6 +26,9 @@
     "@tauri-apps/plugin-fs": "2.5.1",
     "@tauri-apps/plugin-shell": "2.3.5",
     "@tauri-apps/plugin-updater": "2.10.1",
+    "d3-selection": "3.0.0",
+    "d3-zoom": "3.0.0",
+    "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.0.227",
     "react": "19.2.7",
     "react-dom": "19.2.7"
@@ -34,6 +37,8 @@
     "@eslint/js": "10.0.1",
     "@tailwindcss/postcss": "4.3.0",
     "@tauri-apps/cli": "2.11.2",
+    "@types/d3-selection": "3.0.11",
+    "@types/d3-zoom": "3.0.8",
     "@types/node": "25.9.1",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",

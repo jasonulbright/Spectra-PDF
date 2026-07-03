@@ -6,12 +6,14 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export async function loadDocument(buffer: PdfBuffer): Promise<pdfjsLib.PDFDocumentProxy> {
   // Tauri IPC serializes file bytes as a number[]; other sources may pass an
-  // ArrayBuffer or Uint8Array. new Uint8Array(...) accepts all three.
+  // ArrayBuffer or Uint8Array. Typed-array input is copied because pdf.js
+  // transfers (detaches) the array it is given to its worker, and state
+  // buffers are shared by several consumers.
   let data: Uint8Array;
   if (buffer instanceof Uint8Array) {
-    data = buffer;
+    data = buffer.slice();
   } else if (buffer instanceof ArrayBuffer) {
-    data = new Uint8Array(buffer);
+    data = new Uint8Array(buffer.slice(0));
   } else {
     data = new Uint8Array(buffer);
   }

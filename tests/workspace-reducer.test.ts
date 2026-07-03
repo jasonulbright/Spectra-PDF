@@ -1,0 +1,618 @@
+import { describe, expect, it } from 'vitest';
+import { appReducer, initialState } from '../src/renderer/state/reducer';
+import type { AppState, OpenDocument, OpenFile, PageRef } from '../src/renderer/state/types';
+
+function makeFile(path: string, pageCount: number, name?: string): OpenFile {
+  return {
+    path,
+    workingPath: `${path}.working`,
+    name: name ?? (path.split('/').pop() ?? path),
+    pageCount,
+    buffer: [1, 2, 3],
+    dirty: false,
+    undoStack: [],
+    redoStack: [],
+  };
+}
+
+function makePages(path: string, count: number, offset = 0): PageRef[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `${path}#p${offset + i}`,
+    sourceDocId: path,
+    sourcePageIndex: offset + i,
+    rotation: 0 as const,
+    width: 300,
+    height: 400,
+  }));
+}
+
+function makeDoc(file: OpenFile, id: string, pages: PageRef[]): OpenDocument {
+  return { ...file, id, pages, pageCount: pages.length };
+}
+
+function stateWith(files: OpenFile[], documents: OpenDocument[]): AppState {
+  return {
+    ...initialState,
+    files: new Map(files.map((f) => [f.path, f])),
+    workspace: { documents },
+  };
+}
+
+const pageIds = (doc: OpenDocument): string[] => doc.pages.map((p) => p.id);
+
+describe('SET_WORKSPACE_DOCUMENTS', () => {
+  it('appends documents for a newly indexed file', () => {
+    const a = makeFile('a.pdf', 2);
+    const docA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const next = appReducer(stateWith([a], []), {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [docA],
+    });
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0']);
+  });
+
+  it('replaces a file\'s documents in place, preserving workspace order', () => {
+    const a = makeFile('a.pdf', 5);
+    const b = makeFile('b.pdf', 2);
+    const docA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 5));
+    const docB = makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2));
+    // Re-index a.pdf as two manifest partitions
+    const split = [
+      makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3)),
+      makeDoc(a, 'a.pdf#1', makePages('a.pdf', 2, 3)),
+    ];
+    const next = appReducer(stateWith([a, b], [docA, docB]), {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: split,
+    });
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0', 'a.pdf#1', 'b.pdf#0']);
+  });
+
+  it('is ignored when the file is no longer open', () => {
+    const a = makeFile('a.pdf', 2);
+    const docA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const next = appReducer(stateWith([], []), {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [docA],
+    });
+    expect(next.workspace.documents).toEqual([]);
+  });
+});
+
+describe('CLOSE_FILE', () => {
+  it('drops the closed file\'s workspace documents', () => {
+    const a = makeFile('a.pdf', 2);
+    const b = makeFile('b.pdf', 1);
+    const docs = [
+      makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2)),
+      makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1)),
+    ];
+    const next = appReducer(stateWith([a, b], docs), { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['b.pdf#0']);
+  });
+});
+
+describe('REORDER_PAGES', () => {
+  it('applies a full permutation of the document\'s pages', () => {
+    const a = makeFile('a.pdf', 3);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3));
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'REORDER_PAGES',
+      docId: 'a.pdf#0',
+      order: ['a.pdf#p2', 'a.pdf#p0', 'a.pdf#p1'],
+    });
+    expect(pageIds(next.workspace.documents[0])).toEqual(['a.pdf#p2', 'a.pdf#p0', 'a.pdf#p1']);
+  });
+
+  it('rejects an order that is not a permutation', () => {
+    const a = makeFile('a.pdf', 3);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3));
+    const state = stateWith([a], [doc]);
+    for (const order of [
+      ['a.pdf#p0', 'a.pdf#p1'], // wrong length
+      ['a.pdf#p0', 'a.pdf#p1', 'nope'], // unknown id
+    ]) {
+      const next = appReducer(state, { type: 'REORDER_PAGES', docId: 'a.pdf#0', order });
+      expect(pageIds(next.workspace.documents[0])).toEqual(['a.pdf#p0', 'a.pdf#p1', 'a.pdf#p2']);
+    }
+  });
+});
+
+describe('MOVE_PAGE', () => {
+  it('moves a page between documents and updates both page counts', () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 1);
+    const docA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3));
+    const docB = makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1));
+    const next = appReducer(stateWith([a, b], [docA, docB]), {
+      type: 'MOVE_PAGE',
+      fromDocId: 'a.pdf#0',
+      toDocId: 'b.pdf#0',
+      pageId: 'a.pdf#p1',
+      toIndex: 0,
+    });
+    const [nextA, nextB] = next.workspace.documents;
+    expect(pageIds(nextA)).toEqual(['a.pdf#p0', 'a.pdf#p2']);
+    expect(nextA.pageCount).toBe(2);
+    expect(pageIds(nextB)).toEqual(['a.pdf#p1', 'b.pdf#p0']);
+    expect(nextB.pageCount).toBe(2);
+    // The moved page still references its original source bytes
+    expect(nextB.pages[0].sourceDocId).toBe('a.pdf');
+    expect(nextB.pages[0].sourcePageIndex).toBe(1);
+  });
+
+  it('repositions within the same document', () => {
+    const a = makeFile('a.pdf', 3);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3));
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'MOVE_PAGE',
+      fromDocId: 'a.pdf#0',
+      toDocId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      toIndex: 2,
+    });
+    expect(pageIds(next.workspace.documents[0])).toEqual(['a.pdf#p1', 'a.pdf#p2', 'a.pdf#p0']);
+    expect(next.workspace.documents[0].pageCount).toBe(3);
+  });
+
+  it('is a no-op when the page is not in the source document', () => {
+    const a = makeFile('a.pdf', 2);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const state = stateWith([a], [doc]);
+    const next = appReducer(state, {
+      type: 'MOVE_PAGE',
+      fromDocId: 'a.pdf#0',
+      toDocId: 'a.pdf#0',
+      pageId: 'missing',
+      toIndex: 0,
+    });
+    expect(next).toBe(state);
+  });
+});
+
+describe('SPLIT_DOC', () => {
+  it('splits one document into two at the given index', () => {
+    const a = makeFile('a.pdf', 4);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 4));
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'SPLIT_DOC',
+      docId: 'a.pdf#0',
+      atIndex: 3,
+      newDocId: 'a.pdf#0-split',
+      newName: 'a (2)',
+    });
+    const [head, tail] = next.workspace.documents;
+    expect(head.id).toBe('a.pdf#0');
+    expect(pageIds(head)).toEqual(['a.pdf#p0', 'a.pdf#p1', 'a.pdf#p2']);
+    expect(head.pageCount).toBe(3);
+    expect(tail.id).toBe('a.pdf#0-split');
+    expect(tail.name).toBe('a (2)');
+    expect(pageIds(tail)).toEqual(['a.pdf#p3']);
+    expect(tail.pageCount).toBe(1);
+  });
+
+  it('rejects splits at the document boundaries', () => {
+    const a = makeFile('a.pdf', 2);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const state = stateWith([a], [doc]);
+    for (const atIndex of [0, 2]) {
+      const next = appReducer(state, {
+        type: 'SPLIT_DOC',
+        docId: 'a.pdf#0',
+        atIndex,
+        newDocId: 'x',
+        newName: 'x',
+      });
+      expect(next).toBe(state);
+    }
+  });
+});
+
+describe('ROTATE_PAGE_REF', () => {
+  it('sets rotation on exactly the targeted page', () => {
+    const a = makeFile('a.pdf', 2);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'ROTATE_PAGE_REF',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p1',
+      rotation: 90,
+    });
+    expect(next.workspace.documents[0].pages.map((p) => p.rotation)).toEqual([0, 90]);
+  });
+});
+
+describe('page-edit undo tier', () => {
+  const twoFiles = () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 2);
+    return {
+      a,
+      b,
+      state: stateWith(
+        [a, b],
+        [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3)), makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2))],
+      ),
+    };
+  };
+
+  it('page mutations push undo and mark the touched paths dirty', () => {
+    const { state } = twoFiles();
+    const next = appReducer(state, {
+      type: 'MOVE_PAGE',
+      fromDocId: 'a.pdf#0',
+      toDocId: 'b.pdf#0',
+      pageId: 'a.pdf#p1',
+      toIndex: 0,
+    });
+    expect(next.pageUndoStack).toHaveLength(1);
+    expect(next.pageUndoStack[0].documents).toBe(state.workspace.documents);
+    expect(next.pageDirtyPaths.sort()).toEqual(['a.pdf', 'b.pdf']);
+    expect(next.pageRedoStack).toEqual([]);
+  });
+
+  it('rejected edits push nothing', () => {
+    const { state } = twoFiles();
+    const next = appReducer(state, {
+      type: 'REORDER_PAGES',
+      docId: 'a.pdf#0',
+      order: ['a.pdf#p0', 'a.pdf#p1', 'a.pdf#p2'], // identity — not a change
+    });
+    expect(next).toBe(state);
+  });
+
+  it('UNDO_PAGE_OP restores documents and dirty paths; REDO_PAGE_OP reapplies', () => {
+    const { state } = twoFiles();
+    const edited = appReducer(state, {
+      type: 'REORDER_PAGES',
+      docId: 'a.pdf#0',
+      order: ['a.pdf#p2', 'a.pdf#p0', 'a.pdf#p1'],
+    });
+    const undone = appReducer(edited, { type: 'UNDO_PAGE_OP' });
+    expect(undone.workspace.documents).toBe(state.workspace.documents);
+    expect(undone.pageDirtyPaths).toEqual([]);
+    expect(undone.pageRedoStack).toHaveLength(1);
+    const redone = appReducer(undone, { type: 'REDO_PAGE_OP' });
+    expect(redone.workspace.documents).toBe(edited.workspace.documents);
+    expect(redone.pageDirtyPaths).toEqual(['a.pdf']);
+    expect(appReducer(state, { type: 'UNDO_PAGE_OP' })).toBe(state);
+  });
+
+  it('CLEAR_PAGE_EDITS resets the tier but leaves the workspace alone', () => {
+    const { state } = twoFiles();
+    const edited = appReducer(state, {
+      type: 'REORDER_PAGES',
+      docId: 'a.pdf#0',
+      order: ['a.pdf#p2', 'a.pdf#p0', 'a.pdf#p1'],
+    });
+    const cleared = appReducer(edited, { type: 'CLEAR_PAGE_EDITS' });
+    expect(cleared.pageUndoStack).toEqual([]);
+    expect(cleared.pageRedoStack).toEqual([]);
+    expect(cleared.pageDirtyPaths).toEqual([]);
+    expect(cleared.workspace.documents).toBe(edited.workspace.documents);
+  });
+});
+
+describe('zero-page and prune guards', () => {
+  it('rejects a cross-file move that would empty the source file', () => {
+    const a = makeFile('a.pdf', 1);
+    const b = makeFile('b.pdf', 1);
+    const state = stateWith(
+      [a, b],
+      [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1)), makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1))],
+    );
+    const next = appReducer(state, {
+      type: 'MOVE_PAGE',
+      fromDocId: 'a.pdf#0',
+      toDocId: 'b.pdf#0',
+      pageId: 'a.pdf#p0',
+      toIndex: 0,
+    });
+    expect(next).toBe(state);
+  });
+
+  it('prunes an emptied partition when the file has siblings', () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 1);
+    const partA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const partB = makeDoc(a, 'a.pdf#1', makePages('a.pdf', 1, 2));
+    const docB = makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1));
+    const state = stateWith([a, b], [partA, partB, docB]);
+    const next = appReducer(state, {
+      type: 'MOVE_PAGE',
+      fromDocId: 'a.pdf#1',
+      toDocId: 'b.pdf#0',
+      pageId: 'a.pdf#p2',
+      toIndex: 1,
+    });
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0', 'b.pdf#0']);
+  });
+});
+
+describe('MOVE_PAGE_TO_NEW_DOC', () => {
+  it('creates a new partition of the source file at the given slot', () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 1);
+    const state = stateWith(
+      [a, b],
+      [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3)), makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1))],
+    );
+    const next = appReducer(state, {
+      type: 'MOVE_PAGE_TO_NEW_DOC',
+      fromDocId: 'a.pdf#0',
+      pageId: 'a.pdf#p1',
+      docIndex: 1,
+      newDocId: 'new-doc',
+      newName: 'a (2)',
+    });
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0', 'new-doc', 'b.pdf#0']);
+    const created = next.workspace.documents[1];
+    expect(created.path).toBe('a.pdf');
+    expect(created.name).toBe('a (2)');
+    expect(created.pages.map((p) => p.id)).toEqual(['a.pdf#p1']);
+    expect(next.pageDirtyPaths).toEqual(['a.pdf']);
+  });
+
+  it('prunes an emptied single-page source and adjusts the insert slot', () => {
+    const a = makeFile('a.pdf', 3);
+    const partA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const partB = makeDoc(a, 'a.pdf#1', makePages('a.pdf', 1, 2));
+    const state = stateWith([a], [partA, partB]);
+    const next = appReducer(state, {
+      type: 'MOVE_PAGE_TO_NEW_DOC',
+      fromDocId: 'a.pdf#1',
+      pageId: 'a.pdf#p2',
+      docIndex: 2,
+      newDocId: 'new-doc',
+      newName: 'a (2)',
+    });
+    // Source partition emptied and removed; new doc lands after the remaining one.
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0', 'new-doc']);
+  });
+});
+
+describe('REORDER_DOCS / RENAME_DOC / REMOVE_DOC', () => {
+  it('swaps neighbors and marks dirty only for same-file swaps', () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 1);
+    const partA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const partB = makeDoc(a, 'a.pdf#1', makePages('a.pdf', 1, 2));
+    const docB = makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1));
+    const state = stateWith([a, b], [partA, partB, docB]);
+
+    const crossFile = appReducer(state, { type: 'REORDER_DOCS', docId: 'b.pdf#0', direction: -1 });
+    expect(crossFile.workspace.documents.map((d) => d.id)).toEqual([
+      'a.pdf#0',
+      'b.pdf#0',
+      'a.pdf#1',
+    ]);
+    expect(crossFile.pageDirtyPaths).toEqual([]); // view-only, but still undoable
+    expect(crossFile.pageUndoStack).toHaveLength(1);
+
+    const sameFile = appReducer(state, { type: 'REORDER_DOCS', docId: 'a.pdf#1', direction: -1 });
+    expect(sameFile.pageDirtyPaths).toEqual(['a.pdf']);
+
+    expect(appReducer(state, { type: 'REORDER_DOCS', docId: 'a.pdf#0', direction: -1 })).toBe(
+      state,
+    );
+  });
+
+  it('renames mark dirty only when the file carries a manifest', () => {
+    const a = makeFile('a.pdf', 3);
+    const partA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const partB = makeDoc(a, 'a.pdf#1', makePages('a.pdf', 1, 2));
+    const multi = appReducer(stateWith([a], [partA, partB]), {
+      type: 'RENAME_DOC',
+      docId: 'a.pdf#0',
+      name: 'Chapter One',
+    });
+    expect(multi.workspace.documents[0].name).toBe('Chapter One');
+    expect(multi.pageDirtyPaths).toEqual(['a.pdf']);
+
+    const plain = makeFile('c.pdf', 2);
+    const single = appReducer(
+      stateWith([plain], [makeDoc(plain, 'c.pdf#0', makePages('c.pdf', 2))]),
+      { type: 'RENAME_DOC', docId: 'c.pdf#0', name: 'Renamed' },
+    );
+    expect(single.workspace.documents[0].name).toBe('Renamed');
+    expect(single.pageDirtyPaths).toEqual([]); // display-only until reindex
+  });
+
+  it('removes a partition but never the last document of a file', () => {
+    const a = makeFile('a.pdf', 3);
+    const partA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const partB = makeDoc(a, 'a.pdf#1', makePages('a.pdf', 1, 2));
+    const state = stateWith([a], [partA, partB]);
+    const removed = appReducer(state, { type: 'REMOVE_DOC', docId: 'a.pdf#1' });
+    expect(removed.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0']);
+    expect(removed.pageDirtyPaths).toEqual(['a.pdf']);
+
+    const lastDoc = appReducer(removed, { type: 'REMOVE_DOC', docId: 'a.pdf#0' });
+    expect(lastDoc).toBe(removed);
+  });
+});
+
+describe('UPDATE_FILE with a non-empty page tier (bypassed-gate hardening)', () => {
+  const editedState = () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 2);
+    const c = makeFile('c.pdf', 2);
+    const state = stateWith(
+      [a, b, c],
+      [
+        makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3)),
+        makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2)),
+        makeDoc(c, 'c.pdf#0', makePages('c.pdf', 2)),
+      ],
+    );
+    // Cross-file move entangles a.pdf and b.pdf; c.pdf stays clean.
+    return appReducer(state, {
+      type: 'MOVE_PAGE',
+      fromDocId: 'a.pdf#0',
+      toDocId: 'b.pdf#0',
+      pageId: 'a.pdf#p1',
+      toIndex: 0,
+    });
+  };
+
+  it('resets the tier and drops the dirty paths\' documents for reindexing', () => {
+    const edited = editedState();
+    const next = appReducer(edited, {
+      type: 'UPDATE_FILE',
+      path: 'a.pdf',
+      pageCount: 2,
+      buffer: [9, 9, 9],
+      snapshotPath: 'snap1',
+    });
+    expect(next.pageUndoStack).toEqual([]);
+    expect(next.pageRedoStack).toEqual([]);
+    expect(next.pageDirtyPaths).toEqual([]);
+    // Entangled (dirty) paths' docs dropped; untouched clean file keeps its docs.
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['c.pdf#0']);
+    // The file update itself still lands on the snapshot chain.
+    expect(next.files.get('a.pdf')?.undoStack).toEqual(['snap1']);
+    expect(next.files.get('a.pdf')?.pageCount).toBe(2);
+  });
+
+  it('leaves the workspace alone when the tier is empty', () => {
+    const a = makeFile('a.pdf', 3);
+    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))]);
+    const next = appReducer(state, {
+      type: 'UPDATE_FILE',
+      path: 'a.pdf',
+      pageCount: 2,
+      buffer: [9],
+      snapshotPath: 'snap1',
+    });
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0']);
+    expect(next.files.get('a.pdf')?.undoStack).toEqual(['snap1']);
+  });
+});
+
+describe('COMMIT_PAGE_EDITS', () => {
+  it('applies all file updates and clears the tier atomically', () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 2);
+    const state = stateWith(
+      [a, b],
+      [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3)), makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2))],
+    );
+    const edited = appReducer(state, {
+      type: 'MOVE_PAGE',
+      fromDocId: 'a.pdf#0',
+      toDocId: 'b.pdf#0',
+      pageId: 'a.pdf#p1',
+      toIndex: 0,
+    });
+    const next = appReducer(edited, {
+      type: 'COMMIT_PAGE_EDITS',
+      updates: [
+        { path: 'a.pdf', pageCount: 2, buffer: [1], snapshotPath: 'snapA' },
+        { path: 'b.pdf', pageCount: 3, buffer: [2], snapshotPath: 'snapB' },
+      ],
+    });
+    expect(next.files.get('a.pdf')).toMatchObject({ pageCount: 2, dirty: true, undoStack: ['snapA'] });
+    expect(next.files.get('b.pdf')).toMatchObject({ pageCount: 3, dirty: true, undoStack: ['snapB'] });
+    expect(next.pageUndoStack).toEqual([]);
+    expect(next.pageRedoStack).toEqual([]);
+    expect(next.pageDirtyPaths).toEqual([]);
+    // Workspace untouched — the indexer re-derives from the new buffers.
+    expect(next.workspace.documents).toBe(edited.workspace.documents);
+  });
+});
+
+describe('OPEN_FILE with a non-empty page tier', () => {
+  it('clears undo history (unreplayable) but keeps pending dirt', () => {
+    const a = makeFile('a.pdf', 3);
+    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))]);
+    const edited = appReducer(state, {
+      type: 'REORDER_PAGES',
+      docId: 'a.pdf#0',
+      order: ['a.pdf#p2', 'a.pdf#p0', 'a.pdf#p1'],
+    });
+    const next = appReducer(edited, {
+      type: 'OPEN_FILE',
+      path: 'b.pdf',
+      workingPath: 'b.pdf.working',
+      name: 'b.pdf',
+      pageCount: 2,
+      buffer: [5],
+    });
+    expect(next.pageUndoStack).toEqual([]);
+    expect(next.pageRedoStack).toEqual([]);
+    expect(next.pageDirtyPaths).toEqual(['a.pdf']); // composition still committable
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0']);
+  });
+});
+
+describe('RENAME_DOC manifest predicate (file-anchored)', () => {
+  it('dirties a single-partition .pdfx file — its manifest persists the name', () => {
+    const bundle = makeFile('c.pdfx', 2, 'c.pdfx');
+    const state = stateWith([bundle], [makeDoc(bundle, 'c.pdfx#0', makePages('c.pdfx', 2))]);
+    const next = appReducer(state, { type: 'RENAME_DOC', docId: 'c.pdfx#0', name: 'Bundle' });
+    expect(next.workspace.documents[0].name).toBe('Bundle');
+    expect(next.pageDirtyPaths).toEqual(['c.pdfx']);
+  });
+
+  it('does not dirty a plain single-doc PDF even if the partition name says .pdfx', () => {
+    const plain = makeFile('a.pdf', 2);
+    const state = stateWith([plain], [makeDoc(plain, 'a.pdf#0', makePages('a.pdf', 2))]);
+    const next = appReducer(state, {
+      type: 'RENAME_DOC',
+      docId: 'a.pdf#0',
+      name: 'archive.pdfx', // display name only — the FILE is a plain .pdf
+    });
+    expect(next.workspace.documents[0].name).toBe('archive.pdfx');
+    expect(next.pageDirtyPaths).toEqual([]);
+  });
+});
+
+describe('CLOSE_FILE with pending cross-file edits', () => {
+  it('strips pages sourced from the closed file and resets the tier', () => {
+    const a = makeFile('a.pdf', 2);
+    const b = makeFile('b.pdf', 2);
+    const state = stateWith(
+      [a, b],
+      [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2)), makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2))],
+    );
+    // Move a page from a.pdf into b's doc, then close a.pdf.
+    const moved = appReducer(state, {
+      type: 'MOVE_PAGE',
+      fromDocId: 'a.pdf#0',
+      toDocId: 'b.pdf#0',
+      pageId: 'a.pdf#p0',
+      toIndex: 0,
+    });
+    const closed = appReducer(moved, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(closed.workspace.documents.map((d) => d.id)).toEqual(['b.pdf#0']);
+    expect(closed.workspace.documents[0].pages.every((p) => p.sourceDocId === 'b.pdf')).toBe(true);
+    expect(closed.pageUndoStack).toEqual([]);
+    expect(closed.pageRedoStack).toEqual([]);
+    expect(closed.pageDirtyPaths).toEqual(['b.pdf']);
+  });
+
+  it('resets a path stripped to zero pages instead of keeping an uncommittable strip', () => {
+    const a = makeFile('a.pdf', 2);
+    const b = makeFile('b.pdf', 1);
+    // b's only document holds nothing but a-sourced pages (its own page was
+    // moved elsewhere earlier in the session).
+    const state = {
+      ...stateWith(
+        [a, b],
+        [
+          makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1, 1)),
+          makeDoc(b, 'b.pdf#0', makePages('a.pdf', 1)),
+        ],
+      ),
+      pageDirtyPaths: ['a.pdf', 'b.pdf'],
+    };
+    const closed = appReducer(state, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    // b's stripped-to-empty doc is dropped — the indexer restores b's pristine
+    // composition from its unchanged buffer — and b is no longer dirty.
+    expect(closed.workspace.documents).toEqual([]);
+    expect(closed.pageDirtyPaths).toEqual([]);
+  });
+});

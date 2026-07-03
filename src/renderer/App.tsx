@@ -23,6 +23,10 @@ import { GrayscalePanel } from './panels/GrayscalePanel';
 import { OptimizePanel } from './panels/OptimizePanel';
 import { PdfVersionPanel } from './panels/PdfVersionPanel';
 import { useEngine } from './hooks/useEngine';
+import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
+import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
+import { commitPageEdits } from './lib/workspace-commit';
+import { setCommitGate } from './lib/commit-gate';
 import { DropZone } from './components/DropZone';
 import { OperationQueue } from './components/OperationQueue';
 import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
@@ -32,7 +36,7 @@ import { UpdateBar } from './components/UpdateBar';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
 
-type ViewMode = 'operations' | 'pages';
+type ViewMode = 'operations' | 'pages' | 'canvas';
 
 const panels: Record<Operation, React.ComponentType> = {
   merge: MergePanel, split: SplitPanel, rotate: RotatePanel, delete: DeletePanel,
@@ -68,6 +72,7 @@ function AppContent(): React.ReactElement {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const { call, openFiles, saveFile } = useEngine();
+  useWorkspaceIndexer();
 
   // 3-choice confirm dialog state (Save / Don't Save / Cancel)
   const [confirmState, setConfirmState] = useState<{
@@ -124,6 +129,59 @@ function AppContent(): React.ReactElement {
   const activeFile = state.activeFileId ? state.files.get(state.activeFileId) : null;
   const allFiles = Array.from(state.files.values());
 
+  // Commit-failure banner: commits triggered from gates/effects have no
+  // natural place to report, so failures surface here.
+  const [commitError, setCommitError] = useState<string | null>(null);
+
+  // Materialize pending in-memory page edits onto the snapshot undo chain.
+  // Runs before anything that reads or replaces file bytes (save, whole-file
+  // ops, close) — all dirty files commit together because cross-file moves
+  // entangle them. Uses the raw (ungated) snapshot to avoid re-entering the
+  // commit gate.
+  const commitIfNeeded = useCallback(async () => {
+    if (state.pageDirtyPaths.length === 0) return;
+    await commitPageEdits({
+      workspace: state.workspace,
+      files: state.files,
+      dirtyPaths: state.pageDirtyPaths,
+      dispatch,
+      snapshot: file.snapshotRaw,
+      writeBuffer: file.writeBuffer,
+      rename: file.rename,
+      remove: file.remove,
+    });
+    setCommitError(null);
+  }, [state.pageDirtyPaths, state.workspace, state.files, dispatch]);
+  const commitRef = useRef(commitIfNeeded);
+  commitRef.current = commitIfNeeded;
+
+  // Fire-and-forget variant for gates/effects/buttons: reports instead of
+  // throwing. Flows that must abort on failure (save, close) await
+  // commitIfNeeded directly and handle the rejection themselves.
+  const commitAndReport = useCallback(async () => {
+    try {
+      await commitRef.current();
+    } catch (err) {
+      setCommitError(
+        `Applying page changes failed: ${err instanceof Error ? err.message : String(err)}. ` +
+          'Your edits are still pending — fix the cause (disk space, file locks) and retry.',
+      );
+    }
+  }, []);
+
+  // Register the commit gate so panel operations (which snapshot the working
+  // file before mutating it) flush pending canvas edits first.
+  useEffect(() => {
+    setCommitGate(() => commitRef.current());
+    return () => setCommitGate(null);
+  }, []);
+
+  const isFileDirty = useCallback(
+    (f: { path: string; dirty: boolean }) =>
+      f.dirty || state.pageDirtyPaths.includes(f.path),
+    [state.pageDirtyPaths],
+  );
+
   // Reload the working copy buffer and page count into state
   const reloadFile = useCallback(async (filePath: string) => {
     const f = state.files.get(filePath);
@@ -175,17 +233,18 @@ function AppContent(): React.ReactElement {
     }
   }, [state.files, call, dispatch, addRecent, showPasswordPrompt]);
 
-  // Drag-drop handler: open files, then navigate based on count
+  // Drag-drop handler: open files, then navigate based on count. Drops while
+  // in the canvas stay there — new files appear as strips in place.
   const handleFilesDropped = useCallback(async (paths: string[]) => {
     await openByPaths(paths);
-    if (paths.length === 0) return;
+    if (paths.length === 0 || view === 'canvas') return;
     if (paths.length >= 2) {
       setView('operations');
       setActiveOp('merge');
     } else {
       setView('pages');
     }
-  }, [openByPaths]);
+  }, [openByPaths, view]);
 
   const handleOpenFile = useCallback(async (): Promise<boolean> => {
     const paths = await openFiles();
@@ -233,7 +292,8 @@ function AppContent(): React.ReactElement {
   ) => {
     const f = state.files.get(filePath);
     if (!f) return;
-    // Snapshot before mutation
+    // Snapshot before mutation. file.snapshot runs the commit gate first, so
+    // pending page edits are on disk before the snapshot and the engine call.
     const snapshotPath = await file.snapshot(f.workingPath);
     // Perform operation on working copy
     await call(method, { ...params, file: f.workingPath, output: f.workingPath });
@@ -265,6 +325,12 @@ function AppContent(): React.ReactElement {
   }, [activeFile]);
 
   const handleUndo = useCallback(async () => {
+    // Page-edit tier first: pending in-memory edits are always newer than the
+    // last disk snapshot (commit drains the tier before whole-file ops).
+    if (state.pageUndoStack.length > 0) {
+      dispatch({ type: 'UNDO_PAGE_OP' });
+      return;
+    }
     if (!activeFile || activeFile.undoStack.length === 0) return;
     const snapshotPath = activeFile.undoStack[activeFile.undoStack.length - 1];
     await file.restoreSnapshot(activeFile.workingPath, snapshotPath);
@@ -288,41 +354,59 @@ function AppContent(): React.ReactElement {
         buffer: result.buffer,
       });
     }
-  }, [activeFile, state.files, reloadFile, dispatch]);
+  }, [activeFile, state.files, state.pageUndoStack.length, reloadFile, dispatch]);
+
+  // Run the commit ahead of a dependent step; on failure surface the error
+  // and tell the caller to abort (the edits are still pending and retryable).
+  const commitOrAbort = useCallback(async (): Promise<boolean> => {
+    try {
+      await commitIfNeeded();
+      return true;
+    } catch (err) {
+      setCommitError(
+        `Applying page changes failed: ${err instanceof Error ? err.message : String(err)}. ` +
+          'Nothing was saved — your edits are still pending.',
+      );
+      return false;
+    }
+  }, [commitIfNeeded]);
 
   const handleSave = useCallback(async () => {
     if (!activeFile) return;
+    if (!(await commitOrAbort())) return;
     await file.saveAs(activeFile.workingPath, activeFile.path);
     dispatch({ type: 'MARK_SAVED', path: activeFile.path });
-  }, [activeFile, dispatch]);
+  }, [activeFile, dispatch, commitOrAbort]);
 
   const handleSaveAs = useCallback(async () => {
     if (!activeFile) return;
     const dest = await saveFile(activeFile.name);
     if (!dest) return;
+    if (!(await commitOrAbort())) return;
     await file.saveAs(activeFile.workingPath, dest);
     dispatch({ type: 'MARK_SAVED', path: activeFile.path });
-  }, [activeFile, saveFile, dispatch]);
+  }, [activeFile, saveFile, dispatch, commitOrAbort]);
 
   // Close file with unsaved changes prompt
   const handleCloseFile = useCallback(async (filePath: string) => {
     const f = state.files.get(filePath);
-    if (f?.dirty) {
+    if (f && isFileDirty(f)) {
       const result = await showConfirm(
         `"${f.name}" has unsaved changes. Save before closing?`
       );
       if (result === 'cancel') return;
       if (result === 'save') {
+        if (!(await commitOrAbort())) return;
         await file.saveAs(f.workingPath, f.path);
       }
     }
     dispatch({ type: 'CLOSE_FILE', path: filePath });
-  }, [state.files, dispatch, showConfirm]);
+  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort]);
 
   // Close all open files with unsaved changes prompt
   const handleCloseAll = useCallback(async () => {
     const allOpen = Array.from(state.files.values());
-    const dirtyFiles = allOpen.filter((f) => f.dirty);
+    const dirtyFiles = allOpen.filter(isFileDirty);
     if (dirtyFiles.length > 0) {
       const names = dirtyFiles.map((f) => f.name).join(', ');
       const result = await showConfirm(
@@ -330,6 +414,7 @@ function AppContent(): React.ReactElement {
       );
       if (result === 'cancel') return;
       if (result === 'save') {
+        if (!(await commitOrAbort())) return;
         for (const f of dirtyFiles) {
           await file.saveAs(f.workingPath, f.path);
         }
@@ -338,11 +423,13 @@ function AppContent(): React.ReactElement {
     for (const f of allOpen) {
       dispatch({ type: 'CLOSE_FILE', path: f.path });
     }
-  }, [state.files, dispatch, showConfirm]);
+  }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort]);
 
-  // Keep a ref to current files so the close handler always sees latest state
+  // Keep refs to current state so the close handler always sees latest values
   const filesRef = useRef(state.files);
   filesRef.current = state.files;
+  const pageDirtyRef = useRef(state.pageDirtyPaths);
+  pageDirtyRef.current = state.pageDirtyPaths;
 
   // Handle window close — Rust intercepts CloseRequested and emits app:beforeClose
   useEffect(() => {
@@ -350,7 +437,9 @@ function AppContent(): React.ReactElement {
       const minimizeToTray = getSettings().minimizeToTray === true;
 
       // If no dirty files, either minimize to tray or close
-      const dirtyFiles = Array.from(filesRef.current.values()).filter((f) => f.dirty);
+      const dirtyFiles = Array.from(filesRef.current.values()).filter(
+        (f) => f.dirty || pageDirtyRef.current.includes(f.path),
+      );
       if (dirtyFiles.length === 0) {
         if (minimizeToTray) {
           await app.hideToTray();
@@ -367,6 +456,11 @@ function AppContent(): React.ReactElement {
         return; // Do nothing — window stays open
       }
       if (result === 'save') {
+        try {
+          await commitRef.current();
+        } catch {
+          return; // commit failed — keep the window open, edits still pending
+        }
         for (const f of dirtyFiles) {
           await file.saveAs(f.workingPath, f.path);
         }
@@ -379,6 +473,20 @@ function AppContent(): React.ReactElement {
     });
     return () => { unlisten.then((fn) => fn()); };
   }, []);
+
+  // Leaving the canvas commits pending page edits, making "in-memory edits
+  // exist only while in canvas view" the invariant — Pages/Inspector and the
+  // operation panels always see materialized state. On failure the banner
+  // shows and the tier stays pending (the engine-call/snapshot gates still
+  // protect any operation attempted meanwhile).
+  const prevViewRef = useRef(view);
+  useEffect(() => {
+    const prev = prevViewRef.current;
+    prevViewRef.current = view;
+    if (prev === 'canvas' && view !== 'canvas') {
+      void commitAndReport();
+    }
+  }, [view, commitAndReport]);
 
   // Handle tray actions (Quick Merge)
   useEffect(() => {
@@ -449,7 +557,8 @@ function AppContent(): React.ReactElement {
   }, [view, activeOp, state.files, state.activeFileId, activeFile?.dirty, activeFile?.pageCount]);
 
   const Panel = panels[activeOp];
-  const canUndo = activeFile ? activeFile.undoStack.length > 0 : false;
+  const canUndo =
+    state.pageUndoStack.length > 0 || (activeFile ? activeFile.undoStack.length > 0 : false);
 
   return (
     <DropZone onFilesDropped={handleFilesDropped}>
@@ -466,13 +575,13 @@ function AppContent(): React.ReactElement {
           </button>
         </div>
         <div className="flex items-center gap-2">
-          {/* Undo / Save — only in pages view with an active file */}
-          {view === 'pages' && activeFile && (
+          {/* Undo / Save — in pages and canvas views with an active file */}
+          {(view === 'pages' || view === 'canvas') && activeFile && (
             <>
               <button data-testid="undo-btn" onClick={handleUndo} disabled={!canUndo} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Undo last action">
                 Undo
               </button>
-              <button data-testid="save-btn" onClick={handleSave} disabled={!activeFile.dirty} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Save to original file">
+              <button data-testid="save-btn" onClick={handleSave} disabled={!isFileDirty(activeFile)} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Save to original file">
                 Save
               </button>
               <button data-testid="save-as-btn" onClick={handleSaveAs} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium" title="Save as new file">
@@ -505,11 +614,36 @@ function AppContent(): React.ReactElement {
             >
               Pages
             </button>
+            <button
+              data-testid="view-canvas"
+              onClick={() => setView('canvas')}
+              className={`px-3 py-1 text-xs font-medium ${view === 'canvas' ? 'bg-neutral-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}`}
+            >
+              Canvas
+            </button>
           </div>
         </div>
       </header>
 
       <UpdateBar />
+
+      {commitError && (
+        <div data-testid="commit-error-bar" className="flex items-center gap-3 px-4 py-2 bg-red-600/20 border-b border-red-500/40 text-sm text-red-200 shrink-0">
+          <span className="flex-1">{commitError}</span>
+          <button
+            onClick={() => void commitAndReport()}
+            className="px-2 py-0.5 text-xs bg-red-600 hover:bg-red-500 text-white rounded font-medium"
+          >
+            Retry
+          </button>
+          <button
+            onClick={() => setCommitError(null)}
+            className="text-red-300 hover:text-red-100 text-xs"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar — operations + open files in tools view */}
@@ -624,6 +758,17 @@ function AppContent(): React.ReactElement {
               </div>
 
             </div>
+          ) : view === 'canvas' ? (
+            <WorkspaceCanvasView
+              onOpenFiles={() => void handleOpenFile()}
+              onCloseFile={(path) => void handleCloseFile(path)}
+              onInspectPage={(path, pageNumber) => {
+                dispatch({ type: 'SET_ACTIVE_FILE', path });
+                dispatch({ type: 'SET_ACTIVE_PAGE', page: pageNumber });
+                setView('pages');
+              }}
+              onApplyChanges={() => void commitAndReport()}
+            />
           ) : activeFile && activeFile.buffer ? (
             state.activePage ? (
               <PageInspector

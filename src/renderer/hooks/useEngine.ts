@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { engine, dialog } from '../lib/tauri-bridge';
+import { runCommitGate } from '../lib/commit-gate';
 import { useOperationQueue, isTrackableMethod, getFriendlyName } from './useOperationQueue';
 
 interface PendingRequest {
@@ -86,6 +87,11 @@ export function useEngine() {
 
   const call = useCallback(async (method: string, params: Record<string, unknown> = {}): Promise<EngineResult> => {
     if (isTrackableMethod(method)) {
+      // Every user-facing operation reads (and usually rewrites) the working
+      // file — pending in-memory page edits must be committed to disk first.
+      // A gate failure rejects here, so the operation aborts instead of
+      // running against bytes that don't match what the user sees.
+      await runCommitGate();
       return track(getFriendlyName(method, params), () => rawCall(method, params)) as Promise<EngineResult>;
     }
     return rawCall(method, params);

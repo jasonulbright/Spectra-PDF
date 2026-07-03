@@ -126,3 +126,367 @@
 :root[style*="--accent"] .focus\:border-blue-500:focus { border-color: var(--accent); }
 :root[style*="--accent"] .text-blue-300 { color: var(--accent-hover); }
 :root[style*="--accent"] .bg-blue-500 { background-color: var(--accent); }
+
+/* ── Canvas workspace view ────────────────────────────────────────────────
+   Ported from PDFx's canvas styles, scoped under .canvas-view. PDFx's theme
+   variables are mapped onto Spectra's palette here (dark default, light via
+   [data-theme="light"]); class names inside are kept verbatim so the ported
+   components stay diffable against their PDFx originals.
+   ──────────────────────────────────────────────────────────────────────── */
+
+.canvas-view {
+  --surface: #ffffff;
+  --ink: rgba(255, 255, 245, 0.92);
+  --ink-soft: rgba(255, 255, 245, 0.6);
+  --ink-faint: rgba(255, 255, 245, 0.4);
+  --select: #0078D4;
+  --hover: rgba(255, 255, 255, 0.08);
+  --group-bg: rgba(255, 255, 255, 0.05);
+  --page-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.36);
+  user-select: none;
+}
+
+[data-theme="light"] .canvas-view {
+  --ink: #16161a;
+  --ink-soft: #55555c;
+  --ink-faint: #8e8e94;
+  --select: #0c857a;
+  --hover: rgba(22, 22, 26, 0.06);
+  --group-bg: rgba(20, 20, 24, 0.045);
+  --page-shadow: 0 1px 2px rgba(20, 20, 24, 0.07), 0 6px 20px rgba(20, 20, 24, 0.06);
+}
+
+.canvas-viewport {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.canvas-viewport.panning {
+  cursor: grabbing;
+}
+
+.canvas-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.canvas-doc {
+  position: absolute;
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.canvas-view.committing .canvas-doc {
+  transition: none;
+}
+
+.doc-row {
+  width: 100%;
+  padding: 52px 16px 14px;
+  background: var(--group-bg);
+  border-radius: 24px;
+}
+
+.canvas-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.overlay-header-slot {
+  position: absolute;
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.doc-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px;
+  pointer-events: auto;
+  transform: scale(calc(1 / max(var(--k, 1), 1)));
+  transform-origin: bottom left;
+  white-space: nowrap;
+}
+
+.doc-index {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
+.doc-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: text;
+}
+
+.doc-name:hover {
+  background: var(--hover);
+}
+
+/* The rename field reuses .doc-name so it stays visually identical. */
+.doc-name-input {
+  font-family: inherit;
+  background: var(--hover);
+  border: none;
+  outline: none;
+  min-width: 80px;
+}
+
+.doc-pages {
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+[data-theme="light"] .doc-index,
+[data-theme="light"] .doc-pages {
+  color: var(--ink-soft);
+}
+
+.doc-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  align-self: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.canvas-view .icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.canvas-view .icon-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.canvas-view .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.doc-header:hover .doc-actions {
+  opacity: 1;
+}
+
+.page-strip {
+  overflow: visible;
+}
+
+.page-strip-inner {
+  display: flex;
+  flex-wrap: wrap; /* rows break at the max-width DocumentRow sets — must mirror layout.ts wrapPages */
+  gap: 18px;
+  padding: 0 6px;
+  width: max-content;
+}
+
+.canvas-view .page {
+  position: relative;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-radius: 10px;
+  box-shadow: var(--page-shadow);
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    filter 0.15s ease;
+}
+
+.canvas-view .page.selected {
+  outline: 3px solid var(--select);
+  outline-offset: 2px;
+}
+
+.canvas-view .page.collapsing {
+  box-shadow: none;
+}
+
+.canvas-view .page.ghost {
+  background: var(--hover);
+  border: 1.5px dashed var(--ink-faint);
+  box-shadow: none;
+  cursor: default;
+  pointer-events: none;
+}
+
+.canvas-view .page.ghost.grow {
+  animation: ghost-grow 0.18s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes ghost-grow {
+  from {
+    width: 0;
+    opacity: 0;
+  }
+}
+
+/* Inline-SVG dashed border with a wider dash gap than CSS `border: dashed`
+   allows; sized to its host by the DashedBorder component. */
+.dashed-border {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.dashed-border rect {
+  stroke: var(--ink-faint);
+  transition: stroke 0.15s ease;
+}
+
+.add-ghost {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-family: inherit;
+  color: var(--ink-faint);
+  background: var(--hover);
+  border: none;
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.add-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.add-ghost:hover {
+  color: var(--ink);
+}
+
+.add-ghost:hover .dashed-border rect {
+  stroke: var(--ink-soft);
+}
+
+/* Persistent, transparent "Add document" row after the last document: a
+   dashed outline holding one always-visible ghost page. The padding places
+   that page where a real first page sits — keep in sync with ROW_PAD_Y. */
+.add-doc-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 52px 22px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.add-doc-row:hover .dashed-border rect {
+  stroke: var(--ink-soft);
+}
+
+.add-doc-page {
+  transition: color 0.15s ease;
+}
+
+.add-doc-row:hover .add-doc-page {
+  color: var(--ink);
+}
+
+/* Suppressed mid-drag so it never collides with the between-document ghost. */
+.canvas-view.dragging .add-doc-row {
+  display: none;
+}
+
+.ghost-doc {
+  pointer-events: none;
+  animation: ghost-row-in 0.2s ease;
+  transition: top 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.doc-row.ghost {
+  padding: 42px 16px 14px;
+}
+
+.ghost-strip {
+  display: flex;
+  gap: 18px;
+  padding: 0 6px;
+  width: max-content;
+}
+
+@keyframes ghost-row-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.pageview {
+  position: absolute;
+  inset: 0;
+}
+
+.pageview-base {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.pageview-base.ready {
+  opacity: 1;
+}
+
+.pageview-detail {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.page-number {
+  position: absolute;
+  bottom: 6px;
+  right: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(40, 40, 45, 0.55);
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 4px;
+  padding: 1px 5px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-view .page:hover .page-number {
+  opacity: 1;
+}

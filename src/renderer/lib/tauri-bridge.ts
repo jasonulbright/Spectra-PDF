@@ -4,6 +4,13 @@
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import {
+  readFile as fsReadFile,
+  writeFile as fsWriteFile,
+  rename as fsRename,
+  remove as fsRemove,
+} from '@tauri-apps/plugin-fs';
+import { runCommitGate } from './commit-gate';
 
 // ── Engine (Python sidecar) ───────────────────────────────────────────────
 
@@ -30,11 +37,30 @@ export const dialog = {
 
 // ── File operations ───────────────────────────────────────────────────────
 
+// Binary file I/O goes through plugin-fs (efficient binary IPC, capability-
+// scoped to $TEMP/spectrapdf in capabilities/main.json) — the working copies,
+// snapshots, and commit temp files all live there.
+const snapshotRaw = (workingPath: string) => invoke<string>('snapshot', { workingPath });
+
 export const file = {
-  readBuffer: (filePath: string) => invoke<number[]>('read_file_buffer', { filePath }),
+  readBuffer: (filePath: string) => fsReadFile(filePath),
+  writeBuffer: (filePath: string, bytes: Uint8Array) => fsWriteFile(filePath, bytes),
+  rename: (fromPath: string, toPath: string) => fsRename(fromPath, toPath),
+  remove: (filePath: string) => fsRemove(filePath),
   createWorkingCopy: (filePath: string) =>
     invoke<string>('create_working_copy', { filePath }),
-  snapshot: (workingPath: string) => invoke<string>('snapshot', { workingPath }),
+  /**
+   * Every mutating operation snapshots its working file first, which makes
+   * this the natural choke point for the page-edit commit gate: pending
+   * canvas edits land on disk before the snapshot is taken, so the undo
+   * entry the caller pushes points at the committed state.
+   */
+  snapshot: async (workingPath: string) => {
+    await runCommitGate();
+    return snapshotRaw(workingPath);
+  },
+  /** Ungated variant — used by the commit implementation itself. */
+  snapshotRaw,
   restoreSnapshot: (workingPath: string, snapshotPath: string) =>
     invoke('restore_snapshot', { workingPath, snapshotPath }),
   saveAs: (workingPath: string, destPath: string) =>
