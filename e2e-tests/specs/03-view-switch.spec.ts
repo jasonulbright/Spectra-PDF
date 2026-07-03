@@ -2,7 +2,7 @@ import { expect } from '@wdio/globals';
 import { waitForHarness, getState } from '../support/harness.js';
 
 describe('view switcher', () => {
-  it('navigates between Home, Tools, Pages via header buttons', async () => {
+  it('navigates between Home, Tools, Canvas via header buttons', async () => {
     await waitForHarness();
 
     await $('[data-testid="view-tools"]').click();
@@ -15,9 +15,9 @@ describe('view switcher', () => {
       timeoutMsg: 'view did not switch to welcome',
     });
 
-    await $('[data-testid="view-pages"]').click();
-    await browser.waitUntil(async () => (await getState()).view === 'pages', {
-      timeoutMsg: 'view did not switch to pages',
+    await $('[data-testid="view-canvas"]').click();
+    await browser.waitUntil(async () => (await getState()).view === 'canvas', {
+      timeoutMsg: 'view did not switch to canvas',
     });
 
     await expect($('[data-testid="view-switcher"]')).toBeDisplayed();

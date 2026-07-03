@@ -4,8 +4,6 @@ import { carriesManifest } from '../lib/doc-names';
 export const initialState: AppState = {
   files: new Map(),
   activeFileId: null,
-  selectedPages: [],
-  activePage: null,
   workspace: { documents: [] },
   pageUndoStack: [],
   pageRedoStack: [],
@@ -111,8 +109,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         files,
         activeFileId: action.path,
-        selectedPages: [],
-        activePage: null,
         // Page-edit history recorded before this file existed (or before its
         // buffer was refreshed) can't be replayed against the new workspace —
         // undoing it would drop the file's strip. Pending dirt stays valid:
@@ -150,8 +146,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         files,
         activeFileId,
-        selectedPages: [],
-        activePage: null,
         workspace: { documents },
         pageUndoStack: [],
         pageRedoStack: [],
@@ -159,21 +153,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
     case 'SET_ACTIVE_FILE':
-      return { ...state, activeFileId: action.path, selectedPages: [], activePage: null };
-    case 'SELECT_PAGE':
-      return { ...state, selectedPages: [action.page] };
-    case 'SELECT_PAGES':
-      return { ...state, selectedPages: action.pages, activePage: action.pages[0] ?? null };
-    case 'TOGGLE_PAGE': {
-      const pages = state.selectedPages.includes(action.page)
-        ? state.selectedPages.filter((p) => p !== action.page)
-        : [...state.selectedPages, action.page];
-      return { ...state, selectedPages: pages };
-    }
-    case 'SET_ACTIVE_PAGE':
-      return { ...state, activePage: action.page };
-    case 'CLEAR_SELECTION':
-      return { ...state, selectedPages: [], activePage: null };
+      return { ...state, activeFileId: action.path };
     case 'UPDATE_FILE': {
       const files = applyFileUpdate(state.files, action);
       if (files === state.files) return state;
@@ -326,6 +306,21 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
       next = [...next.slice(0, insertAt), newDoc, ...next.slice(insertAt)];
       return applyPageEdit(state, next, [source.path]);
+    }
+    case 'DELETE_PAGE_REF': {
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      const page = doc?.pages.find((p) => p.id === action.pageId);
+      if (!doc || !page) return state;
+      // Deleting the file's last remaining page would materialize a 0-page
+      // PDF at commit — closing the file is the right gesture for that.
+      if (pagesForPath(state.workspace.documents, doc.path) <= 1) return state;
+      const documents = pruneEmptyDocs(
+        mapDocument(state.workspace.documents, action.docId, (d) => {
+          const pages = d.pages.filter((p) => p.id !== action.pageId);
+          return { ...d, pages, pageCount: pages.length };
+        }),
+      );
+      return applyPageEdit(state, documents, [doc.path]);
     }
     case 'SPLIT_DOC': {
       const index = state.workspace.documents.findIndex((d) => d.id === action.docId);

@@ -4,7 +4,6 @@ import { file, app } from './lib/tauri-bridge';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
 import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
 import { Sidebar, Operation } from './components/Sidebar';
-import { ThumbnailGrid } from './components/ThumbnailGrid';
 import { PageInspector } from './components/PageInspector';
 import { MergePanel } from './panels/MergePanel';
 import { SplitPanel } from './panels/SplitPanel';
@@ -36,7 +35,7 @@ import { UpdateBar } from './components/UpdateBar';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
 
-type ViewMode = 'operations' | 'pages' | 'canvas';
+type ViewMode = 'operations' | 'canvas';
 
 const panels: Record<Operation, React.ComponentType> = {
   merge: MergePanel, split: SplitPanel, rotate: RotatePanel, delete: DeletePanel,
@@ -68,7 +67,9 @@ function AppContent(): React.ReactElement {
     try { return JSON.parse(localStorage.getItem('spectra-recent') || '[]'); } catch { return []; }
   });
   const [appVersion, setAppVersion] = useState('');
-  const [pagesSidebarWidth, setPagesSidebarWidth] = useState(192);
+  // PageInspector overlay target (canvas view). `page` is the file's
+  // committed page order — the opener commits pending edits first.
+  const [inspector, setInspector] = useState<{ path: string; page: number } | null>(null);
   const state = useAppState();
   const dispatch = useAppDispatch();
   const { call, openFiles, saveFile } = useEngine();
@@ -128,6 +129,7 @@ function AppContent(): React.ReactElement {
 
   const activeFile = state.activeFileId ? state.files.get(state.activeFileId) : null;
   const allFiles = Array.from(state.files.values());
+  const inspectorFile = inspector ? state.files.get(inspector.path) : null;
 
   // Commit-failure banner: commits triggered from gates/effects have no
   // natural place to report, so failures surface here.
@@ -242,7 +244,7 @@ function AppContent(): React.ReactElement {
       setView('operations');
       setActiveOp('merge');
     } else {
-      setView('pages');
+      setView('canvas');
     }
   }, [openByPaths, view]);
 
@@ -258,10 +260,10 @@ function AppContent(): React.ReactElement {
   const handleWelcomeAction = useCallback(async (action: string) => {
     if (action === 'open') {
       if (state.files.size > 0) {
-        setView('pages');
+        setView('canvas');
       } else {
         const opened = await handleOpenFile();
-        if (opened) setView('pages');
+        if (opened) setView('canvas');
       }
     } else if (action === 'merge') {
       setView('operations');
@@ -277,10 +279,10 @@ function AppContent(): React.ReactElement {
       setActiveOp('extract_text');
     } else if (action === 'recent' && recentFiles.length > 0) {
       await openByPaths([recentFiles[0]]);
-      setView('pages');
+      setView('canvas');
     } else if (action.startsWith('open:')) {
       await openByPaths([action.slice(5)]);
-      setView('pages');
+      setView('canvas');
     }
   }, [handleOpenFile, openByPaths, recentFiles, state.files]);
 
@@ -304,25 +306,18 @@ function AppContent(): React.ReactElement {
     }
   }, [state.files, call, reloadFile, dispatch]);
 
-  const handleRotatePage = useCallback(async (page: number, angle: number) => {
-    if (!state.activeFileId) return;
-    await performOperation(state.activeFileId, 'rotate', { pages: [page], angle });
-  }, [state.activeFileId, performOperation]);
+  // Inspector overlay ops — engine-backed, so they run against the committed
+  // file (the inspector opener commits before handing over a page number).
+  const handleInspectorRotate = useCallback(async (page: number, angle: number) => {
+    if (!inspector) return;
+    await performOperation(inspector.path, 'rotate', { pages: [page], angle });
+  }, [inspector, performOperation]);
 
-  const handleDeletePage = useCallback(async (page: number) => {
-    if (!state.activeFileId) return;
-    await performOperation(state.activeFileId, 'delete', { pages: [page] });
-    dispatch({ type: 'SET_ACTIVE_PAGE', page: null });
-  }, [state.activeFileId, performOperation, dispatch]);
-
-  const handleExtractTextFromPage = useCallback(async (page: number) => {
-    if (!activeFile) return;
-    // Switch to Tools > Extract Text with the page pre-selected
-    setView('operations');
-    setActiveOp('extract_text');
-    // Store the page number so the panel can pick it up
-    setExtractPage(page);
-  }, [activeFile]);
+  const handleInspectorDelete = useCallback(async (page: number) => {
+    if (!inspector) return;
+    await performOperation(inspector.path, 'delete', { pages: [page] });
+    setInspector(null); // page numbering shifted — the canvas is the safe place
+  }, [inspector, performOperation]);
 
   const handleUndo = useCallback(async () => {
     // Page-edit tier first: pending in-memory edits are always newer than the
@@ -370,6 +365,27 @@ function AppContent(): React.ReactElement {
       return false;
     }
   }, [commitIfNeeded]);
+
+  // Open the PageInspector overlay from the canvas. Pending edits commit
+  // first so the file's on-disk order matches the workspace numbering the
+  // canvas computed, and the inspector's engine ops hit the right page.
+  const handleInspectPage = useCallback(async (path: string, page: number) => {
+    if (!(await commitOrAbort())) return;
+    dispatch({ type: 'SET_ACTIVE_FILE', path });
+    setInspector({ path, page });
+  }, [commitOrAbort, dispatch]);
+
+  const handleExtractFromCanvas = useCallback((path: string, page: number) => {
+    dispatch({ type: 'SET_ACTIVE_FILE', path });
+    setExtractPage(page);
+    setView('operations'); // leaving the canvas commits, so the panel reads committed bytes
+    setActiveOp('extract_text');
+  }, [dispatch]);
+
+  // The inspector cannot outlive its file.
+  useEffect(() => {
+    if (inspector && !state.files.has(inspector.path)) setInspector(null);
+  }, [inspector, state.files]);
 
   const handleSave = useCallback(async () => {
     if (!activeFile) return;
@@ -507,7 +523,7 @@ function AppContent(): React.ReactElement {
         setView('operations');
         setActiveOp('merge');
       } else {
-        setView('pages');
+        setView('canvas');
       }
     });
     return () => { unlisten.then((fn) => fn()); };
@@ -575,8 +591,8 @@ function AppContent(): React.ReactElement {
           </button>
         </div>
         <div className="flex items-center gap-2">
-          {/* Undo / Save — in pages and canvas views with an active file */}
-          {(view === 'pages' || view === 'canvas') && activeFile && (
+          {/* Undo / Save — in canvas view with an active file */}
+          {view === 'canvas' && activeFile && (
             <>
               <button data-testid="undo-btn" onClick={handleUndo} disabled={!canUndo} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Undo last action">
                 Undo
@@ -606,13 +622,6 @@ function AppContent(): React.ReactElement {
               className={`px-3 py-1 text-xs font-medium ${view === 'operations' ? 'bg-neutral-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}`}
             >
               Tools
-            </button>
-            <button
-              data-testid="view-pages"
-              onClick={() => setView('pages')}
-              className={`px-3 py-1 text-xs font-medium ${view === 'pages' ? 'bg-neutral-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}`}
-            >
-              Pages
             </button>
             <button
               data-testid="view-canvas"
@@ -685,63 +694,6 @@ function AppContent(): React.ReactElement {
           </div>
         )}
 
-        {/* File tabs — only in pages view, resizable */}
-        {view === 'pages' && state.files.size > 0 && (
-          <div
-            className="bg-neutral-850 border-r border-neutral-800 flex flex-col py-2 shrink-0 overflow-y-auto relative"
-            style={{ width: pagesSidebarWidth, minWidth: 148, maxWidth: 400 }}
-          >
-            <div className="flex items-center justify-between px-4 pb-2">
-              <span className="text-[10px] uppercase tracking-widest text-neutral-300 font-semibold">Open Files</span>
-              <button onClick={handleCloseAll} className="text-neutral-500 hover:text-red-400 transition-colors" title="Close all files">
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l8 8M9 1l-8 8"/></svg>
-              </button>
-            </div>
-            {Array.from(state.files.values()).map((f) => (
-              <div key={f.path} className="flex items-center group">
-                <button
-                  onClick={() => dispatch({ type: 'SET_ACTIVE_FILE', path: f.path })}
-                  className={`flex-1 px-4 py-1.5 text-left text-sm truncate transition-colors ${
-                    f.dirty ? 'italic' : ''
-                  } ${
-                    state.activeFileId === f.path ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
-                  }`}
-                  title={f.path}
-                >
-                  {f.dirty && <span className="text-amber-400 mr-1 not-italic">*</span>}
-                  {f.name}
-                  <span className="text-neutral-500 ml-1 text-xs">{f.pageCount}p</span>
-                </button>
-                <button
-                  onClick={() => handleCloseFile(f.path)}
-                  className="px-2 text-neutral-500 hover:text-red-400 opacity-0 group-hover:opacity-100 text-xs"
-                >
-                  x
-                </button>
-              </div>
-            ))}
-            {/* Resize handle */}
-            <div
-              className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                const startX = e.clientX;
-                const startW = pagesSidebarWidth;
-                const onMove = (ev: MouseEvent) => {
-                  const newW = Math.min(400, Math.max(148, startW + ev.clientX - startX));
-                  setPagesSidebarWidth(newW);
-                };
-                const onUp = () => {
-                  document.removeEventListener('mousemove', onMove);
-                  document.removeEventListener('mouseup', onUp);
-                };
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-              }}
-            />
-          </div>
-        )}
-
         {/* Main area */}
         <main className="flex-1 flex flex-col overflow-hidden">
           {view === 'welcome' ? (
@@ -758,48 +710,26 @@ function AppContent(): React.ReactElement {
               </div>
 
             </div>
-          ) : view === 'canvas' ? (
-            <WorkspaceCanvasView
-              onOpenFiles={() => void handleOpenFile()}
-              onCloseFile={(path) => void handleCloseFile(path)}
-              onInspectPage={(path, pageNumber) => {
-                dispatch({ type: 'SET_ACTIVE_FILE', path });
-                dispatch({ type: 'SET_ACTIVE_PAGE', page: pageNumber });
-                setView('pages');
-              }}
-              onApplyChanges={() => void commitAndReport()}
-            />
-          ) : activeFile && activeFile.buffer ? (
-            state.activePage ? (
-              <PageInspector
-                buffer={activeFile.buffer}
-                page={state.activePage}
-                onClose={() => dispatch({ type: 'SET_ACTIVE_PAGE', page: null })}
-                onRotate={handleRotatePage}
-                onDelete={handleDeletePage}
-              />
-            ) : (
-              <div className="flex-1 overflow-y-auto">
-                <ThumbnailGrid
-                  buffer={activeFile.buffer}
-                  pageCount={activeFile.pageCount}
-                  selectedPages={state.selectedPages}
-                  activePage={state.activePage}
-                  onSelectPage={(p) => dispatch({ type: 'SELECT_PAGE', page: p })}
-                  onTogglePage={(p) => dispatch({ type: 'TOGGLE_PAGE', page: p })}
-                  onActivatePage={(p) => dispatch({ type: 'SET_ACTIVE_PAGE', page: p })}
-                  onRotate={handleRotatePage}
-                  onDelete={handleDeletePage}
-                  onExtractText={handleExtractTextFromPage}
-                />
-              </div>
-            )
           ) : (
-            <div className="flex-1 flex items-center justify-center text-neutral-500">
-              <div className="text-center">
-                <p className="text-lg mb-1">No file open</p>
-                <p className="text-sm">Click "Open PDF" to view pages</p>
-              </div>
+            <div className="flex-1 flex flex-col relative overflow-hidden">
+              <WorkspaceCanvasView
+                onOpenFiles={() => void handleOpenFile()}
+                onCloseFile={(path) => void handleCloseFile(path)}
+                onInspectPage={(path, pageNumber) => void handleInspectPage(path, pageNumber)}
+                onExtractText={handleExtractFromCanvas}
+                onApplyChanges={() => void commitAndReport()}
+              />
+              {inspector && inspectorFile?.buffer && (
+                <div className="absolute inset-0 z-40 bg-neutral-900">
+                  <PageInspector
+                    buffer={inspectorFile.buffer}
+                    page={inspector.page}
+                    onClose={() => setInspector(null)}
+                    onRotate={handleInspectorRotate}
+                    onDelete={handleInspectorDelete}
+                  />
+                </div>
+              )}
             </div>
           )}
         </main>

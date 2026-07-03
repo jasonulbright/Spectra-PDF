@@ -19,6 +19,7 @@ interface DocLayerProps {
   betweenIndex: number;
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
+  onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
 }
 
@@ -58,6 +59,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               }
               onSelectPage={props.onSelectPage}
               onOpenPage={props.onOpenPage}
+              onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
             />
           </div>

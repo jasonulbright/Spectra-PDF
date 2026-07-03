@@ -4,6 +4,8 @@ import { usePdfProxies } from '../../hooks/usePdfProxies';
 import { computeLayout, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
 import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
+import { ContextMenu } from '../ContextMenu';
+import type { MenuItem } from '../ContextMenu';
 import { Canvas } from './Canvas';
 import { DocLayer } from './DocLayer';
 import { HeaderLayer } from './HeaderLayer';
@@ -11,19 +13,45 @@ import { AddDocGhost, GhostRow } from './DropGhost';
 import { deriveDropGhosts } from './ghost-size';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import type { DragSource } from '../../canvas/usePageDrag';
+import type { OpenDocument } from '../../state/types';
 
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
   onCloseFile: (path: string) => void;
-  // Route a double-clicked page to the existing PageInspector (pages view).
+  // Open the PageInspector overlay. `pageNumber` is the page's workspace
+  // position within its file (== the file's page order once pending edits
+  // commit, which the opener does first).
   onInspectPage: (path: string, pageNumber: number) => void;
+  // Jump to the extract-text panel with the page pre-selected (same
+  // workspace-position numbering; the engine gate commits before reading).
+  onExtractText: (path: string, pageNumber: number) => void;
   onApplyChanges: () => void;
+}
+
+// A page's 1-based position within its file's committed order: pages of all
+// same-path documents in workspace order. This is what the file looks like
+// after the commit bridge materializes pending edits.
+function workspacePageNumber(
+  docs: OpenDocument[],
+  doc: OpenDocument,
+  pageId: string,
+): number | null {
+  const index = doc.pages.findIndex((p) => p.id === pageId);
+  if (index === -1) return null;
+  let before = 0;
+  for (const d of docs) {
+    if (d.path !== doc.path) continue;
+    if (d.id === doc.id) return before + index + 1;
+    before += d.pages.length;
+  }
+  return null;
 }
 
 export function WorkspaceCanvasView({
   onOpenFiles,
   onCloseFile,
   onInspectPage,
+  onExtractText,
   onApplyChanges,
 }: WorkspaceCanvasViewProps): React.ReactElement {
   const state = useAppState();
@@ -34,6 +62,9 @@ export function WorkspaceCanvasView({
   const canvasRef = useRef<CanvasHandle | null>(null);
   const [selected, setSelected] = useState<DragSource | null>(null);
   const [renderVersion, setRenderVersion] = useState(0);
+  const [menu, setMenu] = useState<{ x: number; y: number; docId: string; pageId: string } | null>(
+    null,
+  );
 
   const movePageInto = useCallback(
     (source: DragSource, targetDocId: string, index: number) => {
@@ -81,12 +112,67 @@ export function WorkspaceCanvasView({
   const onOpenPage = useCallback(
     (docId: string, pageId: string) => {
       const doc = docs.find((d) => d.id === docId);
-      const page = doc?.pages.find((p) => p.id === pageId);
-      if (!page) return;
-      onInspectPage(page.sourceDocId, page.sourcePageIndex + 1);
+      if (!doc) return;
+      const pageNumber = workspacePageNumber(docs, doc, pageId);
+      if (pageNumber != null) onInspectPage(doc.path, pageNumber);
     },
     [docs, onInspectPage],
   );
+
+  const onPageContextMenu = useCallback(
+    (docId: string, pageId: string, e: React.MouseEvent) => {
+      setSelected({ docId, pageId });
+      setMenu({ x: e.clientX, y: e.clientY, docId, pageId });
+    },
+    [],
+  );
+
+  const rotateBy = useCallback(
+    (docId: string, pageId: string, delta: 90 | 270) => {
+      const page = docs.find((d) => d.id === docId)?.pages.find((p) => p.id === pageId);
+      if (!page) return;
+      const rotation = (((page.rotation + delta) % 360) + 360) % 360 as 0 | 90 | 180 | 270;
+      dispatch({ type: 'ROTATE_PAGE_REF', docId, pageId, rotation });
+    },
+    [dispatch, docs],
+  );
+
+  const menuItems = useMemo((): MenuItem[] => {
+    if (!menu) return [];
+    const doc = docs.find((d) => d.id === menu.docId);
+    if (!doc) return [];
+    const fileHasOnePage =
+      docs.filter((d) => d.path === doc.path).reduce((sum, d) => sum + d.pages.length, 0) <= 1;
+    return [
+      {
+        label: 'Open',
+        onClick: () => {
+          const pageNumber = workspacePageNumber(docs, doc, menu.pageId);
+          if (pageNumber != null) onInspectPage(doc.path, pageNumber);
+        },
+      },
+      { label: '', onClick: () => {}, separator: true },
+      { label: 'Rotate right 90°', onClick: () => rotateBy(menu.docId, menu.pageId, 90) },
+      { label: 'Rotate left 90°', onClick: () => rotateBy(menu.docId, menu.pageId, 270) },
+      { label: '', onClick: () => {}, separator: true },
+      {
+        label: 'Extract text…',
+        onClick: () => {
+          const pageNumber = workspacePageNumber(docs, doc, menu.pageId);
+          if (pageNumber != null) onExtractText(doc.path, pageNumber);
+        },
+      },
+      { label: '', onClick: () => {}, separator: true },
+      {
+        label: 'Delete page',
+        danger: true,
+        // A file's last page can't be deleted (0-page PDFs can't exist) —
+        // closing the file is the right gesture for that.
+        disabled: fileHasOnePage,
+        onClick: () => dispatch({ type: 'DELETE_PAGE_REF', docId: menu.docId, pageId: menu.pageId }),
+      },
+    ];
+  }, [menu, docs, dispatch, onInspectPage, onExtractText, rotateBy]);
 
   const onMoveDoc = useCallback(
     (docId: string, direction: -1 | 1) => dispatch({ type: 'REORDER_DOCS', docId, direction }),
@@ -179,6 +265,7 @@ export function WorkspaceCanvasView({
           betweenIndex={betweenIndex}
           onSelectPage={onSelectPage}
           onOpenPage={onOpenPage}
+          onPageContextMenu={onPageContextMenu}
           onPagePointerDown={drag.onPagePointerDown}
         />
         {drag.dropTarget?.kind === 'between' && (
@@ -200,6 +287,8 @@ export function WorkspaceCanvasView({
           <AddDocGhost width={MIN_DOC_WIDTH} onClick={onOpenFiles} />
         </div>
       </Canvas>
+
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
 
       {/* Floating controls: zoom cluster + pending page-edit commit */}
       <div className="absolute bottom-4 right-4 flex items-center gap-2 z-30">

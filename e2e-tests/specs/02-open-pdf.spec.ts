@@ -22,8 +22,8 @@ describe('open valid PDF', () => {
     expect(state.activeFile!.dirty).toBe(false);
   });
 
-  it('switches into pages view and exposes Save / Save As / Undo', async () => {
-    await setView('pages');
+  it('switches into canvas view and exposes Save / Save As / Undo', async () => {
+    await setView('canvas');
     await expect($('[data-testid="open-pdf-btn"]')).toBeDisplayed();
     await expect($('[data-testid="save-as-btn"]')).toBeDisplayed();
     await expect($('[data-testid="undo-btn"]')).toBeDisplayed();

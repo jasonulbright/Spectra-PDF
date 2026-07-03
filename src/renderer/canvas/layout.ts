@@ -47,10 +47,17 @@ export function pageDisplayWidth(width: number, height: number): number {
   return Math.max(6, Math.round((BASE_PAGE_HEIGHT * width) / height));
 }
 
-interface PageLike {
+export interface PageLike {
   id: string;
   width: number;
   height: number;
+  rotation?: number; // in-memory quarter-turns pending commit — swaps the display aspect
+}
+
+export function displayWidthOf(page: PageLike): number {
+  return page.rotation === 90 || page.rotation === 270
+    ? pageDisplayWidth(page.height, page.width)
+    : pageDisplayWidth(page.width, page.height);
 }
 
 // Greedy row wrap, identical to what flexbox produces for the same explicit
@@ -62,7 +69,7 @@ export function wrapPages<T extends PageLike>(pages: T[], excludeId: string | nu
   let x = 0;
   for (const page of pages) {
     if (page.id === excludeId) continue;
-    const w = pageDisplayWidth(page.width, page.height);
+    const w = displayWidthOf(page);
     const extended = row.length === 0 ? w : x + PAGE_GAP + w;
     if (row.length > 0 && extended > MAX_ROW_WIDTH) {
       rows.push(row);
@@ -79,7 +86,7 @@ export function wrapPages<T extends PageLike>(pages: T[], excludeId: string | nu
 
 export function rowWidth(row: PageLike[]): number {
   return (
-    row.reduce((sum, p) => sum + pageDisplayWidth(p.width, p.height), 0) +
+    row.reduce((sum, p) => sum + displayWidthOf(p), 0) +
     Math.max(0, row.length - 1) * PAGE_GAP
   );
 }

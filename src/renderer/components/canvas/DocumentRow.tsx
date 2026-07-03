@@ -20,6 +20,7 @@ interface DocumentRowProps {
   intoGhost: { index: number; width: number; height: number } | null;
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
+  onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
 }
 
@@ -33,6 +34,7 @@ function DocumentRowImpl({
   intoGhost,
   onSelectPage,
   onOpenPage,
+  onPageContextMenu,
   onPagePointerDown,
 }: DocumentRowProps): React.JSX.Element {
   const strip: React.JSX.Element[] = [];
@@ -60,6 +62,7 @@ function DocumentRowImpl({
         visibleNumber={visible + 1}
         onSelectPage={onSelectPage}
         onOpenPage={onOpenPage}
+        onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
       />,
     );

@@ -4,6 +4,7 @@ import {
   computeDropTarget,
   betweenSlotY,
   pageDisplayWidth,
+  displayWidthOf,
   wrapPages,
   rowWidth,
   BASE_PAGE_HEIGHT,
@@ -55,6 +56,18 @@ describe('pageDisplayWidth', () => {
 
   it('falls back to the reference width for unresolved (0×0) dimensions', () => {
     expect(pageDisplayWidth(0, 0)).toBe(Math.round((BASE_PAGE_HEIGHT * 612) / 792));
+  });
+});
+
+describe('displayWidthOf', () => {
+  it('swaps the aspect for pending 90°/270° rotations', () => {
+    const page = { id: 'p', width: 612, height: 792 };
+    const portrait = pageDisplayWidth(612, 792);
+    const landscape = pageDisplayWidth(792, 612);
+    expect(displayWidthOf({ ...page, rotation: 0 })).toBe(portrait);
+    expect(displayWidthOf({ ...page, rotation: 90 })).toBe(landscape);
+    expect(displayWidthOf({ ...page, rotation: 180 })).toBe(portrait);
+    expect(displayWidthOf({ ...page, rotation: 270 })).toBe(landscape);
   });
 });
 

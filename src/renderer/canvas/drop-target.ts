@@ -7,9 +7,10 @@ import {
   ROW_GAP,
   CARD_PAD_X,
   PAGE_GAP,
-  pageDisplayWidth,
+  displayWidthOf,
   wrapPages,
 } from './layout';
+import type { PageLike } from './layout';
 
 export type DropTarget =
   | { kind: 'into'; docId: string; index: number }
@@ -20,17 +21,11 @@ export type DropTarget =
 // its drag-start threshold below the same gate.
 export const INTO_MIN_SCREEN_PX = 90;
 
-interface PageLike {
-  id: string;
-  width: number;
-  height: number;
-}
-
 function insertionIndexInRow(row: PageLike[], relX: number): number {
   let x = 0;
   let index = 0;
   for (const page of row) {
-    const w = pageDisplayWidth(page.width, page.height);
+    const w = displayWidthOf(page);
     if (relX <= x + w / 2) return index;
     index++;
     x += w + PAGE_GAP;

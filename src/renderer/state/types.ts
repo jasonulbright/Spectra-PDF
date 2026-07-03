@@ -45,8 +45,6 @@ export interface PageEditSnapshot {
 export interface AppState {
   files: Map<string, OpenFile>;
   activeFileId: string | null;
-  selectedPages: number[];
-  activePage: number | null;
   // Parallel page-level view of `files`, kept in sync asynchronously by
   // useWorkspaceIndexer. The canvas view renders it; other views still read
   // `files` directly.
@@ -63,11 +61,6 @@ export type AppAction =
   | { type: 'OPEN_FILE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer }
   | { type: 'CLOSE_FILE'; path: string }
   | { type: 'SET_ACTIVE_FILE'; path: string }
-  | { type: 'SELECT_PAGE'; page: number }
-  | { type: 'SELECT_PAGES'; pages: number[] }
-  | { type: 'TOGGLE_PAGE'; page: number }
-  | { type: 'SET_ACTIVE_PAGE'; page: number | null }
-  | { type: 'CLEAR_SELECTION' }
   | { type: 'UPDATE_FILE'; path: string; pageCount: number; buffer: PdfBuffer; snapshotPath: string }
   // Atomic variant dispatched by the commit bridge after all files are
   // rebuilt on disk: applies every file update and clears the page-edit tier
@@ -84,6 +77,7 @@ export type AppAction =
   | { type: 'REORDER_PAGES'; docId: string; order: string[] } // permutation of PageRef ids
   | { type: 'MOVE_PAGE'; fromDocId: string; toDocId: string; pageId: string; toIndex: number }
   | { type: 'MOVE_PAGE_TO_NEW_DOC'; fromDocId: string; pageId: string; docIndex: number; newDocId: string; newName: string }
+  | { type: 'DELETE_PAGE_REF'; docId: string; pageId: string }
   | { type: 'SPLIT_DOC'; docId: string; atIndex: number; newDocId: string; newName: string }
   | { type: 'ROTATE_PAGE_REF'; docId: string; pageId: string; rotation: 0 | 90 | 180 | 270 }
   | { type: 'REORDER_DOCS'; docId: string; direction: -1 | 1 }

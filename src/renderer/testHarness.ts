@@ -12,7 +12,7 @@
 import { file, engine } from './lib/tauri-bridge';
 
 export interface TestStateSnapshot {
-  view: 'welcome' | 'operations' | 'pages' | 'canvas';
+  view: 'welcome' | 'operations' | 'canvas';
   activeOp: string;
   fileCount: number;
   activeFileId: string | null;
@@ -31,7 +31,7 @@ export interface TestHarness {
   /** Save the active working copy to a known destination, no dialog. */
   saveActiveAs: (destPath: string) => Promise<void>;
   /** Switch the main view. */
-  setView: (view: 'welcome' | 'operations' | 'pages' | 'canvas') => void;
+  setView: (view: 'welcome' | 'operations' | 'canvas') => void;
   /** Select an operation in the sidebar. */
   setActiveOp: (op: string) => void;
   /** Snapshot of currently observable state, for assertions. */
@@ -51,7 +51,7 @@ export interface TestHarness {
 
 export interface TestHarnessDeps {
   openByPaths: (paths: string[]) => Promise<void>;
-  setView: (view: 'welcome' | 'operations' | 'pages' | 'canvas') => void;
+  setView: (view: 'welcome' | 'operations' | 'canvas') => void;
   setActiveOp: (op: string) => void;
   getStateSnapshot: () => TestStateSnapshot;
   subscribe: (listener: (s: TestStateSnapshot) => void) => () => void;

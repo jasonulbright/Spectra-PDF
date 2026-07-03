@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageRef } from '../../state/types';
-import { pageDisplayWidth } from '../../canvas/layout';
+import { displayWidthOf } from '../../canvas/layout';
 import { PageView } from './PageView';
 
 interface PageCellProps {
@@ -15,6 +15,7 @@ interface PageCellProps {
   visibleNumber: number;
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
+  onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
 }
 
@@ -29,8 +30,10 @@ function PageCellImpl({
   visibleNumber,
   onSelectPage,
   onOpenPage,
+  onPageContextMenu,
   onPagePointerDown,
 }: PageCellProps): React.JSX.Element {
+  const displayWidth = displayWidthOf(page);
   return (
     <div
       data-page-id={page.id}
@@ -45,7 +48,7 @@ function PageCellImpl({
               pointerEvents: 'none',
             }
           : {
-              width: pageDisplayWidth(page.width, page.height),
+              width: displayWidth,
               height: pageHeight,
             }
       }
@@ -57,6 +60,11 @@ function PageCellImpl({
         e.stopPropagation();
         onOpenPage(docId, page.id);
       }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onPageContextMenu(docId, page.id, e);
+      }}
       onPointerDown={(e) => onPagePointerDown(docId, page.id, e)}
     >
       <PageView
@@ -65,6 +73,9 @@ function PageCellImpl({
         naturalWidth={page.width}
         naturalHeight={page.height}
         version={renderVersion}
+        rotation={page.rotation}
+        displayWidth={displayWidth}
+        displayHeight={pageHeight}
       />
       <span className="page-number">{visibleNumber}</span>
     </div>

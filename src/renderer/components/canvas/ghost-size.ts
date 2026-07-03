@@ -1,4 +1,4 @@
-import { BASE_PAGE_HEIGHT, pageDisplayWidth } from '../../canvas/layout';
+import { BASE_PAGE_HEIGHT, displayWidthOf, pageDisplayWidth } from '../../canvas/layout';
 import type { DropTarget } from '../../canvas/layout';
 import type { GhostSize } from './DropGhost';
 import type { DragSource } from '../../canvas/usePageDrag';
@@ -12,7 +12,7 @@ export const LETTER_GHOST: GhostSize = {
 };
 
 export function pageGhostSize(page: PageRef): GhostSize {
-  return { width: pageDisplayWidth(page.width, page.height), height: BASE_PAGE_HEIGHT };
+  return { width: displayWidthOf(page), height: BASE_PAGE_HEIGHT };
 }
 
 export interface DropGhosts {

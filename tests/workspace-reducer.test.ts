@@ -211,6 +211,43 @@ describe('SPLIT_DOC', () => {
   });
 });
 
+describe('DELETE_PAGE_REF', () => {
+  it('removes the page in memory and marks the file dirty', () => {
+    const a = makeFile('a.pdf', 3);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3));
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'DELETE_PAGE_REF',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p1',
+    });
+    expect(pageIds(next.workspace.documents[0])).toEqual(['a.pdf#p0', 'a.pdf#p2']);
+    expect(next.workspace.documents[0].pageCount).toBe(2);
+    expect(next.pageDirtyPaths).toEqual(['a.pdf']);
+    expect(next.pageUndoStack).toHaveLength(1);
+  });
+
+  it('refuses to delete a file\'s last page', () => {
+    const a = makeFile('a.pdf', 1);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));
+    const state = stateWith([a], [doc]);
+    expect(
+      appReducer(state, { type: 'DELETE_PAGE_REF', docId: 'a.pdf#0', pageId: 'a.pdf#p0' }),
+    ).toBe(state);
+  });
+
+  it('prunes a partition emptied by the deletion', () => {
+    const a = makeFile('a.pdf', 3);
+    const partA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const partB = makeDoc(a, 'a.pdf#1', makePages('a.pdf', 1, 2));
+    const next = appReducer(stateWith([a], [partA, partB]), {
+      type: 'DELETE_PAGE_REF',
+      docId: 'a.pdf#1',
+      pageId: 'a.pdf#p2',
+    });
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0']);
+  });
+});
+
 describe('ROTATE_PAGE_REF', () => {
   it('sets rotation on exactly the targeted page', () => {
     const a = makeFile('a.pdf', 2);

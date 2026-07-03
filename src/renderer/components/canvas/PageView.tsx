@@ -8,6 +8,12 @@ interface PageViewProps {
   naturalWidth: number;
   naturalHeight: number;
   version: number;
+  // Pending in-memory rotation. Rendered via CSS on the (unrotated) raster;
+  // the cell passes its own pixel box because a 90°/270° canvas needs the
+  // swapped extents, which percentages can't express.
+  rotation?: 0 | 90 | 180 | 270;
+  displayWidth?: number;
+  displayHeight?: number;
   eager?: boolean;
   detail?: boolean;
 }
@@ -18,6 +24,9 @@ function PageViewImpl({
   naturalWidth,
   naturalHeight,
   version,
+  rotation = 0,
+  displayWidth,
+  displayHeight,
   eager = false,
   detail = true,
 }: PageViewProps): React.JSX.Element {
@@ -69,7 +78,10 @@ function PageViewImpl({
     const root = rootRef.current;
     const detailCanvas = detailRef.current;
     if (!root || !detailCanvas) return;
-    if (!detail) {
+    // The detail raster's visibility geometry isn't rotation-aware; skip it
+    // while a rotation is pending (the base raster carries the page, and the
+    // rotation is baked into the file at commit, after which detail returns).
+    if (!detail || rotation !== 0) {
       detailCanvas.style.display = 'none';
       return;
     }
@@ -106,11 +118,27 @@ function PageViewImpl({
       cancelled = true;
       task?.cancel();
     };
-  }, [near, version, detail, pdf, pageNumber, naturalWidth, naturalHeight]);
+  }, [near, version, detail, rotation, pdf, pageNumber, naturalWidth, naturalHeight]);
+
+  const swapped = rotation === 90 || rotation === 270;
+  const baseStyle: React.CSSProperties | undefined =
+    rotation !== 0 && displayWidth != null && displayHeight != null
+      ? {
+          left: '50%',
+          top: '50%',
+          width: swapped ? displayHeight : displayWidth,
+          height: swapped ? displayWidth : displayHeight,
+          transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+        }
+      : undefined;
 
   return (
     <div className="pageview" ref={rootRef}>
-      <canvas ref={baseRef} className={baseReady ? 'pageview-base ready' : 'pageview-base'} />
+      <canvas
+        ref={baseRef}
+        className={baseReady ? 'pageview-base ready' : 'pageview-base'}
+        style={baseStyle}
+      />
       <canvas ref={detailRef} className="pageview-detail" style={{ display: 'none' }} />
     </div>
   );
