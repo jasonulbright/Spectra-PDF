@@ -98,7 +98,14 @@ interface CommitDeps {
   remove: (filePath: string) => Promise<unknown>;
 }
 
-const COMMIT_TMP_SUFFIX = '.commit-tmp';
+// Temp names are unique per run so a stale leftover (crash, prior failure)
+// can never be renamed into place by a later commit.
+let commitSeq = 0;
+// Loud reentrancy guard: concurrent runs stage/rename the same working files
+// and consume each other's temps. Callers must serialize (App shares one
+// in-flight promise across all commit entry points); this turns a bypass of
+// that contract into an explicit error instead of silent file corruption.
+let commitRunning = false;
 
 // Materialize pending page edits: rebuild every dirty file via pdf-lib and
 // land the rebuilds on the snapshot undo chain in one atomic dispatch. All
@@ -122,35 +129,44 @@ export async function commitPageEdits({
   rename,
   remove,
 }: CommitDeps): Promise<void> {
-  const plans = planCommit(workspace, files, dirtyPaths);
-  if (plans.length === 0) {
-    dispatch({ type: 'CLEAR_PAGE_EDITS' });
-    return;
+  if (commitRunning) {
+    throw new Error('commitPageEdits is already running — callers must share the in-flight run');
   }
-  const built = await Promise.all(plans.map(buildCommitBytes));
-
-  const staged: string[] = [];
-  const updates: { path: string; pageCount: number; buffer: PdfBuffer; snapshotPath: string }[] =
-    [];
+  commitRunning = true;
   try {
-    for (let i = 0; i < plans.length; i++) {
-      const tmp = plans[i].workingPath + COMMIT_TMP_SUFFIX;
-      await writeBuffer(tmp, built[i]);
-      staged.push(tmp);
+    const plans = planCommit(workspace, files, dirtyPaths);
+    if (plans.length === 0) {
+      dispatch({ type: 'CLEAR_PAGE_EDITS' });
+      return;
     }
-    for (let i = 0; i < plans.length; i++) {
-      const snapshotPath = await snapshot(plans[i].workingPath);
-      await rename(staged[i], plans[i].workingPath);
-      updates.push({
-        path: plans[i].path,
-        pageCount: plans[i].pageCount,
-        buffer: built[i],
-        snapshotPath,
-      });
+    const built = await Promise.all(plans.map(buildCommitBytes));
+
+    const runTag = `.commit-tmp-${++commitSeq}`;
+    const staged: string[] = [];
+    const updates: { path: string; pageCount: number; buffer: PdfBuffer; snapshotPath: string }[] =
+      [];
+    try {
+      for (let i = 0; i < plans.length; i++) {
+        const tmp = plans[i].workingPath + runTag;
+        await writeBuffer(tmp, built[i]);
+        staged.push(tmp);
+      }
+      for (let i = 0; i < plans.length; i++) {
+        const snapshotPath = await snapshot(plans[i].workingPath);
+        await rename(staged[i], plans[i].workingPath);
+        updates.push({
+          path: plans[i].path,
+          pageCount: plans[i].pageCount,
+          buffer: built[i],
+          snapshotPath,
+        });
+      }
+    } catch (err) {
+      await Promise.all(staged.map((tmp) => Promise.resolve(remove(tmp)).catch(() => {})));
+      throw err;
     }
-  } catch (err) {
-    await Promise.all(staged.map((tmp) => Promise.resolve(remove(tmp)).catch(() => {})));
-    throw err;
+    dispatch({ type: 'COMMIT_PAGE_EDITS', updates });
+  } finally {
+    commitRunning = false;
   }
-  dispatch({ type: 'COMMIT_PAGE_EDITS', updates });
 }

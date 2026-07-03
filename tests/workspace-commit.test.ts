@@ -201,14 +201,18 @@ describe('commitPageEdits (transactional)', () => {
     return { files, workspace, dirtyPaths: ['a.pdf', 'b.pdf'] };
   }
 
+  const TMP = /\.commit-tmp-\d+$/;
+
   it('stages all temps, then snapshots+renames, then dispatches one atomic update', async () => {
     const { files, workspace, dirtyPaths } = await crossFileState();
     const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
     await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(fs) });
-    expect(fs.writes).toEqual(['a.pdf.working.commit-tmp', 'b.pdf.working.commit-tmp']);
+    expect(fs.writes).toHaveLength(2);
+    expect(fs.writes[0]).toMatch(/^a\.pdf\.working\.commit-tmp-\d+$/);
+    expect(fs.writes[1]).toMatch(/^b\.pdf\.working\.commit-tmp-\d+$/);
     expect(fs.renames).toEqual([
-      ['a.pdf.working.commit-tmp', 'a.pdf.working'],
-      ['b.pdf.working.commit-tmp', 'b.pdf.working'],
+      [fs.writes[0], 'a.pdf.working'],
+      [fs.writes[1], 'b.pdf.working'],
     ]);
     expect(fs.removed).toEqual([]);
     expect(fs.dispatched).toHaveLength(1);
@@ -233,7 +237,8 @@ describe('commitPageEdits (transactional)', () => {
     expect(fs.renames).toEqual([]);
     expect(fs.snapshots).toEqual([]);
     expect(fs.dispatched).toEqual([]);
-    expect(fs.removed).toEqual(['a.pdf.working.commit-tmp']);
+    expect(fs.removed).toHaveLength(1);
+    expect(fs.removed[0]).toMatch(TMP);
 
     // Retry from the same (unchanged) state: byte-identical plans succeed.
     const retryFs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
@@ -248,6 +253,34 @@ describe('commitPageEdits (transactional)', () => {
       expect(await pageWidths(pdf)).toEqual([200, 100, 201]);
       await pdf.loadingTask.destroy();
     }
+  });
+
+  it('uses distinct temp names across runs so leftovers can never be renamed in', async () => {
+    const { files, workspace, dirtyPaths } = await crossFileState();
+    const first: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+    const second: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+    await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(first) });
+    await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(second) });
+    expect(first.writes[0]).not.toBe(second.writes[0]);
+  });
+
+  it('rejects concurrent entry loudly instead of corrupting the staged files', async () => {
+    const { files, workspace, dirtyPaths } = await crossFileState();
+    const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+    const deps = makeDeps(fs);
+    const slowDeps = {
+      ...deps,
+      writeBuffer: async (filePath: string) => {
+        await new Promise((r) => setTimeout(r, 20));
+        return deps.writeBuffer(filePath);
+      },
+    };
+    const first = commitPageEdits({ workspace, files, dirtyPaths, ...slowDeps });
+    await expect(
+      commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(fs) }),
+    ).rejects.toThrow(/already running/);
+    await first; // the in-flight run itself completes normally
+    expect(fs.dispatched).toHaveLength(1);
   });
 
   it('clears the tier without touching disk when there is nothing to plan', async () => {

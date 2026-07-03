@@ -140,19 +140,35 @@ function AppContent(): React.ReactElement {
   // ops, close) — all dirty files commit together because cross-file moves
   // entangle them. Uses the raw (ungated) snapshot to avoid re-entering the
   // commit gate.
-  const commitIfNeeded = useCallback(async () => {
-    if (state.pageDirtyPaths.length === 0) return;
-    await commitPageEdits({
-      workspace: state.workspace,
-      files: state.files,
-      dirtyPaths: state.pageDirtyPaths,
-      dispatch,
-      snapshot: file.snapshotRaw,
-      writeBuffer: file.writeBuffer,
-      rename: file.rename,
-      remove: file.remove,
-    });
-    setCommitError(null);
+  //
+  // Every entry point (gate, Apply button, save/close, inspector open,
+  // leave-view effect) shares ONE in-flight run: two overlapping commits
+  // stage and rename the same working files and consume each other's temps —
+  // e.g. double-click a page and hit "Apply changes" during the ~200ms the
+  // first commit is writing, and the second rename hits ENOENT.
+  const inflightCommit = useRef<Promise<void> | null>(null);
+  const commitIfNeeded = useCallback((): Promise<void> => {
+    if (inflightCommit.current) return inflightCommit.current;
+    if (state.pageDirtyPaths.length === 0) return Promise.resolve();
+    const run = (async () => {
+      try {
+        await commitPageEdits({
+          workspace: state.workspace,
+          files: state.files,
+          dirtyPaths: state.pageDirtyPaths,
+          dispatch,
+          snapshot: file.snapshotRaw,
+          writeBuffer: file.writeBuffer,
+          rename: file.rename,
+          remove: file.remove,
+        });
+        setCommitError(null);
+      } finally {
+        inflightCommit.current = null;
+      }
+    })();
+    inflightCommit.current = run;
+    return run;
   }, [state.pageDirtyPaths, state.workspace, state.files, dispatch]);
   const commitRef = useRef(commitIfNeeded);
   commitRef.current = commitIfNeeded;
