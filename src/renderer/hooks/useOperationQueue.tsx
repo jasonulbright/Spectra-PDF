@@ -22,6 +22,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   decrypt: 'Decrypt',
   extract_text: 'Extract Text',
   set_metadata: 'Update Metadata',
+  set_outline: 'Save Bookmarks',
   unlock: 'Unlock',
 };
 
@@ -31,6 +32,7 @@ const INTERNAL_METHODS = new Set([
   'get_page_info',
   'check_encrypted',
   'get_metadata',
+  'get_outline',
 ]);
 
 export function isTrackableMethod(method: string): boolean {

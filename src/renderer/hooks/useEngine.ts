@@ -8,8 +8,17 @@ interface PendingRequest {
   reject: (reason: unknown) => void;
 }
 
+export interface OutlineNode {
+  title: string;
+  page: number | null; // 1-based; null = no resolvable target
+  children: OutlineNode[];
+}
+
 /** Result of an engine operation. Which fields are populated depends on the operation invoked. */
 export interface EngineResult {
+  outline: OutlineNode[];
+  count: number;
+  truncated: boolean;
   pages: number;
   pages_extracted: number;
   size_bytes: number;

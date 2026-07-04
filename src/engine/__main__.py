@@ -24,6 +24,7 @@ from engine.repair import repair
 from engine.rebuild import rebuild
 from engine.recover import recover
 from engine.check import check
+from engine.outline import get_outline, set_outline
 
 
 def ping() -> dict:
@@ -57,6 +58,8 @@ def main() -> None:
     server.register("rebuild", rebuild)
     server.register("recover", recover)
     server.register("check", check)
+    server.register("get_outline", get_outline)
+    server.register("set_outline", set_outline)
 
     # Signal readiness on stderr so the Tauri backend knows we're alive
     print("engine: ready", file=sys.stderr, flush=True)
