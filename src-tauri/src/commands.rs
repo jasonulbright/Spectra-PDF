@@ -8,11 +8,17 @@ use uuid::Uuid;
 // ── File dialogs ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn open_files_dialog(app: AppHandle) -> Result<Vec<String>, String> {
+pub async fn open_files_dialog(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Vec<String>, String> {
+    // Parenting makes the native dialog modal to the app window — without it
+    // the main window stays interactive and can stack dialogs.
     let result = app
         .dialog()
         .file()
-        .add_filter("PDF Files", &["pdf"])
+        .set_parent(&window)
+        .add_filter("PDF Files", &["pdf", "pdfx"])
         .blocking_pick_files();
 
     match result {
@@ -32,9 +38,14 @@ pub async fn open_files_dialog(app: AppHandle) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub async fn save_file_dialog(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     default_path: Option<String>,
 ) -> Result<Option<String>, String> {
-    let mut builder = app.dialog().file().add_filter("PDF Files", &["pdf"]);
+    let mut builder = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("PDF Files", &["pdf", "pdfx"]);
     if let Some(ref path) = default_path {
         builder = builder.set_file_name(path);
     }

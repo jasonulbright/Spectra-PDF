@@ -29,10 +29,31 @@ export const engine = {
 
 // ── File dialogs ──────────────────────────────────────────────────────────
 
+// Dialogs are OS-modal (parented in Rust), but modality lands a beat after
+// the click — serialize here too so a rapid second click joins the open
+// dialog instead of stacking another.
+let openDialogInflight: Promise<string[]> | null = null;
+let saveDialogInflight: Promise<string | null> | null = null;
+
 export const dialog = {
-  openFiles: () => invoke<string[]>('open_files_dialog'),
-  saveFile: (options?: { defaultPath?: string }) =>
-    invoke<string | null>('save_file_dialog', { defaultPath: options?.defaultPath }),
+  openFiles: () => {
+    if (!openDialogInflight) {
+      openDialogInflight = invoke<string[]>('open_files_dialog').finally(() => {
+        openDialogInflight = null;
+      });
+    }
+    return openDialogInflight;
+  },
+  saveFile: (options?: { defaultPath?: string }) => {
+    if (!saveDialogInflight) {
+      saveDialogInflight = invoke<string | null>('save_file_dialog', {
+        defaultPath: options?.defaultPath,
+      }).finally(() => {
+        saveDialogInflight = null;
+      });
+    }
+    return saveDialogInflight;
+  },
 };
 
 // ── File operations ───────────────────────────────────────────────────────

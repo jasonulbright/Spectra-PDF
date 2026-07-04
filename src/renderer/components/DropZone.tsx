@@ -21,7 +21,7 @@ export function DropZone({ onFilesDropped, children }: DropZoneProps): React.Rea
       } else if (event.payload.type === 'drop') {
         setDragging(false);
         const paths = event.payload.paths.filter((p) =>
-          p.toLowerCase().endsWith('.pdf')
+          /\.pdfx?$/i.test(p)
         );
         if (paths.length > 0) callbackRef.current(paths);
       }
