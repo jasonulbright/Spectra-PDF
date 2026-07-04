@@ -490,3 +490,41 @@
 .canvas-view .page:hover .page-number {
   opacity: 1;
 }
+
+/* Pending (uncommitted) annotation overlays — positioned by the display-
+   normalized rect on PageRef.annotations. The rect itself must not block
+   page dragging; only the remove button takes pointer events. */
+.page-annot {
+  position: absolute;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.page-annot-x {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 16px;
+  height: 16px;
+  line-height: 14px;
+  font-size: 11px;
+  text-align: center;
+  color: #fff;
+  background: rgba(20, 20, 24, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: auto;
+}
+
+.canvas-view .page:hover .page-annot-x {
+  opacity: 1;
+}
+
+.page-annot-band {
+  background: rgba(255, 213, 74, 0.35);
+  border-color: #ffd54a;
+}

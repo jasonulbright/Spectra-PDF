@@ -65,6 +65,35 @@ export function WorkspaceCanvasView({
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string; pageId: string } | null>(
     null,
   );
+  const [tool, setTool] = useState<'select' | 'highlight'>('select');
+
+  // Escape returns to Select from the highlight tool.
+  React.useEffect(() => {
+    if (tool !== 'highlight') return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setTool('select');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tool]);
+
+  const onAddAnnotation = useCallback(
+    (docId: string, pageId: string, rect: { x: number; y: number; w: number; h: number }) => {
+      dispatch({
+        type: 'ADD_ANNOTATION',
+        docId,
+        pageId,
+        annotation: { id: crypto.randomUUID(), kind: 'highlight', ...rect, color: '#ffd54a' },
+      });
+    },
+    [dispatch],
+  );
+
+  const onRemoveAnnotation = useCallback(
+    (docId: string, pageId: string, annotationId: string) =>
+      dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId }),
+    [dispatch],
+  );
 
   const movePageInto = useCallback(
     (source: DragSource, targetDocId: string, index: number) => {
@@ -265,8 +294,11 @@ export function WorkspaceCanvasView({
           betweenIndex={betweenIndex}
           onSelectPage={onSelectPage}
           onOpenPage={onOpenPage}
+          annotateMode={tool === 'highlight'}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={drag.onPagePointerDown}
+          onAddAnnotation={onAddAnnotation}
+          onRemoveAnnotation={onRemoveAnnotation}
         />
         {drag.dropTarget?.kind === 'between' && (
           <div
@@ -290,8 +322,25 @@ export function WorkspaceCanvasView({
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
 
-      {/* Floating controls: zoom cluster + pending page-edit commit */}
+      {/* Floating controls: tool toggle + zoom cluster + pending page-edit commit */}
       <div className="absolute bottom-4 right-4 flex items-center gap-2 z-30">
+        <div className="flex bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg overflow-hidden">
+          <button
+            title="Select and drag pages"
+            onClick={() => setTool('select')}
+            className={`px-3 py-1.5 text-xs font-medium ${tool === 'select' ? 'bg-neutral-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
+          >
+            Select
+          </button>
+          <button
+            data-testid="tool-highlight"
+            title="Drag a box on a page to highlight (Esc to exit)"
+            onClick={() => setTool(tool === 'highlight' ? 'select' : 'highlight')}
+            className={`px-3 py-1.5 text-xs font-medium ${tool === 'highlight' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
+          >
+            Highlight
+          </button>
+        </div>
         {dirty && (
           <button
             data-testid="apply-page-edits-btn"

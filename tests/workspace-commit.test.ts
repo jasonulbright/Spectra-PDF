@@ -157,6 +157,55 @@ describe('carriesManifest', () => {
   });
 });
 
+describe('annotations round-trip', () => {
+  // Non-circular validation: read the written /Square rect back with pdf.js
+  // and re-project it through the page's own viewport — the result must land
+  // on the display-normalized rect we authored.
+  async function roundTrip(rotation: 0 | 90 | 180 | 270) {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const authored = { x: 0.1, y: 0.2, w: 0.3, h: 0.15 };
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', a, 'a', [
+          { ...pageRef('a.pdf', 0, rotation), annotations: [
+            { id: 'ann1', kind: 'highlight' as const, ...authored, color: '#ffd54a', note: 'check this' },
+          ] },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const pdf = await loadPdf(await buildCommitBytes(plan));
+    const page = await pdf.getPage(1);
+    const annots = (await page.getAnnotations()) as {
+      subtype: string;
+      rect: [number, number, number, number];
+      contentsObj?: { str: string };
+    }[];
+    expect(annots).toHaveLength(1);
+    expect(annots[0].subtype).toBe('Square');
+    expect(annots[0].contentsObj?.str).toBe('check this');
+    const viewport = page.getViewport({ scale: 1 }); // includes the committed rotation
+    const [rx0, ry0, rx1, ry1] = annots[0].rect;
+    const p1 = viewport.convertToViewportPoint(rx0, ry0);
+    const p2 = viewport.convertToViewportPoint(rx1, ry1);
+    const nx = Math.min(p1[0], p2[0]) / viewport.width;
+    const ny = Math.min(p1[1], p2[1]) / viewport.height;
+    const nw = Math.abs(p1[0] - p2[0]) / viewport.width;
+    const nh = Math.abs(p1[1] - p2[1]) / viewport.height;
+    expect(nx).toBeCloseTo(authored.x, 3);
+    expect(ny).toBeCloseTo(authored.y, 3);
+    expect(nw).toBeCloseTo(authored.w, 3);
+    expect(nh).toBeCloseTo(authored.h, 3);
+    await pdf.loadingTask.destroy();
+  }
+
+  it('lands where authored at rotation 0', () => roundTrip(0));
+  it('lands where authored at rotation 90', () => roundTrip(90));
+  it('lands where authored at rotation 180', () => roundTrip(180));
+  it('lands where authored at rotation 270', () => roundTrip(270));
+});
+
 describe('commitPageEdits (transactional)', () => {
   interface FakeFs {
     writes: string[];

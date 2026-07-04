@@ -607,6 +607,53 @@ describe('RENAME_DOC manifest predicate (file-anchored)', () => {
   });
 });
 
+describe('ADD_ANNOTATION / REMOVE_ANNOTATION', () => {
+  const ann = { id: 'ann1', kind: 'highlight' as const, x: 0.1, y: 0.2, w: 0.3, h: 0.1, color: '#ffd54a' };
+
+  it('adds to the page, marks dirty, and is undoable', () => {
+    const a = makeFile('a.pdf', 2);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'ADD_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p1',
+      annotation: ann,
+    });
+    expect(next.workspace.documents[0].pages[1].annotations).toEqual([ann]);
+    expect(next.workspace.documents[0].pages[0].annotations).toBeUndefined();
+    expect(next.pageDirtyPaths).toEqual(['a.pdf']);
+    expect(next.pageUndoStack).toHaveLength(1);
+    const undone = appReducer(next, { type: 'UNDO_PAGE_OP' });
+    expect(undone.workspace.documents[0].pages[1].annotations).toBeUndefined();
+  });
+
+  it('removes by id; unknown ids are a no-op', () => {
+    const a = makeFile('a.pdf', 1);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));
+    const withAnn = appReducer(stateWith([a], [doc]), {
+      type: 'ADD_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotation: ann,
+    });
+    const removed = appReducer(withAnn, {
+      type: 'REMOVE_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotationId: 'ann1',
+    });
+    expect(removed.workspace.documents[0].pages[0].annotations).toEqual([]);
+    expect(
+      appReducer(withAnn, {
+        type: 'REMOVE_ANNOTATION',
+        docId: 'a.pdf#0',
+        pageId: 'a.pdf#p0',
+        annotationId: 'nope',
+      }),
+    ).toBe(withAnn);
+  });
+});
+
 describe('snapshot undo/redo history (multi-level)', () => {
   const withHistory = () => {
     const a = makeFile('a.pdf', 5);

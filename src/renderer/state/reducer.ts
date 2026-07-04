@@ -366,6 +366,34 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       );
       return applyPageEdit(state, documents, [doc.path]);
     }
+    case 'ADD_ANNOTATION': {
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      const page = doc?.pages.find((p) => p.id === action.pageId);
+      if (!doc || !page) return state;
+      const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
+        ...d,
+        pages: d.pages.map((p) =>
+          p.id === action.pageId
+            ? { ...p, annotations: [...(p.annotations ?? []), action.annotation] }
+            : p,
+        ),
+      }));
+      return applyPageEdit(state, documents, [doc.path]);
+    }
+    case 'REMOVE_ANNOTATION': {
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      const page = doc?.pages.find((p) => p.id === action.pageId);
+      if (!doc || !page?.annotations?.some((a) => a.id === action.annotationId)) return state;
+      const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
+        ...d,
+        pages: d.pages.map((p) =>
+          p.id === action.pageId
+            ? { ...p, annotations: p.annotations!.filter((a) => a.id !== action.annotationId) }
+            : p,
+        ),
+      }));
+      return applyPageEdit(state, documents, [doc.path]);
+    }
     case 'ROTATE_PAGE_REF': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       const page = doc?.pages.find((p) => p.id === action.pageId);

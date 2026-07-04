@@ -14,6 +14,21 @@ export interface OpenFile {
   redoStack: string[];    // snapshot paths for redo
 }
 
+// Pending (uncommitted) annotation, display-normalized: x/y/w/h are 0..1
+// relative to the rendered cell (inherent /Rotate + pending rotation baked
+// in), so capture space equals render space. The commit builder maps these
+// into PDF user space.
+export interface PageAnnotation {
+  id: string;
+  kind: 'highlight';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string; // #rrggbb
+  note?: string;
+}
+
 export interface PageRef {
   id: string;              // stable synthetic id, survives reorder
   sourceDocId: string;     // files-map key of the file this page's bytes come from
@@ -21,6 +36,7 @@ export interface PageRef {
   rotation: 0 | 90 | 180 | 270;
   width: number;           // page size at scale 1, from the pdf.js viewport
   height: number;
+  annotations?: PageAnnotation[]; // pending only — baked into the file at commit
 }
 
 // A document as composed in the workspace. Usually one per open file; a .pdfx
@@ -84,6 +100,8 @@ export type AppAction =
   | { type: 'MOVE_PAGE'; fromDocId: string; toDocId: string; pageId: string; toIndex: number }
   | { type: 'MOVE_PAGE_TO_NEW_DOC'; fromDocId: string; pageId: string; docIndex: number; newDocId: string; newName: string }
   | { type: 'DELETE_PAGE_REF'; docId: string; pageId: string }
+  | { type: 'ADD_ANNOTATION'; docId: string; pageId: string; annotation: PageAnnotation }
+  | { type: 'REMOVE_ANNOTATION'; docId: string; pageId: string; annotationId: string }
   | { type: 'SPLIT_DOC'; docId: string; atIndex: number; newDocId: string; newName: string }
   | { type: 'ROTATE_PAGE_REF'; docId: string; pageId: string; rotation: 0 | 90 | 180 | 270 }
   | { type: 'REORDER_DOCS'; docId: string; direction: -1 | 1 }

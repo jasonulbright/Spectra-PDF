@@ -20,7 +20,10 @@ interface DocLayerProps {
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
+  annotateMode: boolean;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
+  onAddAnnotation: (docId: string, pageId: string, rect: { x: number; y: number; w: number; h: number }) => void;
+  onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
 }
 
 function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
@@ -59,8 +62,11 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               }
               onSelectPage={props.onSelectPage}
               onOpenPage={props.onOpenPage}
+              annotateMode={props.annotateMode}
               onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
+              onAddAnnotation={props.onAddAnnotation}
+              onRemoveAnnotation={props.onRemoveAnnotation}
             />
           </div>
         );

@@ -21,7 +21,10 @@ interface DocumentRowProps {
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
+  annotateMode: boolean;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
+  onAddAnnotation: (docId: string, pageId: string, rect: { x: number; y: number; w: number; h: number }) => void;
+  onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
 }
 
 function DocumentRowImpl({
@@ -34,8 +37,11 @@ function DocumentRowImpl({
   intoGhost,
   onSelectPage,
   onOpenPage,
+  annotateMode,
   onPageContextMenu,
   onPagePointerDown,
+  onAddAnnotation,
+  onRemoveAnnotation,
 }: DocumentRowProps): React.JSX.Element {
   const strip: React.JSX.Element[] = [];
   let visible = 0;
@@ -62,8 +68,11 @@ function DocumentRowImpl({
         visibleNumber={visible + 1}
         onSelectPage={onSelectPage}
         onOpenPage={onOpenPage}
+        annotateMode={annotateMode}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
+        onAddAnnotation={onAddAnnotation}
+        onRemoveAnnotation={onRemoveAnnotation}
       />,
     );
     if (!collapsed) visible++;
