@@ -345,28 +345,42 @@ function AppContent(): React.ReactElement {
     }
     if (!activeFile || activeFile.undoStack.length === 0) return;
     const snapshotPath = activeFile.undoStack[activeFile.undoStack.length - 1];
+    // Capture the current state first so redo can come back to it. Raw
+    // snapshot — the page tier is empty here, the gate has nothing to do.
+    const redoSnapshot = await file.snapshotRaw(activeFile.workingPath);
     await file.restoreSnapshot(activeFile.workingPath, snapshotPath);
-    dispatch({ type: 'UNDO', path: activeFile.path });
+    dispatch({ type: 'UNDO', path: activeFile.path, redoSnapshot });
     const result = await reloadFile(activeFile.path);
     if (result) {
-      // Update buffer/pageCount without pushing to undo stack
-      const files = new Map(state.files);
-      const f = files.get(activeFile.path);
-      if (f) {
-        files.set(activeFile.path, { ...f, buffer: result.buffer, pageCount: result.pageCount });
-      }
-      // Dispatch a lightweight update - we already popped undo in UNDO action
-      // Just need to refresh buffer. Use OPEN_FILE with existing working path.
       dispatch({
-        type: 'OPEN_FILE',
+        type: 'REFRESH_BUFFER',
         path: activeFile.path,
-        workingPath: activeFile.workingPath,
-        name: activeFile.name,
         pageCount: result.pageCount,
         buffer: result.buffer,
       });
     }
-  }, [activeFile, state.files, state.pageUndoStack.length, reloadFile, dispatch]);
+  }, [activeFile, state.pageUndoStack.length, reloadFile, dispatch]);
+
+  const handleRedo = useCallback(async () => {
+    if (state.pageRedoStack.length > 0) {
+      dispatch({ type: 'REDO_PAGE_OP' });
+      return;
+    }
+    if (!activeFile || activeFile.redoStack.length === 0) return;
+    const snapshotPath = activeFile.redoStack[activeFile.redoStack.length - 1];
+    const undoSnapshot = await file.snapshotRaw(activeFile.workingPath);
+    await file.restoreSnapshot(activeFile.workingPath, snapshotPath);
+    dispatch({ type: 'REDO', path: activeFile.path, undoSnapshot });
+    const result = await reloadFile(activeFile.path);
+    if (result) {
+      dispatch({
+        type: 'REFRESH_BUFFER',
+        path: activeFile.path,
+        pageCount: result.pageCount,
+        buffer: result.buffer,
+      });
+    }
+  }, [activeFile, state.pageRedoStack.length, reloadFile, dispatch]);
 
   // Run the commit ahead of a dependent step; on failure surface the error
   // and tell the caller to abort (the edits are still pending and retryable).
@@ -592,6 +606,8 @@ function AppContent(): React.ReactElement {
   const Panel = panels[activeOp];
   const canUndo =
     state.pageUndoStack.length > 0 || (activeFile ? activeFile.undoStack.length > 0 : false);
+  const canRedo =
+    state.pageRedoStack.length > 0 || (activeFile ? activeFile.redoStack.length > 0 : false);
 
   return (
     <DropZone onFilesDropped={handleFilesDropped}>
@@ -613,6 +629,9 @@ function AppContent(): React.ReactElement {
             <>
               <button data-testid="undo-btn" onClick={handleUndo} disabled={!canUndo} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Undo last action">
                 Undo
+              </button>
+              <button data-testid="redo-btn" onClick={handleRedo} disabled={!canRedo} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Redo">
+                Redo
               </button>
               <button data-testid="save-btn" onClick={handleSave} disabled={!isFileDirty(activeFile)} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Save to original file">
                 Save

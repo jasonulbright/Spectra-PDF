@@ -66,8 +66,14 @@ export type AppAction =
   // rebuilt on disk: applies every file update and clears the page-edit tier
   // in one step, so no intermediate state is observable.
   | { type: 'COMMIT_PAGE_EDITS'; updates: { path: string; pageCount: number; buffer: PdfBuffer; snapshotPath: string }[] }
-  | { type: 'UNDO'; path: string }
-  | { type: 'REDO'; path: string }
+  // Snapshot-tier history. UNDO carries a snapshot of the pre-restore state
+  // so REDO can return to it; the caller performs the disk restore and then
+  // refreshes the buffer via REFRESH_BUFFER (which must not touch history —
+  // that was the original multi-level-undo bug: refreshing via OPEN_FILE
+  // reset the stacks after every undo).
+  | { type: 'UNDO'; path: string; redoSnapshot: string }
+  | { type: 'REDO'; path: string; undoSnapshot: string }
+  | { type: 'REFRESH_BUFFER'; path: string; pageCount: number; buffer: PdfBuffer }
   | { type: 'MARK_SAVED'; path: string }
   // Workspace actions. SET_WORKSPACE_DOCUMENTS is dispatched by
   // useWorkspaceIndexer after a file is opened or its buffer changes. The

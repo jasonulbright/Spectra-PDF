@@ -201,21 +201,50 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const files = new Map(state.files);
       const existing = files.get(action.path);
       if (!existing || existing.undoStack.length === 0) return state;
-      // Pop last snapshot — it will be restored by the caller
-      // Push current state to redo (caller handles the snapshot)
-      const undoStack = [...existing.undoStack];
-      undoStack.pop(); // remove the snapshot we're restoring to
-      files.set(action.path, { ...existing, undoStack, dirty: undoStack.length > 0 });
+      files.set(action.path, {
+        ...existing,
+        undoStack: existing.undoStack.slice(0, -1), // caller restored this snapshot
+        redoStack: [...existing.redoStack, action.redoSnapshot],
+        dirty: existing.undoStack.length > 1,
+      });
       return { ...state, files };
     }
     case 'REDO': {
       const files = new Map(state.files);
       const existing = files.get(action.path);
       if (!existing || existing.redoStack.length === 0) return state;
-      const redoStack = [...existing.redoStack];
-      redoStack.pop();
-      files.set(action.path, { ...existing, redoStack, dirty: true });
+      files.set(action.path, {
+        ...existing,
+        redoStack: existing.redoStack.slice(0, -1), // caller restored this snapshot
+        undoStack: [...existing.undoStack, action.undoSnapshot],
+        dirty: true,
+      });
       return { ...state, files };
+    }
+    case 'REFRESH_BUFFER': {
+      // Buffer/pageCount swap that leaves undo/redo history alone — used
+      // after an undo/redo restore. Callers drain the page tier first, but if
+      // one ever doesn't, invalidate it like UPDATE_FILE does.
+      const existing = state.files.get(action.path);
+      if (!existing) return state;
+      const files = new Map(state.files);
+      files.set(action.path, { ...existing, pageCount: action.pageCount, buffer: action.buffer });
+      const tierEmpty =
+        state.pageUndoStack.length === 0 &&
+        state.pageRedoStack.length === 0 &&
+        state.pageDirtyPaths.length === 0;
+      if (tierEmpty) return { ...state, files };
+      const invalidated = new Set([...state.pageDirtyPaths, action.path]);
+      return {
+        ...state,
+        files,
+        workspace: {
+          documents: state.workspace.documents.filter((d) => !invalidated.has(d.path)),
+        },
+        pageUndoStack: [],
+        pageRedoStack: [],
+        pageDirtyPaths: [],
+      };
     }
     case 'MARK_SAVED': {
       const files = new Map(state.files);

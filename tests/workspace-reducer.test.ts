@@ -607,6 +607,47 @@ describe('RENAME_DOC manifest predicate (file-anchored)', () => {
   });
 });
 
+describe('snapshot undo/redo history (multi-level)', () => {
+  const withHistory = () => {
+    const a = makeFile('a.pdf', 5);
+    let state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 5))]);
+    // Two whole-file ops → two undo entries.
+    state = appReducer(state, { type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 4, buffer: [2], snapshotPath: 'snap1' });
+    state = appReducer(state, { type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 3, buffer: [3], snapshotPath: 'snap2' });
+    return state;
+  };
+
+  it('supports two consecutive undos and preserves redo path', () => {
+    let state = withHistory();
+    expect(state.files.get('a.pdf')?.undoStack).toEqual(['snap1', 'snap2']);
+
+    state = appReducer(state, { type: 'UNDO', path: 'a.pdf', redoSnapshot: 'redo2' });
+    expect(state.files.get('a.pdf')?.undoStack).toEqual(['snap1']); // second undo still possible
+    expect(state.files.get('a.pdf')?.redoStack).toEqual(['redo2']);
+    expect(state.files.get('a.pdf')?.dirty).toBe(true);
+
+    state = appReducer(state, { type: 'UNDO', path: 'a.pdf', redoSnapshot: 'redo1' });
+    expect(state.files.get('a.pdf')?.undoStack).toEqual([]);
+    expect(state.files.get('a.pdf')?.redoStack).toEqual(['redo2', 'redo1']);
+    expect(state.files.get('a.pdf')?.dirty).toBe(false);
+
+    state = appReducer(state, { type: 'REDO', path: 'a.pdf', undoSnapshot: 'snap1' });
+    expect(state.files.get('a.pdf')?.undoStack).toEqual(['snap1']);
+    expect(state.files.get('a.pdf')?.redoStack).toEqual(['redo2']);
+    expect(state.files.get('a.pdf')?.dirty).toBe(true);
+  });
+
+  it('REFRESH_BUFFER swaps bytes without touching history', () => {
+    let state = withHistory();
+    state = appReducer(state, { type: 'REFRESH_BUFFER', path: 'a.pdf', pageCount: 4, buffer: [9] });
+    const f = state.files.get('a.pdf')!;
+    expect(f.pageCount).toBe(4);
+    expect(f.buffer).toEqual([9]);
+    expect(f.undoStack).toEqual(['snap1', 'snap2']); // untouched — the original bug reset these
+    expect(f.redoStack).toEqual([]);
+  });
+});
+
 describe('CLOSE_FILE with pending cross-file edits', () => {
   it('strips pages sourced from the closed file and resets the tier', () => {
     const a = makeFile('a.pdf', 2);
