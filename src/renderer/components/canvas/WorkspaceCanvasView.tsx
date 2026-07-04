@@ -259,7 +259,8 @@ export function WorkspaceCanvasView({
       className={
         'canvas-view flex-1 flex flex-col relative overflow-hidden' +
         (drag.committing ? ' committing' : '') +
-        (drag.draggingPage ? ' dragging' : '')
+        (drag.draggingPage ? ' dragging' : '') +
+        (tool === 'highlight' ? ' annotating' : '')
       }
     >
       <Canvas

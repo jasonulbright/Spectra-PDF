@@ -47,47 +47,56 @@ function PageCellImpl({
   onRemoveAnnotation,
 }: PageCellProps): React.JSX.Element {
   const displayWidth = displayWidthOf(page);
-  // Rubber band for the highlight tool, in display-normalized coords.
+  // Rubber band for the highlight tool, in display-normalized coords. Driven
+  // by window-level native listeners for the drag's duration — the same
+  // pattern as usePageDrag — rather than React synthetic move/up through
+  // pointer capture, which proved unreliable in the WebView.
   const [band, setBand] = useState<AnnotationRect | null>(null);
-  const bandStart = useRef<{ x: number; y: number } | null>(null);
-
-  const normPoint = (e: React.PointerEvent<HTMLElement>): { x: number; y: number } => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return {
-      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
-    };
-  };
+  const bandActive = useRef(false);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     if (!annotateMode) {
       onPagePointerDown(docId, page.id, e);
       return;
     }
-    if (e.button !== 0) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    bandStart.current = normPoint(e);
-    setBand({ ...bandStart.current, w: 0, h: 0 });
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLElement>): void => {
-    if (!annotateMode || !bandStart.current) return;
-    const p = normPoint(e);
-    const s = bandStart.current;
-    setBand({
-      x: Math.min(s.x, p.x),
-      y: Math.min(s.y, p.y),
-      w: Math.abs(p.x - s.x),
-      h: Math.abs(p.y - s.y),
+    if (e.button !== 0 || bandActive.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    bandActive.current = true;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const norm = (cx: number, cy: number): { x: number; y: number } => ({
+      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
     });
-  };
+    const start = norm(e.clientX, e.clientY);
+    let latest: AnnotationRect = { ...start, w: 0, h: 0 };
+    setBand(latest);
 
-  const handlePointerUp = (): void => {
-    if (!annotateMode || !bandStart.current) return;
-    const done = band;
-    bandStart.current = null;
-    setBand(null);
-    if (done && done.w > 0.01 && done.h > 0.01) onAddAnnotation(docId, page.id, done);
+    const onMove = (ev: PointerEvent): void => {
+      const p = norm(ev.clientX, ev.clientY);
+      latest = {
+        x: Math.min(start.x, p.x),
+        y: Math.min(start.y, p.y),
+        w: Math.abs(p.x - start.x),
+        h: Math.abs(p.y - start.y),
+      };
+      setBand(latest);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      bandActive.current = false;
+      setBand(null);
+      if (commit && latest.w > 0.01 && latest.h > 0.01) {
+        onAddAnnotation(docId, page.id, latest);
+      }
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
   };
 
   return (
@@ -122,8 +131,6 @@ function PageCellImpl({
         onPageContextMenu(docId, page.id, e);
       }}
       onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
     >
       <PageView
         pdf={pdf}

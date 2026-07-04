@@ -528,3 +528,8 @@
   background: rgba(255, 213, 74, 0.35);
   border-color: #ffd54a;
 }
+
+/* Highlight tool active: crosshair over pages signals draw-a-box mode. */
+.canvas-view.annotating .page {
+  cursor: crosshair;
+}
