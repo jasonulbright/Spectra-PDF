@@ -26,6 +26,10 @@ export interface RedactionMark {
   // was shown at draw time — i.e. the file's baked /Rotate composed with the
   // PageRef's in-memory rotation at that moment.
   rect: { x: number; y: number; w: number; h: number };
+  // The PageRef's in-memory rotation DELTA at draw time only — NOT the
+  // composed orientation the rect comment above describes. The baked /Rotate
+  // half is read from the file at apply time (PageGeometry.bakedRotate) and
+  // composed there; storing the composition here would double-count it.
   rotationAtDraw: 0 | 90 | 180 | 270;
 }
 
