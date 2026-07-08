@@ -49,6 +49,8 @@ pub enum CliCommand {
     ExtractText(ExtractTextArgs),
     /// Delete pages from a PDF
     Delete(DeleteArgs),
+    /// Redact (true content removal, not just a visual box) a rectangular region on a page
+    Redact(RedactArgs),
     /// View or set PDF metadata
     Metadata(MetadataArgs),
     /// Convert a PDF to grayscale
@@ -178,6 +180,22 @@ pub struct DeleteArgs {
     /// Comma-separated page numbers to delete (1-based)
     #[arg(short, long)]
     pub pages: String,
+}
+
+#[derive(Args)]
+pub struct RedactArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// 1-based page number the region is on
+    #[arg(short, long)]
+    pub page: u32,
+    /// Region rectangle in the page's own /MediaBox point space (not
+    /// display-normalized, not rotation-adjusted): "x0,y0,x1,y1"
+    #[arg(long)]
+    pub rect: String,
 }
 
 #[derive(Args)]
@@ -645,6 +663,26 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
                     "pages": pages,
+                }),
+            )
+        }
+
+        CliCommand::Redact(args) => {
+            let rect: Vec<f64> = args
+                .rect
+                .split(',')
+                .map(|s| s.trim().parse::<f64>())
+                .collect::<Result<Vec<f64>, _>>()
+                .map_err(|_| "--rect requires exactly 4 comma-separated numbers: x0,y0,x1,y1".to_string())?;
+            if rect.len() != 4 {
+                return Err("--rect requires exactly 4 comma-separated numbers: x0,y0,x1,y1".to_string());
+            }
+            engine.call(
+                "redact",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "regions": [{"page": args.page, "rect": rect}],
                 }),
             )
         }

@@ -17,6 +17,8 @@ from engine.extract_text import extract_text
 from engine.metadata import get_metadata, set_metadata
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
 from engine.validate import validate_pdf
+from engine.redact import redact
+from pikepdf import Name, Dictionary
 
 
 # ── Merge ─────────────────────────────────────────────────────────────────
@@ -288,3 +290,188 @@ class TestValidate:
     def test_validate_nonexistent(self):
         with pytest.raises(Exception):
             validate_pdf("/nonexistent/file.pdf")
+
+
+# ── Redact ────────────────────────────────────────────────────────────────
+
+
+def _make_redact_fixture(path: str) -> None:
+    """A 400x400 page: "SECRET DATA" near (50,300), a 3x3 red image placed at
+    (200,50)-(300,150), and unrelated "KEEP ME" text near (50,50) — built
+    directly via pikepdf's low-level object API (no reportlab dependency)."""
+    doc = pikepdf.new()
+    page = doc.add_blank_page(page_size=(400, 400))
+    font = doc.make_indirect(
+        Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+    )
+    img_stream = doc.make_stream(bytes([255, 0, 0] * 9))
+    img_stream.Type = Name.XObject
+    img_stream.Subtype = Name.Image
+    img_stream.Width = 3
+    img_stream.Height = 3
+    img_stream.BitsPerComponent = 8
+    img_stream.ColorSpace = Name.DeviceRGB
+    page.Resources = Dictionary(Font=Dictionary(F1=font), XObject=Dictionary(Im0=img_stream))
+    content = (
+        b"BT /F1 12 Tf 50 300 Td (SECRET DATA) Tj ET "
+        b"q 100 0 0 100 200 50 cm /Im0 Do Q "
+        b"BT /F1 12 Tf 50 50 Td (KEEP ME) Tj ET"
+    )
+    page.Contents = doc.make_stream(content)
+    doc.save(path)
+    doc.close()
+
+
+class TestRedact:
+    def test_redact_removes_text_and_image_keeps_unrelated_content(self, tmp_dir):
+        src = os.path.join(tmp_dir, "redact_in.pdf")
+        out = os.path.join(tmp_dir, "redact_out.pdf")
+        _make_redact_fixture(src)
+
+        result = redact(
+            file=src,
+            output=out,
+            regions=[
+                {"page": 1, "rect": [40, 290, 250, 320]},
+                {"page": 1, "rect": [190, 40, 310, 160]},
+            ],
+        )
+        assert result["pages_redacted"] == 1
+        assert result["regions_applied"] == 2
+        assert result["text_runs_removed"] == 1
+        assert result["images_removed"] == 1
+
+        # Non-circular verification: pdfminer, independent of pikepdf/our own
+        # content-stream walk, must no longer find the redacted text.
+        text = extract_text(out)["text"]
+        assert "SECRET DATA" not in text
+        assert "KEEP ME" in text
+
+        with pikepdf.open(out) as pdf:
+            xobjects = pdf.pages[0].get("/Resources", {}).get("/XObject", {})
+            assert list(xobjects.keys() if xobjects else []) == []
+
+    def test_redact_region_with_no_overlap_is_a_no_op_on_content(self, tmp_dir):
+        src = os.path.join(tmp_dir, "redact_in2.pdf")
+        out = os.path.join(tmp_dir, "redact_out2.pdf")
+        _make_redact_fixture(src)
+
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [0, 0, 10, 10]}])
+        assert result["text_runs_removed"] == 0
+        assert result["images_removed"] == 0
+
+        text = extract_text(out)["text"]
+        assert "SECRET DATA" in text
+        assert "KEEP ME" in text
+
+    def test_redact_in_place(self, tmp_dir):
+        src = os.path.join(tmp_dir, "redact_in3.pdf")
+        _make_redact_fixture(src)
+
+        redact(file=src, output=src, regions=[{"page": 1, "rect": [40, 290, 250, 320]}])
+        text = extract_text(src)["text"]
+        assert "SECRET DATA" not in text
+        assert "KEEP ME" in text
+
+    def test_redact_out_of_range_page_is_ignored(self, tmp_dir):
+        src = os.path.join(tmp_dir, "redact_in4.pdf")
+        out = os.path.join(tmp_dir, "redact_out4.pdf")
+        _make_redact_fixture(src)
+
+        result = redact(file=src, output=out, regions=[{"page": 99, "rect": [0, 0, 10, 10]}])
+        assert result["pages_redacted"] == 0
+        text = extract_text(out)["text"]
+        assert "SECRET DATA" in text
+
+    def test_redact_finds_images_via_inherited_resources(self, tmp_dir):
+        # Regression: a page whose /Resources lives on an ancestor /Pages
+        # node (common generator output — a single shared /Resources dict
+        # rather than one duplicated per page) must still have its images
+        # found and redacted. Missing this was a false negative: the
+        # dangerous failure direction for a redaction tool.
+        src = os.path.join(tmp_dir, "redact_inherited.pdf")
+        out = os.path.join(tmp_dir, "redact_inherited_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(400, 400))
+        img_stream = doc.make_stream(bytes([255, 0, 0] * 9))
+        img_stream.Type = Name.XObject
+        img_stream.Subtype = Name.Image
+        img_stream.Width = 3
+        img_stream.Height = 3
+        img_stream.BitsPerComponent = 8
+        img_stream.ColorSpace = Name.DeviceRGB
+        # No page.Resources at all — put it on the Pages node instead.
+        # (add_blank_page auto-assigns an empty /Resources dict directly on
+        # the page; delete it so the inheritance walk is actually exercised.)
+        del page.obj["/Resources"]
+        doc.Root.Pages.Resources = Dictionary(XObject=Dictionary(Im0=img_stream))
+        page.Contents = doc.make_stream(b"q 100 0 0 100 200 50 cm /Im0 Do Q")
+        doc.save(src)
+        doc.close()
+
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [190, 40, 310, 160]}])
+        assert result["images_removed"] == 1
+        with pikepdf.open(out) as pdf:
+            # The page still has no /Resources of its own; walk to the
+            # inherited one the same way production code does.
+            node = pdf.pages[0].obj
+            while "/Resources" not in node:
+                node = node.Parent
+            xobjects = node.Resources.get("/XObject", {})
+            assert list(xobjects.keys() if xobjects else []) == []
+
+    def test_redact_drops_the_whole_instruction_on_partial_overlap(self, tmp_dir):
+        # A region overlapping only PART of a large image/text run must
+        # still remove the entire instruction — the module's documented
+        # "over-redact rather than risk a false negative" behavior.
+        src = os.path.join(tmp_dir, "redact_partial.pdf")
+        out = os.path.join(tmp_dir, "redact_partial_out.pdf")
+        _make_redact_fixture(src)
+
+        # The image spans (200,50)-(300,150); this region only clips its
+        # bottom-left corner.
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [190, 40, 220, 70]}])
+        assert result["images_removed"] == 1
+        with pikepdf.open(out) as pdf:
+            xobjects = pdf.pages[0].get("/Resources", {}).get("/XObject", {})
+            assert list(xobjects.keys() if xobjects else []) == []
+
+    def test_redact_tracks_rotated_cm_and_multiple_text_lines(self, tmp_dir):
+        # A rotated cm (image placement) and two Td-separated lines of text
+        # exercise matrix composition beyond the axis-aligned single-Td cases
+        # the other tests cover.
+        src = os.path.join(tmp_dir, "redact_rotated.pdf")
+        out = os.path.join(tmp_dir, "redact_rotated_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(400, 400))
+        font = doc.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+        )
+        img_stream = doc.make_stream(bytes([0, 255, 0] * 9))
+        img_stream.Type = Name.XObject
+        img_stream.Subtype = Name.Image
+        img_stream.Width = 3
+        img_stream.Height = 3
+        img_stream.BitsPerComponent = 8
+        img_stream.ColorSpace = Name.DeviceRGB
+        page.Resources = Dictionary(Font=Dictionary(F1=font), XObject=Dictionary(Im0=img_stream))
+        # 45-degree-rotated 50x50 image placement centered near (300,300),
+        # plus two lines of text reached via two separate Td moves.
+        content = (
+            b"q 35.36 35.36 -35.36 35.36 300 265 cm /Im0 Do Q "
+            b"BT /F1 12 Tf 50 300 Td (LINE ONE) Tj 0 -20 Td (LINE TWO) Tj ET"
+        )
+        page.Contents = doc.make_stream(content)
+        doc.save(src)
+        doc.close()
+
+        # Region around the rotated image's bounding box.
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [260, 260, 340, 340]}])
+        assert result["images_removed"] == 1
+
+        # Region around the SECOND text line only (first Td at y=300, second
+        # at y=280 after the relative -20 move) — must not remove LINE ONE.
+        result2 = redact(file=src, output=out, regions=[{"page": 1, "rect": [40, 270, 150, 290]}])
+        text = extract_text(out)["text"]
+        assert "LINE ONE" in text
+        assert "LINE TWO" not in text
