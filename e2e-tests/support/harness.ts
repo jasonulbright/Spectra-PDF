@@ -142,6 +142,37 @@ export async function recolorAnnotation(
   );
 }
 
+export async function removeAnnotation(docId: string, pageId: string, annotationId: string): Promise<void> {
+  await browser.execute(
+    function (d, p, a) {
+      (window as any).__SPECTRA_TEST__.removeAnnotation(d, p, a);
+    },
+    docId,
+    pageId,
+    annotationId,
+  );
+}
+
+export interface FirstAnnotation {
+  docId: string;
+  pageId: string;
+  annotationId: string;
+  kind: string;
+  color: string;
+  note?: string;
+}
+
+export async function getFirstAnnotation(timeoutMs = 10_000): Promise<FirstAnnotation | null> {
+  return await browser.executeAsync<FirstAnnotation | null, [number]>(
+    function (timeout, done) {
+      (window as any).__SPECTRA_TEST__.getFirstAnnotation(timeout)
+        .then((r: unknown) => done(r as any))
+        .catch(() => done(null as any));
+    },
+    timeoutMs,
+  );
+}
+
 export async function commitPendingEdits(): Promise<void> {
   const result = await browser.executeAsync<string | null, []>(function (done) {
     (window as any).__SPECTRA_TEST__.commitPendingEdits()

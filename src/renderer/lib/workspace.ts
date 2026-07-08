@@ -1,6 +1,7 @@
 import { getDocumentProxy } from './pdfDocCache';
 import { readManifest, partitionPages, stripExtension } from './pdfx-format';
-import type { OpenDocument, OpenFile, PageRef } from '../state/types';
+import { importPageAnnotations } from './annotation-import';
+import type { OpenDocument, OpenFile, PageAnnotation, PageRef } from '../state/types';
 
 // Derives the workspace's page-level view of an open file: reads the .pdfx
 // manifest (if present) to recover document boundaries, and captures per-page
@@ -15,10 +16,12 @@ export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
   const manifest = await readManifest(doc);
   const partitions = partitionPages(manifest, doc.numPages, stripExtension(file.name));
   const dims: { width: number; height: number }[] = [];
+  const annotations: PageAnnotation[][] = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const { width, height } = page.getViewport({ scale: 1 });
     dims.push({ width, height });
+    annotations.push(await importPageAnnotations(page));
   }
   return partitions.map((partition, docIndex) => ({
     ...file,
@@ -33,6 +36,7 @@ export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
         rotation: 0,
         width: dims[pageIndex]?.width ?? 0,
         height: dims[pageIndex]?.height ?? 0,
+        ...(annotations[pageIndex]?.length ? { annotations: annotations[pageIndex] } : {}),
       }),
     ),
   }));

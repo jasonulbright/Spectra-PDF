@@ -38,6 +38,16 @@ export interface ExportAnnotation {
   color: string; // #rrggbb
   note?: string;
   points?: number[]; // ink only: flat [x0,y0,x1,y1,...] in the same space as x/y/w/h
+  // Present for imported annotations only — see PageAnnotation.importedOriginal
+  // and the "importing existing annotations safely" design note. The builder
+  // uses this to positively match and strip the ORIGINAL object from the
+  // copied page before re-appending this (possibly edited) annotation, so
+  // imported-but-unedited annotations don't end up duplicated in the output.
+  importedOriginal?: {
+    subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp';
+    rect: [number, number, number, number];
+    contents?: string;
+  };
 }
 
 export interface ExportPage {
@@ -49,6 +59,11 @@ export interface ExportPage {
   // commit bridge. Absent/0 keeps PDFx-identical output.
   rotation?: 0 | 90 | 180 | 270;
   annotations?: ExportAnnotation[];
+  // Fingerprints of imported annotations the user removed — see
+  // PageRef.removedImportedOriginals. The builder strips their matching
+  // original from the copied page's real /Annots WITHOUT re-appending them
+  // (unlike `annotations`, which is always re-appended after stripping).
+  removedImportedOriginals?: NonNullable<ExportAnnotation['importedOriginal']>[];
 }
 
 export interface ExportDocument {

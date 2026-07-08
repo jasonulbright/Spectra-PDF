@@ -454,12 +454,24 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'REMOVE_ANNOTATION': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       const page = doc?.pages.find((p) => p.id === action.pageId);
-      if (!doc || !page?.annotations?.some((a) => a.id === action.annotationId)) return state;
+      const removed = page?.annotations?.find((a) => a.id === action.annotationId);
+      if (!doc || !removed) return state;
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) =>
           p.id === action.pageId
-            ? { ...p, annotations: p.annotations!.filter((a) => a.id !== action.annotationId) }
+            ? {
+                ...p,
+                annotations: p.annotations!.filter((a) => a.id !== action.annotationId),
+                // Removing an imported annotation drops its importedOriginal
+                // fingerprint along with it — without keeping the fingerprint
+                // here, the commit-time strip has nothing left to match the
+                // real PDF object against and leaves it in place, silently
+                // undoing the removal. See PageRef.removedImportedOriginals.
+                ...(removed.importedOriginal
+                  ? { removedImportedOriginals: [...(p.removedImportedOriginals ?? []), removed.importedOriginal] }
+                  : {}),
+              }
             : p,
         ),
       }));

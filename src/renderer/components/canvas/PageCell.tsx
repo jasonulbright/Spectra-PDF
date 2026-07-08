@@ -296,7 +296,20 @@ function PageCellImpl({
         displayWidth={displayWidth}
         displayHeight={pageHeight}
       />
-      {(page.annotations ?? []).map((a) => (
+      {(page.annotations ?? []).map((a) => {
+        // pdf.js's base raster (PageView) already draws every real annotation
+        // in the CURRENTLY LOADED file with AnnotationMode.ENABLE — including
+        // ones we've imported but haven't touched. Painting our own visible
+        // body on top of an untouched import would double it up. Only once
+        // color/note diverges from the importedOriginal snapshot is the file
+        // on disk stale relative to the edit, and the overlay must take over
+        // (same as any brand-new, uncommitted annotation always does).
+        const pristineImport =
+          !!a.importedOriginal &&
+          a.importedOriginal.hasAppearance && // else pdf.js draws nothing to avoid duplicating
+          a.color === a.importedOriginal.color &&
+          (a.note ?? '') === (a.importedOriginal.contents ?? '');
+        return (
         <div
           key={a.id}
           className={
@@ -311,13 +324,15 @@ function PageCellImpl({
             top: `${a.y * 100}%`,
             width: `${a.w * 100}%`,
             height: `${a.h * 100}%`,
-            ...(a.kind === 'highlight'
-              ? { backgroundColor: `${a.color}66`, borderColor: a.color }
-              : a.kind === 'ink'
-                ? {}
-                : a.kind === 'stamp'
-                  ? { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
-                  : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
+            ...(pristineImport
+              ? {}
+              : a.kind === 'highlight'
+                ? { backgroundColor: `${a.color}66`, borderColor: a.color }
+                : a.kind === 'ink'
+                  ? {}
+                  : a.kind === 'stamp'
+                    ? { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
+                    : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
             ...(a.kind === 'freetext' && tool === 'select' ? { pointerEvents: 'auto' } : {}),
           }}
           onPointerDown={a.kind === 'freetext' ? (e) => e.stopPropagation() : undefined}
@@ -330,7 +345,7 @@ function PageCellImpl({
               : undefined
           }
         >
-          {a.kind === 'ink' && (
+          {a.kind === 'ink' && !pristineImport && (
             <svg className="page-annot-ink-svg" viewBox="0 0 1 1" preserveAspectRatio="none">
               <polyline
                 points={(a.points ?? [])
@@ -349,10 +364,10 @@ function PageCellImpl({
               />
             </svg>
           )}
-          {a.kind === 'freetext' && editing !== a.id && (
+          {a.kind === 'freetext' && editing !== a.id && !pristineImport && (
             <span className="page-annot-text-body">{a.note}</span>
           )}
-          {a.kind === 'stamp' && <span className="page-annot-stamp-label">{a.note}</span>}
+          {a.kind === 'stamp' && !pristineImport && <span className="page-annot-stamp-label">{a.note}</span>}
           {editing === a.id ? (
             <textarea
               className="page-annot-editor"
@@ -413,7 +428,8 @@ function PageCellImpl({
             )
           )}
         </div>
-      ))}
+        );
+      })}
       {band && (
         <div
           className="page-annot page-annot-band"

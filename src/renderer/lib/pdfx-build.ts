@@ -1,4 +1,4 @@
-import { PDFDocument, PDFArray, PDFHexString, PDFName, degrees } from 'pdf-lib';
+import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFString, degrees } from 'pdf-lib';
 
 import { MANIFEST_NAME, PDFX_VERSION } from './pdfx-format';
 import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from './pdfx-format';
@@ -51,6 +51,53 @@ export function displayRectToPdf(
   const xs = [mapped[0][0], mapped[1][0]];
   const ys = [mapped[0][1], mapped[1][1]];
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+// Inverse of displayPointToPdf — maps a PDF-user-space point back into
+// display-normalized space for the page's CURRENT (pre-edit) rotation. Used
+// only at import time (workspace.ts) to seed PageAnnotation from an existing
+// PDF annotation's /Rect; re-derived algebraically from displayPointToPdf's
+// four cases, not independently verified against the spec — the round-trip
+// test in workspace-commit.test.ts is what actually proves it's a true
+// inverse (import then re-export must reproduce the original /Rect).
+export function pdfPointToDisplay(
+  px: number,
+  py: number,
+  mediaBox: { x: number; y: number; width: number; height: number },
+  rotation: number,
+): [number, number] {
+  const { x: mx, y: my, width: W, height: H } = mediaBox;
+  switch (((rotation % 360) + 360) % 360) {
+    case 90:
+      return [(py - my) / H, (px - mx) / W];
+    case 180:
+      return [1 - (px - mx) / W, (py - my) / H];
+    case 270:
+      return [1 - (py - my) / H, 1 - (px - mx) / W];
+    default:
+      return [(px - mx) / W, 1 - (py - my) / H];
+  }
+}
+
+// Inverse of displayRectToPdf — maps a PDF-space [x0,y0,x1,y1] rect back into
+// a display-normalized {x,y,w,h} bbox via its two corners (same min/max
+// pattern as the forward direction, since rotation can flip which corner is
+// which in display space).
+export function pdfRectToDisplay(
+  rect: [number, number, number, number],
+  mediaBox: { x: number; y: number; width: number; height: number },
+  rotation: number,
+): { x: number; y: number; w: number; h: number } {
+  const [x0, y0, x1, y1] = rect;
+  const mapped = [
+    pdfPointToDisplay(x0, y0, mediaBox, rotation),
+    pdfPointToDisplay(x1, y1, mediaBox, rotation),
+  ];
+  const xs = [mapped[0][0], mapped[1][0]];
+  const ys = [mapped[0][1], mapped[1][1]];
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
 
 const HIGHLIGHT_ALPHA = 0.4;
@@ -108,13 +155,74 @@ function apMatrixFor(rotation: number): number[] {
   }
 }
 
+// Positively match and remove ORIGINAL annotation objects on the copied page
+// that correspond to imported annotations in `annotations` (which the caller
+// will re-append, possibly edited, right after this runs) — never a blanket
+// subtype strip. See docs/architecture/05-phase2c-annotations.md, "importing
+// existing annotations safely": an original we can't positively fingerprint
+// against something we're re-authoring is left alone, so a matching miss can
+// only ever produce a visible duplicate, never silent data loss.
+function stripImportedOriginals(
+  copied: import('pdf-lib').PDFPage,
+  annotations: ExportAnnotation[],
+  removedImportedOriginals: NonNullable<ExportAnnotation['importedOriginal']>[],
+): void {
+  // Two sources of fingerprints to strip-on-match: annotations being
+  // re-appended (live, possibly edited) and ones the user REMOVED (tombstones
+  // — matched and stripped same as any other, just never re-appended after).
+  // Without the latter, deleting an imported annotation would be a no-op:
+  // its fingerprint vanishes with it, nothing left to match the real PDF
+  // object against, and the "original" reappears on reindex after commit.
+  const fingerprints = [
+    ...annotations.map((a) => a.importedOriginal),
+    ...removedImportedOriginals,
+  ].filter((f): f is NonNullable<ExportAnnotation['importedOriginal']> => !!f);
+  if (fingerprints.length === 0) return;
+  const annots = copied.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
+  if (!annots) return;
+  const consumed = new Set<number>(); // indices into `fingerprints` already matched
+  // Iterate back-to-front: PDFArray.remove(index) shifts later indices, which
+  // would desync a forward loop's remaining indices mid-iteration.
+  for (let i = annots.size() - 1; i >= 0; i--) {
+    let dict: PDFDict;
+    try {
+      dict = annots.lookup(i, PDFDict);
+    } catch {
+      continue; // not a dict (shouldn't happen for a valid /Annots entry) — leave it
+    }
+    const subtype = dict.lookupMaybe(PDFName.of('Subtype'), PDFName)?.decodeText();
+    if (subtype !== 'Square' && subtype !== 'FreeText' && subtype !== 'Ink' && subtype !== 'Stamp') continue;
+    const rectArr = dict.lookupMaybe(PDFName.of('Rect'), PDFArray);
+    if (!rectArr || rectArr.size() !== 4) continue;
+    const rect = [0, 1, 2, 3].map((j) => rectArr.lookup(j) as import('pdf-lib').PDFNumber).map((n) => n.asNumber());
+    const contentsObj = dict.lookupMaybe(PDFName.of('Contents'), PDFString, PDFHexString);
+    const contents = contentsObj?.decodeText();
+    const matchIndex = fingerprints.findIndex(
+      (fp, idx) =>
+        !consumed.has(idx) &&
+        fp.subtype === subtype &&
+        (fp.contents ?? '') === (contents ?? '') &&
+        fp.rect.every((v, k) => Math.abs(v - rect[k]) <= 0.5),
+    );
+    if (matchIndex === -1) continue; // no positive match — never guess-remove
+    consumed.add(matchIndex);
+    annots.remove(i);
+  }
+}
+
 function addAnnotations(
   output: PDFDocument,
   copied: import('pdf-lib').PDFPage,
   annotations: ExportAnnotation[],
+  removedImportedOriginals: NonNullable<ExportAnnotation['importedOriginal']>[],
 ): void {
+  stripImportedOriginals(copied, annotations, removedImportedOriginals);
   const context = output.context;
-  const { x, y, width, height } = copied.getMediaBox();
+  // CropBox (defaults to MediaBox when absent, so byte-identical for the
+  // common case) — must match what annotation-import.ts reads via pdf.js's
+  // page.view (the crop-intersected box), or an imported annotation's
+  // position drifts by the crop offset the moment it's edited and re-baked.
+  const { x, y, width, height } = copied.getCropBox();
   const rotation = ((copied.getRotation().angle % 360) + 360) % 360;
   for (const a of annotations) {
     const [rx0, ry0, rx1, ry1] = displayRectToPdf(a, { x, y, width, height }, rotation);
@@ -292,7 +400,12 @@ function addAnnotations(
 
 function applyPageExtras(copied: import('pdf-lib').PDFPage, page: ExportPage, output: PDFDocument): void {
   applyRotation(copied, page);
-  if (page.annotations?.length) addAnnotations(output, copied, page.annotations);
+  // Must still run when `annotations` is empty but removedImportedOriginals
+  // isn't — e.g. the user deleted the only imported annotation on this page,
+  // leaving nothing to re-append but still needing the original stripped.
+  if (page.annotations?.length || page.removedImportedOriginals?.length) {
+    addAnnotations(output, copied, page.annotations ?? [], page.removedImportedOriginals ?? []);
+  }
 }
 
 export async function buildPdf(pages: ExportPage[]): Promise<Uint8Array> {

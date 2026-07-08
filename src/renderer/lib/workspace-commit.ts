@@ -66,17 +66,23 @@ export function planCommit(
           ...(p.rotation ? { rotation: p.rotation } : {}),
           ...(p.annotations?.length
             ? {
-                annotations: p.annotations.map(({ kind, x, y, w, h, color, note, points }) => ({
-                  kind,
-                  x,
-                  y,
-                  w,
-                  h,
-                  color,
-                  note,
-                  points,
-                })),
+                annotations: p.annotations.map(
+                  ({ kind, x, y, w, h, color, note, points, importedOriginal }) => ({
+                    kind,
+                    x,
+                    y,
+                    w,
+                    h,
+                    color,
+                    note,
+                    points,
+                    importedOriginal,
+                  }),
+                ),
               }
+            : {}),
+          ...(p.removedImportedOriginals?.length
+            ? { removedImportedOriginals: p.removedImportedOriginals }
             : {}),
         }),
       ),

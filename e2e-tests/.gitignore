@@ -1,0 +1,4 @@
+# Downloaded by `msedgedriver-tool` (see wdio.conf.ts) to pin the WebDriver
+# version to whatever WebView2 runtime is actually installed on this machine
+# — environment-specific and large (~40MB), never checked in.
+msedgedriver.exe

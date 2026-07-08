@@ -11,9 +11,20 @@ shipped binaries.
 ```powershell
 cargo install tauri-driver --locked
 cargo install --git https://github.com/chippers/msedgedriver-tool
-msedgedriver-tool   # downloads msedgedriver matching local Edge
-npm ci              # in e2e-tests/
+cd e2e-tests
+npm ci
 ```
+
+WebView2 is Chromium-based and updates roughly monthly via Windows Update;
+msedgedriver only talks to the exact major version it was built for. So
+`npm test`'s `onPrepare` hook re-runs `msedgedriver-tool` itself at the start
+of every run, downloading a copy of `msedgedriver.exe` into `e2e-tests/`
+(gitignored) that matches whatever WebView2 is installed *right now* — there
+is no version pinned anywhere, minimum or otherwise. `wdio.conf.ts` then
+points `tauri-driver --native-driver` straight at that freshly-resolved
+copy, rather than trusting PATH to already have a correctly-versioned one.
+`msedgedriver-tool` itself just needs to be on PATH (from the `cargo install`
+above); nothing else to maintain by hand.
 
 ## Build the test binary
 

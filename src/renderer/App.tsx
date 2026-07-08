@@ -589,6 +589,25 @@ function AppContent(): React.ReactElement {
     return doc && page ? { docId: doc.id, pageId: page.id } : null;
   };
 
+  const harnessFirstAnnotationRef = useRef<
+    () => { docId: string; pageId: string; annotationId: string; kind: string; color: string; note?: string } | null
+  >(() => null);
+  harnessFirstAnnotationRef.current = () => {
+    const doc = state.workspace.documents.find((d) => d.path === state.activeFileId);
+    const page = doc?.pages[0];
+    const annotation = page?.annotations?.[0];
+    return doc && page && annotation
+      ? {
+          docId: doc.id,
+          pageId: page.id,
+          annotationId: annotation.id,
+          kind: annotation.kind,
+          color: annotation.color,
+          note: annotation.note,
+        }
+      : null;
+  };
+
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     installTestHarness({
@@ -601,10 +620,13 @@ function AppContent(): React.ReactElement {
         return () => harnessListenersRef.current.delete(listener);
       },
       getFirstPage: () => harnessFirstPageRef.current(),
+      getFirstPageAnnotation: () => harnessFirstAnnotationRef.current(),
       dispatchAddAnnotation: (docId, pageId, annotation) =>
         dispatch({ type: 'ADD_ANNOTATION', docId, pageId, annotation }),
       dispatchRecolorAnnotation: (docId, pageId, annotationId, color) =>
         dispatch({ type: 'RECOLOR_ANNOTATION', docId, pageId, annotationId, color }),
+      dispatchRemoveAnnotation: (docId, pageId, annotationId) =>
+        dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId }),
       commitPendingEdits: () => commitRef.current(),
     });
   }, [openByPaths, dispatch]);

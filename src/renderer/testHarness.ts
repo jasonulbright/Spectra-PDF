@@ -72,6 +72,18 @@ export interface TestHarness {
   /** Recolor an existing annotation (docId/pageId/annotationId as returned by
    * addAnnotation) via the same reducer path the per-annotation swatches use. */
   recolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
+  /** Remove an existing annotation via the same reducer path the hover ×
+   * button / comment sidebar's Remove use. */
+  removeAnnotation: (docId: string, pageId: string, annotationId: string) => void;
+  /**
+   * The first annotation (of any origin — freshly added or imported from a
+   * pre-existing PDF object) on the active file's first workspace page, once
+   * the async indexer has run. Polls like addAnnotation, for e2e coverage of
+   * import-on-open without a pointer-driven way to discover annotation ids.
+   */
+  getFirstAnnotation: (
+    timeoutMs?: number,
+  ) => Promise<{ docId: string; pageId: string; annotationId: string; kind: string; color: string; note?: string } | null>;
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
   commitPendingEdits: () => Promise<void>;
@@ -86,8 +98,18 @@ export interface TestHarnessDeps {
   /** First page of the active file's first workspace document, once the
    * async indexer has produced one; null until then. */
   getFirstPage: () => { docId: string; pageId: string } | null;
+  /** Same page lookup as getFirstPage, plus its first annotation if any. */
+  getFirstPageAnnotation: () => {
+    docId: string;
+    pageId: string;
+    annotationId: string;
+    kind: string;
+    color: string;
+    note?: string;
+  } | null;
   dispatchAddAnnotation: (docId: string, pageId: string, annotation: TestAnnotationInput & { id: string }) => void;
   dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
+  dispatchRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
   commitPendingEdits: () => Promise<void>;
 }
 
@@ -245,6 +267,23 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         captureError('recolorAnnotation', err);
         throw err;
       }
+    },
+    removeAnnotation: (docId, pageId, annotationId) => {
+      try {
+        deps.dispatchRemoveAnnotation(docId, pageId, annotationId);
+      } catch (err) {
+        captureError('removeAnnotation', err);
+        throw err;
+      }
+    },
+    getFirstAnnotation: async (timeoutMs = 10_000) => {
+      const deadline = Date.now() + timeoutMs;
+      let found = deps.getFirstPageAnnotation();
+      while (!found && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        found = deps.getFirstPageAnnotation();
+      }
+      return found;
     },
     commitPendingEdits: async () => {
       try {

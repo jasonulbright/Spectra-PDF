@@ -4,10 +4,19 @@
  * Runs against the debug build of the Tauri binary, driven by tauri-driver
  * which proxies to msedgedriver to control the embedded WebView2.
  *
+ * WebView2 is Chromium-based and Windows Update bumps it roughly monthly —
+ * msedgedriver only talks to the exact major version it was built for, so
+ * ANY pinned copy (a stale `cargo install`-managed global, or a checked-in
+ * binary) goes stale on its own schedule, not ours. There is no version to
+ * pin here, minimum or otherwise: `onPrepare` below always re-resolves the
+ * driver against whatever WebView2 is installed RIGHT NOW, by re-running
+ * `msedgedriver-tool` at the start of every run. `--native-driver` then
+ * points tauri-driver at that freshly-resolved copy instead of trusting PATH
+ * to already have a correctly-versioned one.
+ *
  * Prereqs (one-time per machine):
  *   cargo install tauri-driver --locked
  *   cargo install --git https://github.com/chippers/msedgedriver-tool
- *   msedgedriver-tool   # downloads msedgedriver matching local Edge
  *
  * Build the app harness with:
  *   cross-env VITE_E2E=1 npm run --prefix .. build:renderer
@@ -21,6 +30,7 @@ import { existsSync } from 'node:fs';
 
 const REPO_ROOT = resolve(__dirname, '..');
 const APP_BINARY = resolve(REPO_ROOT, 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const NATIVE_DRIVER = resolve(__dirname, 'msedgedriver.exe');
 const TAURI_DRIVER_PORT = 4444;
 
 let tauriDriver: ChildProcessWithoutNullStreams | null = null;
@@ -68,6 +78,15 @@ export const config: WebdriverIO.Config = {
         `App binary not found at ${APP_BINARY}. Run \`npm run build:app\` first.`,
       );
     }
+    // Always re-resolve against whatever WebView2 is installed right now —
+    // never trust a previously-downloaded copy to still match (see header).
+    const result = spawnSync('msedgedriver-tool', [], { cwd: __dirname, shell: true, stdio: 'pipe' });
+    if (result.error || result.status !== 0 || !existsSync(NATIVE_DRIVER)) {
+      throw new Error(
+        `msedgedriver-tool failed to resolve a matching msedgedriver.exe into ${__dirname}: ` +
+          `${result.stdout?.toString() ?? ''}${result.stderr?.toString() ?? ''}`,
+      );
+    }
   },
   beforeSession: () =>
     new Promise<void>((resolveSession, rejectSession) => {
@@ -77,11 +96,15 @@ export const config: WebdriverIO.Config = {
       // Set SPECTRAPDF_E2E so the Tauri binary skips single-instance + tray —
       // each WDIO session needs a clean launch and a clean exit.
       const env = { ...process.env, SPECTRAPDF_E2E: '1' };
-      tauriDriver = spawn('tauri-driver', ['--port', String(TAURI_DRIVER_PORT)], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true,
-        env,
-      });
+      tauriDriver = spawn(
+        'tauri-driver',
+        ['--port', String(TAURI_DRIVER_PORT), '--native-driver', NATIVE_DRIVER],
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: true,
+          env,
+        },
+      );
       tauriDriver.stderr.on('data', (chunk) => {
         process.stderr.write(`[tauri-driver] ${chunk}`);
       });

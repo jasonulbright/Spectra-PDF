@@ -14,10 +14,37 @@ export interface OpenFile {
   redoStack: string[];    // snapshot paths for redo
 }
 
-// Pending (uncommitted) annotation, display-normalized: x/y/w/h are 0..1
-// relative to the rendered cell (inherent /Rotate + pending rotation baked
-// in), so capture space equals render space. The commit builder maps these
-// into PDF user space.
+// A fingerprint of a pre-existing PDF annotation object as read at import
+// time — raw PDF-space rect, not display-normalized, so rotation never
+// invalidates it. Used at commit (pdfx-build.ts's stripImportedOriginals) to
+// positively match and remove that one original from the copied page's real
+// /Annots before re-authoring it (or, for PageRef.removedImportedOriginals,
+// WITHOUT re-authoring it — see there). See
+// docs/architecture/05-phase2c-annotations.md, "importing existing
+// annotations safely".
+export interface ImportedAnnotationFingerprint {
+  subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp';
+  rect: [number, number, number, number];
+  contents?: string;
+  // Color at import time — NOT used for the commit-time fingerprint match
+  // (that only checks subtype/rect/contents), only to detect whether the
+  // annotation has been recolored since import (see PageCell: pdf.js's
+  // base raster already draws every real annotation in the currently
+  // loaded file — including ones we've imported but not yet re-edited —
+  // so the overlay must not also paint a visible body for those, or it
+  // doubles up. Once color or note diverges from this snapshot, the file
+  // on disk is stale relative to the edit and the overlay must take over.
+  color: string;
+  // Whether pdf.js reported the original as having a real /AP appearance
+  // stream at import time. pdf.js's base raster (AnnotationMode.ENABLE)
+  // synthesizes fallback appearances for AP-less Square/FreeText/Ink, but
+  // NOT for a custom-name /Stamp with no /AP — so PageCell must only
+  // suppress its own visible body (to avoid double-rendering) when this is
+  // true; otherwise an AP-less imported annotation would render as nothing
+  // until the user happens to edit it.
+  hasAppearance: boolean;
+}
+
 export interface PageAnnotation {
   id: string;
   kind: 'highlight' | 'freetext' | 'ink' | 'stamp';
@@ -36,6 +63,10 @@ export interface PageAnnotation {
   // same space as x/y/w/h (which store the path's bounding box). Re-projected
   // point-by-point alongside the bbox on rotation.
   points?: number[];
+  // Present only for annotations imported from a pre-existing PDF object.
+  // Never touched after import; edits to x/y/w/h/color/note/points do not
+  // update it.
+  importedOriginal?: ImportedAnnotationFingerprint;
 }
 
 export interface PageRef {
@@ -46,6 +77,16 @@ export interface PageRef {
   width: number;           // page size at scale 1, from the pdf.js viewport
   height: number;
   annotations?: PageAnnotation[]; // pending only — baked into the file at commit
+  // Fingerprints of imported annotations the user REMOVED (REMOVE_ANNOTATION
+  // on a PageAnnotation with importedOriginal). Once removed, the fingerprint
+  // is gone from `annotations` too — without this list, stripImportedOriginals
+  // would have nothing left to match the original against and would leave it
+  // in place, silently undoing the removal on commit. These are consumed the
+  // same way as a live annotation's importedOriginal (match → strip → done),
+  // just never re-appended. Cleared implicitly on next reindex — a freshly
+  // indexed PageRef has none, and the removed original is genuinely gone
+  // from the file by then.
+  removedImportedOriginals?: ImportedAnnotationFingerprint[];
 }
 
 // A document as composed in the workspace. Usually one per open file; a .pdfx
