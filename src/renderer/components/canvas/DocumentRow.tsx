@@ -23,6 +23,7 @@ interface DocumentRowProps {
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   tool: CanvasTool;
+  annotationColor?: string;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -40,6 +41,7 @@ function DocumentRowImpl({
   onSelectPage,
   onOpenPage,
   tool,
+  annotationColor,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
@@ -72,6 +74,7 @@ function DocumentRowImpl({
         onSelectPage={onSelectPage}
         onOpenPage={onOpenPage}
         tool={tool}
+        annotationColor={annotationColor}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
         onAddAnnotation={onAddAnnotation}

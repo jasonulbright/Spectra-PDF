@@ -728,6 +728,33 @@ describe('annotation rects follow page rotation', () => {
     expect(restored.w).toBeCloseTo(base.w, 10);
     expect(restored.h).toBeCloseTo(base.h, 10);
   });
+
+  it('rotateAnnotationRect turns ink points along with the bbox', () => {
+    const ink = {
+      id: 'i',
+      kind: 'ink' as const,
+      x: 0.1,
+      y: 0.2,
+      w: 0.3,
+      h: 0.1,
+      color: '#2f6fed',
+      points: [0.1, 0.2, 0.4, 0.3],
+    };
+    const rotated = rotateAnnotationRect(ink, 90);
+    expect(rotated).toMatchObject({ x: 0.7, y: 0.1, w: 0.1, h: 0.3 });
+    // Each point re-projects individually, consistent with the new bbox.
+    expect(rotated.points![0]).toBeCloseTo(0.8, 10);
+    expect(rotated.points![1]).toBeCloseTo(0.1, 10);
+    expect(rotated.points![2]).toBeCloseTo(0.7, 10);
+    expect(rotated.points![3]).toBeCloseTo(0.4, 10);
+    // Four quarter-turns compose back to the original.
+    let r = ink;
+    for (let i = 0; i < 4; i++) r = rotateAnnotationRect(r, 90);
+    expect(r.points![0]).toBeCloseTo(ink.points[0], 10);
+    expect(r.points![1]).toBeCloseTo(ink.points[1], 10);
+    expect(r.points![2]).toBeCloseTo(ink.points[2], 10);
+    expect(r.points![3]).toBeCloseTo(ink.points[3], 10);
+  });
 });
 
 describe('snapshot undo/redo history (multi-level)', () => {

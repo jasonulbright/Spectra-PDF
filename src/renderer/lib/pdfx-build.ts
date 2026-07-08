@@ -15,32 +15,39 @@ function hexToRgb(hex: string): [number, number, number] {
   return [((v >> 16) & 0xff) / 255, ((v >> 8) & 0xff) / 255, (v & 0xff) / 255];
 }
 
-// Map a display-normalized rect (top-left origin, in the orientation a viewer
-// shows after applying the page's FINAL rotation) back into PDF user space.
-// Corner interpolation per quarter-turn; validated against pdf.js viewport
-// round-trips in tests/workspace-commit.test.ts.
+// Map a single display-normalized point (top-left origin, in the orientation
+// a viewer shows after applying the page's FINAL rotation) into PDF user
+// space. Shared by displayRectToPdf (bbox corners) and ink stroke points —
+// validated against pdf.js viewport round-trips in tests/workspace-commit.test.ts.
+export function displayPointToPdf(
+  u: number,
+  v: number,
+  mediaBox: { x: number; y: number; width: number; height: number },
+  rotation: number,
+): [number, number] {
+  const { x: mx, y: my, width: W, height: H } = mediaBox;
+  switch (((rotation % 360) + 360) % 360) {
+    case 90: // page shown rotated 90° clockwise
+      return [mx + v * W, my + u * H];
+    case 180:
+      return [mx + (1 - u) * W, my + v * H];
+    case 270:
+      return [mx + (1 - v) * W, my + (1 - u) * H];
+    default:
+      return [mx + u * W, my + (1 - v) * H];
+  }
+}
+
+// Map a display-normalized rect back into PDF user space via its two corners.
 export function displayRectToPdf(
   a: { x: number; y: number; w: number; h: number },
   mediaBox: { x: number; y: number; width: number; height: number },
   rotation: number,
 ): [number, number, number, number] {
-  const { x: mx, y: my, width: W, height: H } = mediaBox;
-  const corners: [number, number][] = [
-    [a.x, a.y],
-    [a.x + a.w, a.y + a.h],
+  const mapped = [
+    displayPointToPdf(a.x, a.y, mediaBox, rotation),
+    displayPointToPdf(a.x + a.w, a.y + a.h, mediaBox, rotation),
   ];
-  const mapped = corners.map(([u, v]): [number, number] => {
-    switch (((rotation % 360) + 360) % 360) {
-      case 90: // page shown rotated 90° clockwise
-        return [mx + v * W, my + u * H];
-      case 180:
-        return [mx + (1 - u) * W, my + v * H];
-      case 270:
-        return [mx + (1 - v) * W, my + (1 - u) * H];
-      default:
-        return [mx + u * W, my + (1 - v) * H];
-    }
-  });
   const xs = [mapped[0][0], mapped[1][0]];
   const ys = [mapped[0][1], mapped[1][1]];
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
@@ -108,10 +115,20 @@ function addAnnotations(
   const { x, y, width, height } = copied.getMediaBox();
   const rotation = ((copied.getRotation().angle % 360) + 360) % 360;
   for (const a of annotations) {
-    const [x0, y0, x1, y1] = displayRectToPdf(a, { x, y, width, height }, rotation);
+    const [rx0, ry0, rx1, ry1] = displayRectToPdf(a, { x, y, width, height }, rotation);
+    // Ink strokes are legitimately zero-width/height (a straight horizontal
+    // or vertical line) — degenerate only for the box-shaped kinds.
+    if (a.kind !== 'ink' && (rx1 - rx0 <= 0 || ry1 - ry0 <= 0)) continue;
+    // Pad ink's rect/BBox past the stroke's half-width so a flat line's edge
+    // isn't sitting exactly on the BBox boundary (a Form XObject clips to
+    // BBox, and that's a knife-edge float-rounding risk at pad == half-width).
+    const pad = a.kind === 'ink' ? 2 : 0;
+    const x0 = rx0 - pad;
+    const y0 = ry0 - pad;
+    const x1 = rx1 + pad;
+    const y1 = ry1 + pad;
     const w = x1 - x0;
     const h = y1 - y0;
-    if (w <= 0 || h <= 0) continue;
     const [r, g, b] = hexToRgb(a.color);
     // Display-orientation dims — appearance content is authored in display
     // space and counter-rotated by the AP matrix so it reads upright.
@@ -159,6 +176,39 @@ function addAnnotations(
       });
       annot.set(PDFName.of('DA'), PDFHexString.fromText(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
+    } else if (a.kind === 'ink') {
+      const strokeW = 2;
+      const flatPdf: number[] = [];
+      for (let i = 0; i < (a.points?.length ?? 0); i += 2) {
+        const [px, py] = displayPointToPdf(a.points![i], a.points![i + 1], { x, y, width, height }, rotation);
+        flatPdf.push(px, py);
+      }
+      let content = `${r} ${g} ${b} RG ${strokeW} w 1 J 1 j `;
+      for (let i = 0; i < flatPdf.length; i += 2) {
+        const px = flatPdf[i] - x0;
+        const py = flatPdf[i + 1] - y0;
+        content += i === 0 ? `${px} ${py} m ` : `${px} ${py} l `;
+      }
+      content += 'S';
+      const ap = context.register(
+        context.stream(content, {
+          Type: 'XObject',
+          Subtype: 'Form',
+          FormType: 1,
+          BBox: [0, 0, w, h],
+        }),
+      );
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: 'Ink',
+        Rect: [x0, y0, x1, y1],
+        C: [r, g, b],
+        F: 4, // print
+        InkList: [flatPdf],
+        BS: { W: strokeW },
+        AP: { N: ap },
+      });
+      if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     } else {
       // Appearance stream — pdf.js and friends render /AP, not bare dicts.
       const gsRef = context.register(

@@ -4,7 +4,7 @@ import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthOf } from '../../canvas/layout';
 import { PageView } from './PageView';
 
-export type CanvasTool = 'select' | 'highlight' | 'freetext';
+export type CanvasTool = 'select' | 'highlight' | 'freetext' | 'ink';
 
 export interface AnnotationRect {
   x: number;
@@ -15,7 +15,14 @@ export interface AnnotationRect {
 
 const HIGHLIGHT_COLOR = '#ffd54a';
 const FREETEXT_COLOR = '#16161a';
+const INK_COLOR = '#2f6fed';
 const FREETEXT_FONT_PT = 12;
+
+function defaultColorFor(kind: PageAnnotation['kind']): string {
+  if (kind === 'freetext') return FREETEXT_COLOR;
+  if (kind === 'ink') return INK_COLOR;
+  return HIGHLIGHT_COLOR;
+}
 
 interface PageCellProps {
   docId: string;
@@ -27,6 +34,9 @@ interface PageCellProps {
   collapsed: boolean;
   visibleNumber: number;
   tool: CanvasTool;
+  // Overrides the kind-default color for newly created annotations (color
+  // picker in the floating toolbar); undefined keeps the per-kind default.
+  annotationColor?: string;
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
@@ -46,6 +56,7 @@ function PageCellImpl({
   collapsed,
   visibleNumber,
   tool,
+  annotationColor,
   onSelectPage,
   onOpenPage,
   onPageContextMenu,
@@ -62,15 +73,67 @@ function PageCellImpl({
   // pointer capture, which proved unreliable in the WebView.
   const [band, setBand] = useState<AnnotationRect | null>(null);
   const bandActive = useRef(false);
-  // Cancels the in-flight band (removes window listeners, commits nothing).
+  // Cancels the in-flight band/stroke (removes window listeners, commits nothing).
   const cancelBand = useRef<(() => void) | null>(null);
   // Freetext annotation currently being edited inline.
   const [editing, setEditing] = useState<string | null>(null);
+  // In-progress ink stroke, flat [x0,y0,x1,y1,...] display-normalized points.
+  const [inkPoints, setInkPoints] = useState<number[] | null>(null);
 
   // Display px of the page's own point size — scales freetext to the cell.
   const freetextFontPx =
     (FREETEXT_FONT_PT / (page.rotation === 90 || page.rotation === 270 ? page.width : page.height)) *
       pageHeight || FREETEXT_FONT_PT;
+
+  const handleInkDown = (e: React.PointerEvent<HTMLElement>): void => {
+    bandActive.current = true;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const norm = (cx: number, cy: number): { x: number; y: number } => ({
+      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
+    });
+    const start = norm(e.clientX, e.clientY);
+    let points = [start.x, start.y];
+    setInkPoints(points);
+
+    const onMove = (ev: PointerEvent): void => {
+      const p = norm(ev.clientX, ev.clientY);
+      points = [...points, p.x, p.y];
+      setInkPoints(points);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      bandActive.current = false;
+      cancelBand.current = null;
+      setInkPoints(null);
+      const xs = points.filter((_, i) => i % 2 === 0);
+      const ys = points.filter((_, i) => i % 2 === 1);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      const w = Math.max(...xs) - minX;
+      const h = Math.max(...ys) - minY;
+      if (commit && (w > 0.005 || h > 0.005)) {
+        onAddAnnotation(docId, page.id, {
+          id: crypto.randomUUID(),
+          kind: 'ink',
+          x: minX,
+          y: minY,
+          w,
+          h,
+          color: annotationColor ?? INK_COLOR,
+          points,
+        });
+      }
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    cancelBand.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     if (!annotateMode) {
@@ -80,6 +143,10 @@ function PageCellImpl({
     if (e.button !== 0 || bandActive.current || editing) return;
     e.preventDefault();
     e.stopPropagation();
+    if (tool === 'ink') {
+      handleInkDown(e);
+      return;
+    }
     bandActive.current = true;
     const rect = e.currentTarget.getBoundingClientRect();
     const norm = (cx: number, cy: number): { x: number; y: number } => ({
@@ -113,7 +180,7 @@ function PageCellImpl({
           id: crypto.randomUUID(),
           kind,
           ...latest,
-          color: kind === 'freetext' ? FREETEXT_COLOR : HIGHLIGHT_COLOR,
+          color: annotationColor ?? defaultColorFor(kind),
         };
         onAddAnnotation(docId, page.id, annotation);
         if (kind === 'freetext') setEditing(annotation.id);
@@ -187,8 +254,10 @@ function PageCellImpl({
       {(page.annotations ?? []).map((a) => (
         <div
           key={a.id}
-          className={'page-annot' + (a.kind === 'freetext' ? ' page-annot-text' : '')}
-          title={a.kind === 'highlight' ? a.note : undefined}
+          className={
+            'page-annot' + (a.kind === 'freetext' ? ' page-annot-text' : '') + (a.kind === 'ink' ? ' page-annot-ink' : '')
+          }
+          title={a.kind === 'highlight' || a.kind === 'ink' ? a.note : undefined}
           style={{
             left: `${a.x * 100}%`,
             top: `${a.y * 100}%`,
@@ -196,7 +265,9 @@ function PageCellImpl({
             height: `${a.h * 100}%`,
             ...(a.kind === 'highlight'
               ? { backgroundColor: `${a.color}66`, borderColor: a.color }
-              : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
+              : a.kind === 'ink'
+                ? {}
+                : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
             ...(a.kind === 'freetext' && tool === 'select' ? { pointerEvents: 'auto' } : {}),
           }}
           onPointerDown={a.kind === 'freetext' ? (e) => e.stopPropagation() : undefined}
@@ -209,6 +280,25 @@ function PageCellImpl({
               : undefined
           }
         >
+          {a.kind === 'ink' && (
+            <svg className="page-annot-ink-svg" viewBox="0 0 1 1" preserveAspectRatio="none">
+              <polyline
+                points={(a.points ?? [])
+                  .map((v, i) =>
+                    i % 2 === 0 ? (a.w > 0 ? (v - a.x) / a.w : 0.5) : (a.h > 0 ? (v - a.y) / a.h : 0.5),
+                  )
+                  .reduce<string[]>((acc, v, i) => {
+                    if (i % 2 === 0) acc.push(`${v}`);
+                    else acc[acc.length - 1] += `,${v}`;
+                    return acc;
+                  }, [])
+                  .join(' ')}
+                fill="none"
+                stroke={a.color}
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+          )}
           {a.kind === 'freetext' && editing !== a.id && (
             <span className="page-annot-text-body">{a.note}</span>
           )}
@@ -237,7 +327,7 @@ function PageCellImpl({
             !annotateMode && (
               <button
                 className="page-annot-x"
-                title={a.kind === 'freetext' ? 'Remove text' : 'Remove highlight'}
+                title={a.kind === 'freetext' ? 'Remove text' : a.kind === 'ink' ? 'Remove drawing' : 'Remove highlight'}
                 onClick={(e) => {
                   e.stopPropagation();
                   onRemoveAnnotation(docId, page.id, a.id);
@@ -259,6 +349,20 @@ function PageCellImpl({
             height: `${band.h * 100}%`,
           }}
         />
+      )}
+      {inkPoints && (
+        <svg className="page-annot-ink-svg page-annot-ink-live" viewBox="0 0 1 1" preserveAspectRatio="none">
+          <polyline
+            points={inkPoints.reduce<string[]>((acc, v, i) => {
+              if (i % 2 === 0) acc.push(`${v}`);
+              else acc[acc.length - 1] += `,${v}`;
+              return acc;
+            }, []).join(' ')}
+            fill="none"
+            stroke={annotationColor ?? INK_COLOR}
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
       )}
       <span className="page-number">{visibleNumber}</span>
     </div>

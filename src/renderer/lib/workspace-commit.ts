@@ -65,7 +65,18 @@ export function planCommit(
           pageIndex: p.sourcePageIndex,
           ...(p.rotation ? { rotation: p.rotation } : {}),
           ...(p.annotations?.length
-            ? { annotations: p.annotations.map(({ kind, x, y, w, h, color, note }) => ({ kind, x, y, w, h, color, note })) }
+            ? {
+                annotations: p.annotations.map(({ kind, x, y, w, h, color, note, points }) => ({
+                  kind,
+                  x,
+                  y,
+                  w,
+                  h,
+                  color,
+                  note,
+                  points,
+                })),
+              }
             : {}),
         }),
       ),

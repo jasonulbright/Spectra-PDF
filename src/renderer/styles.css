@@ -551,6 +551,28 @@
   text-align: left;
 }
 
+/* Ink annotations: the rect is a plain bounding box (no border/fill), the
+   stroke itself is an svg polyline stretched to fill it. */
+.page-annot-ink {
+  border: none;
+}
+
+.page-annot-ink-svg {
+  position: absolute;
+  inset: -2px; /* small bleed so strokes at the exact bbox edge aren't clipped */
+  width: calc(100% + 4px);
+  height: calc(100% + 4px);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.page-annot-ink-live {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 .page-annot-editor {
   position: absolute;
   inset: 0;

@@ -20,16 +20,20 @@ export interface OpenFile {
 // into PDF user space.
 export interface PageAnnotation {
   id: string;
-  kind: 'highlight' | 'freetext';
+  kind: 'highlight' | 'freetext' | 'ink';
   x: number;
   y: number;
   w: number;
   h: number;
-  // highlight: fill color. freetext: text color.
+  // highlight: fill color. freetext: text color. ink: stroke color.
   color: string; // #rrggbb
   // highlight: optional popup note. freetext: the drawn text (both land in
   // /Contents at commit).
   note?: string;
+  // ink only: flat [x0,y0,x1,y1,...] stroke path, display-normalized in the
+  // same space as x/y/w/h (which store the path's bounding box). Re-projected
+  // point-by-point alongside the bbox on rotation.
+  points?: number[];
 }
 
 export interface PageRef {

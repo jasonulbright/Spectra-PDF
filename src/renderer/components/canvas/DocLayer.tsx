@@ -23,6 +23,7 @@ interface DocLayerProps {
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   tool: CanvasTool;
+  annotationColor?: string;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -66,6 +67,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onSelectPage={props.onSelectPage}
               onOpenPage={props.onOpenPage}
               tool={props.tool}
+              annotationColor={props.annotationColor}
               onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
               onAddAnnotation={props.onAddAnnotation}

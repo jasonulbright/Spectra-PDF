@@ -16,6 +16,8 @@ import type { DragSource } from '../../canvas/usePageDrag';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { CanvasTool } from './PageCell';
 
+const ANNOTATION_PALETTE = ['#ffd54a', '#16161a', '#2f6fed', '#e0393e', '#2fbf71', '#a855f7'];
+
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
   onCloseFile: (path: string) => void;
@@ -67,6 +69,10 @@ export function WorkspaceCanvasView({
     null,
   );
   const [tool, setTool] = useState<CanvasTool>('select');
+  // Color picker for the annotation tools: null keeps each tool's own default
+  // (yellow highlight, dark freetext, blue ink); a pick applies to whichever
+  // tool creates the next annotation, across tool switches.
+  const [toolColor, setToolColor] = useState<string | null>(null);
 
   // Escape returns to Select from the highlight tool.
   React.useEffect(() => {
@@ -297,6 +303,7 @@ export function WorkspaceCanvasView({
           onSelectPage={onSelectPage}
           onOpenPage={onOpenPage}
           tool={tool}
+          annotationColor={toolColor ?? undefined}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
@@ -351,7 +358,36 @@ export function WorkspaceCanvasView({
           >
             Text
           </button>
+          <button
+            data-testid="tool-ink"
+            title="Draw freehand on a page (Esc to exit)"
+            onClick={() => setTool(tool === 'ink' ? 'select' : 'ink')}
+            className={`px-3 py-1.5 text-xs font-medium ${tool === 'ink' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
+          >
+            Draw
+          </button>
         </div>
+        {tool !== 'select' && (
+          <div
+            className="flex items-center gap-1 bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg px-2 py-1"
+            title="Annotation color"
+          >
+            {ANNOTATION_PALETTE.map((c) => (
+              <button
+                key={c}
+                data-testid={`annot-color-${c.slice(1)}`}
+                onClick={() => setToolColor(toolColor === c ? null : c)}
+                title={c}
+                className="w-4 h-4 rounded-full"
+                style={{
+                  backgroundColor: c,
+                  outline: toolColor === c ? '2px solid white' : '1px solid rgba(255,255,255,0.3)',
+                  outlineOffset: 1,
+                }}
+              />
+            ))}
+          </div>
+        )}
         {dirty && (
           <button
             data-testid="apply-page-edits-btn"

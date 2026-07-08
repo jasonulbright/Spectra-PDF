@@ -6,12 +6,30 @@ import { carriesManifest } from '../lib/doc-names';
 // in the page's CURRENT display space (that's what the overlay renders and
 // what the commit builder maps through the final rotation), so they must
 // turn with the page to keep covering the same content.
+// Re-project a single display-normalized point through the same quarter-turn
+// (derived from, and consistent with, the bbox corner mapping below: applying
+// this to a rect's two corners and re-deriving min/max reproduces it exactly).
+function rotatePoint(u: number, v: number, d: number): [number, number] {
+  if (d === 90) return [1 - v, u];
+  if (d === 180) return [1 - u, 1 - v];
+  if (d === 270) return [v, 1 - u];
+  return [u, v];
+}
+
 export function rotateAnnotationRect(a: PageAnnotation, delta: number): PageAnnotation {
   const d = ((delta % 360) + 360) % 360;
-  if (d === 90) return { ...a, x: 1 - (a.y + a.h), y: a.x, w: a.h, h: a.w };
-  if (d === 180) return { ...a, x: 1 - (a.x + a.w), y: 1 - (a.y + a.h) };
-  if (d === 270) return { ...a, x: a.y, y: 1 - (a.x + a.w), w: a.h, h: a.w };
-  return a;
+  if (d === 0) return a;
+  let points: number[] | undefined;
+  if (a.points) {
+    points = [];
+    for (let i = 0; i < a.points.length; i += 2) {
+      const [px, py] = rotatePoint(a.points[i], a.points[i + 1], d);
+      points.push(px, py);
+    }
+  }
+  if (d === 90) return { ...a, x: 1 - (a.y + a.h), y: a.x, w: a.h, h: a.w, ...(points ? { points } : {}) };
+  if (d === 180) return { ...a, x: 1 - (a.x + a.w), y: 1 - (a.y + a.h), ...(points ? { points } : {}) };
+  return { ...a, x: a.y, y: 1 - (a.x + a.w), w: a.h, h: a.w, ...(points ? { points } : {}) }; // 270
 }
 
 export const initialState: AppState = {

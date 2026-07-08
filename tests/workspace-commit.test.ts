@@ -278,6 +278,56 @@ describe('annotations round-trip', () => {
     const after = await bakedRect(90, rotateAnnotationRect(ann(authored), 90));
     for (let i = 0; i < 4; i++) expect(after[i]).toBeCloseTo(before[i], 3);
   });
+
+  // A simple two-point stroke; bbox is the points' own extent (zero height —
+  // a straight horizontal stroke, the degenerate case the box kinds'
+  // skip-empty-rect guard must NOT apply to). Authored fresh at each
+  // rotation (not re-projected between them) — same pattern as the highlight
+  // `roundTrip` test above: it isolates displayPointToPdf's per-quadrant
+  // correctness, since mapping to PDF space and back via the committed
+  // page's own viewport must be the identity.
+  const inkPoints = [0.2, 0.3, 0.5, 0.3];
+  async function inkRoundTrip(rotation: 0 | 90 | 180 | 270) {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', a, 'a', [
+          {
+            ...pageRef('a.pdf', 0, rotation),
+            annotations: [
+              { id: 'k1', kind: 'ink' as const, x: 0.2, y: 0.3, w: 0.3, h: 0, color: '#2f6fed', points: inkPoints },
+            ],
+          },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const pdf = await loadPdf(await buildCommitBytes(plan));
+    const page = await pdf.getPage(1);
+    const annots = (await page.getAnnotations()) as {
+      subtype: string;
+      hasAppearance: boolean;
+      inkLists?: Float32Array[];
+    }[];
+    expect(annots).toHaveLength(1);
+    expect(annots[0].subtype).toBe('Ink');
+    expect(annots[0].hasAppearance).toBe(true);
+    const viewport = page.getViewport({ scale: 1 }); // includes the committed rotation
+    // pdf.js flattens each stroke to a typed array of [x0,y0,x1,y1,...].
+    const stroke = annots[0].inkLists![0];
+    for (let i = 0; i < inkPoints.length; i += 2) {
+      const p = viewport.convertToViewportPoint(stroke[i], stroke[i + 1]);
+      expect(p[0] / viewport.width).toBeCloseTo(inkPoints[i], 3);
+      expect(p[1] / viewport.height).toBeCloseTo(inkPoints[i + 1], 3);
+    }
+    await pdf.loadingTask.destroy();
+  }
+
+  it('ink bakes as /Ink with a stroked appearance, at rotation 0', () => inkRoundTrip(0));
+  it('ink lands where authored at rotation 90', () => inkRoundTrip(90));
+  it('ink lands where authored at rotation 180', () => inkRoundTrip(180));
+  it('ink lands where authored at rotation 270', () => inkRoundTrip(270));
 });
 
 describe('commitPageEdits (transactional)', () => {
