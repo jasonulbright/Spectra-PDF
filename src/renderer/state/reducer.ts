@@ -1,5 +1,18 @@
-import { AppState, AppAction, OpenDocument, OpenFile, PdfBuffer } from './types';
+import { AppState, AppAction, OpenDocument, OpenFile, PageAnnotation, PdfBuffer } from './types';
 import { carriesManifest } from '../lib/doc-names';
+
+// Re-project a display-normalized annotation rect when its page's display
+// rotates by `delta` quarter-turns clockwise: annotation coords always live
+// in the page's CURRENT display space (that's what the overlay renders and
+// what the commit builder maps through the final rotation), so they must
+// turn with the page to keep covering the same content.
+export function rotateAnnotationRect(a: PageAnnotation, delta: number): PageAnnotation {
+  const d = ((delta % 360) + 360) % 360;
+  if (d === 90) return { ...a, x: 1 - (a.y + a.h), y: a.x, w: a.h, h: a.w };
+  if (d === 180) return { ...a, x: 1 - (a.x + a.w), y: 1 - (a.y + a.h) };
+  if (d === 270) return { ...a, x: a.y, y: 1 - (a.x + a.w), w: a.h, h: a.w };
+  return a;
+}
 
 export const initialState: AppState = {
   files: new Map(),
@@ -398,10 +411,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       const page = doc?.pages.find((p) => p.id === action.pageId);
       if (!doc || !page || page.rotation === action.rotation) return state;
+      const delta = (action.rotation - page.rotation + 360) % 360;
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) =>
-          p.id === action.pageId ? { ...p, rotation: action.rotation } : p,
+          p.id === action.pageId
+            ? {
+                ...p,
+                rotation: action.rotation,
+                annotations: p.annotations?.map((a) => rotateAnnotationRect(a, delta)),
+              }
+            : p,
         ),
       }));
       return applyPageEdit(state, documents, [doc.path]);

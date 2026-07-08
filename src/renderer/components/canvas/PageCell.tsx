@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageRef } from '../../state/types';
 import { displayWidthOf } from '../../canvas/layout';
@@ -53,6 +53,8 @@ function PageCellImpl({
   // pointer capture, which proved unreliable in the WebView.
   const [band, setBand] = useState<AnnotationRect | null>(null);
   const bandActive = useRef(false);
+  // Cancels the in-flight band (removes window listeners, commits nothing).
+  const cancelBand = useRef<(() => void) | null>(null);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     if (!annotateMode) {
@@ -87,6 +89,7 @@ function PageCellImpl({
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
       bandActive.current = false;
+      cancelBand.current = null;
       setBand(null);
       if (commit && latest.w > 0.01 && latest.h > 0.01) {
         onAddAnnotation(docId, page.id, latest);
@@ -94,10 +97,18 @@ function PageCellImpl({
     };
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
+    cancelBand.current = onCancel;
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
   };
+
+  // Leaving highlight mode (Escape, tool toggle) mid-drag cancels the band —
+  // the still-attached pointerup would otherwise commit a highlight the user
+  // believes they abandoned.
+  useEffect(() => {
+    if (!annotateMode) cancelBand.current?.();
+  }, [annotateMode]);
 
   return (
     <div

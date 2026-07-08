@@ -7,6 +7,7 @@ import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { planCommit, buildCommitBytes, commitPageEdits } from '../src/renderer/lib/workspace-commit';
+import { rotateAnnotationRect } from '../src/renderer/state/reducer';
 import { readManifest } from '../src/renderer/lib/pdfx-format';
 import { carriesManifest } from '../src/renderer/lib/doc-names';
 import type { AppAction, OpenDocument, OpenFile, PageRef, Workspace } from '../src/renderer/state/types';
@@ -204,6 +205,39 @@ describe('annotations round-trip', () => {
   it('lands where authored at rotation 90', () => roundTrip(90));
   it('lands where authored at rotation 180', () => roundTrip(180));
   it('lands where authored at rotation 270', () => roundTrip(270));
+
+  it('rotate-after-annotate anchors the same page content as annotate-only', async () => {
+    // Draw at rotation 0, then rotate the page 90°: the reducer re-projects
+    // the rect into the new display space (rotateAnnotationRect), and the
+    // builder inverts the new rotation — the baked PDF-space rect must be
+    // identical to committing the un-rotated annotation, because it covers
+    // the same content.
+    const authored = { x: 0.1, y: 0.2, w: 0.3, h: 0.15 };
+    const ann = (r: { x: number; y: number; w: number; h: number }) => ({
+      id: 'ann1',
+      kind: 'highlight' as const,
+      ...r,
+      color: '#ffd54a',
+    });
+    async function bakedRect(rotation: 0 | 90, rect: typeof authored) {
+      const { files } = await setup();
+      const a = files.get('a.pdf')!;
+      const workspace: Workspace = {
+        documents: [
+          makeDoc('a#0', a, 'a', [{ ...pageRef('a.pdf', 0, rotation), annotations: [ann(rect)] }]),
+        ],
+      };
+      const [plan] = planCommit(workspace, files, ['a.pdf']);
+      const pdf = await loadPdf(await buildCommitBytes(plan));
+      const page = await pdf.getPage(1);
+      const [annot] = (await page.getAnnotations()) as { rect: number[] }[];
+      await pdf.loadingTask.destroy();
+      return annot.rect;
+    }
+    const before = await bakedRect(0, authored);
+    const after = await bakedRect(90, rotateAnnotationRect(ann(authored), 90));
+    for (let i = 0; i < 4; i++) expect(after[i]).toBeCloseTo(before[i], 3);
+  });
 });
 
 describe('commitPageEdits (transactional)', () => {

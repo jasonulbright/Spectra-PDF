@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appReducer, initialState } from '../src/renderer/state/reducer';
+import { appReducer, initialState, rotateAnnotationRect } from '../src/renderer/state/reducer';
 import type { AppState, OpenDocument, OpenFile, PageRef } from '../src/renderer/state/types';
 
 function makeFile(path: string, pageCount: number, name?: string): OpenFile {
@@ -651,6 +651,53 @@ describe('ADD_ANNOTATION / REMOVE_ANNOTATION', () => {
         annotationId: 'nope',
       }),
     ).toBe(withAnn);
+  });
+});
+
+describe('annotation rects follow page rotation', () => {
+  const base = { id: 'a', kind: 'highlight' as const, x: 0.1, y: 0.2, w: 0.3, h: 0.15, color: '#ffd54a' };
+
+  it('rotateAnnotationRect turns rects with the page', () => {
+    expect(rotateAnnotationRect(base, 90)).toMatchObject({ x: 0.65, y: 0.1, w: 0.15, h: 0.3 });
+    expect(rotateAnnotationRect(base, 180)).toMatchObject({ x: 0.6, y: 0.65, w: 0.3, h: 0.15 });
+    expect(rotateAnnotationRect(base, 270)).toMatchObject({ x: 0.2, y: 0.6, w: 0.15, h: 0.3 });
+    // Four quarter-turns compose back to the original (within float noise).
+    let r = base;
+    for (let i = 0; i < 4; i++) r = rotateAnnotationRect(r, 90);
+    expect(r.x).toBeCloseTo(base.x, 10);
+    expect(r.y).toBeCloseTo(base.y, 10);
+  });
+
+  it('ROTATE_PAGE_REF re-projects existing annotations by the delta', () => {
+    const a = makeFile('a.pdf', 1);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));
+    const annotated = appReducer(stateWith([a], [doc]), {
+      type: 'ADD_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotation: base,
+    });
+    const rotated = appReducer(annotated, {
+      type: 'ROTATE_PAGE_REF',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      rotation: 90,
+    });
+    const page = rotated.workspace.documents[0].pages[0];
+    expect(page.rotation).toBe(90);
+    expect(page.annotations![0]).toMatchObject({ x: 0.65, y: 0.1, w: 0.15, h: 0.3 });
+    // Rotating back restores the original rect.
+    const back = appReducer(rotated, {
+      type: 'ROTATE_PAGE_REF',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      rotation: 0,
+    });
+    const restored = back.workspace.documents[0].pages[0].annotations![0];
+    expect(restored.x).toBeCloseTo(base.x, 10);
+    expect(restored.y).toBeCloseTo(base.y, 10);
+    expect(restored.w).toBeCloseTo(base.w, 10);
+    expect(restored.h).toBeCloseTo(base.h, 10);
   });
 });
 
