@@ -673,6 +673,56 @@ class TestWatermark:
         assert result["pages_watermarked"] == 0
         assert "X" not in extract_text(out)["text"]
 
+    def test_watermark_explicit_empty_pages_means_zero_pages_not_all(self, tmp_dir):
+        # Review-caught: `if pages:` treated [] like None, so an empty
+        # selection (e.g. from a caller whose page parse dropped every bad
+        # token) silently widened to the WHOLE document. [] must match
+        # rotate.py's convention: operate on zero pages.
+        src = os.path.join(tmp_dir, "wm_in9.pdf")
+        out = os.path.join(tmp_dir, "wm_out9.pdf")
+        _make_watermark_fixture(src)
+
+        result = watermark(file=src, output=out, text="X", pages=[])
+        assert result["pages_watermarked"] == 0
+        assert "X" not in extract_text(out)["text"]
+
+    def test_watermark_glyph_metrics_match_pdfminer_descriptor(self):
+        # _GLYPH_HEIGHT_EM is Ascent + |Descent| from the Helvetica AFM —
+        # pinned against pdfminer's descriptor like the advance table.
+        from pdfminer.fontmetrics import FONT_METRICS
+
+        from engine.watermark import _GLYPH_HEIGHT_EM
+
+        descriptor, _ = FONT_METRICS["Helvetica"]
+        expected = (descriptor["Ascent"] + abs(descriptor["Descent"])) / 1000.0
+        assert _GLYPH_HEIGHT_EM == pytest.approx(expected)
+
+    def test_watermark_auto_size_respects_the_perpendicular_axis(self, tmp_dir):
+        # Review-caught: the baseline crossing degenerates to a single term
+        # at axis-aligned angles, so a banner-shaped box got a size that
+        # ignored its height entirely and clipped vertically. The glyph box
+        # must fit the box's thickness too, and the size must actually
+        # respond to it.
+        from engine.watermark import _GLYPH_HEIGHT_EM, MIN_AUTO_FONT_SIZE
+
+        sizes = {}
+        for h in (30, 60, 200):
+            src = os.path.join(tmp_dir, f"wm_banner_{h}.pdf")
+            out = os.path.join(tmp_dir, f"wm_banner_{h}_out.pdf")
+            doc = pikepdf.new()
+            doc.add_blank_page(page_size=(1500, h))
+            doc.save(src)
+            doc.close()
+            result = watermark(
+                file=src, output=out, text="CONFIDENTIAL BANNER STRIP", angle=0
+            )
+            size = result["font_size_applied"]
+            sizes[h] = size
+            assert (
+                size * _GLYPH_HEIGHT_EM <= h or size == MIN_AUTO_FONT_SIZE
+            ), f"glyph box {size * _GLYPH_HEIGHT_EM:.1f}pt overflows {h}pt-tall page"
+        assert sizes[30] < sizes[60] < sizes[200], f"size must track the box height: {sizes}"
+
     def test_watermark_rejects_bad_args(self, tmp_dir):
         src = os.path.join(tmp_dir, "wm_in8.pdf")
         out = os.path.join(tmp_dir, "wm_out8.pdf")

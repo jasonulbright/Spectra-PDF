@@ -31,6 +31,13 @@ export function WatermarkPanel(): React.ReactElement {
       pageInput.trim().toLowerCase() === 'all'
         ? undefined
         : pageInput.split(',').map((s) => parseInt(s.trim())).filter((n) => !isNaN(n));
+    // An empty parse must never reach the engine: pages [] means "zero
+    // pages" there, and quietly stamping nothing (or, worse, everything)
+    // on a typo helps no one.
+    if (pages && pages.length === 0) {
+      setStatus('Error: no valid page numbers — use e.g. 1,3,5 or all');
+      return;
+    }
     setBusy(true);
     setStatus('Applying watermark...');
     try {

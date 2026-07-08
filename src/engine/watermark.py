@@ -23,8 +23,9 @@ counter-clockwise in user space, so text meant to read at ``angle``° in the
 DISPLAYED orientation is drawn at ``angle + /Rotate`` about the crop-box
 center (the center is rotation-invariant, so centering needs no correction).
 /Rotate and the crop/media boxes are inheritable page attributes — resolved
-via the same /Parent-chain walk as redact's resource lookup, for the same
-reason.
+via pdf_tree.walk_inheritable, the one shared /Parent-chain walk that
+redact's resource lookup also uses (one implementation, so a fix propagates
+to every consumer).
 
 Deliberately NOT Ghostscript (the roadmap row offers both): a gs pdfwrite
 round-trip regenerates the whole file to add one stream per page, and
@@ -40,6 +41,8 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import Dictionary, Name
+
+from engine.pdf_tree import walk_inheritable
 
 
 # Exact Helvetica AFM advance widths (em/1000) for ASCII 0x20..0x7E, pinned
@@ -60,6 +63,10 @@ _HELVETICA_ASCII_WIDTHS = (
 # Fallback advance for non-ASCII Latin-1 (accented forms are near their base
 # glyph's width; 0.6 em over-reserves slightly, the safe direction).
 _NON_ASCII_ADVANCE_EM = 0.6
+
+# Helvetica vertical extent in em: AFM Ascent 718 + |Descent| 207 — pinned
+# against pdfminer's descriptor in tests, like the advance table.
+_GLYPH_HEIGHT_EM = 0.925
 
 MIN_AUTO_FONT_SIZE = 8.0
 MAX_AUTO_FONT_SIZE = 144.0
@@ -103,24 +110,11 @@ def _escape_pdf_text(text: str) -> str:
     return "".join(out)
 
 
-def _walk_inheritable(page: pikepdf.Page, key: str):
-    """Resolve an inheritable page attribute (/Rotate, /CropBox, /MediaBox)
-    via the /Parent chain — page.obj.get alone only sees the page's OWN dict,
-    and generators legitimately hoist these onto an ancestor /Pages node
-    (same failure mode redact._resolve_resources exists for)."""
-    node = page.obj
-    seen = 0
-    while node is not None and seen < 64:  # cycle guard
-        value = node.get(key)
-        if value is not None:
-            return value
-        node = node.get("/Parent")
-        seen += 1
-    return None
-
-
 def _resolve_rotate(page: pikepdf.Page) -> int:
-    value = _walk_inheritable(page, "/Rotate")
+    """/Rotate is inheritable — resolved via the page-tree walk shared with
+    redact (pdf_tree.walk_inheritable); page.obj.get alone would misread
+    files that hoist it onto an ancestor /Pages node."""
+    value = walk_inheritable(page, "/Rotate")
     rotate = int(value) if value is not None else 0
     return ((rotate % 360) + 360) % 360
 
@@ -128,9 +122,9 @@ def _resolve_rotate(page: pikepdf.Page) -> int:
 def _resolve_box(page: pikepdf.Page) -> tuple[float, float, float, float]:
     """The page's crop box (fall back to media box), inheritance-aware,
     normalized to (x0, y0, x1, y1) with x0<x1, y0<y1."""
-    box = _walk_inheritable(page, "/CropBox")
+    box = walk_inheritable(page, "/CropBox")
     if box is None:
-        box = _walk_inheritable(page, "/MediaBox")
+        box = walk_inheritable(page, "/MediaBox")
     if box is None:
         raise ValueError("page has no /CropBox or /MediaBox anywhere in its page tree")
     x0, y0, x1, y1 = (float(box[i]) for i in range(4))
@@ -138,23 +132,44 @@ def _resolve_box(page: pikepdf.Page) -> tuple[float, float, float, float]:
 
 
 def _auto_font_size(text: str, width: float, height: float, rotate: int, angle: float) -> float:
-    """Size the text to span ~AUTO_FIT_FRACTION of the box's CROSSING length
-    along the text's direction — the length of a line through the box center
-    at that angle, min(W/|cos|, H/|sin|). NOT the projection extent
-    (W|cos| + H|sin|): a centered segment sized to the projection can poke far
-    outside the box (dramatically so for wide-short pages), which is exactly
-    the overflow the e2e caught. A centered fraction < 1 of the crossing
-    length is inside the box by construction. width/height are user-space
-    crop dims; the DISPLAYED dims swap when /Rotate is 90 or 270."""
+    """Size the text so that BOTH of its axes fit the box.
+
+    Baseline axis: span ~AUTO_FIT_FRACTION of the box's crossing length along
+    the text direction — the length of a line through the box center at that
+    angle, min(W/|cos|, H/|sin|). NOT the projection extent (W|cos| + H|sin|):
+    a centered segment sized to the projection can poke far outside the box
+    (dramatically so for wide-short pages) — the overflow the e2e caught.
+
+    Glyph-height axis: the SAME bound rotated 90° — near axis-aligned angles
+    the baseline crossing degenerates to inf on one term and stops seeing the
+    box dimension PERPENDICULAR to the text run entirely, so a banner-shaped
+    box (say 1500×10 at angle 0) would get a size independent of its height
+    and clip vertically (review-caught). The perpendicular crossing is
+    min(W/|sin|, H/|cos|); the text's vertical extent (ascender+descender)
+    must fit the same fraction of it.
+
+    A centered fraction < 1 of each crossing keeps that axis inside the box
+    by construction. width/height are user-space crop dims; the DISPLAYED
+    dims swap when /Rotate is 90 or 270. MIN_AUTO_FONT_SIZE is a legibility
+    floor and wins below it (a box thinner than ~12pt clips rather than
+    rendering unreadable dust)."""
     disp_w, disp_h = (height, width) if rotate in (90, 270) else (width, height)
     theta = math.radians(angle)
     cos_a, sin_a = abs(math.cos(theta)), abs(math.sin(theta))
-    crossing = min(
+    baseline_crossing = min(
         disp_w / cos_a if cos_a > 1e-9 else math.inf,
         disp_h / sin_a if sin_a > 1e-9 else math.inf,
     )
+    perp_crossing = min(
+        disp_w / sin_a if sin_a > 1e-9 else math.inf,
+        disp_h / cos_a if cos_a > 1e-9 else math.inf,
+    )
     advance = max(_text_width_em(text), 0.1)
-    return max(MIN_AUTO_FONT_SIZE, min(MAX_AUTO_FONT_SIZE, AUTO_FIT_FRACTION * crossing / advance))
+    fit = min(
+        AUTO_FIT_FRACTION * baseline_crossing / advance,
+        AUTO_FIT_FRACTION * perp_crossing / _GLYPH_HEIGHT_EM,
+    )
+    return max(MIN_AUTO_FONT_SIZE, min(MAX_AUTO_FONT_SIZE, fit))
 
 
 def _n(v: float) -> str:
@@ -236,8 +251,11 @@ def watermark(
             extent along the text direction).
         layer: ``"over"`` (default — survives scans/opaque fills) or
             ``"under"`` (classic behind-the-text watermark).
-        pages: 1-based page numbers; None/empty = all pages. Out-of-range
-            entries are ignored (same convention as redact).
+        pages: 1-based page numbers; None = all pages, an explicit empty
+            list = ZERO pages (matching rotate.py's convention — an empty
+            selection must never silently widen to the whole document; the
+            CLI's --pages parse rejects garbage for the same reason).
+            Out-of-range entries are ignored (same convention as redact).
     """
     if not text or not text.strip():
         raise ValueError("watermark text must not be empty")
@@ -252,7 +270,7 @@ def watermark(
     same_file = input_path.resolve() == output_path.resolve()
 
     wanted: set[int] | None = None
-    if pages:
+    if pages is not None:
         wanted = {int(p) for p in pages}
 
     pages_watermarked = 0

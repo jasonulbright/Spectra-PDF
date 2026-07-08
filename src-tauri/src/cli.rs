@@ -731,10 +731,20 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "layer": args.layer,
             });
             if let Some(pages) = &args.pages {
+                // Strict parse (like --rect): silently dropping bad tokens
+                // would send an empty list — and an empty page selection must
+                // never widen to "all pages", nor should a typo quietly
+                // shrink the selection. Review-caught.
                 let parsed: Vec<i64> = pages
                     .split(',')
-                    .filter_map(|s| s.trim().parse().ok())
-                    .collect();
+                    .map(|s| s.trim().parse::<i64>())
+                    .collect::<Result<Vec<i64>, _>>()
+                    .map_err(|_| {
+                        format!("--pages requires comma-separated page numbers, got: {pages}")
+                    })?;
+                if parsed.is_empty() {
+                    return Err("--pages requires at least one page number".to_string());
+                }
                 params["pages"] = json!(parsed);
             }
             engine.call("watermark", params)

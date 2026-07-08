@@ -45,6 +45,8 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Name
 
+from engine.pdf_tree import walk_inheritable
+
 Matrix = tuple[float, float, float, float, float, float]
 Rect = tuple[float, float, float, float]  # x0, y0, x1, y1, x0<x1, y0<y1
 
@@ -116,15 +118,10 @@ def _resolve_resources(page: "pikepdf.Page"):
     ever sees the page's OWN dict, so relying on it alone silently treats
     such a page as having no XObjects at all — a false negative (an image
     that should have been redacted, wasn't), the one failure direction this
-    module can't tolerate."""
-    node = page.obj
-    seen = 0
-    while node is not None and seen < 64:
-        if "/Resources" in node:
-            return node.Resources
-        node = node.get("/Parent")
-        seen += 1
-    return {}
+    module can't tolerate. The walk itself is shared with watermark.py via
+    pdf_tree.walk_inheritable."""
+    resources = walk_inheritable(page, "/Resources")
+    return resources if resources is not None else {}
 
 
 def _redact_page(pdf: "pikepdf.Pdf", page: "pikepdf.Page", regions: list[Rect]) -> dict:
