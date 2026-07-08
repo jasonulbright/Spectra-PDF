@@ -582,6 +582,13 @@ function AppContent(): React.ReactElement {
       : null,
   });
 
+  const harnessFirstPageRef = useRef<() => { docId: string; pageId: string } | null>(() => null);
+  harnessFirstPageRef.current = () => {
+    const doc = state.workspace.documents.find((d) => d.path === state.activeFileId);
+    const page = doc?.pages[0];
+    return doc && page ? { docId: doc.id, pageId: page.id } : null;
+  };
+
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     installTestHarness({
@@ -593,8 +600,12 @@ function AppContent(): React.ReactElement {
         harnessListenersRef.current.add(listener);
         return () => harnessListenersRef.current.delete(listener);
       },
+      getFirstPage: () => harnessFirstPageRef.current(),
+      dispatchAddAnnotation: (docId, pageId, annotation) =>
+        dispatch({ type: 'ADD_ANNOTATION', docId, pageId, annotation }),
+      commitPendingEdits: () => commitRef.current(),
     });
-  }, [openByPaths]);
+  }, [openByPaths, dispatch]);
 
   // Notify harness subscribers on every state-relevant change.
   useEffect(() => {

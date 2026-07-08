@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
-import type { CanvasTool } from './PageCell';
+import type { CanvasTool, StampPreset } from './PageCell';
 import { MAX_ROW_WIDTH } from '../../canvas/layout';
 import { GhostPage } from './DropGhost';
 import { PageCell } from './PageCell';
@@ -24,6 +24,7 @@ interface DocumentRowProps {
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   tool: CanvasTool;
   annotationColor?: string;
+  stampPreset?: StampPreset | null;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -42,6 +43,7 @@ function DocumentRowImpl({
   onOpenPage,
   tool,
   annotationColor,
+  stampPreset,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
@@ -75,6 +77,7 @@ function DocumentRowImpl({
         onOpenPage={onOpenPage}
         tool={tool}
         annotationColor={annotationColor}
+        stampPreset={stampPreset}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
         onAddAnnotation={onAddAnnotation}

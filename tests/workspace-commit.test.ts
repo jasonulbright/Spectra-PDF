@@ -246,6 +246,46 @@ describe('annotations round-trip', () => {
     }
   });
 
+  it('stamp bakes as /Stamp with a centered label and correct placement', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const authored = { x: 0.3, y: 0.4, w: 0.32, h: 0.09 };
+    for (const rotation of [0, 90] as const) {
+      const rect = rotation === 90 ? rotateAnnotationRect({ id: 's', kind: 'stamp', ...authored, color: '#2fbf71' }, 90) : { ...authored };
+      const workspace: Workspace = {
+        documents: [
+          makeDoc('a#0', a, 'a', [
+            {
+              ...pageRef('a.pdf', 0, rotation),
+              annotations: [
+                { id: 's1', kind: 'stamp', x: rect.x, y: rect.y, w: rect.w, h: rect.h, color: '#2fbf71', note: 'APPROVED' },
+              ],
+            },
+          ]),
+        ],
+      };
+      const [plan] = planCommit(workspace, files, ['a.pdf']);
+      const pdf = await loadPdf(await buildCommitBytes(plan));
+      const page = await pdf.getPage(1);
+      const annots = (await page.getAnnotations()) as {
+        subtype: string;
+        hasAppearance: boolean;
+        contentsObj?: { str: string };
+        rect: [number, number, number, number];
+      }[];
+      expect(annots).toHaveLength(1);
+      expect(annots[0].subtype).toBe('Stamp');
+      expect(annots[0].hasAppearance).toBe(true);
+      expect(annots[0].contentsObj?.str).toBe('APPROVED');
+      const viewport = page.getViewport({ scale: 1 });
+      const p1 = viewport.convertToViewportPoint(annots[0].rect[0], annots[0].rect[1]);
+      const p2 = viewport.convertToViewportPoint(annots[0].rect[2], annots[0].rect[3]);
+      expect(Math.min(p1[0], p2[0]) / viewport.width).toBeCloseTo(rect.x, 3);
+      expect(Math.min(p1[1], p2[1]) / viewport.height).toBeCloseTo(rect.y, 3);
+      await pdf.loadingTask.destroy();
+    }
+  });
+
   it('rotate-after-annotate anchors the same page content as annotate-only', async () => {
     // Draw at rotation 0, then rotate the page 90°: the reducer re-projects
     // the rect into the new display space (rotateAnnotationRect), and the

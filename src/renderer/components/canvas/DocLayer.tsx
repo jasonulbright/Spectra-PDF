@@ -5,7 +5,7 @@ import { DocumentRow } from './DocumentRow';
 import type { DocPlacement } from '../../canvas/layout';
 import type { DragSource } from '../../canvas/usePageDrag';
 import type { PageAnnotation } from '../../state/types';
-import type { CanvasTool } from './PageCell';
+import type { CanvasTool, StampPreset } from './PageCell';
 
 interface DocLayerProps {
   items: DocPlacement[];
@@ -24,6 +24,7 @@ interface DocLayerProps {
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   tool: CanvasTool;
   annotationColor?: string;
+  stampPreset?: StampPreset | null;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -68,6 +69,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onOpenPage={props.onOpenPage}
               tool={props.tool}
               annotationColor={props.annotationColor}
+              stampPreset={props.stampPreset}
               onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
               onAddAnnotation={props.onAddAnnotation}

@@ -86,3 +86,52 @@ export async function skipWelcome(): Promise<void> {
     (window as any).__SPECTRA_TEST__.skipWelcome();
   });
 }
+
+export interface TestAnnotationInput {
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  note?: string;
+  points?: number[];
+}
+
+// executeAsync's `done` always RESOLVES the browser-side call — there's no
+// way to reject it from inside the page. Errors are tagged with this marker
+// so the Node-side wrapper below can tell "resolved with a result" from
+// "resolved with an error string" and throw a real, readable failure instead
+// of a confusing downstream assertion mismatch (e.g. `undefined.docId`).
+const ERROR_TAG = '__SPECTRA_E2E_ERROR__:';
+
+export async function addAnnotation(
+  annotation: TestAnnotationInput,
+): Promise<{ docId: string; pageId: string; annotationId: string }> {
+  const result = await browser.executeAsync<
+    { docId: string; pageId: string; annotationId: string } | string,
+    [TestAnnotationInput]
+  >(
+    function (a, done) {
+      (window as any).__SPECTRA_TEST__.addAnnotation(a)
+        .then((r: unknown) => done(r as any))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    annotation,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`addAnnotation failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
+export async function commitPendingEdits(): Promise<void> {
+  const result = await browser.executeAsync<string | null, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.commitPendingEdits()
+      .then(() => done(null))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  });
+  if (typeof result === 'string') {
+    throw new Error(`commitPendingEdits failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}

@@ -25,6 +25,17 @@ export interface TestStateSnapshot {
   } | null;
 }
 
+export interface TestAnnotationInput {
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  note?: string;
+  points?: number[];
+}
+
 export interface TestHarness {
   /** Open one or more PDFs by absolute path, bypassing the OS dialog. */
   openByPaths: (paths: string[]) => Promise<void>;
@@ -47,6 +58,20 @@ export interface TestHarness {
   consumeLastError: () => string | null;
   /** Skip the welcome screen on the next reload. */
   skipWelcome: () => void;
+  /**
+   * Add an annotation to the active file's first workspace page, bypassing
+   * pointer-drag simulation (the canvas tools are pointer-capture based —
+   * see CLAUDE.md — which WebDriver can't reliably drive). Polls for the
+   * workspace indexer to finish since it runs async after OPEN_FILE.
+   * Exercises the exact reducer path the real tools use.
+   */
+  addAnnotation: (
+    annotation: TestAnnotationInput,
+    timeoutMs?: number,
+  ) => Promise<{ docId: string; pageId: string; annotationId: string }>;
+  /** Materialize pending page-tier edits (annotations, moves, etc.) via the
+   * real commit bridge — same path as the "Apply changes" button. */
+  commitPendingEdits: () => Promise<void>;
 }
 
 export interface TestHarnessDeps {
@@ -55,6 +80,11 @@ export interface TestHarnessDeps {
   setActiveOp: (op: string) => void;
   getStateSnapshot: () => TestStateSnapshot;
   subscribe: (listener: (s: TestStateSnapshot) => void) => () => void;
+  /** First page of the active file's first workspace document, once the
+   * async indexer has produced one; null until then. */
+  getFirstPage: () => { docId: string; pageId: string } | null;
+  dispatchAddAnnotation: (docId: string, pageId: string, annotation: TestAnnotationInput & { id: string }) => void;
+  commitPendingEdits: () => Promise<void>;
 }
 
 export const TEST_HARNESS_ENABLED =
@@ -182,6 +212,35 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     skipWelcome: () => {
       localStorage.setItem('spectra-skip-welcome', 'true');
+    },
+    addAnnotation: async (annotation, timeoutMs = 10_000) => {
+      const deadline = Date.now() + timeoutMs;
+      let page = deps.getFirstPage();
+      while (!page && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        page = deps.getFirstPage();
+      }
+      if (!page) {
+        const msg = `addAnnotation: no workspace page appeared within ${timeoutMs}ms`;
+        lastError = msg;
+        throw new Error(msg);
+      }
+      const annotationId = `e2e-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      try {
+        deps.dispatchAddAnnotation(page.docId, page.pageId, { ...annotation, id: annotationId });
+      } catch (err) {
+        captureError('addAnnotation', err);
+        throw err;
+      }
+      return { docId: page.docId, pageId: page.pageId, annotationId };
+    },
+    commitPendingEdits: async () => {
+      try {
+        await deps.commitPendingEdits();
+      } catch (err) {
+        captureError('commitPendingEdits', err);
+        throw err;
+      }
     },
   };
 

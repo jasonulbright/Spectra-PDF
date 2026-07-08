@@ -14,7 +14,9 @@ import { deriveDropGhosts } from './ghost-size';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import type { DragSource } from '../../canvas/usePageDrag';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
-import type { CanvasTool } from './PageCell';
+import type { CanvasTool, StampPreset } from './PageCell';
+import { STAMP_PRESETS } from './PageCell';
+import { CommentSidebar } from './CommentSidebar';
 
 const ANNOTATION_PALETTE = ['#ffd54a', '#16161a', '#2f6fed', '#e0393e', '#2fbf71', '#a855f7'];
 
@@ -73,6 +75,8 @@ export function WorkspaceCanvasView({
   // (yellow highlight, dark freetext, blue ink); a pick applies to whichever
   // tool creates the next annotation, across tool switches.
   const [toolColor, setToolColor] = useState<string | null>(null);
+  const [stampPreset, setStampPreset] = useState<StampPreset | null>(null);
+  const [showComments, setShowComments] = useState(false);
 
   // Escape returns to Select from the highlight tool.
   React.useEffect(() => {
@@ -304,6 +308,7 @@ export function WorkspaceCanvasView({
           onOpenPage={onOpenPage}
           tool={tool}
           annotationColor={toolColor ?? undefined}
+          stampPreset={stampPreset}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
@@ -366,8 +371,47 @@ export function WorkspaceCanvasView({
           >
             Draw
           </button>
+          <button
+            data-testid="tool-stamp"
+            title="Click a page to place a stamp (Esc to exit)"
+            onClick={() => setTool(tool === 'stamp' ? 'select' : 'stamp')}
+            className={`px-3 py-1.5 text-xs font-medium ${tool === 'stamp' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
+          >
+            Stamp
+          </button>
         </div>
-        {tool !== 'select' && (
+        {tool === 'stamp' && (
+          <div
+            className="flex items-center gap-1 bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg px-2 py-1"
+            title="Stamp preset"
+          >
+            {STAMP_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                data-testid={`stamp-preset-${p.label.toLowerCase()}`}
+                onClick={() => setStampPreset(stampPreset?.label === p.label ? null : p)}
+                title={p.label}
+                className="px-2 py-0.5 text-[10px] font-bold rounded-full"
+                style={{
+                  color: p.color,
+                  border: `1px solid ${p.color}`,
+                  backgroundColor: stampPreset?.label === p.label ? `${p.color}33` : 'transparent',
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <button
+          data-testid="toggle-comments"
+          title="Show annotation notes"
+          onClick={() => setShowComments((v) => !v)}
+          className={`px-3 py-1.5 text-xs font-medium rounded-full shadow-lg border ${showComments ? 'bg-blue-600 text-white border-blue-600' : 'bg-neutral-800/90 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
+        >
+          Comments
+        </button>
+        {tool !== 'select' && tool !== 'stamp' && (
           <div
             className="flex items-center gap-1 bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg px-2 py-1"
             title="Annotation color"
@@ -421,6 +465,16 @@ export function WorkspaceCanvasView({
           </button>
         </div>
       </div>
+
+      {showComments && (
+        <CommentSidebar
+          docs={docs}
+          onSelectPage={onSelectPage}
+          onUpdateAnnotation={onUpdateAnnotation}
+          onRemoveAnnotation={onRemoveAnnotation}
+          onClose={() => setShowComments(false)}
+        />
+      )}
     </div>
   );
 }

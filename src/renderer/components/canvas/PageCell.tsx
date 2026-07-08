@@ -4,7 +4,7 @@ import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthOf } from '../../canvas/layout';
 import { PageView } from './PageView';
 
-export type CanvasTool = 'select' | 'highlight' | 'freetext' | 'ink';
+export type CanvasTool = 'select' | 'highlight' | 'freetext' | 'ink' | 'stamp';
 
 export interface AnnotationRect {
   x: number;
@@ -12,6 +12,24 @@ export interface AnnotationRect {
   w: number;
   h: number;
 }
+
+export interface StampPreset {
+  label: string;
+  color: string;
+}
+
+export const STAMP_PRESETS: StampPreset[] = [
+  { label: 'APPROVED', color: '#2fbf71' },
+  { label: 'REJECTED', color: '#e0393e' },
+  { label: 'DRAFT', color: '#8a8a93' },
+  { label: 'CONFIDENTIAL', color: '#e0393e' },
+  { label: 'REVIEWED', color: '#2f6fed' },
+];
+
+// Fixed footprint, display-normalized (0..1 of the page cell) — stamps are a
+// single click-to-place, not a drag-sized box.
+const STAMP_W = 0.32;
+const STAMP_H = 0.09;
 
 const HIGHLIGHT_COLOR = '#ffd54a';
 const FREETEXT_COLOR = '#16161a';
@@ -37,6 +55,9 @@ interface PageCellProps {
   // Overrides the kind-default color for newly created annotations (color
   // picker in the floating toolbar); undefined keeps the per-kind default.
   annotationColor?: string;
+  // Selected stamp preset — required for the Stamp tool to place anything;
+  // clicks are ignored while none is picked.
+  stampPreset?: StampPreset | null;
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
@@ -57,6 +78,7 @@ function PageCellImpl({
   visibleNumber,
   tool,
   annotationColor,
+  stampPreset,
   onSelectPage,
   onOpenPage,
   onPageContextMenu,
@@ -145,6 +167,23 @@ function PageCellImpl({
     e.stopPropagation();
     if (tool === 'ink') {
       handleInkDown(e);
+      return;
+    }
+    if (tool === 'stamp') {
+      if (!stampPreset) return; // no preset picked yet — clicks are a no-op
+      const rect = e.currentTarget.getBoundingClientRect();
+      const cx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const cy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      onAddAnnotation(docId, page.id, {
+        id: crypto.randomUUID(),
+        kind: 'stamp',
+        x: Math.max(0, Math.min(1 - STAMP_W, cx - STAMP_W / 2)),
+        y: Math.max(0, Math.min(1 - STAMP_H, cy - STAMP_H / 2)),
+        w: STAMP_W,
+        h: STAMP_H,
+        color: annotationColor ?? stampPreset.color,
+        note: stampPreset.label,
+      });
       return;
     }
     bandActive.current = true;
@@ -255,7 +294,10 @@ function PageCellImpl({
         <div
           key={a.id}
           className={
-            'page-annot' + (a.kind === 'freetext' ? ' page-annot-text' : '') + (a.kind === 'ink' ? ' page-annot-ink' : '')
+            'page-annot' +
+            (a.kind === 'freetext' ? ' page-annot-text' : '') +
+            (a.kind === 'ink' ? ' page-annot-ink' : '') +
+            (a.kind === 'stamp' ? ' page-annot-stamp' : '')
           }
           title={a.kind === 'highlight' || a.kind === 'ink' ? a.note : undefined}
           style={{
@@ -267,7 +309,9 @@ function PageCellImpl({
               ? { backgroundColor: `${a.color}66`, borderColor: a.color }
               : a.kind === 'ink'
                 ? {}
-                : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
+                : a.kind === 'stamp'
+                  ? { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
+                  : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
             ...(a.kind === 'freetext' && tool === 'select' ? { pointerEvents: 'auto' } : {}),
           }}
           onPointerDown={a.kind === 'freetext' ? (e) => e.stopPropagation() : undefined}
@@ -302,6 +346,7 @@ function PageCellImpl({
           {a.kind === 'freetext' && editing !== a.id && (
             <span className="page-annot-text-body">{a.note}</span>
           )}
+          {a.kind === 'stamp' && <span className="page-annot-stamp-label">{a.note}</span>}
           {editing === a.id ? (
             <textarea
               className="page-annot-editor"
@@ -327,7 +372,15 @@ function PageCellImpl({
             !annotateMode && (
               <button
                 className="page-annot-x"
-                title={a.kind === 'freetext' ? 'Remove text' : a.kind === 'ink' ? 'Remove drawing' : 'Remove highlight'}
+                title={
+                  a.kind === 'freetext'
+                    ? 'Remove text'
+                    : a.kind === 'ink'
+                      ? 'Remove drawing'
+                      : a.kind === 'stamp'
+                        ? 'Remove stamp'
+                        : 'Remove highlight'
+                }
                 onClick={(e) => {
                   e.stopPropagation();
                   onRemoveAnnotation(docId, page.id, a.id);

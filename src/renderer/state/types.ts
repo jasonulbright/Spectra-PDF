@@ -20,15 +20,17 @@ export interface OpenFile {
 // into PDF user space.
 export interface PageAnnotation {
   id: string;
-  kind: 'highlight' | 'freetext' | 'ink';
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp';
   x: number;
   y: number;
   w: number;
   h: number;
   // highlight: fill color. freetext: text color. ink: stroke color.
+  // stamp: border/text color (fixed per preset — see STAMP_PRESETS).
   color: string; // #rrggbb
-  // highlight: optional popup note. freetext: the drawn text (both land in
-  // /Contents at commit).
+  // highlight: optional popup note. freetext: the drawn text. stamp: the
+  // preset label (e.g. "APPROVED"). All three land in /Contents at commit,
+  // and are what the comment sidebar lists.
   note?: string;
   // ink only: flat [x0,y0,x1,y1,...] stroke path, display-normalized in the
   // same space as x/y/w/h (which store the path's bounding box). Re-projected

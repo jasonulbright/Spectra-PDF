@@ -681,6 +681,26 @@ describe('ADD_ANNOTATION / REMOVE_ANNOTATION', () => {
       }),
     ).toBe(withAnn);
   });
+
+  it('handles stamp annotations the same kind-agnostic way as highlight/freetext', () => {
+    const a = makeFile('a.pdf', 1);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));
+    const stamp = { id: 'stamp1', kind: 'stamp' as const, x: 0.3, y: 0.4, w: 0.32, h: 0.09, color: '#2fbf71', note: 'APPROVED' };
+    const withStamp = appReducer(stateWith([a], [doc]), {
+      type: 'ADD_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotation: stamp,
+    });
+    expect(withStamp.workspace.documents[0].pages[0].annotations).toEqual([stamp]);
+    const removed = appReducer(withStamp, {
+      type: 'REMOVE_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotationId: 'stamp1',
+    });
+    expect(removed.workspace.documents[0].pages[0].annotations).toEqual([]);
+  });
 });
 
 describe('annotation rects follow page rotation', () => {

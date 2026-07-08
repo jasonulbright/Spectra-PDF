@@ -55,6 +55,8 @@ export function displayRectToPdf(
 
 const HIGHLIGHT_ALPHA = 0.4;
 const FREETEXT_FONT_SIZE = 12;
+const STAMP_FONT_SIZE = 14;
+const STAMP_PAD = 4;
 
 // Escape a string for a PDF content-stream literal, best-effort WinAnsi:
 // characters outside Latin-1 render as '?' in the appearance (the full
@@ -209,6 +211,49 @@ function addAnnotations(
         AP: { N: ap },
       });
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
+    } else if (a.kind === 'stamp') {
+      const label = (a.note ?? '').toUpperCase();
+      const fontRef = context.register(
+        context.obj({
+          Type: 'Font',
+          Subtype: 'Type1',
+          BaseFont: 'Helvetica-Bold',
+          Encoding: 'WinAnsiEncoding',
+        }),
+      );
+      // Single centered line, clipped (not wrapped) to the box — stamps are
+      // short fixed labels, not free-form text.
+      const maxChars = Math.max(1, Math.floor((dispW - STAMP_PAD * 2) / (STAMP_FONT_SIZE * 0.6)));
+      const clipped = label.length > maxChars ? label.slice(0, maxChars) : label;
+      const textWidth = clipped.length * STAMP_FONT_SIZE * 0.6;
+      const tx = Math.max(STAMP_PAD, (dispW - textWidth) / 2);
+      const ty = (dispH - STAMP_FONT_SIZE) / 2 + STAMP_FONT_SIZE * 0.2;
+      // Translucent fill wrapped in q/Q so only the background rect picks up
+      // the ExtGState alpha — the border and text stay fully opaque.
+      const content =
+        `q /GS0 gs ${r} ${g} ${b} rg 0 0 ${dispW} ${dispH} re f Q ` +
+        `${r} ${g} ${b} RG 1.5 w 0.75 0.75 ${dispW - 1.5} ${dispH - 1.5} re S ` +
+        `BT /HelvB ${STAMP_FONT_SIZE} Tf ${r} ${g} ${b} rg ${tx} ${ty} Td (${escapePdfText(clipped)}) Tj ET`;
+      const gsRef = context.register(context.obj({ Type: 'ExtGState', ca: 0.12 }));
+      const ap = context.register(
+        context.stream(content, {
+          Type: 'XObject',
+          Subtype: 'Form',
+          FormType: 1,
+          BBox: [0, 0, dispW, dispH],
+          Matrix: apMatrixFor(rotation),
+          Resources: { Font: { HelvB: fontRef }, ExtGState: { GS0: gsRef } },
+        }),
+      );
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: 'Stamp',
+        Rect: [x0, y0, x1, y1],
+        C: [r, g, b],
+        F: 4, // print
+        AP: { N: ap },
+      });
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(label));
     } else {
       // Appearance stream — pdf.js and friends render /AP, not bare dicts.
       const gsRef = context.register(
