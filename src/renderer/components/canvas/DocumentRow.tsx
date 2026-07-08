@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
+import type { RedactionMark } from '../../lib/redaction';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { MAX_ROW_WIDTH } from '../../canvas/layout';
 import { GhostPage } from './DropGhost';
@@ -25,11 +26,22 @@ interface DocumentRowProps {
   tool: CanvasTool;
   annotationColor?: string;
   stampPreset?: StampPreset | null;
+  // Pending redaction marks keyed by pageId — per-page arrays are built once
+  // per marks change (WorkspaceCanvasView useMemo), so PageCell memoization
+  // survives unrelated re-renders.
+  redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
+  onAddRedactionMark: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onRemoveRedactionMark: (markId: string) => void;
 }
 
 function DocumentRowImpl({
@@ -45,12 +57,15 @@ function DocumentRowImpl({
   tool,
   annotationColor,
   stampPreset,
+  redactionMarksByPage,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
   onUpdateAnnotation,
   onRecolorAnnotation,
   onRemoveAnnotation,
+  onAddRedactionMark,
+  onRemoveRedactionMark,
 }: DocumentRowProps): React.JSX.Element {
   const strip: React.JSX.Element[] = [];
   let visible = 0;
@@ -80,12 +95,15 @@ function DocumentRowImpl({
         tool={tool}
         annotationColor={annotationColor}
         stampPreset={stampPreset}
+        redactionMarks={redactionMarksByPage.get(page.id)}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
         onAddAnnotation={onAddAnnotation}
         onUpdateAnnotation={onUpdateAnnotation}
         onRecolorAnnotation={onRecolorAnnotation}
         onRemoveAnnotation={onRemoveAnnotation}
+        onAddRedactionMark={onAddRedactionMark}
+        onRemoveRedactionMark={onRemoveRedactionMark}
       />,
     );
     if (!collapsed) visible++;

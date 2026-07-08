@@ -1,7 +1,30 @@
 import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
 import { carriesManifest } from './doc-names';
 import type { ExportPage } from './pdfx-format';
-import type { AppAction, OpenFile, PdfBuffer, Workspace } from '../state/types';
+import type { AppAction, OpenDocument, OpenFile, PdfBuffer, Workspace } from '../state/types';
+
+// A page's 1-based position within its file's committed order: pages of all
+// same-path documents in workspace order — what the file looks like after
+// this bridge materializes pending edits. Callers that hand the number to
+// something reading the file (inspector, extract-text, redaction) commit
+// first, so on-disk order matches. Lives here (not workspace.ts) because it
+// describes committed order — and stays importable in Node tests, where
+// workspace.ts's pdf.js renderer chain can't load.
+export function workspacePageNumber(
+  docs: OpenDocument[],
+  doc: OpenDocument,
+  pageId: string,
+): number | null {
+  const index = doc.pages.findIndex((p) => p.id === pageId);
+  if (index === -1) return null;
+  let before = 0;
+  for (const d of docs) {
+    if (d.path !== doc.path) continue;
+    if (d.id === doc.id) return before + index + 1;
+    before += d.pages.length;
+  }
+  return null;
+}
 
 export interface CommitDocumentPlan {
   name: string;

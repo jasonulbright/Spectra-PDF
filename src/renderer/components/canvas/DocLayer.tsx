@@ -5,6 +5,7 @@ import { DocumentRow } from './DocumentRow';
 import type { DocPlacement } from '../../canvas/layout';
 import type { DragSource } from '../../canvas/usePageDrag';
 import type { PageAnnotation } from '../../state/types';
+import type { RedactionMark } from '../../lib/redaction';
 import type { CanvasTool, StampPreset } from './PageCell';
 
 interface DocLayerProps {
@@ -25,11 +26,19 @@ interface DocLayerProps {
   tool: CanvasTool;
   annotationColor?: string;
   stampPreset?: StampPreset | null;
+  redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
+  onAddRedactionMark: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onRemoveRedactionMark: (markId: string) => void;
 }
 
 function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
@@ -71,12 +80,15 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               tool={props.tool}
               annotationColor={props.annotationColor}
               stampPreset={props.stampPreset}
+              redactionMarksByPage={props.redactionMarksByPage}
               onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
               onAddAnnotation={props.onAddAnnotation}
               onUpdateAnnotation={props.onUpdateAnnotation}
               onRecolorAnnotation={props.onRecolorAnnotation}
               onRemoveAnnotation={props.onRemoveAnnotation}
+              onAddRedactionMark={props.onAddRedactionMark}
+              onRemoveRedactionMark={props.onRemoveRedactionMark}
             />
           </div>
         );

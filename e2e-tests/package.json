@@ -6,7 +6,7 @@
   "scripts": {
     "test": "wdio run wdio.conf.ts",
     "test:headed": "wdio run wdio.conf.ts --logLevel info",
-    "build:app": "cross-env VITE_E2E=1 npx --prefix .. tauri build --debug --no-bundle"
+    "build:app": "cd .. && cross-env VITE_E2E=1 npx tauri build --debug --no-bundle"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.0",

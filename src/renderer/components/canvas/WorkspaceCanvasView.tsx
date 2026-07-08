@@ -1,9 +1,14 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { usePdfProxies } from '../../hooks/usePdfProxies';
 import { computeLayout, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
 import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
+import { getDocumentProxy } from '../../lib/pdfDocCache';
+import { buildRedactionRegions } from '../../lib/redaction';
+import type { RedactionMark, RedactionRegion } from '../../lib/redaction';
+import { workspacePageNumber } from '../../lib/workspace-commit';
+import { TEST_HARNESS_ENABLED, registerCanvasRedaction } from '../../testHarness';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
 import { Canvas } from './Canvas';
@@ -13,7 +18,7 @@ import { AddDocGhost, GhostRow } from './DropGhost';
 import { deriveDropGhosts } from './ghost-size';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import type { DragSource } from '../../canvas/usePageDrag';
-import type { OpenDocument, PageAnnotation } from '../../state/types';
+import type { PageAnnotation, PdfBuffer } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { STAMP_PRESETS, ANNOTATION_PALETTE } from './PageCell';
 import { CommentSidebar } from './CommentSidebar';
@@ -29,26 +34,16 @@ interface WorkspaceCanvasViewProps {
   // workspace-position numbering; the engine gate commits before reading).
   onExtractText: (path: string, pageNumber: number) => void;
   onApplyChanges: () => void;
+  // Run the engine's redact on one file — App routes this through
+  // performOperation, so the commit gate flushes pending page edits, a
+  // snapshot lands on the undo chain, and the buffer reloads after.
+  onRedactFile: (path: string, regions: RedactionRegion[]) => Promise<void>;
 }
 
-// A page's 1-based position within its file's committed order: pages of all
-// same-path documents in workspace order. This is what the file looks like
-// after the commit bridge materializes pending edits.
-function workspacePageNumber(
-  docs: OpenDocument[],
-  doc: OpenDocument,
-  pageId: string,
-): number | null {
-  const index = doc.pages.findIndex((p) => p.id === pageId);
-  if (index === -1) return null;
-  let before = 0;
-  for (const d of docs) {
-    if (d.path !== doc.path) continue;
-    if (d.id === doc.id) return before + index + 1;
-    before += d.pages.length;
-  }
-  return null;
-}
+// Stable empties so the "no pending marks" hot path never breaks the layer
+// components' memoization when unrelated state changes.
+const NO_MARKS: RedactionMark[] = [];
+const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
 
 export function WorkspaceCanvasView({
   onOpenFiles,
@@ -56,6 +51,7 @@ export function WorkspaceCanvasView({
   onInspectPage,
   onExtractText,
   onApplyChanges,
+  onRedactFile,
 }: WorkspaceCanvasViewProps): React.ReactElement {
   const state = useAppState();
   const dispatch = useAppDispatch();
@@ -75,6 +71,14 @@ export function WorkspaceCanvasView({
   const [toolColor, setToolColor] = useState<string | null>(null);
   const [stampPreset, setStampPreset] = useState<StampPreset | null>(null);
   const [showComments, setShowComments] = useState(false);
+  // Pending redaction marks — transient view state, deliberately NOT the
+  // page-edit tier (see lib/redaction.ts for why). They survive tool
+  // switches and in-memory page edits, and die when their file's buffer
+  // changes underneath them or the canvas unmounts.
+  const [marks, setMarks] = useState<RedactionMark[]>([]);
+  const [confirmRedact, setConfirmRedact] = useState(false);
+  const [redacting, setRedacting] = useState(false);
+  const [redactError, setRedactError] = useState<string | null>(null);
 
   // Escape returns to Select from the highlight tool.
   React.useEffect(() => {
@@ -109,6 +113,157 @@ export function WorkspaceCanvasView({
       dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId }),
     [dispatch],
   );
+
+  // Marks whose page still exists in the workspace — a deleted page's marks
+  // drop out of the count and the apply payload rather than being guessed at.
+  const liveMarks = useMemo(() => {
+    if (marks.length === 0) return NO_MARKS;
+    return marks.filter((m) => docs.some((d) => d.pages.some((p) => p.id === m.pageId)));
+  }, [marks, docs]);
+
+  const redactionMarksByPage = useMemo(() => {
+    if (liveMarks.length === 0) return NO_MARKS_BY_PAGE;
+    const map = new Map<string, RedactionMark[]>();
+    for (const m of liveMarks) {
+      const arr = map.get(m.pageId);
+      if (arr) arr.push(m);
+      else map.set(m.pageId, [m]);
+    }
+    return map;
+  }, [liveMarks]);
+
+  const onAddRedactionMark = useCallback(
+    (
+      docId: string,
+      pageId: string,
+      rect: { x: number; y: number; w: number; h: number },
+      rotationAtDraw: 0 | 90 | 180 | 270,
+    ) => {
+      const doc = docs.find((d) => d.id === docId);
+      if (!doc) return;
+      setMarks((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw },
+      ]);
+    },
+    [docs],
+  );
+
+  const onRemoveRedactionMark = useCallback(
+    (markId: string) => setMarks((prev) => prev.filter((m) => m.id !== markId)),
+    [],
+  );
+
+  // Invalidate marks when their file's bytes change underneath them (commit,
+  // whole-file op, undo, reopen) or the file closes. PageRef ids are
+  // positional (`path#pN`), so after a reindex a surviving mark could bind to
+  // a DIFFERENT physical page — for a destructive tool, dropping the marks is
+  // the only safe answer. Buffer identity is exactly what the indexer keys
+  // on, so this fires precisely when the workspace is about to be rebuilt.
+  const lastBuffersRef = useRef<Map<string, PdfBuffer | null>>(new Map());
+  useEffect(() => {
+    const current = new Map<string, PdfBuffer | null>();
+    for (const [path, f] of state.files) current.set(path, f.buffer);
+    const prev = lastBuffersRef.current;
+    lastBuffersRef.current = current;
+    const invalidated = new Set<string>();
+    for (const [path, buf] of current) {
+      if (prev.has(path) && prev.get(path) !== buf) invalidated.add(path);
+    }
+    for (const path of prev.keys()) {
+      if (!current.has(path)) invalidated.add(path); // closed — a later reopen reuses the same positional ids
+    }
+    if (invalidated.size > 0) {
+      setMarks((prevMarks) => prevMarks.filter((m) => !invalidated.has(m.path)));
+    }
+  }, [state.files]);
+
+  // Convert every live mark into engine regions and redact file by file.
+  // Geometry (crop-intersected box + baked /Rotate) is read from the CURRENT
+  // buffer's pdf.js proxy — the same bytes the marks were drawn against; the
+  // commit gate then materializes pending page edits before the engine reads
+  // the file, so workspace page numbers and composed rotations line up with
+  // what lands on disk. Resolves with per-file failure messages (empty =
+  // success) — the confirm button surfaces them in the error banner, the test
+  // harness rethrows them.
+  // Ref, not just state: two clicks in the same tick both read a stale
+  // `redacting === false` (same failure mode as the commit-race double-click,
+  // see the punchlist's reentrancy tripwire note).
+  const applyingRef = useRef(false);
+  const applyMarks = useCallback(async (): Promise<string[]> => {
+    const toApply = liveMarks;
+    if (toApply.length === 0 || applyingRef.current) return [];
+    applyingRef.current = true;
+    setRedacting(true);
+    setRedactError(null);
+    try {
+      const { files: payloads } = await buildRedactionRegions(docs, toApply, async (page) => {
+        const f = state.files.get(page.sourceDocId);
+        if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+        const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+        const p = await proxy.getPage(page.sourcePageIndex + 1);
+        const [vx0, vy0, vx1, vy1] = p.view;
+        return {
+          box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+          bakedRotate: p.rotate,
+        };
+      });
+      const failures: string[] = [];
+      for (const payload of payloads) {
+        try {
+          await onRedactFile(payload.path, payload.regions);
+          const applied = new Set(payload.markIds);
+          setMarks((prev) => prev.filter((m) => !applied.has(m.id)));
+        } catch (err) {
+          const name = payload.path.split(/[\\/]/).pop() || payload.path;
+          failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (failures.length > 0) {
+        setRedactError(`Redaction failed — ${failures.join('; ')}. Those marks are still pending.`);
+      }
+      return failures;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setRedactError(`Redaction failed — ${msg}. The marks are still pending.`);
+      return [msg];
+    } finally {
+      applyingRef.current = false;
+      setRedacting(false);
+    }
+  }, [liveMarks, docs, state.files, onRedactFile]);
+
+  // Harness bridge (e2e builds only): redaction marks live here, out of the
+  // reducer's reach, so the canvas registers its own handlers while mounted.
+  // Refs keep the registration stable across renders.
+  const applyMarksRef = useRef(applyMarks);
+  applyMarksRef.current = applyMarks;
+  const harnessAddMarkRef = useRef<
+    (rect: { x: number; y: number; w: number; h: number }) => { markId: string; docId: string; pageId: string } | null
+  >(() => null);
+  harnessAddMarkRef.current = (rect) => {
+    const doc = docs.find((d) => d.path === state.activeFileId);
+    const page = doc?.pages[0];
+    if (!doc || !page) return null;
+    const id = crypto.randomUUID();
+    setMarks((prev) => [
+      ...prev,
+      { id, path: doc.path, pageId: page.id, rect, rotationAtDraw: page.rotation },
+    ]);
+    return { markId: id, docId: doc.id, pageId: page.id };
+  };
+  const liveMarksRef = useRef(liveMarks);
+  liveMarksRef.current = liveMarks;
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerCanvasRedaction({
+      addMarkToFirstPage: (rect) => harnessAddMarkRef.current(rect),
+      apply: () => applyMarksRef.current(),
+      clear: () => setMarks([]),
+      count: () => liveMarksRef.current.length,
+    });
+    return () => registerCanvasRedaction(null);
+  }, []);
 
   const movePageInto = useCallback(
     (source: DragSource, targetDocId: string, index: number) => {
@@ -313,12 +468,15 @@ export function WorkspaceCanvasView({
           tool={tool}
           annotationColor={toolColor ?? undefined}
           stampPreset={stampPreset}
+          redactionMarksByPage={redactionMarksByPage}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
           onUpdateAnnotation={onUpdateAnnotation}
           onRecolorAnnotation={onRecolorAnnotation}
           onRemoveAnnotation={onRemoveAnnotation}
+          onAddRedactionMark={onAddRedactionMark}
+          onRemoveRedactionMark={onRemoveRedactionMark}
         />
         {drag.dropTarget?.kind === 'between' && (
           <div
@@ -384,6 +542,14 @@ export function WorkspaceCanvasView({
           >
             Stamp
           </button>
+          <button
+            data-testid="tool-redact"
+            title="Drag a box on a page to mark it for redaction (Esc to exit)"
+            onClick={() => setTool(tool === 'redact' ? 'select' : 'redact')}
+            className={`px-3 py-1.5 text-xs font-medium ${tool === 'redact' ? 'bg-red-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
+          >
+            Redact
+          </button>
         </div>
         {tool === 'stamp' && (
           <div
@@ -437,6 +603,29 @@ export function WorkspaceCanvasView({
             ))}
           </div>
         )}
+        {liveMarks.length > 0 && (
+          <>
+            <button
+              data-testid="redact-apply-btn"
+              disabled={redacting}
+              onClick={() => setConfirmRedact(true)}
+              className="px-3 py-1.5 text-xs text-white bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded-full font-medium shadow-lg"
+            >
+              {redacting
+                ? 'Redacting…'
+                : `Redact ${liveMarks.length} region${liveMarks.length === 1 ? '' : 's'}`}
+            </button>
+            <button
+              data-testid="redact-clear-btn"
+              disabled={redacting}
+              onClick={() => setMarks([])}
+              title="Clear all pending redaction marks"
+              className="px-3 py-1.5 text-xs bg-neutral-800/90 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded-full font-medium shadow-lg"
+            >
+              Clear
+            </button>
+          </>
+        )}
         {dirty && (
           <button
             data-testid="apply-page-edits-btn"
@@ -480,6 +669,71 @@ export function WorkspaceCanvasView({
           onRemoveAnnotation={onRemoveAnnotation}
           onClose={() => setShowComments(false)}
         />
+      )}
+
+      {redactError && (
+        <div
+          data-testid="redact-error"
+          className="absolute bottom-16 right-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+        >
+          <span className="flex-1">{redactError}</span>
+          <button
+            onClick={() => setRedactError(null)}
+            className="text-red-300 hover:text-red-100"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Redaction is the one canvas action that destroys file content, so it
+          alone gets an explicit confirm step. */}
+      {confirmRedact && (
+        <div
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center"
+          onClick={() => setConfirmRedact(false)}
+        >
+          <div
+            className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[420px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3 border-b border-neutral-800">
+              <h3 className="text-sm font-semibold">Redact content</h3>
+            </div>
+            <div className="px-5 py-4 text-sm text-neutral-300 space-y-2">
+              <p>
+                Permanently remove the content under {liveMarks.length} marked region
+                {liveMarks.length === 1 ? '' : 's'} across{' '}
+                {new Set(liveMarks.map((m) => m.pageId)).size} page
+                {new Set(liveMarks.map((m) => m.pageId)).size === 1 ? '' : 's'}?
+              </p>
+              <p className="text-xs text-neutral-400">
+                Text and images under each region are removed from the file's content, not just
+                covered. Undo can restore the file while it stays open; once saved, the content is
+                gone for good.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-neutral-800">
+              <button
+                data-testid="redact-cancel-btn"
+                onClick={() => setConfirmRedact(false)}
+                className="px-3 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                data-testid="redact-confirm-btn"
+                onClick={() => {
+                  setConfirmRedact(false);
+                  void applyMarks();
+                }}
+                className="px-3 py-1 text-xs text-white bg-red-600 hover:bg-red-500 rounded font-medium"
+              >
+                Redact
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

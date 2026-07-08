@@ -36,6 +36,32 @@ export interface TestAnnotationInput {
   points?: number[];
 }
 
+/**
+ * Redaction marks are transient WorkspaceCanvasView state (not reducer
+ * state), so the annotation hooks' dispatch-from-App pattern can't reach
+ * them. Instead the canvas registers its own handlers here while mounted;
+ * harness methods poll the slot the same way addAnnotation polls the async
+ * indexer. `apply` runs the exact code path the confirm dialog's Redact
+ * button runs and resolves with per-file failure messages (empty = success).
+ */
+export interface CanvasRedactionHandlers {
+  addMarkToFirstPage: (rect: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }) => { markId: string; docId: string; pageId: string } | null;
+  apply: () => Promise<string[]>;
+  clear: () => void;
+  count: () => number;
+}
+
+let canvasRedaction: CanvasRedactionHandlers | null = null;
+
+export function registerCanvasRedaction(handlers: CanvasRedactionHandlers | null): void {
+  canvasRedaction = handlers;
+}
+
 export interface TestHarness {
   /** Open one or more PDFs by absolute path, bypassing the OS dialog. */
   openByPaths: (paths: string[]) => Promise<void>;
@@ -87,6 +113,24 @@ export interface TestHarness {
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
   commitPendingEdits: () => Promise<void>;
+  /**
+   * Add a pending redaction mark to the active file's first workspace page,
+   * bypassing pointer-drag simulation (same WebDriver constraint as
+   * addAnnotation). Polls for the canvas view + async indexer. The canvas
+   * view must be mounted (setView('canvas')) first.
+   */
+  addRedactionMark: (
+    rect: { x: number; y: number; w: number; h: number },
+    timeoutMs?: number,
+  ) => Promise<{ markId: string; docId: string; pageId: string }>;
+  /** Apply all pending redaction marks via the same path as the confirm
+   * dialog's Redact button (commit gate → snapshot → engine → reload).
+   * Rejects if any file's redaction failed. */
+  applyRedactions: () => Promise<void>;
+  /** Drop all pending redaction marks (the Clear button). */
+  clearRedactionMarks: () => void;
+  /** Number of pending redaction marks the canvas currently shows. */
+  getRedactionMarkCount: () => number;
 }
 
 export interface TestHarnessDeps {
@@ -293,6 +337,38 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
+    addRedactionMark: async (rect, timeoutMs = 10_000) => {
+      const deadline = Date.now() + timeoutMs;
+      // Waits for the canvas view to mount (registration) AND the indexer to
+      // produce a first page (addMarkToFirstPage returns null until then).
+      let added = canvasRedaction?.addMarkToFirstPage(rect) ?? null;
+      while (!added && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        added = canvasRedaction?.addMarkToFirstPage(rect) ?? null;
+      }
+      if (!added) {
+        const msg = `addRedactionMark: no canvas page appeared within ${timeoutMs}ms`;
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return added;
+    },
+    applyRedactions: async () => {
+      if (!canvasRedaction) {
+        const msg = 'applyRedactions: canvas view not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        const failures = await canvasRedaction.apply();
+        if (failures.length > 0) throw new Error(failures.join('; '));
+      } catch (err) {
+        captureError('applyRedactions', err);
+        throw err;
+      }
+    },
+    clearRedactionMarks: () => canvasRedaction?.clear(),
+    getRedactionMarkCount: () => canvasRedaction?.count() ?? 0,
   };
 
   window.__SPECTRA_TEST__ = harness;

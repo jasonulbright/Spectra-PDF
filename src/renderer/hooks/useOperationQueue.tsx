@@ -24,6 +24,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   set_metadata: 'Update Metadata',
   set_outline: 'Save Bookmarks',
   unlock: 'Unlock',
+  redact: 'Redact',
 };
 
 /** Methods that are internal lookups, not user-facing operations. */
@@ -77,6 +78,10 @@ export function getFriendlyName(method: string, params: Record<string, unknown> 
       return `${base} — ${file}`;
     case 'merge':
       return `${base} (${Array.isArray(params.files) ? params.files.length : '?'} files)`;
+    case 'redact': {
+      const n = Array.isArray(params.regions) ? params.regions.length : 0;
+      return `${base} ${n} region${n === 1 ? '' : 's'} — ${file}`;
+    }
     default:
       return file ? `${base} — ${file}` : base;
   }

@@ -183,3 +183,53 @@ export async function commitPendingEdits(): Promise<void> {
     throw new Error(`commitPendingEdits failed: ${result.replace(ERROR_TAG, '')}`);
   }
 }
+
+export interface RedactionMarkRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export async function addRedactionMark(
+  rect: RedactionMarkRect,
+): Promise<{ markId: string; docId: string; pageId: string }> {
+  const result = await browser.executeAsync<
+    { markId: string; docId: string; pageId: string } | string,
+    [RedactionMarkRect]
+  >(
+    function (r, done) {
+      (window as any).__SPECTRA_TEST__.addRedactionMark(r)
+        .then((res: unknown) => done(res as any))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    rect,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`addRedactionMark failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
+export async function applyRedactions(): Promise<void> {
+  const result = await browser.executeAsync<string | null, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.applyRedactions()
+      .then(() => done(null))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  });
+  if (typeof result === 'string') {
+    throw new Error(`applyRedactions failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+export async function clearRedactionMarks(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.clearRedactionMarks();
+  });
+}
+
+export async function getRedactionMarkCount(): Promise<number> {
+  return await browser.execute<number, []>(function () {
+    return (window as any).__SPECTRA_TEST__.getRedactionMarkCount();
+  });
+}

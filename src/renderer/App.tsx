@@ -323,6 +323,18 @@ function AppContent(): React.ReactElement {
     }
   }, [state.files, call, reloadFile, dispatch]);
 
+  // Canvas redaction — same snapshot/gate/reload flow as the inspector ops.
+  // Destructive by design, so it must NOT use the panels' save-to-new-file
+  // pattern: the snapshot keeps it undoable while the file is open, and the
+  // gate materializes pending page edits so the engine sees the page order
+  // and rotations the marks were drawn against.
+  const handleRedactFile = useCallback(
+    async (path: string, regions: { page: number; rect: [number, number, number, number] }[]) => {
+      await performOperation(path, 'redact', { regions });
+    },
+    [performOperation],
+  );
+
   // Inspector overlay ops — engine-backed, so they run against the committed
   // file (the inspector opener commits before handing over a page number).
   const handleInspectorRotate = useCallback(async (page: number, angle: number) => {
@@ -789,6 +801,7 @@ function AppContent(): React.ReactElement {
                 onInspectPage={(path, pageNumber) => void handleInspectPage(path, pageNumber)}
                 onExtractText={handleExtractFromCanvas}
                 onApplyChanges={() => void commitAndReport()}
+                onRedactFile={handleRedactFile}
               />
               {inspector && inspectorFile?.buffer && (
                 <div className="absolute inset-0 z-40 bg-neutral-900">

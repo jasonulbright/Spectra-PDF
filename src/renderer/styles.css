@@ -558,6 +558,36 @@
   border-color: #ffd54a;
 }
 
+.page-annot-band.band-redact {
+  background: rgba(224, 57, 62, 0.22);
+  border-color: #e0393e;
+}
+
+/* Pending redaction marks: unmistakably not a highlight — dark fill, red
+   border, corner tag. Same pointer contract as .page-annot: the box never
+   blocks page interactions, only the × takes events. The label clips itself
+   (not the box) so the outside-the-corner × is never cut off. */
+.page-redact {
+  position: absolute;
+  background: rgba(12, 12, 16, 0.55);
+  border: 1.5px solid #e0393e;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.page-redact-label {
+  display: inline-block;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  padding: 1px 3px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: rgba(255, 122, 126, 0.9);
+}
+
 /* Annotation tool active: crosshair over pages signals draw-a-box mode. */
 .canvas-view.annotating .page {
   cursor: crosshair;

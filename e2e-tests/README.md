@@ -55,7 +55,7 @@ npm test
 WebdriverIO spawns `tauri-driver` on port 4444, launches the binary, and
 runs every `specs/*.spec.ts` file.
 
-## What's covered (v1)
+## What's covered
 
 | Spec | Verifies |
 |---|---|
@@ -64,6 +64,9 @@ runs every `specs/*.spec.ts` file.
 | `03-view-switch.spec.ts` | Header view switcher (Home / Tools / Pages) works |
 | `04-save-as.spec.ts` | Working copy serializes to disk as a non-empty PDF |
 | `05-malformed-refuse.spec.ts` | Structurally broken PDF is refused, app stays alive |
+| `06-annotations.spec.ts` | Highlight/stamp/recolor bake into the saved file via the commit bridge |
+| `07-import-existing-annotations.spec.ts` | Pre-existing annotations import, edit, and delete round-trip |
+| `08-redaction.spec.ts` | Marked region's text is stripped from the saved file; unmarked text and other pages survive |
 
 ## Adding a spec
 

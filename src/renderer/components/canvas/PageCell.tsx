@@ -2,9 +2,11 @@ import { memo, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthOf } from '../../canvas/layout';
+import { projectMarkRect } from '../../lib/redaction';
+import type { RedactionMark } from '../../lib/redaction';
 import { PageView } from './PageView';
 
-export type CanvasTool = 'select' | 'highlight' | 'freetext' | 'ink' | 'stamp';
+export type CanvasTool = 'select' | 'highlight' | 'freetext' | 'ink' | 'stamp' | 'redact';
 
 export interface AnnotationRect {
   x: number;
@@ -62,6 +64,9 @@ interface PageCellProps {
   // Selected stamp preset — required for the Stamp tool to place anything;
   // clicks are ignored while none is picked.
   stampPreset?: StampPreset | null;
+  // Pending redaction marks on this page (transient view state — see
+  // lib/redaction.ts); undefined when none.
+  redactionMarks?: RedactionMark[];
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
@@ -70,6 +75,13 @@ interface PageCellProps {
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
+  onAddRedactionMark: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onRemoveRedactionMark: (markId: string) => void;
 }
 
 function PageCellImpl({
@@ -84,6 +96,7 @@ function PageCellImpl({
   tool,
   annotationColor,
   stampPreset,
+  redactionMarks,
   onSelectPage,
   onOpenPage,
   onPageContextMenu,
@@ -92,6 +105,8 @@ function PageCellImpl({
   onUpdateAnnotation,
   onRecolorAnnotation,
   onRemoveAnnotation,
+  onAddRedactionMark,
+  onRemoveRedactionMark,
 }: PageCellProps): React.JSX.Element {
   const displayWidth = displayWidthOf(page);
   const annotateMode = tool !== 'select';
@@ -199,6 +214,9 @@ function PageCellImpl({
       y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
     });
     const start = norm(e.clientX, e.clientY);
+    // 'redact' shares the band mechanics but commits a transient mark, not a
+    // PageAnnotation. `tool` is stable for the drag's duration — a mid-drag
+    // tool switch cancels via the annotateMode effect below.
     const kind = tool === 'freetext' ? 'freetext' : 'highlight';
     let latest: AnnotationRect = { ...start, w: 0, h: 0 };
     setBand(latest);
@@ -221,14 +239,18 @@ function PageCellImpl({
       cancelBand.current = null;
       setBand(null);
       if (commit && latest.w > 0.01 && latest.h > 0.01) {
-        const annotation: PageAnnotation = {
-          id: crypto.randomUUID(),
-          kind,
-          ...latest,
-          color: annotationColor ?? defaultColorFor(kind),
-        };
-        onAddAnnotation(docId, page.id, annotation);
-        if (kind === 'freetext') setEditing(annotation.id);
+        if (tool === 'redact') {
+          onAddRedactionMark(docId, page.id, latest, page.rotation);
+        } else {
+          const annotation: PageAnnotation = {
+            id: crypto.randomUUID(),
+            kind,
+            ...latest,
+            color: annotationColor ?? defaultColorFor(kind),
+          };
+          onAddAnnotation(docId, page.id, annotation);
+          if (kind === 'freetext') setEditing(annotation.id);
+        }
       }
     };
     const onUp = (): void => finish(true);
@@ -430,9 +452,41 @@ function PageCellImpl({
         </div>
         );
       })}
+      {(redactionMarks ?? []).map((m) => {
+        // Marks store the rect as drawn; a page rotated in memory since then
+        // just changes the projection (user space is unmoved by /Rotate).
+        const r = projectMarkRect(m, page.rotation);
+        return (
+          <div
+            key={m.id}
+            className="page-redact"
+            style={{
+              left: `${r.x * 100}%`,
+              top: `${r.y * 100}%`,
+              width: `${r.w * 100}%`,
+              height: `${r.h * 100}%`,
+            }}
+          >
+            <span className="page-redact-label">REDACT</span>
+            {(tool === 'select' || tool === 'redact') && (
+              <button
+                className="page-annot-x"
+                title="Remove redaction mark"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveRedactionMark(m.id);
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+        );
+      })}
       {band && (
         <div
-          className="page-annot page-annot-band"
+          className={'page-annot page-annot-band' + (tool === 'redact' ? ' band-redact' : '')}
           style={{
             left: `${band.x * 100}%`,
             top: `${band.y * 100}%`,
