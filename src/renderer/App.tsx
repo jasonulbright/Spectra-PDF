@@ -603,6 +603,8 @@ function AppContent(): React.ReactElement {
       getFirstPage: () => harnessFirstPageRef.current(),
       dispatchAddAnnotation: (docId, pageId, annotation) =>
         dispatch({ type: 'ADD_ANNOTATION', docId, pageId, annotation }),
+      dispatchRecolorAnnotation: (docId, pageId, annotationId, color) =>
+        dispatch({ type: 'RECOLOR_ANNOTATION', docId, pageId, annotationId, color }),
       commitPendingEdits: () => commitRef.current(),
     });
   }, [openByPaths, dispatch]);

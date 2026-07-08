@@ -656,6 +656,35 @@ describe('ADD_ANNOTATION / REMOVE_ANNOTATION', () => {
     ).toBe(updated);
   });
 
+  it('RECOLOR_ANNOTATION edits the color and is undoable; same-color is a no-op', () => {
+    const a = makeFile('a.pdf', 1);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));
+    const withAnn = appReducer(stateWith([a], [doc]), {
+      type: 'ADD_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotation: ann,
+    });
+    const recolored = appReducer(withAnn, {
+      type: 'RECOLOR_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotationId: 'ann1',
+      color: '#2f6fed',
+    });
+    expect(recolored.workspace.documents[0].pages[0].annotations![0].color).toBe('#2f6fed');
+    expect(recolored.pageUndoStack).toHaveLength(2);
+    expect(
+      appReducer(recolored, {
+        type: 'RECOLOR_ANNOTATION',
+        docId: 'a.pdf#0',
+        pageId: 'a.pdf#p0',
+        annotationId: 'ann1',
+        color: '#2f6fed',
+      }),
+    ).toBe(recolored);
+  });
+
   it('removes by id; unknown ids are a no-op', () => {
     const a = makeFile('a.pdf', 1);
     const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));

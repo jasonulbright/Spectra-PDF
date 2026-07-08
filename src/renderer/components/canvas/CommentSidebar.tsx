@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { OpenDocument } from '../../state/types';
+import { ANNOTATION_PALETTE } from './PageCell';
 
 interface CommentEntry {
   docId: string;
@@ -38,6 +39,7 @@ interface CommentSidebarProps {
   docs: OpenDocument[];
   onSelectPage: (docId: string, pageId: string) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
+  onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
   onClose: () => void;
 }
@@ -50,6 +52,7 @@ export function CommentSidebar({
   docs,
   onSelectPage,
   onUpdateAnnotation,
+  onRecolorAnnotation,
   onRemoveAnnotation,
   onClose,
 }: CommentSidebarProps): React.JSX.Element {
@@ -112,16 +115,32 @@ export function CommentSidebar({
                 {e.note}
               </p>
             )}
-            <button
-              className="comment-sidebar-item-remove"
-              title="Remove"
-              onClick={(ev) => {
-                ev.stopPropagation();
-                onRemoveAnnotation(e.docId, e.pageId, e.annotationId);
-              }}
-            >
-              Remove
-            </button>
+            <div className="comment-sidebar-item-actions">
+              <div className="comment-sidebar-item-recolor">
+                {ANNOTATION_PALETTE.map((c) => (
+                  <button
+                    key={c}
+                    className="comment-sidebar-item-recolor-dot"
+                    title={`Recolor to ${c}`}
+                    style={{ backgroundColor: c }}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      onRecolorAnnotation(e.docId, e.pageId, e.annotationId, c);
+                    }}
+                  />
+                ))}
+              </div>
+              <button
+                className="comment-sidebar-item-remove"
+                title="Remove"
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onRemoveAnnotation(e.docId, e.pageId, e.annotationId);
+                }}
+              >
+                Remove
+              </button>
+            </div>
           </div>
         ))}
       </div>

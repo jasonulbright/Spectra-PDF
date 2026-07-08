@@ -431,6 +431,26 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }));
       return applyPageEdit(state, documents, [doc.path]);
     }
+    case 'RECOLOR_ANNOTATION': {
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      const page = doc?.pages.find((p) => p.id === action.pageId);
+      const existing = page?.annotations?.find((a) => a.id === action.annotationId);
+      if (!doc || !existing || existing.color === action.color) return state;
+      const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
+        ...d,
+        pages: d.pages.map((p) =>
+          p.id === action.pageId
+            ? {
+                ...p,
+                annotations: p.annotations!.map((a) =>
+                  a.id === action.annotationId ? { ...a, color: action.color } : a,
+                ),
+              }
+            : p,
+        ),
+      }));
+      return applyPageEdit(state, documents, [doc.path]);
+    }
     case 'REMOVE_ANNOTATION': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       const page = doc?.pages.find((p) => p.id === action.pageId);

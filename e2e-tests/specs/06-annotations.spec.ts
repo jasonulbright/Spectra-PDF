@@ -14,6 +14,7 @@ import {
   setView,
   saveActiveAs,
   addAnnotation,
+  recolorAnnotation,
   commitPendingEdits,
 } from '../support/harness.js';
 
@@ -45,14 +46,17 @@ describe('annotations survive the commit round trip', () => {
   // each test its own source file so there's nothing stale to reuse.
   let samplePdfA: string;
   let samplePdfB: string;
+  let samplePdfC: string;
 
   before(() => {
     tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-annot-'));
     dest = resolve(tmp, 'annotated.pdf');
     samplePdfA = resolve(tmp, 'sample-a.pdf');
     samplePdfB = resolve(tmp, 'sample-b.pdf');
+    samplePdfC = resolve(tmp, 'sample-c.pdf');
     copyFileSync(SAMPLE_PDF, samplePdfA);
     copyFileSync(SAMPLE_PDF, samplePdfB);
+    copyFileSync(SAMPLE_PDF, samplePdfC);
   });
 
   after(() => {
@@ -118,6 +122,36 @@ describe('annotations survive the commit round trip', () => {
     expect(annots).toHaveLength(1);
     expect(annots[0].subtype).toBe('Stamp');
     expect(annots[0].contentsObj?.str).toBe('APPROVED');
+    await pdf.loadingTask.destroy();
+  });
+
+  it('a recolored annotation bakes with its NEW color, not the one it was created with', async () => {
+    const recolorDest = resolve(tmp, 'recolored.pdf');
+    await openByPaths([samplePdfC]);
+    await setView('canvas');
+
+    const { docId, pageId, annotationId } = await addAnnotation({
+      kind: 'highlight',
+      x: 0.1,
+      y: 0.15,
+      w: 0.3,
+      h: 0.1,
+      color: '#ffd54a', // yellow at creation
+      note: 'recolor me',
+    });
+    await recolorAnnotation(docId, pageId, annotationId, '#2f6fed'); // blue
+    await commitPendingEdits();
+    await saveActiveAs(recolorDest);
+
+    const pdf = await loadPdf(recolorDest);
+    const page = await pdf.getPage(1);
+    const annots = (await page.getAnnotations()) as { subtype: string; color: number[] }[];
+    expect(annots).toHaveLength(1);
+    expect(annots[0].subtype).toBe('Square');
+    // pdf.js reports annotation color as a typed array of 0..255 RGB;
+    // #2f6fed = (47, 111, 237). Array.from avoids a typed-array-vs-plain-array
+    // toEqual mismatch.
+    expect(Array.from(annots[0].color)).toEqual([47, 111, 237]);
     await pdf.loadingTask.destroy();
   });
 });

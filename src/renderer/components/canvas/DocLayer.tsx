@@ -28,6 +28,7 @@ interface DocLayerProps {
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
+  onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
 }
 
@@ -74,6 +75,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onPagePointerDown={props.onPagePointerDown}
               onAddAnnotation={props.onAddAnnotation}
               onUpdateAnnotation={props.onUpdateAnnotation}
+              onRecolorAnnotation={props.onRecolorAnnotation}
               onRemoveAnnotation={props.onRemoveAnnotation}
             />
           </div>

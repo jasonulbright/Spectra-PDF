@@ -28,6 +28,7 @@ interface DocumentRowProps {
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
+  onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
 }
 
@@ -48,6 +49,7 @@ function DocumentRowImpl({
   onPagePointerDown,
   onAddAnnotation,
   onUpdateAnnotation,
+  onRecolorAnnotation,
   onRemoveAnnotation,
 }: DocumentRowProps): React.JSX.Element {
   const strip: React.JSX.Element[] = [];
@@ -82,6 +84,7 @@ function DocumentRowImpl({
         onPagePointerDown={onPagePointerDown}
         onAddAnnotation={onAddAnnotation}
         onUpdateAnnotation={onUpdateAnnotation}
+        onRecolorAnnotation={onRecolorAnnotation}
         onRemoveAnnotation={onRemoveAnnotation}
       />,
     );

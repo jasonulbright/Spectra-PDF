@@ -524,6 +524,35 @@
   opacity: 1;
 }
 
+/* Per-annotation recolor row — opposite corner from the remove button. */
+.page-annot-recolor {
+  position: absolute;
+  top: -10px;
+  left: -2px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(20, 20, 24, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: auto;
+}
+
+.canvas-view .page:hover .page-annot-recolor {
+  opacity: 1;
+}
+
+.page-annot-recolor-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 0;
+}
+
 .page-annot-band {
   background: rgba(255, 213, 74, 0.35);
   border-color: #ffd54a;
@@ -676,15 +705,35 @@
   margin-bottom: 4px;
 }
 
-.comment-sidebar-item-remove {
-  font-size: 10px;
-  color: #a3a3a3;
+.comment-sidebar-item-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
 
-.comment-sidebar-item:hover .comment-sidebar-item-remove {
+.comment-sidebar-item:hover .comment-sidebar-item-actions {
   opacity: 1;
+}
+
+.comment-sidebar-item-recolor {
+  display: flex;
+  gap: 3px;
+}
+
+.comment-sidebar-item-recolor-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 0;
+}
+
+.comment-sidebar-item-remove {
+  font-size: 10px;
+  color: #a3a3a3;
 }
 
 .page-annot-editor {

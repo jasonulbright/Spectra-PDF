@@ -111,6 +111,7 @@ export type AppAction =
   | { type: 'DELETE_PAGE_REF'; docId: string; pageId: string }
   | { type: 'ADD_ANNOTATION'; docId: string; pageId: string; annotation: PageAnnotation }
   | { type: 'UPDATE_ANNOTATION'; docId: string; pageId: string; annotationId: string; note: string }
+  | { type: 'RECOLOR_ANNOTATION'; docId: string; pageId: string; annotationId: string; color: string }
   | { type: 'REMOVE_ANNOTATION'; docId: string; pageId: string; annotationId: string }
   | { type: 'SPLIT_DOC'; docId: string; atIndex: number; newDocId: string; newName: string }
   | { type: 'ROTATE_PAGE_REF'; docId: string; pageId: string; rotation: 0 | 90 | 180 | 270 }

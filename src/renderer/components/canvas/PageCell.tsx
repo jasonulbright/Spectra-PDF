@@ -31,6 +31,10 @@ export const STAMP_PRESETS: StampPreset[] = [
 const STAMP_W = 0.32;
 const STAMP_H = 0.09;
 
+// Shared by the floating toolbar's "color for new annotations" picker and
+// each annotation's own hover recolor row.
+export const ANNOTATION_PALETTE = ['#ffd54a', '#16161a', '#2f6fed', '#e0393e', '#2fbf71', '#a855f7'];
+
 const HIGHLIGHT_COLOR = '#ffd54a';
 const FREETEXT_COLOR = '#16161a';
 const INK_COLOR = '#2f6fed';
@@ -64,6 +68,7 @@ interface PageCellProps {
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
+  onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
 }
 
@@ -85,6 +90,7 @@ function PageCellImpl({
   onPagePointerDown,
   onAddAnnotation,
   onUpdateAnnotation,
+  onRecolorAnnotation,
   onRemoveAnnotation,
 }: PageCellProps): React.JSX.Element {
   const displayWidth = displayWidthOf(page);
@@ -370,24 +376,40 @@ function PageCellImpl({
             />
           ) : (
             !annotateMode && (
-              <button
-                className="page-annot-x"
-                title={
-                  a.kind === 'freetext'
-                    ? 'Remove text'
-                    : a.kind === 'ink'
-                      ? 'Remove drawing'
-                      : a.kind === 'stamp'
-                        ? 'Remove stamp'
-                        : 'Remove highlight'
-                }
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveAnnotation(docId, page.id, a.id);
-                }}
-              >
-                ×
-              </button>
+              <>
+                <div className="page-annot-recolor" onPointerDown={(e) => e.stopPropagation()}>
+                  {ANNOTATION_PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      className="page-annot-recolor-dot"
+                      title={`Recolor to ${c}`}
+                      style={{ backgroundColor: c }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRecolorAnnotation(docId, page.id, a.id, c);
+                      }}
+                    />
+                  ))}
+                </div>
+                <button
+                  className="page-annot-x"
+                  title={
+                    a.kind === 'freetext'
+                      ? 'Remove text'
+                      : a.kind === 'ink'
+                        ? 'Remove drawing'
+                        : a.kind === 'stamp'
+                          ? 'Remove stamp'
+                          : 'Remove highlight'
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveAnnotation(docId, page.id, a.id);
+                  }}
+                >
+                  ×
+                </button>
+              </>
             )
           )}
         </div>

@@ -69,6 +69,9 @@ export interface TestHarness {
     annotation: TestAnnotationInput,
     timeoutMs?: number,
   ) => Promise<{ docId: string; pageId: string; annotationId: string }>;
+  /** Recolor an existing annotation (docId/pageId/annotationId as returned by
+   * addAnnotation) via the same reducer path the per-annotation swatches use. */
+  recolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
   commitPendingEdits: () => Promise<void>;
@@ -84,6 +87,7 @@ export interface TestHarnessDeps {
    * async indexer has produced one; null until then. */
   getFirstPage: () => { docId: string; pageId: string } | null;
   dispatchAddAnnotation: (docId: string, pageId: string, annotation: TestAnnotationInput & { id: string }) => void;
+  dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   commitPendingEdits: () => Promise<void>;
 }
 
@@ -233,6 +237,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
       return { docId: page.docId, pageId: page.pageId, annotationId };
+    },
+    recolorAnnotation: (docId, pageId, annotationId, color) => {
+      try {
+        deps.dispatchRecolorAnnotation(docId, pageId, annotationId, color);
+      } catch (err) {
+        captureError('recolorAnnotation', err);
+        throw err;
+      }
     },
     commitPendingEdits: async () => {
       try {

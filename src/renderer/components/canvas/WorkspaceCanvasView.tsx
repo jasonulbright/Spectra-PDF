@@ -15,10 +15,8 @@ import type { CanvasHandle } from '../../canvas/canvas-handle';
 import type { DragSource } from '../../canvas/usePageDrag';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
-import { STAMP_PRESETS } from './PageCell';
+import { STAMP_PRESETS, ANNOTATION_PALETTE } from './PageCell';
 import { CommentSidebar } from './CommentSidebar';
-
-const ANNOTATION_PALETTE = ['#ffd54a', '#16161a', '#2f6fed', '#e0393e', '#2fbf71', '#a855f7'];
 
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
@@ -97,6 +95,12 @@ export function WorkspaceCanvasView({
   const onUpdateAnnotation = useCallback(
     (docId: string, pageId: string, annotationId: string, note: string) =>
       dispatch({ type: 'UPDATE_ANNOTATION', docId, pageId, annotationId, note }),
+    [dispatch],
+  );
+
+  const onRecolorAnnotation = useCallback(
+    (docId: string, pageId: string, annotationId: string, color: string) =>
+      dispatch({ type: 'RECOLOR_ANNOTATION', docId, pageId, annotationId, color }),
     [dispatch],
   );
 
@@ -313,6 +317,7 @@ export function WorkspaceCanvasView({
           onPagePointerDown={drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
           onUpdateAnnotation={onUpdateAnnotation}
+          onRecolorAnnotation={onRecolorAnnotation}
           onRemoveAnnotation={onRemoveAnnotation}
         />
         {drag.dropTarget?.kind === 'between' && (
@@ -471,6 +476,7 @@ export function WorkspaceCanvasView({
           docs={docs}
           onSelectPage={onSelectPage}
           onUpdateAnnotation={onUpdateAnnotation}
+          onRecolorAnnotation={onRecolorAnnotation}
           onRemoveAnnotation={onRemoveAnnotation}
           onClose={() => setShowComments(false)}
         />

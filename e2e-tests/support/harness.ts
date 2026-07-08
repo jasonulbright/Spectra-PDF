@@ -125,6 +125,23 @@ export async function addAnnotation(
   return result;
 }
 
+export async function recolorAnnotation(
+  docId: string,
+  pageId: string,
+  annotationId: string,
+  color: string,
+): Promise<void> {
+  await browser.execute(
+    function (d, p, a, c) {
+      (window as any).__SPECTRA_TEST__.recolorAnnotation(d, p, a, c);
+    },
+    docId,
+    pageId,
+    annotationId,
+    color,
+  );
+}
+
 export async function commitPendingEdits(): Promise<void> {
   const result = await browser.executeAsync<string | null, []>(function (done) {
     (window as any).__SPECTRA_TEST__.commitPendingEdits()
