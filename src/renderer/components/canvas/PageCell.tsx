@@ -1,8 +1,10 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import type { PageRef } from '../../state/types';
+import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthOf } from '../../canvas/layout';
 import { PageView } from './PageView';
+
+export type CanvasTool = 'select' | 'highlight' | 'freetext';
 
 export interface AnnotationRect {
   x: number;
@@ -10,6 +12,10 @@ export interface AnnotationRect {
   w: number;
   h: number;
 }
+
+const HIGHLIGHT_COLOR = '#ffd54a';
+const FREETEXT_COLOR = '#16161a';
+const FREETEXT_FONT_PT = 12;
 
 interface PageCellProps {
   docId: string;
@@ -20,12 +26,13 @@ interface PageCellProps {
   selected: boolean;
   collapsed: boolean;
   visibleNumber: number;
-  annotateMode: boolean;
+  tool: CanvasTool;
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
-  onAddAnnotation: (docId: string, pageId: string, rect: AnnotationRect) => void;
+  onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
+  onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
 }
 
@@ -38,30 +45,39 @@ function PageCellImpl({
   selected,
   collapsed,
   visibleNumber,
-  annotateMode,
+  tool,
   onSelectPage,
   onOpenPage,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
+  onUpdateAnnotation,
   onRemoveAnnotation,
 }: PageCellProps): React.JSX.Element {
   const displayWidth = displayWidthOf(page);
-  // Rubber band for the highlight tool, in display-normalized coords. Driven
-  // by window-level native listeners for the drag's duration — the same
-  // pattern as usePageDrag — rather than React synthetic move/up through
+  const annotateMode = tool !== 'select';
+  // Rubber band for the annotation tools, in display-normalized coords.
+  // Driven by window-level native listeners for the drag's duration — the
+  // same pattern as usePageDrag — rather than React synthetic move/up through
   // pointer capture, which proved unreliable in the WebView.
   const [band, setBand] = useState<AnnotationRect | null>(null);
   const bandActive = useRef(false);
   // Cancels the in-flight band (removes window listeners, commits nothing).
   const cancelBand = useRef<(() => void) | null>(null);
+  // Freetext annotation currently being edited inline.
+  const [editing, setEditing] = useState<string | null>(null);
+
+  // Display px of the page's own point size — scales freetext to the cell.
+  const freetextFontPx =
+    (FREETEXT_FONT_PT / (page.rotation === 90 || page.rotation === 270 ? page.width : page.height)) *
+      pageHeight || FREETEXT_FONT_PT;
 
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     if (!annotateMode) {
       onPagePointerDown(docId, page.id, e);
       return;
     }
-    if (e.button !== 0 || bandActive.current) return;
+    if (e.button !== 0 || bandActive.current || editing) return;
     e.preventDefault();
     e.stopPropagation();
     bandActive.current = true;
@@ -71,6 +87,7 @@ function PageCellImpl({
       y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
     });
     const start = norm(e.clientX, e.clientY);
+    const kind = tool === 'freetext' ? 'freetext' : 'highlight';
     let latest: AnnotationRect = { ...start, w: 0, h: 0 };
     setBand(latest);
 
@@ -92,7 +109,14 @@ function PageCellImpl({
       cancelBand.current = null;
       setBand(null);
       if (commit && latest.w > 0.01 && latest.h > 0.01) {
-        onAddAnnotation(docId, page.id, latest);
+        const annotation: PageAnnotation = {
+          id: crypto.randomUUID(),
+          kind,
+          ...latest,
+          color: kind === 'freetext' ? FREETEXT_COLOR : HIGHLIGHT_COLOR,
+        };
+        onAddAnnotation(docId, page.id, annotation);
+        if (kind === 'freetext') setEditing(annotation.id);
       }
     };
     const onUp = (): void => finish(true);
@@ -103,12 +127,19 @@ function PageCellImpl({
     window.addEventListener('pointercancel', onCancel);
   };
 
-  // Leaving highlight mode (Escape, tool toggle) mid-drag cancels the band —
-  // the still-attached pointerup would otherwise commit a highlight the user
+  // Leaving annotate mode (Escape, tool toggle) mid-drag cancels the band —
+  // the still-attached pointerup would otherwise commit a box the user
   // believes they abandoned.
   useEffect(() => {
     if (!annotateMode) cancelBand.current?.();
   }, [annotateMode]);
+
+  const finishEditing = (annotation: PageAnnotation, value: string): void => {
+    setEditing(null);
+    const note = value.trim();
+    if (!note) onRemoveAnnotation(docId, page.id, annotation.id);
+    else if (note !== annotation.note) onUpdateAnnotation(docId, page.id, annotation.id, note);
+  };
 
   return (
     <div
@@ -156,28 +187,65 @@ function PageCellImpl({
       {(page.annotations ?? []).map((a) => (
         <div
           key={a.id}
-          className="page-annot"
-          title={a.note}
+          className={'page-annot' + (a.kind === 'freetext' ? ' page-annot-text' : '')}
+          title={a.kind === 'highlight' ? a.note : undefined}
           style={{
             left: `${a.x * 100}%`,
             top: `${a.y * 100}%`,
             width: `${a.w * 100}%`,
             height: `${a.h * 100}%`,
-            backgroundColor: `${a.color}66`,
-            borderColor: a.color,
+            ...(a.kind === 'highlight'
+              ? { backgroundColor: `${a.color}66`, borderColor: a.color }
+              : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
+            ...(a.kind === 'freetext' && tool === 'select' ? { pointerEvents: 'auto' } : {}),
           }}
+          onPointerDown={a.kind === 'freetext' ? (e) => e.stopPropagation() : undefined}
+          onDoubleClick={
+            a.kind === 'freetext'
+              ? (e) => {
+                  e.stopPropagation();
+                  setEditing(a.id);
+                }
+              : undefined
+          }
         >
-          {!annotateMode && (
-            <button
-              className="page-annot-x"
-              title="Remove highlight"
-              onClick={(e) => {
+          {a.kind === 'freetext' && editing !== a.id && (
+            <span className="page-annot-text-body">{a.note}</span>
+          )}
+          {editing === a.id ? (
+            <textarea
+              className="page-annot-editor"
+              style={{ fontSize: freetextFontPx, color: a.color }}
+              autoFocus
+              defaultValue={a.note ?? ''}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onBlur={(e) => finishEditing(a, e.currentTarget.value)}
+              onKeyDown={(e) => {
                 e.stopPropagation();
-                onRemoveAnnotation(docId, page.id, a.id);
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  finishEditing(a, a.note ?? ''); // revert (removes if never had text)
+                } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  finishEditing(a, e.currentTarget.value);
+                }
               }}
-            >
-              ×
-            </button>
+            />
+          ) : (
+            !annotateMode && (
+              <button
+                className="page-annot-x"
+                title={a.kind === 'freetext' ? 'Remove text' : 'Remove highlight'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveAnnotation(docId, page.id, a.id);
+                }}
+              >
+                ×
+              </button>
+            )
           )}
         </div>
       ))}

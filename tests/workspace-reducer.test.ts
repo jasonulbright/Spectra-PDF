@@ -627,6 +627,35 @@ describe('ADD_ANNOTATION / REMOVE_ANNOTATION', () => {
     expect(undone.workspace.documents[0].pages[1].annotations).toBeUndefined();
   });
 
+  it('UPDATE_ANNOTATION edits the note and is undoable; same-note is a no-op', () => {
+    const a = makeFile('a.pdf', 1);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));
+    const withAnn = appReducer(stateWith([a], [doc]), {
+      type: 'ADD_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotation: { ...ann, kind: 'freetext' },
+    });
+    const updated = appReducer(withAnn, {
+      type: 'UPDATE_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotationId: 'ann1',
+      note: 'hello',
+    });
+    expect(updated.workspace.documents[0].pages[0].annotations![0].note).toBe('hello');
+    expect(updated.pageUndoStack).toHaveLength(2);
+    expect(
+      appReducer(updated, {
+        type: 'UPDATE_ANNOTATION',
+        docId: 'a.pdf#0',
+        pageId: 'a.pdf#p0',
+        annotationId: 'ann1',
+        note: 'hello',
+      }),
+    ).toBe(updated);
+  });
+
   it('removes by id; unknown ids are a no-op', () => {
     const a = makeFile('a.pdf', 1);
     const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));

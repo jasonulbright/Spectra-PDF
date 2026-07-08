@@ -529,7 +529,37 @@
   border-color: #ffd54a;
 }
 
-/* Highlight tool active: crosshair over pages signals draw-a-box mode. */
+/* Annotation tool active: crosshair over pages signals draw-a-box mode. */
 .canvas-view.annotating .page {
   cursor: crosshair;
+}
+
+/* Freetext annotations: bordered text box; body scales with the page. */
+.page-annot-text {
+  background: rgba(250, 250, 245, 0.92);
+  border-width: 1px;
+  border-style: solid;
+  overflow: hidden;
+}
+
+.page-annot-text-body {
+  display: block;
+  padding: 2px 3px;
+  line-height: 1.2;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: left;
+}
+
+.page-annot-editor {
+  position: absolute;
+  inset: 0;
+  padding: 2px 3px;
+  background: rgba(255, 255, 250, 0.98);
+  border: none;
+  outline: 2px solid #0078d4;
+  resize: none;
+  line-height: 1.2;
+  font-family: Helvetica, Arial, sans-serif;
+  pointer-events: auto;
 }

@@ -4,6 +4,8 @@ import { BASE_PAGE_HEIGHT, DOC_SLOT } from '../../canvas/layout';
 import { DocumentRow } from './DocumentRow';
 import type { DocPlacement } from '../../canvas/layout';
 import type { DragSource } from '../../canvas/usePageDrag';
+import type { PageAnnotation } from '../../state/types';
+import type { CanvasTool } from './PageCell';
 
 interface DocLayerProps {
   items: DocPlacement[];
@@ -20,9 +22,10 @@ interface DocLayerProps {
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
-  annotateMode: boolean;
+  tool: CanvasTool;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
-  onAddAnnotation: (docId: string, pageId: string, rect: { x: number; y: number; w: number; h: number }) => void;
+  onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
+  onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
 }
 
@@ -62,10 +65,11 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               }
               onSelectPage={props.onSelectPage}
               onOpenPage={props.onOpenPage}
-              annotateMode={props.annotateMode}
+              tool={props.tool}
               onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
               onAddAnnotation={props.onAddAnnotation}
+              onUpdateAnnotation={props.onUpdateAnnotation}
               onRemoveAnnotation={props.onRemoveAnnotation}
             />
           </div>

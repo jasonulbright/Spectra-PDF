@@ -13,7 +13,8 @@ import { AddDocGhost, GhostRow } from './DropGhost';
 import { deriveDropGhosts } from './ghost-size';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import type { DragSource } from '../../canvas/usePageDrag';
-import type { OpenDocument } from '../../state/types';
+import type { OpenDocument, PageAnnotation } from '../../state/types';
+import type { CanvasTool } from './PageCell';
 
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
@@ -65,11 +66,11 @@ export function WorkspaceCanvasView({
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string; pageId: string } | null>(
     null,
   );
-  const [tool, setTool] = useState<'select' | 'highlight'>('select');
+  const [tool, setTool] = useState<CanvasTool>('select');
 
   // Escape returns to Select from the highlight tool.
   React.useEffect(() => {
-    if (tool !== 'highlight') return;
+    if (tool === 'select') return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') setTool('select');
     };
@@ -78,14 +79,14 @@ export function WorkspaceCanvasView({
   }, [tool]);
 
   const onAddAnnotation = useCallback(
-    (docId: string, pageId: string, rect: { x: number; y: number; w: number; h: number }) => {
-      dispatch({
-        type: 'ADD_ANNOTATION',
-        docId,
-        pageId,
-        annotation: { id: crypto.randomUUID(), kind: 'highlight', ...rect, color: '#ffd54a' },
-      });
-    },
+    (docId: string, pageId: string, annotation: PageAnnotation) =>
+      dispatch({ type: 'ADD_ANNOTATION', docId, pageId, annotation }),
+    [dispatch],
+  );
+
+  const onUpdateAnnotation = useCallback(
+    (docId: string, pageId: string, annotationId: string, note: string) =>
+      dispatch({ type: 'UPDATE_ANNOTATION', docId, pageId, annotationId, note }),
     [dispatch],
   );
 
@@ -260,7 +261,7 @@ export function WorkspaceCanvasView({
         'canvas-view flex-1 flex flex-col relative overflow-hidden' +
         (drag.committing ? ' committing' : '') +
         (drag.draggingPage ? ' dragging' : '') +
-        (tool === 'highlight' ? ' annotating' : '')
+        (tool !== 'select' ? ' annotating' : '')
       }
     >
       <Canvas
@@ -295,10 +296,11 @@ export function WorkspaceCanvasView({
           betweenIndex={betweenIndex}
           onSelectPage={onSelectPage}
           onOpenPage={onOpenPage}
-          annotateMode={tool === 'highlight'}
+          tool={tool}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
+          onUpdateAnnotation={onUpdateAnnotation}
           onRemoveAnnotation={onRemoveAnnotation}
         />
         {drag.dropTarget?.kind === 'between' && (
@@ -340,6 +342,14 @@ export function WorkspaceCanvasView({
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'highlight' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
             Highlight
+          </button>
+          <button
+            data-testid="tool-freetext"
+            title="Drag a box on a page to add text (Esc to exit)"
+            onClick={() => setTool(tool === 'freetext' ? 'select' : 'freetext')}
+            className={`px-3 py-1.5 text-xs font-medium ${tool === 'freetext' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
+          >
+            Text
           </button>
         </div>
         {dirty && (

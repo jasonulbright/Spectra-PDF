@@ -20,12 +20,15 @@ export interface OpenFile {
 // into PDF user space.
 export interface PageAnnotation {
   id: string;
-  kind: 'highlight';
+  kind: 'highlight' | 'freetext';
   x: number;
   y: number;
   w: number;
   h: number;
+  // highlight: fill color. freetext: text color.
   color: string; // #rrggbb
+  // highlight: optional popup note. freetext: the drawn text (both land in
+  // /Contents at commit).
   note?: string;
 }
 
@@ -101,6 +104,7 @@ export type AppAction =
   | { type: 'MOVE_PAGE_TO_NEW_DOC'; fromDocId: string; pageId: string; docIndex: number; newDocId: string; newName: string }
   | { type: 'DELETE_PAGE_REF'; docId: string; pageId: string }
   | { type: 'ADD_ANNOTATION'; docId: string; pageId: string; annotation: PageAnnotation }
+  | { type: 'UPDATE_ANNOTATION'; docId: string; pageId: string; annotationId: string; note: string }
   | { type: 'REMOVE_ANNOTATION'; docId: string; pageId: string; annotationId: string }
   | { type: 'SPLIT_DOC'; docId: string; atIndex: number; newDocId: string; newName: string }
   | { type: 'ROTATE_PAGE_REF'; docId: string; pageId: string; rotation: 0 | 90 | 180 | 270 }

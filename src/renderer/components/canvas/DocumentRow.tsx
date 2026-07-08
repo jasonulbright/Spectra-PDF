@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import type { OpenDocument } from '../../state/types';
+import type { OpenDocument, PageAnnotation } from '../../state/types';
+import type { CanvasTool } from './PageCell';
 import { MAX_ROW_WIDTH } from '../../canvas/layout';
 import { GhostPage } from './DropGhost';
 import { PageCell } from './PageCell';
@@ -21,9 +22,10 @@ interface DocumentRowProps {
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
-  annotateMode: boolean;
+  tool: CanvasTool;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
-  onAddAnnotation: (docId: string, pageId: string, rect: { x: number; y: number; w: number; h: number }) => void;
+  onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
+  onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
 }
 
@@ -37,10 +39,11 @@ function DocumentRowImpl({
   intoGhost,
   onSelectPage,
   onOpenPage,
-  annotateMode,
+  tool,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
+  onUpdateAnnotation,
   onRemoveAnnotation,
 }: DocumentRowProps): React.JSX.Element {
   const strip: React.JSX.Element[] = [];
@@ -68,10 +71,11 @@ function DocumentRowImpl({
         visibleNumber={visible + 1}
         onSelectPage={onSelectPage}
         onOpenPage={onOpenPage}
-        annotateMode={annotateMode}
+        tool={tool}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
         onAddAnnotation={onAddAnnotation}
+        onUpdateAnnotation={onUpdateAnnotation}
         onRemoveAnnotation={onRemoveAnnotation}
       />,
     );

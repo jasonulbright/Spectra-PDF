@@ -206,6 +206,46 @@ describe('annotations round-trip', () => {
   it('lands where authored at rotation 180', () => roundTrip(180));
   it('lands where authored at rotation 270', () => roundTrip(270));
 
+  it('freetext bakes as /FreeText with appearance, text, and correct placement', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const authored = { x: 0.15, y: 0.1, w: 0.4, h: 0.2 };
+    for (const rotation of [0, 90] as const) {
+      const rect = rotation === 90 ? rotateAnnotationRect({ id: 't', kind: 'freetext', ...authored, color: '#16161a' }, 90) : { ...authored };
+      const workspace: Workspace = {
+        documents: [
+          makeDoc('a#0', a, 'a', [
+            {
+              ...pageRef('a.pdf', 0, rotation),
+              annotations: [
+                { id: 't1', kind: 'freetext', x: rect.x, y: rect.y, w: rect.w, h: rect.h, color: '#16161a', note: 'Reviewed (ok) — see p.2\nsecond line' },
+              ],
+            },
+          ]),
+        ],
+      };
+      const [plan] = planCommit(workspace, files, ['a.pdf']);
+      const pdf = await loadPdf(await buildCommitBytes(plan));
+      const page = await pdf.getPage(1);
+      const annots = (await page.getAnnotations()) as {
+        subtype: string;
+        hasAppearance: boolean;
+        contentsObj?: { str: string };
+        rect: [number, number, number, number];
+      }[];
+      expect(annots).toHaveLength(1);
+      expect(annots[0].subtype).toBe('FreeText');
+      expect(annots[0].hasAppearance).toBe(true);
+      expect(annots[0].contentsObj?.str).toBe('Reviewed (ok) — see p.2\nsecond line');
+      const viewport = page.getViewport({ scale: 1 });
+      const p1 = viewport.convertToViewportPoint(annots[0].rect[0], annots[0].rect[1]);
+      const p2 = viewport.convertToViewportPoint(annots[0].rect[2], annots[0].rect[3]);
+      expect(Math.min(p1[0], p2[0]) / viewport.width).toBeCloseTo(rect.x, 3);
+      expect(Math.min(p1[1], p2[1]) / viewport.height).toBeCloseTo(rect.y, 3);
+      await pdf.loadingTask.destroy();
+    }
+  });
+
   it('rotate-after-annotate anchors the same page content as annotate-only', async () => {
     // Draw at rotation 0, then rotate the page 90°: the reducer re-projects
     // the rect into the new display space (rotateAnnotationRect), and the

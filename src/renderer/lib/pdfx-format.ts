@@ -30,7 +30,7 @@ export interface PagePartition {
 // orientation); the builder maps it into PDF user space. Spectra extension —
 // absent keeps PDFx-identical output.
 export interface ExportAnnotation {
-  kind: 'highlight';
+  kind: 'highlight' | 'freetext';
   x: number;
   y: number;
   w: number;
