@@ -51,6 +51,8 @@ pub enum CliCommand {
     Delete(DeleteArgs),
     /// Redact (true content removal, not just a visual box) a rectangular region on a page
     Redact(RedactArgs),
+    /// Stamp a translucent text watermark across pages
+    Watermark(WatermarkArgs),
     /// View or set PDF metadata
     Metadata(MetadataArgs),
     /// Convert a PDF to grayscale
@@ -196,6 +198,36 @@ pub struct RedactArgs {
     /// display-normalized, not rotation-adjusted): "x0,y0,x1,y1"
     #[arg(long)]
     pub rect: String,
+}
+
+#[derive(Args)]
+pub struct WatermarkArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Watermark text (Latin-1 best-effort — non-Latin glyphs render as '?')
+    #[arg(short, long)]
+    pub text: String,
+    /// Fill/stroke alpha, 0 < opacity <= 1
+    #[arg(long, default_value_t = 0.15)]
+    pub opacity: f64,
+    /// Degrees counter-clockwise in the page's DISPLAYED orientation (45 = diagonal)
+    #[arg(long, default_value_t = 45.0)]
+    pub angle: f64,
+    /// Text color as #rrggbb
+    #[arg(long, default_value = "#808080")]
+    pub color: String,
+    /// Font size in points; 0 auto-fits per page
+    #[arg(long, default_value_t = 0.0)]
+    pub font_size: f64,
+    /// "over" (on top of content) or "under" (behind it)
+    #[arg(long, default_value = "over")]
+    pub layer: String,
+    /// Comma-separated 1-based page numbers (omit for all pages)
+    #[arg(long)]
+    pub pages: Option<String>,
 }
 
 #[derive(Args)]
@@ -685,6 +717,27 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "regions": [{"page": args.page, "rect": rect}],
                 }),
             )
+        }
+
+        CliCommand::Watermark(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "text": args.text,
+                "opacity": args.opacity,
+                "angle": args.angle,
+                "color": args.color,
+                "font_size": args.font_size,
+                "layer": args.layer,
+            });
+            if let Some(pages) = &args.pages {
+                let parsed: Vec<i64> = pages
+                    .split(',')
+                    .filter_map(|s| s.trim().parse().ok())
+                    .collect();
+                params["pages"] = json!(parsed);
+            }
+            engine.call("watermark", params)
         }
 
         CliCommand::Metadata(args) => {

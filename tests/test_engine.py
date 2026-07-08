@@ -18,6 +18,7 @@ from engine.metadata import get_metadata, set_metadata
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
 from engine.validate import validate_pdf
 from engine.redact import redact
+from engine.watermark import watermark
 from pikepdf import Name, Dictionary
 
 
@@ -475,3 +476,214 @@ class TestRedact:
         text = extract_text(out)["text"]
         assert "LINE ONE" in text
         assert "LINE TWO" not in text
+
+
+# ── Watermark ─────────────────────────────────────────────────────────────
+
+
+def _make_watermark_fixture(path: str, page_count: int = 2, rotate: int | None = None, rotate_on_tree: bool = False) -> None:
+    """Pages with per-page ORIGINAL <n> text. `rotate` lands on each page's
+    own dict, or (rotate_on_tree) on the /Pages root so it must be resolved
+    via the inheritance walk."""
+    doc = pikepdf.new()
+    font = doc.make_indirect(
+        Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+    )
+    for i in range(page_count):
+        page = doc.add_blank_page(page_size=(400, 400))
+        page.Resources = Dictionary(Font=Dictionary(F1=font))
+        page.Contents = doc.make_stream(f"BT /F1 12 Tf 50 300 Td (ORIGINAL {i + 1}) Tj ET".encode("ascii"))
+        if rotate is not None and not rotate_on_tree:
+            page.Rotate = rotate
+    if rotate is not None and rotate_on_tree:
+        doc.Root.Pages.Rotate = rotate
+    doc.save(path)
+    doc.close()
+
+
+def _find_watermark_forms(page: pikepdf.Page) -> list:
+    """The overlay Form XObjects our watermark attached to this page —
+    identified by their private /F0 Helvetica resource."""
+    forms = []
+    xobjects = page.obj.get("/Resources", {}).get("/XObject", {})
+    for _, candidate in (xobjects.items() if xobjects else []):
+        if candidate.get("/Subtype") == Name.Form and "/F0" in candidate.get("/Resources", {}).get("/Font", {}):
+            forms.append(candidate)
+    return forms
+
+
+def _tm_operands(form) -> list[float]:
+    """Operands of the Tm operator inside a watermark form's stream."""
+    for operands, operator in pikepdf.parse_content_stream(form):
+        if str(operator) == "Tm":
+            return [float(v) for v in operands]
+    raise AssertionError("no Tm operator found in watermark form")
+
+
+class TestWatermark:
+    def test_watermark_stamps_every_page_and_keeps_content(self, tmp_dir):
+        src = os.path.join(tmp_dir, "wm_in.pdf")
+        out = os.path.join(tmp_dir, "wm_out.pdf")
+        _make_watermark_fixture(src)
+
+        result = watermark(file=src, output=out, text="CONFIDENTIAL")
+        assert result["pages_watermarked"] == 2
+        assert result["font_size_applied"] > 0
+
+        # Non-circular verification via pdfminer — which also proves the text
+        # inside the overlay Form XObject's `Do` is really reachable content
+        # (pdfminer descends into forms).
+        text = extract_text(out)["text"]
+        assert text.count("CONFIDENTIAL") == 2
+        assert "ORIGINAL 1" in text
+        assert "ORIGINAL 2" in text
+
+    def test_watermark_pages_subset(self, tmp_dir):
+        src = os.path.join(tmp_dir, "wm_in2.pdf")
+        out = os.path.join(tmp_dir, "wm_out2.pdf")
+        _make_watermark_fixture(src)
+
+        result = watermark(file=src, output=out, text="DRAFT", pages=[2])
+        assert result["pages_watermarked"] == 1
+        assert "DRAFT" not in extract_text(out, pages=[1])["text"]
+        assert "DRAFT" in extract_text(out, pages=[2])["text"]
+
+    def test_watermark_in_place(self, tmp_dir):
+        src = os.path.join(tmp_dir, "wm_in3.pdf")
+        _make_watermark_fixture(src)
+
+        watermark(file=src, output=src, text="STAMPED")
+        text = extract_text(src)["text"]
+        assert "STAMPED" in text
+        assert "ORIGINAL 1" in text
+
+    def test_watermark_opacity_lands_in_extgstate(self, tmp_dir):
+        src = os.path.join(tmp_dir, "wm_in4.pdf")
+        out = os.path.join(tmp_dir, "wm_out4.pdf")
+        _make_watermark_fixture(src, page_count=1)
+
+        watermark(file=src, output=out, text="X", opacity=0.25)
+        with pikepdf.open(out) as pdf:
+            forms = _find_watermark_forms(pdf.pages[0])
+            assert len(forms) == 1
+            gs = forms[0].Resources.ExtGState.GS0
+            assert float(gs.ca) == pytest.approx(0.25)
+            assert float(gs.CA) == pytest.approx(0.25)
+
+    def test_watermark_rotated_page_composes_the_display_angle(self, tmp_dir):
+        # angle=0 on a /Rotate 90 page must be DRAWN at 90° in user space so
+        # it reads horizontally in the displayed orientation.
+        src = os.path.join(tmp_dir, "wm_rot.pdf")
+        out = os.path.join(tmp_dir, "wm_rot_out.pdf")
+        _make_watermark_fixture(src, page_count=1, rotate=90)
+
+        watermark(file=src, output=out, text="SIDEWAYS", angle=0)
+        with pikepdf.open(out) as pdf:
+            a, b, c, d, _, _ = _tm_operands(_find_watermark_forms(pdf.pages[0])[0])
+        assert a == pytest.approx(0.0, abs=1e-4)  # cos 90
+        assert b == pytest.approx(1.0, abs=1e-4)  # sin 90
+        assert c == pytest.approx(-1.0, abs=1e-4)
+        assert d == pytest.approx(0.0, abs=1e-4)
+        assert "SIDEWAYS" in extract_text(out)["text"]
+
+    def test_watermark_honors_inherited_rotate(self, tmp_dir):
+        # /Rotate hoisted onto the /Pages root (inheritable per spec) must be
+        # found by the /Parent-chain walk — same generator pattern the redact
+        # inherited-resources regression covered.
+        src = os.path.join(tmp_dir, "wm_rot_inh.pdf")
+        out = os.path.join(tmp_dir, "wm_rot_inh_out.pdf")
+        _make_watermark_fixture(src, page_count=1, rotate=90, rotate_on_tree=True)
+
+        watermark(file=src, output=out, text="SIDEWAYS", angle=0)
+        with pikepdf.open(out) as pdf:
+            a, b, _, _, _, _ = _tm_operands(_find_watermark_forms(pdf.pages[0])[0])
+        assert a == pytest.approx(0.0, abs=1e-4)
+        assert b == pytest.approx(1.0, abs=1e-4)
+
+    def test_watermark_helvetica_widths_match_pdfminer(self):
+        # The embedded ASCII advance table must agree with pdfminer's own
+        # Helvetica AFM metrics (an independent source, already a test dep).
+        # A wrong width regresses both auto-sizing and centering — the 0.5-em
+        # average this table replaced underestimated uppercase text by ~40%
+        # and pushed long stamps past the form BBox (caught live by the
+        # watermark e2e as a clipped stamp tail).
+        from pdfminer.fontmetrics import FONT_METRICS
+
+        from engine.watermark import _HELVETICA_ASCII_WIDTHS
+
+        _, char_widths = FONT_METRICS["Helvetica"]  # keyed by character
+        for code in range(32, 127):
+            ch = chr(code)
+            assert _HELVETICA_ASCII_WIDTHS[code - 32] == char_widths[ch], (
+                f"width mismatch for {ch!r}"
+            )
+
+    def test_watermark_long_uppercase_text_stays_inside_the_box(self, tmp_dir):
+        # Regression for the e2e-caught overflow: auto-sized long uppercase
+        # text on a Letter page at 45° must keep the whole baseline inside
+        # the crop box (the form BBox clips whatever crosses it).
+        from engine.watermark import _text_width_em
+
+        src = os.path.join(tmp_dir, "wm_fit.pdf")
+        out = os.path.join(tmp_dir, "wm_fit_out.pdf")
+        doc = pikepdf.new()
+        doc.add_blank_page(page_size=(612, 792))
+        doc.save(src)
+        doc.close()
+
+        text = "E2E-WATERMARK"
+        result = watermark(file=src, output=out, text=text)
+        size = result["font_size_applied"]
+        with pikepdf.open(out) as pdf:
+            a, b, _, _, tx, ty = _tm_operands(_find_watermark_forms(pdf.pages[0])[0])
+        end_x = tx + _text_width_em(text) * size * a  # a = cos(theta)
+        end_y = ty + _text_width_em(text) * size * b  # b = sin(theta)
+        for v, hi in ((tx, 612), (end_x, 612), (ty, 792), (end_y, 792)):
+            assert 0 <= v <= hi, f"baseline point {v} outside [0, {hi}]"
+
+    def test_watermark_auto_size_shrinks_for_longer_text(self, tmp_dir):
+        src = os.path.join(tmp_dir, "wm_in5.pdf")
+        _make_watermark_fixture(src, page_count=1)
+
+        short = watermark(file=src, output=os.path.join(tmp_dir, "s.pdf"), text="HI")
+        long = watermark(
+            file=src,
+            output=os.path.join(tmp_dir, "l.pdf"),
+            text="THIS IS A MUCH LONGER WATERMARK LINE",
+        )
+        assert long["font_size_applied"] < short["font_size_applied"]
+
+    def test_watermark_under_layer(self, tmp_dir):
+        src = os.path.join(tmp_dir, "wm_in6.pdf")
+        out = os.path.join(tmp_dir, "wm_out6.pdf")
+        _make_watermark_fixture(src, page_count=1)
+
+        result = watermark(file=src, output=out, text="BEHIND", layer="under")
+        assert result["layer"] == "under"
+        text = extract_text(out)["text"]
+        assert "BEHIND" in text
+        assert "ORIGINAL 1" in text
+
+    def test_watermark_out_of_range_pages_ignored(self, tmp_dir):
+        src = os.path.join(tmp_dir, "wm_in7.pdf")
+        out = os.path.join(tmp_dir, "wm_out7.pdf")
+        _make_watermark_fixture(src)
+
+        result = watermark(file=src, output=out, text="X", pages=[99])
+        assert result["pages_watermarked"] == 0
+        assert "X" not in extract_text(out)["text"]
+
+    def test_watermark_rejects_bad_args(self, tmp_dir):
+        src = os.path.join(tmp_dir, "wm_in8.pdf")
+        out = os.path.join(tmp_dir, "wm_out8.pdf")
+        _make_watermark_fixture(src, page_count=1)
+
+        with pytest.raises(ValueError):
+            watermark(file=src, output=out, text="   ")
+        with pytest.raises(ValueError):
+            watermark(file=src, output=out, text="X", color="red")
+        with pytest.raises(ValueError):
+            watermark(file=src, output=out, text="X", opacity=0)
+        with pytest.raises(ValueError):
+            watermark(file=src, output=out, text="X", layer="sideways")
+

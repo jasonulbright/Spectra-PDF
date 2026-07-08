@@ -15,6 +15,7 @@ export type Operation =
   | 'decrypt'
   | 'extract_text'
   | 'outline'
+  | 'watermark'
   | 'metadata'
   | 'repair'
   | 'rebuild'
@@ -56,6 +57,7 @@ const groups: OpGroup[] = [
   { name: 'Content', items: [
     { id: 'extract_text', label: 'Extract Text' },
     { id: 'outline', label: 'Bookmarks' },
+    { id: 'watermark', label: 'Watermark' },
     { id: 'metadata', label: 'Metadata' },
   ]},
 ];

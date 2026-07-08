@@ -25,6 +25,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   set_outline: 'Save Bookmarks',
   unlock: 'Unlock',
   redact: 'Redact',
+  watermark: 'Watermark',
 };
 
 /** Methods that are internal lookups, not user-facing operations. */

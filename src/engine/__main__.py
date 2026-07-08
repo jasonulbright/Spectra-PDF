@@ -26,6 +26,7 @@ from engine.recover import recover
 from engine.check import check
 from engine.outline import get_outline, set_outline
 from engine.redact import redact
+from engine.watermark import watermark
 
 
 def ping() -> dict:
@@ -62,6 +63,7 @@ def main() -> None:
     server.register("get_outline", get_outline)
     server.register("set_outline", set_outline)
     server.register("redact", redact)
+    server.register("watermark", watermark)
 
     # Signal readiness on stderr so the Tauri backend knows we're alive
     print("engine: ready", file=sys.stderr, flush=True)

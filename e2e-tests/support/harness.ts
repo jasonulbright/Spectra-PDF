@@ -233,3 +233,34 @@ export async function getRedactionMarkCount(): Promise<number> {
     return (window as any).__SPECTRA_TEST__.getRedactionMarkCount();
   });
 }
+
+/**
+ * Set a React-controlled input's value atomically. WDIO's `setValue` is
+ * unreliable here twice over: its clearValue can be undone by React
+ * re-rendering the controlled value, and char-by-char typing into the
+ * WebView2 can drop keystrokes (observed live: "CONFIDENTIAL" default
+ * surviving + a truncated suffix landing in the same field). The native
+ * value setter + a bubbling `input` event is the canonical React-compatible
+ * way to set the whole value in one shot.
+ */
+export async function setReactInputValue(selector: string, value: string): Promise<void> {
+  const el = await $(selector);
+  await el.waitForDisplayed({ timeout: 10_000 });
+  await browser.execute(
+    function (element, v) {
+      const input = element as unknown as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )!.set!;
+      setter.call(input, v);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    },
+    el,
+    value,
+  );
+  const readBack = await el.getValue();
+  if (readBack !== value) {
+    throw new Error(`setReactInputValue: field holds ${JSON.stringify(readBack)}, expected ${JSON.stringify(value)}`);
+  }
+}

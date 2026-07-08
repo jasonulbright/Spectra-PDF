@@ -336,6 +336,25 @@ export function SettingsPanel(): React.ReactElement {
         <span className="text-sm text-neutral-400">Start with Windows</span>
       </label>
 
+      <div data-testid="licenses-note" className="border-t border-neutral-800 pt-4">
+        <label className="block text-sm text-neutral-400 mb-2">Third-party components</label>
+        <div className="text-xs text-neutral-500 space-y-1.5">
+          <p>
+            <span className="text-neutral-400">Ghostscript</span> (AGPL-3.0) is bundled unmodified
+            and invoked strictly as a separate program — it is never linked into this application.
+            Source: ghostscript.com. Used for Compress, Grayscale, PDF/A, and Rebuild.
+          </p>
+          <p>
+            Also bundled or embedded: <span className="text-neutral-400">Python</span> (PSF license)
+            with <span className="text-neutral-400">pikepdf</span> (MPL-2.0) and{' '}
+            <span className="text-neutral-400">pdfminer.six</span> (MIT);{' '}
+            <span className="text-neutral-400">pdf.js</span> (Apache-2.0);{' '}
+            <span className="text-neutral-400">pdf-lib</span> (MIT);{' '}
+            <span className="text-neutral-400">Tauri</span> (MIT/Apache-2.0).
+          </p>
+        </div>
+      </div>
+
       <StatusBar message={status} />
     </div>
   );
