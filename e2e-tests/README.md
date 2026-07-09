@@ -70,6 +70,7 @@ runs every `specs/*.spec.ts` file.
 | `09-watermark.spec.ts` | Watermark panel form stamps text onto every page of the saved file |
 | `10-forms.spec.ts` | Forms panel lists AcroForm fields, fills them, and the values bake into the saved file |
 | `11-compare.spec.ts` | Compare panel diffs two open PDFs and reports the differing line |
+| `12-signatures.spec.ts` | Signatures panel verifies a signed PDF: signer, valid badge, and the trust caveat |
 
 ## Adding a spec
 

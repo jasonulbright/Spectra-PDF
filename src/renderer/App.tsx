@@ -25,6 +25,7 @@ import { OutlinePanel } from './panels/OutlinePanel';
 import { WatermarkPanel } from './panels/WatermarkPanel';
 import { FormsPanel } from './panels/FormsPanel';
 import { ComparePanel } from './panels/ComparePanel';
+import { SignaturesPanel } from './panels/SignaturesPanel';
 import { useEngine } from './hooks/useEngine';
 import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
 import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
@@ -48,6 +49,7 @@ const panels: Record<Operation, React.ComponentType> = {
   encrypt: EncryptPanel, decrypt: DecryptPanel,
   extract_text: ExtractTextPanel, metadata: MetadataPanel, outline: OutlinePanel,
   watermark: WatermarkPanel, forms: FormsPanel, compare: ComparePanel,
+  signatures: SignaturesPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
 };
 
@@ -58,6 +60,7 @@ const titles: Record<Operation, string> = {
   encrypt: 'Encrypt PDF', decrypt: 'Decrypt PDF',
   extract_text: 'Extract Text', metadata: 'Edit Metadata', outline: 'Bookmarks',
   watermark: 'Watermark', forms: 'Fill Form', compare: 'Compare PDFs',
+  signatures: 'Signatures',
   repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',
 };
 

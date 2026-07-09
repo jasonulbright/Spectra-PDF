@@ -55,6 +55,8 @@ pub enum CliCommand {
     Watermark(WatermarkArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
+    /// Verify the digital signatures in a PDF (JSON report; read-only)
+    VerifySignatures(VerifySignaturesArgs),
     /// View or set PDF metadata
     Metadata(MetadataArgs),
     /// Convert a PDF to grayscale
@@ -241,6 +243,12 @@ pub struct CompareArgs {
     /// Unchanged lines of context to keep around each change
     #[arg(long, default_value_t = 3)]
     pub context: u32,
+}
+
+#[derive(Args)]
+pub struct VerifySignaturesArgs {
+    /// PDF file to verify
+    pub input: PathBuf,
 }
 
 #[derive(Args)]
@@ -770,6 +778,11 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "file_b": abs(&args.b).to_string_lossy(),
                 "context": args.context,
             }),
+        ),
+
+        CliCommand::VerifySignatures(args) => engine.call(
+            "verify_signatures",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
         ),
 
         CliCommand::Metadata(args) => {

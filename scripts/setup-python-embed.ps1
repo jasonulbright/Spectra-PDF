@@ -45,8 +45,12 @@ Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEM
 # Install dependencies (pinned versions — update deliberately, not automatically)
 $PikepdfVersion = "10.7.2"
 $PdfminerVersion = "20260107"
-Write-Host "Installing pikepdf==$PikepdfVersion and pdfminer.six==$PdfminerVersion..."
-& $DestDir\python.exe -m pip install "pikepdf==$PikepdfVersion" "pdfminer.six==$PdfminerVersion" --no-warn-script-location 2>&1 | Out-Null
+# pyHanko powers digital-signature verification; it pulls cryptography,
+# asn1crypto, and pyhanko-certvalidator (all permissive). See
+# docs/architecture/10-phase2h-signatures.md.
+$PyhankoVersion = "0.35.2"
+Write-Host "Installing pikepdf==$PikepdfVersion, pdfminer.six==$PdfminerVersion, pyHanko==$PyhankoVersion..."
+& $DestDir\python.exe -m pip install "pikepdf==$PikepdfVersion" "pdfminer.six==$PdfminerVersion" "pyHanko==$PyhankoVersion" --no-warn-script-location 2>&1 | Out-Null
 
 # Cleanup — remove pip, caches, metadata
 Write-Host "Cleaning up..."

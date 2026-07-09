@@ -21,6 +21,7 @@ from engine.redact import redact
 from engine.watermark import watermark
 from engine.compare import compare_text
 import engine.compare as compare_mod
+from engine.signatures import verify_signatures
 from pikepdf import Name, Dictionary
 
 
@@ -859,3 +860,136 @@ class TestCompare:
         # Counts reflect the FULL diff even though rows were capped.
         assert r["summary"]["lines_removed"] == 20
         assert r["summary"]["lines_added"] == 20
+
+
+# ── Verify signatures ───────────────────────────────────────────────────────
+
+
+_SIGNER = None
+
+
+def _self_signed_signer():
+    """A pyHanko signer backed by a fresh 100-year self-signed cert (test
+    fixtures only — the app ships verification, not signing)."""
+    import datetime
+    import tempfile
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    from cryptography.x509.oid import NameOID
+    from pyhanko.sign import signers
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Spectra Test Signer")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime(2000, 1, 1))
+        .not_valid_after(datetime.datetime(2100, 1, 1))
+        .sign(key, hashes.SHA256())
+    )
+    pfx = pkcs12.serialize_key_and_certificates(
+        b"t", key, cert, None, serialization.BestAvailableEncryption(b"pw")
+    )
+    p = tempfile.mktemp(suffix=".pfx")
+    with open(p, "wb") as f:
+        f.write(pfx)
+    return signers.SimpleSigner.load_pkcs12(p, passphrase=b"pw")
+
+
+def _signer():
+    global _SIGNER
+    if _SIGNER is None:
+        _SIGNER = _self_signed_signer()  # one keygen per test session
+    return _SIGNER
+
+
+def _sign_into(path: str, field_name: str) -> None:
+    """Sign the PDF at `path` in place, adding a signature field."""
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    from pyhanko.sign import signers
+
+    with open(path, "rb") as inf:
+        writer = IncrementalPdfFileWriter(inf)
+        out = signers.sign_pdf(
+            writer, signers.PdfSignatureMetadata(field_name=field_name), signer=_signer()
+        )
+    with open(path, "wb") as f:
+        f.write(out.getvalue())
+
+
+def _make_signed_pdf(path: str, field_name: str = "Sig1") -> None:
+    doc = pikepdf.new()
+    doc.add_blank_page(page_size=(400, 400))
+    doc.save(path)
+    doc.close()
+    _sign_into(path, field_name)
+
+
+class TestVerifySignatures:
+    def test_unsigned_pdf_reports_not_signed(self, tmp_dir):
+        p = os.path.join(tmp_dir, "unsigned.pdf")
+        doc = pikepdf.new()
+        doc.add_blank_page(page_size=(200, 200))
+        doc.save(p)
+        doc.close()
+        r = verify_signatures(p)
+        assert r["signed"] is False
+        assert r["signatures"] == []
+        assert r["summary"]["all_valid"] is False
+
+    def test_valid_signature(self, tmp_dir):
+        p = os.path.join(tmp_dir, "signed.pdf")
+        _make_signed_pdf(p)
+        r = verify_signatures(p)
+        assert r["signed"] is True
+        assert r["signature_count"] == 1
+        s = r["signatures"][0]
+        assert s["valid"] is True
+        assert s["intact"] is True
+        assert s["covers_whole_document"] is True
+        assert s["modified_after_signing"] is False
+        assert s["trusted"] is False  # single-cert: no trust store consulted
+        assert "Spectra Test Signer" in (s["signer"] or "")
+        assert s["digest_algorithm"] == "sha256"
+        assert r["summary"]["all_valid"] is True
+        # We NEVER claim trust — even a cryptographically valid signature.
+        assert r["summary"]["trust_verified"] is False
+
+    def test_tampered_covered_byte_breaks_integrity(self, tmp_dir):
+        p = os.path.join(tmp_dir, "signed.pdf")
+        _make_signed_pdf(p)
+        with open(p, "rb") as f:
+            data = bytearray(f.read())
+        data[100] ^= 0xFF  # flip a byte inside the signed byte range
+        with open(p, "wb") as f:
+            f.write(bytes(data))
+        r = verify_signatures(p)
+        # The security-critical property: a tampered doc is never reported OK.
+        assert r["summary"]["all_valid"] is False
+        assert r["signatures"][0]["intact"] is False
+
+    def test_modification_after_signing_detected(self, tmp_dir):
+        p = os.path.join(tmp_dir, "signed.pdf")
+        _make_signed_pdf(p)
+        with open(p, "ab") as f:
+            f.write(b"\n% appended after signing\n")
+        r = verify_signatures(p)
+        s = r["signatures"][0]
+        assert s["modified_after_signing"] is True
+        assert s["covers_whole_document"] is False
+        assert r["summary"]["any_modified_after_signing"] is True
+
+    def test_multiple_signatures(self, tmp_dir):
+        p = os.path.join(tmp_dir, "signed.pdf")
+        _make_signed_pdf(p, field_name="Sig1")
+        _sign_into(p, "Sig2")  # second signature, incremental
+        r = verify_signatures(p)
+        assert r["signature_count"] == 2
+        assert {s["field"] for s in r["signatures"]} == {"Sig1", "Sig2"}
+        assert all(s["valid"] for s in r["signatures"])

@@ -27,6 +27,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   redact: 'Redact',
   watermark: 'Watermark',
   compare_text: 'Compare',
+  verify_signatures: 'Verify Signatures',
 };
 
 /** Methods that are internal lookups, not user-facing operations. */
