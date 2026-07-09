@@ -16,6 +16,7 @@ export type Operation =
   | 'extract_text'
   | 'outline'
   | 'watermark'
+  | 'forms'
   | 'metadata'
   | 'repair'
   | 'rebuild'
@@ -58,6 +59,7 @@ const groups: OpGroup[] = [
     { id: 'extract_text', label: 'Extract Text' },
     { id: 'outline', label: 'Bookmarks' },
     { id: 'watermark', label: 'Watermark' },
+    { id: 'forms', label: 'Fill Form' },
     { id: 'metadata', label: 'Metadata' },
   ]},
 ];
