@@ -24,6 +24,7 @@ import { PdfVersionPanel } from './panels/PdfVersionPanel';
 import { OutlinePanel } from './panels/OutlinePanel';
 import { WatermarkPanel } from './panels/WatermarkPanel';
 import { FormsPanel } from './panels/FormsPanel';
+import { ComparePanel } from './panels/ComparePanel';
 import { useEngine } from './hooks/useEngine';
 import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
 import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
@@ -46,7 +47,7 @@ const panels: Record<Operation, React.ComponentType> = {
   pdfa: PdfaPanel, pdf_version: PdfVersionPanel,
   encrypt: EncryptPanel, decrypt: DecryptPanel,
   extract_text: ExtractTextPanel, metadata: MetadataPanel, outline: OutlinePanel,
-  watermark: WatermarkPanel, forms: FormsPanel,
+  watermark: WatermarkPanel, forms: FormsPanel, compare: ComparePanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
 };
 
@@ -56,7 +57,7 @@ const titles: Record<Operation, string> = {
   pdfa: 'Convert to PDF/A', pdf_version: 'Set PDF Version',
   encrypt: 'Encrypt PDF', decrypt: 'Decrypt PDF',
   extract_text: 'Extract Text', metadata: 'Edit Metadata', outline: 'Bookmarks',
-  watermark: 'Watermark', forms: 'Fill Form',
+  watermark: 'Watermark', forms: 'Fill Form', compare: 'Compare PDFs',
   repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',
 };
 

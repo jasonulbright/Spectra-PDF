@@ -17,6 +17,7 @@ export type Operation =
   | 'outline'
   | 'watermark'
   | 'forms'
+  | 'compare'
   | 'metadata'
   | 'repair'
   | 'rebuild'
@@ -60,6 +61,7 @@ const groups: OpGroup[] = [
     { id: 'outline', label: 'Bookmarks' },
     { id: 'watermark', label: 'Watermark' },
     { id: 'forms', label: 'Fill Form' },
+    { id: 'compare', label: 'Compare' },
     { id: 'metadata', label: 'Metadata' },
   ]},
 ];

@@ -19,6 +19,8 @@ from engine.inspect import get_page_count, get_page_info, check_encrypted, unloc
 from engine.validate import validate_pdf
 from engine.redact import redact
 from engine.watermark import watermark
+from engine.compare import compare_text
+import engine.compare as compare_mod
 from pikepdf import Name, Dictionary
 
 
@@ -737,3 +739,123 @@ class TestWatermark:
         with pytest.raises(ValueError):
             watermark(file=src, output=out, text="X", layer="sideways")
 
+
+
+# ── Compare ───────────────────────────────────────────────────────────────
+
+
+def _make_text_pdf(path: str, pages: list[list[str]]) -> None:
+    """Build a PDF from `pages` (list of pages, each a list of text lines) —
+    one `BT .. Tj ET` per line at a descending y, so pdfminer extracts them as
+    distinct lines top-to-bottom. Same reportlab-free style as the redaction
+    fixtures."""
+    doc = pikepdf.new()
+    font = doc.make_indirect(
+        Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+    )
+    for lines in pages:
+        page = doc.add_blank_page(page_size=(400, 600))
+        page.Resources = Dictionary(Font=Dictionary(F1=font))
+        parts = []
+        y = 550
+        for line in lines:
+            esc = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+            parts.append(f"BT /F1 12 Tf 50 {y} Td ({esc}) Tj ET".encode("latin-1"))
+            y -= 16
+        page.Contents = doc.make_stream(b"\n".join(parts))
+    doc.save(path)
+    doc.close()
+
+
+class TestCompare:
+    def test_identical_files(self, tmp_dir):
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        _make_text_pdf(a, [["alpha", "beta", "gamma"]])
+        _make_text_pdf(b, [["alpha", "beta", "gamma"]])
+        r = compare_text(a, b)
+        assert r["summary"]["identical"] is True
+        assert r["summary"]["similarity"] == 1.0
+        assert r["summary"]["lines_added"] == 0
+        assert r["summary"]["lines_removed"] == 0
+        assert all(row["type"] == "context" for row in r["rows"])
+
+    def test_insertion(self, tmp_dir):
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        _make_text_pdf(a, [["alpha", "beta", "gamma"]])
+        _make_text_pdf(b, [["alpha", "beta", "delta", "gamma"]])
+        r = compare_text(a, b)
+        assert r["summary"]["identical"] is False
+        assert r["summary"]["lines_added"] == 1
+        assert r["summary"]["lines_removed"] == 0
+        assert any(row["type"] == "add" and row["text"] == "delta" for row in r["rows"])
+
+    def test_deletion(self, tmp_dir):
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        _make_text_pdf(a, [["alpha", "beta", "gamma"]])
+        _make_text_pdf(b, [["alpha", "gamma"]])
+        r = compare_text(a, b)
+        assert r["summary"]["lines_removed"] == 1
+        assert r["summary"]["lines_added"] == 0
+        assert any(row["type"] == "remove" and row["text"] == "beta" for row in r["rows"])
+
+    def test_replacement(self, tmp_dir):
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        _make_text_pdf(a, [["alpha", "beta", "gamma"]])
+        _make_text_pdf(b, [["alpha", "BETA", "gamma"]])
+        r = compare_text(a, b)
+        assert r["summary"]["identical"] is False
+        assert r["summary"]["lines_added"] == 1
+        assert r["summary"]["lines_removed"] == 1
+        assert any(row["type"] == "remove" and row["text"] == "beta" for row in r["rows"])
+        assert any(row["type"] == "add" and row["text"] == "BETA" for row in r["rows"])
+
+    def test_change_is_attributed_to_its_page(self, tmp_dir):
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        _make_text_pdf(a, [["page one line"], ["page two original"]])
+        _make_text_pdf(b, [["page one line"], ["page two changed"]])
+        r = compare_text(a, b)
+        removed = [row for row in r["rows"] if row["type"] == "remove"]
+        added = [row for row in r["rows"] if row["type"] == "add"]
+        assert removed and removed[0]["text"] == "page two original"
+        assert removed[0]["page"] == 2
+        assert added and added[0]["text"] == "page two changed"
+        assert added[0]["page"] == 2
+
+    def test_differing_page_counts(self, tmp_dir):
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        _make_text_pdf(a, [["only page"]])
+        _make_text_pdf(b, [["only page"], ["brand new page"]])
+        r = compare_text(a, b)
+        assert r["summary"]["pages_a"] == 1
+        assert r["summary"]["pages_b"] == 2
+        assert r["summary"]["lines_added"] == 1
+        assert any(row.get("text") == "brand new page" and row["page"] == 2 for row in r["rows"])
+
+    def test_both_empty_text_is_identical(self, tmp_dir):
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        _make_text_pdf(a, [[]])  # a blank page, no text
+        _make_text_pdf(b, [[]])
+        r = compare_text(a, b)
+        assert r["summary"]["identical"] is True
+        assert r["summary"]["similarity"] == 1.0
+        assert r["rows"] == []
+
+    def test_truncation_caps_rows_but_not_counts(self, tmp_dir, monkeypatch):
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        _make_text_pdf(a, [[f"a-line-{i}" for i in range(20)]])
+        _make_text_pdf(b, [[f"b-line-{i}" for i in range(20)]])  # every line differs
+        monkeypatch.setattr(compare_mod, "MAX_ROWS", 5)
+        r = compare_text(a, b)
+        assert r["summary"]["truncated"] is True
+        assert len(r["rows"]) == 5
+        # Counts reflect the FULL diff even though rows were capped.
+        assert r["summary"]["lines_removed"] == 20
+        assert r["summary"]["lines_added"] == 20

@@ -26,6 +26,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   unlock: 'Unlock',
   redact: 'Redact',
   watermark: 'Watermark',
+  compare_text: 'Compare',
 };
 
 /** Methods that are internal lookups, not user-facing operations. */
@@ -83,6 +84,8 @@ export function getFriendlyName(method: string, params: Record<string, unknown> 
       const n = Array.isArray(params.regions) ? params.regions.length : 0;
       return `${base} ${n} region${n === 1 ? '' : 's'} — ${file}`;
     }
+    case 'compare_text':
+      return `${base}: ${fileName(params.file_a)} ↔ ${fileName(params.file_b)}`;
     default:
       return file ? `${base} — ${file}` : base;
   }

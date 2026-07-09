@@ -53,6 +53,8 @@ pub enum CliCommand {
     Redact(RedactArgs),
     /// Stamp a translucent text watermark across pages
     Watermark(WatermarkArgs),
+    /// Compare the text of two PDFs (JSON diff report)
+    Compare(CompareArgs),
     /// View or set PDF metadata
     Metadata(MetadataArgs),
     /// Convert a PDF to grayscale
@@ -228,6 +230,17 @@ pub struct WatermarkArgs {
     /// Comma-separated 1-based page numbers (omit for all pages)
     #[arg(long)]
     pub pages: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CompareArgs {
+    /// First (baseline) PDF file
+    pub a: PathBuf,
+    /// Second (changed) PDF file
+    pub b: PathBuf,
+    /// Unchanged lines of context to keep around each change
+    #[arg(long, default_value_t = 3)]
+    pub context: u32,
 }
 
 #[derive(Args)]
@@ -749,6 +762,15 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
             engine.call("watermark", params)
         }
+
+        CliCommand::Compare(args) => engine.call(
+            "compare_text",
+            json!({
+                "file_a": abs(&args.a).to_string_lossy(),
+                "file_b": abs(&args.b).to_string_lossy(),
+                "context": args.context,
+            }),
+        ),
 
         CliCommand::Metadata(args) => {
             let input = abs(&args.input);

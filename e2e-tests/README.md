@@ -69,6 +69,7 @@ runs every `specs/*.spec.ts` file.
 | `08-redaction.spec.ts` | Marked region's text is stripped from the saved file; unmarked text and other pages survive |
 | `09-watermark.spec.ts` | Watermark panel form stamps text onto every page of the saved file |
 | `10-forms.spec.ts` | Forms panel lists AcroForm fields, fills them, and the values bake into the saved file |
+| `11-compare.spec.ts` | Compare panel diffs two open PDFs and reports the differing line |
 
 ## Adding a spec
 
