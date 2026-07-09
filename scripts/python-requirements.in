@@ -1,0 +1,8 @@
+# Top-level bundled Python engine dependencies (the human-edited pin list).
+# Update these deliberately, then regenerate the hash-pinned lockfile:
+#   scripts/lock-python-deps.ps1   (resolves the full transitive tree + hashes)
+# The lockfile scripts/python-requirements.txt is what setup-python-embed.ps1
+# actually installs, with --require-hashes. See docs/PUNCHLIST.md dev notes.
+pikepdf==10.7.2
+pdfminer.six==20260107
+pyHanko==0.35.2

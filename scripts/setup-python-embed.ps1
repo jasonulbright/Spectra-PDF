@@ -42,15 +42,18 @@ Write-Host "Installing pip..."
 Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEMP\get-pip.py"
 & $DestDir\python.exe "$env:TEMP\get-pip.py" --no-warn-script-location 2>&1 | Out-Null
 
-# Install dependencies (pinned versions — update deliberately, not automatically)
-$PikepdfVersion = "10.7.2"
-$PdfminerVersion = "20260107"
-# pyHanko powers digital-signature verification; it pulls cryptography,
-# asn1crypto, and pyhanko-certvalidator (all permissive). See
+# Install the hash-pinned dependency tree. Every package — top-level AND
+# transitive (cryptography, lxml, …) — is version- and hash-verified via
+# --require-hashes, so a build is reproducible and can't silently pull a
+# different transitive version. Top-level pins live in python-requirements.in;
+# the full locked tree in python-requirements.txt is regenerated deliberately
+# with lock-python-deps.ps1 (never floated automatically). pyHanko (for
+# signature verification) pulls cryptography/asn1crypto/certvalidator — see
 # docs/architecture/10-phase2h-signatures.md.
-$PyhankoVersion = "0.35.2"
-Write-Host "Installing pikepdf==$PikepdfVersion, pdfminer.six==$PdfminerVersion, pyHanko==$PyhankoVersion..."
-& $DestDir\python.exe -m pip install "pikepdf==$PikepdfVersion" "pdfminer.six==$PdfminerVersion" "pyHanko==$PyhankoVersion" --no-warn-script-location 2>&1 | Out-Null
+$LockFile = "$PSScriptRoot\python-requirements.txt"
+Write-Host "Installing hash-pinned dependencies from python-requirements.txt..."
+& $DestDir\python.exe -m pip install --require-hashes -r $LockFile --no-warn-script-location 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Hash-verified dependency install failed" }
 
 # Cleanup — remove pip, caches, metadata
 Write-Host "Cleaning up..."
