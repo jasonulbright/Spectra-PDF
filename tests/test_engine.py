@@ -326,6 +326,49 @@ def _make_redact_fixture(path: str) -> None:
     doc.close()
 
 
+def _all_form_streams(pdf) -> list:
+    """Every reachable /Form XObject stream in the document, walking page and
+    nested-form /Resources. Used to assert redacted form COPIES decode cleanly
+    — a copy that keeps the original's /Filter over freshly-written raw bytes
+    is a corrupt stream a real reader can't inflate."""
+    seen: set = set()
+    out: list = []
+
+    def visit(res):
+        if res is None:
+            return
+        xo = res.get("/XObject")
+        if xo is None:
+            return
+        for key in xo.keys():
+            stream = xo[key]
+            ident = stream.objgen if getattr(stream, "is_indirect", False) else id(stream)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            if stream.get("/Subtype") == Name.Form:
+                out.append(stream)
+                visit(stream.get("/Resources"))
+
+    for page in pdf.pages:
+        visit(page.get("/Resources"))
+    return out
+
+
+def _stream_contains(obj, needle: bytes) -> bool:
+    """True if `needle` is in the object's DECODED bytes, falling back to its
+    RAW bytes if decoding fails — so a (buggy) undecodable stream can never
+    silently hide a secret from the scan."""
+    for reader in ("read_bytes", "read_raw_bytes"):
+        try:
+            if needle in bytes(getattr(obj, reader)()):
+                return True
+            return False  # decoded fine, needle absent — done
+        except Exception:
+            continue
+    return False
+
+
 class TestRedact:
     def test_redact_removes_text_and_image_keeps_unrelated_content(self, tmp_dir):
         src = os.path.join(tmp_dir, "redact_in.pdf")
@@ -493,7 +536,12 @@ class TestRedact:
         font = doc.make_indirect(
             Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
         )
-        form = doc.make_stream(b"BT /F1 12 Tf 10 40 Td (FORMSECRET) Tj ET")
+        # Two runs in the same form: FORMSECRET (will fall in the region) and
+        # FORMKEEP (won't). FORMKEEP surviving as EXTRACTABLE text proves the
+        # redacted copy is a valid, decodable stream — a copy that wrongly
+        # inherits the original's /Filter over raw bytes would be corrupt and
+        # FORMKEEP would be unreadable.
+        form = doc.make_stream(b"BT /F1 12 Tf 10 40 Td (FORMSECRET) Tj 0 -35 Td (FORMKEEP) Tj ET")
         form.Type = Name.XObject
         form.Subtype = Name.Form
         form.BBox = [0, 0, 200, 60]
@@ -508,24 +556,25 @@ class TestRedact:
         doc.save(src)
         doc.close()
 
+        # FORMSECRET at form-y=40 → device y≈290 on p1 (in region); FORMKEEP at
+        # form-y=5 → device y≈255 (below the region).
         result = redact(file=src, output=out, regions=[{"page": 1, "rect": [55, 285, 180, 305]}])
         assert result["text_runs_removed"] == 1
 
-        # Independent (non-pikepdf-walk) check: pdfminer must not surface the
-        # secret for page 1. Page 2 still legitimately shows it once.
-        assert extract_text(out)["text"].count("FORMSECRET") == 1
+        text = extract_text(out)["text"]
+        # Page 1's FORMSECRET gone; page 2's still there once; FORMKEEP kept on
+        # both pages (2×) — the latter fails if the redacted copy is corrupt.
+        assert text.count("FORMSECRET") == 1
+        assert text.count("FORMKEEP") == 2
 
-        # Byte-level: the literal must survive in exactly ONE stream (page 2's
-        # untouched original form) — proving both that page 1's copy really
-        # dropped it and that the shared original was not over-redacted.
         with pikepdf.open(out) as pdf:
-            streams_with = 0
-            for obj in pdf.objects:
-                try:
-                    if b"FORMSECRET" in obj.read_bytes():
-                        streams_with += 1
-                except Exception:
-                    continue
+            # Every redacted form COPY must decode without error.
+            for stream in _all_form_streams(pdf):
+                stream.read_bytes()  # raises DataDecodingError on a corrupt copy
+            # Byte-level (decode-or-raw): FORMSECRET must survive in exactly ONE
+            # stream (page 2's untouched original) — proving page 1's copy
+            # really dropped it and the shared original was not over-redacted.
+            streams_with = sum(1 for obj in pdf.objects if _stream_contains(obj, b"FORMSECRET"))
             assert streams_with == 1
 
     def test_redact_removes_image_inside_form_and_prunes_its_bytes(self, tmp_dir):
@@ -566,6 +615,10 @@ class TestRedact:
                 if obj.get("/Type") == Name.XObject and obj.get("/Subtype") == Name.Image
             ]
             assert images == []
+            # The redacted form copy must decode cleanly (guards the /Filter-
+            # mismatch corruption class).
+            for stream in _all_form_streams(pdf):
+                stream.read_bytes()
 
     def test_redact_tracks_leading_based_lines(self, tmp_dir):
         # 2i: text laid out with TL + T* (leading-based next-line moves), not

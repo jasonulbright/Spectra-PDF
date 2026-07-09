@@ -475,8 +475,14 @@ def _redact_form(pdf, form, parent_resources, regions, form_ctm, depth, name_cou
         return None, None
 
     copy = pdf.make_stream(pikepdf.unparse_content_stream(result.kept))
+    # make_stream stores the rebuilt content UNCOMPRESSED with no filter, so we
+    # must NOT copy the original's /Filter or /DecodeParms — inheriting a
+    # /FlateDecode over raw bytes yields a stream no reader can inflate,
+    # corrupting the copy (and any legitimate content it was meant to keep).
+    # /Length is likewise recomputed by pikepdf on write. /Resources is set
+    # below from a pruned copy.
     for key in form.keys():
-        if key in ("/Length", "/Resources"):
+        if key in ("/Length", "/Filter", "/DecodeParms", "/Resources"):
             continue
         copy[key] = form[key]
 
