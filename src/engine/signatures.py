@@ -176,9 +176,22 @@ def sign_pdf(
     if not Path(pfx_path).is_file():
         raise ValueError("Signer file (.pfx) not found.")
 
+    # Use load_pkcs12_data (not load_pkcs12): the file-path variant swallows its
+    # own failure, logs it via `logger.error(..., exc_info=e)` on the
+    # pyhanko.sign.signers.pdf_cms logger — which is NOT silenced here — and
+    # returns None. With no handler configured, Python's last-resort handler
+    # dumps that ERROR-with-traceback (including internal deployment paths) to
+    # stderr on every wrong-password/corrupt-.pfx attempt, and our `except`
+    # below would be dead code. load_pkcs12_data genuinely raises instead, so
+    # the handling here is live and nothing leaks. The bundled-chain unpacking
+    # (other_certs from the archive) happens inside load_pkcs12_data itself.
     try:
-        signer = signers.SimpleSigner.load_pkcs12(
-            str(pfx_path), passphrase=password.encode("utf-8") if password else None
+        with open(pfx_path, "rb") as pf:
+            pfx_bytes = pf.read()
+        signer = signers.SimpleSigner.load_pkcs12_data(
+            pfx_bytes,
+            other_certs=[],
+            passphrase=password.encode("utf-8") if password else None,
         )
     except Exception:
         # Deliberately generic and password-free — never echo the secret, and
@@ -187,8 +200,6 @@ def sign_pdf(
         raise ValueError(
             "Could not load the signer — wrong password, or an unsupported/corrupt .pfx."
         ) from None
-    if signer is None:
-        raise ValueError("Could not load the signer from the provided .pfx.")
 
     meta = signers.PdfSignatureMetadata(field_name=field_name, reason=reason, location=location)
     with open(file, "rb") as inf:
