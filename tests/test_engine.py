@@ -480,6 +480,299 @@ class TestRedact:
         assert "LINE ONE" in text
         assert "LINE TWO" not in text
 
+    def test_redact_descends_into_form_xobject_and_spares_shared_uses(self, tmp_dir):
+        # 2i: text drawn via a Form XObject under a region must be removed from
+        # the OUTPUT BYTES, not just visually covered. And a form shared with a
+        # second, non-overlapping placement must NOT lose its content there —
+        # the redaction operates on a per-page copy, never the shared original.
+        src = os.path.join(tmp_dir, "redact_form.pdf")
+        out = os.path.join(tmp_dir, "redact_form_out.pdf")
+        doc = pikepdf.new()
+        p1 = doc.add_blank_page(page_size=(400, 400))
+        p2 = doc.add_blank_page(page_size=(400, 400))
+        font = doc.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+        )
+        form = doc.make_stream(b"BT /F1 12 Tf 10 40 Td (FORMSECRET) Tj ET")
+        form.Type = Name.XObject
+        form.Subtype = Name.Form
+        form.BBox = [0, 0, 200, 60]
+        form.Resources = Dictionary(Font=Dictionary(F1=font))
+        form = doc.make_indirect(form)
+        # Same form object on both pages: in-region on p1 (placed at 50,250),
+        # far out of the redaction region on p2 (placed at 50,20).
+        p1.Resources = Dictionary(XObject=Dictionary(Fm0=form))
+        p1.Contents = doc.make_stream(b"q 1 0 0 1 50 250 cm /Fm0 Do Q")
+        p2.Resources = Dictionary(XObject=Dictionary(Fm0=form))
+        p2.Contents = doc.make_stream(b"q 1 0 0 1 50 20 cm /Fm0 Do Q")
+        doc.save(src)
+        doc.close()
+
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [55, 285, 180, 305]}])
+        assert result["text_runs_removed"] == 1
+
+        # Independent (non-pikepdf-walk) check: pdfminer must not surface the
+        # secret for page 1. Page 2 still legitimately shows it once.
+        assert extract_text(out)["text"].count("FORMSECRET") == 1
+
+        # Byte-level: the literal must survive in exactly ONE stream (page 2's
+        # untouched original form) — proving both that page 1's copy really
+        # dropped it and that the shared original was not over-redacted.
+        with pikepdf.open(out) as pdf:
+            streams_with = 0
+            for obj in pdf.objects:
+                try:
+                    if b"FORMSECRET" in obj.read_bytes():
+                        streams_with += 1
+                except Exception:
+                    continue
+            assert streams_with == 1
+
+    def test_redact_removes_image_inside_form_and_prunes_its_bytes(self, tmp_dir):
+        # 2i: an image drawn inside a Form XObject under a region must be gone
+        # from the file, not merely undrawn — its XObject bytes must be pruned.
+        src = os.path.join(tmp_dir, "redact_formimg.pdf")
+        out = os.path.join(tmp_dir, "redact_formimg_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(400, 400))
+        img = doc.make_stream(bytes([7, 7, 7] * 9))
+        img.Type = Name.XObject
+        img.Subtype = Name.Image
+        img.Width = 3
+        img.Height = 3
+        img.BitsPerComponent = 8
+        img.ColorSpace = Name.DeviceRGB
+        img = doc.make_indirect(img)
+        form = doc.make_stream(b"q 40 0 0 40 5 5 cm /ImF Do Q")
+        form.Type = Name.XObject
+        form.Subtype = Name.Form
+        form.BBox = [0, 0, 50, 50]
+        form.Resources = Dictionary(XObject=Dictionary(ImF=img))
+        form = doc.make_indirect(form)
+        page.Resources = Dictionary(XObject=Dictionary(Fm0=form))
+        # Form placed at (100,100); its image spans ~ (105,105)-(145,145).
+        page.Contents = doc.make_stream(b"q 1 0 0 1 100 100 cm /Fm0 Do Q")
+        doc.save(src)
+        doc.close()
+
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [110, 110, 140, 140]}])
+        assert result["images_removed"] == 1
+
+        # No Image XObject may remain reachable in the saved file.
+        with pikepdf.open(out) as pdf:
+            images = [
+                obj
+                for obj in pdf.objects
+                if obj.get("/Type") == Name.XObject and obj.get("/Subtype") == Name.Image
+            ]
+            assert images == []
+
+    def test_redact_tracks_leading_based_lines(self, tmp_dir):
+        # 2i: text laid out with TL + T* (leading-based next-line moves), not
+        # explicit per-line Td, must track line positions so only the line
+        # under the region is removed. The old walker ignored T*/leading and
+        # collapsed every line onto the first line's origin.
+        src = os.path.join(tmp_dir, "redact_leading.pdf")
+        out = os.path.join(tmp_dir, "redact_leading_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(400, 400))
+        font = doc.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+        )
+        page.Resources = Dictionary(Font=Dictionary(F1=font))
+        # LEADA at y=320, then T* (leading 14) → LEADB y=306, T* → LEADC y=292.
+        page.Contents = doc.make_stream(
+            b"BT /F1 12 Tf 14 TL 50 320 Td (LEADA) Tj T* (LEADB) Tj T* (LEADC) Tj ET"
+        )
+        doc.save(src)
+        doc.close()
+
+        # Region straddles only the middle line's band (y 306..318).
+        redact(file=src, output=out, regions=[{"page": 1, "rect": [45, 307, 120, 317]}])
+        text = extract_text(out)["text"]
+        assert "LEADA" in text
+        assert "LEADB" not in text
+        assert "LEADC" in text
+
+    def test_redact_strips_overlapping_annotations(self, tmp_dir):
+        # 2i: an annotation whose /Rect overlaps a region is removed; one that
+        # doesn't is kept. Content-stream stripping never touches annotation
+        # appearances, so this is a separate removal path.
+        src = os.path.join(tmp_dir, "redact_annot.pdf")
+        out = os.path.join(tmp_dir, "redact_annot_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(400, 400))
+        a_over = doc.make_indirect(
+            Dictionary(Type=Name.Annot, Subtype=Name.FreeText, Rect=[50, 250, 200, 290], Contents="hidden")
+        )
+        a_far = doc.make_indirect(
+            Dictionary(Type=Name.Annot, Subtype=Name.FreeText, Rect=[50, 20, 200, 60], Contents="visible")
+        )
+        page.Annots = pikepdf.Array([a_over, a_far])
+        page.Contents = doc.make_stream(b"")
+        doc.save(src)
+        doc.close()
+
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [60, 255, 180, 285]}])
+        assert result["annotations_removed"] == 1
+        with pikepdf.open(out) as pdf:
+            annots = pdf.pages[0].obj.get("/Annots")
+            assert annots is not None and len(annots) == 1
+            assert [float(v) for v in annots[0].Rect] == [50, 20, 200, 60]
+
+    def test_redact_cascades_to_linked_popup_annotations(self, tmp_dir):
+        # 2i review finding: removing a markup annotation whose /Popup sits at a
+        # non-overlapping /Rect must ALSO remove the popup — its /Parent keeps
+        # the "removed" markup object (and its secret /Contents) reachable
+        # otherwise. Verified by a full-object byte scan of the output.
+        src = os.path.join(tmp_dir, "redact_popup.pdf")
+        out = os.path.join(tmp_dir, "redact_popup_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(400, 400))
+        markup = doc.make_indirect(
+            Dictionary(Type=Name.Annot, Subtype=Name.Text, Rect=[50, 250, 80, 280], Contents="TOPSECRETCOMMENT")
+        )
+        popup = doc.make_indirect(
+            Dictionary(Type=Name.Annot, Subtype=Name.Popup, Rect=[350, 350, 395, 395], Parent=markup)
+        )
+        markup.Popup = popup
+        page.Annots = pikepdf.Array([markup, popup])
+        page.Contents = doc.make_stream(b"")
+        doc.save(src)
+        doc.close()
+
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [40, 240, 90, 290]}])
+        assert result["annotations_removed"] == 2  # markup + cascaded popup
+        with pikepdf.open(out) as pdf:
+            assert pdf.pages[0].obj.get("/Annots") is None
+            for obj in pdf.objects:
+                try:
+                    contents = obj.get("/Contents")
+                except Exception:
+                    continue
+                assert contents is None or "TOPSECRETCOMMENT" not in str(contents)
+
+    def test_redact_restores_font_size_across_q_q(self, tmp_dir):
+        # 2i review finding: text-state (font size / leading) is part of the
+        # graphics state and must be restored by Q. A transient small font
+        # inside q..Q must not leave a stale size that under-sizes a later
+        # bbox — that under-estimate is an under-redaction leak.
+        src = os.path.join(tmp_dir, "redact_fontstate.pdf")
+        out = os.path.join(tmp_dir, "redact_fontstate_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(400, 400))
+        font = doc.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+        )
+        page.Resources = Dictionary(Font=Dictionary(F1=font))
+        # Establish 40pt, transiently override to 8pt inside q..Q, then show
+        # text relying on the restored 40pt. Only the true 40pt width reaches
+        # into the region below.
+        page.Contents = doc.make_stream(
+            b"BT /F1 40 Tf ET q BT /F1 8 Tf ET Q BT 10 300 Td (SECRETBIG) Tj ET"
+        )
+        doc.save(src)
+        doc.close()
+
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [100, 295, 190, 320]}])
+        assert result["text_runs_removed"] == 1
+        assert "SECRETBIG" not in extract_text(out)["text"]
+
+    def test_redact_survives_malformed_content_and_annots(self, tmp_dir):
+        # 2i review finding: adversarial/malformed input must not crash the
+        # whole operation. A 1-operand Td, a non-array TJ, and a null /Annots
+        # entry are all tolerated; a valid region on the page still redacts.
+        src = os.path.join(tmp_dir, "redact_malformed.pdf")
+        out = os.path.join(tmp_dir, "redact_malformed_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(400, 400))
+        font = doc.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+        )
+        page.Resources = Dictionary(Font=Dictionary(F1=font))
+        page.Contents = doc.make_stream(
+            b"BT /F1 12 Tf 50 Td (BADTD) Tj 5 TJ 60 300 Td (REALSECRET) Tj ET"
+        )
+        page.Annots = pikepdf.Array([pikepdf.Object.parse(b"null")])
+        doc.save(src)
+        doc.close()
+
+        # Must not raise, and must still remove the intersecting real text.
+        # (The malformed `5 TJ` is preserved verbatim, so pdfminer can't parse
+        # the output — scan the raw stream bytes for the secret instead.)
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [55, 295, 200, 315]}])
+        assert result["text_runs_removed"] >= 1
+        with pikepdf.open(out) as pdf:
+            for obj in pdf.objects:
+                try:
+                    data = obj.read_bytes()
+                except Exception:
+                    continue
+                assert b"REALSECRET" not in data
+
+    def test_redact_form_nesting_past_depth_cap_fails_closed(self, tmp_dir):
+        # 2i re-review finding: a Form chain deeper than MAX_FORM_DEPTH must
+        # NOT leave content intact — and the drop must be SIGNALLED so it isn't
+        # silently reverted by an enclosing form bottoming out. A 20-wrapper
+        # chain (deeper than the cap) around a secret, all placed inside the
+        # region, must come back with the secret gone.
+        src = os.path.join(tmp_dir, "redact_deep.pdf")
+        out = os.path.join(tmp_dir, "redact_deep_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(400, 400))
+        font = doc.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+        )
+
+        def _make_form(content, resources):
+            f = doc.make_stream(content)
+            f.Type = Name.XObject
+            f.Subtype = Name.Form
+            f.BBox = [0, 0, 200, 200]
+            f.Resources = resources
+            return doc.make_indirect(f)
+
+        cur = _make_form(b"BT /F1 12 Tf 5 5 Td (DEEPSECRET) Tj ET", Dictionary(Font=Dictionary(F1=font)))
+        for _ in range(20):
+            cur = _make_form(b"/Fm Do", Dictionary(XObject=Dictionary(Fm=cur)))
+        page.Resources = Dictionary(XObject=Dictionary(Top=cur))
+        page.Contents = doc.make_stream(b"q 1 0 0 1 50 50 cm /Top Do Q")
+        doc.save(src)
+        doc.close()
+
+        # Region overlaps every placed bbox (form at (50,50), BBox 0..200).
+        redact(file=src, output=out, regions=[{"page": 1, "rect": [40, 40, 160, 160]}])
+        assert "DEEPSECRET" not in extract_text(out)["text"]
+        with pikepdf.open(out) as pdf:
+            for obj in pdf.objects:
+                try:
+                    data = obj.read_bytes()
+                except Exception:
+                    continue
+                assert b"DEEPSECRET" not in data
+
+    def test_redact_accounts_for_horizontal_scaling(self, tmp_dir):
+        # 2i re-review finding: Tz (horizontal scaling) > 100 makes text WIDER
+        # than the flat width estimate; the bbox must fold it in so expanded
+        # text that reaches into a region is still caught.
+        src = os.path.join(tmp_dir, "redact_tz.pdf")
+        out = os.path.join(tmp_dir, "redact_tz_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(400, 400))
+        font = doc.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+        )
+        page.Resources = Dictionary(Font=Dictionary(F1=font))
+        # 400% horizontal scaling: unscaled width ~54pt (from x=10) reaches to
+        # ~64; the true 4x width reaches to ~226, into the region at x>=150.
+        page.Contents = doc.make_stream(b"BT /F1 12 Tf 400 Tz 10 300 Td (SECRETTAG) Tj ET")
+        doc.save(src)
+        doc.close()
+
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": [150, 295, 220, 320]}])
+        assert result["text_runs_removed"] == 1
+        assert "SECRETTAG" not in extract_text(out)["text"]
+
 
 # ── Watermark ─────────────────────────────────────────────────────────────
 
