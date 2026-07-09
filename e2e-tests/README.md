@@ -71,6 +71,7 @@ runs every `specs/*.spec.ts` file.
 | `10-forms.spec.ts` | Forms panel lists AcroForm fields, fills them, and the values bake into the saved file |
 | `11-compare.spec.ts` | Compare panel diffs two open PDFs and reports the differing line |
 | `12-signatures.spec.ts` | Signatures panel verifies a signed PDF: signer, valid badge, and the trust caveat |
+| `13-signing.spec.ts` | Signing a PDF with a PKCS#12 signer produces a self-verifying signed file; wrong password fails closed |
 
 ## Adding a spec
 

@@ -21,7 +21,7 @@ from engine.redact import redact
 from engine.watermark import watermark
 from engine.compare import compare_text
 import engine.compare as compare_mod
-from engine.signatures import verify_signatures
+from engine.signatures import verify_signatures, sign_pdf
 from pikepdf import Name, Dictionary
 
 
@@ -1037,3 +1037,109 @@ class TestVerifySignatures:
         assert s["valid"] is True and s["intact"] is True  # crypto still fine
         assert s["trusted"] is False  # but the OS store is never consulted
         assert r["summary"]["trust_verified"] is False
+
+
+# ── Sign ────────────────────────────────────────────────────────────────────
+
+
+def _make_test_pfx(path: str, password: str = "testpw") -> str:
+    """Write a self-signed, 100-year PKCS#12 signer to `path`."""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Spectra Test Signer")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime(2000, 1, 1))
+        .not_valid_after(datetime.datetime(2100, 1, 1))
+        .sign(key, hashes.SHA256())
+    )
+    enc = (
+        serialization.BestAvailableEncryption(password.encode())
+        if password
+        else serialization.NoEncryption()
+    )
+    with open(path, "wb") as f:
+        f.write(pkcs12.serialize_key_and_certificates(b"test", key, cert, None, enc))
+    return path
+
+
+def _blank_pdf(path: str) -> str:
+    doc = pikepdf.new()
+    doc.add_blank_page(page_size=(300, 300))
+    doc.save(path)
+    doc.close()
+    return path
+
+
+class TestSignPdf:
+    def test_sign_then_verify_roundtrip(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(file=src, output=out, pfx_path=pfx, password="pw")
+        assert os.path.isfile(out)
+        # The engine self-verifies and echoes the result.
+        assert r["valid"] is True
+        assert r["intact"] is True
+        assert r["covers_whole_document"] is True
+        assert "Spectra Test Signer" in (r["signer"] or "")
+        # And our own verify handler agrees on the produced file.
+        v = verify_signatures(out)
+        assert v["signed"] is True
+        assert v["summary"]["all_valid"] is True
+
+    def test_tampered_signed_output_fails_verification(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        sign_pdf(file=src, output=out, pfx_path=pfx, password="pw")
+        with open(out, "rb") as f:
+            data = bytearray(f.read())
+        data[100] ^= 0xFF  # flip a byte inside the signed byte range
+        with open(out, "wb") as f:
+            f.write(bytes(data))
+        assert verify_signatures(out)["summary"]["all_valid"] is False
+
+    def test_wrong_password_raises_and_writes_no_output(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "correct")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError):
+            sign_pdf(file=src, output=out, pfx_path=pfx, password="wrong")
+        # Fail closed — no partial/omit-the-signature output.
+        assert not os.path.exists(out)
+
+    def test_in_place_output_is_rejected(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        with pytest.raises(ValueError):
+            sign_pdf(file=src, output=src, pfx_path=pfx, password="pw")
+
+    def test_result_never_contains_the_password(self, tmp_dir):
+        token = "unique-secret-9f3a2b"
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), token)
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(file=src, output=out, pfx_path=pfx, password=token)
+        assert token not in str(r)  # password appears nowhere in the report
+
+    def test_reason_and_location_accepted(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(
+            file=src, output=out, pfx_path=pfx, password="pw",
+            reason="I approve this document", location="Cleveland, OH",
+        )
+        assert r["valid"] is True

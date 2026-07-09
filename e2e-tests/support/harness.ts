@@ -234,6 +234,37 @@ export async function getRedactionMarkCount(): Promise<number> {
   });
 }
 
+export interface SignParams {
+  pfxPath: string;
+  password: string;
+  output: string;
+  reason?: string;
+  location?: string;
+}
+
+export interface SignSummary {
+  output: string;
+  signer: string | null;
+  valid: boolean;
+  intact: boolean;
+  covers_whole_document: boolean;
+}
+
+export async function signActiveFile(params: SignParams): Promise<SignSummary> {
+  const result = await browser.executeAsync<SignSummary | string, [SignParams]>(
+    function (p, done) {
+      (window as any).__SPECTRA_TEST__.signActiveFile(p)
+        .then((res: unknown) => done(res as any))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    params,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`signActiveFile failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
 /**
  * Set a React-controlled input's value atomically. WDIO's `setValue` is
  * unreliable here twice over: its clearValue can be undone by React

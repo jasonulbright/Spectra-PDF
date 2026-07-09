@@ -39,7 +39,11 @@ import logging
 # genuine ERROR-level diagnostics (malformed CMS, processing errors) still log.
 logging.getLogger("pyhanko.sign.validation.generic_cms").setLevel(logging.ERROR)
 
+from pathlib import Path
+
 from pyhanko.pdf_utils.reader import PdfFileReader
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.sign import signers
 from pyhanko.sign.validation import validate_pdf_signature
 from pyhanko_certvalidator import ValidationContext
 
@@ -134,4 +138,79 @@ def verify_signatures(file: str) -> dict:
             # This slice never verifies signer identity against a trust store.
             "trust_verified": False,
         },
+    }
+
+
+def sign_pdf(
+    file: str,
+    output: str,
+    pfx_path: str,
+    password: str,
+    field_name: str = "Signature1",
+    reason: str | None = None,
+    location: str | None = None,
+) -> dict:
+    """Apply an INVISIBLE digital signature using a PKCS#12 (.pfx) signer,
+    written to a NEW file (signing appends an incremental revision — see
+    docs/architecture/11-phase2h-signing.md).
+
+    SECURITY: the ``password`` is used only to load the signer and is NEVER
+    placed in the return value, an error message, or any log. The result is
+    self-verified via verify_signatures so the caller gets immediate
+    confirmation.
+
+    Args:
+        file: Input PDF path.
+        output: Output path for the signed PDF (MUST differ from ``file``).
+        pfx_path: PKCS#12 (.pfx/.p12) signer file.
+        password: Passphrase for the .pfx (empty string if none).
+        field_name: Signature field name (default "Signature1").
+        reason / location: Optional signature metadata (not secret).
+    """
+    input_path = Path(file)
+    output_path = Path(output)
+    if input_path.resolve() == output_path.resolve():
+        # Signing appends a revision; an in-place write would be ambiguous and
+        # invites re-serialization that breaks the signature.
+        raise ValueError("The signed output must be a different file from the input.")
+    if not Path(pfx_path).is_file():
+        raise ValueError("Signer file (.pfx) not found.")
+
+    try:
+        signer = signers.SimpleSigner.load_pkcs12(
+            str(pfx_path), passphrase=password.encode("utf-8") if password else None
+        )
+    except Exception:
+        # Deliberately generic and password-free — never echo the secret, and
+        # suppress the underlying exception chain (`from None`) so nothing it
+        # may carry leaks upward.
+        raise ValueError(
+            "Could not load the signer — wrong password, or an unsupported/corrupt .pfx."
+        ) from None
+    if signer is None:
+        raise ValueError("Could not load the signer from the provided .pfx.")
+
+    meta = signers.PdfSignatureMetadata(field_name=field_name, reason=reason, location=location)
+    with open(file, "rb") as inf:
+        writer = IncrementalPdfFileWriter(inf)
+        signed = signers.sign_pdf(writer, meta, signer=signer)
+    # Fail closed: only write the output once signing has fully succeeded.
+    with open(output_path, "wb") as f:
+        f.write(signed.getvalue())
+
+    # Immediately self-verify the freshly-signed file (read-only, empty trust
+    # context like all verification). The returned dict carries NO secret.
+    verification = verify_signatures(str(output_path))
+    sig = next(
+        (s for s in verification["signatures"] if s.get("field") == field_name),
+        verification["signatures"][-1] if verification["signatures"] else None,
+    )
+    return {
+        "output": str(output_path),
+        "field": field_name,
+        "signer": sig["signer"] if sig else None,
+        "valid": sig["valid"] if sig else False,
+        "intact": sig["intact"] if sig else False,
+        "covers_whole_document": sig["covers_whole_document"] if sig else False,
+        "signature_count": verification["signature_count"],
     }

@@ -59,6 +59,28 @@ pub async fn save_file_dialog(
     }
 }
 
+/// Pick a PKCS#12 signer file (.pfx/.p12) for signing. Separate from the PDF
+/// picker (different filter); window-parented for the same modality reason.
+#[tauri::command]
+pub async fn pick_certificate_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("PKCS#12 signer", &["pfx", "p12"])
+        .blocking_pick_file();
+    match result {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
 // ── File operations ───────────────────────────────────────────────────────
 
 #[tauri::command]

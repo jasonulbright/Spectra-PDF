@@ -62,6 +62,34 @@ export function registerCanvasRedaction(handlers: CanvasRedactionHandlers | null
   canvasRedaction = handlers;
 }
 
+/**
+ * Signing goes through two native dialogs (.pfx picker + output save) that
+ * WebDriver can't drive, so the SignaturesPanel registers its real sign call
+ * here while mounted. The harness injects the paths + password and exercises
+ * the exact `call('sign_pdf', …)` path the UI runs.
+ */
+export interface SignHandler {
+  sign: (params: {
+    pfxPath: string;
+    password: string;
+    output: string;
+    reason?: string;
+    location?: string;
+  }) => Promise<{
+    output: string;
+    signer: string | null;
+    valid: boolean;
+    intact: boolean;
+    covers_whole_document: boolean;
+  }>;
+}
+
+let signHandler: SignHandler | null = null;
+
+export function registerSignHandler(handler: SignHandler | null): void {
+  signHandler = handler;
+}
+
 export interface TestHarness {
   /** Open one or more PDFs by absolute path, bypassing the OS dialog. */
   openByPaths: (paths: string[]) => Promise<void>;
@@ -131,6 +159,25 @@ export interface TestHarness {
   clearRedactionMarks: () => void;
   /** Number of pending redaction marks the canvas currently shows. */
   getRedactionMarkCount: () => number;
+  /**
+   * Sign the active file via the Signatures panel's real engine call, with
+   * injected paths (the .pfx picker and output save dialog are native and
+   * not WebDriver-drivable). The Signatures panel must be mounted. Returns the
+   * self-verify summary of the produced file.
+   */
+  signActiveFile: (params: {
+    pfxPath: string;
+    password: string;
+    output: string;
+    reason?: string;
+    location?: string;
+  }) => Promise<{
+    output: string;
+    signer: string | null;
+    valid: boolean;
+    intact: boolean;
+    covers_whole_document: boolean;
+  }>;
 }
 
 export interface TestHarnessDeps {
@@ -369,6 +416,19 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     clearRedactionMarks: () => canvasRedaction?.clear(),
     getRedactionMarkCount: () => canvasRedaction?.count() ?? 0,
+    signActiveFile: async (params) => {
+      if (!signHandler) {
+        const msg = 'signActiveFile: Signatures panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await signHandler.sign(params);
+      } catch (err) {
+        captureError('signActiveFile', err);
+        throw err;
+      }
+    },
   };
 
   window.__SPECTRA_TEST__ = harness;

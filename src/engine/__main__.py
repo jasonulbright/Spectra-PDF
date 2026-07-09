@@ -28,7 +28,7 @@ from engine.outline import get_outline, set_outline
 from engine.redact import redact
 from engine.watermark import watermark
 from engine.compare import compare_text
-from engine.signatures import verify_signatures
+from engine.signatures import verify_signatures, sign_pdf
 
 
 def ping() -> dict:
@@ -68,6 +68,7 @@ def main() -> None:
     server.register("watermark", watermark)
     server.register("compare_text", compare_text)
     server.register("verify_signatures", verify_signatures)
+    server.register("sign_pdf", sign_pdf)
 
     # Signal readiness on stderr so the Tauri backend knows we're alive
     print("engine: ready", file=sys.stderr, flush=True)

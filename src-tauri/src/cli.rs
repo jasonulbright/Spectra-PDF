@@ -57,6 +57,8 @@ pub enum CliCommand {
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
     VerifySignatures(VerifySignaturesArgs),
+    /// Sign a PDF with a PKCS#12 (.pfx) signer, written to a new file
+    Sign(SignArgs),
     /// View or set PDF metadata
     Metadata(MetadataArgs),
     /// Convert a PDF to grayscale
@@ -249,6 +251,28 @@ pub struct CompareArgs {
 pub struct VerifySignaturesArgs {
     /// PDF file to verify
     pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct SignArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file (must differ from the input; signing appends a revision)
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// PKCS#12 (.pfx/.p12) signer file (key + certificate)
+    #[arg(long)]
+    pub pfx: PathBuf,
+    /// Passphrase for the .pfx. Omit to read it from stdin (keeps it out of
+    /// the shell history and process list; prefer this for scripts).
+    #[arg(long)]
+    pub password: Option<String>,
+    /// Optional signature reason
+    #[arg(long)]
+    pub reason: Option<String>,
+    /// Optional signature location
+    #[arg(long)]
+    pub location: Option<String>,
 }
 
 #[derive(Args)]
@@ -784,6 +808,36 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             "verify_signatures",
             json!({ "file": abs(&args.input).to_string_lossy() }),
         ),
+
+        CliCommand::Sign(args) => {
+            // Password from --password, else read one line from stdin (so a
+            // script can pipe it without it landing in the process arg list or
+            // shell history).
+            let password = match &args.password {
+                Some(p) => p.clone(),
+                None => {
+                    use std::io::Read;
+                    let mut s = String::new();
+                    std::io::stdin()
+                        .read_to_string(&mut s)
+                        .map_err(|e| format!("failed to read password from stdin: {}", e))?;
+                    s.trim_end_matches(['\r', '\n']).to_string()
+                }
+            };
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "pfx_path": abs(&args.pfx).to_string_lossy(),
+                "password": password,
+            });
+            if let Some(reason) = &args.reason {
+                params["reason"] = json!(reason);
+            }
+            if let Some(location) = &args.location {
+                params["location"] = json!(location);
+            }
+            engine.call("sign_pdf", params)
+        }
 
         CliCommand::Metadata(args) => {
             let input = abs(&args.input);

@@ -59,6 +59,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::open_files_dialog,
             commands::save_file_dialog,
+            commands::pick_certificate_file,
 
             commands::read_file_buffer,
             commands::create_working_copy,
