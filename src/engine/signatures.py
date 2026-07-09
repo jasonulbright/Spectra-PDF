@@ -7,12 +7,24 @@ time.
 
 Scope — deliberately "single-cert" verification (roadmap § C, first slice):
 we validate the signature's cryptography and the document's integrity, but do
-NOT validate the signer's certificate against a trust store, nor check
-revocation, nor timestamp/LTV. So ``trusted`` is always reported but reflects
-"no trust anchor was consulted" — the UI must present a valid result as
+NOT validate the signer's certificate against any trust store, nor check
+revocation, nor timestamp/LTV. So ``trusted`` is reported but is
+DETERMINISTICALLY False — the UI must present a valid result as
 "cryptographically valid, signer identity NOT verified against a trusted
 authority", never as fully trusted. Signing (applying signatures) is a
 separate deferred slice. See docs/architecture/10-phase2h-signatures.md.
+
+CRITICAL — trust context: we pass an EXPLICIT EMPTY trust context
+(``ValidationContext(trust_roots=[])``), NOT ``signer_validation_context=None``.
+Passing None does NOT mean "no anchor": pyHanko's SimpleTrustManager.build
+treats ``trust_roots is None`` as "load the operating system's certificate
+store" (oscrypto `trust_list.get_list()` — ~dozens of real CA roots on
+Windows). Under None, a PDF signed by any commercial CA (DigiCert, GlobalSign,
+…) would come back ``trusted=True``, machine-dependent, silently contradicting
+this slice's whole promise. An explicit empty ``trust_roots=[]`` (a non-None
+value, so no OS fallback) makes ``trusted`` deterministically False regardless
+of the host's trust store. Regression-tested by monkeypatching the OS store to
+contain the signer cert and asserting ``trusted`` stays False.
 
 Uses pyHanko (MIT) — the ByteRange / CMS / incremental-update handling is
 exactly the security-critical plumbing not to hand-roll.
@@ -20,14 +32,24 @@ exactly the security-critical plumbing not to hand-roll.
 
 import logging
 
-# pyHanko logs a full traceback when it can't build a trust path (which is
-# ALWAYS, here — we pass no trust anchor by design). It's handled internally
-# and only reflected as trusted=False, so silence the noise before importing.
-for _name in ("pyhanko", "pyhanko_certvalidator"):
-    logging.getLogger(_name).setLevel(logging.CRITICAL)
+# pyHanko logs the path-building failure as a WARNING-with-traceback whenever a
+# signature doesn't chain to a trust anchor — which is BY DESIGN here (we
+# provide no anchors). Drop that expected noise WITHOUT blanketing the whole
+# package: scope to the one submodule that emits it, and only at WARNING —
+# genuine ERROR-level diagnostics (malformed CMS, processing errors) still log.
+logging.getLogger("pyhanko.sign.validation.generic_cms").setLevel(logging.ERROR)
 
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.validation import validate_pdf_signature
+from pyhanko_certvalidator import ValidationContext
+
+
+# An explicit, empty, offline trust context. Empty trust_roots (NOT None) means
+# no anchor and no OS-store fallback, so trusted is deterministically False;
+# allow_fetching=False keeps validation offline (no CRL/OCSP network) — moot
+# with no anchor, but explicit for determinism in enterprise/air-gapped hosts.
+def _empty_trust_context() -> ValidationContext:
+    return ValidationContext(trust_roots=[], allow_fetching=False)
 
 
 def _signer_name(status) -> str | None:
@@ -47,7 +69,11 @@ def _verify_one(embedded) -> dict:
     field = getattr(embedded, "field_name", None)
     ts = getattr(embedded, "self_reported_timestamp", None)
     try:
-        status = validate_pdf_signature(embedded, signer_validation_context=None)
+        # Explicit empty trust context — see the module docstring for why NOT
+        # None (which would consult the OS certificate store).
+        status = validate_pdf_signature(
+            embedded, signer_validation_context=_empty_trust_context()
+        )
     except Exception as exc:
         # A signature we can't validate at all (malformed CMS, unsupported
         # algorithm) is reported as failed, not allowed to sink the whole
@@ -73,7 +99,9 @@ def _verify_one(embedded) -> dict:
         "valid": bool(status.valid),
         # The bytes the signature covers are unmodified (document integrity).
         "intact": bool(status.intact),
-        # Always false in this slice — no trust store is consulted.
+        # Deterministically false: we validate against an EXPLICIT empty trust
+        # context, so no certificate ever chains to an anchor. Reported (not
+        # hidden) so the UI can state the identity caveat honestly.
         "trusted": bool(status.trusted),
         "coverage": coverage,
         "covers_whole_document": coverage == "ENTIRE_FILE",

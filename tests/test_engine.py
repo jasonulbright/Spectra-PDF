@@ -993,3 +993,47 @@ class TestVerifySignatures:
         assert r["signature_count"] == 2
         assert {s["field"] for s in r["signatures"]} == {"Sig1", "Sig2"}
         assert all(s["valid"] for s in r["signatures"])
+
+    def test_pyhanko_can_report_trusted_as_a_positive_control(self, tmp_dir):
+        # Proves the mechanism CAN return trusted=True — so trusted=False from
+        # verify_signatures is a deliberate empty-trust choice, not merely an
+        # un-anchorable cert. Validates the SAME signature directly with the
+        # signer's own cert supplied AS a trust root.
+        import io
+
+        from pyhanko.pdf_utils.reader import PdfFileReader
+        from pyhanko.sign.validation import validate_pdf_signature
+        from pyhanko_certvalidator import ValidationContext
+
+        p = os.path.join(tmp_dir, "signed.pdf")
+        _make_signed_pdf(p)
+        with open(p, "rb") as f:
+            esig = PdfFileReader(io.BytesIO(f.read())).embedded_signatures[0]
+        status = validate_pdf_signature(
+            esig,
+            signer_validation_context=ValidationContext(trust_roots=[_signer().signing_cert]),
+        )
+        assert status.trusted is True
+
+    def test_trusted_stays_false_even_if_signer_is_an_os_trust_root(self, tmp_dir, monkeypatch):
+        # The security invariant this whole feature rests on. If the handler
+        # passed signer_validation_context=None, pyHanko would fall back to the
+        # OS certificate store, and a signer whose cert lives there (any real
+        # commercial CA) would report trusted=True — machine-dependent and
+        # contradicting our "identity NOT verified" promise. We pass an explicit
+        # EMPTY trust context, so even with the signer's own cert injected into
+        # the OS store, trusted must stay False. (This test FAILS on a revert to
+        # None; the plain valid-signature test would not.)
+        import oscrypto.trust_list as os_trust
+
+        p = os.path.join(tmp_dir, "signed.pdf")
+        _make_signed_pdf(p)
+        signer_cert = _signer().signing_cert  # asn1crypto x509.Certificate
+        monkeypatch.setattr(
+            os_trust, "get_list", lambda *a, **k: [(signer_cert, set(), set())]
+        )
+        r = verify_signatures(p)
+        s = r["signatures"][0]
+        assert s["valid"] is True and s["intact"] is True  # crypto still fine
+        assert s["trusted"] is False  # but the OS store is never consulted
+        assert r["summary"]["trust_verified"] is False
