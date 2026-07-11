@@ -19,10 +19,10 @@ interface DocumentRowProps {
   proxies: Map<string, PDFDocumentProxy>;
   pageHeight: number;
   renderVersion: number;
-  selectedPageId: string | null;
-  collapseId: string | null;
+  selectedPageIds: ReadonlySet<string>;
+  collapsedIds: ReadonlySet<string> | null;
   intoGhost: { index: number; width: number; height: number } | null;
-  onSelectPage: (docId: string, pageId: string) => void;
+  onSelectPage: (docId: string, pageId: string, e?: React.MouseEvent) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   tool: CanvasTool;
@@ -61,8 +61,8 @@ function DocumentRowImpl({
   proxies,
   pageHeight,
   renderVersion,
-  selectedPageId,
-  collapseId,
+  selectedPageIds,
+  collapsedIds,
   intoGhost,
   onSelectPage,
   onOpenPage,
@@ -94,7 +94,7 @@ function DocumentRowImpl({
     }
   };
   for (const page of doc.pages) {
-    const collapsed = page.id === collapseId;
+    const collapsed = collapsedIds?.has(page.id) ?? false;
     if (!collapsed) emitGhost();
     strip.push(
       <PageCell
@@ -104,7 +104,7 @@ function DocumentRowImpl({
         pdf={proxies.get(page.sourceDocId) ?? null}
         pageHeight={pageHeight}
         renderVersion={renderVersion}
-        selected={page.id === selectedPageId}
+        selected={selectedPageIds.has(page.id)}
         collapsed={collapsed}
         visibleNumber={visible + 1}
         onSelectPage={onSelectPage}

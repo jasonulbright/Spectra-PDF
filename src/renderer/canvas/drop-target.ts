@@ -36,8 +36,13 @@ function insertionIndexInRow(row: PageLike[], relX: number): number {
 // Insertion index across a card's wrapped rows: pick the row under the world
 // Y, then walk that row's midpoints. Indices count visible (non-excluded)
 // pages, matching how the reducer inserts after removal.
-function insertionIndexInCard(item: DocPlacement, wx: number, wy: number, excludeId: string | null): number {
-  const rows = wrapPages(item.doc.pages, excludeId);
+function insertionIndexInCard(
+  item: DocPlacement,
+  wx: number,
+  wy: number,
+  excludeIds: ReadonlySet<string> | null,
+): number {
+  const rows = wrapPages(item.doc.pages, excludeIds);
   const rowIndex = Math.max(
     0,
     Math.min(
@@ -55,7 +60,7 @@ export function computeDropTarget(
   worldX: number,
   worldY: number,
   scale: number,
-  excludeId: string | null,
+  excludeIds: ReadonlySet<string> | null,
   allowInto: boolean,
 ): DropTarget {
   const items = layout.items;
@@ -65,7 +70,7 @@ export function computeDropTarget(
         return {
           kind: 'into',
           docId: item.doc.id,
-          index: insertionIndexInCard(item, worldX, worldY, excludeId),
+          index: insertionIndexInCard(item, worldX, worldY, excludeIds),
         };
       }
     }

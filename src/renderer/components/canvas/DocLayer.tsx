@@ -3,7 +3,6 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { BASE_PAGE_HEIGHT, DOC_SLOT } from '../../canvas/layout';
 import { DocumentRow } from './DocumentRow';
 import type { DocPlacement } from '../../canvas/layout';
-import type { DragSource } from '../../canvas/usePageDrag';
 import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { SignaturePlacement } from '../../lib/signature-placement';
@@ -14,15 +13,14 @@ interface DocLayerProps {
   items: DocPlacement[];
   proxies: Map<string, PDFDocumentProxy>;
   renderVersion: number;
-  selected: DragSource | null;
-  collapsedId: string | null;
-  draggingPage: DragSource | null;
+  selectedPageIds: ReadonlySet<string>;
+  collapsedIds: ReadonlySet<string> | null;
   intoDocId: string | null;
   intoIndex: number;
   intoGhostWidth: number;
   intoGhostHeight: number;
   betweenIndex: number;
-  onSelectPage: (docId: string, pageId: string) => void;
+  onSelectPage: (docId: string, pageId: string, e?: React.MouseEvent) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   tool: CanvasTool;
@@ -76,12 +74,8 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               proxies={props.proxies}
               pageHeight={BASE_PAGE_HEIGHT}
               renderVersion={props.renderVersion}
-              selectedPageId={props.selected?.docId === doc.id ? props.selected.pageId : null}
-              collapseId={
-                props.collapsedId && props.draggingPage?.docId === doc.id
-                  ? props.collapsedId
-                  : null
-              }
+              selectedPageIds={props.selectedPageIds}
+              collapsedIds={props.collapsedIds}
               intoGhost={
                 intoDocId === doc.id
                   ? { index: intoIndex, width: intoGhostWidth, height: intoGhostHeight }

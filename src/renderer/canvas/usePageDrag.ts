@@ -13,12 +13,21 @@ export interface DragSource {
 interface PageDragDeps {
   layout: CanvasLayout;
   canvasRef: React.RefObject<CanvasHandle | null>;
-  movePageInto: (source: DragSource, targetDocId: string, index: number) => void;
-  movePageToNewDoc: (source: DragSource, docIndex: number) => void;
+  // The pages that should move when `grabbedPageId` is grabbed: the whole
+  // multi-selection if the grabbed page is part of it, otherwise just that
+  // page. Returned in workspace-flattened order.
+  getMovingPageIds: (grabbedPageId: string) => string[];
+  movePagesInto: (movingIds: string[], targetDocId: string, index: number) => void;
+  movePagesToNewDoc: (movingIds: string[], docIndex: number) => void;
 }
 
 interface DragSession {
   source: DragSource;
+  // The full set of pages travelling with this drag (≥1). Captured at grab time
+  // so drop-target index math excludes every moving page from the first move,
+  // not a frame later like the render-collapse.
+  movingIds: string[];
+  movingSet: Set<string>;
   el: HTMLElement;
   pointerId: number;
   startX: number;
@@ -41,11 +50,12 @@ const DRAG_THRESHOLD_ZOOMED_OUT_PX = 24;
 // PDFx's useDragController/root-drag-handlers (drop-target math, deferred
 // collapse, commit flash); the event plumbing is pointer-based because HTML5
 // drag-and-drop can't complete inside a Tauri webview on Windows while native
-// file drag-drop is enabled.
+// file drag-drop is enabled. Supports multi-page drags: grabbing a page that is
+// part of the current selection moves the whole selection as one undo step.
 export function usePageDrag(deps: PageDragDeps) {
   const [draggingPage, setDraggingPage] = useState<DragSource | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
-  const [collapsedId, setCollapsedId] = useState<string | null>(null);
+  const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string> | null>(null);
   const [committing, setCommitting] = useState(false);
 
   const depsRef = useRef(deps);
@@ -53,8 +63,6 @@ export function usePageDrag(deps: PageDragDeps) {
   const session = useRef<DragSession | null>(null);
   const dropTargetRef = useRef<DropTarget | null>(null);
   dropTargetRef.current = dropTarget;
-  const collapsedRef = useRef<string | null>(null);
-  collapsedRef.current = collapsedId;
 
   const updateDropTarget = useCallback((next: DropTarget | null) => {
     setDropTarget((prev) => {
@@ -90,7 +98,7 @@ export function usePageDrag(deps: PageDragDeps) {
     }
     setDraggingPage(null);
     setDropTarget(null);
-    setCollapsedId(null);
+    setCollapsedIds(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -117,15 +125,13 @@ export function usePageDrag(deps: PageDragDeps) {
       if (Math.hypot(e.clientX - s.startX, e.clientY - s.startY) < threshold) return;
       s.started = true;
       const rect = s.el.getBoundingClientRect();
-      s.ghost = buildDragGhost(s.el, rect);
+      s.ghost = buildDragGhost(s.el, rect, s.movingIds.length);
       setDraggingPage(s.source);
     }
     if (s.ghost) moveDragGhost(s.ghost, e.clientX - s.grabDX, e.clientY - s.grabDY);
     const w = depsRef.current.canvasRef.current?.clientToWorld(e.clientX, e.clientY);
     if (!w) return;
-    updateDropTarget(
-      computeDropTarget(depsRef.current.layout, w.x, w.y, w.k, collapsedRef.current, true),
-    );
+    updateDropTarget(computeDropTarget(depsRef.current.layout, w.x, w.y, w.k, s.movingSet, true));
   }
 
   function onPointerUp(e: PointerEvent): void {
@@ -139,12 +145,12 @@ export function usePageDrag(deps: PageDragDeps) {
     setCommitting(true);
     const w = depsRef.current.canvasRef.current?.clientToWorld(e.clientX, e.clientY);
     const target = w
-      ? computeDropTarget(depsRef.current.layout, w.x, w.y, w.k, s.source.pageId, true)
+      ? computeDropTarget(depsRef.current.layout, w.x, w.y, w.k, s.movingSet, true)
       : dropTargetRef.current;
-    const source = s.source;
+    const movingIds = s.movingIds;
     teardown();
-    if (target?.kind === 'into') depsRef.current.movePageInto(source, target.docId, target.index);
-    else if (target?.kind === 'between') depsRef.current.movePageToNewDoc(source, target.docIndex);
+    if (target?.kind === 'into') depsRef.current.movePagesInto(movingIds, target.docId, target.index);
+    else if (target?.kind === 'between') depsRef.current.movePagesToNewDoc(movingIds, target.docIndex);
   }
 
   function onPointerCancel(): void {
@@ -164,8 +170,11 @@ export function usePageDrag(deps: PageDragDeps) {
       if (e.button !== 0 || session.current) return;
       const el = e.currentTarget;
       const rect = el.getBoundingClientRect();
+      const movingIds = depsRef.current.getMovingPageIds(pageId);
       session.current = {
         source: { docId, pageId },
+        movingIds,
+        movingSet: new Set(movingIds),
         el,
         pointerId: e.pointerId,
         startX: e.clientX,
@@ -192,11 +201,14 @@ export function usePageDrag(deps: PageDragDeps) {
     [],
   );
 
-  // Collapse the dragged page a frame after the ghost appears (PDFx timing:
+  // Collapse the dragged page(s) a frame after the ghost appears (PDFx timing:
   // lets the drag ghost paint before the strip reflows).
   useEffect(() => {
     if (!draggingPage) return;
-    const id = requestAnimationFrame(() => setCollapsedId(draggingPage.pageId));
+    const id = requestAnimationFrame(() => {
+      const s = session.current;
+      if (s) setCollapsedIds(s.movingSet);
+    });
     return () => cancelAnimationFrame(id);
   }, [draggingPage]);
 
@@ -212,7 +224,7 @@ export function usePageDrag(deps: PageDragDeps) {
   return {
     draggingPage,
     dropTarget,
-    collapsedId,
+    collapsedIds,
     committing,
     onPagePointerDown,
   };

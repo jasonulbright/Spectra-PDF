@@ -104,6 +104,27 @@ export function registerCanvasOcr(handlers: CanvasOcrHandlers | null): void {
 }
 
 /**
+ * Multi-select (2n.1) is local canvas view state, and both modifier-click
+ * selection and the pointer-capture group drag are not reliably
+ * WebDriver-drivable. The canvas registers selection setters/readers plus the
+ * exact batched delete/rotate paths the Delete/`[`/`]` keys run, so a spec can
+ * select a subset and exercise the real reducer + commit path.
+ */
+export interface CanvasSelectionHandlers {
+  selectPageIds: (ids: string[]) => void;
+  getSelectedPageIds: () => string[];
+  getWorkspacePageIds: () => string[];
+  deleteSelected: () => void;
+  rotateSelected: (delta: 90 | 270) => void;
+}
+
+let canvasSelection: CanvasSelectionHandlers | null = null;
+
+export function registerCanvasSelection(handlers: CanvasSelectionHandlers | null): void {
+  canvasSelection = handlers;
+}
+
+/**
  * Signing goes through two native dialogs (.pfx picker + output save) that
  * WebDriver can't drive, so the SignaturesPanel registers its real sign call
  * here while mounted. The harness injects the paths + password and exercises
@@ -188,6 +209,10 @@ export interface TestHarness {
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
   commitPendingEdits: () => Promise<void>;
+  /** Test-only: close every open file so a spec starts from a clean
+   * workspace (multi-select is workspace-wide, so accumulated files across
+   * cases would otherwise cross-contaminate select-all). */
+  closeAllFiles: () => void;
   /**
    * Add a pending redaction mark to the active file's first workspace page,
    * bypassing pointer-drag simulation (same WebDriver constraint as
@@ -221,6 +246,18 @@ export interface TestHarness {
   } | null>;
   /** Drop the pending signature placement. */
   clearSignaturePlacement: () => void;
+  /** Select a set of canvas page ids (2n.1) — bypasses modifier-click pointer
+   * simulation. Canvas view must be mounted. */
+  selectCanvasPages: (pageIds: string[]) => void;
+  /** The currently selected canvas page ids. */
+  getSelectedCanvasPageIds: () => string[];
+  /** Workspace-flattened page ids in order (the select-all / range basis). */
+  getWorkspacePageIds: () => string[];
+  /** Delete the current canvas selection via the same batched path Delete runs
+   * (DELETE_PAGE_REFS → page tier). Canvas view must be mounted. */
+  deleteSelectedCanvasPages: () => void;
+  /** Rotate the current canvas selection ±90 via the batched path (`[`/`]`). */
+  rotateSelectedCanvasPages: (delta: 90 | 270) => void;
   /** Number of scanned source pages with OCR words ready to persist. */
   ocrReadyCount: () => number;
   /** Run the "Make searchable" flow (engine apply_ocr_layer per file);
@@ -272,6 +309,7 @@ export interface TestHarnessDeps {
   dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   dispatchRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
   commitPendingEdits: () => Promise<void>;
+  closeAllFiles: () => void;
 }
 
 export const TEST_HARNESS_ENABLED =
@@ -454,6 +492,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
+    closeAllFiles: () => deps.closeAllFiles(),
     addRedactionMark: async (rect, timeoutMs = 10_000) => {
       const deadline = Date.now() + timeoutMs;
       // Waits for the canvas view to mount (registration) AND the indexer to
@@ -513,6 +552,11 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     clearSignaturePlacement: () => canvasSignature?.clear(),
+    selectCanvasPages: (pageIds) => canvasSelection?.selectPageIds(pageIds),
+    getSelectedCanvasPageIds: () => canvasSelection?.getSelectedPageIds() ?? [],
+    getWorkspacePageIds: () => canvasSelection?.getWorkspacePageIds() ?? [],
+    deleteSelectedCanvasPages: () => canvasSelection?.deleteSelected(),
+    rotateSelectedCanvasPages: (delta) => canvasSelection?.rotateSelected(delta),
     ocrReadyCount: () => canvasOcr?.readyCount() ?? 0,
     applyOcr: async () => {
       if (!canvasOcr) {

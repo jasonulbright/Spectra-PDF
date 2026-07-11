@@ -5,7 +5,7 @@
  */
 
 export interface TestStateSnapshot {
-  view: 'welcome' | 'operations' | 'pages';
+  view: 'welcome' | 'operations' | 'canvas';
   activeOp: string;
   fileCount: number;
   activeFileId: string | null;
@@ -235,6 +235,82 @@ export async function getRedactionMarkCount(): Promise<number> {
   return await browser.execute<number, []>(function () {
     return (window as any).__SPECTRA_TEST__.getRedactionMarkCount();
   });
+}
+
+/** Test-only: close every open file so the next case starts clean. */
+export async function closeAllFiles(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.closeAllFiles();
+  });
+}
+
+/** Workspace-flattened page ids in order (2n.1). Canvas must be mounted. */
+export async function getWorkspacePageIds(): Promise<string[]> {
+  return await browser.execute<string[], []>(function () {
+    return (window as any).__SPECTRA_TEST__.getWorkspacePageIds();
+  });
+}
+
+/** Select a set of canvas page ids (2n.1 multi-select). */
+export async function selectCanvasPages(pageIds: string[]): Promise<void> {
+  await browser.execute<void, [string[]]>(
+    function (ids) {
+      (window as any).__SPECTRA_TEST__.selectCanvasPages(ids);
+    },
+    pageIds,
+  );
+}
+
+/** The currently selected canvas page ids. */
+export async function getSelectedCanvasPageIds(): Promise<string[]> {
+  return await browser.execute<string[], []>(function () {
+    return (window as any).__SPECTRA_TEST__.getSelectedCanvasPageIds();
+  });
+}
+
+/** Delete the current canvas selection via the batched path Delete runs. */
+export async function deleteSelectedCanvasPages(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.deleteSelectedCanvasPages();
+  });
+}
+
+/** Rotate the current canvas selection ±90 via the batched path (`[`/`]`). */
+export async function rotateSelectedCanvasPages(delta: 90 | 270): Promise<void> {
+  await browser.execute<void, [number]>(
+    function (d) {
+      (window as any).__SPECTRA_TEST__.rotateSelectedCanvasPages(d);
+    },
+    delta,
+  );
+}
+
+/**
+ * Dispatch a real global keydown on `window` (2n.1 keyboard shortcuts).
+ * WDIO `browser.keys` targets the focused element; the canvas shortcuts are
+ * window-level listeners, so we synthesize the event directly — this exercises
+ * the exact keydown handlers WorkspaceCanvasView/App register.
+ */
+export async function pressGlobalKey(
+  key: string,
+  mods: { ctrl?: boolean; shift?: boolean; meta?: boolean } = {},
+): Promise<void> {
+  await browser.execute<void, [string, { ctrl?: boolean; shift?: boolean; meta?: boolean }]>(
+    function (k, m) {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: k,
+          ctrlKey: Boolean(m.ctrl),
+          shiftKey: Boolean(m.shift),
+          metaKey: Boolean(m.meta),
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    },
+    key,
+    mods,
+  );
 }
 
 /** Number of scanned source pages whose OCR words are ready to persist. */

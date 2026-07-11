@@ -21,7 +21,7 @@ import { buildOcrApplyPayload } from '../../lib/ocr-apply';
 import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
 import { workspacePageNumber } from '../../lib/workspace-commit';
-import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr } from '../../testHarness';
+import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection } from '../../testHarness';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
 import { Canvas } from './Canvas';
@@ -30,7 +30,6 @@ import { HeaderLayer } from './HeaderLayer';
 import { AddDocGhost, GhostRow } from './DropGhost';
 import { deriveDropGhosts } from './ghost-size';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
-import type { DragSource } from '../../canvas/usePageDrag';
 import type { PageAnnotation, PdfBuffer } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { STAMP_PRESETS, ANNOTATION_PALETTE } from './PageCell';
@@ -78,7 +77,11 @@ export function WorkspaceCanvasView({
   const proxies = usePdfProxies(state.files);
   const layout = useMemo(() => computeLayout(docs), [docs]);
   const canvasRef = useRef<CanvasHandle | null>(null);
-  const [selected, setSelected] = useState<DragSource | null>(null);
+  // Multi-select is view state (never the page-edit tier): a set of selected
+  // page ids plus the anchor for shift-range selection. Batched page ops
+  // (move/delete/rotate) act on the whole set as one undo step (2n.1).
+  const [selectedPageIds, setSelectedPageIds] = useState<ReadonlySet<string>>(NO_PAGE_IDS);
+  const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
   const [renderVersion, setRenderVersion] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string; pageId: string } | null>(
     null,
@@ -118,6 +121,16 @@ export function WorkspaceCanvasView({
   const [applyingOcr, setApplyingOcr] = useState(false);
   const [ocrApplyError, setOcrApplyError] = useState<string | null>(null);
 
+  // Workspace-flattened page order (doc order, then page order) — the basis for
+  // shift-range selection, select-all, and workspace-order group moves. Refs
+  // let the single keyboard listener read the latest order/selection without
+  // re-registering on every change.
+  const flatOrder = useMemo(() => docs.flatMap((d) => d.pages.map((p) => p.id)), [docs]);
+  const flatOrderRef = useRef(flatOrder);
+  flatOrderRef.current = flatOrder;
+  const selectionRef = useRef(selectedPageIds);
+  selectionRef.current = selectedPageIds;
+
   // Escape returns to Select from the highlight tool.
   React.useEffect(() => {
     if (tool === 'select') return;
@@ -141,6 +154,100 @@ export function WorkspaceCanvasView({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Selection actions, shared by the keyboard listener and the e2e harness.
+  // They read the latest order/selection via refs, so they're stable.
+  const selectAllPages = useCallback(() => {
+    const all = flatOrderRef.current;
+    if (all.length === 0) return;
+    setSelectedPageIds(new Set(all));
+    setSelectionAnchor(all[0] ?? null);
+  }, []);
+  const clearSelection = useCallback(() => {
+    setSelectedPageIds(NO_PAGE_IDS);
+    setSelectionAnchor(null);
+  }, []);
+  const deleteSelectedPages = useCallback(() => {
+    const sel = selectionRef.current;
+    if (sel.size === 0) return;
+    dispatch({ type: 'DELETE_PAGE_REFS', pageIds: [...sel] });
+    setSelectedPageIds(NO_PAGE_IDS);
+    setSelectionAnchor(null);
+  }, [dispatch]);
+  const rotateSelectedPages = useCallback(
+    (delta: 90 | 270) => {
+      const sel = selectionRef.current;
+      if (sel.size === 0) return;
+      dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: [...sel], delta });
+    },
+    [dispatch],
+  );
+
+  // Canvas keyboard shortcuts (2n.1): select-all, delete, rotate, zoom, and
+  // Escape-to-clear. One stable window listener; never fires while typing in a
+  // field. Undo/redo (Ctrl+Z/Y) are app-global and live in App.tsx.
+  useEffect(() => {
+    const isEditable = (el: EventTarget | null): boolean => {
+      const n = el as HTMLElement | null;
+      if (!n || !n.tagName) return false;
+      return (
+        n.tagName === 'INPUT' ||
+        n.tagName === 'TEXTAREA' ||
+        n.tagName === 'SELECT' ||
+        n.isContentEditable
+      );
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (isEditable(e.target)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault();
+        selectAllPages();
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectionRef.current.size === 0) return;
+        e.preventDefault();
+        deleteSelectedPages();
+      } else if (e.key === '[' || e.key === ']') {
+        if (selectionRef.current.size === 0) return;
+        e.preventDefault();
+        rotateSelectedPages(e.key === ']' ? 90 : 270);
+      } else if (e.key === 'Escape') {
+        // Tool exit is handled by the tool effect (mounted only off 'select');
+        // here Escape clears any page selection.
+        if (selectionRef.current.size > 0) clearSelection();
+      } else if (mod && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        canvasRef.current?.zoomIn();
+      } else if (mod && e.key === '-') {
+        e.preventDefault();
+        canvasRef.current?.zoomOut();
+      } else if (mod && e.key === '0') {
+        e.preventDefault();
+        canvasRef.current?.reset();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectAllPages, clearSelection, deleteSelectedPages, rotateSelectedPages]);
+
+  // e2e harness for multi-select (2n.1): modifier-click selection and the
+  // pointer-capture group drag aren't reliably WebDriver-drivable, so the
+  // canvas registers selection setters/readers + the batched delete/rotate
+  // paths here, mirroring the redaction/signature/OCR hooks.
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerCanvasSelection({
+      selectPageIds: (ids) => {
+        setSelectedPageIds(new Set(ids));
+        setSelectionAnchor(ids[ids.length - 1] ?? null);
+      },
+      getSelectedPageIds: () => [...selectionRef.current],
+      getWorkspacePageIds: () => [...flatOrderRef.current],
+      deleteSelected: () => deleteSelectedPages(),
+      rotateSelected: (delta) => rotateSelectedPages(delta),
+    });
+    return () => registerCanvasSelection(null);
+  }, [deleteSelectedPages, rotateSelectedPages]);
 
   const onAddAnnotation = useCallback(
     (docId: string, pageId: string, annotation: PageAnnotation) =>
@@ -551,47 +658,112 @@ export function WorkspaceCanvasView({
     return () => registerCanvasSignature(null);
   }, []);
 
-  const movePageInto = useCallback(
-    (source: DragSource, targetDocId: string, index: number) => {
-      dispatch({
-        type: 'MOVE_PAGE',
-        fromDocId: source.docId,
-        toDocId: targetDocId,
-        pageId: source.pageId,
-        toIndex: index,
-      });
-      setSelected({ docId: targetDocId, pageId: source.pageId });
+  // Which pages travel with a drag that grabs `grabbedPageId`: the whole
+  // selection (in workspace order) when the grabbed page is part of a
+  // multi-selection, otherwise just that page. MUST be a pure query — it runs
+  // on pointer-down, before we know whether this is a drag or a click, so it
+  // must not mutate the selection (that would corrupt a following Ctrl/Shift
+  // click's modifier logic). A drag re-selects its moved pages on drop;
+  // a plain click selects via onSelectPage.
+  const getMovingPageIds = useCallback(
+    (grabbedPageId: string): string[] => {
+      if (selectedPageIds.size > 1 && selectedPageIds.has(grabbedPageId)) {
+        return flatOrder.filter((id) => selectedPageIds.has(id));
+      }
+      return [grabbedPageId];
     },
-    [dispatch],
+    [selectedPageIds, flatOrder],
   );
 
-  const movePageToNewDoc = useCallback(
-    (source: DragSource, docIndex: number) => {
-      const sourceDoc = docs.find((d) => d.id === source.docId);
-      if (!sourceDoc) return;
-      const newDocId = crypto.randomUUID();
-      const newName = uniqueDocName(
-        sourceDoc.name,
-        new Set(docs.filter((d) => d.id !== source.docId || d.pages.length > 1).map((d) => d.name)),
-      );
-      dispatch({
-        type: 'MOVE_PAGE_TO_NEW_DOC',
-        fromDocId: source.docId,
-        pageId: source.pageId,
-        docIndex,
-        newDocId,
-        newName,
-      });
-      setSelected({ docId: newDocId, pageId: source.pageId });
+  const movePagesInto = useCallback(
+    (movingIds: string[], targetDocId: string, index: number) => {
+      if (movingIds.length === 0) return;
+      if (movingIds.length === 1) {
+        // Keep the exact single-page semantics (same-doc no-op guard, etc.).
+        const src = docs.find((d) => d.pages.some((p) => p.id === movingIds[0]));
+        if (!src) return;
+        dispatch({
+          type: 'MOVE_PAGE',
+          fromDocId: src.id,
+          toDocId: targetDocId,
+          pageId: movingIds[0],
+          toIndex: index,
+        });
+      } else {
+        dispatch({ type: 'MOVE_PAGES', pageIds: movingIds, toDocId: targetDocId, toIndex: index });
+      }
+      setSelectedPageIds(new Set(movingIds));
+      setSelectionAnchor(movingIds[movingIds.length - 1]);
     },
     [dispatch, docs],
   );
 
-  const drag = usePageDrag({ layout, canvasRef, movePageInto, movePageToNewDoc });
+  const movePagesToNewDoc = useCallback(
+    (movingIds: string[], docIndex: number) => {
+      if (movingIds.length === 0) return;
+      // Template on the first moving page's document (matches the reducer).
+      const first = docs.find((d) => d.pages.some((p) => p.id === movingIds[0]));
+      if (!first) return;
+      const movingSet = new Set(movingIds);
+      const newDocId = crypto.randomUUID();
+      // Free a fully-emptied source doc's name for reuse by the new doc.
+      const taken = new Set(
+        docs.filter((d) => !d.pages.every((p) => movingSet.has(p.id))).map((d) => d.name),
+      );
+      const newName = uniqueDocName(first.name, taken);
+      if (movingIds.length === 1) {
+        dispatch({
+          type: 'MOVE_PAGE_TO_NEW_DOC',
+          fromDocId: first.id,
+          pageId: movingIds[0],
+          docIndex,
+          newDocId,
+          newName,
+        });
+      } else {
+        dispatch({ type: 'MOVE_PAGES_TO_NEW_DOC', pageIds: movingIds, docIndex, newDocId, newName });
+      }
+      setSelectedPageIds(new Set(movingIds));
+      setSelectionAnchor(movingIds[movingIds.length - 1]);
+    },
+    [dispatch, docs],
+  );
+
+  const drag = usePageDrag({
+    layout,
+    canvasRef,
+    getMovingPageIds,
+    movePagesInto,
+    movePagesToNewDoc,
+  });
 
   const onSelectPage = useCallback(
-    (docId: string, pageId: string) => setSelected({ docId, pageId }),
-    [],
+    (docId: string, pageId: string, e?: React.MouseEvent) => {
+      if (e && (e.metaKey || e.ctrlKey)) {
+        // Toggle this page in/out of the selection.
+        setSelectedPageIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(pageId)) next.delete(pageId);
+          else next.add(pageId);
+          return next;
+        });
+        setSelectionAnchor(pageId);
+        return;
+      }
+      if (e && e.shiftKey && selectionAnchor) {
+        // Range-select across workspace-flattened order from the anchor.
+        const a = flatOrder.indexOf(selectionAnchor);
+        const b = flatOrder.indexOf(pageId);
+        if (a !== -1 && b !== -1) {
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          setSelectedPageIds(new Set(flatOrder.slice(lo, hi + 1)));
+          return; // keep the anchor so a further shift-click re-extends
+        }
+      }
+      setSelectedPageIds(new Set([pageId]));
+      setSelectionAnchor(pageId);
+    },
+    [flatOrder, selectionAnchor],
   );
 
   const onOpenPage = useCallback(
@@ -606,7 +778,10 @@ export function WorkspaceCanvasView({
 
   const onPageContextMenu = useCallback(
     (docId: string, pageId: string, e: React.MouseEvent) => {
-      setSelected({ docId, pageId });
+      // Right-clicking a page already in the selection keeps the whole
+      // selection (menu actions then apply to all); otherwise select just it.
+      setSelectedPageIds((prev) => (prev.has(pageId) ? prev : new Set([pageId])));
+      setSelectionAnchor(pageId);
       setMenu({ x: e.clientX, y: e.clientY, docId, pageId });
     },
     [],
@@ -628,6 +803,24 @@ export function WorkspaceCanvasView({
     if (!doc) return [];
     const fileHasOnePage =
       docs.filter((d) => d.path === doc.path).reduce((sum, d) => sum + d.pages.length, 0) <= 1;
+    // A right-click on a page that's part of a multi-selection makes the menu
+    // act on the whole selection (delete/rotate as one undo step).
+    const multi = selectedPageIds.size > 1 && selectedPageIds.has(menu.pageId);
+    const selCount = selectedPageIds.size;
+    const selectionIds = (): string[] => [...selectedPageIds];
+    // Disable a multi-delete that would empty any file (the reducer rejects
+    // such a batch atomically — disabling makes that visible up front).
+    const multiDeleteEmpties = (): boolean => {
+      const sel = new Map<string, number>();
+      const tot = new Map<string, number>();
+      for (const d of docs) {
+        tot.set(d.path, (tot.get(d.path) ?? 0) + d.pages.length);
+        for (const p of d.pages)
+          if (selectedPageIds.has(p.id)) sel.set(d.path, (sel.get(d.path) ?? 0) + 1);
+      }
+      for (const [path, n] of sel) if (n >= (tot.get(path) ?? 0)) return true;
+      return false;
+    };
     return [
       {
         label: 'Open',
@@ -637,8 +830,20 @@ export function WorkspaceCanvasView({
         },
       },
       { label: '', onClick: () => {}, separator: true },
-      { label: 'Rotate right 90°', onClick: () => rotateBy(menu.docId, menu.pageId, 90) },
-      { label: 'Rotate left 90°', onClick: () => rotateBy(menu.docId, menu.pageId, 270) },
+      {
+        label: multi ? `Rotate ${selCount} pages right 90°` : 'Rotate right 90°',
+        onClick: () =>
+          multi
+            ? dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: selectionIds(), delta: 90 })
+            : rotateBy(menu.docId, menu.pageId, 90),
+      },
+      {
+        label: multi ? `Rotate ${selCount} pages left 90°` : 'Rotate left 90°',
+        onClick: () =>
+          multi
+            ? dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: selectionIds(), delta: 270 })
+            : rotateBy(menu.docId, menu.pageId, 270),
+      },
       { label: '', onClick: () => {}, separator: true },
       {
         label: 'Extract text…',
@@ -649,15 +854,19 @@ export function WorkspaceCanvasView({
       },
       { label: '', onClick: () => {}, separator: true },
       {
-        label: 'Delete page',
+        label: multi ? `Delete ${selCount} pages` : 'Delete page',
         danger: true,
         // A file's last page can't be deleted (0-page PDFs can't exist) —
-        // closing the file is the right gesture for that.
-        disabled: fileHasOnePage,
-        onClick: () => dispatch({ type: 'DELETE_PAGE_REF', docId: menu.docId, pageId: menu.pageId }),
+        // closing the file is the right gesture for that. For a multi-delete,
+        // disable only when the batch would empty a whole file.
+        disabled: multi ? multiDeleteEmpties() : fileHasOnePage,
+        onClick: () =>
+          multi
+            ? dispatch({ type: 'DELETE_PAGE_REFS', pageIds: selectionIds() })
+            : dispatch({ type: 'DELETE_PAGE_REF', docId: menu.docId, pageId: menu.pageId }),
       },
     ];
-  }, [menu, docs, dispatch, onInspectPage, onExtractText, rotateBy]);
+  }, [menu, docs, dispatch, onInspectPage, onExtractText, rotateBy, selectedPageIds]);
 
   const onMoveDoc = useCallback(
     (docId: string, direction: -1 | 1) => dispatch({ type: 'REORDER_DOCS', docId, direction }),
@@ -726,7 +935,10 @@ export function WorkspaceCanvasView({
         slotHeight={layout.slotHeight}
         dragging={drag.draggingPage !== null}
         onSettle={() => setRenderVersion((v) => v + 1)}
-        onBackgroundClick={() => setSelected(null)}
+        onBackgroundClick={() => {
+          setSelectedPageIds(NO_PAGE_IDS);
+          setSelectionAnchor(null);
+        }}
         overlay={
           <HeaderLayer
             items={layout.items}
@@ -741,9 +953,8 @@ export function WorkspaceCanvasView({
           items={layout.items}
           proxies={proxies}
           renderVersion={renderVersion}
-          selected={selected}
-          collapsedId={drag.collapsedId}
-          draggingPage={drag.draggingPage}
+          selectedPageIds={selectedPageIds}
+          collapsedIds={drag.collapsedIds}
           intoDocId={intoDocId}
           intoIndex={intoIndex}
           intoGhostWidth={ghostSize.width}

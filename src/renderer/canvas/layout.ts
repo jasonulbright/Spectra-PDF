@@ -61,14 +61,18 @@ export function displayWidthOf(page: PageLike): number {
 }
 
 // Greedy row wrap, identical to what flexbox produces for the same explicit
-// pixel widths and gap. `excludeId` drops the collapsed (dragged) page, which
-// leaves the flex flow via position:absolute and so doesn't affect wrapping.
-export function wrapPages<T extends PageLike>(pages: T[], excludeId: string | null): T[][] {
+// pixel widths and gap. `exclude` drops the collapsed (dragged) page(s), which
+// leave the flex flow via position:absolute and so don't affect wrapping. It's
+// a set so a multi-page drag excludes every moving page at once.
+export function wrapPages<T extends PageLike>(
+  pages: T[],
+  exclude: ReadonlySet<string> | null,
+): T[][] {
   const rows: T[][] = [];
   let row: T[] = [];
   let x = 0;
   for (const page of pages) {
-    if (page.id === excludeId) continue;
+    if (exclude?.has(page.id)) continue;
     const w = displayWidthOf(page);
     const extended = row.length === 0 ? w : x + PAGE_GAP + w;
     if (row.length > 0 && extended > MAX_ROW_WIDTH) {

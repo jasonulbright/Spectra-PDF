@@ -893,3 +893,292 @@ describe('CLOSE_FILE with pending cross-file edits', () => {
     expect(closed.pageDirtyPaths).toEqual([]);
   });
 });
+
+describe('MOVE_PAGES (batched multi-select move)', () => {
+  it('moves several pages into another doc in workspace order, one undo step', () => {
+    const a = makeFile('a.pdf', 4);
+    const b = makeFile('b.pdf', 1);
+    const docA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 4));
+    const docB = makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1));
+    const next = appReducer(stateWith([a, b], [docA, docB]), {
+      type: 'MOVE_PAGES',
+      pageIds: ['a.pdf#p2', 'a.pdf#p0'], // deliberately out of order — result is workspace order
+      toDocId: 'b.pdf#0',
+      toIndex: 0,
+    });
+    const [nextA, nextB] = next.workspace.documents;
+    expect(pageIds(nextA)).toEqual(['a.pdf#p1', 'a.pdf#p3']);
+    expect(pageIds(nextB)).toEqual(['a.pdf#p0', 'a.pdf#p2', 'b.pdf#p0']);
+    expect(next.pageUndoStack).toHaveLength(1); // batched = single undo entry
+    expect(next.pageDirtyPaths.sort()).toEqual(['a.pdf', 'b.pdf']);
+  });
+
+  it('collects a selection spanning multiple docs, flattened in workspace order', () => {
+    const a = makeFile('a.pdf', 2);
+    const b = makeFile('b.pdf', 2);
+    const c = makeFile('c.pdf', 1);
+    const docs = [
+      makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2)),
+      makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2)),
+      makeDoc(c, 'c.pdf#0', makePages('c.pdf', 1)),
+    ];
+    const next = appReducer(stateWith([a, b, c], docs), {
+      type: 'MOVE_PAGES',
+      pageIds: ['b.pdf#p0', 'a.pdf#p1'],
+      toDocId: 'c.pdf#0',
+      toIndex: 1,
+    });
+    const byId = new Map(next.workspace.documents.map((d) => [d.id, d]));
+    expect(pageIds(byId.get('a.pdf#0')!)).toEqual(['a.pdf#p0']);
+    expect(pageIds(byId.get('b.pdf#0')!)).toEqual(['b.pdf#p1']);
+    // a.pdf#p1 precedes b.pdf#p0 in workspace order, so that's the inserted order.
+    expect(pageIds(byId.get('c.pdf#0')!)).toEqual(['c.pdf#p0', 'a.pdf#p1', 'b.pdf#p0']);
+  });
+
+  it('reorders a multi-selection within the same document', () => {
+    const a = makeFile('a.pdf', 5);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 5));
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'MOVE_PAGES',
+      pageIds: ['a.pdf#p0', 'a.pdf#p1'],
+      toDocId: 'a.pdf#0',
+      toIndex: 3, // after removal, kept = [p2,p3,p4]; insert at 3 → end
+    });
+    expect(pageIds(next.workspace.documents[0])).toEqual([
+      'a.pdf#p2',
+      'a.pdf#p3',
+      'a.pdf#p4',
+      'a.pdf#p0',
+      'a.pdf#p1',
+    ]);
+  });
+
+  it('is a no-op (no undo entry) when the selection lands exactly where it started', () => {
+    const a = makeFile('a.pdf', 3);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3));
+    const state = stateWith([a], [doc]);
+    const next = appReducer(state, {
+      type: 'MOVE_PAGES',
+      pageIds: ['a.pdf#p0', 'a.pdf#p1'],
+      toDocId: 'a.pdf#0',
+      toIndex: 0, // kept=[p2]; inserting [p0,p1] at 0 → p0,p1,p2 (unchanged)
+    });
+    expect(next).toBe(state);
+  });
+
+  it('rejects the whole batch if any id is not found', () => {
+    const a = makeFile('a.pdf', 3);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3));
+    const state = stateWith([a], [doc]);
+    const next = appReducer(state, {
+      type: 'MOVE_PAGES',
+      pageIds: ['a.pdf#p0', 'ghost'],
+      toDocId: 'a.pdf#0',
+      toIndex: 0,
+    });
+    expect(next).toBe(state);
+  });
+
+  it('rejects a move that would empty a source file, and prunes emptied partitions otherwise', () => {
+    const a = makeFile('a.pdf', 2);
+    const b = makeFile('b.pdf', 1);
+    const wouldEmpty = stateWith(
+      [a, b],
+      [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2)), makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1))],
+    );
+    // Moving BOTH of a.pdf's pages into b empties a.pdf → rejected atomically.
+    expect(
+      appReducer(wouldEmpty, {
+        type: 'MOVE_PAGES',
+        pageIds: ['a.pdf#p0', 'a.pdf#p1'],
+        toDocId: 'b.pdf#0',
+        toIndex: 0,
+      }),
+    ).toBe(wouldEmpty);
+
+    // A partition (not a whole file) emptied by the move is pruned.
+    const partA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));
+    const partB = makeDoc(a, 'a.pdf#1', makePages('a.pdf', 1, 1));
+    const c = makeFile('c.pdf', 1);
+    const withParts = stateWith(
+      [a, c],
+      [partA, partB, makeDoc(c, 'c.pdf#0', makePages('c.pdf', 1))],
+    );
+    const pruned = appReducer(withParts, {
+      type: 'MOVE_PAGES',
+      pageIds: ['a.pdf#p1'], // empties partB, but a.pdf keeps partA → allowed
+      toDocId: 'c.pdf#0',
+      toIndex: 0,
+    });
+    expect(pruned.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0', 'c.pdf#0']);
+  });
+});
+
+describe('MOVE_PAGES_TO_NEW_DOC (batched extract-to-new-doc)', () => {
+  it('creates a new doc from the selection, templated on the first page\'s doc', () => {
+    const a = makeFile('a.pdf', 4);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 4));
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'MOVE_PAGES_TO_NEW_DOC',
+      pageIds: ['a.pdf#p3', 'a.pdf#p1'],
+      docIndex: 1,
+      newDocId: 'new-doc',
+      newName: 'a (extract)',
+    });
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0', 'new-doc']);
+    const [orig, created] = next.workspace.documents;
+    expect(pageIds(orig)).toEqual(['a.pdf#p0', 'a.pdf#p2']);
+    expect(created.path).toBe('a.pdf');
+    expect(created.name).toBe('a (extract)');
+    // Workspace order preserved in the new doc (p1 before p3).
+    expect(pageIds(created)).toEqual(['a.pdf#p1', 'a.pdf#p3']);
+    expect(next.pageUndoStack).toHaveLength(1);
+  });
+
+  it('re-partitions (not rejects) when the selection is every page of its only file', () => {
+    const a = makeFile('a.pdf', 2);
+    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))]);
+    // All of a.pdf → the emptied source partition is pruned, but the new doc IS
+    // a.pdf (same path), so the file keeps its pages: this re-partitions rather
+    // than emptying the file, so it is allowed.
+    const next = appReducer(state, {
+      type: 'MOVE_PAGES_TO_NEW_DOC',
+      pageIds: ['a.pdf#p0', 'a.pdf#p1'],
+      docIndex: 1,
+      newDocId: 'new-doc',
+      newName: 'a (2)',
+    });
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['new-doc']);
+    expect(pageIds(next.workspace.documents[0])).toEqual(['a.pdf#p0', 'a.pdf#p1']);
+  });
+
+  it('rejects when it would empty a DIFFERENT source file', () => {
+    const a = makeFile('a.pdf', 2);
+    const b = makeFile('b.pdf', 1);
+    const state = stateWith(
+      [a, b],
+      [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2)), makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1))],
+    );
+    // New doc templates on a.pdf (first page); pulling b's only page in empties b.
+    expect(
+      appReducer(state, {
+        type: 'MOVE_PAGES_TO_NEW_DOC',
+        pageIds: ['a.pdf#p0', 'b.pdf#p0'],
+        docIndex: 2,
+        newDocId: 'new-doc',
+        newName: 'mix',
+      }),
+    ).toBe(state);
+  });
+});
+
+describe('DELETE_PAGE_REFS (batched delete)', () => {
+  it('removes several pages across docs in one undo step, marking every touched path dirty', () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 3);
+    const docs = [
+      makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3)),
+      makeDoc(b, 'b.pdf#0', makePages('b.pdf', 3)),
+    ];
+    const next = appReducer(stateWith([a, b], docs), {
+      type: 'DELETE_PAGE_REFS',
+      pageIds: ['a.pdf#p1', 'b.pdf#p2', 'a.pdf#p0'],
+    });
+    const [nextA, nextB] = next.workspace.documents;
+    expect(pageIds(nextA)).toEqual(['a.pdf#p2']);
+    expect(pageIds(nextB)).toEqual(['b.pdf#p0', 'b.pdf#p1']);
+    expect(next.pageUndoStack).toHaveLength(1);
+    expect(next.pageDirtyPaths.sort()).toEqual(['a.pdf', 'b.pdf']);
+  });
+
+  it('rejects the whole batch if it would empty any file', () => {
+    const a = makeFile('a.pdf', 2);
+    const b = makeFile('b.pdf', 2);
+    const state = stateWith(
+      [a, b],
+      [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2)), makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2))],
+    );
+    // Deleting both of a.pdf's pages would materialize a 0-page a.pdf → reject.
+    expect(
+      appReducer(state, {
+        type: 'DELETE_PAGE_REFS',
+        pageIds: ['a.pdf#p0', 'a.pdf#p1', 'b.pdf#p0'],
+      }),
+    ).toBe(state);
+  });
+
+  it('prunes an emptied partition when the file keeps pages elsewhere', () => {
+    const a = makeFile('a.pdf', 3);
+    const partA = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const partB = makeDoc(a, 'a.pdf#1', makePages('a.pdf', 1, 2));
+    const next = appReducer(stateWith([a], [partA, partB]), {
+      type: 'DELETE_PAGE_REFS',
+      pageIds: ['a.pdf#p2'],
+    });
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0']);
+  });
+
+  it('ignores an all-unknown batch', () => {
+    const a = makeFile('a.pdf', 2);
+    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))]);
+    expect(appReducer(state, { type: 'DELETE_PAGE_REFS', pageIds: ['ghost'] })).toBe(state);
+  });
+});
+
+describe('ROTATE_PAGE_REFS (batched rotate by delta)', () => {
+  it('rotates exactly the selected pages by the delta, one undo step', () => {
+    const a = makeFile('a.pdf', 3);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3));
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'ROTATE_PAGE_REFS',
+      pageIds: ['a.pdf#p0', 'a.pdf#p2'],
+      delta: 90,
+    });
+    expect(next.workspace.documents[0].pages.map((p) => p.rotation)).toEqual([90, 0, 90]);
+    expect(next.pageUndoStack).toHaveLength(1);
+    expect(next.pageDirtyPaths).toEqual(['a.pdf']);
+  });
+
+  it('adds the delta to each page\'s current rotation (wrapping past 360)', () => {
+    const a = makeFile('a.pdf', 2);
+    const pages = makePages('a.pdf', 2);
+    pages[0] = { ...pages[0], rotation: 270 };
+    const doc = makeDoc(a, 'a.pdf#0', pages);
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'ROTATE_PAGE_REFS',
+      pageIds: ['a.pdf#p0'],
+      delta: 180,
+    });
+    expect(next.workspace.documents[0].pages[0].rotation).toBe(90); // 270 + 180 = 450 → 90
+  });
+
+  it('re-projects annotations on the rotated pages', () => {
+    const a = makeFile('a.pdf', 1);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1));
+    const base = { id: 'x', kind: 'highlight' as const, x: 0.1, y: 0.2, w: 0.3, h: 0.15, color: '#ffd54a' };
+    const annotated = appReducer(stateWith([a], [doc]), {
+      type: 'ADD_ANNOTATION',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotation: base,
+    });
+    const rotated = appReducer(annotated, {
+      type: 'ROTATE_PAGE_REFS',
+      pageIds: ['a.pdf#p0'],
+      delta: 90,
+    });
+    expect(rotated.workspace.documents[0].pages[0].annotations![0]).toMatchObject({
+      x: 0.65,
+      y: 0.1,
+      w: 0.15,
+      h: 0.3,
+    });
+  });
+
+  it('is a no-op for an empty selection or a zero-normalized delta', () => {
+    const a = makeFile('a.pdf', 2);
+    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))]);
+    expect(appReducer(state, { type: 'ROTATE_PAGE_REFS', pageIds: [], delta: 90 })).toBe(state);
+    expect(appReducer(state, { type: 'ROTATE_PAGE_REFS', pageIds: ['ghost'], delta: 90 })).toBe(state);
+  });
+});

@@ -77,7 +77,7 @@ interface PageCellProps {
   // orientation — projected by the current in-memory rotation like marks).
   findMatch?: boolean;
   findWords?: OcrWord[];
-  onSelectPage: (docId: string, pageId: string) => void;
+  onSelectPage: (docId: string, pageId: string, e?: React.MouseEvent) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
@@ -325,7 +325,7 @@ function PageCellImpl({
       }
       onClick={(e) => {
         e.stopPropagation();
-        onSelectPage(docId, page.id);
+        onSelectPage(docId, page.id, e);
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();

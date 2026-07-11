@@ -1,4 +1,4 @@
-import { AppState, AppAction, OpenDocument, OpenFile, PageAnnotation, PdfBuffer } from './types';
+import { AppState, AppAction, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer } from './types';
 import { carriesManifest } from '../lib/doc-names';
 
 // Re-project a display-normalized annotation rect when its page's display
@@ -367,6 +367,101 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       next = [...next.slice(0, insertAt), newDoc, ...next.slice(insertAt)];
       return applyPageEdit(state, next, [source.path]);
     }
+    case 'MOVE_PAGES': {
+      if (action.pageIds.length === 0) return state;
+      const idSet = new Set(action.pageIds);
+      const to = state.workspace.documents.find((d) => d.id === action.toDocId);
+      if (!to) return state;
+      // Collect the moving pages in workspace-flattened order (doc order, then
+      // page order) so a selection spanning several docs keeps its visual order.
+      const moving: PageRef[] = [];
+      const touched = new Set<string>();
+      for (const d of state.workspace.documents) {
+        for (const p of d.pages) {
+          if (idSet.has(p.id)) {
+            moving.push(p);
+            touched.add(d.path);
+          }
+        }
+      }
+      if (moving.length !== idSet.size) return state; // an id wasn't found — reject atomically
+      touched.add(to.path);
+      // Remove every moving page from its doc; insert them into the target at
+      // the clamped index, counted against the target's post-removal length
+      // (the drop-target math already excludes the moving pages).
+      let documents = state.workspace.documents.map((d) => {
+        if (d.id === to.id) {
+          const kept = d.pages.filter((p) => !idSet.has(p.id));
+          const at = Math.max(0, Math.min(action.toIndex, kept.length));
+          const pages = [...kept.slice(0, at), ...moving, ...kept.slice(at)];
+          return { ...d, pages, pageCount: pages.length };
+        }
+        if (d.pages.some((p) => idSet.has(p.id))) {
+          const pages = d.pages.filter((p) => !idSet.has(p.id));
+          return { ...d, pages, pageCount: pages.length };
+        }
+        return d;
+      });
+      // No-op guard: a drag that landed exactly where it started must not push
+      // an undo entry (mirrors MOVE_PAGE's same-document no-op check).
+      const unchanged =
+        documents.length === state.workspace.documents.length &&
+        documents.every((d, i) => {
+          const prev = state.workspace.documents[i];
+          return (
+            d.pages.length === prev.pages.length && d.pages.every((p, j) => p === prev.pages[j])
+          );
+        });
+      if (unchanged) return state;
+      for (const path of touched) {
+        if (pagesForPath(documents, path) === 0) return state; // would empty a file
+      }
+      documents = pruneEmptyDocs(documents);
+      return applyPageEdit(state, documents, [...touched]);
+    }
+    case 'MOVE_PAGES_TO_NEW_DOC': {
+      if (action.pageIds.length === 0) return state;
+      const idSet = new Set(action.pageIds);
+      const moving: PageRef[] = [];
+      const touched = new Set<string>();
+      let template: OpenDocument | undefined;
+      for (const d of state.workspace.documents) {
+        for (const p of d.pages) {
+          if (idSet.has(p.id)) {
+            moving.push(p);
+            touched.add(d.path);
+            if (!template) template = d;
+          }
+        }
+      }
+      if (moving.length !== idSet.size || !template) return state;
+      // The new document is templated on the first selected page's document, so
+      // it carries a real path/buffer for the commit builder (like the singular
+      // MOVE_PAGE_TO_NEW_DOC). Pages sourced from other files ride along as
+      // cross-file references, exactly as an "into" move already allows.
+      const newDoc: OpenDocument = {
+        ...template,
+        id: action.newDocId,
+        name: action.newName,
+        pages: moving,
+        pageCount: moving.length,
+      };
+      const stripped = state.workspace.documents.map((d) => {
+        if (!d.pages.some((p) => idSet.has(p.id))) return d;
+        const pages = d.pages.filter((p) => !idSet.has(p.id));
+        return { ...d, pages, pageCount: pages.length };
+      });
+      // Insert in the pre-prune frame (same doc-slot count as the original list,
+      // since removal only empties docs, never drops slots yet) then prune —
+      // the new doc has pages so it's never pruned, and its position among the
+      // survivors matches the single version's index-adjust-then-insert.
+      const at = Math.max(0, Math.min(action.docIndex, stripped.length));
+      const documents = pruneEmptyDocs([...stripped.slice(0, at), newDoc, ...stripped.slice(at)]);
+      for (const path of touched) {
+        if (pagesForPath(documents, path) === 0) return state; // would empty a file
+      }
+      return applyPageEdit(state, documents, [...touched]);
+    }
     case 'DELETE_PAGE_REF': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       const page = doc?.pages.find((p) => p.id === action.pageId);
@@ -381,6 +476,34 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         }),
       );
       return applyPageEdit(state, documents, [doc.path]);
+    }
+    case 'DELETE_PAGE_REFS': {
+      if (action.pageIds.length === 0) return state;
+      const idSet = new Set(action.pageIds);
+      const touched = new Set<string>();
+      let found = 0;
+      for (const d of state.workspace.documents) {
+        for (const p of d.pages) {
+          if (idSet.has(p.id)) {
+            touched.add(d.path);
+            found++;
+          }
+        }
+      }
+      if (found === 0) return state;
+      const stripped = state.workspace.documents.map((d) => {
+        if (!d.pages.some((p) => idSet.has(p.id))) return d;
+        const pages = d.pages.filter((p) => !idSet.has(p.id));
+        return { ...d, pages, pageCount: pages.length };
+      });
+      // Atomic: reject the whole batch if it would materialize a 0-page file
+      // (closing the file is the right gesture for emptying one) — same guard
+      // as the singular DELETE_PAGE_REF, applied per touched path.
+      for (const path of touched) {
+        if (pagesForPath(stripped, path) === 0) return state;
+      }
+      const documents = pruneEmptyDocs(stripped);
+      return applyPageEdit(state, documents, [...touched]);
     }
     case 'SPLIT_DOC': {
       const index = state.workspace.documents.findIndex((d) => d.id === action.docId);
@@ -495,6 +618,28 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ),
       }));
       return applyPageEdit(state, documents, [doc.path]);
+    }
+    case 'ROTATE_PAGE_REFS': {
+      if (action.pageIds.length === 0) return state;
+      const idSet = new Set(action.pageIds);
+      const delta = (((action.delta % 360) + 360) % 360) as 0 | 90 | 180 | 270;
+      if (delta === 0) return state;
+      const touched = new Set<string>();
+      const documents = state.workspace.documents.map((d) => {
+        if (!d.pages.some((p) => idSet.has(p.id))) return d;
+        touched.add(d.path);
+        return {
+          ...d,
+          pages: d.pages.map((p) => {
+            if (!idSet.has(p.id)) return p;
+            const rotation = (((p.rotation + delta) % 360) as 0 | 90 | 180 | 270);
+            // Re-project annotations by the same delta as the singular rotate.
+            return { ...p, rotation, annotations: p.annotations?.map((a) => rotateAnnotationRect(a, delta)) };
+          }),
+        };
+      });
+      if (touched.size === 0) return state;
+      return applyPageEdit(state, documents, [...touched]);
     }
     case 'REORDER_DOCS': {
       const index = state.workspace.documents.findIndex((d) => d.id === action.docId);

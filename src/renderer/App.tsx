@@ -416,6 +416,40 @@ function AppContent(): React.ReactElement {
     }
   }, [activeFile, state.pageRedoStack.length, reloadFile, dispatch]);
 
+  // App-global Undo/Redo keyboard shortcuts (2n.1): Ctrl/Cmd+Z undoes,
+  // Ctrl/Cmd+Shift+Z or Ctrl+Y redoes. Undo/redo is app-wide (not canvas-only),
+  // so it lives here beside the handlers. Skipped while typing in a field; refs
+  // keep the listener stable while always invoking the latest handler.
+  const undoRef = useRef(handleUndo);
+  undoRef.current = handleUndo;
+  const redoRef = useRef(handleRedo);
+  redoRef.current = handleRedo;
+  useEffect(() => {
+    const isEditable = (el: EventTarget | null): boolean => {
+      const n = el as HTMLElement | null;
+      if (!n || !n.tagName) return false;
+      return (
+        n.tagName === 'INPUT' ||
+        n.tagName === 'TEXTAREA' ||
+        n.tagName === 'SELECT' ||
+        n.isContentEditable
+      );
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey) || isEditable(e.target)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        void undoRef.current();
+      } else if ((k === 'z' && e.shiftKey) || k === 'y') {
+        e.preventDefault();
+        void redoRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Run the commit ahead of a dependent step; on failure surface the error
   // and tell the caller to abort (the edits are still pending and retryable).
   const commitOrAbort = useCallback(async (): Promise<boolean> => {
@@ -662,6 +696,11 @@ function AppContent(): React.ReactElement {
       dispatchRemoveAnnotation: (docId, pageId, annotationId) =>
         dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId }),
       commitPendingEdits: () => commitRef.current(),
+      // Test-only workspace reset: closes every open file (no dirty-save
+      // dialogs) so a spec can start each case from a clean workspace.
+      closeAllFiles: () => {
+        for (const f of filesRef.current.values()) dispatch({ type: 'CLOSE_FILE', path: f.path });
+      },
     });
   }, [openByPaths, dispatch]);
 

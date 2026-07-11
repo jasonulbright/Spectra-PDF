@@ -149,13 +149,22 @@ export type AppAction =
   | { type: 'REORDER_PAGES'; docId: string; order: string[] } // permutation of PageRef ids
   | { type: 'MOVE_PAGE'; fromDocId: string; toDocId: string; pageId: string; toIndex: number }
   | { type: 'MOVE_PAGE_TO_NEW_DOC'; fromDocId: string; pageId: string; docIndex: number; newDocId: string; newName: string }
+  // Batched multi-select variants of the moves/delete/rotate below. Each is one
+  // reducer step = one page-edit undo entry (a per-page dispatch loop would push
+  // N snapshots). pageIds may span docs/files; the pages move in
+  // workspace-flattened order. Same guards as the singulars (no file emptied to
+  // zero pages). See docs/architecture/16-phase2n-canvas-completeness.md § 2n.1.
+  | { type: 'MOVE_PAGES'; pageIds: string[]; toDocId: string; toIndex: number }
+  | { type: 'MOVE_PAGES_TO_NEW_DOC'; pageIds: string[]; docIndex: number; newDocId: string; newName: string }
   | { type: 'DELETE_PAGE_REF'; docId: string; pageId: string }
+  | { type: 'DELETE_PAGE_REFS'; pageIds: string[] }
   | { type: 'ADD_ANNOTATION'; docId: string; pageId: string; annotation: PageAnnotation }
   | { type: 'UPDATE_ANNOTATION'; docId: string; pageId: string; annotationId: string; note: string }
   | { type: 'RECOLOR_ANNOTATION'; docId: string; pageId: string; annotationId: string; color: string }
   | { type: 'REMOVE_ANNOTATION'; docId: string; pageId: string; annotationId: string }
   | { type: 'SPLIT_DOC'; docId: string; atIndex: number; newDocId: string; newName: string }
   | { type: 'ROTATE_PAGE_REF'; docId: string; pageId: string; rotation: 0 | 90 | 180 | 270 }
+  | { type: 'ROTATE_PAGE_REFS'; pageIds: string[]; delta: 90 | 180 | 270 }
   | { type: 'REORDER_DOCS'; docId: string; direction: -1 | 1 }
   | { type: 'RENAME_DOC'; docId: string; name: string }
   | { type: 'REMOVE_DOC'; docId: string }

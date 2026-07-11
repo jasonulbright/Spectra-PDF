@@ -167,11 +167,24 @@ describe('computeDropTarget', () => {
       docId: 'm',
       index: 0,
     });
-    expect(computeDropTarget(mixed, x, DOC_HEIGHT / 2, 1, 'm.pdf#p0', true)).toEqual({
+    expect(computeDropTarget(mixed, x, DOC_HEIGHT / 2, 1, new Set(['m.pdf#p0']), true)).toEqual({
       kind: 'into',
       docId: 'm',
       index: 1,
     });
+  });
+
+  it('excludes every page of a multi-page drag from the insertion index', () => {
+    // Four uniform letter pages; drop past the 3rd remaining slot while the
+    // first two pages are the ones being dragged (excluded from counting).
+    const four = computeLayout([makeDoc('m', 'm.pdf', [LETTER, LETTER, LETTER, LETTER])]);
+    const letterW = pageDisplayWidth(...LETTER);
+    // With p0+p1 excluded, the remaining row is [p2, p3]; a point past p2's
+    // midpoint lands at index 1 among the two remaining pages.
+    const x = CARD_PAD_X + letterW + PAGE_GAP + 4;
+    expect(
+      computeDropTarget(four, x, DOC_HEIGHT / 2, 1, new Set(['m.pdf#p0', 'm.pdf#p1']), true),
+    ).toEqual({ kind: 'into', docId: 'm', index: 1 });
   });
 
   it('falls back to between-slots when zoomed too far out', () => {
@@ -235,10 +248,15 @@ describe('wrapPages', () => {
     expect(rows.every((r) => rowWidth(r) <= MAX_ROW_WIDTH)).toBe(true);
   });
 
-  it('excludes the collapsed page from wrapping, matching the DOM reflow', () => {
+  it('excludes the collapsed page(s) from wrapping, matching the DOM reflow', () => {
     const pages = makePages('a.pdf', Array.from({ length: perRow + 1 }, () => LETTER));
     expect(wrapPages(pages, null)).toHaveLength(2);
-    expect(wrapPages(pages, pages[0].id)).toHaveLength(1);
+    // One excluded page drops the overflow row back to a single row.
+    expect(wrapPages(pages, new Set([pages[0].id]))).toHaveLength(1);
+    // A multi-page drag excludes every moving page at once.
+    const many = makePages('a.pdf', Array.from({ length: perRow * 2 }, () => LETTER));
+    const excludeTwo = new Set([many[0].id, many[1].id]);
+    expect(wrapPages(many, excludeTwo).flat()).toHaveLength(perRow * 2 - 2);
   });
 
   it('yields a single empty row for a pageless document', () => {
