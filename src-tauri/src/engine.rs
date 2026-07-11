@@ -76,6 +76,11 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
     let (mut rx, child) = shell
         .command(&python_path)
         .args([&script_path])
+        // The JSON-RPC channel is UTF-8 by contract; without this an embedded
+        // Python on Windows decodes stdin as cp1252 and mojibakes every
+        // non-ASCII value (the engine also reconfigures its own stdio — this
+        // is the spawner half of the fix).
+        .env("PYTHONUTF8", "1")
         .spawn()
         .map_err(|e| format!("Failed to start engine: {}", e))?;
 

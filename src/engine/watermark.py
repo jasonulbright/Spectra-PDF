@@ -45,46 +45,20 @@ from pikepdf import Dictionary, Name
 from engine.pdf_tree import walk_inheritable
 
 
-# Exact Helvetica AFM advance widths (em/1000) for ASCII 0x20..0x7E, pinned
-# against pdfminer's own Helvetica metrics in tests. The rough 0.5-em average
-# the frontend builder uses elsewhere UNDERESTIMATES uppercase text by ~40%,
-# which pushed long auto-sized stamps past the form BBox — live-caught by the
-# watermark e2e as a stamp whose clipped tail extracted as "E2E-WATERMA".
-# Sizing and centering both need the real width.
-_HELVETICA_ASCII_WIDTHS = (
-    278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
-    556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
-    1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
-    667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
-    333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
-    556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+# Helvetica metrics moved to pdf_metrics.py (shared with forms.py — Phase 2l);
+# the aliases below keep this module's call sites and tests unchanged.
+from engine.pdf_metrics import (
+    GLYPH_HEIGHT_EM as _GLYPH_HEIGHT_EM,
+    HELVETICA_ASCII_WIDTHS as _HELVETICA_ASCII_WIDTHS,
+    NON_ASCII_ADVANCE_EM as _NON_ASCII_ADVANCE_EM,
+    text_width_em as _text_width_em,
 )
-
-# Fallback advance for non-ASCII Latin-1 (accented forms are near their base
-# glyph's width; 0.6 em over-reserves slightly, the safe direction).
-_NON_ASCII_ADVANCE_EM = 0.6
-
-# Helvetica vertical extent in em: AFM Ascent 718 + |Descent| 207 — pinned
-# against pdfminer's descriptor in tests, like the advance table.
-_GLYPH_HEIGHT_EM = 0.925
 
 MIN_AUTO_FONT_SIZE = 8.0
 MAX_AUTO_FONT_SIZE = 144.0
 # Fraction of the box's crossing length (along the text direction) the
 # auto-sized text should span.
 AUTO_FIT_FRACTION = 0.65
-
-
-def _text_width_em(text: str) -> float:
-    """Helvetica advance width of `text` in em units."""
-    total = 0.0
-    for ch in text:
-        code = ord(ch)
-        if 32 <= code <= 126:
-            total += _HELVETICA_ASCII_WIDTHS[code - 32] / 1000.0
-        else:
-            total += _NON_ASCII_ADVANCE_EM
-    return total
 
 
 def _parse_color(color: str) -> tuple[float, float, float]:

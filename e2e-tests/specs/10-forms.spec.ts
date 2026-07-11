@@ -94,4 +94,27 @@ describe('forms panel fills AcroForm fields and bakes them into the saved file',
     expect(vals.get('subscribe')).toBeDefined();
     expect(vals.get('subscribe')).not.toBe('Off');
   });
+
+  it('CLI fill (engine path) matches the GUI fill (pdf-lib path) field-for-field (2l)', async () => {
+    // Cross-IMPLEMENTATION parity: the same source form filled with the same
+    // values via the headless CLI (pikepdf engine + generated appearances)
+    // must read back identically — through a third reader (pdf.js) — to the
+    // GUI fill asserted above.
+    const { execFileSync } = await import('node:child_process');
+    const cliOut = resolve(tmp, 'filled-cli.pdf');
+    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    execFileSync(binary, [
+      'forms', source,
+      '-o', cliOut,
+      '--set', 'full_name=Ada Lovelace',
+      '--set', 'subscribe=true',
+    ]);
+    expect(existsSync(cliOut)).toBe(true);
+
+    const gui = await fieldValues(dest);
+    const cli = await fieldValues(cliOut);
+    expect(cli.get('full_name')).toBe(gui.get('full_name'));
+    expect(cli.get('subscribe')).not.toBe('Off');
+    expect(gui.get('subscribe')).not.toBe('Off');
+  });
 });

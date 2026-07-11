@@ -6,6 +6,21 @@ the appropriate handler, and returns results.
 """
 
 import sys
+
+# The JSON-RPC channel is UTF-8 BY CONTRACT. On Windows an embedded Python
+# defaults its stdio to the ANSI codepage (cp1252), which silently decodes the
+# Rust side's UTF-8 request bytes as cp1252 — mojibake for EVERY non-ASCII
+# value on every text-carrying op (metadata titles, watermark text, form
+# values, bookmark titles, signer names), in the GUI and the CLI alike, and it
+# corrupts VALID values, not just ones validation should reject
+# (review-caught live: "José García" stored as mojibake; "日本語" sailed past
+# the forms WinAnsi check as cp1252 gibberish that happened to encode).
+# Reconfigure both directions before the server reads anything. The spawners
+# also set PYTHONUTF8=1 (engine.rs / cli.rs) as belt-and-suspenders — this
+# line is the authoritative fix that holds no matter how the engine is run.
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
+
 from engine.ipc import JsonRpcServer
 from engine.merge import merge
 from engine.split import split
@@ -28,6 +43,7 @@ from engine.outline import get_outline, set_outline
 from engine.redact import redact
 from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
+from engine.forms import read_form_fields, fill_form_fields
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
 
 
@@ -68,6 +84,8 @@ def main() -> None:
     server.register("watermark", watermark)
     server.register("compare_text", compare_text)
     server.register("compare_visual", compare_visual)
+    server.register("read_form_fields", read_form_fields)
+    server.register("fill_form_fields", fill_form_fields)
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)
     server.register("generate_signer", generate_signer)

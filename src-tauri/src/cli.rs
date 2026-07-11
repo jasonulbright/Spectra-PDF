@@ -61,6 +61,10 @@ pub enum CliCommand {
     Sign(SignArgs),
     /// Generate a self-signed signing identity (.pfx with a new private key)
     GenerateSigner(GenerateSignerArgs),
+    /// List AcroForm fields (JSON), or fill them with --set (and optionally --flatten)
+    Forms(FormsArgs),
+    /// Read the bookmark tree (JSON), or replace it with --from-json
+    Outline(OutlineArgs),
     /// View or set PDF metadata
     Metadata(MetadataArgs),
     /// Convert a PDF to grayscale
@@ -299,6 +303,37 @@ pub struct SignArgs {
 }
 
 #[derive(Args)]
+pub struct FormsArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file (required with --set/--flatten; omit to just list fields)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+    /// Fill a field: NAME=VALUE (splits on the FIRST '='; repeatable).
+    /// Checkboxes accept true/false/yes/no/on/off.
+    #[arg(long = "set", value_name = "NAME=VALUE")]
+    pub set: Vec<String>,
+    /// Flatten after filling: bake appearances into page content and remove
+    /// all form fields (locks the form)
+    #[arg(long)]
+    pub flatten: bool,
+}
+
+#[derive(Args)]
+pub struct OutlineArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file (required with --from-json; omit to just read)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+    /// Replace the bookmark tree from a JSON file ('-' reads stdin). Accepts
+    /// the same shape `outline <input>` prints ({"outline": [...]} or a bare
+    /// array of {title, page, children, action?} items).
+    #[arg(long = "from-json", value_name = "FILE")]
+    pub from_json: Option<String>,
+}
+
+#[derive(Args)]
 pub struct GenerateSignerArgs {
     /// Signer display name (certificate common name)
     #[arg(long)]
@@ -511,6 +546,10 @@ impl CliEngine {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            // UTF-8 by contract on the JSON-RPC channel (see engine.rs — the
+            // engine reconfigures its own stdio too; both halves shipped
+            // together after a live mojibake repro on non-ASCII form values).
+            .env("PYTHONUTF8", "1")
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("Failed to start engine: {}", e))?;
@@ -924,6 +963,98 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 params["appearance"] = json!({ "page": page, "rect": nums });
             }
             engine.call("sign_pdf", params)
+        }
+
+        CliCommand::Forms(args) => {
+            let input = abs(&args.input).to_string_lossy().to_string();
+            if args.set.is_empty() && !args.flatten {
+                return engine.call("read_form_fields", json!({ "file": input }));
+            }
+            let output = match &args.output {
+                Some(p) => abs(p).to_string_lossy().to_string(),
+                None => {
+                    return Err(
+                        "forms: -o/--output is required when filling (--set) or flattening"
+                            .to_string(),
+                    )
+                }
+            };
+            let mut edits = serde_json::Map::new();
+            for pair in &args.set {
+                match pair.split_once('=') {
+                    Some((name, value)) if !name.is_empty() => {
+                        edits.insert(name.to_string(), json!(value));
+                    }
+                    _ => {
+                        return Err(format!(
+                            "invalid --set {:?}: expected NAME=VALUE",
+                            pair
+                        ))
+                    }
+                }
+            }
+            engine.call(
+                "fill_form_fields",
+                json!({
+                    "file": input,
+                    "output": output,
+                    "edits": edits,
+                    "flatten": args.flatten,
+                }),
+            )
+        }
+
+        CliCommand::Outline(args) => {
+            let input = abs(&args.input).to_string_lossy().to_string();
+            match &args.from_json {
+                None => engine.call("get_outline", json!({ "file": input })),
+                Some(source) => {
+                    let output = match &args.output {
+                        Some(p) => abs(p).to_string_lossy().to_string(),
+                        None => {
+                            return Err(
+                                "outline: -o/--output is required with --from-json".to_string()
+                            )
+                        }
+                    };
+                    let raw = if source == "-" {
+                        use std::io::Read;
+                        let mut s = String::new();
+                        std::io::stdin()
+                            .read_to_string(&mut s)
+                            .map_err(|e| format!("failed to read JSON from stdin: {}", e))?;
+                        s
+                    } else {
+                        std::fs::read_to_string(source)
+                            .map_err(|e| format!("failed to read {}: {}", source, e))?
+                    };
+                    let parsed: Value = serde_json::from_str(&raw)
+                        .map_err(|e| format!("invalid outline JSON: {}", e))?;
+                    // Accept both the `outline <input>` output shape and a bare array.
+                    let tree = match parsed {
+                        Value::Array(items) => Value::Array(items),
+                        Value::Object(ref map) => match map.get("outline") {
+                            Some(Value::Array(items)) => Value::Array(items.clone()),
+                            _ => {
+                                return Err(
+                                    "invalid outline JSON: expected an array or {\"outline\": [...]}"
+                                        .to_string(),
+                                )
+                            }
+                        },
+                        _ => {
+                            return Err(
+                                "invalid outline JSON: expected an array or {\"outline\": [...]}"
+                                    .to_string(),
+                            )
+                        }
+                    };
+                    engine.call(
+                        "set_outline",
+                        json!({ "file": input, "outline": tree, "output": output }),
+                    )
+                }
+            }
         }
 
         CliCommand::GenerateSigner(args) => {
