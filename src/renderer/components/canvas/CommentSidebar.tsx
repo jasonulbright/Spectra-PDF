@@ -38,6 +38,7 @@ function collectComments(docs: OpenDocument[]): CommentEntry[] {
 interface CommentSidebarProps {
   docs: OpenDocument[];
   onSelectPage: (docId: string, pageId: string) => void;
+  onJumpToPage: (pageId: string) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
@@ -45,12 +46,13 @@ interface CommentSidebarProps {
 }
 
 // Lists every annotation with a note (highlight popups, freetext bodies,
-// stamp labels) across the open workspace. No scroll-to-page yet — the
-// canvas has no `centerOn` handle (same gap tracked for the bookmarks
-// sidebar) — selecting an entry only highlights the page via onSelectPage.
+// stamp labels) across the open workspace. Clicking an entry highlights its
+// page (onSelectPage) and scrolls the canvas to it (onJumpToPage → centerOn,
+// the handle added in 2m).
 export function CommentSidebar({
   docs,
   onSelectPage,
+  onJumpToPage,
   onUpdateAnnotation,
   onRecolorAnnotation,
   onRemoveAnnotation,
@@ -76,7 +78,10 @@ export function CommentSidebar({
             key={e.annotationId}
             className="comment-sidebar-item"
             style={{ borderLeftColor: e.color }}
-            onClick={() => onSelectPage(e.docId, e.pageId)}
+            onClick={() => {
+              onSelectPage(e.docId, e.pageId);
+              onJumpToPage(e.pageId);
+            }}
           >
             <div className="comment-sidebar-item-meta">
               <span className="comment-sidebar-item-kind">{e.kind}</span>

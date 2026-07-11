@@ -8,11 +8,11 @@ interface PendingRequest {
   reject: (reason: unknown) => void;
 }
 
-export interface OutlineNode {
-  title: string;
-  page: number | null; // 1-based; null = no resolvable target
-  children: OutlineNode[];
-}
+// Canonical outline node type lives in the (dependency-free) reorder lib so the
+// sidebar's reorder and the engine contract share one definition; its index
+// signature carries the opaque 2l action/dest/action_lossy payloads untouched.
+export type { OutlineNode } from '../lib/outline-reorder';
+import type { OutlineNode } from '../lib/outline-reorder';
 
 /** Result of an engine operation. Which fields are populated depends on the operation invoked. */
 export interface EngineResult {

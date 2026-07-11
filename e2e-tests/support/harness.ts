@@ -313,6 +313,39 @@ export async function pressGlobalKey(
   );
 }
 
+/** Flattened outline rows the sidebar shows (2n.2). Sidebar must be mounted. */
+export async function getOutlineOrder(): Promise<
+  { title: string; depth: number; page: number | null }[]
+> {
+  return await browser.execute<{ title: string; depth: number; page: number | null }[], []>(
+    function () {
+      return (window as any).__SPECTRA_TEST__.getOutlineOrder();
+    },
+  );
+}
+
+/** Reorder an outline node via the exact drop path (moveOutlineNode ->
+ * set_outline -> UPDATE_FILE); resolves after the save. */
+export async function reorderOutline(
+  fromPath: number[],
+  overIndex: number,
+  depth: number,
+): Promise<void> {
+  const result = await browser.executeAsync<string | null, [number[], number, number]>(
+    function (fp, oi, d, done) {
+      (window as any).__SPECTRA_TEST__.reorderOutline(fp, oi, d)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    fromPath,
+    overIndex,
+    depth,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`reorderOutline failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
 /** Number of scanned source pages whose OCR words are ready to persist. */
 export async function ocrReadyCount(): Promise<number> {
   return await browser.execute<number, []>(function () {

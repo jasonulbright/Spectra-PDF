@@ -125,6 +125,23 @@ export function registerCanvasSelection(handlers: CanvasSelectionHandlers | null
 }
 
 /**
+ * Outline sidebar reorder (2n.2) is a pointer-capture tree drag, not
+ * WebDriver-drivable. The sidebar registers a reader + the exact drop path
+ * (moveOutlineNode -> set_outline -> UPDATE_FILE) so a spec can reorder and
+ * verify the persisted file. Only registered while the sidebar is mounted.
+ */
+export interface CanvasOutlineHandlers {
+  getOrder: () => { title: string; depth: number; page: number | null }[];
+  reorder: (fromPath: number[], overIndex: number, depth: number) => Promise<void>;
+}
+
+let canvasOutline: CanvasOutlineHandlers | null = null;
+
+export function registerCanvasOutline(handlers: CanvasOutlineHandlers | null): void {
+  canvasOutline = handlers;
+}
+
+/**
  * Signing goes through two native dialogs (.pfx picker + output save) that
  * WebDriver can't drive, so the SignaturesPanel registers its real sign call
  * here while mounted. The harness injects the paths + password and exercises
@@ -258,6 +275,12 @@ export interface TestHarness {
   deleteSelectedCanvasPages: () => void;
   /** Rotate the current canvas selection ±90 via the batched path (`[`/`]`). */
   rotateSelectedCanvasPages: (delta: 90 | 270) => void;
+  /** Flattened outline rows (title/depth/page) the sidebar currently shows.
+   * Outline sidebar must be mounted (toggle-outline). */
+  getOutlineOrder: () => { title: string; depth: number; page: number | null }[];
+  /** Reorder an outline node via the exact drop path (moveOutlineNode ->
+   * set_outline -> UPDATE_FILE); resolves after the save. */
+  reorderOutline: (fromPath: number[], overIndex: number, depth: number) => Promise<void>;
   /** Number of scanned source pages with OCR words ready to persist. */
   ocrReadyCount: () => number;
   /** Run the "Make searchable" flow (engine apply_ocr_layer per file);
@@ -557,6 +580,11 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     getWorkspacePageIds: () => canvasSelection?.getWorkspacePageIds() ?? [],
     deleteSelectedCanvasPages: () => canvasSelection?.deleteSelected(),
     rotateSelectedCanvasPages: (delta) => canvasSelection?.rotateSelected(delta),
+    getOutlineOrder: () => canvasOutline?.getOrder() ?? [],
+    reorderOutline: async (fromPath, overIndex, depth) => {
+      if (!canvasOutline) throw new Error('reorderOutline: outline sidebar not mounted');
+      await canvasOutline.reorder(fromPath, overIndex, depth);
+    },
     ocrReadyCount: () => canvasOcr?.readyCount() ?? 0,
     applyOcr: async () => {
       if (!canvasOcr) {
