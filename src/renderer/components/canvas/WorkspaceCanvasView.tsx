@@ -7,8 +7,14 @@ import { uniqueDocName } from '../../lib/doc-names';
 import { getDocumentProxy } from '../../lib/pdfDocCache';
 import { buildRedactionRegions } from '../../lib/redaction';
 import type { RedactionMark, RedactionRegion } from '../../lib/redaction';
+import { buildSignatureAppearance } from '../../lib/signature-placement';
+import type { SignaturePlacement } from '../../lib/signature-placement';
+import { useEngine } from '../../hooks/useEngine';
+import { dialog } from '../../lib/tauri-bridge';
+import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../SignerSourceFields';
+import type { SignerSource } from '../SignerSourceFields';
 import { workspacePageNumber } from '../../lib/workspace-commit';
-import { TEST_HARNESS_ENABLED, registerCanvasRedaction } from '../../testHarness';
+import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature } from '../../testHarness';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
 import { Canvas } from './Canvas';
@@ -79,6 +85,17 @@ export function WorkspaceCanvasView({
   const [confirmRedact, setConfirmRedact] = useState(false);
   const [redacting, setRedacting] = useState(false);
   const [redactError, setRedactError] = useState<string | null>(null);
+  // Pending visible-signature placement — single, transient, same lifecycle
+  // as redaction marks (see lib/signature-placement.ts).
+  const [sigPlacement, setSigPlacement] = useState<SignaturePlacement | null>(null);
+  const [sigSource, setSigSource] = useState<SignerSource>(EMPTY_SIGNER_SOURCE);
+  const [sigPassword, setSigPassword] = useState('');
+  const [sigReason, setSigReason] = useState('');
+  const [sigLocation, setSigLocation] = useState('');
+  const [signingBusy, setSigningBusy] = useState(false);
+  const [signError, setSignError] = useState<string | null>(null);
+  const [signDone, setSignDone] = useState<{ signer: string | null; output: string; ok: boolean } | null>(null);
+  const { call: engineCall } = useEngine();
 
   // Escape returns to Select from the highlight tool.
   React.useEffect(() => {
@@ -154,6 +171,31 @@ export function WorkspaceCanvasView({
     [],
   );
 
+  // Single pending placement — drawing again anywhere replaces it.
+  const onSetSignaturePlacement = useCallback(
+    (
+      docId: string,
+      pageId: string,
+      rect: { x: number; y: number; w: number; h: number },
+      rotationAtDraw: 0 | 90 | 180 | 270,
+    ) => {
+      const doc = docs.find((d) => d.id === docId);
+      if (!doc) return;
+      setSigPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
+      setSignDone(null);
+      setSignError(null);
+    },
+    [docs],
+  );
+  const onClearSignaturePlacement = useCallback(() => setSigPlacement(null), []);
+
+  // Placement whose page still exists (a deleted page's placement is inert,
+  // surfaced as such rather than guessed at).
+  const liveSigPlacement = useMemo(() => {
+    if (!sigPlacement) return null;
+    return docs.some((d) => d.pages.some((p) => p.id === sigPlacement.pageId)) ? sigPlacement : null;
+  }, [sigPlacement, docs]);
+
   // Invalidate marks when their file's bytes change underneath them (commit,
   // whole-file op, undo, reopen) or the file closes. PageRef ids are
   // positional (`path#pN`), so after a reindex a surviving mark could bind to
@@ -175,6 +217,7 @@ export function WorkspaceCanvasView({
     }
     if (invalidated.size > 0) {
       setMarks((prevMarks) => prevMarks.filter((m) => !invalidated.has(m.path)));
+      setSigPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
     }
   }, [state.files]);
 
@@ -233,6 +276,77 @@ export function WorkspaceCanvasView({
     }
   }, [liveMarks, docs, state.files, onRedactFile]);
 
+  // Sign the placement's file, visible stamp at the drawn box. Geometry is
+  // read from the CURRENT buffer's proxy (same contract as applyMarks); the
+  // engine gate then flushes pending page edits before sign_pdf reads the
+  // file, so the output contains what the user sees. The input file itself is
+  // NEVER modified — signing writes a new file.
+  const signingRef = useRef(false);
+  const applySignature = useCallback(async (): Promise<void> => {
+    const placement = liveSigPlacement;
+    if (!placement || signingRef.current) return;
+    // Synchronous validation only above this line. The reentrancy ref MUST be
+    // taken before the FIRST await (review-caught; same double-click class as
+    // the punchlist's applyMarks tripwire) — a second click during
+    // buildSignatureAppearance or the native save dialog would otherwise
+    // start an overlapping sign flow.
+    const resolved = signerSourceParams(sigSource);
+    if (resolved.error) {
+      setSignError(resolved.error);
+      return;
+    }
+    if (!sigPassword && sigSource.mode === 'pfx') {
+      setSignError('Enter the signer password.');
+      return;
+    }
+    signingRef.current = true;
+    setSigningBusy(true);
+    setSignError(null);
+    try {
+      const built = await buildSignatureAppearance(docs, placement, async (page) => {
+        const f = state.files.get(page.sourceDocId);
+        if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+        const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+        const p = await proxy.getPage(page.sourcePageIndex + 1);
+        const [vx0, vy0, vx1, vy1] = p.view;
+        return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
+      });
+      if (!built) {
+        setSignError('The page this signature was placed on no longer exists.');
+        return;
+      }
+      const file = state.files.get(built.path);
+      if (!file) {
+        setSignError('The file this signature was placed on is no longer open.');
+        return;
+      }
+      const baseName = (built.path.split(/[\\/]/).pop() ?? 'document').replace(/\.pdfx?$/i, '');
+      const dest = await dialog.saveFile({ defaultPath: `${baseName}-signed.pdf` });
+      if (!dest) return; // cancelled — the finally still clears the password
+      const res = (await engineCall('sign_pdf', {
+        file: file.workingPath,
+        output: dest,
+        ...resolved.params!,
+        password: sigPassword,
+        ...(sigReason.trim() ? { reason: sigReason.trim() } : {}),
+        ...(sigLocation.trim() ? { location: sigLocation.trim() } : {}),
+        appearance: built.appearance,
+      })) as unknown as { signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean };
+      setSignDone({ signer: res.signer, output: res.output, ok: res.valid && res.intact && res.covers_whole_document });
+      setSigPlacement(null);
+      setTool('select');
+    } catch (err) {
+      setSignError(err instanceof Error ? err.message : String(err));
+    } finally {
+      // Clear the secret from state on EVERY exit — success, failure, or a
+      // cancelled save dialog (review-caught: a cancel used to strand the
+      // typed password in state, pre-filling later unrelated attempts).
+      setSigPassword('');
+      signingRef.current = false;
+      setSigningBusy(false);
+    }
+  }, [liveSigPlacement, sigSource, sigPassword, sigReason, sigLocation, docs, state.files, engineCall]);
+
   // Harness bridge (e2e builds only): redaction marks live here, out of the
   // reducer's reach, so the canvas registers its own handlers while mounted.
   // Refs keep the registration stable across renders.
@@ -263,6 +377,53 @@ export function WorkspaceCanvasView({
       count: () => liveMarksRef.current.length,
     });
     return () => registerCanvasRedaction(null);
+  }, []);
+
+  // Same bridge for the visible-signature placement (rubber band + native
+  // dialogs aren't WebDriver-drivable). The harness places on the first page
+  // and reads back the CONVERTED appearance via the real conversion path.
+  const liveSigRef = useRef(liveSigPlacement);
+  liveSigRef.current = liveSigPlacement;
+  const harnessPlaceSigRef = useRef<
+    (rect: { x: number; y: number; w: number; h: number }) => boolean
+  >(() => false);
+  harnessPlaceSigRef.current = (rect) => {
+    const doc = docs.find((d) => d.path === state.activeFileId);
+    const page = doc?.pages[0];
+    if (!doc || !page) return false;
+    setSigPlacement({
+      id: crypto.randomUUID(),
+      path: doc.path,
+      pageId: page.id,
+      rect,
+      rotationAtDraw: page.rotation,
+    });
+    return true;
+  };
+  const harnessBuildSigRef = useRef<
+    () => Promise<{ path: string; appearance: { page: number; rect: [number, number, number, number] } } | null>
+  >(async () => null);
+  harnessBuildSigRef.current = async () => {
+    const placement = liveSigPlacement;
+    if (!placement) return null;
+    return buildSignatureAppearance(docs, placement, async (page) => {
+      const f = state.files.get(page.sourceDocId);
+      if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+      const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+      const p = await proxy.getPage(page.sourcePageIndex + 1);
+      const [vx0, vy0, vx1, vy1] = p.view;
+      return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
+    });
+  };
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerCanvasSignature({
+      placeOnFirstPage: (rect) => harnessPlaceSigRef.current(rect),
+      buildAppearance: () => harnessBuildSigRef.current(),
+      clear: () => setSigPlacement(null),
+      has: () => liveSigRef.current != null,
+    });
+    return () => registerCanvasSignature(null);
   }, []);
 
   const movePageInto = useCallback(
@@ -469,6 +630,7 @@ export function WorkspaceCanvasView({
           annotationColor={toolColor ?? undefined}
           stampPreset={stampPreset}
           redactionMarksByPage={redactionMarksByPage}
+          signaturePlacement={liveSigPlacement}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
@@ -477,6 +639,8 @@ export function WorkspaceCanvasView({
           onRemoveAnnotation={onRemoveAnnotation}
           onAddRedactionMark={onAddRedactionMark}
           onRemoveRedactionMark={onRemoveRedactionMark}
+          onSetSignaturePlacement={onSetSignaturePlacement}
+          onClearSignaturePlacement={onClearSignaturePlacement}
         />
         {drag.dropTarget?.kind === 'between' && (
           <div
@@ -549,6 +713,14 @@ export function WorkspaceCanvasView({
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'redact' ? 'bg-red-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
             Redact
+          </button>
+          <button
+            data-testid="tool-signature"
+            title="Drag a box on a page to place a visible signature (Esc to exit)"
+            onClick={() => setTool(tool === 'signature' ? 'select' : 'signature')}
+            className={`px-3 py-1.5 text-xs font-medium ${tool === 'signature' ? 'bg-violet-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
+          >
+            Sign
           </button>
         </div>
         {tool === 'stamp' && (
@@ -669,6 +841,91 @@ export function WorkspaceCanvasView({
           onRemoveAnnotation={onRemoveAnnotation}
           onClose={() => setShowComments(false)}
         />
+      )}
+
+      {liveSigPlacement && (
+        <div
+          data-testid="sign-canvas-form"
+          className="absolute bottom-4 left-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
+        >
+          <div className="text-sm text-neutral-200 font-medium">Sign with a visible stamp</div>
+          <p className="text-[11px] text-neutral-500 -mt-1.5">
+            The stamp is drawn at the box you placed; the signed copy is written to a NEW file —
+            this file is left unchanged.
+          </p>
+          <SignerSourceFields value={sigSource} onChange={setSigSource} idPrefix="canvas-sign" />
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">Password</span>
+            <input
+              data-testid="canvas-sign-password"
+              type="password"
+              value={sigPassword}
+              onChange={(e) => setSigPassword(e.target.value)}
+              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">Reason</span>
+            <input
+              type="text"
+              value={sigReason}
+              placeholder="optional"
+              onChange={(e) => setSigReason(e.target.value)}
+              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">Location</span>
+            <input
+              type="text"
+              value={sigLocation}
+              placeholder="optional"
+              onChange={(e) => setSigLocation(e.target.value)}
+              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          {signError && <div data-testid="canvas-sign-error" className="text-xs text-red-400">{signError}</div>}
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setSigPlacement(null);
+                setSigPassword('');
+                setSignError(null);
+              }}
+              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              data-testid="canvas-sign-apply"
+              onClick={() => void applySignature()}
+              disabled={signingBusy}
+              className="px-2.5 py-1 text-xs text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-50 rounded font-medium"
+            >
+              {signingBusy ? 'Signing…' : 'Sign & Save…'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {signDone && (
+        <div
+          data-testid="canvas-sign-done"
+          className={`absolute bottom-4 left-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 rounded text-xs shadow-lg border ${
+            signDone.ok
+              ? 'bg-green-600/15 border-green-600/40 text-green-200'
+              : 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+          }`}
+        >
+          <span className="flex-1">
+            Signed as <strong>{signDone.signer ?? '(unknown)'}</strong>
+            {signDone.ok
+              ? ' — valid, covers the whole document. '
+              : ' — but the signature did not verify as expected. '}
+            Saved to {signDone.output}
+          </span>
+          <button onClick={() => setSignDone(null)} className="hover:text-white">×</button>
+        </div>
       )}
 
       {redactError && (

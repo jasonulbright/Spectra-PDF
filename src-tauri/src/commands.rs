@@ -81,6 +81,30 @@ pub async fn pick_certificate_file(
     }
 }
 
+/// Pick a PEM/DER signer component (private key or certificate) — the PEM
+/// signer source's two file inputs. Loose filter: key/cert files wear many
+/// extensions in the wild, so "all files" stays one click away.
+#[tauri::command]
+pub async fn pick_pem_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("PEM/DER key or certificate", &["pem", "key", "crt", "cer", "der"])
+        .add_filter("All files", &["*"])
+        .blocking_pick_file();
+    match result {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
 // ── File operations ───────────────────────────────────────────────────────
 
 #[tauri::command]

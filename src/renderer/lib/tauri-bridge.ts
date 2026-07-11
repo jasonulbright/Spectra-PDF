@@ -56,6 +56,7 @@ export const dialog = {
   },
   /** Pick a PKCS#12 (.pfx/.p12) signer file. Returns null if cancelled. */
   pickCertificate: () => invoke<string | null>('pick_certificate_file'),
+  pickPemFile: () => invoke<string | null>('pick_pem_file'),
 };
 
 // ── File operations ───────────────────────────────────────────────────────

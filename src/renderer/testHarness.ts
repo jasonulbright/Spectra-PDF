@@ -63,6 +63,29 @@ export function registerCanvasRedaction(handlers: CanvasRedactionHandlers | null
 }
 
 /**
+ * Visible-signature placement is likewise transient canvas state (2k). The
+ * canvas registers placement + the REAL display→PDF conversion here;
+ * `buildAppearance` returns the exact appearance payload the Sign & Save
+ * button would send, so a spec can hand it to signActiveFile and exercise the
+ * same engine path end to end.
+ */
+export interface CanvasSignatureHandlers {
+  placeOnFirstPage: (rect: { x: number; y: number; w: number; h: number }) => boolean;
+  buildAppearance: () => Promise<{
+    path: string;
+    appearance: { page: number; rect: [number, number, number, number] };
+  } | null>;
+  clear: () => void;
+  has: () => boolean;
+}
+
+let canvasSignature: CanvasSignatureHandlers | null = null;
+
+export function registerCanvasSignature(handlers: CanvasSignatureHandlers | null): void {
+  canvasSignature = handlers;
+}
+
+/**
  * Signing goes through two native dialogs (.pfx picker + output save) that
  * WebDriver can't drive, so the SignaturesPanel registers its real sign call
  * here while mounted. The harness injects the paths + password and exercises
@@ -70,11 +93,17 @@ export function registerCanvasRedaction(handlers: CanvasRedactionHandlers | null
  */
 export interface SignHandler {
   sign: (params: {
-    pfxPath: string;
+    // Signer source: a .pfx path, OR a PEM key+cert pair (2k).
+    pfxPath?: string;
+    keyPath?: string;
+    certPath?: string;
     password: string;
     output: string;
     reason?: string;
     location?: string;
+    // Visible-stamp placement (2k) — engine convention: 1-based page, PDF
+    // user-space rect.
+    appearance?: { page: number; rect: [number, number, number, number] };
   }) => Promise<{
     output: string;
     signer: string | null;
@@ -159,6 +188,21 @@ export interface TestHarness {
   clearRedactionMarks: () => void;
   /** Number of pending redaction marks the canvas currently shows. */
   getRedactionMarkCount: () => number;
+  /** Place a visible-signature box on the active file's first canvas page
+   * (display-normalized rect), waiting for the canvas + indexer like
+   * addRedactionMark. */
+  placeSignature: (
+    rect: { x: number; y: number; w: number; h: number },
+    timeoutMs?: number,
+  ) => Promise<void>;
+  /** Convert the pending placement via the REAL display→PDF path; returns the
+   * engine appearance payload the canvas Sign button would send. */
+  buildSignatureAppearance: () => Promise<{
+    path: string;
+    appearance: { page: number; rect: [number, number, number, number] };
+  } | null>;
+  /** Drop the pending signature placement. */
+  clearSignaturePlacement: () => void;
   /**
    * Sign the active file via the Signatures panel's real engine call, with
    * injected paths (the .pfx picker and output save dialog are native and
@@ -166,11 +210,14 @@ export interface TestHarness {
    * self-verify summary of the produced file.
    */
   signActiveFile: (params: {
-    pfxPath: string;
+    pfxPath?: string;
+    keyPath?: string;
+    certPath?: string;
     password: string;
     output: string;
     reason?: string;
     location?: string;
+    appearance?: { page: number; rect: [number, number, number, number] };
   }) => Promise<{
     output: string;
     signer: string | null;
@@ -416,6 +463,33 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     clearRedactionMarks: () => canvasRedaction?.clear(),
     getRedactionMarkCount: () => canvasRedaction?.count() ?? 0,
+    placeSignature: async (rect, timeoutMs = 10_000) => {
+      const deadline = Date.now() + timeoutMs;
+      let placed = canvasSignature?.placeOnFirstPage(rect) ?? false;
+      while (!placed && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        placed = canvasSignature?.placeOnFirstPage(rect) ?? false;
+      }
+      if (!placed) {
+        const msg = `placeSignature: no canvas page appeared within ${timeoutMs}ms`;
+        lastError = msg;
+        throw new Error(msg);
+      }
+    },
+    buildSignatureAppearance: async () => {
+      if (!canvasSignature) {
+        const msg = 'buildSignatureAppearance: canvas view not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await canvasSignature.buildAppearance();
+      } catch (err) {
+        captureError('buildSignatureAppearance', err);
+        throw err;
+      }
+    },
+    clearSignaturePlacement: () => canvasSignature?.clear(),
     signActiveFile: async (params) => {
       if (!signHandler) {
         const msg = 'signActiveFile: Signatures panel not mounted';

@@ -32,6 +32,9 @@ const FRIENDLY_NAMES: Record<string, string> = {
   // NB: the default getFriendlyName path uses only params.file — the signing
   // password is never referenced, so it can't reach the operation log.
   sign_pdf: 'Sign',
+  // Same property: no param besides the (non-secret) name ever reaches the
+  // queue label; the .pfx password stays out of every sink.
+  generate_signer: 'Create Signer',
 };
 
 /** Methods that are internal lookups, not user-facing operations. */

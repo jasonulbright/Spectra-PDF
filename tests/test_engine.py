@@ -1779,6 +1779,59 @@ def _blank_pdf(path: str) -> str:
     return path
 
 
+def _make_test_pem(tmp_dir: str, key_password: str | None = None, with_chain: bool = False):
+    """Write PEM signer materials: (key_path, cert_path). With `with_chain`,
+    cert_path is a FULLCHAIN file (leaf first, then the intermediate that
+    issued it) — the ubiquitous fullchain.pem layout."""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    def make_cert(subject_cn, issuer_name, issuer_key, key, ca=False):
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject_cn)])
+        builder = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer_name if issuer_name is not None else subject)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.datetime(2000, 1, 1))
+            .not_valid_after(datetime.datetime(2100, 1, 1))
+            .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+        )
+        return builder.sign(issuer_key if issuer_key is not None else key, hashes.SHA256()), subject
+
+    leaf_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    chain_pem = b""
+    if with_chain:
+        inter_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        inter_cert, inter_name = make_cert("Spectra Test Intermediate", None, None, inter_key, ca=True)
+        leaf_cert, _ = make_cert("Spectra PEM Signer", inter_name, inter_key, leaf_key)
+        chain_pem = inter_cert.public_bytes(serialization.Encoding.PEM)
+    else:
+        leaf_cert, _ = make_cert("Spectra PEM Signer", None, None, leaf_key)
+
+    enc = (
+        serialization.BestAvailableEncryption(key_password.encode())
+        if key_password
+        else serialization.NoEncryption()
+    )
+    key_path = os.path.join(tmp_dir, "signer.key.pem")
+    cert_path = os.path.join(tmp_dir, "signer.crt.pem")
+    with open(key_path, "wb") as f:
+        f.write(
+            leaf_key.private_bytes(
+                serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, enc
+            )
+        )
+    with open(cert_path, "wb") as f:
+        f.write(leaf_cert.public_bytes(serialization.Encoding.PEM) + chain_pem)
+    return key_path, cert_path
+
+
 class TestSignPdf:
     def test_sign_then_verify_roundtrip(self, tmp_dir):
         pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
@@ -1840,3 +1893,207 @@ class TestSignPdf:
             reason="I approve this document", location="Cleveland, OH",
         )
         assert r["valid"] is True
+
+    # ── 2k: PEM signer source ────────────────────────────────────────────
+
+    def test_pem_signer_roundtrip(self, tmp_dir):
+        key_path, cert_path = _make_test_pem(tmp_dir)
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(file=src, output=out, key_path=key_path, cert_path=cert_path, password="")
+        assert r["valid"] is True and r["intact"] is True
+        assert r["signer"] == "Spectra PEM Signer"
+        v = verify_signatures(out)
+        assert v["summary"]["all_valid"] is True
+
+    def test_pem_encrypted_key_roundtrip_and_wrong_passphrase(self, tmp_dir):
+        key_path, cert_path = _make_test_pem(tmp_dir, key_password="s3cret")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(file=src, output=out, key_path=key_path, cert_path=cert_path, password="s3cret")
+        assert r["valid"] is True
+
+        # Wrong passphrase: generic error (no secret echoed), no output file.
+        out2 = os.path.join(tmp_dir, "out2.pdf")
+        with pytest.raises(ValueError) as exc:
+            sign_pdf(file=src, output=out2, key_path=key_path, cert_path=cert_path, password="WRONG")
+        assert "WRONG" not in str(exc.value)
+        assert not os.path.exists(out2)
+
+    def test_pem_fullchain_embeds_intermediate(self, tmp_dir):
+        key_path, cert_path = _make_test_pem(tmp_dir, with_chain=True)
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(file=src, output=out, key_path=key_path, cert_path=cert_path, password="")
+        assert r["valid"] is True
+        # Independent check: the CMS SignedData carries the intermediate too.
+        from pyhanko.pdf_utils.reader import PdfFileReader
+
+        with open(out, "rb") as f:
+            emb = list(PdfFileReader(f).embedded_signatures)[0]
+            certs = emb.signed_data["certificates"]
+            assert len(certs) >= 2
+
+    def test_pem_reversed_chain_still_signs_as_the_key_holder(self, tmp_dir):
+        # 2k review (HIGH): the signer certificate is selected by MATCHING THE
+        # KEY, never positionally. A root-first bundle (the other common
+        # chain-file convention) used to claim the CA as the signer and write
+        # a cryptographically INVALID signature with exit 0.
+        key_path, cert_path = _make_test_pem(tmp_dir, with_chain=True)
+        # Reverse the bundle: intermediate first, leaf second.
+        with open(cert_path, "rb") as f:
+            pem = f.read()
+        blocks = pem.split(b"-----END CERTIFICATE-----")
+        blocks = [b + b"-----END CERTIFICATE-----" for b in blocks if b.strip()]
+        assert len(blocks) == 2
+        reversed_path = os.path.join(tmp_dir, "reversed.crt.pem")
+        with open(reversed_path, "wb") as f:
+            f.write(blocks[1] + b"\n" + blocks[0])
+
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(file=src, output=out, key_path=key_path, cert_path=reversed_path, password="")
+        assert r["signer"] == "Spectra PEM Signer"  # the leaf, not the CA
+        assert r["valid"] is True and r["intact"] is True
+
+    def test_pem_cert_not_matching_key_fails_closed(self, tmp_dir):
+        # A cert file with NO certificate matching the key must refuse and
+        # write nothing — never sign with a mismatched identity.
+        key_path, _ = _make_test_pem(tmp_dir)
+        other_dir = os.path.join(tmp_dir, "other")
+        os.makedirs(other_dir)
+        _, other_cert = _make_test_pem(other_dir)  # different keypair's cert
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match="Could not load the signer"):
+            sign_pdf(file=src, output=out, key_path=key_path, cert_path=other_cert, password="")
+        assert not os.path.exists(out)
+
+    def test_signer_source_validation(self, tmp_dir):
+        key_path, cert_path = _make_test_pem(tmp_dir)
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match="ONE signer source"):
+            sign_pdf(file=src, output=out, pfx_path=pfx, key_path=key_path, cert_path=cert_path, password="pw")
+        with pytest.raises(ValueError, match="both the key file and the certificate"):
+            sign_pdf(file=src, output=out, key_path=key_path, password="")
+        with pytest.raises(ValueError, match="No signer"):
+            sign_pdf(file=src, output=out, password="")
+        assert not os.path.exists(out)
+
+    # ── 2k: visible appearance ───────────────────────────────────────────
+
+    def test_visible_appearance_lands_on_requested_page_and_rect(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = os.path.join(tmp_dir, "in.pdf")
+        doc = pikepdf.new()
+        doc.add_blank_page(page_size=(300, 300))
+        doc.add_blank_page(page_size=(300, 300))
+        doc.save(src)
+        doc.close()
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(
+            file=src, output=out, pfx_path=pfx, password="pw",
+            reason="Approved", appearance={"page": 2, "rect": [40, 40, 220, 110]},
+        )
+        assert r["valid"] is True and r["intact"] is True and r["covers_whole_document"] is True
+        # Independent pikepdf check: the widget annotation sits on PAGE 2 at
+        # the requested rect with a generated appearance stream; page 1 clean.
+        with pikepdf.open(out) as pdf:
+            assert pdf.pages[0].get("/Annots") is None
+            annots = pdf.pages[1].get("/Annots")
+            assert annots is not None and len(annots) == 1
+            widget = annots[0]
+            assert widget.Subtype == Name.Widget
+            assert [round(float(v)) for v in widget.Rect] == [40, 40, 220, 110]
+            assert "/N" in widget.AP
+            assert widget.AP.N.read_bytes()  # non-empty appearance stream
+
+    def test_visible_appearance_validation(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match="out of range"):
+            sign_pdf(file=src, output=out, pfx_path=pfx, password="pw",
+                     appearance={"page": 99, "rect": [10, 10, 100, 60]})
+        with pytest.raises(ValueError, match="empty"):
+            sign_pdf(file=src, output=out, pfx_path=pfx, password="pw",
+                     appearance={"page": 1, "rect": [10, 10, 10, 60]})
+        with pytest.raises(ValueError, match="appearance"):
+            sign_pdf(file=src, output=out, pfx_path=pfx, password="pw",
+                     appearance={"page": 1})
+        # Non-integral page rejects instead of silently truncating (1.7 → 1).
+        with pytest.raises(ValueError, match="appearance"):
+            sign_pdf(file=src, output=out, pfx_path=pfx, password="pw",
+                     appearance={"page": 1.7, "rect": [10, 10, 100, 60]})
+        assert not os.path.exists(out)
+
+    def test_percent_in_reason_does_not_break_visible_stamp(self, tmp_dir):
+        # pyHanko stamp text is %-interpolated; a literal % in user text must
+        # be escaped, not crash (or worse, interpolate).
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(
+            file=src, output=out, pfx_path=pfx, password="pw",
+            reason="100% reviewed", location="50% off %(signer)s",
+            appearance={"page": 1, "rect": [20, 20, 260, 90]},
+        )
+        assert r["valid"] is True
+
+
+class TestGenerateSigner:
+    def test_generate_then_sign_then_verify(self, tmp_dir):
+        from engine.signatures import generate_signer
+
+        pfx = os.path.join(tmp_dir, "me.pfx")
+        token = "GEN-Xq7-UNIQUE"
+        r = generate_signer("Jason Test Identity", pfx, token, org="Spectra QA")
+        assert r["output"] == pfx and os.path.exists(pfx)
+        assert r["common_name"] == "Jason Test Identity"
+        assert r["fingerprint_sha256"] and len(r["fingerprint_sha256"]) == 64
+        # The password never appears anywhere in the result.
+        assert token not in str(r)
+
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        s = sign_pdf(file=src, output=out, pfx_path=pfx, password=token)
+        assert s["valid"] is True and s["signer"] == "Jason Test Identity"
+        # Verification of a self-signed identity still reports untrusted.
+        v = verify_signatures(out)
+        assert v["summary"]["trust_verified"] is False
+
+    def test_refuses_overwrite_without_flag(self, tmp_dir):
+        from engine.signatures import generate_signer
+
+        pfx = os.path.join(tmp_dir, "me.pfx")
+        generate_signer("A", pfx, "pw1")
+        with pytest.raises(ValueError, match="already exists"):
+            generate_signer("B", pfx, "pw2")
+        # Explicit overwrite replaces it (new CN provable via signing name).
+        r = generate_signer("B", pfx, "pw2", overwrite=True)
+        assert r["common_name"] == "B"
+
+    def test_generation_input_validation(self, tmp_dir):
+        from engine.signatures import generate_signer
+
+        pfx = os.path.join(tmp_dir, "me.pfx")
+        with pytest.raises(ValueError, match="common name"):
+            generate_signer("   ", pfx, "pw")
+        with pytest.raises(ValueError, match="password"):
+            generate_signer("Name", pfx, "")
+        with pytest.raises(ValueError, match="Validity"):
+            generate_signer("Name", pfx, "pw", valid_days=0)
+        assert not os.path.exists(pfx)
+
+    def test_wrong_password_on_generated_pfx_fails_closed(self, tmp_dir):
+        from engine.signatures import generate_signer
+
+        pfx = os.path.join(tmp_dir, "me.pfx")
+        generate_signer("C", pfx, "rightpw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError):
+            sign_pdf(file=src, output=out, pfx_path=pfx, password="wrongpw")
+        assert not os.path.exists(out)

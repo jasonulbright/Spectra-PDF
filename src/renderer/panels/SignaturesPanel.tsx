@@ -5,6 +5,8 @@ import { dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerSignHandler } from '../testHarness';
+import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../components/SignerSourceFields';
+import type { SignerSource } from '../components/SignerSourceFields';
 
 interface SignResult {
   output: string;
@@ -46,7 +48,7 @@ export function SignaturesPanel(): React.ReactElement {
 
   // Signing (produces a NEW file; the active file's working copy is untouched).
   const [showSign, setShowSign] = useState(false);
-  const [pfxPath, setPfxPath] = useState<string | null>(null);
+  const [source, setSource] = useState<SignerSource>(EMPTY_SIGNER_SOURCE);
   const [password, setPassword] = useState('');
   const [reason, setReason] = useState('');
   const [location, setLocation] = useState('');
@@ -87,68 +89,74 @@ export function SignaturesPanel(): React.ReactElement {
     setPassword('');
     setReason('');
     setLocation('');
-    setPfxPath(null);
+    setSource(EMPTY_SIGNER_SOURCE);
     setSignResult(null);
     setSignError(null);
   }, [path]);
-
-  const handlePickPfx = useCallback(async () => {
-    const p = await dialog.pickCertificate();
-    if (p) setPfxPath(p);
-  }, []);
 
   // The core engine call, shared by the UI handler and the e2e harness hook
   // (native .pfx/save dialogs aren't WebDriver-drivable). No dialog / no state
   // — just paths in, self-verify summary out.
   const doSign = useCallback(
     async (
-      pfx: string,
+      sourceParams: Record<string, string>,
       pw: string,
       output: string,
       rsn?: string,
       loc?: string,
+      appearance?: { page: number; rect: [number, number, number, number] },
     ): Promise<SignResult> => {
       if (!activeFile) throw new Error('No active file to sign.');
       return (await call('sign_pdf', {
         file: activeFile.workingPath,
         output,
-        pfx_path: pfx,
+        ...sourceParams,
         password: pw,
         ...(rsn && rsn.trim() ? { reason: rsn.trim() } : {}),
         ...(loc && loc.trim() ? { location: loc.trim() } : {}),
+        ...(appearance ? { appearance } : {}),
       })) as unknown as SignResult;
     },
     [activeFile, call],
   );
 
+  // Ref, not just state: two clicks in the same tick both read a stale
+  // `signing === false` (the documented reentrancy-tripwire class — same
+  // guard as applyMarks/applySignature).
+  const signingRef = useRef(false);
   const handleSign = useCallback(async () => {
-    if (!activeFile) return;
-    if (!pfxPath) {
-      setSignError('Choose a signer (.pfx) file first.');
+    if (!activeFile || signingRef.current) return;
+    const resolved = signerSourceParams(source);
+    if (resolved.error) {
+      setSignError(resolved.error);
       return;
     }
-    if (!password) {
+    if (!password && source.mode === 'pfx') {
       setSignError('Enter the signer password.');
       return;
     }
     const suggested = activeFile.name.replace(/\.pdfx?$/i, '') + '-signed.pdf';
-    const dest = await dialog.saveFile({ defaultPath: suggested });
-    if (!dest) return; // cancelled
+    signingRef.current = true;
     setSigning(true);
     setSignError(null);
     setSignResult(null);
     try {
-      const res = await doSign(pfxPath, password, dest, reason, location);
+      const dest = await dialog.saveFile({ defaultPath: suggested });
+      if (!dest) return; // cancelled — the finally still clears the password
+      const res = await doSign(resolved.params!, password, dest, reason, location);
       setSignResult(res);
       setShowSign(false);
     } catch (e: unknown) {
       setSignError(`Error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      // Clear the secret from component state regardless of outcome.
+      // Clear the secret from component state on EVERY exit — success,
+      // failure, or a cancelled save dialog (review-caught: a cancel used to
+      // strand the typed password in state).
       setPassword('');
+      signingRef.current = false;
       setSigning(false);
     }
-  }, [activeFile, pfxPath, password, reason, location, doSign]);
+  }, [activeFile, source, password, reason, location, doSign]);
 
   // e2e-only: register the real sign call so the harness can drive it with
   // injected paths (the native dialogs can't be driven by WebDriver).
@@ -157,7 +165,17 @@ export function SignaturesPanel(): React.ReactElement {
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerSignHandler({
-      sign: (p) => doSignRef.current(p.pfxPath, p.password, p.output, p.reason, p.location),
+      sign: (p) =>
+        doSignRef.current(
+          p.pfxPath
+            ? { pfx_path: p.pfxPath }
+            : { key_path: p.keyPath ?? '', cert_path: p.certPath ?? '' },
+          p.password,
+          p.output,
+          p.reason,
+          p.location,
+          p.appearance,
+        ),
     });
     return () => registerSignHandler(null);
   }, []);
@@ -232,23 +250,7 @@ export function SignaturesPanel(): React.ReactElement {
             Applies an invisible signature and writes a new signed file — the current file is left
             unchanged. Any later edit to a signed file invalidates its signature.
           </p>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Signer (.pfx)</span>
-            <span
-              data-testid="sign-pfx-path"
-              className="flex-1 text-xs text-neutral-300 truncate"
-              title={pfxPath ?? undefined}
-            >
-              {pfxPath ? pfxPath.split(/[\\/]/).pop() : <span className="text-neutral-600">none chosen</span>}
-            </span>
-            <button
-              data-testid="sign-pick-pfx"
-              onClick={() => void handlePickPfx()}
-              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
-            >
-              Choose…
-            </button>
-          </div>
+          <SignerSourceFields value={source} onChange={setSource} idPrefix="sign" />
           <div className="flex items-center gap-2">
             <span className="text-xs text-neutral-400 w-20 shrink-0">Password</span>
             <input

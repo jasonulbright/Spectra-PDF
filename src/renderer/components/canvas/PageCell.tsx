@@ -4,9 +4,10 @@ import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthOf } from '../../canvas/layout';
 import { projectMarkRect } from '../../lib/redaction';
 import type { RedactionMark } from '../../lib/redaction';
+import type { SignaturePlacement } from '../../lib/signature-placement';
 import { PageView } from './PageView';
 
-export type CanvasTool = 'select' | 'highlight' | 'freetext' | 'ink' | 'stamp' | 'redact';
+export type CanvasTool = 'select' | 'highlight' | 'freetext' | 'ink' | 'stamp' | 'redact' | 'signature';
 
 export interface AnnotationRect {
   x: number;
@@ -67,6 +68,9 @@ interface PageCellProps {
   // Pending redaction marks on this page (transient view state — see
   // lib/redaction.ts); undefined when none.
   redactionMarks?: RedactionMark[];
+  // Pending visible-signature placement, when it sits on THIS page (transient
+  // view state with mark lifecycle — see lib/signature-placement.ts).
+  signaturePlacement?: SignaturePlacement | null;
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
@@ -82,6 +86,13 @@ interface PageCellProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onRemoveRedactionMark: (markId: string) => void;
+  onSetSignaturePlacement: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onClearSignaturePlacement: () => void;
 }
 
 function PageCellImpl({
@@ -97,6 +108,7 @@ function PageCellImpl({
   annotationColor,
   stampPreset,
   redactionMarks,
+  signaturePlacement,
   onSelectPage,
   onOpenPage,
   onPageContextMenu,
@@ -107,6 +119,8 @@ function PageCellImpl({
   onRemoveAnnotation,
   onAddRedactionMark,
   onRemoveRedactionMark,
+  onSetSignaturePlacement,
+  onClearSignaturePlacement,
 }: PageCellProps): React.JSX.Element {
   const displayWidth = displayWidthOf(page);
   const annotateMode = tool !== 'select';
@@ -241,6 +255,9 @@ function PageCellImpl({
       if (commit && latest.w > 0.01 && latest.h > 0.01) {
         if (tool === 'redact') {
           onAddRedactionMark(docId, page.id, latest, page.rotation);
+        } else if (tool === 'signature') {
+          // Single pending placement — drawing again (anywhere) replaces it.
+          onSetSignaturePlacement(docId, page.id, latest, page.rotation);
         } else {
           const annotation: PageAnnotation = {
             id: crypto.randomUUID(),
@@ -484,9 +501,44 @@ function PageCellImpl({
           </div>
         );
       })}
+      {signaturePlacement && (
+        (() => {
+          const r = projectMarkRect(signaturePlacement, page.rotation);
+          return (
+            <div
+              data-testid="signature-placement"
+              className="page-signature"
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+            >
+              <span className="page-signature-label">SIGNATURE</span>
+              {(tool === 'select' || tool === 'signature') && (
+                <button
+                  className="page-annot-x"
+                  title="Remove signature placement"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClearSignaturePlacement();
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          );
+        })()
+      )}
       {band && (
         <div
-          className={'page-annot page-annot-band' + (tool === 'redact' ? ' band-redact' : '')}
+          className={
+            'page-annot page-annot-band' +
+            (tool === 'redact' ? ' band-redact' : tool === 'signature' ? ' band-signature' : '')
+          }
           style={{
             left: `${band.x * 100}%`,
             top: `${band.y * 100}%`,

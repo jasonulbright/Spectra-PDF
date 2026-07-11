@@ -6,6 +6,7 @@ import type { DocPlacement } from '../../canvas/layout';
 import type { DragSource } from '../../canvas/usePageDrag';
 import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { CanvasTool, StampPreset } from './PageCell';
 
 interface DocLayerProps {
@@ -27,6 +28,7 @@ interface DocLayerProps {
   annotationColor?: string;
   stampPreset?: StampPreset | null;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
+  signaturePlacement: SignaturePlacement | null;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -39,6 +41,13 @@ interface DocLayerProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onRemoveRedactionMark: (markId: string) => void;
+  onSetSignaturePlacement: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onClearSignaturePlacement: () => void;
 }
 
 function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
@@ -81,6 +90,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               annotationColor={props.annotationColor}
               stampPreset={props.stampPreset}
               redactionMarksByPage={props.redactionMarksByPage}
+              signaturePlacement={props.signaturePlacement}
               onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
               onAddAnnotation={props.onAddAnnotation}
@@ -89,6 +99,8 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onRemoveAnnotation={props.onRemoveAnnotation}
               onAddRedactionMark={props.onAddRedactionMark}
               onRemoveRedactionMark={props.onRemoveRedactionMark}
+              onSetSignaturePlacement={props.onSetSignaturePlacement}
+              onClearSignaturePlacement={props.onClearSignaturePlacement}
             />
           </div>
         );

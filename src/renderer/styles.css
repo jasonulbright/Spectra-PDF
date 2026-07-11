@@ -588,6 +588,34 @@
   color: rgba(255, 122, 126, 0.9);
 }
 
+.page-annot-band.band-signature {
+  background: rgba(139, 92, 246, 0.18);
+  border-color: #8b5cf6;
+}
+
+/* Pending visible-signature placement: violet frame, clearly not a redaction
+   or a highlight. Same pointer contract as .page-redact. */
+.page-signature {
+  position: absolute;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1.5px dashed #8b5cf6;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.page-signature-label {
+  display: inline-block;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  padding: 1px 3px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: rgba(196, 181, 253, 0.95);
+}
+
 /* Annotation tool active: crosshair over pages signals draw-a-box mode. */
 .canvas-view.annotating .page {
   cursor: crosshair;

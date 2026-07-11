@@ -57,8 +57,10 @@ pub enum CliCommand {
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
     VerifySignatures(VerifySignaturesArgs),
-    /// Sign a PDF with a PKCS#12 (.pfx) signer, written to a new file
+    /// Sign a PDF (invisible, or a visible stamp) with a .pfx or PEM signer, written to a new file
     Sign(SignArgs),
+    /// Generate a self-signed signing identity (.pfx with a new private key)
+    GenerateSigner(GenerateSignerArgs),
     /// View or set PDF metadata
     Metadata(MetadataArgs),
     /// Convert a PDF to grayscale
@@ -269,10 +271,17 @@ pub struct SignArgs {
     #[arg(short, long)]
     pub output: PathBuf,
     /// PKCS#12 (.pfx/.p12) signer file (key + certificate)
-    #[arg(long)]
-    pub pfx: PathBuf,
-    /// Passphrase for the .pfx. Omit to read it from stdin (keeps it out of
-    /// the shell history and process list; prefer this for scripts).
+    #[arg(long, conflicts_with_all = ["key", "cert"])]
+    pub pfx: Option<PathBuf>,
+    /// PEM/DER private key file (use together with --cert)
+    #[arg(long, requires = "cert")]
+    pub key: Option<PathBuf>,
+    /// PEM/DER certificate file — may be a fullchain file (signer first)
+    #[arg(long, requires = "key")]
+    pub cert: Option<PathBuf>,
+    /// Passphrase for the signer (.pfx, or an encrypted PEM key). Omit to
+    /// read it from stdin (keeps it out of the shell history and process
+    /// list; prefer this for scripts).
     #[arg(long)]
     pub password: Option<String>,
     /// Optional signature reason
@@ -281,6 +290,34 @@ pub struct SignArgs {
     /// Optional signature location
     #[arg(long)]
     pub location: Option<String>,
+    /// Draw a visible signature stamp on this page (1-based; requires --visible-rect)
+    #[arg(long, requires = "visible_rect")]
+    pub visible_page: Option<u32>,
+    /// Visible stamp rectangle x0,y0,x1,y1 in PDF points (bottom-up, like `redact --rect`)
+    #[arg(long, requires = "visible_page")]
+    pub visible_rect: Option<String>,
+}
+
+#[derive(Args)]
+pub struct GenerateSignerArgs {
+    /// Signer display name (certificate common name)
+    #[arg(long)]
+    pub cn: String,
+    /// Output .pfx path
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Passphrase protecting the generated .pfx. Omit to read from stdin.
+    #[arg(long)]
+    pub password: Option<String>,
+    /// Optional organization name
+    #[arg(long)]
+    pub org: Option<String>,
+    /// Certificate validity in days (default 3 years)
+    #[arg(long, default_value_t = 1095)]
+    pub days: u32,
+    /// Overwrite an existing file (it may contain a private key — off by default)
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args)]
@@ -850,16 +887,68 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
                 "output": abs(&args.output).to_string_lossy(),
-                "pfx_path": abs(&args.pfx).to_string_lossy(),
                 "password": password,
             });
+            // Signer source: --pfx, or --key + --cert (clap enforces the
+            // pairing/conflicts; the engine re-validates).
+            if let Some(pfx) = &args.pfx {
+                params["pfx_path"] = json!(abs(pfx).to_string_lossy());
+            }
+            if let Some(key) = &args.key {
+                params["key_path"] = json!(abs(key).to_string_lossy());
+            }
+            if let Some(cert) = &args.cert {
+                params["cert_path"] = json!(abs(cert).to_string_lossy());
+            }
             if let Some(reason) = &args.reason {
                 params["reason"] = json!(reason);
             }
             if let Some(location) = &args.location {
                 params["location"] = json!(location);
             }
+            // Visible stamp: --visible-page N --visible-rect x0,y0,x1,y1
+            // (rect parsing matches the redact --rect convention).
+            if let (Some(page), Some(rect_str)) = (&args.visible_page, &args.visible_rect) {
+                let nums: Result<Vec<f64>, _> =
+                    rect_str.split(',').map(|s| s.trim().parse::<f64>()).collect();
+                let nums = nums.map_err(|_| {
+                    "invalid --visible-rect: expected four comma-separated numbers x0,y0,x1,y1"
+                        .to_string()
+                })?;
+                if nums.len() != 4 {
+                    return Err(
+                        "invalid --visible-rect: expected exactly four numbers x0,y0,x1,y1"
+                            .to_string(),
+                    );
+                }
+                params["appearance"] = json!({ "page": page, "rect": nums });
+            }
             engine.call("sign_pdf", params)
+        }
+
+        CliCommand::GenerateSigner(args) => {
+            let password = match &args.password {
+                Some(p) => p.clone(),
+                None => {
+                    use std::io::Read;
+                    let mut s = String::new();
+                    std::io::stdin()
+                        .read_to_string(&mut s)
+                        .map_err(|e| format!("failed to read password from stdin: {}", e))?;
+                    s.trim_end_matches(['\r', '\n']).to_string()
+                }
+            };
+            let mut params = json!({
+                "common_name": args.cn,
+                "output": abs(&args.output).to_string_lossy(),
+                "password": password,
+                "valid_days": args.days,
+                "overwrite": args.force,
+            });
+            if let Some(org) = &args.org {
+                params["org"] = json!(org);
+            }
+            engine.call("generate_signer", params)
         }
 
         CliCommand::Metadata(args) => {

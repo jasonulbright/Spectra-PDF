@@ -235,11 +235,16 @@ export async function getRedactionMarkCount(): Promise<number> {
 }
 
 export interface SignParams {
-  pfxPath: string;
+  // One signer source: .pfx path, or PEM key+cert pair (2k).
+  pfxPath?: string;
+  keyPath?: string;
+  certPath?: string;
   password: string;
   output: string;
   reason?: string;
   location?: string;
+  // Visible-stamp placement (engine convention: 1-based page, PDF points).
+  appearance?: { page: number; rect: [number, number, number, number] };
 }
 
 export interface SignSummary {
@@ -261,6 +266,42 @@ export async function signActiveFile(params: SignParams): Promise<SignSummary> {
   );
   if (typeof result === 'string') {
     throw new Error(`signActiveFile failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
+/** Place a visible-signature box on the active file's first canvas page
+ * (display-normalized rect). Canvas view must be mounted. */
+export async function placeSignature(rect: { x: number; y: number; w: number; h: number }): Promise<void> {
+  const result = await browser.executeAsync<string | null, [{ x: number; y: number; w: number; h: number }]>(
+    function (r, done) {
+      (window as any).__SPECTRA_TEST__.placeSignature(r)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    rect,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`placeSignature failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+/** The engine appearance payload the canvas Sign button would send for the
+ * pending placement — produced by the REAL display→PDF conversion path. */
+export async function buildSignatureAppearance(): Promise<{
+  path: string;
+  appearance: { page: number; rect: [number, number, number, number] };
+} | null> {
+  const result = await browser.executeAsync<
+    { path: string; appearance: { page: number; rect: [number, number, number, number] } } | string | null,
+    []
+  >(function (done) {
+    (window as any).__SPECTRA_TEST__.buildSignatureAppearance()
+      .then((res: unknown) => done(res as any))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  });
+  if (typeof result === 'string') {
+    throw new Error(`buildSignatureAppearance failed: ${result.replace(ERROR_TAG, '')}`);
   }
   return result;
 }

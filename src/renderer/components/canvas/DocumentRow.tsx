@@ -2,6 +2,7 @@ import { memo } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { MAX_ROW_WIDTH } from '../../canvas/layout';
 import { GhostPage } from './DropGhost';
@@ -30,6 +31,7 @@ interface DocumentRowProps {
   // per marks change (WorkspaceCanvasView useMemo), so PageCell memoization
   // survives unrelated re-renders.
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
+  signaturePlacement: SignaturePlacement | null;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -42,6 +44,13 @@ interface DocumentRowProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onRemoveRedactionMark: (markId: string) => void;
+  onSetSignaturePlacement: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onClearSignaturePlacement: () => void;
 }
 
 function DocumentRowImpl({
@@ -58,6 +67,7 @@ function DocumentRowImpl({
   annotationColor,
   stampPreset,
   redactionMarksByPage,
+  signaturePlacement,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
@@ -66,6 +76,8 @@ function DocumentRowImpl({
   onRemoveAnnotation,
   onAddRedactionMark,
   onRemoveRedactionMark,
+  onSetSignaturePlacement,
+  onClearSignaturePlacement,
 }: DocumentRowProps): React.JSX.Element {
   const strip: React.JSX.Element[] = [];
   let visible = 0;
@@ -96,6 +108,7 @@ function DocumentRowImpl({
         annotationColor={annotationColor}
         stampPreset={stampPreset}
         redactionMarks={redactionMarksByPage.get(page.id)}
+        signaturePlacement={signaturePlacement?.pageId === page.id ? signaturePlacement : null}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
         onAddAnnotation={onAddAnnotation}
@@ -104,6 +117,8 @@ function DocumentRowImpl({
         onRemoveAnnotation={onRemoveAnnotation}
         onAddRedactionMark={onAddRedactionMark}
         onRemoveRedactionMark={onRemoveRedactionMark}
+        onSetSignaturePlacement={onSetSignaturePlacement}
+        onClearSignaturePlacement={onClearSignaturePlacement}
       />,
     );
     if (!collapsed) visible++;
