@@ -360,6 +360,13 @@ export function WorkspaceCanvasView({
     if (invalidated.size > 0) {
       setMarks((prevMarks) => prevMarks.filter((m) => !invalidated.has(m.path)));
       setSigPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
+      // Selection holds positional PageRef ids (`path#pN`) that the indexer
+      // rebuilds from the new on-disk order after any buffer change. A stale id
+      // would silently re-bind to a DIFFERENT physical page and get deleted or
+      // rotated by the batched actions — the same hazard as marks. Selection is
+      // view-only (no data), so clearing it on any reindex is the safe answer.
+      setSelectedPageIds(NO_PAGE_IDS);
+      setSelectionAnchor(null);
     }
   }, [state.files]);
 
@@ -860,13 +867,20 @@ export function WorkspaceCanvasView({
         // closing the file is the right gesture for that. For a multi-delete,
         // disable only when the batch would empty a whole file.
         disabled: multi ? multiDeleteEmpties() : fileHasOnePage,
-        onClick: () =>
-          multi
-            ? dispatch({ type: 'DELETE_PAGE_REFS', pageIds: selectionIds() })
-            : dispatch({ type: 'DELETE_PAGE_REF', docId: menu.docId, pageId: menu.pageId }),
+        // Clear the selection after deleting, like the keyboard path — the
+        // deleted ids would otherwise linger and (before the buffer-invalidation
+        // clear kicks in) could re-bind to a different page on the next commit.
+        onClick: () => {
+          if (multi) {
+            deleteSelectedPages(); // dispatches DELETE_PAGE_REFS(selection) + clears
+          } else {
+            dispatch({ type: 'DELETE_PAGE_REF', docId: menu.docId, pageId: menu.pageId });
+            clearSelection();
+          }
+        },
       },
     ];
-  }, [menu, docs, dispatch, onInspectPage, onExtractText, rotateBy, selectedPageIds]);
+  }, [menu, docs, dispatch, onInspectPage, onExtractText, rotateBy, selectedPageIds, deleteSelectedPages, clearSelection]);
 
   const onMoveDoc = useCallback(
     (docId: string, direction: -1 | 1) => dispatch({ type: 'REORDER_DOCS', docId, direction }),

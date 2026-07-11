@@ -1123,6 +1123,16 @@ describe('DELETE_PAGE_REFS (batched delete)', () => {
     const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))]);
     expect(appReducer(state, { type: 'DELETE_PAGE_REFS', pageIds: ['ghost'] })).toBe(state);
   });
+
+  it('rejects the whole batch atomically when ANY id is unknown (no partial delete)', () => {
+    // A partially-stale selection (e.g. one id left over from before a reindex)
+    // must not delete the subset that happens to still match.
+    const a = makeFile('a.pdf', 3);
+    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))]);
+    expect(
+      appReducer(state, { type: 'DELETE_PAGE_REFS', pageIds: ['a.pdf#p0', 'ghost'] }),
+    ).toBe(state);
+  });
 });
 
 describe('ROTATE_PAGE_REFS (batched rotate by delta)', () => {
@@ -1180,5 +1190,13 @@ describe('ROTATE_PAGE_REFS (batched rotate by delta)', () => {
     const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))]);
     expect(appReducer(state, { type: 'ROTATE_PAGE_REFS', pageIds: [], delta: 90 })).toBe(state);
     expect(appReducer(state, { type: 'ROTATE_PAGE_REFS', pageIds: ['ghost'], delta: 90 })).toBe(state);
+  });
+
+  it('rejects the whole batch atomically when ANY id is unknown (no partial rotate)', () => {
+    const a = makeFile('a.pdf', 2);
+    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))]);
+    expect(
+      appReducer(state, { type: 'ROTATE_PAGE_REFS', pageIds: ['a.pdf#p0', 'ghost'], delta: 90 }),
+    ).toBe(state);
   });
 });

@@ -56,15 +56,18 @@ describe('multi-select page ops (2n.1)', () => {
   let sampleA: string;
   let sampleB: string;
   let sampleC: string;
+  let sampleD: string;
 
   before(() => {
     tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-multisel-'));
     sampleA = resolve(tmp, 'sample-a.pdf');
     sampleB = resolve(tmp, 'sample-b.pdf');
     sampleC = resolve(tmp, 'sample-c.pdf');
+    sampleD = resolve(tmp, 'sample-d.pdf');
     copyFileSync(SAMPLE_PDF, sampleA);
     copyFileSync(SAMPLE_PDF, sampleB);
     copyFileSync(SAMPLE_PDF, sampleC);
+    copyFileSync(SAMPLE_PDF, sampleD);
   });
 
   after(() => {
@@ -165,5 +168,33 @@ describe('multi-select page ops (2n.1)', () => {
     expect(p2.rotate).toBe(90);
     expect(p3.rotate).toBe(0); // untouched
     await pdf.loadingTask.destroy();
+  });
+
+  it('clears the selection when the buffer is reindexed, so a stale positional id cannot re-bind to a different page', async () => {
+    // Regression for the review-caught HIGH: selection holds positional
+    // PageRef ids (`path#pN`) that the indexer rebuilds after any buffer change
+    // (commit / whole-file op / undo). If the selection survived the reindex, a
+    // following Delete/rotate could hit a DIFFERENT physical page. The
+    // buffer-identity effect must drop the selection — same as redaction marks.
+    await openByPaths([sampleD]);
+    await setView('canvas');
+    const total = (await getState()).activeFile!.pageCount;
+    const ids = await waitForWorkspacePages(total);
+
+    await selectCanvasPages([ids[0], ids[1]]);
+    await browser.waitUntil(async () => (await getSelectedCanvasPageIds()).length === 2, {
+      timeout: 5_000,
+      timeoutMsg: 'selection never reached 2 pages',
+    });
+    // Rotate dirties the file but keeps the selection (rotate is non-destructive
+    // to identity)...
+    await rotateSelectedCanvasPages(90);
+    // ...committing reindexes the workspace from the new buffer — the selection
+    // must be cleared by the buffer-invalidation effect.
+    await commitPendingEdits();
+    await browser.waitUntil(async () => (await getSelectedCanvasPageIds()).length === 0, {
+      timeout: 5_000,
+      timeoutMsg: 'selection was not cleared after the reindex (stale positional ids)',
+    });
   });
 });

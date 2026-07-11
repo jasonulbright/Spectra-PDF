@@ -490,7 +490,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           }
         }
       }
-      if (found === 0) return state;
+      // Atomic on a partially-stale batch: if any requested id isn't present,
+      // reject the whole delete rather than silently removing the subset that
+      // matched (mirrors MOVE_PAGES). A stale id in the set otherwise means the
+      // user deletes fewer/other pages than intended.
+      if (found !== idSet.size) return state;
       const stripped = state.workspace.documents.map((d) => {
         if (!d.pages.some((p) => idSet.has(p.id))) return d;
         const pages = d.pages.filter((p) => !idSet.has(p.id));
@@ -624,6 +628,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const idSet = new Set(action.pageIds);
       const delta = (((action.delta % 360) + 360) % 360) as 0 | 90 | 180 | 270;
       if (delta === 0) return state;
+      // Atomic on a partially-stale batch (mirrors MOVE_PAGES / DELETE_PAGE_REFS):
+      // reject unless every requested id is present, rather than rotating the
+      // matching subset.
+      let found = 0;
+      for (const d of state.workspace.documents) for (const p of d.pages) if (idSet.has(p.id)) found++;
+      if (found !== idSet.size) return state;
       const touched = new Set<string>();
       const documents = state.workspace.documents.map((d) => {
         if (!d.pages.some((p) => idSet.has(p.id))) return d;
@@ -638,7 +648,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           }),
         };
       });
-      if (touched.size === 0) return state;
+      // found === idSet.size (checked above) guarantees at least one match, so
+      // `documents` always carries a real change here.
       return applyPageEdit(state, documents, [...touched]);
     }
     case 'REORDER_DOCS': {
