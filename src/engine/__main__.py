@@ -44,6 +44,7 @@ from engine.redact import redact
 from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
 from engine.forms import read_form_fields, fill_form_fields
+from engine.ocr_layer import apply_ocr_layer
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
 
 
@@ -86,6 +87,7 @@ def main() -> None:
     server.register("compare_visual", compare_visual)
     server.register("read_form_fields", read_form_fields)
     server.register("fill_form_fields", fill_form_fields)
+    server.register("apply_ocr_layer", apply_ocr_layer)
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)
     server.register("generate_signer", generate_signer)

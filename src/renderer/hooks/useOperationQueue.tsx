@@ -28,6 +28,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   watermark: 'Watermark',
   compare_text: 'Compare',
   compare_visual: 'Compare (visual)',
+  apply_ocr_layer: 'Apply OCR Text',
   verify_signatures: 'Verify Signatures',
   // NB: the default getFriendlyName path uses only params.file — the signing
   // password is never referenced, so it can't reach the operation log.

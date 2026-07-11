@@ -343,6 +343,20 @@ function AppContent(): React.ReactElement {
     [performOperation],
   );
 
+  // Persist OCR text layers (2m) — same routing as redaction: the commit
+  // gate flushes pending page edits, a snapshot lands on the undo chain, and
+  // the buffer reloads (which also invalidates the search index for the
+  // file, so Find re-reads the now-searchable text).
+  const handleApplyOcrLayer = useCallback(
+    async (
+      path: string,
+      pages: { page: number; words: { text: string; rect: [number, number, number, number] }[] }[],
+    ) => {
+      await performOperation(path, 'apply_ocr_layer', { pages });
+    },
+    [performOperation],
+  );
+
   // Inspector overlay ops — engine-backed, so they run against the committed
   // file (the inspector opener commits before handing over a page number).
   const handleInspectorRotate = useCallback(async (page: number, angle: number) => {
@@ -810,6 +824,7 @@ function AppContent(): React.ReactElement {
                 onExtractText={handleExtractFromCanvas}
                 onApplyChanges={() => void commitAndReport()}
                 onRedactFile={handleRedactFile}
+                onApplyOcrLayer={handleApplyOcrLayer}
               />
               {inspector && inspectorFile?.buffer && (
                 <div className="absolute inset-0 z-40 bg-neutral-900">

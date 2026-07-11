@@ -86,6 +86,24 @@ export function registerCanvasSignature(handlers: CanvasSignatureHandlers | null
 }
 
 /**
+ * OCR "Make searchable" is a canvas action gated on real (in-webview)
+ * tesseract results, and the FindBar button's visibility depends on that
+ * async state — flaky to drive by click. The canvas registers the same
+ * apply path here so a spec can (1) wait for `readyCount() > 0` (OCR words
+ * landed) then (2) run the exact `apply_ocr_layer` flow the button runs.
+ */
+export interface CanvasOcrHandlers {
+  readyCount: () => number;
+  apply: () => Promise<string[]>;
+}
+
+let canvasOcr: CanvasOcrHandlers | null = null;
+
+export function registerCanvasOcr(handlers: CanvasOcrHandlers | null): void {
+  canvasOcr = handlers;
+}
+
+/**
  * Signing goes through two native dialogs (.pfx picker + output save) that
  * WebDriver can't drive, so the SignaturesPanel registers its real sign call
  * here while mounted. The harness injects the paths + password and exercises
@@ -203,6 +221,11 @@ export interface TestHarness {
   } | null>;
   /** Drop the pending signature placement. */
   clearSignaturePlacement: () => void;
+  /** Number of scanned source pages with OCR words ready to persist. */
+  ocrReadyCount: () => number;
+  /** Run the "Make searchable" flow (engine apply_ocr_layer per file);
+   * rejects if any file failed. Canvas view must be mounted. */
+  applyOcr: () => Promise<void>;
   /**
    * Sign the active file via the Signatures panel's real engine call, with
    * injected paths (the .pfx picker and output save dialog are native and
@@ -490,6 +513,21 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     clearSignaturePlacement: () => canvasSignature?.clear(),
+    ocrReadyCount: () => canvasOcr?.readyCount() ?? 0,
+    applyOcr: async () => {
+      if (!canvasOcr) {
+        const msg = 'applyOcr: canvas view not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        const failures = await canvasOcr.apply();
+        if (failures.length > 0) throw new Error(failures.join('; '));
+      } catch (err) {
+        captureError('applyOcr', err);
+        throw err;
+      }
+    },
     signActiveFile: async (params) => {
       if (!signHandler) {
         const msg = 'signActiveFile: Signatures panel not mounted';

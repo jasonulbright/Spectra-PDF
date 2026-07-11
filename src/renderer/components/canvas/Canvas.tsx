@@ -70,7 +70,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
   }, [contentWidth, contentHeight]);
 
   useImperativeHandle(ref, () =>
-    createCanvasHandle({ viewportRef, zoomRef, userMovedRef, fitTransform }),
+    createCanvasHandle({ viewportRef, worldRef, zoomRef, userMovedRef, fitTransform }),
   );
 
   return (

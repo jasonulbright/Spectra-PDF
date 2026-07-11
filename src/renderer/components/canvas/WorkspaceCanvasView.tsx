@@ -13,8 +13,15 @@ import { useEngine } from '../../hooks/useEngine';
 import { dialog } from '../../lib/tauri-bridge';
 import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../SignerSourceFields';
 import type { SignerSource } from '../SignerSourceFields';
+import { useSearchIndex, sourceKeyOf } from '../../search/useSearchIndex';
+import { useFind } from '../../search/useFind';
+import { normalizeQuery, highlightWords } from '../../search/normalize';
+import { FindBar } from './FindBar';
+import { buildOcrApplyPayload } from '../../lib/ocr-apply';
+import type { OcrApplyPage } from '../../lib/ocr-apply';
+import type { OcrWord } from '../../ocr/types';
 import { workspacePageNumber } from '../../lib/workspace-commit';
-import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature } from '../../testHarness';
+import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr } from '../../testHarness';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
 import { Canvas } from './Canvas';
@@ -44,12 +51,17 @@ interface WorkspaceCanvasViewProps {
   // performOperation, so the commit gate flushes pending page edits, a
   // snapshot lands on the undo chain, and the buffer reloads after.
   onRedactFile: (path: string, regions: RedactionRegion[]) => Promise<void>;
+  // Persist OCR text layers into one file — same performOperation routing as
+  // onRedactFile (gate flush -> snapshot -> engine apply_ocr_layer -> reload).
+  onApplyOcrLayer: (path: string, pages: OcrApplyPage[]) => Promise<void>;
 }
 
 // Stable empties so the "no pending marks" hot path never breaks the layer
 // components' memoization when unrelated state changes.
 const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
+const NO_PAGE_IDS: ReadonlySet<string> = new Set();
+const NO_WORDS_BY_PAGE: ReadonlyMap<string, OcrWord[]> = new Map();
 
 export function WorkspaceCanvasView({
   onOpenFiles,
@@ -58,6 +70,7 @@ export function WorkspaceCanvasView({
   onExtractText,
   onApplyChanges,
   onRedactFile,
+  onApplyOcrLayer,
 }: WorkspaceCanvasViewProps): React.ReactElement {
   const state = useAppState();
   const dispatch = useAppDispatch();
@@ -96,6 +109,14 @@ export function WorkspaceCanvasView({
   const [signError, setSignError] = useState<string | null>(null);
   const [signDone, setSignDone] = useState<{ signer: string | null; output: string; ok: boolean } | null>(null);
   const { call: engineCall } = useEngine();
+  // Find/OCR (2m): index over the open workspace; Ctrl+F opens the bar.
+  const searchIndex = useSearchIndex(docs, proxies, state.files);
+  const onFindNavigate = useCallback((pageId: string) => {
+    canvasRef.current?.centerOn(pageId);
+  }, []);
+  const find = useFind(searchIndex.search, searchIndex.version, docs, onFindNavigate);
+  const [applyingOcr, setApplyingOcr] = useState(false);
+  const [ocrApplyError, setOcrApplyError] = useState<string | null>(null);
 
   // Escape returns to Select from the highlight tool.
   React.useEffect(() => {
@@ -106,6 +127,20 @@ export function WorkspaceCanvasView({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [tool]);
+
+  // Ctrl+F opens Find (2m).
+  const openFindRef = useRef(find.openFind);
+  openFindRef.current = find.openFind;
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        openFindRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const onAddAnnotation = useCallback(
     (docId: string, pageId: string, annotation: PageAnnotation) =>
@@ -220,6 +255,96 @@ export function WorkspaceCanvasView({
       setSigPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
     }
   }, [state.files]);
+
+  // Find overlays: matching pages, and per-word boxes where OCR words exist.
+  const findMatchPageIds = find.active ? find.result.pageIds : NO_PAGE_IDS;
+  const findWordsByPage = useMemo(() => {
+    if (!find.active || find.result.pageIds.size === 0) return NO_WORDS_BY_PAGE;
+    if (!normalizeQuery(find.matchedQuery)) return NO_WORDS_BY_PAGE;
+    const map = new Map<string, OcrWord[]>();
+    for (const doc of docs) {
+      for (const page of doc.pages) {
+        if (!find.result.pageIds.has(page.id)) continue;
+        const words = searchIndex.getOcrWords(sourceKeyOf(page));
+        if (!words) continue;
+        // Per-token match (multi-word queries would never match a single
+        // whitespace-free OCR word otherwise).
+        const hits = highlightWords(words, find.matchedQuery);
+        if (hits.length > 0) map.set(page.id, hits);
+      }
+    }
+    return map.size > 0 ? map : NO_WORDS_BY_PAGE;
+  }, [find.active, find.result, find.matchedQuery, docs, searchIndex]);
+
+  const ocrReady = searchIndex.ocrReadySources();
+
+  const applyingOcrRef = useRef(false);
+  const handleApplyOcr = useCallback(async (): Promise<string[]> => {
+    if (applyingOcrRef.current) return [];
+    applyingOcrRef.current = true;
+    setApplyingOcr(true);
+    setOcrApplyError(null);
+    try {
+      const sources = searchIndex.ocrReadySources();
+      const { files: payloads, skippedSources } = await buildOcrApplyPayload(
+        docs,
+        sources,
+        searchIndex.getOcrWords,
+        async (page) => {
+          const f = state.files.get(page.sourceDocId);
+          if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+          const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+          const p = await proxy.getPage(page.sourcePageIndex + 1);
+          const [vx0, vy0, vx1, vy1] = p.view;
+          return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
+        },
+      );
+      const failures: string[] = [];
+      for (const payload of payloads) {
+        try {
+          await onApplyOcrLayer(payload.path, payload.pages);
+        } catch (err) {
+          const name = payload.path.split(/[\\/]/).pop() || payload.path;
+          failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      // A source dropped between the ready-snapshot and its turn (page
+      // closed/moved, or its OCR invalidated mid-run) must be surfaced, not
+      // silently skipped — the user thinks every scanned page was persisted.
+      if (skippedSources.length > 0) {
+        failures.push(`${skippedSources.length} scanned page(s) skipped (no longer available)`);
+      }
+      if (payloads.length === 0 && skippedSources.length === 0) {
+        failures.push('no OCR-ready pages to apply');
+      }
+      if (failures.length > 0) {
+        setOcrApplyError(`Applying OCR text failed — ${failures.join('; ')}`);
+      }
+      return failures;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setOcrApplyError(`Applying OCR text failed — ${msg}`);
+      return [msg];
+    } finally {
+      applyingOcrRef.current = false;
+      setApplyingOcr(false);
+    }
+  }, [docs, state.files, searchIndex, onApplyOcrLayer]);
+
+  // Harness bridge (e2e): drive OCR-apply without depending on the FindBar
+  // button's async-gated visibility (same pattern as redaction/signature).
+  const applyOcrRef = useRef(handleApplyOcr);
+  applyOcrRef.current = handleApplyOcr;
+  const ocrReadyCountRef = useRef(0);
+  ocrReadyCountRef.current = ocrReady.length;
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerCanvasOcr({
+      readyCount: () => ocrReadyCountRef.current,
+      apply: () => applyOcrRef.current(),
+    });
+    return () => registerCanvasOcr(null);
+  }, []);
 
   // Convert every live mark into engine regions and redact file by file.
   // Geometry (crop-intersected box + baked /Rotate) is read from the CURRENT
@@ -631,6 +756,8 @@ export function WorkspaceCanvasView({
           stampPreset={stampPreset}
           redactionMarksByPage={redactionMarksByPage}
           signaturePlacement={liveSigPlacement}
+          findMatchPageIds={findMatchPageIds}
+          findWordsByPage={findWordsByPage}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
@@ -747,6 +874,14 @@ export function WorkspaceCanvasView({
           </div>
         )}
         <button
+          data-testid="toggle-find"
+          title="Find in documents (Ctrl+F)"
+          onClick={() => (find.open ? find.closeFind() : find.openFind())}
+          className={`px-3 py-1.5 text-xs font-medium rounded-full shadow-lg border ${find.open ? 'bg-blue-600 text-white border-blue-600' : 'bg-neutral-800/90 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
+        >
+          Find
+        </button>
+        <button
           data-testid="toggle-comments"
           title="Show annotation notes"
           onClick={() => setShowComments((v) => !v)}
@@ -841,6 +976,35 @@ export function WorkspaceCanvasView({
           onRemoveAnnotation={onRemoveAnnotation}
           onClose={() => setShowComments(false)}
         />
+      )}
+
+      {find.open && (
+        <FindBar
+          query={find.query}
+          result={find.result}
+          matchCount={find.matchPages.length}
+          current={find.current}
+          ocrRemaining={searchIndex.ocrRemaining}
+          hasScanned={searchIndex.hasScanned}
+          ocrLanguage={searchIndex.ocrLanguage}
+          canApplyOcr={ocrReady.length > 0}
+          applyingOcr={applyingOcr}
+          onQuery={find.setQuery}
+          onOcrLanguage={searchIndex.setOcrLanguage}
+          onNext={find.next}
+          onPrev={find.prev}
+          onApplyOcr={() => void handleApplyOcr()}
+          onClose={find.closeFind}
+        />
+      )}
+      {ocrApplyError && (
+        <div
+          data-testid="ocr-apply-error"
+          className="absolute top-16 right-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+        >
+          <span className="flex-1">{ocrApplyError}</span>
+          <button onClick={() => setOcrApplyError(null)} className="text-red-300 hover:text-red-100">×</button>
+        </div>
       )}
 
       {liveSigPlacement && (

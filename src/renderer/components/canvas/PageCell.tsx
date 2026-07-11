@@ -2,8 +2,9 @@ import { memo, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthOf } from '../../canvas/layout';
-import { projectMarkRect } from '../../lib/redaction';
+import { projectMarkRect, rotateNormalizedRect } from '../../lib/redaction';
 import type { RedactionMark } from '../../lib/redaction';
+import type { OcrWord } from '../../ocr/types';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import { PageView } from './PageView';
 
@@ -71,6 +72,11 @@ interface PageCellProps {
   // Pending visible-signature placement, when it sits on THIS page (transient
   // view state with mark lifecycle — see lib/signature-placement.ts).
   signaturePlacement?: SignaturePlacement | null;
+  // Find (2m): this page matches the active query. OCR'd pages additionally
+  // get per-word highlight boxes (display-normalized at the page's BAKED
+  // orientation — projected by the current in-memory rotation like marks).
+  findMatch?: boolean;
+  findWords?: OcrWord[];
   onSelectPage: (docId: string, pageId: string) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
@@ -109,6 +115,8 @@ function PageCellImpl({
   stampPreset,
   redactionMarks,
   signaturePlacement,
+  findMatch,
+  findWords,
   onSelectPage,
   onOpenPage,
   onPageContextMenu,
@@ -295,7 +303,12 @@ function PageCellImpl({
   return (
     <div
       data-page-id={page.id}
-      className={'page' + (selected ? ' selected' : '') + (collapsed ? ' collapsing' : '')}
+      className={
+        'page' +
+        (selected ? ' selected' : '') +
+        (collapsed ? ' collapsing' : '') +
+        (findMatch ? ' find-match' : '')
+      }
       style={
         collapsed
           ? {
@@ -499,6 +512,21 @@ function PageCellImpl({
               </button>
             )}
           </div>
+        );
+      })}
+      {(findWords ?? []).map((word, i) => {
+        const r = rotateNormalizedRect(word, page.rotation);
+        return (
+          <div
+            key={`fw-${i}`}
+            className="page-find-word"
+            style={{
+              left: `${r.x * 100}%`,
+              top: `${r.y * 100}%`,
+              width: `${r.w * 100}%`,
+              height: `${r.h * 100}%`,
+            }}
+          />
         );
       })}
       {signaturePlacement && (

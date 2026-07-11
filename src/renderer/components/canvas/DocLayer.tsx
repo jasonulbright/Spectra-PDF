@@ -7,6 +7,7 @@ import type { DragSource } from '../../canvas/usePageDrag';
 import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { SignaturePlacement } from '../../lib/signature-placement';
+import type { OcrWord } from '../../ocr/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 
 interface DocLayerProps {
@@ -29,6 +30,8 @@ interface DocLayerProps {
   stampPreset?: StampPreset | null;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   signaturePlacement: SignaturePlacement | null;
+  findMatchPageIds: ReadonlySet<string>;
+  findWordsByPage: ReadonlyMap<string, OcrWord[]>;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -91,6 +94,8 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               stampPreset={props.stampPreset}
               redactionMarksByPage={props.redactionMarksByPage}
               signaturePlacement={props.signaturePlacement}
+              findMatchPageIds={props.findMatchPageIds}
+              findWordsByPage={props.findWordsByPage}
               onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
               onAddAnnotation={props.onAddAnnotation}

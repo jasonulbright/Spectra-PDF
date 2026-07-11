@@ -27,17 +27,20 @@ export async function waitForHarness(timeoutMs = 15_000): Promise<void> {
 }
 
 export async function openByPaths(paths: string[]): Promise<void> {
-  await browser.executeAsync<void, [string[]]>(
+  const result = await browser.executeAsync<string | null, [string[]]>(
     function (p, done) {
       const h = (window as any).__SPECTRA_TEST__;
       if (!h) {
-        done('__SPECTRA_TEST__ missing — was the binary built with VITE_E2E=1?' as any);
+        done('__SPECTRA_TEST__ missing — was the binary built with VITE_E2E=1?');
         return;
       }
-      h.openByPaths(p).then(() => done(undefined)).catch((err: unknown) => done(String(err) as any));
+      h.openByPaths(p)
+        .then(() => done(null))
+        .catch((err: unknown) => done(String(err)));
     },
     paths,
   );
+  if (typeof result === 'string') throw new Error(`openByPaths failed: ${result}`);
 }
 
 export async function getState(): Promise<TestStateSnapshot> {
@@ -232,6 +235,25 @@ export async function getRedactionMarkCount(): Promise<number> {
   return await browser.execute<number, []>(function () {
     return (window as any).__SPECTRA_TEST__.getRedactionMarkCount();
   });
+}
+
+/** Number of scanned source pages whose OCR words are ready to persist. */
+export async function ocrReadyCount(): Promise<number> {
+  return await browser.execute<number, []>(function () {
+    return (window as any).__SPECTRA_TEST__.ocrReadyCount();
+  });
+}
+
+/** Run "Make searchable" (engine apply_ocr_layer per file). Canvas mounted. */
+export async function applyOcr(): Promise<void> {
+  const result = await browser.executeAsync<string | null, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.applyOcr()
+      .then(() => done(null))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  });
+  if (typeof result === 'string') {
+    throw new Error(`applyOcr failed: ${result.replace(ERROR_TAG, '')}`);
+  }
 }
 
 export interface SignParams {

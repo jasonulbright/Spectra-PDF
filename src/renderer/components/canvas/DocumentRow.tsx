@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { SignaturePlacement } from '../../lib/signature-placement';
+import type { OcrWord } from '../../ocr/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { MAX_ROW_WIDTH } from '../../canvas/layout';
 import { GhostPage } from './DropGhost';
@@ -32,6 +33,8 @@ interface DocumentRowProps {
   // survives unrelated re-renders.
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   signaturePlacement: SignaturePlacement | null;
+  findMatchPageIds: ReadonlySet<string>;
+  findWordsByPage: ReadonlyMap<string, OcrWord[]>;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -68,6 +71,8 @@ function DocumentRowImpl({
   stampPreset,
   redactionMarksByPage,
   signaturePlacement,
+  findMatchPageIds,
+  findWordsByPage,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
@@ -109,6 +114,8 @@ function DocumentRowImpl({
         stampPreset={stampPreset}
         redactionMarks={redactionMarksByPage.get(page.id)}
         signaturePlacement={signaturePlacement?.pageId === page.id ? signaturePlacement : null}
+        findMatch={findMatchPageIds.has(page.id)}
+        findWords={findWordsByPage.get(page.id)}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
         onAddAnnotation={onAddAnnotation}

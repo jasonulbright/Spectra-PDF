@@ -1,0 +1,138 @@
+import { resolve } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { tmpdir } from 'node:os';
+import { expect } from '@wdio/globals';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — no type declarations for the deep legacy import
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import {
+  waitForHarness,
+  openByPaths,
+  setView,
+  getState,
+  saveActiveAs,
+  setReactInputValue,
+  ocrReadyCount,
+  applyOcr,
+} from '../support/harness.js';
+
+const require = createRequire(import.meta.url);
+pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
+  require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+).href;
+
+// Committed image-only fixture: one page reading "INVOICE 4200 / Amount Due"
+// rendered to a JPEG — ZERO extractable text (verified at fixture build).
+const SCANNED = resolve(__dirname, '..', 'fixtures', 'scanned.pdf');
+
+/** Open the find bar if it isn't already (the toolbar button TOGGLES, and
+ * find state survives across specs in the same app session). */
+async function ensureFindOpen(): Promise<void> {
+  const input = $('[data-testid="find-input"]');
+  if (await input.isDisplayed().catch(() => false)) return;
+  await $('[data-testid="toggle-find"]').click();
+  await input.waitForDisplayed({ timeout: 10_000 });
+}
+
+async function extractAllText(path: string): Promise<string> {
+  const pdf = await pdfjs.getDocument({
+    data: new Uint8Array(readFileSync(path)),
+    isEvalSupported: false,
+  }).promise;
+  let out = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    for (const item of content.items) if ('str' in item) out += item.str + ' ';
+  }
+  await pdf.loadingTask.destroy();
+  return out;
+}
+
+describe('find + OCR (2m)', () => {
+  let tmp: string;
+
+  before(async () => {
+    tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-ocr-'));
+  });
+
+  after(() => {
+    if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('finds text in a born-digital document and reports matches', async () => {
+    const textPdf = resolve(tmp, 'digital.pdf');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([400, 300]);
+    page.drawText('The quarterly PAYMENT schedule', { x: 40, y: 200, size: 14, font });
+    writeFileSync(textPdf, await doc.save());
+
+    await waitForHarness();
+    await openByPaths([textPdf]);
+    await setView('canvas');
+
+    await ensureFindOpen();
+    await setReactInputValue('[data-testid="find-input"]', 'payment');
+
+    await browser.waitUntil(
+      async () => (await $('[data-testid="find-count"]').getText()).includes('1 match'),
+      { timeout: 20_000, timeoutMsg: 'born-digital find never matched' },
+    );
+  });
+
+  it('OCRs a scanned document in-app, finds the text, and "Make searchable" persists it (2m acceptance)', async function () {
+    this.timeout(180_000); // real in-webview OCR (first run loads core+lang)
+    await waitForHarness();
+    await openByPaths([SCANNED]);
+    // The scanned fixture must actually become the active file.
+    await browser.waitUntil(
+      async () => ((await getState()).activeFile?.path ?? '').includes('scanned.pdf'),
+      {
+        timeout: 15_000,
+        timeoutMsg:
+          'scanned.pdf never became active — state: ' + JSON.stringify(await getState()),
+      },
+    );
+    await setView('canvas');
+
+    // The real tesseract.js worker runs INSIDE the webview against the
+    // bundled offline assets — first run loads core+language, so be patient.
+    // Wait on the real OCR signal (word boxes ready to persist), not the find
+    // count (which the born-digital spec's leftover query could satisfy).
+    await browser.waitUntil(async () => (await ocrReadyCount()) > 0, {
+      timeout: 120_000,
+      interval: 1_000,
+      timeoutMsg: 'OCR words never became ready to persist',
+    });
+
+    // Find now surfaces the recognized text too.
+    await ensureFindOpen();
+    await setReactInputValue('[data-testid="find-input"]', 'invoice');
+    await browser.waitUntil(
+      async () => (await $('[data-testid="find-count"]').getText()).includes('match'),
+      { timeout: 20_000, timeoutMsg: 'OCR text not findable' },
+    );
+
+    // Persist via the same flow the "Make searchable" button runs (driven
+    // through the harness, not the async-gated button — same pattern as
+    // redaction/signature canvas actions): apply_ocr_layer → UPDATE_FILE.
+    await applyOcr();
+    await browser.waitUntil(async () => (await getState()).activeFile?.dirty === true, {
+      timeout: 60_000,
+      timeoutMsg: 'OCR apply never marked the file dirty',
+    });
+
+    const dest = resolve(tmp, 'searchable.pdf');
+    await saveActiveAs(dest);
+    expect(existsSync(dest)).toBe(true);
+
+    // THE acceptance criterion: the SAVED file is genuinely searchable —
+    // an independent reader extracts the recognized text.
+    const text = (await extractAllText(dest)).toUpperCase();
+    expect(text).toContain('INVOICE');
+  });
+});

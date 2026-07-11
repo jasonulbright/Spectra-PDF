@@ -616,6 +616,20 @@
   color: rgba(196, 181, 253, 0.95);
 }
 
+/* Find (2m): matching pages get a ring; OCR'd pages get per-word boxes. */
+.page.find-match {
+  outline: 2px solid rgba(59, 130, 246, 0.9);
+  outline-offset: 2px;
+}
+
+.page-find-word {
+  position: absolute;
+  background: rgba(250, 204, 21, 0.35);
+  border: 1px solid rgba(250, 204, 21, 0.8);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
 /* Annotation tool active: crosshair over pages signals draw-a-box mode. */
 .canvas-view.annotating .page {
   cursor: crosshair;
