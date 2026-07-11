@@ -242,9 +242,17 @@ pub struct CompareArgs {
     pub a: PathBuf,
     /// Second (changed) PDF file
     pub b: PathBuf,
-    /// Unchanged lines of context to keep around each change
+    /// Unchanged lines of context to keep around each change (text mode)
     #[arg(long, default_value_t = 3)]
     pub context: u32,
+    /// Visual (pixel) diff instead of text: rasterizes both PDFs (bundled
+    /// Ghostscript) and reports per-page-pair diff counts and changed-region
+    /// rectangles in PDF points
+    #[arg(long)]
+    pub visual: bool,
+    /// Raster resolution for --visual (36-300; 72 = 1 px per point)
+    #[arg(long, default_value_t = 72)]
+    pub dpi: u32,
 }
 
 #[derive(Args)]
@@ -795,14 +803,29 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             engine.call("watermark", params)
         }
 
-        CliCommand::Compare(args) => engine.call(
-            "compare_text",
-            json!({
-                "file_a": abs(&args.a).to_string_lossy(),
-                "file_b": abs(&args.b).to_string_lossy(),
-                "context": args.context,
-            }),
-        ),
+        CliCommand::Compare(args) => {
+            if args.visual {
+                let gs = resolve_gs();
+                engine.call(
+                    "compare_visual",
+                    json!({
+                        "file_a": abs(&args.a).to_string_lossy(),
+                        "file_b": abs(&args.b).to_string_lossy(),
+                        "dpi": args.dpi,
+                        "gs_path": gs.to_string_lossy(),
+                    }),
+                )
+            } else {
+                engine.call(
+                    "compare_text",
+                    json!({
+                        "file_a": abs(&args.a).to_string_lossy(),
+                        "file_b": abs(&args.b).to_string_lossy(),
+                        "context": args.context,
+                    }),
+                )
+            }
+        }
 
         CliCommand::VerifySignatures(args) => engine.call(
             "verify_signatures",

@@ -19,7 +19,7 @@ from engine.inspect import get_page_count, get_page_info, check_encrypted, unloc
 from engine.validate import validate_pdf
 from engine.redact import redact
 from engine.watermark import watermark
-from engine.compare import compare_text
+from engine.compare import compare_text, compare_visual
 import engine.compare as compare_mod
 from engine.signatures import verify_signatures, sign_pdf
 from pikepdf import Name, Dictionary
@@ -1206,6 +1206,282 @@ class TestCompare:
         # Counts reflect the FULL diff even though rows were capped.
         assert r["summary"]["lines_removed"] == 20
         assert r["summary"]["lines_added"] == 20
+
+    def test_intraline_segments_mark_only_the_changed_word(self, tmp_dir):
+        # 2j: a similar replaced-line pair carries word-level segments on both
+        # rows; joining segment texts reconstructs each line, and only the
+        # edited word is flagged changed.
+        a = os.path.join(tmp_dir, "il_a.pdf")
+        b = os.path.join(tmp_dir, "il_b.pdf")
+        _make_text_pdf(a, [["the quick brown fox jumps"]])
+        _make_text_pdf(b, [["the quick red fox jumps"]])
+        r = compare_text(a, b)
+        remove = next(row for row in r["rows"] if row["type"] == "remove")
+        add = next(row for row in r["rows"] if row["type"] == "add")
+        assert "".join(t for t, _ in remove["segments"]) == "the quick brown fox jumps"
+        assert "".join(t for t, _ in add["segments"]) == "the quick red fox jumps"
+        assert [t for t, changed in remove["segments"] if changed] == ["brown"]
+        assert [t for t, changed in add["segments"] if changed] == ["red"]
+        # Counts/summary semantics unchanged by segments.
+        assert r["summary"]["lines_removed"] == 1
+        assert r["summary"]["lines_added"] == 1
+
+    def test_intraline_skipped_for_dissimilar_replacement(self, tmp_dir):
+        # A replace pair with nothing in common stays whole-line (no segments)
+        # — word-level confetti would be noise, not signal.
+        a = os.path.join(tmp_dir, "ild_a.pdf")
+        b = os.path.join(tmp_dir, "ild_b.pdf")
+        _make_text_pdf(a, [["context line", "aaaa bbbb cccc"]])
+        _make_text_pdf(b, [["context line", "zzzz yyyy xxxx qqqq"]])
+        r = compare_text(a, b)
+        remove = next(row for row in r["rows"] if row["type"] == "remove")
+        add = next(row for row in r["rows"] if row["type"] == "add")
+        assert "segments" not in remove
+        assert "segments" not in add
+
+
+# ── Visual compare ──────────────────────────────────────────────────────────
+
+
+def _make_square_pdf(path: str, pages: list[int | None], size: int = 60) -> None:
+    """One page per entry: a red square at x=<entry> (y fixed at 300 in a
+    400×400 page), or a blank page for None. Image-only content — invisible
+    to the text diff, exactly what the visual diff exists to catch."""
+    doc = pikepdf.new()
+    for x in pages:
+        page = doc.add_blank_page(page_size=(400, 400))
+        if x is None:
+            page.Contents = doc.make_stream(b"")
+            continue
+        img = doc.make_stream(bytes([255, 0, 0] * 9))
+        img.Type = Name.XObject
+        img.Subtype = Name.Image
+        img.Width = 3
+        img.Height = 3
+        img.BitsPerComponent = 8
+        img.ColorSpace = Name.DeviceRGB
+        page.Resources = Dictionary(XObject=Dictionary(Im0=img))
+        page.Contents = doc.make_stream(f"q {size} 0 0 {size} {x} 300 cm /Im0 Do Q".encode("ascii"))
+    doc.save(path)
+    doc.close()
+
+
+class TestCompareVisual:
+    def test_identical_files_visually_identical(self, tmp_dir, gs_path):
+        a = os.path.join(tmp_dir, "va.pdf")
+        b = os.path.join(tmp_dir, "vb.pdf")
+        _make_square_pdf(a, [50, 200])
+        _make_square_pdf(b, [50, 200])
+        r = compare_visual(a, b, gs_path=gs_path)
+        assert r["summary"]["identical"] is True
+        assert r["summary"]["pairs_differing"] == 0
+        assert all(p["identical"] for p in r["pages"])
+        assert all(p["regions"] == [] for p in r["pages"])
+
+    def test_image_only_change_caught_visually_but_not_by_text(self, tmp_dir, gs_path):
+        # THE acceptance scenario for 2j: content with no extractable text —
+        # the text diff reads both files as identical; the visual diff must
+        # flag the moved square and localize it.
+        a = os.path.join(tmp_dir, "va.pdf")
+        b = os.path.join(tmp_dir, "vb.pdf")
+        _make_square_pdf(a, [50, 200])
+        _make_square_pdf(b, [250, 200])  # page 1 square moved, page 2 unchanged
+        assert compare_text(a, b)["summary"]["identical"] is True
+
+        r = compare_visual(a, b, gs_path=gs_path)
+        assert r["summary"]["identical"] is False
+        assert r["summary"]["pairs_differing"] == 1
+        p1 = next(p for p in r["pages"] if p["page"] == 1)
+        p2 = next(p for p in r["pages"] if p["page"] == 2)
+        assert p1["identical"] is False and p2["identical"] is True
+        # Exactly the two 60×60 squares' pixels differ (old + new position).
+        assert p1["diff_pixels"] == 2 * 60 * 60
+        # Region(s) cover both positions: x spans 50..310, y band 40..100
+        # (top-down raster space: page height 400, square top at 400-360=40).
+        assert p1["regions"], "changed regions must be reported"
+        x0 = min(reg["x"] for reg in p1["regions"])
+        x1 = max(reg["x"] + reg["w"] for reg in p1["regions"])
+        y0 = min(reg["y"] for reg in p1["regions"])
+        y1 = max(reg["y"] + reg["h"] for reg in p1["regions"])
+        assert abs(x0 - 50) <= 2 and abs(x1 - 310) <= 2
+        assert abs(y0 - 40) <= 2 and abs(y1 - 100) <= 2
+        # Regions are in-bounds page points.
+        assert p1["width_pts"] == 400 and p1["height_pts"] == 400
+        for reg in p1["regions"]:
+            assert 0 <= reg["x"] <= 400 and 0 <= reg["y"] <= 400
+
+    def test_page_count_mismatch_reports_unpaired(self, tmp_dir, gs_path):
+        a = os.path.join(tmp_dir, "va.pdf")
+        b = os.path.join(tmp_dir, "vb.pdf")
+        _make_square_pdf(a, [50])
+        _make_square_pdf(b, [50, 200, None])
+        r = compare_visual(a, b, gs_path=gs_path)
+        assert r["summary"]["identical"] is False  # counts differ
+        assert r["summary"]["pairs_compared"] == 1
+        assert r["summary"]["unpaired_b"] == 2
+        unpaired = [p for p in r["pages"] if p.get("only_in") == "b"]
+        assert [p["page"] for p in unpaired] == [2, 3]
+
+    def test_size_mismatch_is_a_visual_difference(self, tmp_dir, gs_path):
+        # Same content, different page size: the non-overlap band differs by
+        # construction (white pad vs nothing is still a mismatch in dims —
+        # the pair must not read identical).
+        a = os.path.join(tmp_dir, "va.pdf")
+        b = os.path.join(tmp_dir, "vb.pdf")
+        doc = pikepdf.new()
+        doc.add_blank_page(page_size=(400, 400)).Contents = doc.make_stream(b"q 0 0 0 rg 10 10 50 50 re f Q")
+        doc.save(a)
+        doc.close()
+        doc = pikepdf.new()
+        doc.add_blank_page(page_size=(400, 500)).Contents = doc.make_stream(b"q 0 0 0 rg 10 10 50 50 re f Q")
+        doc.save(b)
+        doc.close()
+        r = compare_visual(a, b, gs_path=gs_path)
+        p1 = r["pages"][0]
+        assert p1["identical"] is False
+        # The compare space is the union of both sizes.
+        assert p1["width_pts"] == 400 and p1["height_pts"] == 500
+
+    def test_dpi_validation(self, tmp_dir, gs_path):
+        a = os.path.join(tmp_dir, "va.pdf")
+        _make_square_pdf(a, [50])
+        with pytest.raises(ValueError):
+            compare_visual(a, a, dpi=10, gs_path=gs_path)
+        with pytest.raises(ValueError):
+            compare_visual(a, a, dpi=1200, gs_path=gs_path)
+
+    def test_read_ppm_is_strict(self, tmp_dir):
+        # Review-driven (two rounds): tolerance for non-conformant PPM framing
+        # is provably unsound — front surplus (CRLF separator) and trailing
+        # surplus (appended newline) are indistinguishable whenever the first
+        # pixel byte is whitespace-valued, and guessing wrong silently shifts
+        # the buffer into a bogus diff. So: strict, loud, no recovery.
+        from engine.compare import _read_ppm
+
+        def probe(name, content):
+            p = os.path.join(tmp_dir, name)
+            with open(p, "wb") as f:
+                f.write(content)
+            return _read_ppm(__import__("pathlib").Path(p))
+
+        body = bytes([0xAB] * 6)
+        # Conformant (with and without the gs comment line) parses exactly.
+        assert probe("ok.ppm", b"P6\n2 1\n255\n" + body) == (2, 1, body)
+        assert probe("okc.ppm", b"P6\n# gs\n2 1\n255\n" + body) == (2, 1, body)
+        # Every non-strict framing raises — never a shifted buffer.
+        for name, content in [
+            ("crlf.ppm", b"P6\n2 1\n255\r\n" + body),  # 2-byte separator
+            ("trail.ppm", b"P6\n2 1\n255\n" + body + b"\n"),  # trailing junk
+            ("trunc.ppm", b"P6\n2 1\n255\n" + body[:-1]),  # short body
+            ("garb.ppm", b"P6\n2 1\n255\nZ" + body),  # non-ws surplus
+            ("eof.ppm", b"P6\n2 1\n255"),  # ends at maxval
+            ("maxval.ppm", b"P6\n2 1\n65535\n" + body),  # 16-bit
+        ]:
+            with pytest.raises(ValueError):
+                probe(name, content)
+
+    def test_garbage_input_raises_never_identical(self, tmp_dir, gs_path):
+        # Review round 3: page counts must come from the RENDERING mechanism.
+        # A soft-failing counter (gs pdfpagecount prints an error + fallback
+        # "0" and exits 0 on garbage) once made two unreadable files compare
+        # "identical: true" — the worst possible output for a compare tool.
+        # Garbage input must raise loud instead.
+        g1 = os.path.join(tmp_dir, "garbage1.pdf")
+        g2 = os.path.join(tmp_dir, "garbage2.pdf")
+        v = os.path.join(tmp_dir, "valid.pdf")
+        with open(g1, "wb") as f:
+            f.write(b"this is not a pdf at all")
+        with open(g2, "wb") as f:
+            f.write(b"different garbage entirely")
+        _make_square_pdf(v, [50])
+        # Garbage now fails at the structural pre-count (pikepdf.PdfError) —
+        # the same loud behavior compare_text has for unreadable files; had it
+        # reached rendering, the gs nonzero-exit raise (RuntimeError) catches
+        # it. Either way: an exception, never a bogus "identical" report.
+        with pytest.raises((RuntimeError, pikepdf.PdfError)):
+            compare_visual(g1, g2, gs_path=gs_path)
+        with pytest.raises((RuntimeError, pikepdf.PdfError)):
+            compare_visual(g1, v, gs_path=gs_path)
+
+    def test_semicolon_filenames_compare_fine(self, tmp_dir, gs_path):
+        # Review round 3: gs's --permit-file-read splits its value on the OS
+        # path-list separator (';' on Windows), so the pdfpagecount approach
+        # broke legitimate semicolon filenames. The rendering mechanism passes
+        # the path as a plain positional argument — must just work.
+        a = os.path.join(tmp_dir, "Quarterly Report; Draft.pdf")
+        b = os.path.join(tmp_dir, "Quarterly Report; Final.pdf")
+        _make_square_pdf(a, [50])
+        _make_square_pdf(b, [250])
+        r = compare_visual(a, b, gs_path=gs_path)
+        assert r["summary"]["pairs_differing"] == 1
+
+    def test_damaged_page_tree_refuses_instead_of_truncating(self, tmp_dir, gs_path):
+        # Review round 4: gs's page-tree walk halts SILENTLY (rc 0) at a
+        # damaged interior node — indistinguishable from document end — so a
+        # 5-page file with a corrupted 3rd /Kids entry renders only 2 pages
+        # and would compare as a 2-page document, reporting real pages 3-5 as
+        # missing with no error. The structural-count disagreement detector
+        # must refuse loudly instead (this app repairs damaged PDFs; comparing
+        # them is a first-class scenario, not an edge case).
+        broken = os.path.join(tmp_dir, "broken5.pdf")
+        healthy = os.path.join(tmp_dir, "healthy5.pdf")
+        doc = pikepdf.new()
+        for _ in range(5):
+            doc.add_blank_page(page_size=(200, 200))
+        doc.Root.Pages.Kids[2] = doc.make_indirect(Dictionary())  # bare dict, no /Type
+        doc.save(broken)
+        doc.close()
+        _make_square_pdf(healthy, [50, 50, 50, 50, 50])
+
+        with pytest.raises(RuntimeError, match="damaged"):
+            compare_visual(broken, healthy, gs_path=gs_path)
+        # Order-independent: the damaged file as B must refuse too.
+        with pytest.raises(RuntimeError, match="damaged"):
+            compare_visual(healthy, broken, gs_path=gs_path)
+
+    def test_asymmetric_lengths_report_exact_counts(self, tmp_dir, gs_path, monkeypatch):
+        # The longer side's tail count is discovered by rendering too
+        # (_count_pages_by_rendering). Force tiny chunks so the tail path
+        # actually runs (paired loop exits at A's end inside chunk 1's range,
+        # B continues) and assert exact counts + unpaired listing.
+        import engine.compare as cmp_mod
+
+        monkeypatch.setattr(cmp_mod, "CHUNK_PROBE_PAGES", 2)
+        monkeypatch.setattr(cmp_mod, "CHUNK_MAX_PAGES", 2)
+        monkeypatch.setattr(cmp_mod, "TAIL_COUNT_CHUNK", 2)
+        a = os.path.join(tmp_dir, "short.pdf")
+        b = os.path.join(tmp_dir, "long.pdf")
+        _make_square_pdf(a, [50])
+        _make_square_pdf(b, [50, 200, 200, 200, 200])
+        r = compare_visual(a, b, gs_path=gs_path)
+        assert r["summary"]["pages_a"] == 1
+        assert r["summary"]["pages_b"] == 5
+        assert r["summary"]["pairs_compared"] == 1
+        assert r["summary"]["identical"] is False
+        unpaired = [p["page"] for p in r["pages"] if p.get("only_in") == "b"]
+        assert unpaired == [2, 3, 4, 5]
+
+    def test_chunked_rendering_attributes_pages_correctly(self, tmp_dir, gs_path, monkeypatch):
+        # Rendering happens in bounded chunks (gs -dFirstPage/-dLastPage) and
+        # gs's %d file counter restarts at 1 per invocation — the chunk→page
+        # mapping must not drift. Force 2-page chunks over a 5-page doc where
+        # ONLY pages 2 and 5 differ (each lands in a different chunk, page 5
+        # in a partial final chunk) and assert exactly those are flagged.
+        import engine.compare as cmp_mod
+
+        monkeypatch.setattr(cmp_mod, "CHUNK_PROBE_PAGES", 2)
+        monkeypatch.setattr(cmp_mod, "CHUNK_MAX_PAGES", 2)
+        a = os.path.join(tmp_dir, "va.pdf")
+        b = os.path.join(tmp_dir, "vb.pdf")
+        _make_square_pdf(a, [50, 50, 50, 50, 50])
+        _make_square_pdf(b, [50, 250, 50, 50, 250])
+        r = compare_visual(a, b, gs_path=gs_path)
+        flags = {p["page"]: p["identical"] for p in r["pages"]}
+        assert flags == {1: True, 2: False, 3: True, 4: True, 5: False}
+        assert r["summary"]["pairs_differing"] == 2
+        # Regions still localized on the differing pages.
+        p2 = next(p for p in r["pages"] if p["page"] == 2)
+        assert p2["regions"] and abs(min(reg["x"] for reg in p2["regions"]) - 50) <= 2
 
 
 # ── Verify signatures ───────────────────────────────────────────────────────

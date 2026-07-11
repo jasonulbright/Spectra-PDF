@@ -27,6 +27,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   redact: 'Redact',
   watermark: 'Watermark',
   compare_text: 'Compare',
+  compare_visual: 'Compare (visual)',
   verify_signatures: 'Verify Signatures',
   // NB: the default getFriendlyName path uses only params.file — the signing
   // password is never referenced, so it can't reach the operation log.

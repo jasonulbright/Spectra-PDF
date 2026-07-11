@@ -55,4 +55,31 @@ describe('compare panel diffs two open PDFs', () => {
     await rows.waitForDisplayed({ timeout: 20_000 });
     expect(await rows.getText()).toContain('DELTA');
   });
+
+  it('visual mode pixel-diffs the pair and lists differing pages (2j)', async () => {
+    // Same two files: the extra DELTA line is also a *visual* difference on
+    // the page raster, so the visual pass must flag page pair 1. This drives
+    // the real engine `compare_visual` (bundled Ghostscript raster) end to
+    // end through the panel.
+    await waitForHarness();
+    await openByPaths([a, b]);
+    await setView('operations');
+    await setActiveOp('compare');
+
+    const target = $('[data-testid="compare-target"]');
+    await target.waitForDisplayed({ timeout: 15_000 });
+    await $('[data-testid="compare-mode-visual"]').click();
+    await $('[data-testid="compare-run"]').click();
+
+    const summary = $('[data-testid="compare-visual-summary"]');
+    await summary.waitForDisplayed({ timeout: 30_000 });
+    expect(await summary.getText()).toContain('1 of 1 page pair differ');
+
+    // The differing pair is listed and auto-selected; both page renders with
+    // overlay hosts appear.
+    const pairItem = $('[data-testid="compare-visual-pair-1"]');
+    await pairItem.waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="compare-visual-page-A"]').waitForDisplayed({ timeout: 20_000 });
+    await $('[data-testid="compare-visual-page-B"]').waitForDisplayed({ timeout: 20_000 });
+  });
 });

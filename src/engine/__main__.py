@@ -27,7 +27,7 @@ from engine.check import check
 from engine.outline import get_outline, set_outline
 from engine.redact import redact
 from engine.watermark import watermark
-from engine.compare import compare_text
+from engine.compare import compare_text, compare_visual
 from engine.signatures import verify_signatures, sign_pdf
 
 
@@ -67,6 +67,7 @@ def main() -> None:
     server.register("redact", redact)
     server.register("watermark", watermark)
     server.register("compare_text", compare_text)
+    server.register("compare_visual", compare_visual)
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)
 
