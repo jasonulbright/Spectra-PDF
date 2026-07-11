@@ -1439,6 +1439,81 @@ class TestCompareVisual:
         with pytest.raises(RuntimeError, match="damaged"):
             compare_visual(healthy, broken, gs_path=gs_path)
 
+    def test_tail_damage_refuses_both_files_never_identical(self, tmp_dir, gs_path):
+        # Post-commit review of the first 2j commit: TAIL-positioned damage —
+        # where nothing real follows the break — made pikepdf's lenient
+        # recovery count and gs's halt-at-damage count COINCIDE, so two
+        # damaged files compared identical:true with zero signal. The strict
+        # tree walk must refuse this exact construction (4 real pages + a
+        # sibling /Pages branch lying Count=3 over genuinely empty Kids).
+        def build(path):
+            doc = pikepdf.new()
+            for _ in range(4):
+                doc.add_blank_page(page_size=(200, 200))
+            liar = doc.make_indirect(
+                Dictionary(Type=Name.Pages, Count=3, Kids=pikepdf.Array([]), Parent=doc.Root.Pages)
+            )
+            doc.Root.Pages.Kids.append(liar)
+            doc.save(path)
+            doc.close()
+
+        a = os.path.join(tmp_dir, "hole_a.pdf")
+        b = os.path.join(tmp_dir, "hole_b.pdf")
+        build(a)
+        build(b)
+        # The lenient walk sees 4 (skips the lying branch) — the exact
+        # agreement that previously waved the pair through.
+        from engine.compare import _page_count
+
+        assert _page_count(a) == 4
+        with pytest.raises(RuntimeError, match="malformed"):
+            compare_visual(a, b, gs_path=gs_path)
+
+    def test_count_consistent_tail_damage_caught_by_render_crosscheck(self, tmp_dir, gs_path):
+        # Layered defense, second layer: damage qpdf REPAIRS into a self-
+        # consistent tree (bare dict kid healed into a /Page, root Count made
+        # consistent) passes the strict walk — but gs still halts at the
+        # damaged node on disk, so the render count cross-check refuses.
+        p = os.path.join(tmp_dir, "tailc.pdf")
+        healthy = os.path.join(tmp_dir, "healthy4.pdf")
+        doc = pikepdf.new()
+        for _ in range(4):
+            doc.add_blank_page(page_size=(200, 200))
+        doc.Root.Pages.Kids.append(doc.make_indirect(Dictionary()))
+        doc.Root.Pages.Count = 5  # consistent with the repair-materialized view
+        doc.save(p)
+        doc.close()
+        _make_square_pdf(healthy, [50, 50, 50, 50])
+        with pytest.raises(RuntimeError, match="damaged"):
+            compare_visual(p, healthy, gs_path=gs_path)
+
+    def test_spec_violating_count_refuses_even_when_renderable(self, tmp_dir, gs_path):
+        # Behavior change vs. the earlier negative control: a lying interior
+        # /Count (says 3, five real kids) renders fully in BOTH engines, but
+        # the strict walk refuses anyway — a compare cannot certify
+        # completeness on a structure it cannot certify, and repair exists.
+        p = os.path.join(tmp_dir, "liedcount.pdf")
+        doc = pikepdf.new()
+        for _ in range(5):
+            doc.add_blank_page(page_size=(200, 200))
+        doc.Root.Pages.Count = 3
+        doc.save(p)
+        doc.close()
+        with pytest.raises(RuntimeError, match="malformed"):
+            compare_visual(p, p, gs_path=gs_path)
+
+    def test_initial_chunk_pages_scales_with_dpi(self):
+        # Post-commit review note: a fixed 8-page probe overshot the byte
+        # budget ~1.5x at the dpi ceiling. The probe must scale down with dpi
+        # (budget is TOTAL in-flight bytes across both sides).
+        from engine.compare import _initial_chunk_pages, CHUNK_BYTE_BUDGET, CHUNK_PROBE_PAGES
+
+        assert _initial_chunk_pages(72) == CHUNK_PROBE_PAGES  # classic probe intact
+        probe_300 = _initial_chunk_pages(300)
+        assert 1 <= probe_300 < CHUNK_PROBE_PAGES
+        letter_300 = int(8.5 * 300) * int(11 * 300) * 3
+        assert 2 * probe_300 * letter_300 <= CHUNK_BYTE_BUDGET
+
     def test_asymmetric_lengths_report_exact_counts(self, tmp_dir, gs_path, monkeypatch):
         # The longer side's tail count is discovered by rendering too
         # (_count_pages_by_rendering). Force tiny chunks so the tail path

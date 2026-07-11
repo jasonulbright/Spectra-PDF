@@ -32,6 +32,9 @@ from pathlib import Path
 import pikepdf
 from pdfminer.high_level import extract_text as pdfminer_extract
 
+Name_Page = pikepdf.Name("/Page")
+Name_Pages = pikepdf.Name("/Pages")
+
 # Bound the row payload for pathological diffs. Counts/similarity in the
 # summary stay exact past this — only the row detail is truncated.
 MAX_ROWS = 5000
@@ -52,16 +55,116 @@ MAX_REGIONS_PER_PAGE = 20
 # deletes each chunk's rasters after diffing, so temp-disk peak stays bounded
 # regardless of document length (uncompressed PPM is ~1.45MB per Letter page
 # at 72 dpi — a large scanned document rendered whole would write gigabytes).
-# The first chunk is a small probe; subsequent chunk size adapts to the
-# measured bytes/page against the byte budget.
+# CHUNK_BYTE_BUDGET is the TOTAL in-flight raster budget (both sides of a
+# chunk together). The first chunk's size is estimated from the dpi (Letter-
+# sized pages assumed — see _initial_chunk_pages); later chunks adapt to the
+# largest page actually measured.
 CHUNK_PROBE_PAGES = 8
 CHUNK_BYTE_BUDGET = 256 * 1024 * 1024
 CHUNK_MAX_PAGES = 64
 
 
+def _initial_chunk_pages(dpi: int) -> int:
+    """First-chunk page count, scaled so the probe itself honors the byte
+    budget. Before anything is measured, a page is estimated as Letter at
+    `dpi` (at 72 dpi this leaves the classic 8-page probe; at 300 dpi it
+    shrinks the probe so 2 sides × probe × ~25MB/page stays inside the
+    budget — a fixed 8-page probe overshot the documented budget ~1.5× at
+    the dpi ceiling). Oversized (A3+) pages can still overshoot the FIRST
+    chunk; the measured adaptation corrects every later chunk."""
+    est_page_bytes = int(8.5 * dpi) * int(11 * dpi) * 3
+    return max(1, min(CHUNK_PROBE_PAGES, CHUNK_BYTE_BUDGET // (2 * est_page_bytes)))
+
+
 def _page_count(file: str) -> int:
     with pikepdf.open(file) as pdf:
         return len(pdf.pages)
+
+
+# Recursion guard for _strict_page_count — real page trees are a few levels
+# deep; anything approaching this is malformed.
+STRICT_WALK_MAX_DEPTH = 256
+
+
+def _strict_page_count(file: str) -> int:
+    """Structural page count via a STRICT page-tree walk that raises on any
+    anomaly, for compare_visual's disagreement detector.
+
+    pikepdf's own ``len(pdf.pages)`` walk is RECOVERY-oriented: it skips or
+    repairs a bad node and keeps counting whatever follows. Ghostscript's walk
+    HALTS at the same node (silently, rc 0). For mid-tree damage the two
+    therefore disagree (detector fires) — but for TAIL damage, where nothing
+    real follows the break, "skip and continue" and "stop dead" land on the
+    same number: both engines wrong identically, and a lenient baseline waves
+    two damaged files through as comparable (reproduced: 4 real pages plus a
+    sibling /Pages branch claiming Count=3 with empty Kids compared
+    identical:true with no signal). So the baseline must not be a recovery
+    walk: this one hard-fails on ANY anomaly — unresolvable/non-dict node,
+    interior node without /Kids, /Count disagreeing with the actual leaf sum,
+    node revisits (cycles/shared nodes), wrong or missing /Type, absurd depth.
+    A strict PASS certifies the tree is well-formed, which is exactly the
+    precondition under which gs's short-render-means-EOF semantics hold; any
+    gs shortfall after a strict pass is a render failure the count
+    cross-check still catches. Deliberately stricter than what gs/pikepdf
+    will RENDER: a spec-violating tree (e.g. a lying interior /Count) refuses
+    here even when both engines happen to render it fully — a compare cannot
+    certify completeness on a structure it cannot certify, and the app ships
+    repair tooling for exactly these files."""
+
+    def anomaly(detail: str) -> RuntimeError:
+        return RuntimeError(
+            f"Page tree of {Path(file).name} is malformed ({detail}) — a visual comparison "
+            f"cannot be certified complete on a damaged file. Repair the file first."
+        )
+
+    with pikepdf.open(file) as pdf:
+        pages_root = pdf.Root.get("/Pages")
+        if pages_root is None:
+            raise anomaly("catalog has no /Pages")
+        seen: set = set()
+
+        def node_key(obj):
+            try:
+                if obj.is_indirect:
+                    return ("i", *obj.objgen)
+            except Exception:
+                pass
+            return ("d", id(obj))
+
+        def walk(node, depth: int) -> int:
+            if depth > STRICT_WALK_MAX_DEPTH:
+                raise anomaly("page tree nesting exceeds any plausible depth")
+            try:
+                node_type = node.get("/Type")
+            except Exception:
+                raise anomaly("unresolvable or non-dictionary tree node") from None
+            key = node_key(node)
+            if key in seen:
+                raise anomaly("node appears more than once (cycle or shared node)")
+            seen.add(key)
+
+            if node_type == Name_Pages:
+                kids = node.get("/Kids")
+                if kids is None or not isinstance(kids, pikepdf.Array):
+                    raise anomaly("interior /Pages node without a /Kids array")
+                count_obj = node.get("/Count")
+                try:
+                    declared = int(count_obj)  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    raise anomaly("interior /Pages node with a missing or non-integer /Count") from None
+                actual = 0
+                for kid in kids:
+                    actual += walk(kid, depth + 1)
+                if actual != declared:
+                    raise anomaly(
+                        f"/Pages node declares Count={declared} but actually contains {actual} page(s)"
+                    )
+                return actual
+            if node_type == Name_Page:
+                return 1
+            raise anomaly("tree node whose /Type is neither /Page nor /Pages")
+
+        return walk(pages_root, 0)
 
 
 def _extract_lines(file: str) -> tuple[list[str], list[int], int]:
@@ -208,16 +311,16 @@ def _render_ppm_range(
     """Rasterize pages first..last (1-based, inclusive) of `file` to PPM P6
     via one Ghostscript call. Returns the page files in page order.
 
-    A SHORT result (fewer files than requested, returncode 0) means the
-    document ENDED inside the range — verified gs semantics: -dLastPage beyond
-    EOF renders to the real last page with rc 0; -dFirstPage beyond EOF
-    renders zero files with rc 0; a mid-document processing failure exits
-    NONZERO (raised here). Callers use short results for end-of-document
-    discovery — page counting deliberately shares this exact mechanism (and
-    binary, and code path) with the diff rendering itself, so "how many pages"
-    can never disagree with "what renders". NOTE: gs's %d output counter
-    restarts at 1 per invocation; the caller owns mapping file j back to real
-    page first + j - 1."""
+    A SHORT result (fewer files than requested, returncode 0) means gs's page
+    enumeration ENDED inside the range — for a WELL-FORMED document that is
+    the true document end (verified gs semantics: -dLastPage beyond EOF
+    renders to the real last page with rc 0; -dFirstPage beyond EOF renders
+    zero files with rc 0; a processing failure exits NONZERO, raised here).
+    For a document with a damaged page tree, gs halts at the damage — ALSO
+    silently, rc 0 — so short-result-as-EOF is only trustworthy after
+    _strict_page_count has certified the tree (see compare_visual). NOTE:
+    gs's %d output counter restarts at 1 per invocation; the caller owns
+    mapping file j back to real page first + j - 1."""
     cmd = [
         gs_path,
         "-sDEVICE=ppmraw",
@@ -444,16 +547,18 @@ def compare_visual(
     pages: list[dict] = []
     pairs_differing = 0
 
-    # Structural page counts, used ONLY to cross-check the render-discovered
-    # counts (see the disagreement-detector note in the loop below). Raises
-    # loud on files pikepdf can't open — same dependency compare_text already
-    # has, so visual and text compare accept the same input class.
-    struct_count_a = _page_count(file_a)
-    struct_count_b = _page_count(file_b)
+    # Structural page counts via the STRICT tree walk (not pikepdf's lenient
+    # recovery walk — see _strict_page_count for why the lenient count and
+    # gs's halt-at-damage can coincide on tail-positioned damage, waving two
+    # damaged files through as identical). Used ONLY to cross-check the
+    # render-discovered counts; raises loud on malformed trees and on files
+    # pikepdf can't open.
+    struct_count_a = _strict_page_count(file_a)
+    struct_count_b = _strict_page_count(file_b)
 
     with tempfile.TemporaryDirectory(prefix="spectra-compare-") as tmp:
         out_dir = Path(tmp)
-        chunk_size = CHUNK_PROBE_PAGES
+        chunk_size = _initial_chunk_pages(dpi)
         max_page_bytes = 0
         start = 1  # 1-based first page of the current chunk
         chunk_idx = 0
@@ -523,9 +628,10 @@ def compare_visual(
             if nb < requested:
                 end_b = start + nb - 1
 
-            # Adapt the chunk size to the measured page size vs. the budget.
+            # Adapt the chunk size to the measured page size vs. the TOTAL
+            # (both-sides) in-flight budget.
             if max_page_bytes > 0:
-                chunk_size = max(1, min(CHUNK_MAX_PAGES, CHUNK_BYTE_BUDGET // max_page_bytes))
+                chunk_size = max(1, min(CHUNK_MAX_PAGES, CHUNK_BYTE_BUDGET // (2 * max_page_bytes)))
             start = end + 1
             chunk_idx += 1
 
