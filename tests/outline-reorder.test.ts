@@ -5,6 +5,7 @@ import {
   restRows,
   clampDropDepth,
   moveOutlineNode,
+  outlinesEqual,
   type OutlineNode,
 } from '../src/renderer/lib/outline-reorder';
 
@@ -121,5 +122,34 @@ describe('moveOutlineNode', () => {
     const snapshot = ser(tree);
     moveOutlineNode(tree, [1], 2, 1);
     expect(ser(tree)).toBe(snapshot); // original intact
+  });
+});
+
+describe('outlinesEqual (no-op detection without delimiter collisions — review #2)', () => {
+  it('is true only for a structurally identical tree', () => {
+    expect(outlinesEqual([n('A', [n('B')]), n('C')], [n('A', [n('B')]), n('C')])).toBe(true);
+    expect(outlinesEqual([n('B'), n('A')], [n('A'), n('B')])).toBe(false); // sibling order
+    expect(outlinesEqual([n('A', [n('B')])], [n('A'), n('B')])).toBe(false); // nesting
+    expect(outlinesEqual([n('A'), n('B', [], 2)], [n('A'), n('B')])).toBe(false); // page differs
+  });
+
+  it('a permutation of truly-identical siblings is a structural no-op', () => {
+    expect(outlinesEqual([n('X'), n('X')], [n('X'), n('X')])).toBe(true);
+  });
+
+  it('distinguishes a real reorder that a delimited string encoding would collide', () => {
+    // The old `${title}:${page}(children)` join was non-injective: bookmark
+    // titles are free-form, so `:` `(` `)` `,` in a title could reproduce the
+    // structural delimiters. This exact tree + move serialized identically
+    // under that scheme yet is a genuine nesting change.
+    const tree = [
+      n(',', [n('():('), n('()', [n(''), n('(,)', [], 3), n('),')])]),
+    ];
+    const moved = moveOutlineNode(tree, [0, 0], 3, 2);
+    // '():(' nests under '()': ',' drops from 2 children to 1, '()' gains one.
+    expect(moved[0].children.length).toBe(1);
+    expect(moved[0].children[0].title).toBe('()');
+    expect(moved[0].children[0].children.map((c) => c.title)).toEqual(['', '():(', '(,)', '),']);
+    expect(outlinesEqual(moved, tree)).toBe(false); // the old delimited encoding said "equal"
   });
 });

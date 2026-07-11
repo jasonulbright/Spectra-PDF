@@ -57,13 +57,16 @@ describe('outline sidebar (2n.2)', () => {
   let tmp: string;
   let bookA: string;
   let bookB: string;
+  let bookC: string;
 
   before(() => {
     tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-outline-'));
     bookA = resolve(tmp, 'book-a.pdf');
     bookB = resolve(tmp, 'book-b.pdf');
+    bookC = resolve(tmp, 'book-c.pdf');
     copyFileSync(BOOKMARKED_PDF, bookA);
     copyFileSync(BOOKMARKED_PDF, bookB);
+    copyFileSync(BOOKMARKED_PDF, bookC);
   });
 
   after(() => {
@@ -152,6 +155,34 @@ describe('outline sidebar (2n.2)', () => {
     expect(titles(outline)).toEqual(['Chapter 1', 'External Link']);
     const ch1 = outline.find((i) => i.title === 'Chapter 1')!;
     expect(titles(ch1.items)).toEqual(['Section 1.1', 'Section 1.2', 'Chapter 2']);
+    await pdf.loadingTask.destroy();
+  });
+
+  it('serializes two rapid drops — the last one wins and persists, no stale overwrite (review #1)', async () => {
+    await openByPaths([bookC]);
+    await setView('canvas');
+    await showOutline();
+
+    // Fire two reorders synchronously (both read the same pre-render tree, so
+    // the SECOND must win), then await BOTH persists. Without the persist chain
+    // their snapshot/set_outline/readBuffer sequences could interleave and let
+    // the first (stale) order win the file on disk.
+    const err = await browser.executeAsync<string | null, []>((done) => {
+      const h = (window as any).__SPECTRA_TEST__;
+      const p1 = h.reorderOutline([2], 0, 0); // Chapter 2 → top
+      const p2 = h.reorderOutline([1], 0, 0); // External Link → top (from the original tree)
+      Promise.all([p1, p2])
+        .then(() => done(null))
+        .catch((e: unknown) => done(String(e)));
+    });
+    if (err) throw new Error(`rapid reorder failed: ${err}`);
+
+    const dest = resolve(tmp, 'rapid.pdf');
+    await saveActiveAs(dest);
+    const pdf = await loadPdf(dest);
+    const outline = (await pdf.getOutline()) as PdfOutlineItem[];
+    // The SAVED file reflects the last drop (External Link on top), not the first.
+    expect(titles(outline)[0]).toBe('External Link');
     await pdf.loadingTask.destroy();
   });
 });

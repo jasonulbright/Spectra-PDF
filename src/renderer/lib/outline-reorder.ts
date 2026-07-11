@@ -50,6 +50,22 @@ export function isPathPrefix(prefix: number[], path: number[]): boolean {
   return prefix.length <= path.length && prefix.every((v, i) => v === path[i]);
 }
 
+/** Structural equality over title/page/nesting — for detecting a no-op drop.
+ * A real structural comparison, NOT a delimited-string encoding: bookmark
+ * titles are free-form user text, so any `sep`-joined serialization is
+ * non-injective (two different trees can encode identically) and would
+ * silently discard a genuine reorder. Order- and nesting-sensitive; a reorder
+ * that only permutes truly identical siblings IS a structural no-op. */
+export function outlinesEqual(a: OutlineNode[], b: OutlineNode[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].title !== b[i].title) return false;
+    if ((a[i].page ?? null) !== (b[i].page ?? null)) return false;
+    if (!outlinesEqual(a[i].children, b[i].children)) return false;
+  }
+  return true;
+}
+
 /** The flattened rows with the dragged node's subtree removed — the rows that
  * stay visible during a drag, and the coordinate space the drop gap indexes. */
 export function restRows(flat: FlatNode[], draggedPath: number[]): FlatNode[] {

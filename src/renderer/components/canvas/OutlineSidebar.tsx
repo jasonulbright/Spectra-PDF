@@ -8,8 +8,9 @@ import {
   clampDropDepth,
   moveOutlineNode,
   isPathPrefix,
+  outlinesEqual,
 } from '../../lib/outline-reorder';
-import type { OutlineNode } from '../../lib/outline-reorder';
+import type { OutlineNode, FlatNode } from '../../lib/outline-reorder';
 import type { OpenFile } from '../../state/types';
 import { TEST_HARNESS_ENABLED, registerCanvasOutline } from '../../testHarness';
 
@@ -115,27 +116,44 @@ export function OutlineSidebar({
   const dragDeps = useRef({ activeFile, onJumpToPage, persist });
   dragDeps.current = { activeFile, onJumpToPage, persist };
 
-  // Insertion gap (index into the non-dragged rows) under the pointer Y.
-  const overIndexAt = (pointerY: number, draggedPath: number[]): number => {
-    const listEl = listRef.current;
-    if (!listEl) return 0;
-    const rest = restRows(flattenOutline(nodesRef.current), draggedPath);
-    let idx = 0;
-    for (const f of rest) {
-      const el = listEl.querySelector(`[data-outline-row="${f.path.join('.')}"]`);
-      if (!el) continue;
-      const r = el.getBoundingClientRect();
-      if (pointerY > r.top + r.height / 2) idx++;
-    }
-    return idx;
+  // Persists are chained so two quick drops can't race on the same working file
+  // — interleaved snapshot/set_outline/readBuffer would let a stale order win
+  // and leave a hole in the undo chain. Each drop's save runs strictly after
+  // the previous one finishes (mirrors OutlinePanel's busy-gated single save,
+  // adapted to the auto-save-per-drop model).
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
+  const queuePersist = (next: OutlineNode[]): Promise<void> => {
+    const run = saveChain.current.then(() => dragDeps.current.persist(next));
+    saveChain.current = run.catch(() => {}); // keep the chain alive after a failure
+    return run;
   };
 
-  const projectDrop = (s: DragState, clientX: number, clientY: number): { overIndex: number; depth: number } => {
-    const rest = restRows(flattenOutline(nodesRef.current), s.path);
-    const overIndex = overIndexAt(clientY, s.path);
-    const baseDepth = s.path.length - 1;
-    const desired = baseDepth + Math.round((clientX - s.startX) / INDENT_PX);
-    return { overIndex, depth: clampDropDepth(rest, overIndex, desired) };
+  // Non-dragged rows + their midpoints, measured ONCE at drag start: the drop
+  // gap is then a cheap number scan per pointermove instead of an O(N)
+  // re-flatten + N live DOM queries every event (outlines reach the engine's
+  // 10k-node cap; usePageDrag likewise hit-tests precomputed geometry).
+  const dragCache = useRef<{ rest: FlatNode[]; mids: number[] } | null>(null);
+  const measureRest = (path: number[]): { rest: FlatNode[]; mids: number[] } => {
+    const rest = restRows(flattenOutline(nodesRef.current), path);
+    const listEl = listRef.current;
+    const mids = rest.map((f) => {
+      const el = listEl?.querySelector(`[data-outline-row="${f.path.join('.')}"]`);
+      const r = el?.getBoundingClientRect();
+      return r ? r.top + r.height / 2 : Number.POSITIVE_INFINITY;
+    });
+    return { rest, mids };
+  };
+
+  const projectFromCache = (
+    s: DragState,
+    cache: { rest: FlatNode[]; mids: number[] },
+    clientX: number,
+    clientY: number,
+  ): { overIndex: number; depth: number } => {
+    let overIndex = 0;
+    for (const m of cache.mids) if (clientY > m) overIndex++;
+    const desired = s.path.length - 1 + Math.round((clientX - s.startX) / INDENT_PX);
+    return { overIndex, depth: clampDropDepth(cache.rest, overIndex, desired) };
   };
 
   function onPointerMove(e: PointerEvent): void {
@@ -144,8 +162,11 @@ export function OutlineSidebar({
     if (!s.started) {
       if (Math.hypot(e.clientX - s.startX, e.clientY - s.startY) < DRAG_THRESHOLD_PX) return;
       s.started = true;
+      dragCache.current = measureRest(s.path); // measure once, at drag start
     }
-    const { overIndex, depth } = projectDrop(s, e.clientX, e.clientY);
+    const cache = dragCache.current;
+    if (!cache) return;
+    const { overIndex, depth } = projectFromCache(s, cache, e.clientX, e.clientY);
     s.overIndex = overIndex;
     s.depth = depth;
     setDrag({ ...s });
@@ -153,25 +174,27 @@ export function OutlineSidebar({
 
   function onPointerUp(e: PointerEvent): void {
     const s = session.current;
+    const cache = dragCache.current;
     teardown();
     if (!s) return;
     const { activeFile: af, onJumpToPage: jump } = dragDeps.current;
-    if (!s.started) {
+    if (!s.started || !cache) {
       // A click, not a drag — jump to the node's page if it has one.
       const hit = flattenOutline(nodesRef.current).find((f) => f.path.join('.') === s.path.join('.'));
       const page = hit?.node.page;
       if (page != null && af) jump(`${af.path}#p${page - 1}`);
       return;
     }
-    const { overIndex, depth } = projectDrop(s, e.clientX, e.clientY);
+    const { overIndex, depth } = projectFromCache(s, cache, e.clientX, e.clientY);
     const next = moveOutlineNode(nodesRef.current, s.path, overIndex, depth);
-    if (serialize(next) === serialize(nodesRef.current)) return; // structural no-op → skip the save
+    if (outlinesEqual(next, nodesRef.current)) return; // structural no-op → skip the save
     setNodes(next);
-    void dragDeps.current.persist(next);
+    void queuePersist(next);
   }
 
   const teardown = useCallback((): void => {
     session.current = null;
+    dragCache.current = null;
     setDrag(null);
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
@@ -209,7 +232,7 @@ export function OutlineSidebar({
       reorder: async (fromPath, overIndex, depth) => {
         const next = moveOutlineNode(nodesRef.current, fromPath, overIndex, depth);
         setNodes(next);
-        await dragDeps.current.persist(next);
+        await queuePersist(next);
       },
     });
     return () => registerCanvasOutline(null);
@@ -264,9 +287,3 @@ export function OutlineSidebar({
   );
 }
 
-// Stable structural signature (title + page + nesting) to detect no-op drops.
-function serialize(nodes: OutlineNode[]): string {
-  return nodes
-    .map((n) => `${n.title}:${n.page ?? ''}(${serialize(n.children)})`)
-    .join(',');
-}
