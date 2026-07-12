@@ -22,7 +22,7 @@ import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
 import { workspacePageNumber } from '../../lib/workspace-commit';
 import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
-import { pruneFormValues } from '../../lib/form-overlay';
+import { pruneFormValues, valueShapeMatches } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
@@ -742,9 +742,28 @@ export function WorkspaceCanvasView({
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasForms({
       setFieldValue: (path, fieldName, value) => {
+        // Mirror exactly what the overlay controls can produce (review note:
+        // a looser harness could "pass" scenarios no real user can trigger):
+        // right shape for the type, and choice values within the options.
         const info = workspaceFormsRef.current.get(path);
         const field = info?.fields.find((f) => f.name === fieldName);
         if (!field || !field.editable) return false;
+        if (!valueShapeMatches(field.type, value)) return false;
+        if (
+          (field.type === 'radio' || field.type === 'dropdown') &&
+          typeof value === 'string' &&
+          value !== '' &&
+          !(field.options ?? []).includes(value)
+        ) {
+          return false;
+        }
+        if (
+          field.type === 'optionlist' &&
+          Array.isArray(value) &&
+          !value.every((v) => (field.options ?? []).includes(v))
+        ) {
+          return false;
+        }
         setFormValueRef.current(path, fieldName, value);
         return true;
       },

@@ -298,4 +298,37 @@ describe('readFormFields widget geometry (2n.4b)', () => {
     const m = byName((await readFormFields(await makeGeometryPdf())).fields);
     expect(m.get('ghost')!.widgets).toEqual([]);
   });
+
+  it('an [export, display] pair-shaped /Opt radio maps NO widget options (review #2)', async () => {
+    // pdf-lib filters non-string /Opt entries, reporting options: [] — it
+    // cannot fill such a field at all, so the overlay must not offer its
+    // widgets as clickable (a raw on-state "selection" would be silently
+    // refused by the fill: a fill that lies). engine/forms.py CAN fill these
+    // (2l), but the renderer path is pdf-lib by invariant.
+    const { PDFArray, PDFDict, PDFName, PDFString } = await import('pdf-lib');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([600, 800]);
+    const form = doc.getForm();
+    const color = form.createRadioGroup('pairopt');
+    color.addOptionToPage('red', page, { x: 50, y: 600, width: 15, height: 15 });
+    color.addOptionToPage('blue', page, { x: 90, y: 600, width: 15, height: 15 });
+    // Replace the flat-string /Opt with [export, display] pairs.
+    const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
+    const fields = acro.lookup(PDFName.of('Fields'), PDFArray);
+    const radio = fields.lookup(fields.size() - 1, PDFDict);
+    radio.set(
+      PDFName.of('Opt'),
+      doc.context.obj([
+        [PDFString.of('exp-red'), PDFString.of('Red')],
+        [PDFString.of('exp-blue'), PDFString.of('Blue')],
+      ]),
+    );
+    const bytes = await doc.save({ updateFieldAppearances: false });
+
+    const m = byName((await readFormFields(bytes)).fields);
+    const f = m.get('pairopt')!;
+    expect(f.options ?? []).toEqual([]); // pdf-lib's own (limited) view
+    expect(f.widgets).toHaveLength(2);
+    for (const w of f.widgets) expect(w.radioOption).toBeUndefined(); // inert, not lying
+  });
 });

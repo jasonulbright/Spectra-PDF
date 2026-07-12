@@ -82,9 +82,14 @@ export function useWorkspaceForms(
               }
               info = { fields, widgetsByPage };
             } catch {
-              // A file whose form can't be read simply has no overlay; the
-              // FormsPanel surfaces read errors, the canvas stays quiet.
-              info = { fields: [], widgetsByPage: new Map() };
+              // A failed re-read keeps the PREVIOUS good read published
+              // (review note: publishing empty fields here would make the
+              // pending-value pruning wipe values over a transient hiccup —
+              // the same hazard stale-while-revalidate exists to prevent). A
+              // file whose form was never readable simply has no overlay;
+              // the FormsPanel surfaces read errors, the canvas stays quiet.
+              const prev = cache.get(path);
+              info = prev ? prev.info : { fields: [], widgetsByPage: new Map() };
             }
             if (!alive || gen !== genRef.current) return; // superseded run
             cache.set(path, { buffer, proxy, info });

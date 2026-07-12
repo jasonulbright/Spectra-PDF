@@ -1,11 +1,15 @@
 // Pure on-canvas form-overlay helpers (2n.4b): widget projection into
 // display-normalized space and name-keyed pending-value pruning.
 import { describe, expect, it } from 'vitest';
+import { PDFDocument } from 'pdf-lib';
 import {
   projectFieldWidgets,
   pruneFormValues,
+  resolveFillTargets,
   valueShapeMatches,
 } from '../src/renderer/lib/form-overlay';
+import { readFormFields } from '../src/renderer/lib/forms';
+import { buildPdf } from '../src/renderer/lib/pdfx-build';
 import type { FormField, FormFieldValue } from '../src/renderer/lib/forms';
 
 const BOX = { x: 0, y: 0, width: 600, height: 800 };
@@ -112,6 +116,109 @@ describe('valueShapeMatches', () => {
     expect(valueShapeMatches('optionlist', 'a')).toBe(false);
     expect(valueShapeMatches('button', 'x')).toBe(false);
     expect(valueShapeMatches('signature', 'x')).toBe(false);
+  });
+});
+
+describe('resolveFillTargets (review-caught: fills must follow renamed fields)', () => {
+  const field = (name: string, rect: [number, number, number, number], over: Partial<FormField> = {}): FormField =>
+    textField({ name, widgets: [{ pageIndex: 0, rect, hidden: false }], ...over });
+
+  it('fills as-is when name and fingerprint both match (the no-import case)', () => {
+    const pre = [field('name', [50, 700, 250, 720])];
+    const post = [field('name', [50, 700, 250, 720])];
+    const r = resolveFillTargets(pre, post, { name: 'v' });
+    expect(r.resolved).toEqual({ name: 'v' });
+    expect(r.skipped).toEqual([]);
+  });
+
+  it("follows the field through a commit rename — never the imported document's same name", () => {
+    // Pre-commit: the target's own field 'name' at rect A. Post-commit: an
+    // imported field kept 'name' (different rect B) and the target's field
+    // was renamed 'name+1' (still rect A). The value must land on name+1.
+    const pre = [field('name', [50, 700, 250, 720])];
+    const post = [
+      field('name', [10, 10, 110, 40]), // the imported document's field
+      field('name+1', [50, 700, 250, 720]), // the field the user typed into
+    ];
+    const r = resolveFillTargets(pre, post, { name: 'typed value' });
+    expect(r.resolved).toEqual({ 'name+1': 'typed value' });
+    expect(r.skipped).toEqual([]);
+  });
+
+  it('refuses when two physically identical same-fingerprint fields exist', () => {
+    // A form imported into a copy of itself: name and name+1 with the SAME
+    // rect — no honest way to pick; refuse rather than guess.
+    const pre = [field('name', [50, 700, 250, 720])];
+    const post = [
+      field('name', [50, 700, 250, 720]),
+      field('name+1', [50, 700, 250, 720]),
+    ];
+    const r = resolveFillTargets(pre, post, { name: 'v' });
+    expect(r.resolved).toEqual({});
+    expect(r.skipped).toHaveLength(1);
+    expect(r.skipped[0].reason).toContain('identical fields');
+  });
+
+  it('an unrelated same-shape field never captures or blocks the fill', () => {
+    // The same text box repeated at the same position under different names
+    // (e.g. a per-page header field) shares the fingerprint but is NOT in
+    // the rename family — it must neither receive the value nor spook the
+    // resolver into refusing a clean same-name fill.
+    const pre = [field('name', [50, 700, 250, 720]), field('other', [50, 700, 250, 720])];
+    const post = [field('name', [50, 700, 250, 720]), field('other', [50, 700, 250, 720])];
+    const r = resolveFillTargets(pre, post, { name: 'v' });
+    expect(r.resolved).toEqual({ name: 'v' });
+    expect(r.skipped).toEqual([]);
+  });
+
+  it('refuses when the field vanished or changed shape during apply', () => {
+    const pre = [field('gone', [50, 700, 250, 720])];
+    const r = resolveFillTargets(pre, [], { gone: 'v' });
+    expect(r.resolved).toEqual({});
+    expect(r.skipped[0].reason).toContain('changed while applying');
+
+    // Fingerprint match but no longer editable — refused, not misfiled.
+    const pre2 = [field('locked', [50, 700, 250, 720])];
+    const post2 = [field('locked', [50, 700, 250, 720], { editable: false, readOnly: true })];
+    const r2 = resolveFillTargets(pre2, post2, { locked: 'v' });
+    expect(r2.resolved).toEqual({});
+    expect(r2.skipped[0].reason).toContain('no longer fillable');
+  });
+
+  it('falls back to a plain name match when there was no pre-commit read', () => {
+    const post = [field('fresh', [50, 700, 250, 720])];
+    const r = resolveFillTargets([], post, { fresh: 'v', ghost: 'x' });
+    expect(r.resolved).toEqual({ fresh: 'v' });
+    expect(r.skipped[0]).toMatchObject({ name: 'ghost' });
+  });
+
+  it('end to end: the reviewer misfile scenario resolves onto the renamed field', async () => {
+    // Two real form files with a colliding 'name' at DIFFERENT rects, merged
+    // through the real rebuild (the carry renames one), resolved through the
+    // real reader — the exact sequence handleFillFormValues runs.
+    async function makeForm(rect: { x: number; y: number; width: number; height: number }): Promise<Uint8Array> {
+      const doc = await PDFDocument.create();
+      const page = doc.addPage([600, 800]);
+      const f = doc.getForm().createTextField('name');
+      f.addToPage(page, rect);
+      return doc.save();
+    }
+    const target = await makeForm({ x: 50, y: 700, width: 200, height: 20 });
+    const imported = await makeForm({ x: 10, y: 10, width: 100, height: 30 });
+    const pre = (await readFormFields(target)).fields;
+    // Import lands BEFORE the target's page, so the imported contribution
+    // keeps 'name' and the target's field renames to 'name+1'.
+    const merged = await buildPdf([
+      { bytes: imported, sourceKey: 'import', pageIndex: 0 },
+      { bytes: target, sourceKey: 'target', pageIndex: 0 },
+    ]);
+    const post = (await readFormFields(merged)).fields;
+    const r = resolveFillTargets(pre, post, { name: 'typed value' });
+    expect(r.skipped).toEqual([]);
+    const [resolvedName] = Object.keys(r.resolved);
+    expect(resolvedName).not.toBe('name'); // NOT the imported document's field
+    const resolvedField = post.find((f) => f.name === resolvedName)!;
+    expect(resolvedField.widgets[0].rect[1]).toBeCloseTo(699.5, 0); // the target's rect
   });
 });
 

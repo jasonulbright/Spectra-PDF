@@ -34,8 +34,9 @@ import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
 import { setCommitGate } from './lib/commit-gate';
-import { fillFormFields } from './lib/forms';
+import { fillFormFields, readFormFields } from './lib/forms';
 import type { FormFieldValue } from './lib/forms';
+import { resolveFillTargets } from './lib/form-overlay';
 import { addFormField } from './lib/form-authoring';
 import type { NewFieldSpec } from './lib/form-authoring';
 import { DropZone } from './components/DropZone';
@@ -447,14 +448,28 @@ function AppContent(): React.ReactElement {
   // snapshot (gate flushes pending page edits, so the fill reads the
   // committed bytes) → read → fillFormFields → write → UPDATE_FILE. The
   // page count is re-read via reloadFile rather than trusted from the
-  // pre-gate closure — the gate's commit may have just changed it.
+  // pre-gate closure — the gate's commit may have just changed it. The
+  // gate's commit can ALSO rename fields (a pending import's name collision,
+  // 2n.4(a)) — pending names re-resolve against the post-commit fields by
+  // fingerprint, all-or-nothing per file (review-caught HIGH: a name-only
+  // fill could silently land on the imported document's same-named field).
   const handleFillFormValues = useCallback(
     async (path: string, values: Record<string, FormFieldValue>) => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
+      // The fields the user typed against, from the CURRENT (pre-commit)
+      // buffer — read BEFORE the snapshot runs the gate.
+      const preFields = f.buffer ? (await readFormFields(f.buffer)).fields : [];
       const snapshotPath = await file.snapshot(f.workingPath);
       const bytes = await file.readBuffer(f.workingPath);
-      const filled = await fillFormFields(bytes, values);
+      const postFields = (await readFormFields(bytes)).fields;
+      const { resolved, skipped } = resolveFillTargets(preFields, postFields, values);
+      if (skipped.length > 0) {
+        // Fail closed for the whole file — nothing written, the values stay
+        // pending on the canvas, the banner carries the reasons.
+        throw new Error(skipped.map((s) => `"${s.name}": ${s.reason}`).join('; '));
+      }
+      const filled = await fillFormFields(bytes, resolved);
       await file.writeBuffer(f.workingPath, filled);
       const result = await reloadFile(path);
       if (!result) throw new Error('The file is no longer open.');

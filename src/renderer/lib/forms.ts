@@ -215,9 +215,18 @@ function widgetPlacements(
       if (on !== null) {
         // pdf-lib-authored radios use /Opt-indexed on-states ('0', '1', …);
         // others use the option name itself (engine/forms.py's convention
-        // note from 2l).
+        // note from 2l). The mapped option must actually be one of the
+        // field's fillable options, or the widget stays unmapped and the
+        // overlay renders it inert (review-caught: an [export, display]
+        // pair-shaped /Opt makes pdf-lib report options: [] — the old raw
+        // on-state fallback produced a clickable widget whose "selection"
+        // the fill then silently refused, a fill that lies; pdf-lib cannot
+        // fill such fields at all, so honest = visibly not offerable).
+        const mapped = hasOpt && /^\d+$/.test(on) ? classified.options?.[Number(on)] : on;
         radioOption =
-          hasOpt && /^\d+$/.test(on) ? classified.options?.[Number(on)] ?? on : on;
+          mapped !== undefined && (classified.options ?? []).includes(mapped)
+            ? mapped
+            : undefined;
       }
     }
     out.push({
