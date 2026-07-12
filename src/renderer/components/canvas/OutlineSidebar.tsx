@@ -5,7 +5,7 @@ import { file } from '../../lib/tauri-bridge';
 import {
   flattenOutline,
   restRows,
-  clampDropDepth,
+  projectDrop,
   moveOutlineNode,
   isPathPrefix,
   outlinesEqual,
@@ -132,8 +132,10 @@ export function OutlineSidebar({
   // gap is then a cheap number scan per pointermove instead of an O(N)
   // re-flatten + N live DOM queries every event (outlines reach the engine's
   // 10k-node cap; usePageDrag likewise hit-tests precomputed geometry).
-  const dragCache = useRef<{ rest: FlatNode[]; mids: number[] } | null>(null);
-  const measureRest = (path: number[]): { rest: FlatNode[]; mids: number[] } => {
+  const dragCache = useRef<{ rest: FlatNode[]; mids: number[]; scrollTop0: number } | null>(null);
+  const measureRest = (
+    path: number[],
+  ): { rest: FlatNode[]; mids: number[]; scrollTop0: number } => {
     const rest = restRows(flattenOutline(nodesRef.current), path);
     const listEl = listRef.current;
     const mids = rest.map((f) => {
@@ -141,19 +143,23 @@ export function OutlineSidebar({
       const r = el?.getBoundingClientRect();
       return r ? r.top + r.height / 2 : Number.POSITIVE_INFINITY;
     });
-    return { rest, mids };
+    // Cache the scroll position too: the mids are viewport-relative, so a
+    // mid-drag scroll shifts every row while the live pointer keeps tracking
+    // the cursor — projectFromCache compensates with the scroll delta.
+    return { rest, mids, scrollTop0: listEl?.scrollTop ?? 0 };
   };
 
   const projectFromCache = (
     s: DragState,
-    cache: { rest: FlatNode[]; mids: number[] },
+    cache: { rest: FlatNode[]; mids: number[]; scrollTop0: number },
     clientX: number,
     clientY: number,
   ): { overIndex: number; depth: number } => {
-    let overIndex = 0;
-    for (const m of cache.mids) if (clientY > m) overIndex++;
+    // Rows moved up by (currentScroll - scrollTop0) since measure; add that
+    // delta to the pointer so it's compared in the mids' captured frame.
+    const y = clientY + ((listRef.current?.scrollTop ?? 0) - cache.scrollTop0);
     const desired = s.path.length - 1 + Math.round((clientX - s.startX) / INDENT_PX);
-    return { overIndex, depth: clampDropDepth(cache.rest, overIndex, desired) };
+    return projectDrop(cache.rest, cache.mids, y, desired);
   };
 
   function onPointerMove(e: PointerEvent): void {

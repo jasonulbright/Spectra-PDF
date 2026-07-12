@@ -4,6 +4,7 @@ import {
   isPathPrefix,
   restRows,
   clampDropDepth,
+  projectDrop,
   moveOutlineNode,
   outlinesEqual,
   type OutlineNode,
@@ -122,6 +123,35 @@ describe('moveOutlineNode', () => {
     const snapshot = ser(tree);
     moveOutlineNode(tree, [1], 2, 1);
     expect(ser(tree)).toBe(snapshot); // original intact
+  });
+});
+
+describe('projectDrop (gap + depth from cached midpoints)', () => {
+  // Lift C from [A[B], C] → rest = [A(d0), B(d1)]; give them content-frame mids.
+  const tree = [n('A', [n('B')]), n('C')];
+  const rest = restRows(flattenOutline(tree), [1]);
+  const mids = [10, 30]; // A midpoint = 10, B midpoint = 30
+
+  it('counts the midpoints above the pointer for the insertion gap', () => {
+    expect(projectDrop(rest, mids, 5, 0).overIndex).toBe(0); // above A
+    expect(projectDrop(rest, mids, 20, 0).overIndex).toBe(1); // between A and B
+    expect(projectDrop(rest, mids, 40, 0).overIndex).toBe(2); // below B
+  });
+
+  it('a scroll-compensated pointer y shifts the gap (review #3 regression)', () => {
+    // The caller adds the mid-drag scroll delta to clientY before calling. Same
+    // cursor, but after scrolling the list down 25px the compensated y is +25,
+    // moving the gap from "above A" to "between A and B" — without this the
+    // cached (viewport) mids would mis-target the drop once the list scrolls.
+    expect(projectDrop(rest, mids, 5, 0).overIndex).toBe(0);
+    expect(projectDrop(rest, mids, 5 + 25, 0).overIndex).toBe(1);
+  });
+
+  it('clamps the desired depth to a valid nesting', () => {
+    expect(projectDrop(rest, mids, 40, 9).depth).toBe(2); // capped at B.depth+1
+    expect(projectDrop(rest, mids, 40, -9).depth).toBe(0); // floored at 0
+    // Matches the standalone clamp for the same gap.
+    expect(projectDrop(rest, mids, 40, 9).depth).toBe(clampDropDepth(rest, 2, 9));
   });
 });
 

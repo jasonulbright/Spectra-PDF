@@ -83,6 +83,23 @@ export function clampDropDepth(rest: FlatNode[], overIndex: number, desiredDepth
   return Math.max(minDepth, Math.min(desiredDepth, maxDepth));
 }
 
+/** Resolve a drop from cached row midpoints. `y` is the pointer's vertical
+ * position in the SAME frame the mids were captured in — the caller adds the
+ * mid-drag scroll delta so scrolling the list doesn't skew the gap (the mids
+ * are cached once at drag start and would otherwise go stale). `desiredDepth`
+ * is the raw depth from the horizontal drag; it's clamped to a valid nesting.
+ * Pure so the gap/scroll/clamp math is unit-testable without a live DOM. */
+export function projectDrop(
+  rest: FlatNode[],
+  mids: number[],
+  y: number,
+  desiredDepth: number,
+): { overIndex: number; depth: number } {
+  let overIndex = 0;
+  for (const m of mids) if (y > m) overIndex++;
+  return { overIndex, depth: clampDropDepth(rest, overIndex, desiredDepth) };
+}
+
 /** Rebuild a tree from a valid pre-order (node, depth) sequence. Each node is
  * cloned (fresh `children`) so the source tree is never mutated; opaque fields
  * survive via spread. Requires every item's depth ≤ previous depth + 1. */
