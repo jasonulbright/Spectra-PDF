@@ -266,33 +266,31 @@ describe('wrapPages', () => {
 });
 
 describe('docSize reserves the add-page ghost row (2n.3)', () => {
-  const letterW = pageDisplayWidth(...LETTER);
-  const perRow = Math.floor((MAX_ROW_WIDTH + PAGE_GAP) / (letterW + PAGE_GAP));
+  it('wraps the trailing ghost to a reserved extra row when the last row is nearly full', () => {
+    // A single page whose display width leaves LESS than (PAGE_GAP +
+    // ADD_GHOST_WIDTH) slack — so the trailing "+" ghost can't share the row
+    // and wraps to a second row the card MUST reserve, else the next card
+    // overlaps. This is the exact regressed scenario (pageDisplayWidth =
+    // round(BASE_PAGE_HEIGHT * w/h), so h = BASE_PAGE_HEIGHT gives width == w).
+    const tight: [number, number] = [MAX_ROW_WIDTH - 30, BASE_PAGE_HEIGHT];
+    const rowW = pageDisplayWidth(...tight);
+    // Assert the fixture really lands in the wrap zone (fails loudly if a
+    // constant change moves the boundary), so this test can't silently pass
+    // without exercising the ghost-wrap branch.
+    expect(rowW).toBeLessThanOrEqual(MAX_ROW_WIDTH); // the page itself fits on one row
+    expect(rowW + PAGE_GAP + ADD_GHOST_WIDTH).toBeGreaterThan(MAX_ROW_WIDTH); // ghost does NOT fit
 
-  it('reserves an extra row exactly when the trailing ghost cannot fit on the last page row', () => {
-    const lastRowWidth = perRow * letterW + (perRow - 1) * PAGE_GAP;
-    const ghostFits = lastRowWidth + PAGE_GAP + ADD_GHOST_WIDTH <= MAX_ROW_WIDTH;
-
-    const full = computeLayout([
-      makeDoc('a', 'a.pdf', Array.from({ length: perRow }, () => LETTER)),
-    ]).items[0];
-    const single = computeLayout([makeDoc('b', 'b.pdf', [LETTER])]).items[0];
-
-    if (ghostFits) {
-      expect(full.height).toBe(single.height); // ghost joins the full row — no extra row
-    } else {
-      // ghost wraps → the card reserves one more page row than a 1-page doc, so
-      // the next card (positioned by this height) can't overlap it.
-      expect(full.height).toBe(single.height + BASE_PAGE_HEIGHT + ROW_GAP);
-    }
+    const wrapped = computeLayout([makeDoc('a', 'a.pdf', [tight])]).items[0];
+    const single = computeLayout([makeDoc('b', 'b.pdf', [LETTER])]).items[0]; // ghost fits → 1 row
+    // The wrapped-ghost card is exactly one page-row (+ its gap) taller.
+    expect(wrapped.height).toBe(single.height + BASE_PAGE_HEIGHT + ROW_GAP);
   });
 
-  it('a two-page-row document is strictly taller than a single-page one', () => {
-    const twoRows = computeLayout([
-      makeDoc('a', 'a.pdf', Array.from({ length: perRow + 1 }, () => LETTER)),
-    ]).items[0];
-    const single = computeLayout([makeDoc('b', 'b.pdf', [LETTER])]).items[0];
-    expect(twoRows.height).toBeGreaterThan(single.height);
+  it('does not reserve an extra row when the ghost fits on the last page row', () => {
+    const letterW = pageDisplayWidth(...LETTER);
+    expect(letterW + PAGE_GAP + ADD_GHOST_WIDTH).toBeLessThanOrEqual(MAX_ROW_WIDTH); // ghost fits
+    const [item] = computeLayout([makeDoc('a', 'a.pdf', [LETTER])]).items;
+    expect(item.height).toBe(DOC_HEIGHT); // single-row card, ghost shares the row
   });
 });
 
