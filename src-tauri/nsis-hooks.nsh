@@ -30,8 +30,8 @@ Function OpenPdfStudioGuiInit
       $\r$\n\
       SILENT INSTALL:$\r$\n\
       $\r$\n\
-      $\"Open PDF Studio Setup.exe$\" /S$\r$\n\
-      $\"Open PDF Studio Setup.exe$\" /S /D=C:\Apps\OpenPDFStudio$\r$\n\
+      $\"Open PDF Studio_X.Y.Z_x64-setup.exe$\" /S$\r$\n\
+      $\"Open PDF Studio_X.Y.Z_x64-setup.exe$\" /S /D=C:\Apps\OpenPDFStudio$\r$\n\
       $\r$\n\
       Auto-update is disabled automatically during$\r$\n\
       silent install (HKLM\SOFTWARE\Open PDF Studio).$\r$\n\
