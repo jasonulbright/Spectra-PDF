@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getSettings } from '../panels/SettingsPanel';
+import { ToolIcon } from './tool-icons';
 
 export type Operation =
   | 'split'
@@ -120,12 +121,14 @@ export function Sidebar({ active, onSelect }: SidebarProps): React.ReactElement 
               <button
                 key={op.id}
                 onClick={() => onSelect(op.id)}
-                className={`w-full px-6 py-1.5 text-left text-sm transition-colors ${
+                className={`w-full px-6 py-1.5 text-left text-sm transition-colors flex items-center gap-2.5 ${
                   active === op.id
                     ? 'bg-neutral-700 text-white'
                     : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
                 }`}
               >
+                {/* currentColor: the glyph follows the button's state colors */}
+                <ToolIcon op={op.id} className="shrink-0 opacity-75" />
                 {op.label}
               </button>
             ))}
