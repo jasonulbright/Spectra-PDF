@@ -388,6 +388,81 @@ describe('multi-source rebuilds (the import machinery)', () => {
     expect([...dr.keys()].sort()).toEqual(['Emb', 'Emb_1']);
   });
 
+  // Non-simple subtypes hide their rendering data where a top-level check
+  // can't see it (review round 2): Type0/CID fonts keep /FontDescriptor
+  // nested under /DescendantFonts; Type3 fonts have no descriptor at all —
+  // their rendering IS their /CharProcs. The allow-list must refuse both.
+  async function withRawDrFont(
+    fieldName: string,
+    makeFont: (doc: PDFDocument) => unknown,
+  ): Promise<Uint8Array> {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([600, 800]);
+    const form = doc.getForm();
+    const f = form.createTextField(fieldName);
+    f.setText('x');
+    f.addToPage(page, { x: 50, y: 700, width: 200, height: 20 });
+    const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
+    acro.set(
+      PDFName.of('DR'),
+      doc.context.obj({ Font: { C0: makeFont(doc) } }),
+    );
+    const fields = acro.lookup(PDFName.of('Fields'), PDFArray);
+    fields.lookup(0, PDFDict).set(PDFName.of('DA'), PDFHexString.fromText('/C0 10 Tf 0 g'));
+    return doc.save({ updateFieldAppearances: false });
+  }
+
+  it('composite (Type0) fonts never count as equivalent — descriptor hides in DescendantFonts (review round 2)', async () => {
+    const type0 = (marker: string) => (doc: PDFDocument) => {
+      const descriptor = doc.context.register(
+        doc.context.obj({ Type: 'FontDescriptor', FontName: marker }),
+      );
+      const descendant = doc.context.register(
+        doc.context.obj({
+          Type: 'Font',
+          Subtype: 'CIDFontType2',
+          BaseFont: 'SameCJK',
+          FontDescriptor: descriptor,
+        }),
+      );
+      return doc.context.register(
+        doc.context.obj({
+          Type: 'Font',
+          Subtype: 'Type0',
+          BaseFont: 'SameCJK',
+          Encoding: 'Identity-H',
+          DescendantFonts: [descendant],
+        }),
+      );
+    };
+    const a = await withRawDrFont('fa', type0('FaceA'));
+    const b = await withRawDrFont('fb', type0('FaceB'));
+    const rebuilt = await buildPdf([...pagesOf(a, 'a', [0]), ...pagesOf(b, 'b', [0])]);
+    const dr = await drBaseFonts(rebuilt);
+    expect([...dr.keys()].sort()).toEqual(['C0', 'C0_1']);
+    const da = await daByField(rebuilt);
+    expect(da.get('fb')).toBe('/C0_1 10 Tf 0 g');
+  });
+
+  it('Type3 fonts never count as equivalent — rendering lives in /CharProcs (review round 2)', async () => {
+    const type3 = (proc: string) => (doc: PDFDocument) =>
+      doc.context.register(
+        doc.context.obj({
+          Type: 'Font',
+          Subtype: 'Type3',
+          BaseFont: 'SameT3',
+          Encoding: 'WinAnsiEncoding',
+          FontMatrix: [0.001, 0, 0, 0.001, 0, 0],
+          CharProcs: { a: doc.context.register(doc.context.stream(proc)) },
+        }),
+      );
+    const a = await withRawDrFont('fa', type3('0 0 m 10 10 l S'));
+    const b = await withRawDrFont('fb', type3('0 10 m 10 0 l S'));
+    const rebuilt = await buildPdf([...pagesOf(a, 'a', [0]), ...pagesOf(b, 'b', [0])]);
+    const dr = await drBaseFonts(rebuilt);
+    expect([...dr.keys()].sort()).toEqual(['C0', 'C0_1']);
+  });
+
   it('pushes a later source\'s differing AcroForm-level /DA down onto its fields', async () => {
     async function withAcroDa(fieldName: string, da: string): Promise<Uint8Array> {
       const doc = await PDFDocument.create();

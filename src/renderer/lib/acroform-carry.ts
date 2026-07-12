@@ -282,19 +282,39 @@ function rewriteDaFonts(da: string, renames: Map<string, string>): string {
   );
 }
 
-// Two /DR font entries are interchangeable only when BaseFont, Subtype, AND
-// Encoding all agree and neither embeds a font program — the ubiquitous case
-// of every source defining /Helv as unembedded WinAnsi Helvetica. Anything
-// else stays "different" and gets renamed; claiming a wrong face — or a
-// wrong glyph MAP (review-caught: same-named Helvetica entries differing
-// only in /Encoding, e.g. a custom /Differences remap, were deduplicated
-// onto the first source's encoding, corrupting the other field's glyphs on
-// the next appearance regeneration) — is the failure mode 2l's review
-// flagged as HIGH.
+// Font subtypes that MAY be treated as interchangeable when everything else
+// agrees — the simple, metadata-describable kinds. An ALLOW-list, not a
+// deny-list (review-caught, round 2): rendering-defining data hides in
+// subtype-specific places a top-level check can't see — Type0/CID fonts
+// carry /FontDescriptor nested under /DescendantFonts (two different
+// embedded CJK fonts deduped to one entry produce GARBLED index-based
+// glyphs, not just a wrong face), and Type3 fonts have no descriptor at all
+// (their rendering IS their /CharProcs streams). Any subtype not listed —
+// including future/unknown ones — defaults to "never equivalent": a
+// duplicate /DR entry is bloat; a false merge corrupts a field's glyphs.
+const SIMPLE_FONT_SUBTYPES = new Set([
+  PDFName.of('Type1'),
+  PDFName.of('TrueType'),
+  PDFName.of('MMType1'),
+]);
+
+// Two /DR font entries are interchangeable only when they are SIMPLE fonts
+// (allow-list above) whose BaseFont, Subtype, and Encoding all agree and
+// neither embeds a font program — the ubiquitous case of every source
+// defining /Helv as unembedded WinAnsi Helvetica. Anything else stays
+// "different" and gets renamed; claiming a wrong face — or a wrong glyph MAP
+// (review-caught: same-named Helvetica entries differing only in /Encoding,
+// e.g. a custom /Differences remap, were deduplicated onto the first
+// source's encoding) — is the failure mode 2l's review flagged as HIGH.
 function fontsEquivalent(output: PDFDocument, a: unknown, b: unknown): boolean {
   const da = asDict(output, a);
   const db = asDict(output, b);
   if (!da || !db) return false;
+  const subA = da.get(NAME_SUBTYPE);
+  const subB = db.get(NAME_SUBTYPE);
+  if (!(subA instanceof PDFName) || subB !== subA || !SIMPLE_FONT_SUBTYPES.has(subA)) {
+    return false;
+  }
   // An embedded font program is never assumed equivalent to anything — only
   // the subset-tag naming convention would distinguish two, and that is a
   // convention, not a guarantee.
@@ -313,15 +333,7 @@ function fontsEquivalent(output: PDFDocument, a: unknown, b: unknown): boolean {
   if (!encodingsMatch) return false;
   const baseA = da.get(NAME_BASEFONT);
   const baseB = db.get(NAME_BASEFONT);
-  const subA = da.get(NAME_SUBTYPE);
-  const subB = db.get(NAME_SUBTYPE);
-  return (
-    baseA instanceof PDFName &&
-    baseB instanceof PDFName &&
-    baseA === baseB &&
-    subA instanceof PDFName &&
-    subB === subA
-  );
+  return baseA instanceof PDFName && baseB instanceof PDFName && baseA === baseB;
 }
 
 // Does any field in this root's tree resolve to /FT /Sig (with inheritance —
