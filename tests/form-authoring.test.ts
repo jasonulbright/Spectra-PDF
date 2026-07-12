@@ -156,4 +156,35 @@ describe('addFormField', () => {
       addFormField(base, { name: 'a.b', type: 'text', pageIndex: 0, rect: [0, 0, 10, 10] }),
     ).rejects.toThrow(/cannot contain/);
   });
+
+  it('refuses a name held by a NON-TERMINAL hierarchy parent (review-caught)', async () => {
+    // pdf-lib's getFields() is terminal-only and cannot see a pure hierarchy
+    // node; the hand-rolled signature path has no pdf-lib duplicate backstop,
+    // so before the raw top-level /T check it would have created a same-/T
+    // sibling next to the parent — two top-level fields sharing a name, which
+    // the spec forbids.
+    const { PDFArray, PDFDict, PDFHexString, PDFName } = await import('pdf-lib');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([600, 800]);
+    const form = doc.getForm();
+    // A real child so the parent is a genuine hierarchy node.
+    form.createTextField('address.street').addToPage(page, { x: 50, y: 700, width: 200, height: 20 });
+    const bytes = await doc.save();
+    // Confirm the parent is top-level and invisible to getFields' terminal view.
+    const reread = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const acro = reread.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
+    const tops = acro.lookup(PDFName.of('Fields'), PDFArray);
+    const topT = (tops.lookup(0, PDFDict).get(PDFName.of('T')) as InstanceType<typeof PDFHexString>);
+    expect(String(topT.decodeText ? topT.decodeText() : topT)).toBe('address');
+
+    // The signature path (no pdf-lib backstop) must refuse via OUR check…
+    await expect(
+      addFormField(bytes, { name: 'address', type: 'signature', pageIndex: 0, rect: [10, 10, 110, 50] }),
+    ).rejects.toThrow(/A field named "address" already exists/);
+    // …and the pdf-lib-authored types refuse through the same message (ours,
+    // not pdf-lib's internal FieldAlreadyExistsError).
+    await expect(
+      addFormField(bytes, { name: 'address', type: 'text', pageIndex: 0, rect: [10, 10, 110, 50] }),
+    ).rejects.toThrow(/A field named "address" already exists/);
+  });
 });

@@ -12,7 +12,7 @@
 // redaction marks, and signature placement, none of which have CLI arms; the
 // CLI's forms parity surface is the fill/read/flatten TRANSFORM (2l's
 // `forms` subcommand), which is unchanged by this.
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFString } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
 
 export type NewFieldType =
@@ -33,6 +33,28 @@ export interface NewFieldSpec {
 }
 
 const CHOICE_TYPES: ReadonlySet<NewFieldType> = new Set(['radio', 'dropdown', 'optionlist']);
+
+// The /T of every TOP-LEVEL /AcroForm /Fields entry — including non-terminal
+// hierarchy parents, which pdf-lib's getFields() (terminal-only) cannot see.
+// Every field this module creates is a new top-level root, so top level is
+// the only place a collision can occur; the review-caught gap was exactly a
+// signature field (the hand-rolled path, which bypasses pdf-lib's own
+// FieldAlreadyExistsError machinery) landing beside a same-named parent node
+// — two same-/T siblings, which the spec forbids.
+function topLevelFieldNames(doc: PDFDocument): Set<string> {
+  const names = new Set<string>();
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  const fields = acro?.lookupMaybe(PDFName.of('Fields'), PDFArray);
+  if (!fields) return names;
+  for (let i = 0; i < fields.size(); i++) {
+    const entry = fields.get(i);
+    const dict = entry instanceof PDFRef ? doc.context.lookup(entry) : entry;
+    if (!(dict instanceof PDFDict)) continue;
+    const t = dict.get(PDFName.of('T'));
+    if (t instanceof PDFString || t instanceof PDFHexString) names.add(t.decodeText());
+  }
+  return names;
+}
 
 // Validate a spec against the document BEFORE any mutation (fail-closed,
 // everything reported at once — the engine ops' posture).
@@ -57,13 +79,19 @@ function validateSpec(doc: PDFDocument, spec: NewFieldSpec): void {
     }
   }
   if (name) {
-    // Duplicate fully-qualified names would make readers treat two fields as
-    // one logical field. getFields() enumerates every terminal field.
-    const existing = doc.getForm().getFields();
-    if (existing.some((f) => f.getName() === name)) {
+    // Duplicate names would make readers treat two fields as one logical
+    // field (or violate sibling /T uniqueness outright). Checked against the
+    // RAW top-level /Fields — not getFields(), whose terminal-only view
+    // misses non-terminal hierarchy parents (review-caught: the hand-rolled
+    // signature path has no pdf-lib backstop and would have created a
+    // same-/T sibling next to such a parent).
+    if (topLevelFieldNames(doc).has(name)) {
       problems.push(`A field named "${name}" already exists.`);
     }
   }
+  // Ensure /AcroForm exists (getForm() lazily creates it, and strips /XFA —
+  // the standing pure-AcroForm posture); addSignatureField relies on it.
+  doc.getForm();
   if (problems.length > 0) throw new Error(problems.join(' '));
 }
 
