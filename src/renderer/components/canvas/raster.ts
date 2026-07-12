@@ -13,6 +13,52 @@ export const logRenderError =
     }
   };
 
+// ── Re-blit batching ─────────────────────────────────────────────────────
+// A buffer swap (commit, undo, refresh) re-renders every near page of the
+// affected file; pdf.js completions arrive staggered over hundreds of ms,
+// and blitting each as it lands reads as an abrupt-swap RIPPLE across the
+// strip (probe-classified in 18-phase3-polish.md — element identity and
+// readiness survive a reorder commit; only pixels swap). Completed
+// re-blits are therefore held briefly and flushed together inside one
+// animation frame: the strip keeps its previous pixels a beat longer,
+// then swaps in one visual step. First paints (fresh canvas, fade-in
+// pending) are never held — scroll-in latency is untouched.
+
+/** Flush when this long passes with no new completion arriving. */
+export const REBLIT_QUIET_MS = 120;
+/** Never hold the first queued re-blit longer than this (stragglers). */
+export const REBLIT_MAX_HOLD_MS = 600;
+
+let reblitQueue: Array<() => void> = [];
+let reblitTimer: ReturnType<typeof setTimeout> | null = null;
+let reblitFirstArrival = 0;
+
+function flushReblits(): void {
+  if (reblitTimer !== null) {
+    clearTimeout(reblitTimer);
+    reblitTimer = null;
+  }
+  const batch = reblitQueue;
+  reblitQueue = [];
+  if (batch.length === 0) return;
+  requestAnimationFrame(() => {
+    for (const blit of batch) blit();
+  });
+}
+
+export function scheduleReblit(blit: () => void): void {
+  const now = Date.now();
+  if (reblitQueue.length === 0) reblitFirstArrival = now;
+  reblitQueue.push(blit);
+  if (reblitTimer !== null) clearTimeout(reblitTimer);
+  const heldFor = now - reblitFirstArrival;
+  if (heldFor >= REBLIT_MAX_HOLD_MS) {
+    flushReblits();
+    return;
+  }
+  reblitTimer = setTimeout(flushReblits, Math.min(REBLIT_QUIET_MS, REBLIT_MAX_HOLD_MS - heldFor));
+}
+
 interface BaseParams {
   pdf: PDFDocumentProxy;
   pageNumber: number;
@@ -22,6 +68,9 @@ interface BaseParams {
   isCancelled: () => boolean;
   onTask: (task: RenderTask) => void;
   onReady: () => void;
+  /** True when this canvas already shows content (a buffer-swap re-render);
+   *  routes the blit through the shared batcher instead of landing solo. */
+  reblit?: boolean;
 }
 
 export async function renderBase({
@@ -33,6 +82,7 @@ export async function renderBase({
   isCancelled,
   onTask,
   onReady,
+  reblit = false,
 }: BaseParams): Promise<void> {
   const page = await pdf.getPage(pageNumber);
   if (isCancelled()) return;
@@ -45,12 +95,22 @@ export async function renderBase({
   onTask(task);
   await task.promise;
   if (isCancelled()) return;
-  const canvas = baseRef.current;
-  if (!canvas) return;
-  canvas.width = off.width;
-  canvas.height = off.height;
-  canvas.getContext('2d')!.drawImage(off, 0, 0);
-  onReady();
+  const paint = (): void => {
+    // Re-checked at flush time — the effect may have been cancelled (or the
+    // cell unmounted) while the blit sat in the batch window.
+    if (isCancelled()) return;
+    const canvas = baseRef.current;
+    if (!canvas) return;
+    canvas.width = off.width;
+    canvas.height = off.height;
+    canvas.getContext('2d')!.drawImage(off, 0, 0);
+    onReady();
+  };
+  if (reblit) {
+    scheduleReblit(paint);
+  } else {
+    paint();
+  }
 }
 
 interface DetailGeometry {

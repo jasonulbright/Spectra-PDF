@@ -35,6 +35,11 @@ function PageViewImpl({
   const detailRef = useRef<HTMLCanvasElement>(null);
   const [near, setNear] = useState(eager);
   const [baseReady, setBaseReady] = useState(false);
+  // Ref mirror of "has ever painted" — read by the render effect without
+  // joining its dep array (a state read there would re-trigger renders on
+  // the ready flip). Once true, later renders are buffer-swap re-blits and
+  // route through the shared batcher (see raster.ts).
+  const hasPaintedRef = useRef(false);
 
   useEffect(() => {
     if (eager) return;
@@ -65,7 +70,11 @@ function PageViewImpl({
       baseRef,
       isCancelled: () => cancelled,
       onTask: (t) => (task = t),
-      onReady: () => setBaseReady(true),
+      onReady: () => {
+        hasPaintedRef.current = true;
+        setBaseReady(true);
+      },
+      reblit: hasPaintedRef.current,
     }).catch(logRenderError(`Failed to render page ${pageNumber}`));
     return () => {
       cancelled = true;
