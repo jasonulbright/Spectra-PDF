@@ -1,8 +1,8 @@
-# Spectra PDF
+# Open PDF Studio
 
 Modern, open-source PDF manipulation studio for Windows. Tauri v2 + React, with an embedded Python engine and vendored upstream Ghostscript (AGPL-3.0). No ads, no telemetry, no upsells. WebView2 prerequisite (ships with Windows 10/11).
 
-![Spectra PDF](docs/images/screenshot_dark_clean.png)
+![Open PDF Studio](docs/images/screenshot_dark_clean.png)
 
 ## Features
 
@@ -38,65 +38,65 @@ Modern, open-source PDF manipulation studio for Windows. Tauri v2 + React, with 
 
 ## Command Line
 
-Use `spectrapdf.exe /?` to see all subcommands and flags:
+Use `openpdfstudio.exe /?` to see all subcommands and flags:
 
 ![CLI Help](docs/images/cmd_switches.png)
 
-When invoked with a subcommand, Spectra PDF runs headless — no window, same engine.
+When invoked with a subcommand, Open PDF Studio runs headless — no window, same engine.
 
 ```bash
 # Compress
-spectrapdf compress input.pdf -o compressed.pdf --quality ebook
+openpdfstudio compress input.pdf -o compressed.pdf --quality ebook
 
 # Merge
-spectrapdf merge a.pdf b.pdf c.pdf -o merged.pdf
+openpdfstudio merge a.pdf b.pdf c.pdf -o merged.pdf
 
 # Rotate
-spectrapdf rotate input.pdf -o rotated.pdf --angle 90 --pages 1,3,5
+openpdfstudio rotate input.pdf -o rotated.pdf --angle 90 --pages 1,3,5
 
 # Split
-spectrapdf split input.pdf -o output_dir/ --ranges "1-3,5-7"
+openpdfstudio split input.pdf -o output_dir/ --ranges "1-3,5-7"
 
 # Encrypt / Decrypt
-spectrapdf encrypt input.pdf -o encrypted.pdf --password secret
-spectrapdf decrypt encrypted.pdf -o decrypted.pdf --password secret
+openpdfstudio encrypt input.pdf -o encrypted.pdf --password secret
+openpdfstudio decrypt encrypted.pdf -o decrypted.pdf --password secret
 
 # PDF/A
-spectrapdf pdfa input.pdf -o archive.pdf --level 2b
+openpdfstudio pdfa input.pdf -o archive.pdf --level 2b
 
 # Extract text
-spectrapdf extract-text input.pdf --pages 1,2,3
+openpdfstudio extract-text input.pdf --pages 1,2,3
 
 # Delete pages
-spectrapdf delete input.pdf -o trimmed.pdf --pages 3,7
+openpdfstudio delete input.pdf -o trimmed.pdf --pages 3,7
 
 # Metadata (read)
-spectrapdf metadata input.pdf
+openpdfstudio metadata input.pdf
 
 # Metadata (write)
-spectrapdf metadata input.pdf -o updated.pdf --title "New Title" --author "Name"
+openpdfstudio metadata input.pdf -o updated.pdf --title "New Title" --author "Name"
 
 # Metadata (strip all)
-spectrapdf metadata input.pdf --strip -o stripped.pdf
+openpdfstudio metadata input.pdf --strip -o stripped.pdf
 
 # Grayscale
-spectrapdf grayscale input.pdf -o grayscale.pdf
+openpdfstudio grayscale input.pdf -o grayscale.pdf
 
 # Optimize (linearize + strip metadata + compress streams)
-spectrapdf optimize input.pdf -o optimized.pdf --linearize --strip-metadata --compress-streams
+openpdfstudio optimize input.pdf -o optimized.pdf --linearize --strip-metadata --compress-streams
 
 # PDF version
-spectrapdf pdf-version input.pdf -o out.pdf --version 1.7
+openpdfstudio pdf-version input.pdf -o out.pdf --version 1.7
 
 # Compress with custom DPI
-spectrapdf compress input.pdf -o compressed.pdf --dpi 200
+openpdfstudio compress input.pdf -o compressed.pdf --dpi 200
 
 # Batch — process every PDF in a directory
-spectrapdf batch C:\pdfs\ -o C:\out\ compress --quality ebook
-spectrapdf batch C:\pdfs\ -o C:\out\ rotate --angle 90
-spectrapdf batch C:\pdfs\ -o C:\out\ pdfa --level 2b
-spectrapdf batch C:\pdfs\ -o C:\out\ grayscale
-spectrapdf batch C:\pdfs\ -o C:\out\ optimize --strip-metadata
+openpdfstudio batch C:\pdfs\ -o C:\out\ compress --quality ebook
+openpdfstudio batch C:\pdfs\ -o C:\out\ rotate --angle 90
+openpdfstudio batch C:\pdfs\ -o C:\out\ pdfa --level 2b
+openpdfstudio batch C:\pdfs\ -o C:\out\ grayscale
+openpdfstudio batch C:\pdfs\ -o C:\out\ optimize --strip-metadata
 ```
 
 Results are JSON on stdout. Progress and errors go to stderr. Exit codes: 0 = success, 1 = operation error, 2 = bad args.
@@ -109,20 +109,20 @@ Use `Setup.exe /?` to see all installer switches:
 
 ```bash
 # Silent install (per-machine, auto-update disabled)
-"Spectra PDF_1.0.0_x64-setup.exe" /S
+"Open PDF Studio_1.0.0_x64-setup.exe" /S
 
 # Silent uninstall (keeps user data for redeployment)
-"C:\Program Files\Spectra PDF\uninstall.exe" /S
+"C:\Program Files\Open PDF Studio\uninstall.exe" /S
 
 # Silent uninstall (removes all user data)
-"C:\Program Files\Spectra PDF\uninstall.exe" /S /removeuserdata
+"C:\Program Files\Open PDF Studio\uninstall.exe" /S /removeuserdata
 ```
 
 ## Requirements
 
 **End users**: WebView2 (included with Windows 10/11 via Edge). The interactive installer downloads the bootstrapper if missing.
 
-> **Note on unsigned releases:** Spectra PDF is distributed **unsigned** (no Authenticode code-signing certificate). On first run, Windows SmartScreen may show a blue *"Windows protected your PC — Unknown publisher"* prompt. This is expected for unsigned open-source software, not a sign of tampering. To proceed, click **More info → Run anyway**. Builds are published on the [releases page](https://github.com/jasonulbright/spectrapdf/releases).
+> **Note on unsigned releases:** Open PDF Studio is distributed **unsigned** (no Authenticode code-signing certificate). On first run, Windows SmartScreen may show a blue *"Windows protected your PC — Unknown publisher"* prompt. This is expected for unsigned open-source software, not a sign of tampering. To proceed, click **More info → Run anyway**. Builds are published on the [releases page](https://github.com/jasonulbright/spectrapdf/releases).
 
 **Developers**:
 
@@ -156,7 +156,7 @@ npm run package
 
 This runs `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs pikepdf/pdfminer), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it into `resources/`), then `cargo tauri build` (compiles Rust, bundles WebView2 frontend, produces the NSIS installer).
 
-Output: `src-tauri/target/release/bundle/nsis/Spectra PDF Setup X.Y.Z.exe`
+Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio Setup X.Y.Z.exe`
 
 **Individual steps** (if needed):
 
@@ -193,7 +193,7 @@ Output: `src-tauri/target/release/bundle/nsis/Spectra PDF Setup X.Y.Z.exe`
 ## Project Structure
 
 ```
-spectrapdf/
+openpdfstudio/
 ├── src-tauri/                 # Tauri v2 Rust backend
 │   ├── src/
 │   │   ├── lib.rs             # App setup, tray, single-instance, events

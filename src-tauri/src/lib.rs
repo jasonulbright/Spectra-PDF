@@ -27,10 +27,10 @@ fn backdrop_supported(build: u32) -> bool {
 
 /// When true, the binary is running under end-to-end test control:
 /// single-instance hijacking and tray-persistence are disabled so each WDIO
-/// session gets a clean launch and exit. Enabled via the SPECTRAPDF_E2E
+/// session gets a clean launch and exit. Enabled via the OPENPDFSTUDIO_E2E
 /// environment variable.
 fn is_e2e_mode() -> bool {
-    std::env::var("SPECTRAPDF_E2E").is_ok()
+    std::env::var("OPENPDFSTUDIO_E2E").is_ok()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -108,7 +108,7 @@ pub fn run() {
                 backdrop_supported(windows_version::OsVersion::current().build);
             let window =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-                    .title("Spectra PDF")
+                    .title("Open PDF Studio")
                     .inner_size(1200.0, 800.0)
                     .min_inner_size(800.0, 600.0)
                     .center()
@@ -136,7 +136,7 @@ pub fn run() {
                 return Ok(());
             }
             // Build system tray
-            let show = MenuItem::with_id(app, "show", "Show Spectra PDF", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "Show Open PDF Studio", true, None::<&str>)?;
             let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
             let merge = MenuItem::with_id(app, "merge", "Quick Merge", true, None::<&str>)?;
             let separator2 = tauri::menu::PredefinedMenuItem::separator(app)?;
@@ -146,7 +146,7 @@ pub fn run() {
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().cloned().unwrap())
                 .menu(&menu)
-                .tooltip("Spectra PDF")
+                .tooltip("Open PDF Studio")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {

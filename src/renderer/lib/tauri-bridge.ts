@@ -62,7 +62,7 @@ export const dialog = {
 // ── File operations ───────────────────────────────────────────────────────
 
 // Binary file I/O goes through plugin-fs (efficient binary IPC, capability-
-// scoped to $TEMP/spectrapdf in capabilities/main.json) — the working copies,
+// scoped to $TEMP/openpdfstudio in capabilities/main.json) — the working copies,
 // snapshots, and commit temp files all live there.
 const snapshotRaw = (workingPath: string) => invoke<string>('snapshot', { workingPath });
 

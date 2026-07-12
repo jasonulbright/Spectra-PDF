@@ -5,7 +5,7 @@ describe('boot', () => {
   it('renders the header with title and version', async () => {
     await waitForHarness();
     await expect($('[data-testid="app-title"]')).toBeDisplayed();
-    await expect($('[data-testid="app-title"]')).toHaveText('Spectra PDF');
+    await expect($('[data-testid="app-title"]')).toHaveText('Open PDF Studio');
     const version = await $('[data-testid="app-version"]').getText();
     expect(version).toMatch(/^v\d+\.\d+\.\d+/);
   });

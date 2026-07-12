@@ -3,7 +3,7 @@
 # Ghostscript is downloaded from Artifex's official release channel, verified
 # against a pinned SHA-256, extracted from the NSIS installer with 7-Zip, and
 # the runtime files (gswin64c.exe, gsdll64.dll, lib/, Resource/) are copied in.
-# Spectra PDF invokes Ghostscript as a separate process; it is unmodified
+# Open PDF Studio invokes Ghostscript as a separate process; it is unmodified
 # upstream Ghostscript, redistributed under AGPL-3.0 (see THIRD-PARTY-LICENSES.md).
 #
 # Run before packaging: powershell -ExecutionPolicy Bypass -File scripts\bundle-ghostscript.ps1

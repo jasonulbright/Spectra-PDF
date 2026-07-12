@@ -115,7 +115,7 @@ pub async fn read_file_buffer(file_path: String) -> Result<Vec<u8>, String> {
 #[tauri::command]
 pub async fn create_working_copy(file_path: String) -> Result<String, String> {
     let work_dir = std::env::temp_dir()
-        .join("spectrapdf")
+        .join("openpdfstudio")
         .join(Uuid::new_v4().to_string());
     fs::create_dir_all(&work_dir)
         .map_err(|e| format!("Failed to create temp dir: {}", e))?;
@@ -457,7 +457,7 @@ pub async fn check_auto_update_disabled() -> Result<bool, String> {
     use winreg::RegKey;
 
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    match hklm.open_subkey("SOFTWARE\\Spectra PDF") {
+    match hklm.open_subkey("SOFTWARE\\Open PDF Studio") {
         Ok(key) => {
             let value: Result<u32, _> = key.get_value("DisableAutoUpdate");
             Ok(value.unwrap_or(0) == 1)
@@ -469,7 +469,7 @@ pub async fn check_auto_update_disabled() -> Result<bool, String> {
 // ── Startup (Start with Windows) ─────────────────────────────────────────
 
 const STARTUP_REG_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const STARTUP_REG_VALUE: &str = "SpectraPDF";
+const STARTUP_REG_VALUE: &str = "OpenPDFStudio";
 
 /// Read the current state of the "Start with Windows" registry entry.
 /// Returns (enabled, minimized) — minimized is true if the --minimized flag is present.

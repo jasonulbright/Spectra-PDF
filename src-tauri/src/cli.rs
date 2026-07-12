@@ -1,4 +1,4 @@
-//! CLI / headless mode for Spectra PDF.
+//! CLI / headless mode for Open PDF Studio.
 //!
 //! When operation flags are present in argv, the app runs headless:
 //! no Tauri runtime, no window — just Python engine over JSON-RPC,
@@ -14,9 +14,9 @@ use std::process::{Command, Stdio};
 
 #[derive(Parser)]
 #[command(
-    name = "spectrapdf",
+    name = "openpdfstudio",
     version = env!("CARGO_PKG_VERSION"),
-    about = "Spectra PDF — modern PDF manipulation studio",
+    about = "Open PDF Studio — modern PDF manipulation studio",
     long_about = "When invoked without a subcommand, the GUI launches.\n\
                   Use a subcommand to run headless from the command line."
 )]

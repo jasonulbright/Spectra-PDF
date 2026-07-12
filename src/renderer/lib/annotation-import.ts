@@ -1,4 +1,4 @@
-// Imports pre-existing PDF annotations into Spectra's editable PageAnnotation
+// Imports pre-existing PDF annotations into Open PDF Studio's editable PageAnnotation
 // model at index time. Only the subtypes we can also author ourselves are
 // recognized — Square (our highlight tool), FreeText, Ink, Stamp. Everything
 // else (Link, Popup, Widget, native Highlight/Underline/StrikeOut quad-point

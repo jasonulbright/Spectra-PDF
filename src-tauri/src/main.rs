@@ -3,7 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use clap::Parser;
-use spectrapdf_lib::cli::Cli;
+use openpdfstudio_lib::cli::Cli;
 
 fn main() {
     // Handle /? before anything else — show a GUI help dialog.
@@ -22,16 +22,16 @@ fn main() {
 
     match cli.command {
         Some(command) => {
-            let code = spectrapdf_lib::cli::run(command);
+            let code = openpdfstudio_lib::cli::run(command);
             std::process::exit(code);
         }
         None if cli.minimized => {
             // --minimized flag without a subcommand — launch GUI minimized
-            spectrapdf_lib::run();
+            openpdfstudio_lib::run();
         }
         None => {
             // No subcommand — launch the GUI as normal
-            spectrapdf_lib::run();
+            openpdfstudio_lib::run();
         }
     }
 }
@@ -119,24 +119,24 @@ fn show_help_dialog() {
     let version = env!("CARGO_PKG_VERSION");
 
     let text = format!(
-        "Spectra PDF v{version} - Command Line Usage\r\n\
+        "Open PDF Studio v{version} - Command Line Usage\r\n\
          \r\n\
          When invoked without a subcommand, the GUI launches.\r\n\
          Use a subcommand to run headless from the command line.\r\n\
          \r\n\
          SUBCOMMANDS:\r\n\
          \r\n\
-         spectrapdf compress input.pdf -o out.pdf --quality ebook\r\n\
-         spectrapdf merge a.pdf b.pdf -o merged.pdf\r\n\
-         spectrapdf rotate input.pdf -o out.pdf --angle 90 --pages 1,3,5\r\n\
-         spectrapdf split input.pdf -o out_dir/ --ranges \"1-3,5-7\"\r\n\
-         spectrapdf encrypt input.pdf -o out.pdf --password secret\r\n\
-         spectrapdf decrypt input.pdf -o out.pdf --password secret\r\n\
-         spectrapdf pdfa input.pdf -o out.pdf --level 2b\r\n\
-         spectrapdf extract-text input.pdf --pages 1,2,3\r\n\
-         spectrapdf delete input.pdf -o out.pdf --pages 3,7\r\n\
-         spectrapdf metadata input.pdf --title \"Title\" -o out.pdf\r\n\
-         spectrapdf batch input_dir/ -o out_dir/ compress --quality ebook\r\n\
+         openpdfstudio compress input.pdf -o out.pdf --quality ebook\r\n\
+         openpdfstudio merge a.pdf b.pdf -o merged.pdf\r\n\
+         openpdfstudio rotate input.pdf -o out.pdf --angle 90 --pages 1,3,5\r\n\
+         openpdfstudio split input.pdf -o out_dir/ --ranges \"1-3,5-7\"\r\n\
+         openpdfstudio encrypt input.pdf -o out.pdf --password secret\r\n\
+         openpdfstudio decrypt input.pdf -o out.pdf --password secret\r\n\
+         openpdfstudio pdfa input.pdf -o out.pdf --level 2b\r\n\
+         openpdfstudio extract-text input.pdf --pages 1,2,3\r\n\
+         openpdfstudio delete input.pdf -o out.pdf --pages 3,7\r\n\
+         openpdfstudio metadata input.pdf --title \"Title\" -o out.pdf\r\n\
+         openpdfstudio batch input_dir/ -o out_dir/ compress --quality ebook\r\n\
          \r\n\
          FLAGS:\r\n\
          \r\n\
@@ -154,7 +154,7 @@ fn show_help_dialog() {
          Press Ctrl+C to copy this text."
     );
 
-    let caption = format!("Spectra PDF v{version}");
+    let caption = format!("Open PDF Studio v{version}");
 
     let text_wide: Vec<u16> = OsStr::new(&text)
         .encode_wide()

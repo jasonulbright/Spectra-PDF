@@ -67,7 +67,7 @@ export function WelcomeScreen({ onAction, recentFiles, onSkipChanged, onClearRec
     <div className="flex-1 flex items-center justify-center p-8">
       <div className="max-w-xl w-full">
         <div className="text-center mb-8">
-          <h2 className="text-2xl font-semibold mb-1">Welcome to Spectra PDF</h2>
+          <h2 className="text-2xl font-semibold mb-1">Welcome to Open PDF Studio</h2>
           <p className="text-neutral-500 text-sm">What would you like to do?</p>
         </div>
 

@@ -889,7 +889,7 @@ function AppContent(): React.ReactElement {
       {/* Header */}
       <header data-testid="app-header" className="app-shell-bar flex items-center justify-between px-4 py-2 border-b border-neutral-800 shrink-0">
         <div className="flex items-center gap-3">
-          <h1 data-testid="app-title" className="text-lg font-semibold tracking-tight">Spectra PDF</h1>
+          <h1 data-testid="app-title" className="text-lg font-semibold tracking-tight">Open PDF Studio</h1>
           <span data-testid="app-version" className="text-[10px] text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded">{appVersion}</span>
           <button data-testid="settings-btn" onClick={() => setShowSettings(true)} className="w-6 h-6 flex items-center justify-center text-neutral-500 hover:text-neutral-300 rounded transition-colors" title="Settings">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -2,7 +2,7 @@
 
 ## 1.0.0 — The Canvas Workspace
 
-Spectra PDF grows from a batch-operations tool into a visual PDF workspace:
+Open PDF Studio grows from a batch-operations tool into a visual PDF workspace:
 open several files as page strips on one canvas, rearrange pages within and
 across them, annotate, redact, fill and build forms, sign, OCR, and compare —
 every edit staged in memory, applied atomically, and undoable. The CLI keeps
@@ -75,7 +75,7 @@ full parity for every whole-file transform.
 
 ## 0.9.0 — Initial Release
 
-First public release of Spectra PDF.
+First public release of Open PDF Studio.
 
 ### Features
 - **Pages** — merge, split by range, rotate, delete

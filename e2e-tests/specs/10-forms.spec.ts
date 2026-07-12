@@ -141,7 +141,7 @@ describe('forms panel fills AcroForm fields and bakes them into the saved file',
     // GUI fill asserted above.
     const { execFileSync } = await import('node:child_process');
     const cliOut = resolve(tmp, 'filled-cli.pdf');
-    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'openpdfstudio.exe');
     execFileSync(binary, [
       'forms', source,
       '-o', cliOut,
@@ -176,7 +176,7 @@ describe('forms panel fills AcroForm fields and bakes them into the saved file',
     writeFileSync(other, await doc.save());
 
     const mergedOut = resolve(tmp, 'merged.pdf');
-    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'openpdfstudio.exe');
     execFileSync(binary, ['merge', dest, other, '-o', mergedOut]);
 
     const p1 = await fieldValues(mergedOut, 1);

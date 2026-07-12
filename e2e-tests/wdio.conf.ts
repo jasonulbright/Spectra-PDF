@@ -1,5 +1,5 @@
 /**
- * WebdriverIO config for Spectra PDF end-to-end tests.
+ * WebdriverIO config for Open PDF Studio end-to-end tests.
  *
  * Runs against the debug build of the Tauri binary, driven by tauri-driver
  * which proxies to msedgedriver to control the embedded WebView2.
@@ -29,7 +29,7 @@ import { resolve, basename } from 'node:path';
 import { existsSync } from 'node:fs';
 
 const REPO_ROOT = resolve(__dirname, '..');
-const APP_BINARY = resolve(REPO_ROOT, 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+const APP_BINARY = resolve(REPO_ROOT, 'src-tauri', 'target', 'debug', 'openpdfstudio.exe');
 const NATIVE_DRIVER = resolve(__dirname, 'msedgedriver.exe');
 const TAURI_DRIVER_PORT = 4444;
 
@@ -93,9 +93,9 @@ export const config: WebdriverIO.Config = {
       // Clear any orphaned driver/app/engine processes before the session starts.
       reapTestProcesses();
 
-      // Set SPECTRAPDF_E2E so the Tauri binary skips single-instance + tray —
+      // Set OPENPDFSTUDIO_E2E so the Tauri binary skips single-instance + tray —
       // each WDIO session needs a clean launch and a clean exit.
-      const env = { ...process.env, SPECTRAPDF_E2E: '1' };
+      const env = { ...process.env, OPENPDFSTUDIO_E2E: '1' };
       tauriDriver = spawn(
         'tauri-driver',
         ['--port', String(TAURI_DRIVER_PORT), '--native-driver', NATIVE_DRIVER],

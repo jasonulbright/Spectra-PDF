@@ -11,19 +11,19 @@
     "updater:allow-download-and-install",
     {
       "identifier": "fs:allow-read-file",
-      "allow": [{ "path": "$TEMP/spectrapdf/**" }]
+      "allow": [{ "path": "$TEMP/openpdfstudio/**" }]
     },
     {
       "identifier": "fs:allow-write-file",
-      "allow": [{ "path": "$TEMP/spectrapdf/**" }]
+      "allow": [{ "path": "$TEMP/openpdfstudio/**" }]
     },
     {
       "identifier": "fs:allow-rename",
-      "allow": [{ "path": "$TEMP/spectrapdf/**" }]
+      "allow": [{ "path": "$TEMP/openpdfstudio/**" }]
     },
     {
       "identifier": "fs:allow-remove",
-      "allow": [{ "path": "$TEMP/spectrapdf/**" }]
+      "allow": [{ "path": "$TEMP/openpdfstudio/**" }]
     }
   ]
 }

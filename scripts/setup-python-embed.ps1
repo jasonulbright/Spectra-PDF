@@ -1,4 +1,4 @@
-# Downloads and configures the embedded Python runtime for SpectraPDF.
+# Downloads and configures the embedded Python runtime for Open PDF Studio.
 # Run once before packaging: powershell -ExecutionPolicy Bypass -File scripts\setup-python-embed.ps1
 
 $PythonVersion = "3.14.5"
