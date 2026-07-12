@@ -261,6 +261,19 @@ interface PageCellProps {
   // Pending values for THIS page's file, keyed by field name.
   formValues?: ReadonlyMap<string, FormFieldValue>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+  // Add-field sub-mode (2n.4c): while armed, forms mode draws a placement
+  // band instead of being inert on empty page area.
+  formsAddMode?: boolean;
+  // Pending new-field placement, when it sits on THIS page (transient view
+  // state with the signature-placement lifecycle).
+  newFieldPlacement?: SignaturePlacement | null;
+  onSetNewFieldRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onClearNewFieldPlacement: () => void;
   onSelectPage: (docId: string, pageId: string, e?: React.MouseEvent) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
@@ -304,6 +317,10 @@ function PageCellImpl({
   formWidgets,
   formValues,
   onSetFormValue,
+  formsAddMode,
+  newFieldPlacement,
+  onSetNewFieldRect,
+  onClearNewFieldPlacement,
   onSelectPage,
   onOpenPage,
   onPageContextMenu,
@@ -393,10 +410,11 @@ function PageCellImpl({
       return;
     }
     if (e.button !== 0 || bandActive.current || editing) return;
-    // Forms mode has no rubber band — widgets handle their own pointer events
-    // (with stopPropagation); a press on empty page area is a no-op, and the
-    // page must not start a drag or a highlight band under an input.
-    if (tool === 'forms') return;
+    // Forms mode has no rubber band UNLESS the add-field sub-mode is armed
+    // (2n.4c) — widgets handle their own pointer events (with
+    // stopPropagation), and a press on empty page area must not start a drag
+    // or a highlight band under an input.
+    if (tool === 'forms' && !formsAddMode) return;
     e.preventDefault();
     e.stopPropagation();
     if (tool === 'ink') {
@@ -457,6 +475,9 @@ function PageCellImpl({
         } else if (tool === 'signature') {
           // Single pending placement — drawing again (anywhere) replaces it.
           onSetSignaturePlacement(docId, page.id, latest, page.rotation);
+        } else if (tool === 'forms') {
+          // Add-field placement (2n.4c) — single, drawing again replaces it.
+          onSetNewFieldRect(docId, page.id, latest, page.rotation);
         } else {
           const annotation: PageAnnotation = {
             id: crypto.randomUUID(),
@@ -763,11 +784,49 @@ function PageCellImpl({
           );
         })()
       )}
+      {newFieldPlacement && (
+        (() => {
+          const r = projectMarkRect(newFieldPlacement, page.rotation);
+          return (
+            <div
+              data-testid="new-field-placement"
+              className="page-form-new"
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+            >
+              <span className="page-form-new-label">NEW FIELD</span>
+              {(tool === 'select' || tool === 'forms') && (
+                <button
+                  className="page-annot-x"
+                  title="Remove field placement"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClearNewFieldPlacement();
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          );
+        })()
+      )}
       {band && (
         <div
           className={
             'page-annot page-annot-band' +
-            (tool === 'redact' ? ' band-redact' : tool === 'signature' ? ' band-signature' : '')
+            (tool === 'redact'
+              ? ' band-redact'
+              : tool === 'signature'
+                ? ' band-signature'
+                : tool === 'forms'
+                  ? ' band-formfield'
+                  : '')
           }
           style={{
             left: `${band.x * 100}%`,

@@ -22,6 +22,8 @@ import {
   pendingFormValueCount,
   applyCanvasFormValues,
   formWidgetCount,
+  placeNewField,
+  createPlacedField,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -133,5 +135,31 @@ describe('on-canvas form filling (2n.4b)', () => {
     await pdf.loadingTask.destroy();
     const vals = await fieldValues(dest);
     expect(vals.get('full_name')).toBe('Survives Commit');
+  });
+
+  it('creates a field on the canvas that is immediately fillable (2n.4c)', async () => {
+    // The prior test left the page committed at /Rotate 90, so this also
+    // exercises placement conversion on a baked-rotated page.
+    await placeNewField({ x: 0.1, y: 0.55, w: 0.4, h: 0.06 });
+    await createPlacedField({ name: 'created_on_canvas', type: 'text' });
+
+    expect(await setCanvasFormValue(source, 'created_on_canvas', 'born on canvas')).toBe(true);
+    await applyCanvasFormValues();
+
+    const dest = resolve(tmp, 'created-filled.pdf');
+    await saveActiveAs(dest);
+    const vals = await fieldValues(dest);
+    expect(vals.get('created_on_canvas')).toBe('born on canvas');
+  });
+
+  it('refuses a duplicate field name through the real validation', async () => {
+    await placeNewField({ x: 0.1, y: 0.7, w: 0.3, h: 0.06 });
+    let message = '';
+    try {
+      await createPlacedField({ name: 'full_name', type: 'text' });
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toContain('already exists');
   });
 });

@@ -36,6 +36,8 @@ import { commitPageEdits } from './lib/workspace-commit';
 import { setCommitGate } from './lib/commit-gate';
 import { fillFormFields } from './lib/forms';
 import type { FormFieldValue } from './lib/forms';
+import { addFormField } from './lib/form-authoring';
+import type { NewFieldSpec } from './lib/form-authoring';
 import { DropZone } from './components/DropZone';
 import { OperationQueue } from './components/OperationQueue';
 import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
@@ -454,6 +456,30 @@ function AppContent(): React.ReactElement {
       const bytes = await file.readBuffer(f.workingPath);
       const filled = await fillFormFields(bytes, values);
       await file.writeBuffer(f.workingPath, filled);
+      const result = await reloadFile(path);
+      if (!result) throw new Error('The file is no longer open.');
+      dispatch({
+        type: 'UPDATE_FILE',
+        path,
+        pageCount: result.pageCount,
+        buffer: result.buffer,
+        snapshotPath,
+      });
+    },
+    [state.files, reloadFile, dispatch],
+  );
+
+  // Author a new form field (2n.4c) — the same renderer-side whole-file-op
+  // shape as the fill above; the spec's pageIndex/rect are already in
+  // committed-order PDF space (the canvas converts before calling).
+  const handleAddFormField = useCallback(
+    async (path: string, spec: NewFieldSpec) => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+      const snapshotPath = await file.snapshot(f.workingPath);
+      const bytes = await file.readBuffer(f.workingPath);
+      const withField = await addFormField(bytes, spec);
+      await file.writeBuffer(f.workingPath, withField);
       const result = await reloadFile(path);
       if (!result) throw new Error('The file is no longer open.');
       dispatch({
@@ -992,6 +1018,7 @@ function AppContent(): React.ReactElement {
                 onApplyOcrLayer={handleApplyOcrLayer}
                 onAddPages={handleAddPages}
                 onFillFormValues={handleFillFormValues}
+                onAddFormField={handleAddFormField}
                 dropResolverRef={dropResolverRef}
               />
               {inspector && inspectorFile?.buffer && (

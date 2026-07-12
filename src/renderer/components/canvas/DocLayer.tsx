@@ -36,6 +36,16 @@ interface DocLayerProps {
   formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+  // Add-field placement (2n.4c).
+  formsAddMode: boolean;
+  newFieldPlacement: SignaturePlacement | null;
+  onSetNewFieldRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onClearNewFieldPlacement: () => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -100,6 +110,10 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               formWidgetsByPage={props.formWidgetsByPage}
               formValuesByPath={props.formValuesByPath}
               onSetFormValue={props.onSetFormValue}
+              formsAddMode={props.formsAddMode}
+              newFieldPlacement={props.newFieldPlacement}
+              onSetNewFieldRect={props.onSetNewFieldRect}
+              onClearNewFieldPlacement={props.onClearNewFieldPlacement}
               onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
               onAddAnnotation={props.onAddAnnotation}

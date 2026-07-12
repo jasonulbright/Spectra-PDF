@@ -25,6 +25,7 @@ import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
 import { pruneFormValues } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
+import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
 import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection, registerCanvasForms } from '../../testHarness';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
@@ -65,6 +66,8 @@ interface WorkspaceCanvasViewProps {
   // the FormsPanel shape (snapshot(gate) → readBuffer → fillFormFields →
   // writeBuffer → UPDATE_FILE), so it lands on the snapshot-undo chain.
   onFillFormValues: (path: string, values: Record<string, FormFieldValue>) => Promise<void>;
+  // Author a new form field into one file (2n.4c) — same whole-file-op shape.
+  onAddFormField: (path: string, spec: NewFieldSpec) => Promise<void>;
   // Per-position external drop (2n.3): the canvas publishes a resolver here so
   // App's drop handler can map a drop point to the document + index under it
   // (returns null for a between/empty drop → App falls back to appending).
@@ -99,6 +102,7 @@ export function WorkspaceCanvasView({
   onApplyOcrLayer,
   onAddPages,
   onFillFormValues,
+  onAddFormField,
   dropResolverRef,
 }: WorkspaceCanvasViewProps): React.ReactElement {
   const state = useAppState();
@@ -226,6 +230,115 @@ export function WorkspaceCanvasView({
     for (const [, values] of pendingFormValues) n += values.size;
     return n;
   }, [pendingFormValues]);
+
+  // Add-field sub-mode (2n.4c): while armed, forms mode draws a placement
+  // band. The placement itself is transient view state with the
+  // signature-placement lifecycle: single (drawing again replaces), dies on
+  // buffer-identity change or when its page leaves the workspace.
+  const [formsAddMode, setFormsAddMode] = useState(false);
+  const [newFieldPlacement, setNewFieldPlacement] = useState<SignaturePlacement | null>(null);
+  const [nfName, setNfName] = useState('');
+  const [nfType, setNfType] = useState<NewFieldType>('text');
+  const [nfOptions, setNfOptions] = useState('');
+  const [nfMultiline, setNfMultiline] = useState(false);
+  const [creatingField, setCreatingField] = useState(false);
+  const [nfError, setNfError] = useState<string | null>(null);
+  // Leaving the forms tool disarms add-field so re-entering starts inert.
+  useEffect(() => {
+    if (tool !== 'forms') setFormsAddMode(false);
+  }, [tool]);
+
+  const onSetNewFieldRect = useCallback(
+    (
+      docId: string,
+      pageId: string,
+      rect: { x: number; y: number; w: number; h: number },
+      rotationAtDraw: 0 | 90 | 180 | 270,
+    ) => {
+      const doc = docs.find((d) => d.id === docId);
+      if (!doc) return;
+      setNewFieldPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
+      setSigPlacement(null); // one placement card at a time (see onSetSignaturePlacement)
+      setNfError(null);
+    },
+    [docs],
+  );
+  const onClearNewFieldPlacement = useCallback(() => setNewFieldPlacement(null), []);
+
+  // Placement whose page still exists (mirrors liveSigPlacement).
+  const liveNewFieldPlacement = useMemo(() => {
+    if (!newFieldPlacement) return null;
+    return docs.some((d) => d.pages.some((p) => p.id === newFieldPlacement.pageId))
+      ? newFieldPlacement
+      : null;
+  }, [newFieldPlacement, docs]);
+
+  // Create the placed field via App's whole-file op. The display→PDF
+  // conversion is buildSignatureAppearance verbatim — a placement is a
+  // placement; it returns the file path, the 1-based committed-order page,
+  // and the PDF user-space rect the authoring lib expects. Takes explicit
+  // params (not the card's state) so the harness can drive the same path
+  // without racing React batching; rejects on failure so callers see it.
+  const creatingFieldRef = useRef(false);
+  const createFieldFromPlacement = useCallback(
+    async (params: {
+      name: string;
+      type: NewFieldType;
+      options?: string[];
+      multiline?: boolean;
+    }): Promise<void> => {
+      const placement = liveNewFieldPlacement;
+      if (!placement || creatingFieldRef.current) return;
+      creatingFieldRef.current = true;
+      setCreatingField(true);
+      setNfError(null);
+      try {
+        const built = await buildSignatureAppearance(docs, placement, async (page) => {
+          const f = state.files.get(page.sourceDocId);
+          if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+          const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+          const p = await proxy.getPage(page.sourcePageIndex + 1);
+          const [vx0, vy0, vx1, vy1] = p.view;
+          return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
+        });
+        if (!built) throw new Error('The page this field was placed on no longer exists.');
+        await onAddFormField(built.path, {
+          name: params.name.trim(),
+          type: params.type,
+          pageIndex: built.appearance.page - 1,
+          rect: built.appearance.rect,
+          ...(params.options && params.options.length > 0 ? { options: params.options } : {}),
+          ...(params.type === 'text' && params.multiline ? { multiline: true } : {}),
+        });
+        // Created — reset the authoring surfaces; stay in forms mode so the
+        // new field is immediately fillable.
+        setNewFieldPlacement(null);
+        setNfName('');
+        setNfOptions('');
+        setNfMultiline(false);
+        setFormsAddMode(false);
+      } catch (err) {
+        setNfError(err instanceof Error ? err.message : String(err));
+        throw err;
+      } finally {
+        creatingFieldRef.current = false;
+        setCreatingField(false);
+      }
+    },
+    [liveNewFieldPlacement, docs, state.files, onAddFormField],
+  );
+  const createPlacedField = useCallback(async (): Promise<void> => {
+    const options =
+      nfType === 'radio' || nfType === 'dropdown' || nfType === 'optionlist'
+        ? nfOptions.split(/[\n,]/).map((o) => o.trim()).filter(Boolean)
+        : undefined;
+    await createFieldFromPlacement({
+      name: nfName,
+      type: nfType,
+      ...(options ? { options } : {}),
+      multiline: nfMultiline,
+    }).catch(() => undefined); // surfaced via nfError; the card stays open
+  }, [createFieldFromPlacement, nfName, nfType, nfOptions, nfMultiline]);
 
   // Bake pending values file by file through App's fill op. Reentrancy-ref'd
   // like applyMarks (two clicks in one tick both read a stale busy flag).
@@ -457,7 +570,10 @@ export function WorkspaceCanvasView({
     [],
   );
 
-  // Single pending placement — drawing again anywhere replaces it.
+  // Single pending placement — drawing again anywhere replaces it. Placement
+  // gestures are mutually exclusive: starting a signature placement clears a
+  // pending new-field placement (and vice versa) so only one bottom-left
+  // card is ever live.
   const onSetSignaturePlacement = useCallback(
     (
       docId: string,
@@ -468,6 +584,7 @@ export function WorkspaceCanvasView({
       const doc = docs.find((d) => d.id === docId);
       if (!doc) return;
       setSigPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
+      setNewFieldPlacement(null);
       setSignDone(null);
       setSignError(null);
     },
@@ -504,6 +621,8 @@ export function WorkspaceCanvasView({
     if (invalidated.size > 0) {
       setMarks((prevMarks) => prevMarks.filter((m) => !invalidated.has(m.path)));
       setSigPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
+      // New-field placement shares the positional-id hazard — same lifecycle.
+      setNewFieldPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
       // Selection holds positional PageRef ids (`path#pN`) that the indexer
       // rebuilds from the new on-disk order after any buffer change. A stale id
       // would silently re-bind to a DIFFERENT physical page and get deleted or
@@ -601,6 +720,24 @@ export function WorkspaceCanvasView({
   applyFormValuesRef.current = applyFormValues;
   const setFormValueRef = useRef(onSetFormValue);
   setFormValueRef.current = onSetFormValue;
+  const createFieldRef = useRef(createFieldFromPlacement);
+  createFieldRef.current = createFieldFromPlacement;
+  const harnessPlaceFieldRef = useRef<
+    (rect: { x: number; y: number; w: number; h: number }) => boolean
+  >(() => false);
+  harnessPlaceFieldRef.current = (rect) => {
+    const doc = docs.find((d) => d.path === state.activeFileId);
+    const page = doc?.pages[0];
+    if (!doc || !page) return false;
+    setNewFieldPlacement({
+      id: crypto.randomUUID(),
+      path: doc.path,
+      pageId: page.id,
+      rect,
+      rotationAtDraw: page.rotation,
+    });
+    return true;
+  };
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasForms({
@@ -624,6 +761,8 @@ export function WorkspaceCanvasView({
         for (const [, arr] of info.widgetsByPage) n += arr.length;
         return n;
       },
+      placeNewFieldOnFirstPage: (rect) => harnessPlaceFieldRef.current(rect),
+      createPlacedField: (params) => createFieldRef.current(params),
     });
     return () => registerCanvasForms(null);
   }, []);
@@ -1170,6 +1309,10 @@ export function WorkspaceCanvasView({
           formWidgetsByPage={formWidgetsByPage}
           formValuesByPath={pendingFormValues}
           onSetFormValue={onSetFormValue}
+          formsAddMode={formsAddMode}
+          newFieldPlacement={liveNewFieldPlacement}
+          onSetNewFieldRect={onSetNewFieldRect}
+          onClearNewFieldPlacement={onClearNewFieldPlacement}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
@@ -1271,6 +1414,20 @@ export function WorkspaceCanvasView({
             Forms
           </button>
         </div>
+        {tool === 'forms' && (
+          <button
+            data-testid="forms-add-field"
+            title="Drag a box on a page to place a new form field"
+            onClick={() => setFormsAddMode((v) => !v)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-full shadow-lg border ${
+              formsAddMode
+                ? 'bg-emerald-600 text-white border-emerald-600'
+                : 'bg-neutral-800/90 text-neutral-300 border-neutral-700 hover:bg-neutral-700'
+            }`}
+          >
+            + Add field
+          </button>
+        )}
         {tool === 'stamp' && (
           <div
             className="flex items-center gap-1 bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg px-2 py-1"
@@ -1543,6 +1700,88 @@ export function WorkspaceCanvasView({
               className="px-2.5 py-1 text-xs text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-50 rounded font-medium"
             >
               {signingBusy ? 'Signing…' : 'Sign & Save…'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {liveNewFieldPlacement && (
+        <div
+          data-testid="new-field-form"
+          className="absolute bottom-4 left-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
+        >
+          <div className="text-sm text-neutral-200 font-medium">New form field</div>
+          <p className="text-[11px] text-neutral-500 -mt-1.5">
+            The field is created at the box you placed and is fillable right away.
+          </p>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">Name</span>
+            <input
+              data-testid="new-field-name"
+              type="text"
+              value={nfName}
+              onChange={(e) => setNfName(e.target.value)}
+              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">Type</span>
+            <select
+              data-testid="new-field-type"
+              value={nfType}
+              onChange={(e) => setNfType(e.target.value as NewFieldType)}
+              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
+            >
+              <option value="text">Text</option>
+              <option value="checkbox">Checkbox</option>
+              <option value="radio">Radio group</option>
+              <option value="dropdown">Dropdown</option>
+              <option value="optionlist">Option list</option>
+              <option value="signature">Signature (empty)</option>
+            </select>
+          </div>
+          {nfType === 'text' && (
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-400">
+              <input
+                type="checkbox"
+                checked={nfMultiline}
+                onChange={() => setNfMultiline((v) => !v)}
+                className="rounded bg-neutral-800 border-neutral-700"
+              />
+              Multiline
+            </label>
+          )}
+          {(nfType === 'radio' || nfType === 'dropdown' || nfType === 'optionlist') && (
+            <div className="flex items-start gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0 pt-1">Options</span>
+              <textarea
+                data-testid="new-field-options"
+                value={nfOptions}
+                rows={3}
+                placeholder="one per line (or comma-separated)"
+                onChange={(e) => setNfOptions(e.target.value)}
+                className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500 resize-y"
+              />
+            </div>
+          )}
+          {nfError && <div data-testid="new-field-error" className="text-xs text-red-400">{nfError}</div>}
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setNewFieldPlacement(null);
+                setNfError(null);
+              }}
+              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              data-testid="new-field-create"
+              onClick={() => void createPlacedField()}
+              disabled={creatingField}
+              className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded font-medium"
+            >
+              {creatingField ? 'Creating…' : 'Create field'}
             </button>
           </div>
         </div>

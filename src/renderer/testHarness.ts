@@ -153,6 +153,16 @@ export interface CanvasFormsHandlers {
   pendingCount: () => number;
   apply: () => Promise<string[]>; // per-file failure messages; empty = success
   widgetCountFor: (path: string) => number;
+  // Add-field authoring (2n.4c) — place on the active file's first page
+  // (display-normalized rect), then create through the REAL conversion +
+  // whole-file-op flow the card's Create button runs.
+  placeNewFieldOnFirstPage: (rect: { x: number; y: number; w: number; h: number }) => boolean;
+  createPlacedField: (params: {
+    name: string;
+    type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'optionlist' | 'signature';
+    options?: string[];
+    multiline?: boolean;
+  }) => Promise<void>;
 }
 
 let canvasForms: CanvasFormsHandlers | null = null;
@@ -323,6 +333,21 @@ export interface TestHarness {
   applyCanvasFormValues: () => Promise<void>;
   /** Overlay widget count read for a file (0 until the async read lands). */
   formWidgetCount: (path: string) => number;
+  /** Place a new-field box on the active file's first canvas page (2n.4c),
+   * waiting for the canvas + indexer like placeSignature. */
+  placeNewField: (
+    rect: { x: number; y: number; w: number; h: number },
+    timeoutMs?: number,
+  ) => Promise<void>;
+  /** Create the placed field through the real conversion + whole-file-op
+   * flow (the card's Create button); rejects with the validation message on
+   * refusal. */
+  createPlacedField: (params: {
+    name: string;
+    type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'optionlist' | 'signature';
+    options?: string[];
+    multiline?: boolean;
+  }) => Promise<void>;
   /** Number of scanned source pages with OCR words ready to persist. */
   ocrReadyCount: () => number;
   /** Run the "Make searchable" flow (engine apply_ocr_layer per file);
@@ -662,6 +687,32 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     formWidgetCount: (path) => canvasForms?.widgetCountFor(path) ?? 0,
+    placeNewField: async (rect, timeoutMs = 10_000) => {
+      const deadline = Date.now() + timeoutMs;
+      let placed = canvasForms?.placeNewFieldOnFirstPage(rect) ?? false;
+      while (!placed && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        placed = canvasForms?.placeNewFieldOnFirstPage(rect) ?? false;
+      }
+      if (!placed) {
+        const msg = `placeNewField: no canvas page appeared within ${timeoutMs}ms`;
+        lastError = msg;
+        throw new Error(msg);
+      }
+    },
+    createPlacedField: async (params) => {
+      if (!canvasForms) {
+        const msg = 'createPlacedField: canvas view not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await canvasForms.createPlacedField(params);
+      } catch (err) {
+        captureError('createPlacedField', err);
+        throw err;
+      }
+    },
     ocrReadyCount: () => canvasOcr?.readyCount() ?? 0,
     applyOcr: async () => {
       if (!canvasOcr) {

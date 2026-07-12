@@ -531,3 +531,36 @@ export async function formWidgetCount(path: string): Promise<number> {
     return (window as any).__SPECTRA_TEST__.formWidgetCount(p);
   }, path);
 }
+
+export async function placeNewField(rect: { x: number; y: number; w: number; h: number }): Promise<void> {
+  const result = await browser.executeAsync<string | null, [{ x: number; y: number; w: number; h: number }]>(
+    function (r, done) {
+      (window as any).__SPECTRA_TEST__.placeNewField(r)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    rect,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`placeNewField failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+export async function createPlacedField(params: {
+  name: string;
+  type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'optionlist' | 'signature';
+  options?: string[];
+  multiline?: boolean;
+}): Promise<void> {
+  const result = await browser.executeAsync<string | null, [typeof params]>(
+    function (p, done) {
+      (window as any).__SPECTRA_TEST__.createPlacedField(p)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    params,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`createPlacedField failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}

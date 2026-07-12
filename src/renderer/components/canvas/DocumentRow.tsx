@@ -41,6 +41,16 @@ interface DocumentRowProps {
   formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+  // Add-field placement (2n.4c).
+  formsAddMode: boolean;
+  newFieldPlacement: SignaturePlacement | null;
+  onSetNewFieldRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onClearNewFieldPlacement: () => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -83,6 +93,10 @@ function DocumentRowImpl({
   formWidgetsByPage,
   formValuesByPath,
   onSetFormValue,
+  formsAddMode,
+  newFieldPlacement,
+  onSetNewFieldRect,
+  onClearNewFieldPlacement,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
@@ -130,6 +144,10 @@ function DocumentRowImpl({
         formWidgets={formWidgetsByPage.get(page.id)}
         formValues={formValuesByPath.get(page.sourceDocId)}
         onSetFormValue={onSetFormValue}
+        formsAddMode={formsAddMode}
+        newFieldPlacement={newFieldPlacement?.pageId === page.id ? newFieldPlacement : null}
+        onSetNewFieldRect={onSetNewFieldRect}
+        onClearNewFieldPlacement={onClearNewFieldPlacement}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
         onAddAnnotation={onAddAnnotation}
