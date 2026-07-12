@@ -57,6 +57,20 @@ describe('scheduleReblit', () => {
     expect(t).toBeLessThanOrEqual(REBLIT_MAX_HOLD_MS + 200); // not the quiet path
   });
 
+  it('flushes synchronously when an arrival lands past the cap (stalled timers)', () => {
+    // Review round 3: the cap can fire two ways — the remaining-capped
+    // timer, or the synchronous heldFor check when an arrival lands after
+    // wall time passed the cap without timers running (a main-thread
+    // stall). This pins the synchronous branch; test 2 pins the timer one.
+    const landed: string[] = [];
+    scheduleReblit(() => landed.push('early'));
+    vi.setSystemTime(Date.now() + REBLIT_MAX_HOLD_MS + 100); // stall: clock moves, no timer fires
+    scheduleReblit(() => landed.push('late'));
+    expect(landed).toEqual([]); // flushed into one rAF, not painted inline
+    vi.advanceTimersByTime(1); // run the stubbed rAF
+    expect(landed).toEqual(['early', 'late']);
+  });
+
   it('starts a fresh batch after a flush', () => {
     const landed: string[] = [];
     scheduleReblit(() => landed.push('first'));
