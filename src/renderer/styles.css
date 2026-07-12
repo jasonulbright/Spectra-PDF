@@ -178,6 +178,33 @@
   background: transparent;
 }
 
+/* Chrome banners (update bar, commit-error bar) sit between the header and
+   the content row — outside .app-content — with translucent tints that
+   used to composite over the shell's opaque background. Over a transparent
+   shell they'd composite against the desktop, so the old base returns as
+   background-color and the exact Tailwind tint moves one layer up as a
+   background-image (painted over the color). */
+:root[data-backdrop="mica"] .app-banner.bg-blue-900\/60 {
+  background-color: #171717;
+  background-image: linear-gradient(
+    color-mix(in oklab, var(--color-blue-900) 60%, transparent),
+    color-mix(in oklab, var(--color-blue-900) 60%, transparent)
+  );
+}
+
+:root[data-backdrop="mica"] .app-banner.bg-red-600\/20 {
+  background-color: #171717;
+  background-image: linear-gradient(
+    color-mix(in oklab, var(--color-red-600) 20%, transparent),
+    color-mix(in oklab, var(--color-red-600) 20%, transparent)
+  );
+}
+
+:root[data-backdrop="mica"][data-theme="light"] .app-banner.bg-blue-900\/60,
+:root[data-backdrop="mica"][data-theme="light"] .app-banner.bg-red-600\/20 {
+  background-color: #ffffff;
+}
+
 /* ── Canvas workspace view ────────────────────────────────────────────────
    Ported from PDFx's canvas styles, scoped under .canvas-view. PDFx's theme
    variables are mapped onto Spectra's palette here (dark default, light via

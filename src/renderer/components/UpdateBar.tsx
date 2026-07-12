@@ -60,7 +60,7 @@ export function UpdateBar(): React.ReactElement | null {
   if (state === 'idle') return null;
 
   return (
-    <div className="flex items-center gap-3 px-4 py-1.5 bg-blue-900/60 border-b border-blue-800 text-sm shrink-0">
+    <div className="app-banner flex items-center gap-3 px-4 py-1.5 bg-blue-900/60 border-b border-blue-800 text-sm shrink-0">
       {state === 'available' && (
         <>
           <span className="text-blue-200">Update available: v{version}</span>

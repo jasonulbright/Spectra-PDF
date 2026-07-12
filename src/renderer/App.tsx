@@ -947,7 +947,7 @@ function AppContent(): React.ReactElement {
       <UpdateBar />
 
       {commitError && (
-        <div data-testid="commit-error-bar" className="flex items-center gap-3 px-4 py-2 bg-red-600/20 border-b border-red-500/40 text-sm text-red-200 shrink-0">
+        <div data-testid="commit-error-bar" className="app-banner flex items-center gap-3 px-4 py-2 bg-red-600/20 border-b border-red-500/40 text-sm text-red-200 shrink-0">
           <span className="flex-1">{commitError}</span>
           <button
             onClick={() => void commitAndReport()}

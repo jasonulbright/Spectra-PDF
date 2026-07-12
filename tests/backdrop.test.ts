@@ -8,7 +8,11 @@ vi.mock('../src/renderer/lib/tauri-bridge', () => ({
 }));
 
 import { app } from '../src/renderer/lib/tauri-bridge';
-import { backdropAttrFor, initBackdrop } from '../src/renderer/lib/backdrop';
+import {
+  BACKDROP_SIGNAL_TIMEOUT_MS,
+  backdropAttrFor,
+  initBackdrop,
+} from '../src/renderer/lib/backdrop';
 
 const getWindowBackdrop = vi.mocked(app.getWindowBackdrop);
 
@@ -38,5 +42,20 @@ describe('initBackdrop', () => {
   it('swallows a missing/failing command (old backend, harness)', async () => {
     getWindowBackdrop.mockRejectedValueOnce(new Error('unknown command'));
     await expect(initBackdrop()).resolves.toBeUndefined();
+  });
+
+  // Review round 1: initBackdrop gates the ENTIRE first render, so a bridge
+  // whose promise never settles must not blank the app forever. Pre-fix
+  // (no timeout race) this test hangs into vitest's test timeout.
+  it('resolves via timeout when the backdrop signal never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      getWindowBackdrop.mockReturnValueOnce(new Promise<never>(() => {}));
+      const boot = initBackdrop();
+      await vi.advanceTimersByTimeAsync(BACKDROP_SIGNAL_TIMEOUT_MS);
+      await expect(boot).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
