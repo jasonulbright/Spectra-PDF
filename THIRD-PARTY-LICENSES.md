@@ -1,6 +1,6 @@
 # Third-Party Licenses
 
-Spectra PDF's own code is MIT-licensed (see [LICENSE](LICENSE)). The application
+Open PDF Studio's own code is MIT-licensed (see [LICENSE](LICENSE)). The application
 **vendors** several third-party components (per the "vendor everything that isn't a
 first-party system prerequisite" approach). Each is listed below with its license
 and source. First-party system prerequisites that are **not** vendored — Microsoft
@@ -10,13 +10,13 @@ WebView2, the MSVC runtime — are obtained from the user's Windows installation
 
 - **Version:** 10.07.1 (unmodified upstream)
 - **License:** GNU Affero General Public License v3.0 (AGPL-3.0)
-- **Role:** Invoked by Spectra PDF as a separate process (no linking) for
+- **Role:** Invoked by Open PDF Studio as a separate process (no linking) for
   compression, grayscale conversion, and PDF/A output.
 - **Binary source:** <https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/tag/gs10071>
 - **Corresponding source:** <https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10071/ghostpdl-10.07.1.tar.gz>
 - **License text shipped at:** `resources/ghostscript/LICENSE-Ghostscript.txt`
 
-Because Spectra PDF is open-source and invokes Ghostscript as an independent
+Because Open PDF Studio is open-source and invokes Ghostscript as an independent
 program (mere aggregation), the two may be distributed together. Ghostscript
 remains under the AGPL-3.0; its complete corresponding source is available at the
 link above.

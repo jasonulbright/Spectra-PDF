@@ -39,7 +39,7 @@ npx tauri build --debug --no-bundle
 the suite exercises the same renderer path as a release build.
 `--no-bundle` skips the NSIS installer step.
 
-The output is `src-tauri/target/debug/spectrapdf.exe`.
+The output is `src-tauri/target/debug/openpdfstudio.exe`.
 
 Prereqs for the binary to actually start the engine: `resources/python/`
 must contain a working `python.exe` (run `scripts/setup-python-embed.ps1`

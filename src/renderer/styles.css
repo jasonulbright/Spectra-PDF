@@ -207,7 +207,7 @@
 
 /* ── Canvas workspace view ────────────────────────────────────────────────
    Ported from PDFx's canvas styles, scoped under .canvas-view. PDFx's theme
-   variables are mapped onto Spectra's palette here (dark default, light via
+   variables are mapped onto Open PDF Studio's palette here (dark default, light via
    [data-theme="light"]); class names inside are kept verbatim so the ported
    components stay diffable against their PDFx originals.
    ──────────────────────────────────────────────────────────────────────── */

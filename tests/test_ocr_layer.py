@@ -52,8 +52,8 @@ class TestApplyOcrLayer:
         # The layer really is invisible-text-mode inside a tagged XObject.
         with pikepdf.open(out) as pdf:
             xo = pdf.pages[0].obj["/Resources"]["/XObject"]
-            assert "/SpectraOCR" in xo
-            assert b"3 Tr" in xo["/SpectraOCR"].read_bytes()
+            assert "/OpenPDFStudioOCR" in xo
+            assert b"3 Tr" in xo["/OpenPDFStudioOCR"].read_bytes()
 
     def test_reapply_replaces_not_stacks(self, tmp_dir):
         src = os.path.join(tmp_dir, "scan.pdf")

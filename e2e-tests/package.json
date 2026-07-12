@@ -1,8 +1,8 @@
 {
-  "name": "spectrapdf-e2e",
+  "name": "openpdfstudio-e2e",
   "version": "0.1.0",
   "private": true,
-  "description": "End-to-end test harness for Spectra PDF (WebdriverIO + tauri-driver)",
+  "description": "End-to-end test harness for Open PDF Studio (WebdriverIO + tauri-driver)",
   "scripts": {
     "test": "wdio run wdio.conf.ts",
     "test:headed": "wdio run wdio.conf.ts --logLevel info",

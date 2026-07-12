@@ -30,7 +30,7 @@ async function loadPdf(path: string) {
 }
 
 // A PDF with a /Square annotation authored directly via raw pdf-lib context
-// calls — NOT through Spectra's own builder — to simulate a file that
+// calls — NOT through Open PDF Studio's own builder — to simulate a file that
 // arrived with an annotation some other tool created (Acrobat, etc.).
 async function makeForeignAnnotatedPdf(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();

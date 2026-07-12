@@ -10,7 +10,7 @@ docs/architecture/15-phase2m-ocr-find.md for the CLI scope boundary.
 
 Construction — the standard "OCR under" text layer:
   - One Form XObject per page, tagged with a private resource name
-    (``/SpectraOCR``) so re-applying REPLACES this tool's own layer instead
+    (``/OpenPDFStudioOCR``) so re-applying REPLACES this tool's own layer instead
     of stacking duplicates (idempotence), and never touches text from any
     other source.
   - Inside: ``Tr 3`` (invisible text rendering mode), one text run per word,
@@ -18,7 +18,7 @@ Construction — the standard "OCR under" text layer:
     (width-fit capped by box height) at the box baseline. The page's visual
     appearance is unchanged — the overlay draws nothing.
   - Content is ADDITIVE: the original content stream is untouched; the
-    overlay is appended as ``q /SpectraOCR Do Q``.
+    overlay is appended as ``q /OpenPDFStudioOCR Do Q``.
 
 Fail-closed: all edits validated first (page range, rect shape, encodable
 text); output written only after every page succeeds; in-place via
@@ -34,7 +34,7 @@ from pikepdf import Dictionary, Name
 
 from engine.pdf_metrics import text_width_em
 
-OCR_XOBJECT_NAME = "/SpectraOCR"
+OCR_XOBJECT_NAME = "/OpenPDFStudioOCR"
 MIN_WORD_FONT = 1.0
 MAX_WORD_FONT = 144.0
 

@@ -1,52 +1,46 @@
-"""Generate NSIS installer graphics for SpectraPDF."""
+"""Generate NSIS installer graphics for Open PDF Studio.
+
+Composes the two Tauri-NSIS images (header 150x57, welcome/finish sidebar
+164x314) from the app icon master (`src-tauri/icons/icon-master.png`, the
+rasterized brand mark) plus the product name in Segoe UI. Regenerate after
+any icon change: `python scripts/gen-installer-images.py` (needs Pillow).
+NSIS requires 24-bit BMPs — Pillow's RGB save handles that.
+"""
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-NAVY = (26, 26, 46)
+# Sampled from the icon master's plate and accent page edge.
+NAVY = (35, 39, 96)
+CORAL = (245, 90, 90)
 WHITE = (255, 255, 255)
-SPECTRUM = [
-    (179, 163, 214),  # purple
-    (108, 214, 174),  # green
-    (240, 186, 100),  # orange
-    (240, 128, 128),  # pink/red
-]
+MUTED = (196, 200, 224)
 
 ICONS_DIR = os.path.join(os.path.dirname(__file__), '..', 'src-tauri', 'icons')
+MASTER = os.path.join(ICONS_DIR, 'icon-master.png')
 
 
-def draw_spectrum_bar(draw, x, y, width, height):
-    """Draw the signature spectrum color bar."""
-    band_w = width // len(SPECTRUM)
-    for i, color in enumerate(SPECTRUM):
-        x0 = x + i * band_w
-        x1 = x0 + band_w if i < len(SPECTRUM) - 1 else x + width
-        draw.rectangle([x0, y, x1, y + height], fill=color)
-
-
-def try_load_font(size):
-    """Try to load a clean font, fall back to default."""
-    font_paths = [
-        "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/calibri.ttf",
-    ]
-    for fp in font_paths:
+def try_load_font(size, bold=False):
+    """Segoe UI (the OS UI face), falling back through common installs."""
+    names = (
+        ["C:/Windows/Fonts/segoeuib.ttf", "C:/Windows/Fonts/arialbd.ttf"]
+        if bold
+        else ["C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf"]
+    )
+    for fp in names:
         if os.path.exists(fp):
             return ImageFont.truetype(fp, size)
     return ImageFont.load_default()
 
 
-def try_load_bold_font(size):
-    """Try to load a bold font, fall back to regular."""
-    bold_paths = [
-        "C:/Windows/Fonts/segoeuib.ttf",
-        "C:/Windows/Fonts/arialbd.ttf",
-        "C:/Windows/Fonts/calibrib.ttf",
-    ]
-    for fp in bold_paths:
-        if os.path.exists(fp):
-            return ImageFont.truetype(fp, size)
-    return try_load_font(size)
+def load_mark(size):
+    """The brand mark, resized with premultiplied compositing onto navy."""
+    mark = Image.open(MASTER).convert('RGBA').resize((size, size), Image.LANCZOS)
+    return mark
+
+
+def paste_mark(img, mark, xy):
+    """Alpha-composite the mark onto an RGB canvas."""
+    img.paste(mark, xy, mark)
 
 
 def gen_header():
@@ -54,17 +48,16 @@ def gen_header():
     img = Image.new('RGB', (150, 57), NAVY)
     draw = ImageDraw.Draw(img)
 
-    # Spectrum bar across top
-    draw_spectrum_bar(draw, 0, 0, 150, 4)
+    # Mark at left, name in two stacked lines beside it.
+    mark = load_mark(36)
+    paste_mark(img, mark, (8, 10))
 
-    # "Spectra PDF" text centered
-    font = try_load_bold_font(16)
-    bbox = draw.textbbox((0, 0), "Spectra PDF", font=font)
-    tw = bbox[2] - bbox[0]
-    th = bbox[3] - bbox[1]
-    tx = (150 - tw) // 2
-    ty = 4 + (53 - th) // 2
-    draw.text((tx, ty), "Spectra PDF", fill=WHITE, font=font)
+    font = try_load_font(14, bold=True)
+    draw.text((52, 12), "Open PDF", fill=WHITE, font=font)
+    draw.text((52, 28), "Studio", fill=MUTED, font=font)
+
+    # Coral accent rule along the bottom edge.
+    draw.rectangle([0, 54, 150, 57], fill=CORAL)
 
     path = os.path.join(ICONS_DIR, 'installer-header.bmp')
     img.save(path, 'BMP')
@@ -76,23 +69,22 @@ def gen_sidebar():
     img = Image.new('RGB', (164, 314), NAVY)
     draw = ImageDraw.Draw(img)
 
-    # Spectrum bar across top — full width
-    draw_spectrum_bar(draw, 0, 0, 164, 6)
+    # Mark centered in the upper half.
+    mark = load_mark(84)
+    paste_mark(img, mark, ((164 - 84) // 2, 58))
 
-    # "Spectra" text — bottom of top third (~95px)
-    font_large = try_load_bold_font(24)
-    bbox = draw.textbbox((0, 0), "Spectra", font=font_large)
+    # Name stacked beneath.
+    font_large = try_load_font(20, bold=True)
+    bbox = draw.textbbox((0, 0), "Open PDF", font=font_large)
     tw = bbox[2] - bbox[0]
-    draw.text(((164 - tw) // 2, 88), "Spectra", fill=WHITE, font=font_large)
+    draw.text(((164 - tw) // 2, 168), "Open PDF", fill=WHITE, font=font_large)
 
-    # "PDF" text — top of middle third (~118px)
-    font_mid = try_load_font(20)
-    bbox = draw.textbbox((0, 0), "PDF", font=font_mid)
+    bbox = draw.textbbox((0, 0), "Studio", font=font_large)
     tw = bbox[2] - bbox[0]
-    draw.text(((164 - tw) // 2, 118), "PDF", fill=(180, 180, 200), font=font_mid)
+    draw.text(((164 - tw) // 2, 194), "Studio", fill=MUTED, font=font_large)
 
-    # Spectrum bar across bottom — full width
-    draw_spectrum_bar(draw, 0, 308, 164, 6)
+    # Coral accent rule along the bottom edge.
+    draw.rectangle([0, 308, 164, 314], fill=CORAL)
 
     path = os.path.join(ICONS_DIR, 'installer-sidebar.bmp')
     img.save(path, 'BMP')

@@ -156,7 +156,7 @@ npm run package
 
 This runs `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs pikepdf/pdfminer), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it into `resources/`), then `cargo tauri build` (compiles Rust, bundles WebView2 frontend, produces the NSIS installer).
 
-Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio Setup X.Y.Z.exe`
+Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio_X.Y.Z_x64-setup.exe`
 
 **Individual steps** (if needed):
 
