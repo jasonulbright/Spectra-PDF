@@ -163,6 +163,24 @@ export interface CanvasFormsHandlers {
     options?: string[];
     multiline?: boolean;
   }) => Promise<void>;
+  // Sign into an existing empty signature field of the ACTIVE file (2n.4d) —
+  // the sign card's field branch with the dialog paths injected.
+  signField: (params: {
+    fieldName: string;
+    pfxPath?: string;
+    keyPath?: string;
+    certPath?: string;
+    password: string;
+    output: string;
+    reason?: string;
+    location?: string;
+  }) => Promise<{
+    signer: string | null;
+    output: string;
+    valid: boolean;
+    intact: boolean;
+    covers_whole_document: boolean;
+  }>;
 }
 
 let canvasForms: CanvasFormsHandlers | null = null;
@@ -348,6 +366,24 @@ export interface TestHarness {
     options?: string[];
     multiline?: boolean;
   }) => Promise<void>;
+  /** Sign into an existing empty signature field of the active file (2n.4d)
+   * via the sign card's real field branch, dialog paths injected. */
+  signCanvasField: (params: {
+    fieldName: string;
+    pfxPath?: string;
+    keyPath?: string;
+    certPath?: string;
+    password: string;
+    output: string;
+    reason?: string;
+    location?: string;
+  }) => Promise<{
+    signer: string | null;
+    output: string;
+    valid: boolean;
+    intact: boolean;
+    covers_whole_document: boolean;
+  }>;
   /** Number of scanned source pages with OCR words ready to persist. */
   ocrReadyCount: () => number;
   /** Run the "Make searchable" flow (engine apply_ocr_layer per file);
@@ -710,6 +746,19 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         await canvasForms.createPlacedField(params);
       } catch (err) {
         captureError('createPlacedField', err);
+        throw err;
+      }
+    },
+    signCanvasField: async (params) => {
+      if (!canvasForms) {
+        const msg = 'signCanvasField: canvas view not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await canvasForms.signField(params);
+      } catch (err) {
+        captureError('signCanvasField', err);
         throw err;
       }
     },

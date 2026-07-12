@@ -261,6 +261,22 @@ def _validated_appearance(appearance: dict, file: str) -> tuple[int, tuple[float
     return page - 1, box
 
 
+def _validated_existing_field(file: str, field_name: str) -> None:
+    """The named field must exist, be a SIGNATURE field, and be empty —
+    validated up front for clear errors (pyHanko's existing_fields_only
+    refusal is the fail-closed backstop either way). enumerate_sig_fields
+    yields signature fields only, so a same-named text field correctly
+    reports as 'no empty signature field'."""
+    with open(file, "rb") as f:
+        reader = PdfFileReader(f)
+        for name, value, _ref in fields.enumerate_sig_fields(reader):
+            if name == field_name:
+                if value is not None:
+                    raise ValueError(f'Signature field "{field_name}" is already signed.')
+                return
+    raise ValueError(f'No empty signature field named "{field_name}" exists in this PDF.')
+
+
 def _stamp_style(reason: str | None, location: str | None) -> "stamp.TextStampStyle":
     """Visible-stamp style: signer + timestamp via pyHanko's built-in
     interpolation, plus optional reason/location lines. USER TEXT IS
@@ -286,6 +302,7 @@ def sign_pdf(
     key_path: str | None = None,
     cert_path: str | None = None,
     appearance: dict | None = None,
+    existing_field: str | None = None,
 ) -> dict:
     """Apply a digital signature, written to a NEW file (signing appends an
     incremental revision — see docs/architecture/11-phase2h-signing.md and
@@ -299,7 +316,15 @@ def sign_pdf(
     Appearance: by default the signature is INVISIBLE. Passing ``appearance``
     = ``{page: <1-based>, rect: [x0,y0,x1,y1]}`` (PDF user-space points,
     bottom-up — the same convention as redaction regions) draws a visible
-    stamp (signer, signing time, optional reason/location) at that box.
+    stamp (signer, signing time, optional reason/location) at that box in a
+    NEW signature field.
+
+    Existing field (2n.4d): passing ``existing_field`` instead FILLS the
+    named, already-present, EMPTY signature field — the field's own widget
+    /Rect provides the stamp box (a zero-size widget signs invisibly, which
+    is that field's design). Mutually exclusive with ``appearance`` (each
+    decides the placement); refuses (before any signing work) when the field
+    is missing, not a signature field, or already signed.
 
     SECURITY: the ``password`` is used only to load the signer and is NEVER
     placed in the return value, an error message, or any log. The result is
@@ -311,10 +336,12 @@ def sign_pdf(
         output: Output path for the signed PDF (MUST differ from ``file``).
         pfx_path: PKCS#12 (.pfx/.p12) signer file.
         password: Passphrase for the signer (empty string if none).
-        field_name: Signature field name (default "Signature1").
+        field_name: NEW signature field name (default "Signature1"); ignored
+            when ``existing_field`` is given.
         reason / location: Optional signature metadata (not secret).
         key_path / cert_path: PEM/DER signer files (alternative to pfx_path).
         appearance: Optional visible-stamp placement (see above).
+        existing_field: Name of an existing empty signature field to fill.
     """
     input_path = Path(file)
     output_path = Path(output)
@@ -322,6 +349,11 @@ def sign_pdf(
         # Signing appends a revision; an in-place write would be ambiguous and
         # invites re-serialization that breaks the signature.
         raise ValueError("The signed output must be a different file from the input.")
+
+    if existing_field is not None and appearance is not None:
+        raise ValueError(
+            "Choose ONE placement: fill an existing signature field, or place a new visible stamp."
+        )
 
     have_pfx = bool(pfx_path)
     have_pem = bool(key_path) or bool(cert_path)
@@ -338,11 +370,23 @@ def sign_pdf(
         signer = _load_signer_from_pem(key_path, cert_path, password)  # type: ignore[arg-type]
 
     placement = _validated_appearance(appearance, file) if appearance is not None else None
+    if existing_field is not None:
+        _validated_existing_field(file, existing_field)
+        field_name = existing_field
 
     meta = signers.PdfSignatureMetadata(field_name=field_name, reason=reason, location=location)
     with open(file, "rb") as inf:
         writer = IncrementalPdfFileWriter(inf)
-        if placement is not None:
+        if existing_field is not None:
+            # existing_fields_only is the fail-closed backstop: pyHanko will
+            # refuse to CREATE a field here, so a lookup miss can never
+            # silently turn into a new invisible signature. The stamp style
+            # draws in the field's own widget rect (zero-size -> invisible).
+            pdf_signer = signers.PdfSigner(
+                meta, signer=signer, stamp_style=_stamp_style(reason, location)
+            )
+            signed = pdf_signer.sign_pdf(writer, existing_fields_only=True)
+        elif placement is not None:
             page_ix, box = placement
             fields.append_signature_field(
                 writer,

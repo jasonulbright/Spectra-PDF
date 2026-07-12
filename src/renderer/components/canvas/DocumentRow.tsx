@@ -41,6 +41,7 @@ interface DocumentRowProps {
   formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+  onSignFieldRequest: (path: string, fieldName: string) => void;
   // Add-field placement (2n.4c).
   formsAddMode: boolean;
   newFieldPlacement: SignaturePlacement | null;
@@ -93,6 +94,7 @@ function DocumentRowImpl({
   formWidgetsByPage,
   formValuesByPath,
   onSetFormValue,
+  onSignFieldRequest,
   formsAddMode,
   newFieldPlacement,
   onSetNewFieldRect,
@@ -144,6 +146,7 @@ function DocumentRowImpl({
         formWidgets={formWidgetsByPage.get(page.id)}
         formValues={formValuesByPath.get(page.sourceDocId)}
         onSetFormValue={onSetFormValue}
+        onSignFieldRequest={onSignFieldRequest}
         formsAddMode={formsAddMode}
         newFieldPlacement={newFieldPlacement?.pageId === page.id ? newFieldPlacement : null}
         onSetNewFieldRect={onSetNewFieldRect}

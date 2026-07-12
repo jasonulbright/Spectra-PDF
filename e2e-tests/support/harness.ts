@@ -564,3 +564,28 @@ export async function createPlacedField(params: {
     throw new Error(`createPlacedField failed: ${result.replace(ERROR_TAG, '')}`);
   }
 }
+
+export async function signCanvasField(params: {
+  fieldName: string;
+  pfxPath?: string;
+  keyPath?: string;
+  certPath?: string;
+  password: string;
+  output: string;
+  reason?: string;
+  location?: string;
+}): Promise<{ signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean }> {
+  const result = await browser.executeAsync<
+    | { signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean }
+    | string,
+    [typeof params]
+  >(function (p, done) {
+    (window as any).__SPECTRA_TEST__.signCanvasField(p)
+      .then((r: unknown) => done(r as any))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  }, params);
+  if (typeof result === 'string') {
+    throw new Error(`signCanvasField failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}

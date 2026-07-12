@@ -773,6 +773,16 @@
   opacity: 0.75;
 }
 
+.page-form-sig.signable {
+  cursor: pointer;
+  background: rgba(139, 92, 246, 0.16);
+}
+
+.page-form-sig.signable:hover {
+  background: rgba(139, 92, 246, 0.28);
+  border-color: #a78bfa;
+}
+
 .page-annot-band.band-formfield {
   background: rgba(16, 185, 129, 0.16);
   border-color: #10b981;

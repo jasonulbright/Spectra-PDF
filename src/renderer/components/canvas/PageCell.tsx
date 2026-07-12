@@ -64,6 +64,7 @@ function FormWidgetView({
   pending,
   fontPx,
   onSetFormValue,
+  onSignFieldRequest,
 }: {
   widget: OverlayWidget;
   rotation: 0 | 90 | 180 | 270;
@@ -71,6 +72,7 @@ function FormWidgetView({
   pending: FormFieldValue | undefined;
   fontPx: number;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+  onSignFieldRequest: (path: string, fieldName: string) => void;
 }): React.JSX.Element | null {
   const hasPending = pending !== undefined;
   if (!formsMode && !hasPending) return null;
@@ -103,7 +105,27 @@ function FormWidgetView({
     onContextMenu: stop,
   } as const;
   if (widget.type === 'signature') {
-    // Rendered as a labeled surface; filling an EMPTY one is 2n.4(d).
+    // An EMPTY, non-read-only signature field is clickable (2n.4d): the
+    // click opens the sign card targeting THIS field by name — the engine
+    // fills it in place (the field's own widget rect is the stamp box).
+    const signable = !widget.sigFilled && !widget.readOnly;
+    if (signable) {
+      return (
+        <button
+          {...common}
+          type="button"
+          className="page-form-widget page-form-sig signable"
+          style={style}
+          title={`${widget.fieldName} — click to sign this field`}
+          onClick={(e) => {
+            stop(e);
+            onSignFieldRequest(widget.path, widget.fieldName);
+          }}
+        >
+          <span>SIGN HERE</span>
+        </button>
+      );
+    }
     return (
       <div
         {...common}
@@ -112,7 +134,7 @@ function FormWidgetView({
         title={
           widget.sigFilled
             ? `${widget.fieldName} — already signed`
-            : `${widget.fieldName} — empty signature field`
+            : `${widget.fieldName} — read-only signature field`
         }
       >
         <span>{widget.sigFilled ? 'SIGNED' : 'SIGNATURE'}</span>
@@ -261,6 +283,9 @@ interface PageCellProps {
   // Pending values for THIS page's file, keyed by field name.
   formValues?: ReadonlyMap<string, FormFieldValue>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+  // Clicking an empty signature widget in forms mode targets it for signing
+  // (2n.4d — the sign card opens in fill-this-field mode).
+  onSignFieldRequest: (path: string, fieldName: string) => void;
   // Add-field sub-mode (2n.4c): while armed, forms mode draws a placement
   // band instead of being inert on empty page area.
   formsAddMode?: boolean;
@@ -317,6 +342,7 @@ function PageCellImpl({
   formWidgets,
   formValues,
   onSetFormValue,
+  onSignFieldRequest,
   formsAddMode,
   newFieldPlacement,
   onSetNewFieldRect,
@@ -750,6 +776,7 @@ function PageCellImpl({
           pending={formValues?.get(w.fieldName)}
           fontPx={freetextFontPx * (10 / 12)}
           onSetFormValue={onSetFormValue}
+          onSignFieldRequest={onSignFieldRequest}
         />
       ))}
       {signaturePlacement && (

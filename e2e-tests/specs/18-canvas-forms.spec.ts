@@ -24,7 +24,10 @@ import {
   formWidgetCount,
   placeNewField,
   createPlacedField,
+  signCanvasField,
 } from '../support/harness.js';
+
+const TEST_PFX = resolve(__dirname, '..', 'fixtures', 'test-signer.pfx');
 
 const require = createRequire(import.meta.url);
 pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
@@ -161,5 +164,68 @@ describe('on-canvas form filling (2n.4b)', () => {
       message = String(err);
     }
     expect(message).toContain('already exists');
+  });
+
+  it('creates an empty signature field, then signs INTO it (2n.4c + 2n.4d)', async () => {
+    await placeNewField({ x: 0.55, y: 0.75, w: 0.35, h: 0.1 });
+    await createPlacedField({ name: 'approval', type: 'signature' });
+
+    const signedOut = resolve(tmp, 'field-signed.pdf');
+    const summary = await signCanvasField({
+      fieldName: 'approval',
+      pfxPath: TEST_PFX,
+      password: 'testpw',
+      output: signedOut,
+      reason: 'Field-fill e2e',
+    });
+    expect(summary.valid).toBe(true);
+    expect(summary.intact).toBe(true);
+    expect(summary.covers_whole_document).toBe(true);
+    expect(existsSync(signedOut)).toBe(true);
+
+    // Independent check: the signature landed IN the created field (its /V
+    // is populated; no second signature field was appended).
+    const doc = await PDFDocument.load(new Uint8Array(readFileSync(signedOut)), {
+      ignoreEncryption: true,
+    });
+    const { PDFName, PDFDict, PDFArray } = await import('pdf-lib');
+    const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
+    const fields = acro.lookup(PDFName.of('Fields'), PDFArray);
+    let sigFields = 0;
+    let signedName = '';
+    for (let i = 0; i < fields.size(); i++) {
+      const f = fields.lookup(i, PDFDict);
+      if (f.get(PDFName.of('FT')) === PDFName.of('Sig')) {
+        sigFields++;
+        if (f.get(PDFName.of('V')) !== undefined) {
+          const t = f.get(PDFName.of('T'));
+          signedName = t ? String(t) : '';
+        }
+      }
+    }
+    expect(sigFields).toBe(1);
+    expect(signedName).toContain('approval');
+  });
+
+  it('refuses signing a field while page edits are pending (rename hazard)', async () => {
+    // Leave a page edit uncommitted, then try to sign — the flow must refuse
+    // (a gate-commit could rename fields out from under a name-only target).
+    const ids = await getWorkspacePageIds();
+    await selectCanvasPages([ids[0]]);
+    await rotateSelectedCanvasPages(90);
+    let message = '';
+    try {
+      await signCanvasField({
+        fieldName: 'approval',
+        pfxPath: TEST_PFX,
+        password: 'testpw',
+        output: resolve(tmp, 'should-not-exist.pdf'),
+      });
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toContain('pending page changes');
+    expect(existsSync(resolve(tmp, 'should-not-exist.pdf'))).toBe(false);
+    await commitPendingEdits(); // leave the workspace clean for later specs
   });
 });

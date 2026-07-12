@@ -166,6 +166,11 @@ export function WorkspaceCanvasView({
   // Pending visible-signature placement — single, transient, same lifecycle
   // as redaction marks (see lib/signature-placement.ts).
   const [sigPlacement, setSigPlacement] = useState<SignaturePlacement | null>(null);
+  // Sign-into-an-existing-field target (2n.4d) — mutually exclusive with the
+  // rubber-band placement; same transient lifecycle.
+  const [sigFieldTarget, setSigFieldTarget] = useState<{ path: string; fieldName: string } | null>(
+    null,
+  );
   const [sigSource, setSigSource] = useState<SignerSource>(EMPTY_SIGNER_SOURCE);
   const [sigPassword, setSigPassword] = useState('');
   const [sigReason, setSigReason] = useState('');
@@ -585,12 +590,30 @@ export function WorkspaceCanvasView({
       if (!doc) return;
       setSigPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
       setNewFieldPlacement(null);
+      setSigFieldTarget(null);
       setSignDone(null);
       setSignError(null);
     },
     [docs],
   );
   const onClearSignaturePlacement = useCallback(() => setSigPlacement(null), []);
+
+  // Clicking an empty signature widget in forms mode targets it (2n.4d). The
+  // early pending-page-edits notice mirrors the hard check in applySignature.
+  const onSignFieldRequest = useCallback(
+    (path: string, fieldName: string) => {
+      setSigFieldTarget({ path, fieldName });
+      setSigPlacement(null);
+      setNewFieldPlacement(null);
+      setSignDone(null);
+      setSignError(
+        state.pageDirtyPaths.includes(path)
+          ? 'Apply the pending page changes first, then sign the field.'
+          : null,
+      );
+    },
+    [state.pageDirtyPaths],
+  );
 
   // Placement whose page still exists (a deleted page's placement is inert,
   // surfaced as such rather than guessed at).
@@ -623,6 +646,9 @@ export function WorkspaceCanvasView({
       setSigPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
       // New-field placement shares the positional-id hazard — same lifecycle.
       setNewFieldPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
+      // A buffer change can rename/remove fields — a name-keyed sign target
+      // must not survive it (the user re-clicks the widget, which re-reads).
+      setSigFieldTarget((prev) => (prev && invalidated.has(prev.path) ? null : prev));
       // Selection holds positional PageRef ids (`path#pN`) that the indexer
       // rebuilds from the new on-disk order after any buffer change. A stale id
       // would silently re-bind to a DIFFERENT physical page and get deleted or
@@ -738,6 +764,41 @@ export function WorkspaceCanvasView({
     });
     return true;
   };
+  // Sign-into-field for the harness (2n.4d): the same engine call the sign
+  // card's field branch makes, with the native save dialog's output injected.
+  const harnessSignFieldRef = useRef<
+    (params: {
+      fieldName: string;
+      pfxPath?: string;
+      keyPath?: string;
+      certPath?: string;
+      password: string;
+      output: string;
+      reason?: string;
+      location?: string;
+    }) => Promise<{ signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean }>
+  >(async () => {
+    throw new Error('canvas not ready');
+  });
+  harnessSignFieldRef.current = async (params) => {
+    const path = state.activeFileId;
+    const f = path ? state.files.get(path) : undefined;
+    if (!path || !f) throw new Error('signCanvasField: no active file');
+    if (state.pageDirtyPaths.includes(path)) {
+      throw new Error('signCanvasField: apply pending page changes first');
+    }
+    return (await engineCall('sign_pdf', {
+      file: f.workingPath,
+      output: params.output,
+      ...(params.pfxPath ? { pfx_path: params.pfxPath } : {}),
+      ...(params.keyPath ? { key_path: params.keyPath } : {}),
+      ...(params.certPath ? { cert_path: params.certPath } : {}),
+      password: params.password,
+      ...(params.reason ? { reason: params.reason } : {}),
+      ...(params.location ? { location: params.location } : {}),
+      existing_field: params.fieldName,
+    })) as unknown as { signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean };
+  };
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasForms({
@@ -782,6 +843,7 @@ export function WorkspaceCanvasView({
       },
       placeNewFieldOnFirstPage: (rect) => harnessPlaceFieldRef.current(rect),
       createPlacedField: (params) => createFieldRef.current(params),
+      signField: (params) => harnessSignFieldRef.current(params),
     });
     return () => registerCanvasForms(null);
   }, []);
@@ -856,15 +918,18 @@ export function WorkspaceCanvasView({
     }
   }, [liveMarks, docs, state.files, onRedactFile]);
 
-  // Sign the placement's file, visible stamp at the drawn box. Geometry is
-  // read from the CURRENT buffer's proxy (same contract as applyMarks); the
-  // engine gate then flushes pending page edits before sign_pdf reads the
-  // file, so the output contains what the user sees. The input file itself is
-  // NEVER modified — signing writes a new file.
+  // Sign the placement's file (visible stamp at the drawn box) or fill the
+  // targeted existing empty signature field (2n.4d — the field's own widget
+  // rect is the stamp box). Geometry for a placement is read from the
+  // CURRENT buffer's proxy (same contract as applyMarks); the engine gate
+  // then flushes pending page edits before sign_pdf reads the file, so the
+  // output contains what the user sees. The input file itself is NEVER
+  // modified — signing writes a new file.
   const signingRef = useRef(false);
   const applySignature = useCallback(async (): Promise<void> => {
     const placement = liveSigPlacement;
-    if (!placement || signingRef.current) return;
+    const fieldTarget = sigFieldTarget;
+    if ((!placement && !fieldTarget) || signingRef.current) return;
     // Synchronous validation only above this line. The reentrancy ref MUST be
     // taken before the FIRST await (review-caught; same double-click class as
     // the punchlist's applyMarks tripwire) — a second click during
@@ -879,28 +944,46 @@ export function WorkspaceCanvasView({
       setSignError('Enter the signer password.');
       return;
     }
+    if (fieldTarget && state.pageDirtyPaths.includes(fieldTarget.path)) {
+      // The gate-commit inside sign_pdf could rename fields (a pending
+      // import's name collision, 2n.4(a)) out from under a name-only target.
+      // Unlike the value fill — which re-resolves renames by fingerprint —
+      // a signature is not silently re-appliable, so refuse until the page
+      // edits are applied and the target re-clicked against the fresh read.
+      setSignError('Apply the pending page changes first, then sign the field.');
+      return;
+    }
     signingRef.current = true;
     setSigningBusy(true);
     setSignError(null);
     try {
-      const built = await buildSignatureAppearance(docs, placement, async (page) => {
-        const f = state.files.get(page.sourceDocId);
-        if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
-        const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
-        const p = await proxy.getPage(page.sourcePageIndex + 1);
-        const [vx0, vy0, vx1, vy1] = p.view;
-        return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
-      });
-      if (!built) {
-        setSignError('The page this signature was placed on no longer exists.');
-        return;
+      let filePath: string;
+      let placementParams: Record<string, unknown>;
+      if (fieldTarget) {
+        filePath = fieldTarget.path;
+        placementParams = { existing_field: fieldTarget.fieldName };
+      } else {
+        const built = await buildSignatureAppearance(docs, placement!, async (page) => {
+          const f = state.files.get(page.sourceDocId);
+          if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+          const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+          const p = await proxy.getPage(page.sourcePageIndex + 1);
+          const [vx0, vy0, vx1, vy1] = p.view;
+          return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
+        });
+        if (!built) {
+          setSignError('The page this signature was placed on no longer exists.');
+          return;
+        }
+        filePath = built.path;
+        placementParams = { appearance: built.appearance };
       }
-      const file = state.files.get(built.path);
+      const file = state.files.get(filePath);
       if (!file) {
         setSignError('The file this signature was placed on is no longer open.');
         return;
       }
-      const baseName = (built.path.split(/[\\/]/).pop() ?? 'document').replace(/\.pdfx?$/i, '');
+      const baseName = (filePath.split(/[\\/]/).pop() ?? 'document').replace(/\.pdfx?$/i, '');
       const dest = await dialog.saveFile({ defaultPath: `${baseName}-signed.pdf` });
       if (!dest) return; // cancelled — the finally still clears the password
       const res = (await engineCall('sign_pdf', {
@@ -910,10 +993,11 @@ export function WorkspaceCanvasView({
         password: sigPassword,
         ...(sigReason.trim() ? { reason: sigReason.trim() } : {}),
         ...(sigLocation.trim() ? { location: sigLocation.trim() } : {}),
-        appearance: built.appearance,
+        ...placementParams,
       })) as unknown as { signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean };
       setSignDone({ signer: res.signer, output: res.output, ok: res.valid && res.intact && res.covers_whole_document });
       setSigPlacement(null);
+      setSigFieldTarget(null);
       setTool('select');
     } catch (err) {
       setSignError(err instanceof Error ? err.message : String(err));
@@ -925,7 +1009,7 @@ export function WorkspaceCanvasView({
       signingRef.current = false;
       setSigningBusy(false);
     }
-  }, [liveSigPlacement, sigSource, sigPassword, sigReason, sigLocation, docs, state.files, engineCall]);
+  }, [liveSigPlacement, sigFieldTarget, sigSource, sigPassword, sigReason, sigLocation, docs, state.files, state.pageDirtyPaths, engineCall]);
 
   // Harness bridge (e2e builds only): redaction marks live here, out of the
   // reducer's reach, so the canvas registers its own handlers while mounted.
@@ -1328,6 +1412,7 @@ export function WorkspaceCanvasView({
           formWidgetsByPage={formWidgetsByPage}
           formValuesByPath={pendingFormValues}
           onSetFormValue={onSetFormValue}
+          onSignFieldRequest={onSignFieldRequest}
           formsAddMode={formsAddMode}
           newFieldPlacement={liveNewFieldPlacement}
           onSetNewFieldRect={onSetNewFieldRect}
@@ -1659,15 +1744,20 @@ export function WorkspaceCanvasView({
         </div>
       )}
 
-      {liveSigPlacement && (
+      {(liveSigPlacement || sigFieldTarget) && (
         <div
           data-testid="sign-canvas-form"
           className="absolute bottom-4 left-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
         >
-          <div className="text-sm text-neutral-200 font-medium">Sign with a visible stamp</div>
+          <div className="text-sm text-neutral-200 font-medium">
+            {sigFieldTarget
+              ? `Sign field "${sigFieldTarget.fieldName}"`
+              : 'Sign with a visible stamp'}
+          </div>
           <p className="text-[11px] text-neutral-500 -mt-1.5">
-            The stamp is drawn at the box you placed; the signed copy is written to a NEW file —
-            this file is left unchanged.
+            {sigFieldTarget
+              ? 'The signature fills this existing field (its own box is the stamp); the signed copy is written to a NEW file — this file is left unchanged.'
+              : 'The stamp is drawn at the box you placed; the signed copy is written to a NEW file — this file is left unchanged.'}
           </p>
           <SignerSourceFields value={sigSource} onChange={setSigSource} idPrefix="canvas-sign" />
           <div className="flex items-center gap-2">
@@ -1705,6 +1795,7 @@ export function WorkspaceCanvasView({
             <button
               onClick={() => {
                 setSigPlacement(null);
+                setSigFieldTarget(null);
                 setSigPassword('');
                 setSignError(null);
               }}

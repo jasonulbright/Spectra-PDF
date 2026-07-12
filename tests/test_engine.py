@@ -2043,6 +2043,112 @@ class TestSignPdf:
         assert r["valid"] is True
 
 
+def _pdf_with_sig_field(path: str, name: str = "sigf", rect=(100, 100, 300, 160), filled: bool = False, as_text: bool = False) -> str:
+    """A one-page PDF carrying one form field named ``name``: an empty (or
+    pre-'signed') signature field, or — with ``as_text`` — a TEXT field of
+    the same name (for the wrong-type refusal case)."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400, 400))
+    ft = pikepdf.Name.Tx if as_text else pikepdf.Name.Sig
+    w = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name.Annot,
+            Subtype=pikepdf.Name.Widget,
+            FT=ft,
+            Rect=list(rect),
+            F=4,
+            P=page.obj,
+        )
+    )
+    w["/T"] = pikepdf.String(name)
+    if filled:
+        w["/V"] = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.Sig))
+    page.obj["/Annots"] = pikepdf.Array([w])
+    acro = pikepdf.Dictionary(Fields=pikepdf.Array([w]))
+    if not as_text:
+        acro["/SigFlags"] = 1
+    pdf.Root["/AcroForm"] = pdf.make_indirect(acro)
+    pdf.save(path)
+    pdf.close()
+    return path
+
+
+class TestSignExistingField:
+    """2n.4d — filling an existing empty signature field by name. The field's
+    own widget /Rect provides the visible appearance; a zero-size widget
+    signs invisibly; anything else refuses before signing work starts."""
+
+    def test_fills_the_named_empty_field_with_a_visible_stamp(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _pdf_with_sig_field(os.path.join(tmp_dir, "in.pdf"), name="approval")
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(file=src, output=out, pfx_path=pfx, password="pw", existing_field="approval")
+        assert r["valid"] is True and r["intact"] is True
+        assert r["field"] == "approval"
+        assert r["covers_whole_document"] is True
+        v = verify_signatures(out)
+        assert v["signature_count"] == 1
+        assert v["signatures"][0]["field"] == "approval"
+        # The signature landed IN the existing field (no second field
+        # appended), its widget kept its rect, and a visible appearance
+        # stream was generated into it.
+        with pikepdf.open(out) as pdf:
+            sig_fields = [
+                f for f in pdf.Root["/AcroForm"]["/Fields"] if f.get("/FT") == pikepdf.Name.Sig
+            ]
+            assert len(sig_fields) == 1
+            field = sig_fields[0]
+            assert str(field["/T"]) == "approval"
+            assert field.get("/V") is not None
+            assert [round(float(x)) for x in field["/Rect"]] == [100, 100, 300, 160]
+            ap = field.get("/AP")
+            assert ap is not None and ap.get("/N") is not None
+            assert len(ap["/N"].read_bytes()) > 0  # a real stamp, not a stub
+
+    def test_zero_size_field_signs_invisibly(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _pdf_with_sig_field(os.path.join(tmp_dir, "in.pdf"), rect=(0, 0, 0, 0))
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = sign_pdf(file=src, output=out, pfx_path=pfx, password="pw", existing_field="sigf")
+        assert r["valid"] is True and r["intact"] is True
+        assert verify_signatures(out)["summary"]["all_valid"] is True
+
+    def test_missing_field_refuses_and_writes_nothing(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _pdf_with_sig_field(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match="No empty signature field"):
+            sign_pdf(file=src, output=out, pfx_path=pfx, password="pw", existing_field="nope")
+        assert not os.path.exists(out)
+
+    def test_already_signed_field_refuses(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _pdf_with_sig_field(os.path.join(tmp_dir, "in.pdf"), filled=True)
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match="already signed"):
+            sign_pdf(file=src, output=out, pfx_path=pfx, password="pw", existing_field="sigf")
+        assert not os.path.exists(out)
+
+    def test_non_signature_field_of_that_name_refuses(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _pdf_with_sig_field(os.path.join(tmp_dir, "in.pdf"), as_text=True)
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match="No empty signature field"):
+            sign_pdf(file=src, output=out, pfx_path=pfx, password="pw", existing_field="sigf")
+        assert not os.path.exists(out)
+
+    def test_existing_field_conflicts_with_appearance(self, tmp_dir):
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _pdf_with_sig_field(os.path.join(tmp_dir, "in.pdf"))
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(ValueError, match="ONE placement"):
+            sign_pdf(
+                file=src, output=out, pfx_path=pfx, password="pw",
+                existing_field="sigf", appearance={"page": 1, "rect": [10, 10, 60, 40]},
+            )
+        assert not os.path.exists(out)
+
+
 class TestGenerateSigner:
     def test_generate_then_sign_then_verify(self, tmp_dir):
         from engine.signatures import generate_signer

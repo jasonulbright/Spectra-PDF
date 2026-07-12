@@ -300,6 +300,12 @@ pub struct SignArgs {
     /// Visible stamp rectangle x0,y0,x1,y1 in PDF points (bottom-up, like `redact --rect`)
     #[arg(long, requires = "visible_page")]
     pub visible_rect: Option<String>,
+    /// Fill an existing EMPTY signature field by name instead of creating a
+    /// new one (the field's own widget rectangle provides the stamp box; a
+    /// zero-size field signs invisibly). Refuses missing, non-signature, or
+    /// already-signed fields.
+    #[arg(long, conflicts_with_all = ["visible_page", "visible_rect"])]
+    pub existing_field: Option<String>,
 }
 
 #[derive(Args)]
@@ -961,6 +967,11 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     );
                 }
                 params["appearance"] = json!({ "page": page, "rect": nums });
+            }
+            // Fill an existing empty signature field (2n.4d) — clap already
+            // forbids combining this with the visible-stamp flags.
+            if let Some(field) = &args.existing_field {
+                params["existing_field"] = json!(field);
             }
             engine.call("sign_pdf", params)
         }

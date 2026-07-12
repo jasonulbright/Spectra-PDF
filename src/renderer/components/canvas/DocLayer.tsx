@@ -36,6 +36,7 @@ interface DocLayerProps {
   formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+  onSignFieldRequest: (path: string, fieldName: string) => void;
   // Add-field placement (2n.4c).
   formsAddMode: boolean;
   newFieldPlacement: SignaturePlacement | null;
@@ -110,6 +111,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               formWidgetsByPage={props.formWidgetsByPage}
               formValuesByPath={props.formValuesByPath}
               onSetFormValue={props.onSetFormValue}
+              onSignFieldRequest={props.onSignFieldRequest}
               formsAddMode={props.formsAddMode}
               newFieldPlacement={props.newFieldPlacement}
               onSetNewFieldRect={props.onSetNewFieldRect}
