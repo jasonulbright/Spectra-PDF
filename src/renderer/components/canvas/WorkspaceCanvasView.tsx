@@ -21,7 +21,11 @@ import { buildOcrApplyPayload } from '../../lib/ocr-apply';
 import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
 import { workspacePageNumber } from '../../lib/workspace-commit';
-import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection } from '../../testHarness';
+import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
+import { pruneFormValues } from '../../lib/form-overlay';
+import type { OverlayWidget } from '../../lib/form-overlay';
+import type { FormFieldValue } from '../../lib/forms';
+import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection, registerCanvasForms } from '../../testHarness';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
 import { Canvas } from './Canvas';
@@ -57,6 +61,10 @@ interface WorkspaceCanvasViewProps {
   // Add-page ghost (2n.3): pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
   onAddPages: (docId: string, toIndex: number) => void;
+  // Bake pending on-canvas form values into one file (2n.4b) — App implements
+  // the FormsPanel shape (snapshot(gate) → readBuffer → fillFormFields →
+  // writeBuffer → UPDATE_FILE), so it lands on the snapshot-undo chain.
+  onFillFormValues: (path: string, values: Record<string, FormFieldValue>) => Promise<void>;
   // Per-position external drop (2n.3): the canvas publishes a resolver here so
   // App's drop handler can map a drop point to the document + index under it
   // (returns null for a between/empty drop → App falls back to appending).
@@ -78,6 +86,8 @@ const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
 const NO_WORDS_BY_PAGE: ReadonlyMap<string, OcrWord[]> = new Map();
+const NO_WIDGETS_BY_PAGE: ReadonlyMap<string, OverlayWidget[]> = new Map();
+const NO_FORM_VALUES: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>> = new Map();
 
 export function WorkspaceCanvasView({
   onOpenFiles,
@@ -88,6 +98,7 @@ export function WorkspaceCanvasView({
   onRedactFile,
   onApplyOcrLayer,
   onAddPages,
+  onFillFormValues,
   dropResolverRef,
 }: WorkspaceCanvasViewProps): React.ReactElement {
   const state = useAppState();
@@ -167,6 +178,92 @@ export function WorkspaceCanvasView({
   const find = useFind(searchIndex.search, searchIndex.version, docs, onFindNavigate);
   const [applyingOcr, setApplyingOcr] = useState(false);
   const [ocrApplyError, setOcrApplyError] = useState<string | null>(null);
+
+  // On-canvas forms (2n.4b): per-file field reads + widget projections, and
+  // the pending-values map. Pending values are NAME-keyed per file —
+  // deliberately not the positional-id lifecycle of marks/selection: a field
+  // name survives page edits and commits, so half-typed values survive an
+  // Apply-changes; they are PRUNED against every settled re-read instead
+  // (name gone / no longer editable / shape mismatch / file closed).
+  const workspaceForms = useWorkspaceForms(state.files, proxies);
+  const [pendingFormValues, setPendingFormValues] =
+    useState<ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>>(NO_FORM_VALUES);
+  const [fillingForms, setFillingForms] = useState(false);
+  const [formsError, setFormsError] = useState<string | null>(null);
+  useEffect(() => {
+    const formsByPath = new Map([...workspaceForms].map(([p, info]) => [p, info.fields]));
+    setPendingFormValues((prev) => pruneFormValues(prev, formsByPath));
+  }, [workspaceForms]);
+
+  const onSetFormValue = useCallback((path: string, fieldName: string, value: FormFieldValue) => {
+    setPendingFormValues((prev) => {
+      const next = new Map(prev);
+      const inner = new Map(next.get(path) ?? []);
+      inner.set(fieldName, value);
+      next.set(path, inner);
+      return next;
+    });
+  }, []);
+
+  const clearFormValues = useCallback(() => setPendingFormValues(NO_FORM_VALUES), []);
+
+  // pageId -> widgets, resolved through (sourceDocId, sourcePageIndex) — an
+  // in-memory moved page keeps its widgets because both travel with the ref.
+  const formWidgetsByPage = useMemo(() => {
+    if (workspaceForms.size === 0) return NO_WIDGETS_BY_PAGE;
+    const map = new Map<string, OverlayWidget[]>();
+    for (const doc of docs) {
+      for (const page of doc.pages) {
+        const widgets = workspaceForms.get(page.sourceDocId)?.widgetsByPage.get(page.sourcePageIndex);
+        if (widgets && widgets.length > 0) map.set(page.id, widgets);
+      }
+    }
+    return map.size > 0 ? map : NO_WIDGETS_BY_PAGE;
+  }, [workspaceForms, docs]);
+
+  const pendingFormCount = useMemo(() => {
+    let n = 0;
+    for (const [, values] of pendingFormValues) n += values.size;
+    return n;
+  }, [pendingFormValues]);
+
+  // Bake pending values file by file through App's fill op. Reentrancy-ref'd
+  // like applyMarks (two clicks in one tick both read a stale busy flag).
+  const fillingRef = useRef(false);
+  const applyFormValues = useCallback(async (): Promise<string[]> => {
+    if (fillingRef.current) return [];
+    const snapshot = pendingFormValues;
+    if (snapshot.size === 0) return [];
+    fillingRef.current = true;
+    setFillingForms(true);
+    setFormsError(null);
+    try {
+      const failures: string[] = [];
+      for (const [path, values] of snapshot) {
+        try {
+          await onFillFormValues(path, Object.fromEntries(values));
+          // Applied — drop this file's pending values (the re-read will show
+          // them as the fields' current values).
+          setPendingFormValues((prev) => {
+            if (!prev.has(path)) return prev;
+            const next = new Map(prev);
+            next.delete(path);
+            return next;
+          });
+        } catch (err) {
+          const name = path.split(/[\\/]/).pop() || path;
+          failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (failures.length > 0) {
+        setFormsError(`Filling failed — ${failures.join('; ')}. Those values are still pending.`);
+      }
+      return failures;
+    } finally {
+      fillingRef.current = false;
+      setFillingForms(false);
+    }
+  }, [pendingFormValues, onFillFormValues]);
 
   // Workspace-flattened page order (doc order, then page order) — the basis for
   // shift-range selection, select-all, and workspace-order group moves. Refs
@@ -491,6 +588,45 @@ export function WorkspaceCanvasView({
       setApplyingOcr(false);
     }
   }, [docs, state.files, searchIndex, onApplyOcrLayer]);
+
+  // Harness bridge for on-canvas forms (2n.4b): the overlay inputs live
+  // inside transformed canvas space (flaky to drive via WebDriver), so the
+  // canvas registers value-setting + apply against the REAL pending-map and
+  // fill paths. Refs keep the registration stable across renders.
+  const workspaceFormsRef = useRef(workspaceForms);
+  workspaceFormsRef.current = workspaceForms;
+  const pendingFormValuesRef = useRef(pendingFormValues);
+  pendingFormValuesRef.current = pendingFormValues;
+  const applyFormValuesRef = useRef(applyFormValues);
+  applyFormValuesRef.current = applyFormValues;
+  const setFormValueRef = useRef(onSetFormValue);
+  setFormValueRef.current = onSetFormValue;
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerCanvasForms({
+      setFieldValue: (path, fieldName, value) => {
+        const info = workspaceFormsRef.current.get(path);
+        const field = info?.fields.find((f) => f.name === fieldName);
+        if (!field || !field.editable) return false;
+        setFormValueRef.current(path, fieldName, value);
+        return true;
+      },
+      pendingCount: () => {
+        let n = 0;
+        for (const [, values] of pendingFormValuesRef.current) n += values.size;
+        return n;
+      },
+      apply: () => applyFormValuesRef.current(),
+      widgetCountFor: (path) => {
+        const info = workspaceFormsRef.current.get(path);
+        if (!info) return 0;
+        let n = 0;
+        for (const [, arr] of info.widgetsByPage) n += arr.length;
+        return n;
+      },
+    });
+    return () => registerCanvasForms(null);
+  }, []);
 
   // Harness bridge (e2e): drive OCR-apply without depending on the FindBar
   // button's async-gated visibility (same pattern as redaction/signature).
@@ -986,7 +1122,8 @@ export function WorkspaceCanvasView({
         'canvas-view flex-1 flex flex-col relative overflow-hidden' +
         (drag.committing ? ' committing' : '') +
         (drag.draggingPage ? ' dragging' : '') +
-        (tool !== 'select' ? ' annotating' : '')
+        (tool !== 'select' && tool !== 'forms' ? ' annotating' : '') +
+        (tool === 'forms' ? ' forms-mode' : '')
       }
     >
       <Canvas
@@ -1030,6 +1167,9 @@ export function WorkspaceCanvasView({
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}
+          formWidgetsByPage={formWidgetsByPage}
+          formValuesByPath={pendingFormValues}
+          onSetFormValue={onSetFormValue}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
@@ -1122,6 +1262,14 @@ export function WorkspaceCanvasView({
           >
             Sign
           </button>
+          <button
+            data-testid="tool-forms"
+            title="Fill form fields directly on the page (Esc to exit)"
+            onClick={() => setTool(tool === 'forms' ? 'select' : 'forms')}
+            className={`px-3 py-1.5 text-xs font-medium ${tool === 'forms' ? 'bg-emerald-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
+          >
+            Forms
+          </button>
         </div>
         {tool === 'stamp' && (
           <div
@@ -1196,6 +1344,29 @@ export function WorkspaceCanvasView({
               />
             ))}
           </div>
+        )}
+        {pendingFormCount > 0 && (
+          <>
+            <button
+              data-testid="forms-fill-btn"
+              disabled={fillingForms}
+              onClick={() => void applyFormValues()}
+              className="px-3 py-1.5 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-full font-medium shadow-lg"
+            >
+              {fillingForms
+                ? 'Filling…'
+                : `Fill ${pendingFormCount} field${pendingFormCount === 1 ? '' : 's'}`}
+            </button>
+            <button
+              data-testid="forms-clear-btn"
+              disabled={fillingForms}
+              onClick={clearFormValues}
+              title="Discard all pending form values"
+              className="px-3 py-1.5 text-xs bg-neutral-800/90 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded-full font-medium shadow-lg"
+            >
+              Clear
+            </button>
+          </>
         )}
         {liveMarks.length > 0 && (
           <>
@@ -1300,6 +1471,15 @@ export function WorkspaceCanvasView({
         >
           <span className="flex-1">{ocrApplyError}</span>
           <button onClick={() => setOcrApplyError(null)} className="text-red-300 hover:text-red-100">×</button>
+        </div>
+      )}
+      {formsError && (
+        <div
+          data-testid="forms-fill-error"
+          className="absolute top-28 right-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+        >
+          <span className="flex-1">{formsError}</span>
+          <button onClick={() => setFormsError(null)} className="text-red-300 hover:text-red-100">×</button>
         </div>
       )}
 

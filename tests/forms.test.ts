@@ -206,3 +206,96 @@ describe('fillFormFields', () => {
     ).rejects.toThrow(/appearances/i);
   });
 });
+
+describe('readFormFields widget geometry (2n.4b)', () => {
+  // Multi-page form with widgets whose page + rect the on-canvas overlay
+  // depends on: text on p0, a multi-widget text field on p0+p2, a radio
+  // spanning pages (pdf-lib /Opt-indexed on-states), and a low-level
+  // signature field pair (empty vs /V-holding).
+  async function makeGeometryPdf(): Promise<Uint8Array> {
+    const { PDFArray, PDFDict, PDFHexString, PDFName } = await import('pdf-lib');
+    const doc = await PDFDocument.create();
+    const p0 = doc.addPage([600, 800]);
+    doc.addPage([600, 800]);
+    const p2 = doc.addPage([600, 800]);
+    const form = doc.getForm();
+
+    const title = form.createTextField('title');
+    title.addToPage(p0, { x: 50, y: 700, width: 200, height: 20 });
+
+    const span = form.createTextField('span');
+    span.addToPage(p0, { x: 10, y: 20, width: 100, height: 30 });
+    span.addToPage(p2, { x: 40, y: 60, width: 100, height: 30 });
+
+    const color = form.createRadioGroup('color');
+    color.addOptionToPage('red', p0, { x: 50, y: 600, width: 15, height: 15 });
+    color.addOptionToPage('blue', p2, { x: 50, y: 600, width: 15, height: 15 });
+
+    // Low-level signature fields: 'sig-empty' (no /V) and 'sig-done' (/V).
+    const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
+    const fields = acro.lookup(PDFName.of('Fields'), PDFArray);
+    const addSig = (name: string, withV: boolean, rect: number[]): void => {
+      const sig = doc.context.obj({
+        Type: 'Annot',
+        Subtype: 'Widget',
+        FT: 'Sig',
+        Rect: rect,
+      }) as InstanceType<typeof PDFDict>;
+      sig.set(PDFName.of('T'), PDFHexString.fromText(name));
+      if (withV) sig.set(PDFName.of('V'), doc.context.obj({}));
+      const ref = doc.context.register(sig);
+      sig.set(PDFName.of('P'), p0.ref);
+      fields.push(ref);
+      p0.node.lookup(PDFName.of('Annots'), PDFArray).push(ref);
+    };
+    addSig('sig-empty', false, [300, 100, 450, 140]);
+    addSig('sig-done', true, [300, 200, 450, 240]);
+
+    // Widget-less pure-data field.
+    const ghost = doc.context.obj({ FT: 'Tx' }) as InstanceType<typeof PDFDict>;
+    ghost.set(PDFName.of('T'), PDFHexString.fromText('ghost'));
+    fields.push(doc.context.register(ghost));
+
+    // pdf-lib's save-time appearance regeneration treats the widget-less
+    // 'ghost' field as its own widget and throws on the missing /Rect.
+    return doc.save({ updateFieldAppearances: false });
+  }
+
+  it('reports each widget with its page, PDF-space rect, and flags', async () => {
+    const m = byName((await readFormFields(await makeGeometryPdf())).fields);
+    // pdf-lib pads /Rect by half its default border width, so assert within
+    // a point rather than pinning its internals.
+    const rectNear = (got: number[], want: number[]): void =>
+      want.forEach((v, i) => expect(Math.abs(got[i] - v)).toBeLessThanOrEqual(1));
+    const title = m.get('title')!.widgets;
+    expect(title).toHaveLength(1);
+    expect(title[0]).toMatchObject({ pageIndex: 0, hidden: false });
+    rectNear(title[0].rect, [50, 700, 250, 720]);
+    const span = m.get('span')!.widgets;
+    expect(span).toHaveLength(2);
+    expect(span[0].pageIndex).toBe(0);
+    rectNear(span[0].rect, [10, 20, 110, 50]);
+    expect(span[1].pageIndex).toBe(2);
+    rectNear(span[1].rect, [40, 60, 140, 90]);
+  });
+
+  it('maps each radio widget to the option it selects (/Opt-indexed on-states)', async () => {
+    const m = byName((await readFormFields(await makeGeometryPdf())).fields);
+    const widgets = m.get('color')!.widgets;
+    expect(widgets).toHaveLength(2);
+    expect(widgets[0]).toMatchObject({ pageIndex: 0, radioOption: 'red' });
+    expect(widgets[1]).toMatchObject({ pageIndex: 2, radioOption: 'blue' });
+  });
+
+  it('flags signature fields as filled only when /V is present', async () => {
+    const m = byName((await readFormFields(await makeGeometryPdf())).fields);
+    expect(m.get('sig-empty')).toMatchObject({ type: 'signature', filled: false });
+    expect(m.get('sig-done')).toMatchObject({ type: 'signature', filled: true });
+    expect(m.get('sig-empty')!.widgets).toHaveLength(1);
+  });
+
+  it('a widget-less pure-data field reports an empty placement list', async () => {
+    const m = byName((await readFormFields(await makeGeometryPdf())).fields);
+    expect(m.get('ghost')!.widgets).toEqual([]);
+  });
+});

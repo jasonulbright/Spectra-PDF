@@ -142,6 +142,26 @@ export function registerCanvasOutline(handlers: CanvasOutlineHandlers | null): v
 }
 
 /**
+ * On-canvas form fill (2n.4b): the overlay inputs live inside transformed
+ * canvas space (flaky to drive via WebDriver), so the canvas registers
+ * value-setting + apply against the REAL pending-value map and fill path.
+ * Values are validated against the current field read (must exist + be
+ * editable), mirroring what the UI controls allow.
+ */
+export interface CanvasFormsHandlers {
+  setFieldValue: (path: string, fieldName: string, value: string | boolean | string[]) => boolean;
+  pendingCount: () => number;
+  apply: () => Promise<string[]>; // per-file failure messages; empty = success
+  widgetCountFor: (path: string) => number;
+}
+
+let canvasForms: CanvasFormsHandlers | null = null;
+
+export function registerCanvasForms(handlers: CanvasFormsHandlers | null): void {
+  canvasForms = handlers;
+}
+
+/**
  * Signing goes through two native dialogs (.pfx picker + output save) that
  * WebDriver can't drive, so the SignaturesPanel registers its real sign call
  * here while mounted. The harness injects the paths + password and exercises
@@ -285,6 +305,24 @@ export interface TestHarness {
   /** Reorder an outline node via the exact drop path (moveOutlineNode ->
    * set_outline -> UPDATE_FILE); resolves after the save. */
   reorderOutline: (fromPath: number[], overIndex: number, depth: number) => Promise<void>;
+  /** Set a pending on-canvas form value for a field of an open file (2n.4b)
+   * — validated against the current field read like the real overlay inputs
+   * (must exist + be editable). Returns false when refused. Canvas view must
+   * be mounted; polls for the async forms read like addAnnotation does for
+   * the indexer. */
+  setCanvasFormValue: (
+    path: string,
+    fieldName: string,
+    value: string | boolean | string[],
+    timeoutMs?: number,
+  ) => Promise<boolean>;
+  /** Total pending on-canvas form values. */
+  pendingFormValueCount: () => number;
+  /** Bake all pending on-canvas form values via the real fill path (the
+   * "Fill N fields" button); rejects if any file failed. */
+  applyCanvasFormValues: () => Promise<void>;
+  /** Overlay widget count read for a file (0 until the async read lands). */
+  formWidgetCount: (path: string) => number;
   /** Number of scanned source pages with OCR words ready to persist. */
   ocrReadyCount: () => number;
   /** Run the "Make searchable" flow (engine apply_ocr_layer per file);
@@ -598,6 +636,32 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       if (!canvasOutline) throw new Error('reorderOutline: outline sidebar not mounted');
       await canvasOutline.reorder(fromPath, overIndex, depth);
     },
+    setCanvasFormValue: async (path, fieldName, value, timeoutMs = 10_000) => {
+      // The forms read is async (buffer -> readFormFields -> projection);
+      // poll like addAnnotation polls the indexer.
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        if (canvasForms?.setFieldValue(path, fieldName, value)) return true;
+        if (Date.now() >= deadline) return false;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    },
+    pendingFormValueCount: () => canvasForms?.pendingCount() ?? 0,
+    applyCanvasFormValues: async () => {
+      if (!canvasForms) {
+        const msg = 'applyCanvasFormValues: canvas view not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        const failures = await canvasForms.apply();
+        if (failures.length > 0) throw new Error(failures.join('; '));
+      } catch (err) {
+        captureError('applyCanvasFormValues', err);
+        throw err;
+      }
+    },
+    formWidgetCount: (path) => canvasForms?.widgetCountFor(path) ?? 0,
     ocrReadyCount: () => canvasOcr?.readyCount() ?? 0,
     applyOcr: async () => {
       if (!canvasOcr) {

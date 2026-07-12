@@ -34,6 +34,8 @@ import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
 import { setCommitGate } from './lib/commit-gate';
+import { fillFormFields } from './lib/forms';
+import type { FormFieldValue } from './lib/forms';
 import { DropZone } from './components/DropZone';
 import { OperationQueue } from './components/OperationQueue';
 import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
@@ -436,6 +438,33 @@ function AppContent(): React.ReactElement {
       await performOperation(path, 'redact', { regions });
     },
     [performOperation],
+  );
+
+  // Bake on-canvas form values (2n.4b) — the renderer-side whole-file-op
+  // shape FormsPanel established (forms fill stays pdf-lib per CLAUDE.md):
+  // snapshot (gate flushes pending page edits, so the fill reads the
+  // committed bytes) → read → fillFormFields → write → UPDATE_FILE. The
+  // page count is re-read via reloadFile rather than trusted from the
+  // pre-gate closure — the gate's commit may have just changed it.
+  const handleFillFormValues = useCallback(
+    async (path: string, values: Record<string, FormFieldValue>) => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+      const snapshotPath = await file.snapshot(f.workingPath);
+      const bytes = await file.readBuffer(f.workingPath);
+      const filled = await fillFormFields(bytes, values);
+      await file.writeBuffer(f.workingPath, filled);
+      const result = await reloadFile(path);
+      if (!result) throw new Error('The file is no longer open.');
+      dispatch({
+        type: 'UPDATE_FILE',
+        path,
+        pageCount: result.pageCount,
+        buffer: result.buffer,
+        snapshotPath,
+      });
+    },
+    [state.files, reloadFile, dispatch],
   );
 
   // Persist OCR text layers (2m) — same routing as redaction: the commit
@@ -962,6 +991,7 @@ function AppContent(): React.ReactElement {
                 onRedactFile={handleRedactFile}
                 onApplyOcrLayer={handleApplyOcrLayer}
                 onAddPages={handleAddPages}
+                onFillFormValues={handleFillFormValues}
                 dropResolverRef={dropResolverRef}
               />
               {inspector && inspectorFile?.buffer && (

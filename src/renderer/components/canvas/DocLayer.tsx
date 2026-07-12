@@ -7,6 +7,8 @@ import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
+import type { OverlayWidget } from '../../lib/form-overlay';
+import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
 
 interface DocLayerProps {
@@ -30,6 +32,10 @@ interface DocLayerProps {
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
+  // Form widgets keyed by pageId + pending values keyed by file path (2n.4b).
+  formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
+  formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
+  onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -91,6 +97,9 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               signaturePlacement={props.signaturePlacement}
               findMatchPageIds={props.findMatchPageIds}
               findWordsByPage={props.findWordsByPage}
+              formWidgetsByPage={props.formWidgetsByPage}
+              formValuesByPath={props.formValuesByPath}
+              onSetFormValue={props.onSetFormValue}
               onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
               onAddAnnotation={props.onAddAnnotation}

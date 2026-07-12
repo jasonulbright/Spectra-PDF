@@ -9,6 +9,8 @@ import {
   PDFDocument,
   PDFName,
   PDFDict,
+  PDFArray,
+  PDFRef,
   PDFTextField,
   PDFCheckBox,
   PDFRadioGroup,
@@ -32,6 +34,22 @@ export type FormFieldType =
 // none); optionlist -> selected strings.
 export type FormFieldValue = string | boolean | string[];
 
+// One widget annotation of a field, located on a page (2n.4b — the on-canvas
+// overlay's geometry source). `rect` is the raw PDF user-space /Rect
+// [x0,y0,x1,y1]; the overlay projects it into display space with the same
+// pdfRectToDisplay + in-memory-rotation recipe Find words use.
+export interface FormWidgetPlacement {
+  pageIndex: number; // 0-based index into the FILE's pages
+  rect: [number, number, number, number];
+  // radio only: the option (from FormField.options) THIS widget selects when
+  // clicked — pdf-lib-authored radios use /Opt-indexed on-states ('/0'),
+  // others use the on-state name itself.
+  radioOption?: string;
+  // /F Hidden or NoView — the overlay must not offer an input where the
+  // raster shows nothing.
+  hidden: boolean;
+}
+
 export interface FormField {
   name: string;
   type: FormFieldType;
@@ -43,6 +61,11 @@ export interface FormField {
   // Whether THIS slice can fill it: a supported input kind and not read-only.
   // buttons/signatures are always false; so are read-only fields of any kind.
   editable: boolean;
+  // Where this field's widgets sit (empty for a pure-data field with no page
+  // presence). A widget whose page couldn't be resolved is omitted.
+  widgets: FormWidgetPlacement[];
+  // signature only: the field already holds a signature (/V present).
+  filled?: boolean;
 }
 
 export interface FormReadResult {
@@ -113,6 +136,100 @@ function classify(field: AnyField): Classified | null {
   return null;
 }
 
+// Widget /F flags (1-based bit positions per the PDF spec, as masks).
+const AF_HIDDEN = 1 << 1;
+const AF_NOVIEW = 1 << 5;
+
+// The widget entries (ref + dict) a field draws through: the field dict
+// itself when merged (no /Kids), else its ref-valued /Kids that carry no /T
+// of their own (a /T-carrying kid is a sub-FIELD — pdf-lib's own field
+// enumeration doesn't descend into a typed terminal's kids, so neither do
+// we; same posture as engine/forms.py's widget rule from 2l).
+function widgetEntries(doc: PDFDocument, field: AnyField): { ref: PDFRef; dict: PDFDict }[] {
+  const acroDict = field.acroField.dict;
+  const kids = acroDict.lookupMaybe(PDFName.of('Kids'), PDFArray);
+  if (!kids || kids.size() === 0) {
+    return [{ ref: field.acroField.ref, dict: acroDict }];
+  }
+  const out: { ref: PDFRef; dict: PDFDict }[] = [];
+  for (let i = 0; i < kids.size(); i++) {
+    const raw = kids.get(i);
+    if (!(raw instanceof PDFRef)) continue; // a widget must be indirect to sit in /Annots
+    const dict = doc.context.lookup(raw);
+    if (!(dict instanceof PDFDict)) continue;
+    if (dict.get(PDFName.of('T')) !== undefined) continue;
+    out.push({ ref: raw, dict });
+  }
+  return out;
+}
+
+// The on-state name a radio widget selects (the non-/Off key of its /AP /N).
+function widgetOnState(doc: PDFDocument, dict: PDFDict): string | null {
+  const ap = dict.lookupMaybe(PDFName.of('AP'), PDFDict);
+  const n = ap?.lookupMaybe(PDFName.of('N'), PDFDict);
+  if (!n) return null;
+  for (const [key] of n.entries()) {
+    const name = key.decodeText();
+    if (name !== 'Off') return name;
+  }
+  return null;
+}
+
+function widgetPlacements(
+  doc: PDFDocument,
+  field: AnyField,
+  classified: Classified,
+): FormWidgetPlacement[] {
+  const pages = doc.getPages();
+  const hasOpt = field.acroField.dict.get(PDFName.of('Opt')) !== undefined;
+  const out: FormWidgetPlacement[] = [];
+  for (const { ref, dict } of widgetEntries(doc, field)) {
+    const page = doc.findPageForAnnotationRef(ref);
+    if (!page) continue; // widget reachable from no page — nothing to place
+    const pageIndex = pages.indexOf(page);
+    if (pageIndex < 0) continue;
+    const rectArr = dict.lookupMaybe(PDFName.of('Rect'), PDFArray);
+    if (!rectArr || rectArr.size() !== 4) continue;
+    let nums: number[];
+    try {
+      nums = [0, 1, 2, 3].map((i) => (rectArr.lookup(i) as import('pdf-lib').PDFNumber).asNumber());
+    } catch {
+      continue;
+    }
+    const rect: [number, number, number, number] = [
+      Math.min(nums[0], nums[2]),
+      Math.min(nums[1], nums[3]),
+      Math.max(nums[0], nums[2]),
+      Math.max(nums[1], nums[3]),
+    ];
+    let flags: number;
+    try {
+      const f = dict.get(PDFName.of('F'));
+      flags = f ? (f as import('pdf-lib').PDFNumber).asNumber() : 0;
+    } catch {
+      flags = 0;
+    }
+    let radioOption: string | undefined;
+    if (classified.type === 'radio') {
+      const on = widgetOnState(doc, dict);
+      if (on !== null) {
+        // pdf-lib-authored radios use /Opt-indexed on-states ('0', '1', …);
+        // others use the option name itself (engine/forms.py's convention
+        // note from 2l).
+        radioOption =
+          hasOpt && /^\d+$/.test(on) ? classified.options?.[Number(on)] ?? on : on;
+      }
+    }
+    out.push({
+      pageIndex,
+      rect,
+      ...(radioOption !== undefined ? { radioOption } : {}),
+      hidden: (flags & (AF_HIDDEN | AF_NOVIEW)) !== 0,
+    });
+  }
+  return out;
+}
+
 // pdf-lib's PDFDocument.getForm() proactively DELETES any /XFA (it warns
 // "does not support reading or writing XFA"), so form.hasXFA() is always
 // false after that call. Detect it off the raw AcroForm dict first — this is
@@ -142,6 +259,12 @@ export async function readFormFields(
     const c = classify(field);
     if (!c) continue;
     const readOnly = field.isReadOnly();
+    let widgets: FormWidgetPlacement[];
+    try {
+      widgets = widgetPlacements(doc, field, c);
+    } catch {
+      widgets = []; // geometry probing must never sink the field list
+    }
     fields.push({
       name: field.getName(),
       type: c.type,
@@ -151,6 +274,10 @@ export async function readFormFields(
       required: field.isRequired(),
       ...(c.multiline !== undefined ? { multiline: c.multiline } : {}),
       editable: EDITABLE_TYPES.has(c.type) && !readOnly,
+      widgets,
+      ...(c.type === 'signature'
+        ? { filled: field.acroField.dict.get(PDFName.of('V')) !== undefined }
+        : {}),
     });
   }
   return { fields, hasXFA };

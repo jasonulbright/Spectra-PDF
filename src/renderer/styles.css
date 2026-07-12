@@ -653,9 +653,134 @@
   pointer-events: none;
 }
 
-/* Annotation tool active: crosshair over pages signals draw-a-box mode. */
+/* On-canvas form widgets (2n.4b). Interactive only in the Forms tool; a
+   widget with a pending value stays visible (inert, emerald) in every other
+   tool. Inputs are opaque so the baked — now stale — widget pixels
+   underneath can't show through a pending edit. */
+.page-form-widget {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.page-form-pending {
+  border: 1.5px solid #10b981;
+  background: rgba(16, 185, 129, 0.16);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.page-form-input {
+  border: 1px solid rgba(16, 185, 129, 0.9);
+  background: #fff;
+  color: #111;
+  padding: 0 2px;
+  border-radius: 1px;
+  resize: none;
+}
+
+.page-form-input.pending {
+  box-shadow: 0 0 0 1.5px rgba(16, 185, 129, 0.55);
+}
+
+.page-form-input:focus {
+  outline: 2px solid #10b981;
+  outline-offset: 0;
+}
+
+.page-form-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(16, 185, 129, 0.9);
+  border-radius: 1px;
+  cursor: pointer;
+}
+
+.page-form-check.pending {
+  box-shadow: 0 0 0 1.5px rgba(16, 185, 129, 0.55);
+}
+
+.page-form-check input {
+  width: 70%;
+  height: 70%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.page-form-radio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(16, 185, 129, 0.9);
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+}
+
+.page-form-radio.pending {
+  box-shadow: 0 0 0 1.5px rgba(16, 185, 129, 0.55);
+}
+
+.page-form-radio-dot {
+  width: 55%;
+  height: 55%;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.page-form-radio.on .page-form-radio-dot {
+  background: #10b981;
+}
+
+.page-form-select {
+  border: 1px solid rgba(16, 185, 129, 0.9);
+  background: #fff;
+  color: #111;
+  border-radius: 1px;
+}
+
+.page-form-select.pending {
+  box-shadow: 0 0 0 1.5px rgba(16, 185, 129, 0.55);
+}
+
+.page-form-locked {
+  border: 1px dashed rgba(148, 163, 184, 0.8);
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 1px;
+  cursor: not-allowed;
+}
+
+.page-form-sig {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed #8b5cf6;
+  background: rgba(139, 92, 246, 0.1);
+  border-radius: 2px;
+}
+
+.page-form-sig span {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: rgba(196, 181, 253, 0.95);
+}
+
+.page-form-sig.signed {
+  border-style: solid;
+  opacity: 0.75;
+}
+
+/* Annotation tool active: crosshair over pages signals draw-a-box mode.
+   Forms mode is exempt — its widgets are inputs, not a draw surface. */
 .canvas-view.annotating .page {
   cursor: crosshair;
+}
+
+.canvas-view.forms-mode .page {
+  cursor: default;
 }
 
 /* Freetext annotations: bordered text box; body scales with the page. */

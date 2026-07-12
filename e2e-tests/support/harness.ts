@@ -489,3 +489,45 @@ export async function setReactInputValue(selector: string, value: string): Promi
     throw new Error(`setReactInputValue: field holds ${JSON.stringify(readBack)}, expected ${JSON.stringify(value)}`);
   }
 }
+
+// --- On-canvas form fill (2n.4b) ------------------------------------------
+
+export async function setCanvasFormValue(
+  path: string,
+  fieldName: string,
+  value: string | boolean | string[],
+): Promise<boolean> {
+  return browser.executeAsync<boolean, [string, string, string | boolean | string[]]>(
+    function (p, name, v, done) {
+      (window as any).__SPECTRA_TEST__.setCanvasFormValue(p, name, v)
+        .then((ok: boolean) => done(ok))
+        .catch(() => done(false));
+    },
+    path,
+    fieldName,
+    value,
+  );
+}
+
+export async function pendingFormValueCount(): Promise<number> {
+  return browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.pendingFormValueCount();
+  });
+}
+
+export async function applyCanvasFormValues(): Promise<void> {
+  const result = await browser.executeAsync<string | null, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.applyCanvasFormValues()
+      .then(() => done(null))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  });
+  if (typeof result === 'string') {
+    throw new Error(`applyCanvasFormValues failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+export async function formWidgetCount(path: string): Promise<number> {
+  return browser.execute(function (p) {
+    return (window as any).__SPECTRA_TEST__.formWidgetCount(p);
+  }, path);
+}

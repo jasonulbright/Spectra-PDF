@@ -4,6 +4,8 @@ import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
+import type { OverlayWidget } from '../../lib/form-overlay';
+import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { MAX_ROW_WIDTH, ADD_GHOST_WIDTH } from '../../canvas/layout';
 import { GhostPage } from './DropGhost';
@@ -35,6 +37,10 @@ interface DocumentRowProps {
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
+  // Form widgets keyed by pageId + pending values keyed by file path (2n.4b).
+  formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
+  formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
+  onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -74,6 +80,9 @@ function DocumentRowImpl({
   signaturePlacement,
   findMatchPageIds,
   findWordsByPage,
+  formWidgetsByPage,
+  formValuesByPath,
+  onSetFormValue,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
@@ -118,6 +127,9 @@ function DocumentRowImpl({
         signaturePlacement={signaturePlacement?.pageId === page.id ? signaturePlacement : null}
         findMatch={findMatchPageIds.has(page.id)}
         findWords={findWordsByPage.get(page.id)}
+        formWidgets={formWidgetsByPage.get(page.id)}
+        formValues={formValuesByPath.get(page.sourceDocId)}
+        onSetFormValue={onSetFormValue}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
         onAddAnnotation={onAddAnnotation}

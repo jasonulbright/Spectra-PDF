@@ -6,9 +6,11 @@ import { projectMarkRect, rotateNormalizedRect } from '../../lib/redaction';
 import type { RedactionMark } from '../../lib/redaction';
 import type { OcrWord } from '../../ocr/types';
 import type { SignaturePlacement } from '../../lib/signature-placement';
+import type { OverlayWidget } from '../../lib/form-overlay';
+import type { FormFieldValue } from '../../lib/forms';
 import { PageView } from './PageView';
 
-export type CanvasTool = 'select' | 'highlight' | 'freetext' | 'ink' | 'stamp' | 'redact' | 'signature';
+export type CanvasTool = 'select' | 'highlight' | 'freetext' | 'ink' | 'stamp' | 'redact' | 'signature' | 'forms';
 
 export interface AnnotationRect {
   x: number;
@@ -50,6 +52,180 @@ function defaultColorFor(kind: PageAnnotation['kind']): string {
   return HIGHLIGHT_COLOR;
 }
 
+// One form widget on the page (2n.4b). Interactive only in forms mode; in
+// any other tool a widget with a pending value renders as an inert badge so
+// pending state is never invisible (the redaction-mark precedent). Every
+// pointer event stops here — typing into an input must never select, drag,
+// or context-menu the page underneath.
+function FormWidgetView({
+  widget,
+  rotation,
+  formsMode,
+  pending,
+  fontPx,
+  onSetFormValue,
+}: {
+  widget: OverlayWidget;
+  rotation: 0 | 90 | 180 | 270;
+  formsMode: boolean;
+  pending: FormFieldValue | undefined;
+  fontPx: number;
+  onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+}): React.JSX.Element | null {
+  const hasPending = pending !== undefined;
+  if (!formsMode && !hasPending) return null;
+  // Widget rects are display-normalized at the BAKED orientation; an
+  // in-memory rotation just re-projects them (the findWords recipe).
+  const r = rotateNormalizedRect(widget.rect, rotation);
+  const style: React.CSSProperties = {
+    left: `${r.x * 100}%`,
+    top: `${r.y * 100}%`,
+    width: `${r.w * 100}%`,
+    height: `${r.h * 100}%`,
+  };
+  const stop = (e: React.SyntheticEvent): void => e.stopPropagation();
+  if (!formsMode) {
+    return (
+      <div
+        className="page-form-widget page-form-pending"
+        style={style}
+        title={`${widget.fieldName} — filled, not yet applied`}
+      />
+    );
+  }
+  const set = (v: FormFieldValue): void => onSetFormValue(widget.path, widget.fieldName, v);
+  const effective = pending ?? widget.value;
+  const common = {
+    'data-testid': `form-widget-${widget.fieldName}`,
+    onPointerDown: stop,
+    onClick: stop,
+    onDoubleClick: stop,
+    onContextMenu: stop,
+  } as const;
+  if (widget.type === 'signature') {
+    // Rendered as a labeled surface; filling an EMPTY one is 2n.4(d).
+    return (
+      <div
+        {...common}
+        className={'page-form-widget page-form-sig' + (widget.sigFilled ? ' signed' : '')}
+        style={style}
+        title={
+          widget.sigFilled
+            ? `${widget.fieldName} — already signed`
+            : `${widget.fieldName} — empty signature field`
+        }
+      >
+        <span>{widget.sigFilled ? 'SIGNED' : 'SIGNATURE'}</span>
+      </div>
+    );
+  }
+  if (!widget.editable) {
+    return (
+      <div
+        {...common}
+        className="page-form-widget page-form-locked"
+        style={style}
+        title={`${widget.fieldName} — read-only`}
+      />
+    );
+  }
+  if (widget.type === 'text') {
+    const str = typeof effective === 'string' ? effective : '';
+    const cls = 'page-form-widget page-form-input' + (hasPending ? ' pending' : '');
+    return widget.multiline ? (
+      <textarea
+        {...common}
+        className={cls}
+        style={{ ...style, fontSize: fontPx }}
+        value={str}
+        onChange={(e) => set(e.target.value)}
+        spellCheck={false}
+      />
+    ) : (
+      <input
+        {...common}
+        className={cls}
+        style={{ ...style, fontSize: fontPx }}
+        type="text"
+        value={str}
+        onChange={(e) => set(e.target.value)}
+        spellCheck={false}
+      />
+    );
+  }
+  if (widget.type === 'checkbox') {
+    return (
+      <label
+        {...common}
+        className={'page-form-widget page-form-check' + (hasPending ? ' pending' : '')}
+        style={style}
+        title={widget.fieldName}
+      >
+        <input type="checkbox" checked={Boolean(effective)} onChange={(e) => set(e.target.checked)} />
+      </label>
+    );
+  }
+  if (widget.type === 'radio') {
+    const on = widget.radioOption !== undefined && effective === widget.radioOption;
+    return (
+      <button
+        {...common}
+        type="button"
+        className={
+          'page-form-widget page-form-radio' + (on ? ' on' : '') + (hasPending ? ' pending' : '')
+        }
+        style={style}
+        title={`${widget.fieldName}: ${widget.radioOption ?? '(unmapped option)'}`}
+        disabled={widget.radioOption === undefined}
+        onClick={(e) => {
+          stop(e);
+          if (widget.radioOption !== undefined) set(widget.radioOption);
+        }}
+      >
+        <span className="page-form-radio-dot" />
+      </button>
+    );
+  }
+  const options = widget.options ?? [];
+  if (widget.type === 'dropdown') {
+    const sel = typeof effective === 'string' ? effective : '';
+    return (
+      <select
+        {...common}
+        className={'page-form-widget page-form-select' + (hasPending ? ' pending' : '')}
+        style={{ ...style, fontSize: fontPx }}
+        value={sel}
+        onChange={(e) => set(e.target.value)}
+      >
+        <option value="">—</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  // optionlist (multi-select)
+  const selected = Array.isArray(effective) ? effective : [];
+  return (
+    <select
+      {...common}
+      multiple
+      className={'page-form-widget page-form-select' + (hasPending ? ' pending' : '')}
+      style={{ ...style, fontSize: fontPx }}
+      value={selected}
+      onChange={(e) => set(Array.from(e.target.selectedOptions, (o) => o.value))}
+    >
+      {options.map((o) => (
+        <option key={o} value={o}>
+          {o}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 interface PageCellProps {
   docId: string;
   page: PageRef;
@@ -77,6 +253,14 @@ interface PageCellProps {
   // orientation — projected by the current in-memory rotation like marks).
   findMatch?: boolean;
   findWords?: OcrWord[];
+  // Form widgets on this page (2n.4b) — display-normalized at the BAKED
+  // orientation like findWords; interactive only in the 'forms' tool, but a
+  // widget with a pending value stays visible in every tool (marks
+  // precedent: pending state must never be invisible).
+  formWidgets?: OverlayWidget[];
+  // Pending values for THIS page's file, keyed by field name.
+  formValues?: ReadonlyMap<string, FormFieldValue>;
+  onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onSelectPage: (docId: string, pageId: string, e?: React.MouseEvent) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
@@ -117,6 +301,9 @@ function PageCellImpl({
   signaturePlacement,
   findMatch,
   findWords,
+  formWidgets,
+  formValues,
+  onSetFormValue,
   onSelectPage,
   onOpenPage,
   onPageContextMenu,
@@ -206,6 +393,10 @@ function PageCellImpl({
       return;
     }
     if (e.button !== 0 || bandActive.current || editing) return;
+    // Forms mode has no rubber band — widgets handle their own pointer events
+    // (with stopPropagation); a press on empty page area is a no-op, and the
+    // page must not start a drag or a highlight band under an input.
+    if (tool === 'forms') return;
     e.preventDefault();
     e.stopPropagation();
     if (tool === 'ink') {
@@ -529,6 +720,17 @@ function PageCellImpl({
           />
         );
       })}
+      {(formWidgets ?? []).map((w, i) => (
+        <FormWidgetView
+          key={`fwid-${w.fieldName}-${i}`}
+          widget={w}
+          rotation={page.rotation}
+          formsMode={tool === 'forms'}
+          pending={formValues?.get(w.fieldName)}
+          fontPx={freetextFontPx * (10 / 12)}
+          onSetFormValue={onSetFormValue}
+        />
+      ))}
       {signaturePlacement && (
         (() => {
           const r = projectMarkRect(signaturePlacement, page.rotation);
