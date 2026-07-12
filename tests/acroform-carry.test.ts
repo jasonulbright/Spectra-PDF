@@ -274,6 +274,120 @@ describe('multi-source rebuilds (the import machinery)', () => {
     expect(daOf('fb')).toBe('/F1_1 10 Tf 0 g');
   });
 
+  // Flexible /DR fixture: one page, one text field per font entry, each
+  // field's own /DA referencing its font key. Saved without appearance
+  // regeneration so the hand-set /DA and /DR survive verbatim.
+  async function withDrFonts(
+    fonts: { key: string; base: string; encoding?: string; embedded?: boolean; fieldName: string }[],
+  ): Promise<Uint8Array> {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([600, 800]);
+    const form = doc.getForm();
+    const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
+    const fontGroup: Record<string, unknown> = {};
+    let y = 700;
+    for (const f of fonts) {
+      const field = form.createTextField(f.fieldName);
+      field.setText('x');
+      field.addToPage(page, { x: 50, y, width: 200, height: 20 });
+      y -= 40;
+      const dict: Record<string, unknown> = { Type: 'Font', Subtype: 'Type1', BaseFont: f.base };
+      if (f.encoding) dict.Encoding = f.encoding;
+      if (f.embedded) dict.FontDescriptor = doc.context.register(doc.context.obj({ Type: 'FontDescriptor' }));
+      fontGroup[f.key] = doc.context.register(doc.context.obj(dict));
+      const fields = acro.lookup(PDFName.of('Fields'), PDFArray);
+      const fieldDict = fields.lookup(fields.size() - 1, PDFDict);
+      fieldDict.set(PDFName.of('DA'), PDFHexString.fromText(`/${f.key} 10 Tf 0 g`));
+    }
+    acro.set(PDFName.of('DR'), doc.context.obj({ Font: fontGroup }));
+    return doc.save({ updateFieldAppearances: false });
+  }
+
+  async function daByField(bytes: Uint8Array): Promise<Map<string, string>> {
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const map = new Map<string, string>();
+    for (const f of doc.getForm().getFields()) {
+      const da = f.acroField.dict.get(PDFName.of('DA'));
+      if (da instanceof PDFHexString || da instanceof PDFString) map.set(f.getName(), da.decodeText());
+    }
+    return map;
+  }
+
+  async function drBaseFonts(bytes: Uint8Array): Promise<Map<string, string>> {
+    const acro = (await acroFormDictOf(bytes))!;
+    const fonts = acro
+      .lookupMaybe(PDFName.of('DR'), PDFDict)!
+      .lookupMaybe(PDFName.of('Font'), PDFDict)!;
+    const map = new Map<string, string>();
+    for (const [k, v] of fonts.entries()) {
+      const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+      const dict = v instanceof PDFDict ? v : (doc.context.lookup(v) as PDFDict);
+      map.set(k.decodeText(), (dict.get(PDFName.of('BaseFont')) as PDFName).decodeText());
+    }
+    return map;
+  }
+
+  it('chained renames rewrite each /DA exactly once — never onto another field\'s font (review #1)', async () => {
+    // Source B renames F1 -> F1_1 while ALSO owning a pre-existing F1_1 that
+    // renames to F1_1_1 — the natural shape of a document that already went
+    // through one merge. The old sequential rewrite re-matched its own
+    // output and landed fa on fb's font (verified live by the reviewer).
+    const a = await withDrFonts([{ key: 'F1', base: 'Helvetica', fieldName: 'base' }]);
+    const b = await withDrFonts([
+      { key: 'F1', base: 'Times-Roman', fieldName: 'fa' },
+      { key: 'F1_1', base: 'Courier', fieldName: 'fb' },
+    ]);
+    const rebuilt = await buildPdf([...pagesOf(a, 'a', [0]), ...pagesOf(b, 'b', [0])]);
+
+    const dr = await drBaseFonts(rebuilt);
+    expect(dr.get('F1')).toBe('Helvetica');
+    const da = await daByField(rebuilt);
+    // fa and fb must reference DISTINCT keys whose faces are their own.
+    const faKey = da.get('fa')!.match(/^\/(\S+) /)![1];
+    const fbKey = da.get('fb')!.match(/^\/(\S+) /)![1];
+    expect(faKey).not.toBe(fbKey);
+    expect(dr.get(faKey)).toBe('Times-Roman');
+    expect(dr.get(fbKey)).toBe('Courier');
+  });
+
+  it('font names containing $ rewrite literally (review #2)', async () => {
+    // '$&' in a replacement STRING splices the matched text; the rewrite must
+    // treat the new name literally.
+    const a = await withDrFonts([{ key: 'F$&', base: 'Helvetica', fieldName: 'fa' }]);
+    const b = await withDrFonts([{ key: 'F$&', base: 'Courier', fieldName: 'fb' }]);
+    const rebuilt = await buildPdf([...pagesOf(a, 'a', [0]), ...pagesOf(b, 'b', [0])]);
+    const da = await daByField(rebuilt);
+    expect(da.get('fa')).toBe('/F$& 10 Tf 0 g');
+    expect(da.get('fb')).toBe('/F$&_1 10 Tf 0 g');
+  });
+
+  it('same-named fonts differing in /Encoding are NOT deduplicated (review #3)', async () => {
+    const a = await withDrFonts([
+      { key: 'Helv', base: 'Helvetica', encoding: 'WinAnsiEncoding', fieldName: 'fa' },
+    ]);
+    const b = await withDrFonts([
+      { key: 'Helv', base: 'Helvetica', encoding: 'MacRomanEncoding', fieldName: 'fb' },
+    ]);
+    const rebuilt = await buildPdf([...pagesOf(a, 'a', [0]), ...pagesOf(b, 'b', [0])]);
+    const dr = await drBaseFonts(rebuilt);
+    expect([...dr.keys()].sort()).toEqual(['Helv', 'Helv_1']);
+    const da = await daByField(rebuilt);
+    expect(da.get('fa')).toBe('/Helv 10 Tf 0 g');
+    expect(da.get('fb')).toBe('/Helv_1 10 Tf 0 g');
+  });
+
+  it('embedded fonts (a /FontDescriptor) never count as equivalent (review #3)', async () => {
+    const a = await withDrFonts([
+      { key: 'Emb', base: 'SameFace', embedded: true, fieldName: 'fa' },
+    ]);
+    const b = await withDrFonts([
+      { key: 'Emb', base: 'SameFace', embedded: true, fieldName: 'fb' },
+    ]);
+    const rebuilt = await buildPdf([...pagesOf(a, 'a', [0]), ...pagesOf(b, 'b', [0])]);
+    const dr = await drBaseFonts(rebuilt);
+    expect([...dr.keys()].sort()).toEqual(['Emb', 'Emb_1']);
+  });
+
   it('pushes a later source\'s differing AcroForm-level /DA down onto its fields', async () => {
     async function withAcroDa(fieldName: string, da: string): Promise<Uint8Array> {
       const doc = await PDFDocument.create();

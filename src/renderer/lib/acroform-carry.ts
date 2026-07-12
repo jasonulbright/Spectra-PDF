@@ -73,6 +73,8 @@ const NAME_P = PDFName.of('P');
 const NAME_SIGFLAGS = PDFName.of('SigFlags');
 const NAME_NEEDAPPEARANCES = PDFName.of('NeedAppearances');
 const NAME_BASEFONT = PDFName.of('BaseFont');
+const NAME_ENCODING = PDFName.of('Encoding');
+const NAME_FONTDESCRIPTOR = PDFName.of('FontDescriptor');
 
 // Defensive cap on /Parent / /Kids recursion — matches the field-tree depth
 // cap posture in engine/forms.py (MAX_FIELD_DEPTH).
@@ -99,6 +101,13 @@ function asArray(doc: PDFDocument, value: unknown): PDFArray | null {
     return resolved instanceof PDFArray ? resolved : null;
   }
   return value instanceof PDFArray ? value : null;
+}
+
+// Resolve one level of indirection, returning whatever the entry actually is
+// (undefined stays undefined) — for values whose TYPE matters, like /Encoding
+// being a simple name vs a dict.
+function resolveDirect(doc: PDFDocument, value: unknown): unknown {
+  return value instanceof PDFRef ? doc.context.lookup(value) : value;
 }
 
 function acroFormOf(doc: PDFDocument): PDFDict | null {
@@ -250,26 +259,58 @@ function escapeRegExp(s: string): string {
 
 // Replace /oldName tokens in a /DA appearance string. A PDF name token ends
 // at whitespace or a delimiter, so "/Helv" must not rewrite "/HelvB".
+// ONE pass over the original string, all renames as a single alternation
+// with a replacer FUNCTION (review-caught, both verified live):
+// (1) sequential per-rename .replace() passes feed each other — when a
+//     rename's TARGET equals another rename's OLD name (the natural shape of
+//     a document that already went through one merge, e.g. F1→F1_1 alongside
+//     a pre-existing F1_1→F1_1_1), the second pass re-matches the first
+//     pass's output and a field silently lands on a DIFFERENT field's font;
+//     a single pass can never re-match its own substitutions.
+// (2) a plain replacement STRING treats $$ / $& as patterns — a legal PDF
+//     name containing '$' mangled the rewrite; a function's return value is
+//     always literal.
 function rewriteDaFonts(da: string, renames: Map<string, string>): string {
-  let out = da;
-  for (const [oldName, newName] of renames) {
-    out = out.replace(
-      new RegExp(`/${escapeRegExp(oldName)}(?=[\\s/\\[\\]()<>{}%]|$)`, 'g'),
-      `/${newName}`,
-    );
-  }
-  return out;
+  if (renames.size === 0) return da;
+  const alternation = [...renames.keys()]
+    .sort((a, b) => b.length - a.length) // longest-first; belt to the lookahead's braces
+    .map(escapeRegExp)
+    .join('|');
+  return da.replace(
+    new RegExp(`/(${alternation})(?=[\\s/\\[\\]()<>{}%]|$)`, 'g'),
+    (_m, name: string) => `/${renames.get(name)!}`,
+  );
 }
 
-// Two /DR font entries are interchangeable when BaseFont and Subtype agree —
-// the ubiquitous case of every source defining /Helv as unembedded
-// Helvetica. Embedded subsets carry distinct ABCDEF+ BaseFont prefixes, so
-// they never false-match. Anything else stays "different" and gets renamed;
-// claiming a wrong face is the failure mode 2l's review flagged as HIGH.
+// Two /DR font entries are interchangeable only when BaseFont, Subtype, AND
+// Encoding all agree and neither embeds a font program — the ubiquitous case
+// of every source defining /Helv as unembedded WinAnsi Helvetica. Anything
+// else stays "different" and gets renamed; claiming a wrong face — or a
+// wrong glyph MAP (review-caught: same-named Helvetica entries differing
+// only in /Encoding, e.g. a custom /Differences remap, were deduplicated
+// onto the first source's encoding, corrupting the other field's glyphs on
+// the next appearance regeneration) — is the failure mode 2l's review
+// flagged as HIGH.
 function fontsEquivalent(output: PDFDocument, a: unknown, b: unknown): boolean {
   const da = asDict(output, a);
   const db = asDict(output, b);
   if (!da || !db) return false;
+  // An embedded font program is never assumed equivalent to anything — only
+  // the subset-tag naming convention would distinguish two, and that is a
+  // convention, not a guarantee.
+  if (da.get(NAME_FONTDESCRIPTOR) !== undefined || db.get(NAME_FONTDESCRIPTOR) !== undefined) {
+    return false;
+  }
+  const encA = resolveDirect(output, da.get(NAME_ENCODING));
+  const encB = resolveDirect(output, db.get(NAME_ENCODING));
+  // Encodings must be the SAME simple name, or both absent (both then fall
+  // to the same standard font's built-in). A dict encoding (custom
+  // /Differences) never matches — deep-comparing one is not worth a
+  // wrong-glyph-map risk.
+  const encodingsMatch =
+    (encA === undefined && encB === undefined) ||
+    (encA instanceof PDFName && encB instanceof PDFName && encA === encB);
+  if (!encodingsMatch) return false;
   const baseA = da.get(NAME_BASEFONT);
   const baseB = db.get(NAME_BASEFONT);
   const subA = da.get(NAME_SUBTYPE);
