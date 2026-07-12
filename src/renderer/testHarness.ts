@@ -230,6 +230,10 @@ export interface TestHarness {
    * workspace (multi-select is workspace-wide, so accumulated files across
    * cases would otherwise cross-contaminate select-all). */
   closeAllFiles: () => void;
+  /** Import a file's pages into a document at an index (2n.3) — the same path
+   * the add-page ghost / per-position drop run, bypassing the native picker.
+   * Resolves once the byte-only source is registered and the pages spliced. */
+  importPagesIntoDoc: (filePath: string, toDocId: string, toIndex: number) => Promise<void>;
   /**
    * Add a pending redaction mark to the active file's first workspace page,
    * bypassing pointer-drag simulation (same WebDriver constraint as
@@ -333,6 +337,7 @@ export interface TestHarnessDeps {
   dispatchRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
   commitPendingEdits: () => Promise<void>;
   closeAllFiles: () => void;
+  importPagesIntoDoc: (filePath: string, toDocId: string, toIndex: number) => Promise<void>;
 }
 
 export const TEST_HARNESS_ENABLED =
@@ -516,6 +521,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     closeAllFiles: () => deps.closeAllFiles(),
+    importPagesIntoDoc: async (filePath, toDocId, toIndex) => {
+      try {
+        await deps.importPagesIntoDoc(filePath, toDocId, toIndex);
+      } catch (err) {
+        captureError('importPagesIntoDoc', err);
+        throw err;
+      }
+    },
     addRedactionMark: async (rect, timeoutMs = 10_000) => {
       const deadline = Date.now() + timeoutMs;
       // Waits for the canvas view to mount (registration) AND the indexer to

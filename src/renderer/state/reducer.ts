@@ -86,6 +86,33 @@ function pruneEmptyDocs(documents: OpenDocument[]): OpenDocument[] {
   return pruned.length === documents.length ? documents : pruned;
 }
 
+// Drop byte-only import sources (2n.3) that no workspace page references any
+// more — but only once the page tier is empty, since an undoable/redoable
+// import still needs its source bytes. After a commit bakes imported pages into
+// the target file and the indexer reindexes them back to sourceDocId=target,
+// the source is unreferenced and safe to evict.
+function evictUnreferencedImportSources(
+  files: Map<string, OpenFile>,
+  documents: OpenDocument[],
+  pageUndoStack: unknown[],
+  pageRedoStack: unknown[],
+): Map<string, OpenFile> {
+  if (pageUndoStack.length > 0 || pageRedoStack.length > 0) return files;
+  const hasImportOnly = [...files.values()].some((f) => f.importOnly);
+  if (!hasImportOnly) return files;
+  const referenced = new Set<string>();
+  for (const d of documents) for (const p of d.pages) referenced.add(p.sourceDocId);
+  let changed = false;
+  const next = new Map(files);
+  for (const [path, f] of files) {
+    if (f.importOnly && !referenced.has(path)) {
+      next.delete(path);
+      changed = true;
+    }
+  }
+  return changed ? next : files;
+}
+
 // After stripping a closed file's pages out of other documents, a still-open
 // path can be left with zero total pages — an uncommittable composition.
 // Dropping its documents (and its dirty mark) lets the indexer restore that
@@ -147,6 +174,27 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         pageUndoStack: [],
         pageRedoStack: [],
       };
+    }
+    case 'REGISTER_IMPORT_SOURCE': {
+      // Byte-only source for IMPORT_PAGES (2n.3): register its bytes so imported
+      // pages render and the commit builder can resolve them, but WITHOUT a
+      // strip (the indexer skips importOnly) and WITHOUT touching the active
+      // file or the page-edit tier (unlike OPEN_FILE). Idempotent — if the path
+      // is already open (as a real file or a prior import source), reuse it.
+      if (state.files.has(action.path)) return state;
+      const files = new Map(state.files);
+      files.set(action.path, {
+        path: action.path,
+        workingPath: action.workingPath,
+        name: action.name,
+        pageCount: action.pageCount,
+        buffer: action.buffer,
+        dirty: false,
+        undoStack: [],
+        redoStack: [],
+        importOnly: true,
+      });
+      return { ...state, files };
     }
     case 'CLOSE_FILE': {
       const files = new Map(state.files);
@@ -295,7 +343,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ? kept.length
         : prev.slice(0, firstIndex).filter((d) => d.path !== action.path).length;
       const documents = [...kept.slice(0, insertAt), ...action.documents, ...kept.slice(insertAt)];
-      return { ...state, workspace: { documents } };
+      // Reindexing bakes any just-committed imports into the target's own pages,
+      // so their byte-only sources may now be unreferenced — evict them (gated
+      // on an empty page tier).
+      const files = evictUnreferencedImportSources(
+        state.files,
+        documents,
+        state.pageUndoStack,
+        state.pageRedoStack,
+      );
+      return { ...state, files, workspace: { documents } };
     }
     case 'REORDER_PAGES': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
@@ -461,6 +518,20 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         if (pagesForPath(documents, path) === 0) return state; // would empty a file
       }
       return applyPageEdit(state, documents, [...touched]);
+    }
+    case 'IMPORT_PAGES': {
+      if (action.pages.length === 0) return state;
+      const to = state.workspace.documents.find((d) => d.id === action.toDocId);
+      if (!to) return state;
+      // Splice the imported page refs into the target at the clamped index.
+      // Their sourceDocId points at a REGISTER_IMPORT_SOURCE byte-only file, so
+      // they render (usePdfProxies) and commit (bytesFor) like any other page.
+      const documents = mapDocument(state.workspace.documents, to.id, (d) => {
+        const at = Math.max(0, Math.min(action.toIndex, d.pages.length));
+        const pages = [...d.pages.slice(0, at), ...action.pages, ...d.pages.slice(at)];
+        return { ...d, pages, pageCount: pages.length };
+      });
+      return applyPageEdit(state, documents, [to.path]);
     }
     case 'DELETE_PAGE_REF': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);

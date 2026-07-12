@@ -49,6 +49,7 @@ interface DocLayerProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearSignaturePlacement: () => void;
+  onAddPages: (docId: string, toIndex: number) => void;
 }
 
 function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
@@ -100,6 +101,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onRemoveRedactionMark={props.onRemoveRedactionMark}
               onSetSignaturePlacement={props.onSetSignaturePlacement}
               onClearSignaturePlacement={props.onClearSignaturePlacement}
+              onAddPages={props.onAddPages}
             />
           </div>
         );

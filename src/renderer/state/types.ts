@@ -12,6 +12,12 @@ export interface OpenFile {
   dirty: boolean;
   undoStack: string[];    // snapshot paths (most recent last)
   redoStack: string[];    // snapshot paths for redo
+  // Registered only so its bytes are available (for rendering imported pages
+  // and for the commit builder), NOT as a document of its own — the workspace
+  // indexer skips these, so they never get a strip. Set by REGISTER_IMPORT_SOURCE
+  // for pages imported into another document; evicted once no page references
+  // them and the page tier is empty. See 2n.3 in the phase doc.
+  importOnly?: boolean;
 }
 
 // A fingerprint of a pre-existing PDF annotation object as read at import
@@ -125,6 +131,10 @@ export interface AppState {
 
 export type AppAction =
   | { type: 'OPEN_FILE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer }
+  // Register a file's bytes WITHOUT a strip, as an import source (2n.3). Not a
+  // page edit (doesn't touch the page-tier undo history or activeFileId);
+  // idempotent. Its pages are then spliced into a real document via IMPORT_PAGES.
+  | { type: 'REGISTER_IMPORT_SOURCE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer }
   | { type: 'CLOSE_FILE'; path: string }
   | { type: 'SET_ACTIVE_FILE'; path: string }
   | { type: 'UPDATE_FILE'; path: string; pageCount: number; buffer: PdfBuffer; snapshotPath: string }
@@ -156,6 +166,10 @@ export type AppAction =
   // zero pages). See docs/architecture/16-phase2n-canvas-completeness.md § 2n.1.
   | { type: 'MOVE_PAGES'; pageIds: string[]; toDocId: string; toIndex: number }
   | { type: 'MOVE_PAGES_TO_NEW_DOC'; pageIds: string[]; docIndex: number; newDocId: string; newName: string }
+  // Splice NEW page refs (sourced from a REGISTER_IMPORT_SOURCE byte-only file)
+  // into an existing document at an index — the import-into-doc machinery (2n.3),
+  // one page-edit undo step.
+  | { type: 'IMPORT_PAGES'; toDocId: string; toIndex: number; pages: PageRef[] }
   | { type: 'DELETE_PAGE_REF'; docId: string; pageId: string }
   | { type: 'DELETE_PAGE_REFS'; pageIds: string[] }
   | { type: 'ADD_ANNOTATION'; docId: string; pageId: string; annotation: PageAnnotation }

@@ -21,6 +21,9 @@ export function useWorkspaceIndexer(): void {
     for (const [path, f] of state.files) {
       const buffer = f.buffer;
       if (!buffer) continue;
+      // Byte-only import sources (2n.3) provide bytes for rendering/commit only
+      // — never a strip. evictExcept above still keeps their proxy alive.
+      if (f.importOnly) continue;
       const current = state.workspace.documents.find((d) => d.path === path);
       if (current && current.buffer === buffer) continue;
       if (inFlight.current.get(path) === buffer) continue;

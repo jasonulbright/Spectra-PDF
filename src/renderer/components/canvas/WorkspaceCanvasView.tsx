@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { usePdfProxies } from '../../hooks/usePdfProxies';
-import { computeLayout, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
+import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
 import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
 import { getDocumentProxy } from '../../lib/pdfDocCache';
@@ -54,7 +54,23 @@ interface WorkspaceCanvasViewProps {
   // Persist OCR text layers into one file — same performOperation routing as
   // onRedactFile (gate flush -> snapshot -> engine apply_ocr_layer -> reload).
   onApplyOcrLayer: (path: string, pages: OcrApplyPage[]) => Promise<void>;
+  // Add-page ghost (2n.3): pick file(s) and import their pages into a document
+  // at an index (byte-only import machinery, undoable via the page tier).
+  onAddPages: (docId: string, toIndex: number) => void;
+  // Per-position external drop (2n.3): the canvas publishes a resolver here so
+  // App's drop handler can map a drop point to the document + index under it
+  // (returns null for a between/empty drop → App falls back to appending).
+  dropResolverRef: React.MutableRefObject<CanvasDropResolver | null>;
 }
+
+export interface CanvasDropTarget {
+  docId: string;
+  index: number;
+}
+// clientX/clientY are webview CSS pixels (App converts the Tauri physical drop
+// position). Returns the doc + insertion index under the point, or null when
+// the point isn't over a document card.
+export type CanvasDropResolver = (clientX: number, clientY: number) => CanvasDropTarget | null;
 
 // Stable empties so the "no pending marks" hot path never breaks the layer
 // components' memoization when unrelated state changes.
@@ -71,13 +87,34 @@ export function WorkspaceCanvasView({
   onApplyChanges,
   onRedactFile,
   onApplyOcrLayer,
+  onAddPages,
+  dropResolverRef,
 }: WorkspaceCanvasViewProps): React.ReactElement {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const docs = state.workspace.documents;
   const proxies = usePdfProxies(state.files);
   const layout = useMemo(() => computeLayout(docs), [docs]);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
   const canvasRef = useRef<CanvasHandle | null>(null);
+
+  // Publish the external-drop resolver (2n.3) so App's drop handler can map a
+  // drop point to the document + index under it. Reads live layout/canvas via
+  // refs; an 'into' target imports, a 'between' target returns null so App
+  // appends a new strip (today's behavior). The clientToWorld + computeDropTarget
+  // path is the same tested math the page drag uses.
+  useEffect(() => {
+    dropResolverRef.current = (clientX, clientY) => {
+      const w = canvasRef.current?.clientToWorld(clientX, clientY);
+      if (!w) return null;
+      const target = computeDropTarget(layoutRef.current, w.x, w.y, w.k, null, true);
+      return target.kind === 'into' ? { docId: target.docId, index: target.index } : null;
+    };
+    return () => {
+      dropResolverRef.current = null;
+    };
+  }, [dropResolverRef]);
   // Multi-select is view state (never the page-edit tier): a set of selected
   // page ids plus the anchor for shift-range selection. Batched page ops
   // (move/delete/rotate) act on the whole set as one undo step (2n.1).
@@ -1003,6 +1040,7 @@ export function WorkspaceCanvasView({
           onRemoveRedactionMark={onRemoveRedactionMark}
           onSetSignaturePlacement={onSetSignaturePlacement}
           onClearSignaturePlacement={onClearSignaturePlacement}
+          onAddPages={onAddPages}
         />
         {drag.dropTarget?.kind === 'between' && (
           <div

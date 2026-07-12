@@ -54,6 +54,7 @@ interface DocumentRowProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearSignaturePlacement: () => void;
+  onAddPages: (docId: string, toIndex: number) => void;
 }
 
 function DocumentRowImpl({
@@ -83,6 +84,7 @@ function DocumentRowImpl({
   onRemoveRedactionMark,
   onSetSignaturePlacement,
   onClearSignaturePlacement,
+  onAddPages,
 }: DocumentRowProps): React.JSX.Element {
   const strip: React.JSX.Element[] = [];
   let visible = 0;
@@ -131,6 +133,22 @@ function DocumentRowImpl({
     if (!collapsed) visible++;
   }
   emitGhost();
+  // Add-page ghost (2n.3): imports a picked file's pages at the end of this doc.
+  strip.push(
+    <button
+      key="__add_page"
+      className="page-add-ghost"
+      data-testid={`add-page-${doc.id}`}
+      title="Add pages from a file"
+      onClick={(e) => {
+        e.stopPropagation();
+        onAddPages(doc.id, doc.pages.length);
+      }}
+      style={{ height: pageHeight }}
+    >
+      +
+    </button>,
+  );
 
   return (
     <section className="doc-row">

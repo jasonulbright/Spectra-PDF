@@ -237,6 +237,28 @@ export async function getRedactionMarkCount(): Promise<number> {
   });
 }
 
+/** Import a file's pages into a document at an index (2n.3) — the add-page /
+ * per-position-drop path, bypassing the native file picker. */
+export async function importPagesIntoDoc(
+  filePath: string,
+  toDocId: string,
+  toIndex: number,
+): Promise<void> {
+  const result = await browser.executeAsync<string | null, [string, string, number]>(
+    function (fp, doc, idx, done) {
+      (window as any).__SPECTRA_TEST__.importPagesIntoDoc(fp, doc, idx)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    filePath,
+    toDocId,
+    toIndex,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`importPagesIntoDoc failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
 /** Test-only: close every open file so the next case starts clean. */
 export async function closeAllFiles(): Promise<void> {
   await browser.execute(function () {

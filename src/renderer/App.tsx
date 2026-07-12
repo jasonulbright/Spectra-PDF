@@ -28,7 +28,10 @@ import { ComparePanel } from './panels/ComparePanel';
 import { SignaturesPanel } from './panels/SignaturesPanel';
 import { useEngine } from './hooks/useEngine';
 import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
+import { indexOpenFile } from './lib/workspace';
+import type { PageRef, PdfBuffer } from './state/types';
 import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
+import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
 import { setCommitGate } from './lib/commit-gate';
 import { DropZone } from './components/DropZone';
@@ -218,24 +221,22 @@ function AppContent(): React.ReactElement {
     return { buffer, pageCount: info.pages };
   }, [state.files, call]);
 
-  const openByPaths = useCallback(async (paths: string[]) => {
-    for (const filePath of paths) {
-      if (state.files.has(filePath)) {
-        dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
-        addRecent(filePath);
-        continue;
-      }
+  // Create a working copy, unlock if encrypted, read bytes + page count. Shared
+  // by opening files and by importing a file's pages into a document (2n.3).
+  // Returns null if the user cancelled an encrypted file.
+  const prepareFileBytes = useCallback(
+    async (
+      filePath: string,
+    ): Promise<{ workingPath: string; name: string; buffer: PdfBuffer; pageCount: number } | null> => {
       const workingPath = await file.createWorkingCopy(filePath);
-      const fileName = filePath.split(/[\\/]/).pop() || filePath;
-
-      // Check if encrypted and prompt for password if needed
+      const name = filePath.split(/[\\/]/).pop() || filePath;
       const encStatus = await call('check_encrypted', { file: workingPath });
       if (encStatus.encrypted) {
         let unlocked = false;
         let error: string | undefined;
         while (!unlocked) {
-          const result = await showPasswordPrompt(fileName, error);
-          if (result === 'cancel') break;
+          const result = await showPasswordPrompt(name, error);
+          if (result === 'cancel') return null;
           try {
             await call('unlock', { file: workingPath, password: result.password });
             unlocked = true;
@@ -243,35 +244,100 @@ function AppContent(): React.ReactElement {
             error = 'Incorrect password. Please try again.';
           }
         }
-        if (!unlocked) continue; // User cancelled — skip this file
       }
-
       const buffer = await file.readBuffer(workingPath);
       const info = await call('get_page_count', { file: workingPath });
-      dispatch({
-        type: 'OPEN_FILE',
-        path: filePath,
-        workingPath,
-        name: fileName,
-        pageCount: info.pages,
-        buffer,
-      });
+      return { workingPath, name, buffer, pageCount: info.pages };
+    },
+    [call, showPasswordPrompt],
+  );
+
+  const openByPaths = useCallback(async (paths: string[]) => {
+    for (const filePath of paths) {
+      if (state.files.has(filePath)) {
+        dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
+        addRecent(filePath);
+        continue;
+      }
+      const prepared = await prepareFileBytes(filePath);
+      if (!prepared) continue; // cancelled encrypted file
+      dispatch({ type: 'OPEN_FILE', path: filePath, ...prepared });
       addRecent(filePath);
     }
-  }, [state.files, call, dispatch, addRecent, showPasswordPrompt]);
+  }, [state.files, dispatch, addRecent, prepareFileBytes]);
+
+  // Import one or more files' pages INTO an existing document at an index (the
+  // add-page ghost and per-position drops, 2n.3). Each file is registered
+  // byte-only (no strip) and its pages spliced in — atomic, undoable. Files
+  // already open are reused. A cancelled encrypted file is skipped.
+  const importFilesIntoDoc = useCallback(
+    async (filePaths: string[], toDocId: string, toIndex: number) => {
+      const allPages: PageRef[] = [];
+      for (const filePath of filePaths) {
+        const existing = state.files.get(filePath);
+        let src: { workingPath: string; name: string; buffer: PdfBuffer; pageCount: number };
+        if (existing?.buffer) {
+          src = {
+            workingPath: existing.workingPath,
+            name: existing.name,
+            buffer: existing.buffer,
+            pageCount: existing.pageCount,
+          };
+        } else {
+          const prepared = await prepareFileBytes(filePath);
+          if (!prepared) continue;
+          dispatch({ type: 'REGISTER_IMPORT_SOURCE', path: filePath, ...prepared });
+          src = prepared;
+        }
+        const docs = await indexOpenFile({
+          path: filePath,
+          workingPath: src.workingPath,
+          name: src.name,
+          pageCount: src.pageCount,
+          buffer: src.buffer,
+          dirty: false,
+          undoStack: [],
+          redoStack: [],
+          importOnly: true,
+        });
+        for (const d of docs) allPages.push(...d.pages);
+      }
+      if (allPages.length > 0) dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages });
+    },
+    [state.files, dispatch, prepareFileBytes],
+  );
 
   // Drag-drop handler: open files, then navigate based on count. Drops while
   // in the canvas stay there — new files appear as strips in place.
-  const handleFilesDropped = useCallback(async (paths: string[]) => {
-    await openByPaths(paths);
-    if (paths.length === 0 || view === 'canvas') return;
-    if (paths.length >= 2) {
-      setView('operations');
-      setActiveOp('merge');
-    } else {
-      setView('canvas');
-    }
-  }, [openByPaths, view]);
+  // The canvas publishes its drop resolver here (2n.3).
+  const dropResolverRef = useRef<CanvasDropResolver | null>(null);
+
+  const handleFilesDropped = useCallback(
+    async (paths: string[], position?: { x: number; y: number }) => {
+      // A drop landing ON a document while in the canvas view imports its pages
+      // into that document at the drop point (2n.3). Tauri reports a physical
+      // position; the resolver wants webview CSS pixels. A miss (between/empty,
+      // or an unresolved point) falls through to the append behavior below —
+      // never a wrong-document import.
+      if (view === 'canvas' && position && dropResolverRef.current) {
+        const dpr = window.devicePixelRatio || 1;
+        const target = dropResolverRef.current(position.x / dpr, position.y / dpr);
+        if (target) {
+          await importFilesIntoDoc(paths, target.docId, target.index);
+          return;
+        }
+      }
+      await openByPaths(paths);
+      if (paths.length === 0 || view === 'canvas') return;
+      if (paths.length >= 2) {
+        setView('operations');
+        setActiveOp('merge');
+      } else {
+        setView('canvas');
+      }
+    },
+    [openByPaths, importFilesIntoDoc, view],
+  );
 
   const handleOpenFile = useCallback(async (): Promise<boolean> => {
     const paths = await openFiles();
@@ -281,6 +347,16 @@ function AppContent(): React.ReactElement {
     }
     return false;
   }, [openFiles, openByPaths]);
+
+  // Add-page ghost (2n.3): pick file(s) and import their pages into a document
+  // at an index via the byte-only import machinery.
+  const handleAddPages = useCallback(
+    async (docId: string, toIndex: number) => {
+      const paths = await openFiles();
+      if (paths.length > 0) await importFilesIntoDoc(paths, docId, toIndex);
+    },
+    [openFiles, importFilesIntoDoc],
+  );
 
   const handleWelcomeAction = useCallback(async (action: string) => {
     if (action === 'open') {
@@ -701,8 +777,10 @@ function AppContent(): React.ReactElement {
       closeAllFiles: () => {
         for (const f of filesRef.current.values()) dispatch({ type: 'CLOSE_FILE', path: f.path });
       },
+      importPagesIntoDoc: (filePath, toDocId, toIndex) =>
+        importFilesIntoDoc([filePath], toDocId, toIndex),
     });
-  }, [openByPaths, dispatch]);
+  }, [openByPaths, dispatch, importFilesIntoDoc]);
 
   // Notify harness subscribers on every state-relevant change.
   useEffect(() => {
@@ -864,6 +942,8 @@ function AppContent(): React.ReactElement {
                 onApplyChanges={() => void commitAndReport()}
                 onRedactFile={handleRedactFile}
                 onApplyOcrLayer={handleApplyOcrLayer}
+                onAddPages={(docId, toIndex) => void handleAddPages(docId, toIndex)}
+                dropResolverRef={dropResolverRef}
               />
               {inspector && inspectorFile?.buffer && (
                 <div className="absolute inset-0 z-40 bg-neutral-900">

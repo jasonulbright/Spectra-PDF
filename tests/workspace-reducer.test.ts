@@ -1200,3 +1200,128 @@ describe('ROTATE_PAGE_REFS (batched rotate by delta)', () => {
     ).toBe(state);
   });
 });
+
+describe('REGISTER_IMPORT_SOURCE (byte-only import source, 2n.3)', () => {
+  it('adds an importOnly file with no strip, active-file change, or page-tier change', () => {
+    const a = makeFile('a.pdf', 3);
+    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))]);
+    const next = appReducer(state, {
+      type: 'REGISTER_IMPORT_SOURCE',
+      path: 'x.pdf',
+      workingPath: 'x.pdf.working',
+      name: 'x.pdf',
+      pageCount: 2,
+      buffer: [7],
+    });
+    expect(next.files.get('x.pdf')).toMatchObject({ importOnly: true, pageCount: 2 });
+    expect(next.activeFileId).toBe(state.activeFileId); // NOT made active (unlike OPEN_FILE)
+    expect(next.workspace.documents.map((d) => d.id)).toEqual(['a.pdf#0']); // no strip for x.pdf
+    expect(next.pageUndoStack).toBe(state.pageUndoStack); // page tier untouched
+  });
+
+  it('is idempotent when the path is already open or registered', () => {
+    const a = makeFile('a.pdf', 3);
+    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))]);
+    expect(
+      appReducer(state, {
+        type: 'REGISTER_IMPORT_SOURCE',
+        path: 'a.pdf',
+        workingPath: 'a.pdf.working',
+        name: 'a.pdf',
+        pageCount: 3,
+        buffer: [9],
+      }),
+    ).toBe(state);
+  });
+});
+
+describe('IMPORT_PAGES (import-into-doc, 2n.3)', () => {
+  it('splices foreign-sourced page refs into the target at the index, one undo step', () => {
+    const a = makeFile('a.pdf', 2);
+    const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
+    const imported = makePages('x.pdf', 2); // sourceDocId = x.pdf (a byte-only source)
+    const next = appReducer(stateWith([a], [doc]), {
+      type: 'IMPORT_PAGES',
+      toDocId: 'a.pdf#0',
+      toIndex: 1,
+      pages: imported,
+    });
+    expect(pageIds(next.workspace.documents[0])).toEqual([
+      'a.pdf#p0',
+      'x.pdf#p0',
+      'x.pdf#p1',
+      'a.pdf#p1',
+    ]);
+    expect(next.workspace.documents[0].pageCount).toBe(4);
+    expect(next.workspace.documents[0].pages[1].sourceDocId).toBe('x.pdf'); // keeps its source
+    expect(next.pageDirtyPaths).toEqual(['a.pdf']);
+    expect(next.pageUndoStack).toHaveLength(1);
+  });
+
+  it('clamps the insertion index and rejects empty pages / unknown target', () => {
+    const a = makeFile('a.pdf', 2);
+    const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))]);
+    expect(appReducer(state, { type: 'IMPORT_PAGES', toDocId: 'a.pdf#0', toIndex: 0, pages: [] })).toBe(state);
+    expect(
+      appReducer(state, { type: 'IMPORT_PAGES', toDocId: 'nope', toIndex: 0, pages: makePages('x.pdf', 1) }),
+    ).toBe(state);
+    // toIndex past the end clamps to append.
+    const appended = appReducer(state, {
+      type: 'IMPORT_PAGES',
+      toDocId: 'a.pdf#0',
+      toIndex: 99,
+      pages: makePages('x.pdf', 1),
+    });
+    expect(pageIds(appended.workspace.documents[0])).toEqual(['a.pdf#p0', 'a.pdf#p1', 'x.pdf#p0']);
+  });
+});
+
+describe('import-source eviction on reindex (2n.3)', () => {
+  const importSource = (path: string, pages: number) => ({
+    ...makeFile(path, pages),
+    importOnly: true,
+  });
+
+  it('evicts an unreferenced import source when the page tier is empty', () => {
+    // Post-commit: a.pdf reindexed to its own pages (imported pages baked in),
+    // so nothing references x.pdf and the tier is empty → x.pdf is evicted.
+    const a = makeFile('a.pdf', 3);
+    const state = stateWith(
+      [a, importSource('x.pdf', 2)],
+      [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))],
+    );
+    const next = appReducer(state, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))],
+    });
+    expect(next.files.has('x.pdf')).toBe(false); // evicted
+    expect(next.files.has('a.pdf')).toBe(true);
+  });
+
+  it('keeps an import source still referenced by a page', () => {
+    const a = makeFile('a.pdf', 2);
+    const withImport = [...makePages('a.pdf', 2), ...makePages('x.pdf', 1)];
+    const state = stateWith([a, importSource('x.pdf', 1)], [makeDoc(a, 'a.pdf#0', withImport)]);
+    const next = appReducer(state, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [makeDoc(a, 'a.pdf#0', withImport)], // still holds the x-sourced page
+    });
+    expect(next.files.has('x.pdf')).toBe(true); // referenced → kept
+  });
+
+  it('keeps an import source while the page tier is non-empty (undoable/redoable import)', () => {
+    const a = makeFile('a.pdf', 3);
+    const state = {
+      ...stateWith([a, importSource('x.pdf', 2)], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))]),
+      pageUndoStack: [{ documents: [], dirtyPaths: [] }],
+    };
+    const next = appReducer(state, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))],
+    });
+    expect(next.files.has('x.pdf')).toBe(true); // pending edit could still need it
+  });
+});

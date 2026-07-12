@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 interface DropZoneProps {
-  onFilesDropped: (paths: string[]) => void;
+  // position is the Tauri physical drop point (2n.3) — undefined on platforms
+  // that don't report one; the handler falls back to appending when absent.
+  onFilesDropped: (paths: string[], position?: { x: number; y: number }) => void;
   children: React.ReactNode;
 }
 
@@ -23,7 +25,10 @@ export function DropZone({ onFilesDropped, children }: DropZoneProps): React.Rea
         const paths = event.payload.paths.filter((p) =>
           /\.pdfx?$/i.test(p)
         );
-        if (paths.length > 0) callbackRef.current(paths);
+        // Tauri reports the physical drop position; forward it so a drop onto a
+        // canvas document imports there (2n.3). Absent → append fallback.
+        const position = event.payload.position as { x: number; y: number } | undefined;
+        if (paths.length > 0) callbackRef.current(paths, position);
       }
     });
     return () => { unlisten.then((fn) => fn()); };
