@@ -109,7 +109,7 @@ Use `Setup.exe /?` to see all installer switches:
 
 ```bash
 # Silent install (per-machine, auto-update disabled)
-"Spectra PDF_0.9.0_x64-setup.exe" /S
+"Spectra PDF_1.0.0_x64-setup.exe" /S
 
 # Silent uninstall (keeps user data for redeployment)
 "C:\Program Files\Spectra PDF\uninstall.exe" /S
