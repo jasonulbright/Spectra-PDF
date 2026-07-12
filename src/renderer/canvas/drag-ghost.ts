@@ -9,6 +9,15 @@ export function buildDragGhost(pageEl: HTMLElement, rect: DOMRect, count = 1): H
   const h = rect.height;
   const k = pageEl.offsetHeight ? h / pageEl.offsetHeight : 1;
 
+  // The ghost mounts on document.body, OUTSIDE the .canvas-view scope that
+  // declares --surface (and any :root --accent) — a bare var() there always
+  // fell through to its fallback (latent: both are white/blue today, the
+  // punchlist's theme trap). Resolve the values HERE, from the page element,
+  // which sits inside every relevant scope.
+  const computed = getComputedStyle(pageEl);
+  const surface = computed.getPropertyValue('--surface').trim() || '#fff';
+  const accent = computed.getPropertyValue('--accent').trim() || '#2f6fed';
+
   // Outer wrapper positions the whole ghost (including the stack offset); the
   // inner card carries the page snapshot so moveDragGhost only transforms one
   // element.
@@ -36,7 +45,7 @@ export function buildDragGhost(pageEl: HTMLElement, rect: DOMRect, count = 1): H
         width: '100%',
         height: '100%',
         borderRadius: `${10 * k}px`,
-        background: 'var(--surface, #fff)',
+        background: surface,
         boxShadow: '0 4px 24px rgba(0, 0, 0, 0.35)',
         opacity: '0.9',
       });
@@ -53,7 +62,7 @@ export function buildDragGhost(pageEl: HTMLElement, rect: DOMRect, count = 1): H
     height: '100%',
     borderRadius: `${10 * k}px`,
     overflow: 'hidden',
-    background: 'var(--surface, #fff)',
+    background: surface,
     boxShadow: '0 4px 24px rgba(0, 0, 0, 0.45)',
     opacity: '0.9',
   });
@@ -82,7 +91,7 @@ export function buildDragGhost(pageEl: HTMLElement, rect: DOMRect, count = 1): H
       padding: `0 ${6 * k}px`,
       boxSizing: 'border-box',
       borderRadius: `${11 * k}px`,
-      background: 'var(--accent, #2f6fed)',
+      background: accent,
       color: '#fff',
       fontSize: `${12 * k}px`,
       fontWeight: '700',

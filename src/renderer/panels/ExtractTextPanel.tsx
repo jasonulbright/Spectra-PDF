@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -29,19 +29,31 @@ export function ExtractTextPanel({ initialPage, onConsumeInitialPage }: { initia
     setStatus('Copied to clipboard');
   }, [text]);
 
-  // Auto-extract when triggered from Pages right-click
+  // Auto-extract when triggered from the canvas context menu. Fires exactly
+  // once per initialPage arrival — everything else is read through refs
+  // (the stable-listener pattern): depending on `busy` would re-fire the
+  // extraction the moment it completes, and depending on `activeFile` would
+  // re-fire on every buffer swap.
+  const activeFileRef = useRef(activeFile);
+  activeFileRef.current = activeFile;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const callRef = useRef(call);
+  callRef.current = call;
+  const consumeRef = useRef(onConsumeInitialPage);
+  consumeRef.current = onConsumeInitialPage;
   useEffect(() => {
-    if (initialPage && activeFile && !busy) {
-      setPageInput(String(initialPage));
-      onConsumeInitialPage?.();
-      // Auto-run extraction
-      const pages = [initialPage];
-      setBusy(true); setStatus('Extracting text...');
-      call('extract_text', { file: activeFile.workingPath, pages }).then((r) => {
-        setText(r.text);
-        setStatus(`Extracted ${r.length} characters from page ${initialPage}`);
-      }).catch((e: unknown) => setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`)).finally(() => setBusy(false));
-    }
+    const file = activeFileRef.current;
+    if (!initialPage || !file || busyRef.current) return;
+    setPageInput(String(initialPage));
+    consumeRef.current?.();
+    // Auto-run extraction
+    const pages = [initialPage];
+    setBusy(true); setStatus('Extracting text...');
+    callRef.current('extract_text', { file: file.workingPath, pages }).then((r) => {
+      setText(r.text);
+      setStatus(`Extracted ${r.length} characters from page ${initialPage}`);
+    }).catch((e: unknown) => setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`)).finally(() => setBusy(false));
   }, [initialPage]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to extract text" />;

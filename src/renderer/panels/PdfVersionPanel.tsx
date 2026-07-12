@@ -14,17 +14,21 @@ export function PdfVersionPanel(): React.ReactElement {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Keyed on workingPath (stable per path, unlike the activeFile object
+  // which swaps on every buffer update) — the intent the old lint-suppressed
+  // `activeFile?.path` dependency encoded.
+  const workingPath = activeFile?.workingPath ?? null;
   useEffect(() => {
-    if (!activeFile) { setCurrentVersion(null); return; }
+    if (!workingPath) { setCurrentVersion(null); return; }
     let cancelled = false;
-    call('get_pdf_version', { file: activeFile.workingPath }).then((r) => {
+    call('get_pdf_version', { file: workingPath }).then((r) => {
       if (!cancelled) {
         setCurrentVersion(r.version);
         setStatus(`Current version: PDF ${r.version}`);
       }
     }).catch((e: unknown) => { if (!cancelled) setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`); });
     return () => { cancelled = true; };
-  }, [activeFile?.path, call]);
+  }, [workingPath, call]);
 
   const handleSetVersion = useCallback(async () => {
     if (!activeFile) return;

@@ -15,11 +15,15 @@ export function MetadataPanel(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  // Load metadata when active file changes
+  // Load metadata when the active FILE changes. Keyed on workingPath (stable
+  // per path, unlike the activeFile object which swaps on every buffer
+  // update) — reading the whole object inside while depending on `?.path`
+  // was the lint-suppressed version of exactly this.
+  const workingPath = activeFile?.workingPath ?? null;
   useEffect(() => {
-    if (!activeFile) { setLoaded(false); return; }
+    if (!workingPath) { setLoaded(false); return; }
     let cancelled = false;
-    call('get_metadata', { file: activeFile.workingPath }).then((r) => {
+    call('get_metadata', { file: workingPath }).then((r) => {
       if (cancelled) return;
       setTitle(r.title || '');
       setAuthor(r.author || '');
@@ -29,7 +33,7 @@ export function MetadataPanel(): React.ReactElement {
       setStatus(`Loaded metadata (${r.pages} pages)`);
     }).catch((e: unknown) => { if (!cancelled) setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`); });
     return () => { cancelled = true; };
-  }, [activeFile?.path, call]);
+  }, [workingPath, call]);
 
   const handleStrip = useCallback(async () => {
     if (!activeFile) return;

@@ -751,7 +751,10 @@ function AppContent(): React.ReactElement {
       }
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, []);
+    // showConfirm is a stable useCallback([]) — listing it is a runtime
+    // no-op (the listener never re-registers); everything else the handler
+    // reads goes through refs above.
+  }, [showConfirm]);
 
   // Leaving the canvas commits pending page edits, making "in-memory edits
   // exist only while in canvas view" the invariant — Pages/Inspector and the

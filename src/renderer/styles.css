@@ -265,7 +265,10 @@
   gap: 2px;
   margin-left: auto;
   align-self: center;
-  opacity: 0;
+  /* Always faintly visible — full hover-reveal (opacity 0) made the actions
+     effectively undiscoverable (Phase 3 polish; missed in the owner's first
+     smoke test). Hover brightens to full. */
+  opacity: 0.35;
   transition: opacity 0.15s ease;
 }
 
