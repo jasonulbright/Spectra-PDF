@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { getSettings } from '../panels/SettingsPanel';
 
 export type Operation =
-  | 'merge'
   | 'split'
   | 'rotate'
   | 'delete'
@@ -36,7 +35,6 @@ interface OpGroup {
 
 const groups: OpGroup[] = [
   { name: 'Pages', items: [
-    { id: 'merge', label: 'Merge' },
     { id: 'split', label: 'Split' },
     { id: 'rotate', label: 'Rotate' },
     { id: 'delete', label: 'Delete Pages' },

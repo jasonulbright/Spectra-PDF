@@ -41,3 +41,15 @@ export function CloseIcon({ size = 16 }: IconProps): React.JSX.Element {
     </svg>
   );
 }
+
+// Merge-up (2o): an up-arrow flowing into a bar — "this document's pages
+// join the one above".
+export function MergeUpIcon({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+      <path d="M12 20V9" />
+      <path d="m8 13 4-4 4 4" />
+      <path d="M4 4h16" />
+    </svg>
+  );
+}

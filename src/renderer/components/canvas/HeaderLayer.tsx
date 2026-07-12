@@ -12,6 +12,9 @@ interface HeaderLayerProps {
   onMove: (docId: string, direction: -1 | 1) => void;
   onRemove: (docId: string) => void;
   onRename: (docId: string, name: string) => void;
+  // Merge-up (2o): append a COPY of this document's pages to the document
+  // above it (one IMPORT_PAGES dispatch — the canvas merge flow).
+  onMergeUp: (docId: string) => void;
 }
 
 function HeaderLayerImpl({
@@ -20,6 +23,7 @@ function HeaderLayerImpl({
   onMove,
   onRemove,
   onRename,
+  onMergeUp,
 }: HeaderLayerProps): React.JSX.Element {
   return (
     <>
@@ -43,6 +47,7 @@ function HeaderLayerImpl({
             onMove={onMove}
             onRemove={onRemove}
             onRename={onRename}
+            onMergeUp={onMergeUp}
           />
         </div>
       ))}

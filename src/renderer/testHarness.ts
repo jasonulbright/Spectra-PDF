@@ -190,6 +190,24 @@ export function registerCanvasForms(handlers: CanvasFormsHandlers | null): void 
 }
 
 /**
+ * Canvas whole-document merge (2o): the header hover actions sit inside the
+ * transformed overlay (flaky to click via WebDriver), so the canvas registers
+ * the doc listing plus the REAL merge-up and guarded remove paths.
+ */
+export interface CanvasMergeHandlers {
+  getDocs: () => { id: string; path: string; name: string; pages: number }[];
+  mergeUp: (docId: string) => void;
+  removeDoc: (docId: string) => void; // the guarded header × path
+  noticeText: () => string | null; // the merge close-guard banner, if shown
+}
+
+let canvasMerge: CanvasMergeHandlers | null = null;
+
+export function registerCanvasMerge(handlers: CanvasMergeHandlers | null): void {
+  canvasMerge = handlers;
+}
+
+/**
  * Signing goes through two native dialogs (.pfx picker + output save) that
  * WebDriver can't drive, so the SignaturesPanel registers its real sign call
  * here while mounted. The harness injects the paths + password and exercises
@@ -384,6 +402,18 @@ export interface TestHarness {
     intact: boolean;
     covers_whole_document: boolean;
   }>;
+  /** Canvas documents (id/path/name/page count), for merge-flow specs (2o).
+   * Polls for the async indexer like addAnnotation. */
+  getCanvasDocs: (
+    timeoutMs?: number,
+  ) => Promise<{ id: string; path: string; name: string; pages: number }[]>;
+  /** Merge a document's pages (as copies) into the document above — the
+   * header merge-up action's real path. */
+  mergeDocUp: (docId: string) => void;
+  /** The header ×'s real (close-guarded) remove path. */
+  removeCanvasDoc: (docId: string) => void;
+  /** The merge close-guard banner text, or null when not shown. */
+  mergeNoticeText: () => string | null;
   /** Number of scanned source pages with OCR words ready to persist. */
   ocrReadyCount: () => number;
   /** Run the "Make searchable" flow (engine apply_ocr_layer per file);
@@ -762,6 +792,18 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
+    getCanvasDocs: async (timeoutMs = 10_000) => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const docs = canvasMerge?.getDocs() ?? [];
+        if (docs.length > 0) return docs;
+        if (Date.now() >= deadline) return docs;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    },
+    mergeDocUp: (docId) => canvasMerge?.mergeUp(docId),
+    removeCanvasDoc: (docId) => canvasMerge?.removeDoc(docId),
+    mergeNoticeText: () => canvasMerge?.noticeText() ?? null,
     ocrReadyCount: () => canvasOcr?.readyCount() ?? 0,
     applyOcr: async () => {
       if (!canvasOcr) {

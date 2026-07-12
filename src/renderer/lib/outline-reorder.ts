@@ -1,8 +1,8 @@
 // Tree reorder for the canvas outline sidebar (2n.2). Bookmarks form a tree,
 // so "drag-reorder" must support both re-sequencing siblings AND reparenting
 // (nesting / un-nesting). This is the projected-depth model dnd-kit's sortable
-// tree uses, but implemented over plain index paths with no per-node ids and
-// no dependency (dnd-kit is being retired — see PUNCHLIST 2o).
+// tree used, but implemented over plain index paths with no per-node ids and
+// no dependency (dnd-kit was retired in 2o).
 //
 // The algorithm avoids fragile post-removal index math: it flattens the tree
 // to a pre-order list, LIFTS the dragged node's whole subtree out, re-depths

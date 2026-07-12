@@ -5,7 +5,6 @@ import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
 import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
 import { Sidebar, Operation } from './components/Sidebar';
 import { PageInspector } from './components/PageInspector';
-import { MergePanel } from './panels/MergePanel';
 import { SplitPanel } from './panels/SplitPanel';
 import { RotatePanel } from './panels/RotatePanel';
 import { DeletePanel } from './panels/DeletePanel';
@@ -51,7 +50,7 @@ import type { TestStateSnapshot } from './testHarness';
 type ViewMode = 'operations' | 'canvas';
 
 const panels: Record<Operation, React.ComponentType> = {
-  merge: MergePanel, split: SplitPanel, rotate: RotatePanel, delete: DeletePanel,
+  split: SplitPanel, rotate: RotatePanel, delete: DeletePanel,
   compress: CompressPanel, grayscale: GrayscalePanel, optimize: OptimizePanel,
   pdfa: PdfaPanel, pdf_version: PdfVersionPanel,
   encrypt: EncryptPanel, decrypt: DecryptPanel,
@@ -62,7 +61,7 @@ const panels: Record<Operation, React.ComponentType> = {
 };
 
 const titles: Record<Operation, string> = {
-  merge: 'Merge PDFs', split: 'Split by Range', rotate: 'Rotate Pages', delete: 'Delete Pages',
+  split: 'Split by Range', rotate: 'Rotate Pages', delete: 'Delete Pages',
   compress: 'Compress', grayscale: 'Convert to Grayscale', optimize: 'Optimize PDF',
   pdfa: 'Convert to PDF/A', pdf_version: 'Set PDF Version',
   encrypt: 'Encrypt PDF', decrypt: 'Decrypt PDF',
@@ -76,7 +75,7 @@ function AppContent(): React.ReactElement {
   const [view, setView] = useState<ViewMode | 'welcome'>(() =>
     localStorage.getItem('spectra-skip-welcome') === 'true' ? 'operations' : 'welcome'
   );
-  const [activeOp, setActiveOp] = useState<Operation>('merge');
+  const [activeOp, setActiveOp] = useState<Operation>('split');
   const [showSettings, setShowSettings] = useState(false);
   const { items: queue, clear: clearQueue } = useOperationQueue();
   const [extractPage, setExtractPage] = useState<number | null>(null);
@@ -353,12 +352,8 @@ function AppContent(): React.ReactElement {
       }
       await openByPaths(paths);
       if (paths.length === 0 || view === 'canvas') return;
-      if (paths.length >= 2) {
-        setView('operations');
-        setActiveOp('merge');
-      } else {
-        setView('canvas');
-      }
+      // Multiple files land as canvas strips — the merge surface (2o).
+      setView('canvas');
     },
     [openByPaths, importFilesIntoDoc, view],
   );
@@ -391,8 +386,12 @@ function AppContent(): React.ReactElement {
         if (opened) setView('canvas');
       }
     } else if (action === 'merge') {
-      setView('operations');
-      setActiveOp('merge');
+      // Merging is a canvas activity (2o): open files as strips, merge-up.
+      if (state.files.size === 0) {
+        const opened = await handleOpenFile();
+        if (!opened) return;
+      }
+      setView('canvas');
     } else if (action === 'compress') {
       setView('operations');
       setActiveOp('compress');
@@ -772,8 +771,8 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     const unlisten = app.onTrayAction((action: string) => {
       if (action === 'merge') {
-        setView('operations');
-        setActiveOp('merge');
+        // Merging is a canvas activity (2o).
+        setView('canvas');
       }
     });
     return () => { unlisten.then((fn) => fn()); };
@@ -783,12 +782,9 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     const unlisten = app.onOpenFile(async (data: { files: string[]; merge: boolean }) => {
       await openByPaths(data.files);
-      if (data.merge && data.files.length > 0) {
-        setView('operations');
-        setActiveOp('merge');
-      } else {
-        setView('canvas');
-      }
+      // A shell "merge" open lands on the canvas like any multi-open —
+      // strips + merge-up ARE the merge flow (2o).
+      setView('canvas');
     });
     return () => { unlisten.then((fn) => fn()); };
   }, [openByPaths]);

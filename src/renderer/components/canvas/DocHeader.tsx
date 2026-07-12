@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { OpenDocument } from '../../state/types';
-import { ChevronUpIcon, ChevronDownIcon, CloseIcon } from './icons';
+import { ChevronUpIcon, ChevronDownIcon, CloseIcon, MergeUpIcon } from './icons';
 
 interface DocHeaderProps {
   doc: OpenDocument;
@@ -9,6 +9,10 @@ interface DocHeaderProps {
   onMove: (docId: string, direction: -1 | 1) => void;
   onRemove: (docId: string) => void;
   onRename: (docId: string, name: string) => void;
+  // Merge-up (2o): append a COPY of this document's pages to the document
+  // above (disabled for the first document; reorder + repeat composes any
+  // merge order). This document's strip stays until the user removes it.
+  onMergeUp: (docId: string) => void;
 }
 
 function DocHeaderImpl({
@@ -18,6 +22,7 @@ function DocHeaderImpl({
   onMove,
   onRemove,
   onRename,
+  onMergeUp,
 }: DocHeaderProps): React.JSX.Element {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(doc.name);
@@ -98,6 +103,15 @@ function DocHeaderImpl({
           onClick={() => onMove(doc.id, 1)}
         >
           <ChevronDownIcon size={14} />
+        </button>
+        <button
+          className="icon-btn"
+          data-testid={`merge-up-${doc.id}`}
+          title="Merge into the document above (copies this document's pages to its end)"
+          disabled={index === 0}
+          onClick={() => onMergeUp(doc.id)}
+        >
+          <MergeUpIcon size={14} />
         </button>
         <button className="icon-btn" title="Remove document" onClick={() => onRemove(doc.id)}>
           <CloseIcon size={14} />

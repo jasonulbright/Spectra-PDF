@@ -21,12 +21,13 @@ import { buildOcrApplyPayload } from '../../lib/ocr-apply';
 import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
 import { workspacePageNumber } from '../../lib/workspace-commit';
+import { buildMergedPageRefs, pathBlockedFromClose } from '../../lib/merge-docs';
 import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
 import { pruneFormValues, valueShapeMatches } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
-import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection, registerCanvasForms } from '../../testHarness';
+import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge } from '../../testHarness';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
 import { Canvas } from './Canvas';
@@ -1312,15 +1313,54 @@ export function WorkspaceCanvasView({
     [dispatch],
   );
 
+  // Canvas whole-document merge (2o): append a COPY of this document's pages
+  // to the document above — one IMPORT_PAGES dispatch = one undo step. Copy,
+  // not move (the zero-page guard forbids emptying a file); the source strip
+  // stays until the user removes it, and after Apply changes the copies
+  // re-bake to the target's own file. Fresh ids + deep-copied annotations:
+  // lib/merge-docs.ts.
+  const [mergeNotice, setMergeNotice] = useState<string | null>(null);
+  const onMergeUp = useCallback(
+    (docId: string) => {
+      const index = docs.findIndex((d) => d.id === docId);
+      if (index <= 0) return; // first document has nothing above it
+      const from = docs[index];
+      const to = docs[index - 1];
+      if (from.pages.length === 0) return;
+      dispatch({
+        type: 'IMPORT_PAGES',
+        toDocId: to.id,
+        toIndex: to.pages.length,
+        pages: buildMergedPageRefs(from),
+      });
+    },
+    [dispatch, docs],
+  );
+
   const onRemoveDoc = useCallback(
     (docId: string) => {
       const doc = docs.find((d) => d.id === docId);
       if (!doc) return;
       const siblings = docs.filter((d) => d.path === doc.path);
-      if (siblings.length === 1) onCloseFile(doc.path);
-      else dispatch({ type: 'REMOVE_DOC', docId });
+      if (siblings.length === 1) {
+        // Close-guard (2o): a STAGED merge copy still reads its bytes from
+        // this file — closing it would orphan the refs and fail every later
+        // commit of the target. Scoped to dirty referencing paths: after
+        // Apply changes the lingering (reindex-pending) refs are hazardless
+        // and refusing would be spurious. Leaving the canvas commits (the
+        // gate), so this canvas-side guard is the only one needed.
+        if (pathBlockedFromClose(docs, state.pageDirtyPaths, doc.path)) {
+          setMergeNotice(
+            `"${doc.name}" is merged into another document — Apply changes first, then close it.`,
+          );
+          return;
+        }
+        onCloseFile(doc.path);
+      } else {
+        dispatch({ type: 'REMOVE_DOC', docId });
+      }
     },
-    [dispatch, docs, onCloseFile],
+    [dispatch, docs, state.pageDirtyPaths, onCloseFile],
   );
 
   const onRenameDoc = useCallback(
@@ -1330,6 +1370,29 @@ export function WorkspaceCanvasView({
     },
     [dispatch, docs],
   );
+
+  // e2e harness for the canvas merge (2o): the header hover actions sit in
+  // the transformed overlay, so the doc listing + the REAL merge-up and
+  // guarded-remove paths register here. Refs keep the registration stable.
+  const docsRef = useRef(docs);
+  docsRef.current = docs;
+  const mergeUpRef = useRef(onMergeUp);
+  mergeUpRef.current = onMergeUp;
+  const removeDocRef = useRef(onRemoveDoc);
+  removeDocRef.current = onRemoveDoc;
+  const mergeNoticeRef = useRef(mergeNotice);
+  mergeNoticeRef.current = mergeNotice;
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerCanvasMerge({
+      getDocs: () =>
+        docsRef.current.map((d) => ({ id: d.id, path: d.path, name: d.name, pages: d.pages.length })),
+      mergeUp: (docId) => mergeUpRef.current(docId),
+      removeDoc: (docId) => removeDocRef.current(docId),
+      noticeText: () => mergeNoticeRef.current,
+    });
+    return () => registerCanvasMerge(null);
+  }, []);
 
   const { intoDocId, intoIndex, betweenIndex, ghostSize, betweenPages } = deriveDropGhosts(
     docs,
@@ -1386,6 +1449,7 @@ export function WorkspaceCanvasView({
             onMove={onMoveDoc}
             onRemove={onRemoveDoc}
             onRename={onRenameDoc}
+            onMergeUp={onMergeUp}
           />
         }
       >
@@ -1741,6 +1805,15 @@ export function WorkspaceCanvasView({
         >
           <span className="flex-1">{formsError}</span>
           <button onClick={() => setFormsError(null)} className="text-red-300 hover:text-red-100">×</button>
+        </div>
+      )}
+      {mergeNotice && (
+        <div
+          data-testid="merge-notice"
+          className="absolute top-40 right-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200 shadow-lg"
+        >
+          <span className="flex-1">{mergeNotice}</span>
+          <button onClick={() => setMergeNotice(null)} className="text-amber-300 hover:text-amber-100">×</button>
         </div>
       )}
 

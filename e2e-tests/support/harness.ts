@@ -589,3 +589,33 @@ export async function signCanvasField(params: {
   }
   return result;
 }
+
+// --- Canvas whole-document merge (2o) --------------------------------------
+
+export async function getCanvasDocs(): Promise<
+  { id: string; path: string; name: string; pages: number }[]
+> {
+  return browser.executeAsync<{ id: string; path: string; name: string; pages: number }[], []>(
+    function (done) {
+      (window as any).__SPECTRA_TEST__.getCanvasDocs().then((d: unknown) => done(d as any));
+    },
+  );
+}
+
+export async function mergeDocUp(docId: string): Promise<void> {
+  await browser.execute(function (id) {
+    (window as any).__SPECTRA_TEST__.mergeDocUp(id);
+  }, docId);
+}
+
+export async function removeCanvasDoc(docId: string): Promise<void> {
+  await browser.execute(function (id) {
+    (window as any).__SPECTRA_TEST__.removeCanvasDoc(id);
+  }, docId);
+}
+
+export async function mergeNoticeText(): Promise<string | null> {
+  return browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.mergeNoticeText();
+  });
+}
