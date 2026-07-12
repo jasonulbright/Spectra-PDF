@@ -50,7 +50,10 @@ function topLevelFieldNames(doc: PDFDocument): Set<string> {
     const entry = fields.get(i);
     const dict = entry instanceof PDFRef ? doc.context.lookup(entry) : entry;
     if (!(dict instanceof PDFDict)) continue;
-    const t = dict.get(PDFName.of('T'));
+    // /T may itself be stored indirectly (theoretical — no real authoring
+    // tool does it, review-noted); resolve one level like /Encoding gets.
+    let t = dict.get(PDFName.of('T'));
+    if (t instanceof PDFRef) t = doc.context.lookup(t);
     if (t instanceof PDFString || t instanceof PDFHexString) names.add(t.decodeText());
   }
   return names;

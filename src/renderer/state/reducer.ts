@@ -167,10 +167,20 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         files,
         activeFileId: action.path,
+        // A REOPENED path's old workspace composition is stale the moment
+        // the new bytes land — serving it until the async indexer catches up
+        // briefly resurrects pre-reopen state (possibly already-edited docs;
+        // the 2p known-bug fix, surfaced while writing 06-annotations). Drop
+        // this path's docs (the indexer rebuilds them from the fresh buffer)
+        // and its now-meaningless page-tier dirt; other files' compositions
+        // and dirt stay — an open invalidates only its own path.
+        workspace: {
+          documents: state.workspace.documents.filter((d) => d.path !== action.path),
+        },
+        pageDirtyPaths: state.pageDirtyPaths.filter((p) => p !== action.path),
         // Page-edit history recorded before this file existed (or before its
         // buffer was refreshed) can't be replayed against the new workspace —
-        // undoing it would drop the file's strip. Pending dirt stays valid:
-        // an open file invalidates no other file's composition.
+        // undoing it would drop the file's strip.
         pageUndoStack: [],
         pageRedoStack: [],
       };

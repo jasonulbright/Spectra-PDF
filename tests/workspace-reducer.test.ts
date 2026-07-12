@@ -1325,3 +1325,47 @@ describe('import-source eviction on reindex (2n.3)', () => {
     expect(next.files.has('x.pdf')).toBe(true); // pending edit could still need it
   });
 });
+
+describe('OPEN_FILE stale-workspace fix (2p)', () => {
+  it("reopening a path drops ITS stale docs and dirt, leaving other files' intact", () => {
+    const a = makeFile('a.pdf', 2);
+    const b = makeFile('b.pdf', 1);
+    const state: AppState = {
+      ...stateWith(
+        [a, b],
+        [makeDoc(a, 'A', makePages('a.pdf', 2)), makeDoc(b, 'B', makePages('b.pdf', 1))],
+      ),
+      pageDirtyPaths: ['a.pdf', 'b.pdf'],
+    };
+    const next = appReducer(state, {
+      type: 'OPEN_FILE',
+      path: 'a.pdf',
+      workingPath: 'a.pdf.working2',
+      name: 'a.pdf',
+      pageCount: 3,
+      buffer: [9, 9, 9],
+    });
+    // The reopened path's old composition is gone (the async indexer rebuilds
+    // from the fresh buffer) — no window where stale, possibly-edited docs
+    // can be served against the new bytes.
+    expect(next.workspace.documents.some((d) => d.path === 'a.pdf')).toBe(false);
+    expect(next.workspace.documents.some((d) => d.path === 'b.pdf')).toBe(true);
+    // Its page-tier dirt is meaningless without the composition; b's stays.
+    expect(next.pageDirtyPaths).toEqual(['b.pdf']);
+    expect(next.files.get('a.pdf')!.pageCount).toBe(3); // fresh entry won
+  });
+
+  it('a first open leaves the (empty) workspace untouched for that path', () => {
+    const state = stateWith([], []);
+    const next = appReducer(state, {
+      type: 'OPEN_FILE',
+      path: 'new.pdf',
+      workingPath: 'new.pdf.working',
+      name: 'new.pdf',
+      pageCount: 1,
+      buffer: [1],
+    });
+    expect(next.workspace.documents).toEqual([]);
+    expect(next.files.has('new.pdf')).toBe(true);
+  });
+});

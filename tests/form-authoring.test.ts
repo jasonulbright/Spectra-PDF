@@ -187,4 +187,24 @@ describe('addFormField', () => {
       addFormField(bytes, { name: 'address', type: 'text', pageIndex: 0, rect: [10, 10, 110, 50] }),
     ).rejects.toThrow(/A field named "address" already exists/);
   });
+
+  it('sees a /T stored as an INDIRECT reference (review-noted theoretical gap)', async () => {
+    const { PDFArray, PDFDict, PDFName, PDFString } = await import('pdf-lib');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 300]);
+    doc.getForm().createTextField('anchor').addToPage(page, { x: 10, y: 100, width: 100, height: 20 });
+    const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
+    const fields = acro.lookup(PDFName.of('Fields'), PDFArray);
+    // A field whose /T is a ref to a string — no authoring tool writes this,
+    // but the walk must still see the name.
+    const tRef = doc.context.register(PDFString.of('indirect-named'));
+    const weird = doc.context.obj({ FT: 'Tx' }) as InstanceType<typeof PDFDict>;
+    weird.set(PDFName.of('T'), tRef);
+    fields.push(doc.context.register(weird));
+    const bytes = await doc.save({ updateFieldAppearances: false });
+
+    await expect(
+      addFormField(bytes, { name: 'indirect-named', type: 'signature', pageIndex: 0, rect: [10, 10, 110, 50] }),
+    ).rejects.toThrow(/A field named "indirect-named" already exists/);
+  });
 });

@@ -34,11 +34,13 @@ function NodeRow({
     <div style={{ marginLeft: path.length > 1 ? 16 : 0 }}>
       <div className="flex items-center gap-2 py-0.5 group">
         <input
+          data-testid="outline-title"
           value={node.title}
           onChange={(e) => onChange(path, (n) => ({ ...n, title: e.target.value }))}
           className="flex-1 min-w-0 px-2 py-0.5 bg-transparent hover:bg-neutral-800 focus:bg-neutral-800 border border-transparent focus:border-neutral-700 rounded text-sm focus:outline-none"
         />
         <input
+          data-testid="outline-page"
           type="number"
           min={1}
           max={pageCount}
@@ -155,6 +157,7 @@ export function OutlinePanel(): React.ReactElement {
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <button
+          data-testid="outline-add"
           onClick={() => {
             setNodes((prev) => [...prev, { title: 'Untitled', page: null, children: [] }]);
             setEdited(true);
@@ -164,6 +167,7 @@ export function OutlinePanel(): React.ReactElement {
           Add bookmark
         </button>
         <button
+          data-testid="outline-save"
           onClick={handleSave}
           disabled={busy || !edited}
           className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"

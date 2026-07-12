@@ -35,6 +35,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): React.R
   return (
     <div
       ref={ref}
+      data-testid="context-menu"
       className="fixed bg-neutral-800 border border-neutral-700 rounded shadow-xl py-1 z-50 min-w-[160px]"
       style={{ left: x, top: y }}
     >
