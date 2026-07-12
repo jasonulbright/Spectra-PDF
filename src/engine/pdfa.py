@@ -13,6 +13,14 @@ def convert_pdfa(
 ) -> dict:
     """Convert a PDF to PDF/A format using Ghostscript.
 
+    Interactive form fields do NOT survive this conversion (gs pdfwrite drops
+    them) — and unlike compress/grayscale, they are deliberately NOT
+    reattached here: our field appearance streams reference unembedded
+    fonts, which PDF/A forbids, so reattaching would silently break the very
+    conformance this op exists to produce. Archival conversion of a form is
+    flatten-then-convert. (Boundary recorded in
+    docs/architecture/16-phase2n-canvas-completeness.md § 2n.4(a).)
+
     Args:
         file: Input PDF path.
         output: Output PDF path.

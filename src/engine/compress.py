@@ -2,6 +2,8 @@
 
 import subprocess
 from pathlib import Path
+
+from .acroform import reattach_forms_file
 from .validate import validate_pdf
 
 
@@ -66,6 +68,11 @@ def compress(
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
         raise RuntimeError(f"Ghostscript failed: {result.stderr}")
+
+    # gs pdfwrite drops /AcroForm and every widget annotation — compressing a
+    # filled form would silently destroy it. Transplant the original's fields
+    # back onto the regenerated pages (no-op for non-form files).
+    reattach_forms_file(input_path, output_path)
 
     return {
         "output": str(output_path),

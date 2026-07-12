@@ -1,7 +1,9 @@
-import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFString, degrees } from 'pdf-lib';
+import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFPage, PDFString, degrees } from 'pdf-lib';
 
 import { MANIFEST_NAME, PDFX_VERSION } from './pdfx-format';
 import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from './pdfx-format';
+import { carryAcroForm, prepareSourceForms } from './acroform-carry';
+import type { FormContribution } from './acroform-carry';
 
 function applyRotation(copied: import('pdf-lib').PDFPage, page: ExportPage): void {
   if (!page.rotation) return;
@@ -408,22 +410,63 @@ function applyPageExtras(copied: import('pdf-lib').PDFPage, page: ExportPage, ou
   }
 }
 
+// Load each distinct source once, prepare its form-field trees for the kept
+// subset of pages, and copy every kept page in ONE copyPages call per source
+// — pdf-lib's object copier caches per call, so a field tree shared by
+// widgets on several kept pages copies ONCE (the old per-page calls would
+// have duplicated the root and forked same-name fields). Pages are then
+// added in output order, and carryAcroForm rebuilds the output /AcroForm
+// from the copied widgets — without it a rebuild destroys every form field
+// (see lib/acroform-carry.ts).
+async function assemblePages(output: PDFDocument, pages: ExportPage[]): Promise<void> {
+  const groups = new Map<string, { bytes: Uint8Array; indices: number[] }>();
+  for (const page of pages) {
+    let g = groups.get(page.sourceKey);
+    if (!g) {
+      g = { bytes: page.bytes, indices: [] };
+      groups.set(page.sourceKey, g);
+    }
+    if (!g.indices.includes(page.pageIndex)) g.indices.push(page.pageIndex);
+  }
+  const sources = new Map<
+    string,
+    { doc: PDFDocument; copiedByIndex: Map<number, PDFPage>; contribution: FormContribution }
+  >();
+  const contributions: FormContribution[] = [];
+  for (const [key, g] of groups) {
+    const doc = await PDFDocument.load(g.bytes, { ignoreEncryption: true });
+    prepareSourceForms(doc, g.indices);
+    const copied = await output.copyPages(doc, g.indices);
+    const copiedByIndex = new Map<number, PDFPage>();
+    g.indices.forEach((idx, i) => copiedByIndex.set(idx, copied[i]));
+    const contribution: FormContribution = { source: doc, copiedPages: [] };
+    contributions.push(contribution);
+    sources.set(key, { doc, copiedByIndex, contribution });
+  }
+  const used = new Set<PDFPage>();
+  for (const page of pages) {
+    const src = sources.get(page.sourceKey)!;
+    let copied = src.copiedByIndex.get(page.pageIndex);
+    if (!copied || used.has(copied)) {
+      // Defensive only: no workspace op can put the same source page into the
+      // output twice today. If one ever does, the duplicate gets its own copy
+      // rather than one page object being mutated through two ExportPages.
+      [copied] = await output.copyPages(src.doc, [page.pageIndex]);
+    }
+    used.add(copied);
+    applyPageExtras(copied, page, output);
+    output.addPage(copied);
+    src.contribution.copiedPages.push(copied);
+  }
+  carryAcroForm(output, contributions);
+}
+
 export async function buildPdf(pages: ExportPage[]): Promise<Uint8Array> {
   // A zero-page PDF is invalid; pdf-lib would happily save one. buildPdfx
   // skips empty documents for the same reason.
   if (pages.length === 0) throw new Error('buildPdf: cannot build a PDF with no pages');
   const output = await PDFDocument.create();
-  const sources = new Map<string, PDFDocument>();
-  for (const page of pages) {
-    let source = sources.get(page.sourceKey);
-    if (!source) {
-      source = await PDFDocument.load(page.bytes, { ignoreEncryption: true });
-      sources.set(page.sourceKey, source);
-    }
-    const [copied] = await output.copyPages(source, [page.pageIndex]);
-    applyPageExtras(copied, page, output);
-    output.addPage(copied);
-  }
+  await assemblePages(output, pages);
   output.setProducer(`PDFX ${PDFX_VERSION}`);
   return output.save();
 }
@@ -431,20 +474,10 @@ export async function buildPdf(pages: ExportPage[]): Promise<Uint8Array> {
 export async function buildPdfx(documents: ExportDocument[], title: string): Promise<Uint8Array> {
   const output = await PDFDocument.create();
   const manifest: PdfxManifest = { pdfx: PDFX_VERSION, title, documents: [] };
-  const sources = new Map<string, PDFDocument>();
 
-  for (const doc of documents) {
-    if (doc.pages.length === 0) continue;
-    for (const page of doc.pages) {
-      let source = sources.get(page.sourceKey);
-      if (!source) {
-        source = await PDFDocument.load(page.bytes, { ignoreEncryption: true });
-        sources.set(page.sourceKey, source);
-      }
-      const [copied] = await output.copyPages(source, [page.pageIndex]);
-      applyPageExtras(copied, page, output);
-      output.addPage(copied);
-    }
+  const nonEmpty = documents.filter((doc) => doc.pages.length > 0);
+  await assemblePages(output, nonEmpty.flatMap((doc) => doc.pages));
+  for (const doc of nonEmpty) {
     manifest.documents.push({ name: doc.name, pages: doc.pages.length });
   }
 

@@ -3,6 +3,8 @@
 #   scripts/lock-python-deps.ps1   (resolves the full transitive tree + hashes)
 # The lockfile scripts/python-requirements.txt is what setup-python-embed.ps1
 # actually installs, with --require-hashes. See docs/PUNCHLIST.md dev notes.
-pikepdf==10.7.2
+# 10.9+ required: merge/split use Pdf.add_pages_from (form-aware page copy,
+# added in pikepdf 10.9) — see engine/acroform.py.
+pikepdf==10.9.1
 pdfminer.six==20260107
 pyHanko==0.35.2

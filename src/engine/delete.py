@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pikepdf
 
+from engine.acroform import prune_form_to_pages
+
 
 def delete(file: str, pages: list[int], output: str) -> dict:
     """Delete specified pages from a PDF.
@@ -24,6 +26,12 @@ def delete(file: str, pages: list[int], output: str) -> dict:
         indices = sorted(set(p - 1 for p in pages if 0 < p <= total), reverse=True)
         for idx in indices:
             del pdf.pages[idx]
+
+        # In-place deletion keeps /AcroForm, but a field whose every widget
+        # sat on deleted pages would linger as a phantom (fillable, visible
+        # nowhere). Prune with every REMAINING page kept — dead widgets drop
+        # because their /P no longer resolves to a surviving page.
+        prune_form_to_pages(pdf, range(len(pdf.pages)))
 
         if same_file:
             with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False, dir=str(input_path.parent)) as tmp:
