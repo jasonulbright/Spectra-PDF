@@ -71,7 +71,9 @@ describe('canvas whole-document merge (2o)', () => {
     await openByPaths([target, source]);
     await setView('canvas');
 
-    let docs = await getCanvasDocs();
+    // Both files index independently and asynchronously — wait for BOTH
+    // (a poll-until-any returns early while the source is still indexing).
+    let docs = await getCanvasDocs(2);
     expect(docs).toHaveLength(2);
     const targetDoc = docs.find((d) => d.path === target)!;
     const sourceDoc = docs.find((d) => d.path === source)!;
@@ -79,7 +81,7 @@ describe('canvas whole-document merge (2o)', () => {
     expect(sourceDoc.pages).toBe(1);
 
     await mergeDocUp(sourceDoc.id);
-    docs = await getCanvasDocs();
+    docs = await getCanvasDocs(2);
     expect(docs.find((d) => d.id === targetDoc.id)!.pages).toBe(3); // grew
     expect(docs.find((d) => d.id === sourceDoc.id)!.pages).toBe(1); // copy, not move
 
@@ -87,7 +89,7 @@ describe('canvas whole-document merge (2o)', () => {
     // guarded remove must refuse and explain.
     await removeCanvasDoc(sourceDoc.id);
     expect(await mergeNoticeText()).toContain('Apply changes first');
-    expect((await getCanvasDocs())).toHaveLength(2); // nothing closed
+    expect((await getCanvasDocs(2))).toHaveLength(2); // nothing closed
 
     await commitPendingEdits();
 
@@ -125,17 +127,17 @@ describe('canvas whole-document merge (2o)', () => {
     await closeAllFiles();
     await openByPaths([target, source]);
     await setView('canvas');
-    let docs = await getCanvasDocs();
+    let docs = await getCanvasDocs(2);
     const sourceDoc = docs.find((d) => d.path === source)!;
     const targetDoc = docs.find((d) => d.path === target)!;
     const before = targetDoc.pages;
 
     await mergeDocUp(sourceDoc.id);
-    expect((await getCanvasDocs()).find((d) => d.id === targetDoc.id)!.pages).toBe(before + 1);
+    expect((await getCanvasDocs(2)).find((d) => d.id === targetDoc.id)!.pages).toBe(before + 1);
 
     await pressGlobalKey('z', { ctrl: true });
     await browser.waitUntil(
-      async () => (await getCanvasDocs()).find((d) => d.id === targetDoc.id)!.pages === before,
+      async () => (await getCanvasDocs(2)).find((d) => d.id === targetDoc.id)!.pages === before,
       { timeout: 10_000, timeoutMsg: 'merge did not undo in one step' },
     );
     // The staged copies are gone with that single step — the close-guard no

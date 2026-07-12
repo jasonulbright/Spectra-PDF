@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { app, type GsInfo } from '../lib/tauri-bridge';
+import { deriveAccentVars } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 
 interface Settings {
@@ -111,16 +112,14 @@ export function applyTheme(theme?: string): void {
 function applyAccentColor(): void {
   app.getSystemAccentColor().then((hex) => {
     if (!hex) return;
+    const vars = deriveAccentVars(hex);
+    if (!vars) return;
     const root = document.documentElement;
-    root.style.setProperty('--accent', hex);
-    // Generate a lighter hover variant by blending with white
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    const lighten = (v: number) => Math.min(255, v + 30);
-    root.style.setProperty('--accent-hover', `rgb(${lighten(r)}, ${lighten(g)}, ${lighten(b)})`);
-    root.style.setProperty('--accent-muted', `rgba(${r}, ${g}, ${b}, 0.3)`);
-    root.style.setProperty('--accent-subtle', `rgba(${r}, ${g}, ${b}, 0.2)`);
+    root.style.setProperty('--accent', vars.accent);
+    root.style.setProperty('--accent-hover', vars.hover);
+    root.style.setProperty('--accent-muted', vars.muted);
+    root.style.setProperty('--accent-subtle', vars.subtle);
+    root.style.setProperty('--accent-fg', vars.fg);
   }).catch(() => {});
 }
 
@@ -130,6 +129,7 @@ function clearAccentColor(): void {
   root.style.removeProperty('--accent-hover');
   root.style.removeProperty('--accent-muted');
   root.style.removeProperty('--accent-subtle');
+  root.style.removeProperty('--accent-fg');
 }
 
 // Apply theme immediately on module load

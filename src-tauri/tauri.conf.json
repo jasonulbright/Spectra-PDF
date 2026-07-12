@@ -10,18 +10,7 @@
     "beforeDevCommand": "npm run dev:renderer"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Spectra PDF",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
-        "decorations": true,
-        "center": true,
-        "visible": false
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

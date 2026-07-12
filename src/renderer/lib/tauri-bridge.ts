@@ -106,6 +106,8 @@ export const app = {
   detectExternalGs: () => invoke<GsInfo | null>('detect_external_gs'),
   getVersion: () => invoke<string>('get_app_version'),
   getSystemAccentColor: () => invoke<string | null>('get_system_accent_color'),
+  /** Which backdrop the window was created with: "mica" or "none". */
+  getWindowBackdrop: () => invoke<string>('get_window_backdrop'),
   appendOperationLog: (line: string) => invoke('append_operation_log', { line }),
   checkAutoUpdateDisabled: () => invoke<boolean>('check_auto_update_disabled'),
 

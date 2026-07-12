@@ -403,8 +403,11 @@ export interface TestHarness {
     covers_whole_document: boolean;
   }>;
   /** Canvas documents (id/path/name/page count), for merge-flow specs (2o).
-   * Polls for the async indexer like addAnnotation. */
+   * Polls for the async indexer like addAnnotation — until at least
+   * `expectedCount` docs are indexed (files index independently, so a
+   * poll-until-any returns early while a later file is still cooking). */
   getCanvasDocs: (
+    expectedCount?: number,
     timeoutMs?: number,
   ) => Promise<{ id: string; path: string; name: string; pages: number }[]>;
   /** Merge a document's pages (as copies) into the document above — the
@@ -792,11 +795,12 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
-    getCanvasDocs: async (timeoutMs = 10_000) => {
+    getCanvasDocs: async (expectedCount = 1, timeoutMs = 10_000) => {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
         const docs = canvasMerge?.getDocs() ?? [];
-        if (docs.length > 0) return docs;
+        if (docs.length >= expectedCount) return docs;
+        // On timeout return what's there — the caller's assert fails loudly.
         if (Date.now() >= deadline) return docs;
         await new Promise((r) => setTimeout(r, 100));
       }

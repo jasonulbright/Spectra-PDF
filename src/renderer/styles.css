@@ -127,6 +127,57 @@
 :root[style*="--accent"] .text-blue-300 { color: var(--accent-hover); }
 :root[style*="--accent"] .bg-blue-500 { background-color: var(--accent); }
 
+/* Text on solid accent surfaces: white fails contrast on light accents
+   (yellow, spring green — Windows itself flips to dark text there), so the
+   fg is luminance-chosen alongside the accent itself. Muted/subtle washes
+   keep normal text. */
+:root[style*="--accent"] .bg-blue-600,
+:root[style*="--accent"] .bg-blue-500 { color: var(--accent-fg, #ffffff); }
+:root[style*="--accent"] .hover\:bg-blue-500:hover { color: var(--accent-fg, #ffffff); }
+
+/* The canvas selection color is hardcoded per theme; under System theme it
+   follows the accent like every other selection surface. */
+:root[style*="--accent"] .canvas-view { --select: var(--accent); }
+
+/* ── Window backdrop (Mica) ──────────────────────────────────────────────
+   Set up only when the backend actually applied a backdrop — index.tsx
+   stamps <html data-backdrop="mica"> before the first render. The frame
+   (header + tools rail) goes translucent so the Mica material shows
+   through; content surfaces get the exact background the shell used to
+   paint, so everything inside them renders as before. Without the
+   attribute this whole section is inert and the app is pixel-identical to
+   the solid look.
+   ──────────────────────────────────────────────────────────────────────── */
+
+:root[data-backdrop="mica"] .app-shell {
+  background: transparent;
+}
+
+:root[data-backdrop="mica"] .app-shell-bar,
+:root[data-backdrop="mica"] .app-rail {
+  background: rgba(23, 23, 23, 0.55);
+}
+
+:root[data-backdrop="mica"] .app-content {
+  background: #171717;
+}
+
+:root[data-backdrop="mica"][data-theme="light"] .app-shell-bar,
+:root[data-backdrop="mica"][data-theme="light"] .app-rail {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+:root[data-backdrop="mica"][data-theme="light"] .app-content {
+  background: #ffffff;
+}
+
+/* Scrollbar tracks paint opaque boxes over translucent surfaces; over
+   opaque content they just show the content background instead. */
+:root[data-backdrop="mica"] ::-webkit-scrollbar-track,
+:root[data-backdrop="mica"] ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* ── Canvas workspace view ────────────────────────────────────────────────
    Ported from PDFx's canvas styles, scoped under .canvas-view. PDFx's theme
    variables are mapped onto Spectra's palette here (dark default, light via

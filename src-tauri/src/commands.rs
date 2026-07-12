@@ -306,24 +306,51 @@ fn run_gs_version(exe_path: &str) -> Result<String, String> {
 
 // ── System accent color ──────────────────────────────────────────────────
 
-/// Read Windows accent color from registry, return as "#RRGGBB".
+/// Windows accent color as "#RRGGBB".
+///
+/// Primary source is WinRT `UISettings` — the documented accent API, which
+/// works in unpackaged Win32 processes and needs no user customization to
+/// exist. The DWM registry value is kept as fallback; it is only written
+/// once a profile customizes its colors, so it can be absent on stock
+/// machines.
 #[tauri::command]
 pub async fn get_system_accent_color() -> Result<Option<String>, String> {
+    Ok(accent_from_uisettings().or_else(accent_from_registry))
+}
+
+fn accent_from_uisettings() -> Option<String> {
+    use windows::UI::ViewManagement::{UIColorType, UISettings};
+    let ui = UISettings::new().ok()?;
+    let c = ui.GetColorValue(UIColorType::Accent).ok()?;
+    Some(format!("#{:02X}{:02X}{:02X}", c.R, c.G, c.B))
+}
+
+fn accent_from_registry() -> Option<String> {
     use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
     use winreg::RegKey;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let Ok(key) = hkcu.open_subkey_with_flags("SOFTWARE\\Microsoft\\Windows\\DWM", KEY_READ) else {
-        return Ok(None);
-    };
-    let Ok(abgr): Result<u32, _> = key.get_value("AccentColor") else {
-        return Ok(None);
-    };
+    let key = hkcu
+        .open_subkey_with_flags("SOFTWARE\\Microsoft\\Windows\\DWM", KEY_READ)
+        .ok()?;
+    let abgr: u32 = key.get_value("AccentColor").ok()?;
     // Registry stores ABGR, convert to RGB
     let r = abgr & 0xFF;
     let g = (abgr >> 8) & 0xFF;
     let b = (abgr >> 16) & 0xFF;
-    Ok(Some(format!("#{:02X}{:02X}{:02X}", r, g, b)))
+    Some(format!("#{:02X}{:02X}{:02X}", r, g, b))
+}
+
+// ── Window backdrop ──────────────────────────────────────────────────────
+
+/// Which backdrop setup applied to the main window ("mica" or "none").
+/// The renderer stamps this on <html data-backdrop> before first paint and
+/// keys translucent shell styling on it.
+#[tauri::command]
+pub async fn get_window_backdrop(
+    state: tauri::State<'_, crate::BackdropState>,
+) -> Result<String, String> {
+    Ok(state.0.to_string())
 }
 
 // ── Operation log ────────────────────────────────────────────────────────

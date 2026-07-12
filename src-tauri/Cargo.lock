@@ -3601,6 +3601,9 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "window-vibrancy",
+ "windows",
+ "windows-version",
  "winreg 0.56.0",
 ]
 

@@ -885,9 +885,9 @@ function AppContent(): React.ReactElement {
 
   return (
     <DropZone onFilesDropped={handleFilesDropped}>
-    <div className="h-screen bg-neutral-900 text-neutral-100 flex flex-col overflow-hidden">
+    <div className="app-shell h-screen bg-neutral-900 text-neutral-100 flex flex-col overflow-hidden">
       {/* Header */}
-      <header data-testid="app-header" className="flex items-center justify-between px-4 py-2 border-b border-neutral-800 shrink-0">
+      <header data-testid="app-header" className="app-shell-bar flex items-center justify-between px-4 py-2 border-b border-neutral-800 shrink-0">
         <div className="flex items-center gap-3">
           <h1 data-testid="app-title" className="text-lg font-semibold tracking-tight">Spectra PDF</h1>
           <span data-testid="app-version" className="text-[10px] text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded">{appVersion}</span>
@@ -967,7 +967,7 @@ function AppContent(): React.ReactElement {
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar — operations + open files in tools view */}
         {view === 'operations' && (
-          <div className="flex flex-col shrink-0 border-r border-neutral-800">
+          <div className="app-rail flex flex-col shrink-0 border-r border-neutral-800">
             {allFiles.length > 0 && (
               <div className="w-48 border-b border-neutral-800 py-2 shrink-0">
                 <div className="flex items-center justify-between px-4 pb-1">
@@ -1005,7 +1005,7 @@ function AppContent(): React.ReactElement {
         )}
 
         {/* Main area */}
-        <main className="flex-1 flex flex-col overflow-hidden">
+        <main className="app-content flex-1 flex flex-col overflow-hidden">
           {view === 'welcome' ? (
             <WelcomeScreen onAction={handleWelcomeAction} recentFiles={recentFiles} onSkipChanged={() => {}} onClearRecent={() => { setRecentFiles([]); localStorage.removeItem('spectra-recent'); }} />
           ) : view === 'operations' ? (

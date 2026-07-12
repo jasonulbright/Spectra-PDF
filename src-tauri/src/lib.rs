@@ -12,6 +12,19 @@ use tauri::{
 /// When true, the app is exiting for real — don't prevent exit.
 pub static QUITTING: AtomicBool = AtomicBool::new(false);
 
+/// Which window backdrop setup actually applied ("mica" or "none"). The
+/// renderer keys translucent styling on this and keeps today's solid look
+/// otherwise.
+pub struct BackdropState(pub &'static str);
+
+/// Mica exists from Windows 11 (build 22000; window-vibrancy uses the
+/// documented backdrop API from 22523 and a fallback attribute below it).
+/// Windows 10 has no equivalent worth shipping — its acrylic path lags
+/// window drags — so unsupported builds keep an ordinary opaque window.
+fn backdrop_supported(build: u32) -> bool {
+    build >= 22000
+}
+
 /// When true, the binary is running under end-to-end test control:
 /// single-instance hijacking and tray-persistence are disabled so each WDIO
 /// session gets a clean launch and exit. Enabled via the SPECTRAPDF_E2E
@@ -72,6 +85,7 @@ pub fn run() {
             commands::detect_external_gs,
             commands::get_app_version,
             commands::get_system_accent_color,
+            commands::get_window_backdrop,
             commands::append_operation_log,
             commands::start_engine,
             commands::send_to_engine,
@@ -83,6 +97,35 @@ pub fn run() {
             commands::hide_to_tray,
         ])
         .setup(move |app| {
+            // The main window is built here rather than in tauri.conf.json:
+            // `transparent` is a creation-time property (tao's DWM
+            // blur-behind region + wry's WebView2 background color) and is
+            // only wanted where a backdrop can compose. Tauri's own
+            // windowEffects/set_effects path discards the vibrancy Result,
+            // so Mica is applied directly and the outcome recorded for the
+            // renderer to key translucent styling on.
+            let wants_backdrop =
+                backdrop_supported(windows_version::OsVersion::current().build);
+            let window =
+                tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                    .title("Spectra PDF")
+                    .inner_size(1200.0, 800.0)
+                    .min_inner_size(800.0, 600.0)
+                    .center()
+                    .visible(false)
+                    .transparent(wants_backdrop)
+                    .build()?;
+            let backdrop = if wants_backdrop && window_vibrancy::apply_mica(&window, None).is_ok()
+            {
+                "mica"
+            } else {
+                // A transparent window whose HTML paints opaque renders
+                // identically to an opaque one, so a failed apply on a
+                // supported build still degrades cleanly.
+                "none"
+            };
+            app.manage(BackdropState(backdrop));
+
             if e2e {
                 // E2E: skip tray + force-show window; every launch must be
                 // self-contained and exit cleanly when the WDIO session ends.
@@ -199,4 +242,17 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::backdrop_supported;
+
+    #[test]
+    fn backdrop_gate_is_the_win11_floor() {
+        assert!(!backdrop_supported(19045)); // Win10 22H2
+        assert!(!backdrop_supported(21999));
+        assert!(backdrop_supported(22000)); // Win11 21H2 (fallback attribute)
+        assert!(backdrop_supported(22631)); // Win11 23H2 (documented backdrop API)
+    }
 }

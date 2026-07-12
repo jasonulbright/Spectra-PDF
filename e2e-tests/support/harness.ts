@@ -592,13 +592,17 @@ export async function signCanvasField(params: {
 
 // --- Canvas whole-document merge (2o) --------------------------------------
 
-export async function getCanvasDocs(): Promise<
+export async function getCanvasDocs(expectedCount = 1): Promise<
   { id: string; path: string; name: string; pages: number }[]
 > {
-  return browser.executeAsync<{ id: string; path: string; name: string; pages: number }[], []>(
-    function (done) {
-      (window as any).__SPECTRA_TEST__.getCanvasDocs().then((d: unknown) => done(d as any));
+  return browser.executeAsync<
+    { id: string; path: string; name: string; pages: number }[],
+    [number]
+  >(
+    function (count, done) {
+      (window as any).__SPECTRA_TEST__.getCanvasDocs(count).then((d: unknown) => done(d as any));
     },
+    expectedCount,
   );
 }
 
