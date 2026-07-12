@@ -308,10 +308,11 @@
   width: max-content;
 }
 
-/* Add-page ghost (2n.3): a dashed "+" at the end of a document's strip. */
+/* Add-page ghost (2n.3): a dashed "+" at the end of a document's strip. Width
+   is set inline from layout.ts ADD_GHOST_WIDTH so the layout math and the DOM
+   agree on the wrap. */
 .page-add-ghost {
   flex-shrink: 0;
-  width: 44px;
   align-self: flex-start;
   border: 2px dashed rgba(255, 255, 255, 0.18);
   border-radius: 10px;

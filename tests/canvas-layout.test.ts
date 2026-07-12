@@ -17,6 +17,7 @@ import {
   DOC_GAP_Y,
   MIN_DOC_WIDTH,
   MAX_ROW_WIDTH,
+  ADD_GHOST_WIDTH,
 } from '../src/renderer/canvas/layout';
 import type { OpenDocument, PageRef } from '../src/renderer/state/types';
 
@@ -261,6 +262,37 @@ describe('wrapPages', () => {
 
   it('yields a single empty row for a pageless document', () => {
     expect(wrapPages([], null)).toEqual([[]]);
+  });
+});
+
+describe('docSize reserves the add-page ghost row (2n.3)', () => {
+  const letterW = pageDisplayWidth(...LETTER);
+  const perRow = Math.floor((MAX_ROW_WIDTH + PAGE_GAP) / (letterW + PAGE_GAP));
+
+  it('reserves an extra row exactly when the trailing ghost cannot fit on the last page row', () => {
+    const lastRowWidth = perRow * letterW + (perRow - 1) * PAGE_GAP;
+    const ghostFits = lastRowWidth + PAGE_GAP + ADD_GHOST_WIDTH <= MAX_ROW_WIDTH;
+
+    const full = computeLayout([
+      makeDoc('a', 'a.pdf', Array.from({ length: perRow }, () => LETTER)),
+    ]).items[0];
+    const single = computeLayout([makeDoc('b', 'b.pdf', [LETTER])]).items[0];
+
+    if (ghostFits) {
+      expect(full.height).toBe(single.height); // ghost joins the full row — no extra row
+    } else {
+      // ghost wraps → the card reserves one more page row than a 1-page doc, so
+      // the next card (positioned by this height) can't overlap it.
+      expect(full.height).toBe(single.height + BASE_PAGE_HEIGHT + ROW_GAP);
+    }
+  });
+
+  it('a two-page-row document is strictly taller than a single-page one', () => {
+    const twoRows = computeLayout([
+      makeDoc('a', 'a.pdf', Array.from({ length: perRow + 1 }, () => LETTER)),
+    ]).items[0];
+    const single = computeLayout([makeDoc('b', 'b.pdf', [LETTER])]).items[0];
+    expect(twoRows.height).toBeGreaterThan(single.height);
   });
 });
 

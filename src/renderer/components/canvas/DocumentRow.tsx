@@ -5,7 +5,7 @@ import type { RedactionMark } from '../../lib/redaction';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
 import type { CanvasTool, StampPreset } from './PageCell';
-import { MAX_ROW_WIDTH } from '../../canvas/layout';
+import { MAX_ROW_WIDTH, ADD_GHOST_WIDTH } from '../../canvas/layout';
 import { GhostPage } from './DropGhost';
 import { PageCell } from './PageCell';
 
@@ -144,7 +144,7 @@ function DocumentRowImpl({
         e.stopPropagation();
         onAddPages(doc.id, doc.pages.length);
       }}
-      style={{ height: pageHeight }}
+      style={{ width: ADD_GHOST_WIDTH, height: pageHeight }}
     >
       +
     </button>,

@@ -95,16 +95,33 @@ export function rowWidth(row: PageLike[]): number {
   );
 }
 
+// Width of the add-page ghost (2n.3) — the trailing "+" flex child of every
+// document's page strip. Single source of truth: DocumentRow sizes the button
+// from this, and docSize below reserves its row so the JS card height matches
+// what the CSS flex-wrap actually produces (the same "must mirror" contract the
+// wrapPages/STRIP_MAX_WIDTH comments call out for real pages).
+export const ADD_GHOST_WIDTH = 44;
+
 function docSize(doc: OpenDocument): { width: number; height: number } {
   const rows = wrapPages(doc.pages, null);
   const contentWidth = Math.max(...rows.map(rowWidth), 0);
+  // The add-page ghost is a real trailing flex child subject to the same wrap:
+  // it joins the last page row if it fits under MAX_ROW_WIDTH, else wraps to a
+  // new row the card must reserve height for (else the next card overlaps).
+  const lastRowWidth = rows.length > 0 ? rowWidth(rows[rows.length - 1]) : 0;
+  const ghostJoinWidth = lastRowWidth + (lastRowWidth > 0 ? PAGE_GAP : 0) + ADD_GHOST_WIDTH;
+  const ghostFits = rows.length > 0 && ghostJoinWidth <= MAX_ROW_WIDTH;
+  const rowCount = ghostFits ? rows.length : rows.length + 1;
+  const effectiveWidth = ghostFits
+    ? Math.max(contentWidth, ghostJoinWidth)
+    : Math.max(contentWidth, ADD_GHOST_WIDTH);
   return {
-    width: Math.max(MIN_DOC_WIDTH, contentWidth + CARD_PAD_X * 2),
+    width: Math.max(MIN_DOC_WIDTH, effectiveWidth + CARD_PAD_X * 2),
     height:
       CARD_PAD_TOP +
       HEADER_BLOCK +
-      rows.length * BASE_PAGE_HEIGHT +
-      (rows.length - 1) * ROW_GAP +
+      rowCount * BASE_PAGE_HEIGHT +
+      (rowCount - 1) * ROW_GAP +
       CARD_PAD_BOTTOM,
   };
 }

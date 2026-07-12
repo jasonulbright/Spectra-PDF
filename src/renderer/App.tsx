@@ -272,6 +272,21 @@ function AppContent(): React.ReactElement {
   // already open are reused. A cancelled encrypted file is skipped.
   const importFilesIntoDoc = useCallback(
     async (filePaths: string[], toDocId: string, toIndex: number) => {
+      // Prepare ALL files (async: working copy, unlock, index) BEFORE any
+      // dispatch. Registering a byte-only source and THEN awaiting before
+      // splicing its pages would open a window where the source is in
+      // state.files but referenced by no page AND the page tier is still empty
+      // — any unrelated reindex in that window (e.g. a just-committed file
+      // finishing its async index) would evict it, orphaning the pages we're
+      // about to splice (review-caught HIGH). So collect first, then register +
+      // splice back-to-back with no await between them.
+      const toRegister: {
+        path: string;
+        workingPath: string;
+        name: string;
+        pageCount: number;
+        buffer: PdfBuffer;
+      }[] = [];
       const allPages: PageRef[] = [];
       for (const filePath of filePaths) {
         const existing = state.files.get(filePath);
@@ -286,7 +301,7 @@ function AppContent(): React.ReactElement {
         } else {
           const prepared = await prepareFileBytes(filePath);
           if (!prepared) continue;
-          dispatch({ type: 'REGISTER_IMPORT_SOURCE', path: filePath, ...prepared });
+          toRegister.push({ path: filePath, ...prepared });
           src = prepared;
         }
         const docs = await indexOpenFile({
@@ -302,7 +317,11 @@ function AppContent(): React.ReactElement {
         });
         for (const d of docs) allPages.push(...d.pages);
       }
-      if (allPages.length > 0) dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages });
+      if (allPages.length === 0) return;
+      // Synchronous from here — no await can let a reindex interleave and evict
+      // a not-yet-spliced source between the register and the splice.
+      for (const reg of toRegister) dispatch({ type: 'REGISTER_IMPORT_SOURCE', ...reg });
+      dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages });
     },
     [state.files, dispatch, prepareFileBytes],
   );
@@ -942,7 +961,7 @@ function AppContent(): React.ReactElement {
                 onApplyChanges={() => void commitAndReport()}
                 onRedactFile={handleRedactFile}
                 onApplyOcrLayer={handleApplyOcrLayer}
-                onAddPages={(docId, toIndex) => void handleAddPages(docId, toIndex)}
+                onAddPages={handleAddPages}
                 dropResolverRef={dropResolverRef}
               />
               {inspector && inspectorFile?.buffer && (
