@@ -60,7 +60,11 @@ jobs:
           python-version: "3.14"
 
       - name: Install Python dependencies
-        run: pip install pikepdf pdfminer.six pytest
+        # Versions pinned to the shipped engine runtime (scripts/python-requirements.in)
+        # so tests exercise what actually ships. pyHanko is required — the engine's
+        # signatures handler imports it at module load, so test_engine.py fails to
+        # collect without it (pyHanko pulls cryptography/certvalidator transitively).
+        run: pip install pikepdf==10.9.1 pdfminer.six==20260107 pyHanko==0.35.2 pytest
 
       - name: Run engine + validation tests
         run: python -m pytest tests/test_engine.py tests/test_validation.py -v
@@ -125,12 +129,13 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1
         shell: pwsh
 
-      - name: Stub Ghostscript binaries (e2e suite does not exercise GS paths)
-        run: |
-          mkdir -p resources/ghostscript
-          touch resources/ghostscript/gswin64c.exe
-          touch resources/ghostscript/gsdll64.dll
-        shell: bash
+      - name: Vendor Ghostscript (the visual-compare e2e drives the real GS raster)
+        # 11-compare.spec.ts (visual mode) exercises engine compare_visual, which
+        # shells out to bundled Ghostscript — so the suite DOES need real GS, not
+        # a stub. bundle-ghostscript.ps1 downloads + checksum-verifies + extracts
+        # with 7-Zip (preinstalled on windows runners).
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1
+        shell: pwsh
 
       - name: Build Tauri binary (debug, frontend embedded, no installer)
         run: npx tauri build --debug --no-bundle

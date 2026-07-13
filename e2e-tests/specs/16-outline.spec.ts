@@ -44,11 +44,17 @@ const titles = (items: PdfOutlineItem[]): string[] => items.map((i) => i.title);
 
 async function showOutline(): Promise<void> {
   const toggle = await $('[data-testid="toggle-outline"]');
-  await toggle.waitForClickable({ timeout: 10_000 });
+  await toggle.waitForClickable({ timeout: 15_000 });
   await toggle.click();
-  // The sidebar registers its harness hooks on mount; wait for the outline read.
+  // The sidebar registers its harness hooks on mount, then reads the outline
+  // through the engine. Each spec FILE launches a fresh app (see wdio.conf
+  // afterSession reaping), so the first read here waits on the engine's cold
+  // boot — which eagerly imports the full pyHanko stack (engine/__main__.py) —
+  // on top of app launch + first canvas render. On a loaded CI runner that
+  // cold path occasionally exceeded the old 10s budget (observed ~2/5); the
+  // engine read itself is instant, so a wider budget just absorbs boot jitter.
   await browser.waitUntil(async () => (await getOutlineOrder()).length > 0, {
-    timeout: 10_000,
+    timeout: 20_000,
     timeoutMsg: 'outline sidebar never populated',
   });
 }

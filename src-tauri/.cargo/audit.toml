@@ -1,0 +1,52 @@
+# cargo-audit policy for Open PDF Studio.
+#
+# Every advisory ignored below is in a TRANSITIVE dependency pulled in by
+# Tauri 2.11.2 / its build stack — none is a direct dependency of this crate,
+# and none is fixable here without an upstream Tauri release bumping the
+# offending transitive pin. The gate stays meaningful: an advisory in any crate
+# we can actually act on (or a genuinely new/actionable one) is NOT listed here,
+# so it still fails the build.
+#
+# REVIEW PROCESS (the advisory-db updates continuously, so this list drifts):
+# when `cargo audit` fails on a new ID, triage it — if it's a transitive,
+# unfixable-here advisory, add it below WITH a justification line; if it's in a
+# crate we control or an upstream fix is available, FIX it (bump the dep),
+# don't ignore it. See docs/PUNCHLIST.md § Dev environment notes.
+
+[advisories]
+ignore = [
+    # ── quick-xml DoS (vulnerability class) — build-time only, unfixable here ──
+    # quick-xml 0.39.4 is pulled by plist 1.9.0 ← tauri-utils ← tauri-build/tauri.
+    # It parses plist/config XML at BUILD time only (no runtime attack surface in
+    # this app), and plist pins ^0.39 so quick-xml 0.41 (patched) is unreachable
+    # without a Tauri upgrade. Revisit when Tauri bumps plist/quick-xml.
+    "RUSTSEC-2026-0194", # quadratic run time on duplicate-attribute check
+    "RUSTSEC-2026-0195", # unbounded namespace-declaration allocation (memory DoS)
+
+    # ── gtk-rs GTK3 bindings: unmaintained (informational) ──
+    # The Linux webkit2gtk UI stack. This product is Windows-only (see CLAUDE.md);
+    # these crates are transitive via Tauri's Linux targets and are never compiled
+    # or shipped on Windows. No patched line exists (GTK3 bindings are EOL).
+    "RUSTSEC-2024-0411", # gdkwayland-sys
+    "RUSTSEC-2024-0412", # gdk
+    "RUSTSEC-2024-0413", # atk
+    "RUSTSEC-2024-0414", # gdkx11-sys
+    "RUSTSEC-2024-0415", # gtk
+    "RUSTSEC-2024-0416", # atk-sys
+    "RUSTSEC-2024-0417", # gdkx11
+    "RUSTSEC-2024-0418", # gdk-sys
+    "RUSTSEC-2024-0419", # gtk3-macros
+    "RUSTSEC-2024-0420", # gtk-sys
+
+    # ── other unmaintained transitives (informational) ──
+    "RUSTSEC-2024-0370", # proc-macro-error (build-time proc-macro dep)
+    "RUSTSEC-2025-0075", # unic-char-range
+    "RUSTSEC-2025-0080", # unic-common
+    "RUSTSEC-2025-0081", # unic-char-property
+    "RUSTSEC-2025-0098", # unic-ucd-version
+    "RUSTSEC-2025-0100", # unic-ucd-ident
+
+    # ── unsound (informational) ──
+    "RUSTSEC-2024-0429", # glib VariantStrIter iterator unsoundness (transitive)
+    "RUSTSEC-2026-0190", # anyhow Error::downcast_mut unsoundness (transitive)
+]
