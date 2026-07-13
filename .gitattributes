@@ -1,0 +1,36 @@
+# Binary assets must NEVER be line-ending-normalized.
+#
+# Git classifies a file as text when it contains no NUL bytes — but some binary
+# files have none (e.g. a small, uncompressed signed PDF), so with
+# core.autocrlf=true a Windows checkout translates LF->CRLF and shifts every
+# byte offset after the first newline. That silently corrupts byte-offset-
+# sensitive formats: a signed PDF's xref/ByteRange no longer matches its stored
+# location, and pyHanko's STRICT verify fails with "Could not find xref table at
+# specified location" (pikepdf and pdf.js reconstruct a broken xref and hide the
+# corruption, so only signature verification exposes it — it broke
+# e2e-tests/specs/12-signatures.spec.ts on the GitHub windows runner, 5/5, while
+# every other spec passed). Marking these `binary` disables EOL translation and
+# textual diffing, so every checkout is byte-identical to the committed blob on
+# all platforms.
+
+*.pdf   binary
+*.pdfx  binary
+*.pfx   binary
+*.p12   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.icns  binary
+*.bmp   binary
+*.sig   binary
+*.dll   binary
+*.exe   binary
+*.pyd   binary
+*.wasm  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.traineddata binary
