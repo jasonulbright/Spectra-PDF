@@ -143,6 +143,36 @@ describe('recent files', () => {
   });
 });
 
+describe('nav pane (M3)', () => {
+  it('opens on a panel; re-opening the active panel closes (icon-strip toggle)', () => {
+    let s = appReducer(initialState, { type: 'UI_OPEN_NAV_PANEL', panel: 'pages' });
+    expect(s.ui.navPane).toMatchObject({ open: true, panel: 'pages' });
+    s = appReducer(s, { type: 'UI_OPEN_NAV_PANEL', panel: 'pages' });
+    expect(s.ui.navPane.open).toBe(false);
+  });
+
+  it('switches panel without closing when a different panel is opened', () => {
+    let s = appReducer(initialState, { type: 'UI_OPEN_NAV_PANEL', panel: 'pages' });
+    s = appReducer(s, { type: 'UI_OPEN_NAV_PANEL', panel: 'bookmarks' });
+    expect(s.ui.navPane).toMatchObject({ open: true, panel: 'bookmarks' });
+  });
+
+  it('toggles open/closed', () => {
+    let s = appReducer(initialState, { type: 'UI_TOGGLE_NAV_PANE' });
+    expect(s.ui.navPane.open).toBe(true);
+    s = appReducer(s, { type: 'UI_TOGGLE_NAV_PANE' });
+    expect(s.ui.navPane.open).toBe(false);
+  });
+
+  it('clamps the width to the minimum and no-ops when unchanged', () => {
+    const s = appReducer(initialState, { type: 'UI_SET_NAV_PANE_WIDTH', width: 50 });
+    expect(s.ui.navPane.width).toBe(180); // NAV_PANE_MIN_WIDTH
+    const wide = appReducer(initialState, { type: 'UI_SET_NAV_PANE_WIDTH', width: 300 });
+    expect(wide.ui.navPane.width).toBe(300);
+    expect(appReducer(wide, { type: 'UI_SET_NAV_PANE_WIDTH', width: 300 })).toBe(wide);
+  });
+});
+
 describe('UI_SELECT_PAGE', () => {
   it('single replaces the selection and moves the anchor', () => {
     let s = select(twoDocState(), ['a.pdf#p0'], 'a.pdf#p0');

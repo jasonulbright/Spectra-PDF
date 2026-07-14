@@ -29,6 +29,7 @@ import type { FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
 import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge } from '../../testHarness';
 import { invokeCommand, registerCanvasServices } from '../../commands/context';
+import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
 import { Canvas } from './Canvas';
@@ -422,11 +423,6 @@ export function WorkspaceCanvasView({
     () => dispatch({ type: 'UI_CLEAR_SELECTION' }),
     [dispatch],
   );
-  // Batched selection ops route through the registry — the same entry point
-  // the Delete/[/] keys hit — so the context menu and harness stay one path.
-  const deleteSelectedPages = useCallback(() => {
-    invokeCommand('document.deleteSelection');
-  }, []);
 
   // e2e harness for multi-select (2n.1): modifier-click selection and the
   // pointer-capture group drag aren't reliably WebDriver-drivable, so the
@@ -1138,93 +1134,19 @@ export function WorkspaceCanvasView({
     [dispatch],
   );
 
-  const rotateBy = useCallback(
-    (docId: string, pageId: string, delta: 90 | 270) => {
-      const page = docs.find((d) => d.id === docId)?.pages.find((p) => p.id === pageId);
-      if (!page) return;
-      const rotation = (((page.rotation + delta) % 360) + 360) % 360 as 0 | 90 | 180 | 270;
-      dispatch({ type: 'ROTATE_PAGE_REF', docId, pageId, rotation });
-    },
-    [dispatch, docs],
-  );
-
   const menuItems = useMemo((): MenuItem[] => {
     if (!menu) return [];
-    const doc = docs.find((d) => d.id === menu.docId);
-    if (!doc) return [];
-    const fileHasOnePage =
-      docs.filter((d) => d.path === doc.path).reduce((sum, d) => sum + d.pages.length, 0) <= 1;
-    // A right-click on a page that's part of a multi-selection makes the menu
-    // act on the whole selection (delete/rotate as one undo step).
-    const multi = selectedPageIds.size > 1 && selectedPageIds.has(menu.pageId);
-    const selCount = selectedPageIds.size;
-    const selectionIds = (): string[] => [...selectedPageIds];
-    // Disable a multi-delete that would empty any file (the reducer rejects
-    // such a batch atomically — disabling makes that visible up front).
-    const multiDeleteEmpties = (): boolean => {
-      const sel = new Map<string, number>();
-      const tot = new Map<string, number>();
-      for (const d of docs) {
-        tot.set(d.path, (tot.get(d.path) ?? 0) + d.pages.length);
-        for (const p of d.pages)
-          if (selectedPageIds.has(p.id)) sel.set(d.path, (sel.get(d.path) ?? 0) + 1);
-      }
-      for (const [path, n] of sel) if (n >= (tot.get(path) ?? 0)) return true;
-      return false;
-    };
-    return [
-      {
-        label: 'Open',
-        onClick: () => {
-          const pageNumber = workspacePageNumber(docs, doc, menu.pageId);
-          if (pageNumber != null) onInspectPage(doc.path, pageNumber);
-        },
-      },
-      { label: '', onClick: () => {}, separator: true },
-      {
-        label: multi ? `Rotate ${selCount} pages right 90°` : 'Rotate right 90°',
-        onClick: () =>
-          multi
-            ? dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: selectionIds(), delta: 90 })
-            : rotateBy(menu.docId, menu.pageId, 90),
-      },
-      {
-        label: multi ? `Rotate ${selCount} pages left 90°` : 'Rotate left 90°',
-        onClick: () =>
-          multi
-            ? dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: selectionIds(), delta: 270 })
-            : rotateBy(menu.docId, menu.pageId, 270),
-      },
-      { label: '', onClick: () => {}, separator: true },
-      {
-        label: 'Extract text…',
-        onClick: () => {
-          const pageNumber = workspacePageNumber(docs, doc, menu.pageId);
-          if (pageNumber != null) onExtractText(doc.path, pageNumber);
-        },
-      },
-      { label: '', onClick: () => {}, separator: true },
-      {
-        label: multi ? `Delete ${selCount} pages` : 'Delete page',
-        danger: true,
-        // A file's last page can't be deleted (0-page PDFs can't exist) —
-        // closing the file is the right gesture for that. For a multi-delete,
-        // disable only when the batch would empty a whole file.
-        disabled: multi ? multiDeleteEmpties() : fileHasOnePage,
-        // Clear the selection after deleting, like the keyboard path — the
-        // deleted ids would otherwise linger and (before the buffer-invalidation
-        // clear kicks in) could re-bind to a different page on the next commit.
-        onClick: () => {
-          if (multi) {
-            deleteSelectedPages(); // dispatches DELETE_PAGE_REFS(selection) + clears
-          } else {
-            dispatch({ type: 'DELETE_PAGE_REF', docId: menu.docId, pageId: menu.pageId });
-            clearSelection();
-          }
-        },
-      },
-    ];
-  }, [menu, docs, dispatch, onInspectPage, onExtractText, rotateBy, selectedPageIds, deleteSelectedPages, clearSelection]);
+    // Shared with the nav-pane Pages panel — one menu definition (M3, § 3.2).
+    return buildPageContextMenu({
+      docs,
+      docId: menu.docId,
+      pageId: menu.pageId,
+      selectedPageIds,
+      dispatch,
+      onOpen: onInspectPage,
+      onExtractText,
+    });
+  }, [menu, docs, selectedPageIds, dispatch, onInspectPage, onExtractText]);
 
   const onMoveDoc = useCallback(
     (docId: string, direction: -1 | 1) => dispatch({ type: 'REORDER_DOCS', docId, direction }),

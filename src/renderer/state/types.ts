@@ -148,6 +148,22 @@ export function viewOf(tab: FocusedTab): ViewMode {
   return 'canvas';
 }
 
+// Left navigation pane (Phase 4 M3, § 5). The panel-id union is the full
+// stable set; the runtime NAV_PANELS registry (components/navpane) only lists
+// the panels that actually exist at a given sub-slice, so an icon never
+// appears without a working panel (completeness rule). Persisted under the
+// `workbench-ui` localStorage key (§ 4.3 — new keys don't extend `spectra-`).
+export type NavPanelId = 'pages' | 'bookmarks' | 'signatures' | 'search';
+
+export interface NavPaneState {
+  open: boolean;
+  panel: NavPanelId;
+  width: number; // px, clamped ≥ NAV_PANE_MIN_WIDTH
+}
+
+export const NAV_PANE_MIN_WIDTH = 180;
+export const NAV_PANE_DEFAULT_WIDTH = 240;
+
 // UI state the command registry needs to read (menus/toolbars can't read
 // component-local state — 19-phase4 § 4.3). Ephemeral interaction state
 // (in-flight drags, rubber bands, inline edits, pending marks/placements)
@@ -165,6 +181,8 @@ export interface UiState {
   // Recent files (the `spectra-recent` list) — in state because the File ▸
   // Open Recent menu and the Home tab render it; App owns persistence.
   recentFiles: string[];
+  // Left navigation pane (M3). App mirrors it to the `workbench-ui` key.
+  navPane: NavPaneState;
 }
 
 export interface AppState {
@@ -256,4 +274,9 @@ export type AppAction =
   | { type: 'UI_SELECT_ALL_PAGES' }
   | { type: 'UI_CLEAR_SELECTION' }
   // Explicit set — drag re-select after a move, and the e2e harness.
-  | { type: 'UI_SET_SELECTION'; pageIds: string[]; anchor: string | null };
+  | { type: 'UI_SET_SELECTION'; pageIds: string[]; anchor: string | null }
+  // Nav pane (M3). Open on a panel (icon-strip toggle: re-opening the active
+  // panel closes); toggle open/closed; resize.
+  | { type: 'UI_OPEN_NAV_PANEL'; panel: NavPanelId }
+  | { type: 'UI_TOGGLE_NAV_PANE' }
+  | { type: 'UI_SET_NAV_PANE_WIDTH'; width: number };

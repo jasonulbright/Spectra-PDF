@@ -21,7 +21,8 @@ export type ChromeIconId =
   | 'tools'
   | 'close'
   | 'overflow'
-  | 'document';
+  | 'document'
+  | 'pages';
 
 const base = {
   fill: 'none',
@@ -113,6 +114,13 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
     <>
       <path d="M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
       <path d="M14 3v4h4" />
+    </>
+  ),
+  // Two stacked page thumbnails (nav-pane Pages panel).
+  pages: (
+    <>
+      <rect x="4" y="3" width="10" height="13" rx="1" />
+      <path d="M8 20h11a1 1 0 0 0 1-1V7" />
     </>
   ),
 };

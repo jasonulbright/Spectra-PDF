@@ -1,4 +1,4 @@
-import { AppState, AppAction, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab } from './types';
+import { AppState, AppAction, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_DEFAULT_WIDTH } from './types';
 import { carriesManifest } from '../lib/doc-names';
 
 // Re-project a display-normalized annotation rect when its page's display
@@ -41,6 +41,7 @@ export const initialUiState: UiState = {
   selectedPageIds: NO_SELECTION,
   selectionAnchor: null,
   recentFiles: [],
+  navPane: { open: false, panel: 'pages', width: NAV_PANE_DEFAULT_WIDTH },
 };
 
 // Leaving doc-tab-land re-applies the board's parked-state semantics: the
@@ -972,6 +973,26 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           selectionAnchor: action.anchor,
         },
       };
+    case 'UI_OPEN_NAV_PANEL': {
+      // Icon-strip toggle: re-opening the active panel closes the pane;
+      // otherwise open on the requested panel.
+      const { navPane } = state.ui;
+      const next =
+        navPane.open && navPane.panel === action.panel
+          ? { ...navPane, open: false }
+          : { ...navPane, open: true, panel: action.panel };
+      return { ...state, ui: { ...state.ui, navPane: next } };
+    }
+    case 'UI_TOGGLE_NAV_PANE':
+      return {
+        ...state,
+        ui: { ...state.ui, navPane: { ...state.ui.navPane, open: !state.ui.navPane.open } },
+      };
+    case 'UI_SET_NAV_PANE_WIDTH': {
+      const width = Math.max(NAV_PANE_MIN_WIDTH, Math.round(action.width));
+      if (width === state.ui.navPane.width) return state;
+      return { ...state, ui: { ...state.ui, navPane: { ...state.ui.navPane, width } } };
+    }
     default:
       return state;
   }

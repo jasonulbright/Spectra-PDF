@@ -215,6 +215,90 @@
   background-color: #ffffff;
 }
 
+/* ── Left navigation pane (Phase 4 M3, § 5) ───────────────────────────────
+   The icon strip carries `.app-rail` (Mica frame tint under a backdrop; the
+   panel body carries `.app-content`, opaque). Dark defaults + a light remap,
+   matching the comment-sidebar pattern (semantic tokens are M7).
+   ──────────────────────────────────────────────────────────────────────── */
+.nav-icon-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-right: 1px solid #262626;
+}
+.nav-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #a3a3a3;
+  cursor: default;
+}
+.nav-icon-btn:hover { background: #262626; color: #e5e5e5; }
+.nav-icon-btn.active { background: #404040; color: #ffffff; }
+
+.nav-panel-body {
+  position: relative;
+  border-right: 1px solid #262626;
+  min-width: 180px;
+}
+.nav-panel-header {
+  padding: 6px 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: #a3a3a3;
+  border-bottom: 1px solid #262626;
+  flex-shrink: 0;
+}
+.nav-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+}
+.nav-resize-handle:hover { background: rgba(0, 120, 212, 0.35); }
+
+.navpanel-scroll { height: 100%; overflow-y: auto; overflow-x: hidden; }
+.navpanel-empty { padding: 16px; font-size: 13px; color: #737373; }
+
+.thumb-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.thumb-row:hover { background: #1f1f1f; }
+.thumb-row.selected { background: rgba(0, 120, 212, 0.22); }
+.thumb-frame {
+  position: relative;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+.thumb-frame canvas { transition: opacity 0.15s ease; }
+.thumb-label { font-size: 11px; color: #a3a3a3; }
+.thumb-row.selected .thumb-label { color: #ffffff; }
+
+[data-theme="light"] .nav-icon-strip,
+[data-theme="light"] .nav-panel-body { border-right-color: #e5e7eb; }
+[data-theme="light"] .nav-icon-btn { color: #6b7280; }
+[data-theme="light"] .nav-icon-btn:hover { background: #e5e7eb; color: #1f2937; }
+[data-theme="light"] .nav-icon-btn.active { background: #d1d5db; color: #111827; }
+[data-theme="light"] .nav-panel-header { color: #6b7280; border-bottom-color: #e5e7eb; }
+[data-theme="light"] .thumb-row:hover { background: #f3f4f6; }
+[data-theme="light"] .thumb-label { color: #6b7280; }
+[data-theme="light"] .thumb-row.selected .thumb-label { color: #111827; }
+
 /* ── Canvas workspace view ────────────────────────────────────────────────
    Ported from PDFx's canvas styles, scoped under .canvas-view. PDFx's theme
    variables are mapped onto Open PDF Studio's palette here (dark default, light via

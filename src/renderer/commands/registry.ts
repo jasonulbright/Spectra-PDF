@@ -5,8 +5,9 @@
 // handler. M1 registers every action that existed before the workbench;
 // M2+ chrome only *references* what is here.
 import { isDocTab } from '../state/types';
-import type { AppState, CanvasTool, FocusedTab } from '../state/types';
+import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
+import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
 
 // --- Pure enablement helpers (unit-tested; menus gray from these) ---------
 
@@ -110,6 +111,8 @@ export const COMMAND_IDS = [
   'edit.preferences',
   'view.home',
   'view.tools',
+  'view.navPane',
+  ...NAV_PANEL_IDS.map((id) => `view.navPanel.${id}` as const),
   'view.zoomIn',
   'view.zoomOut',
   'view.fit',
@@ -224,6 +227,22 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Tools',
     run: ({ dispatch }) => dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' }),
   },
+  'view.navPane': {
+    title: 'Navigation Pane',
+    // The pane is about the active document — only meaningful on a doc tab.
+    when: inCanvas,
+    run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_NAV_PANE' }),
+  },
+  ...(Object.fromEntries(
+    NAV_PANEL_IDS.map((id) => [
+      `view.navPanel.${id}`,
+      {
+        title: NAV_PANEL_TITLES[id],
+        when: inCanvas,
+        run: ({ dispatch }: CommandContext) => dispatch({ type: 'UI_OPEN_NAV_PANEL', panel: id as NavPanelId }),
+      } satisfies Command,
+    ]),
+  ) as Record<`view.navPanel.${(typeof NAV_PANEL_IDS)[number]}`, Command>),
   'view.zoomIn': {
     title: 'Zoom In',
     when: (ctx) => ctx.canvas?.canvas() != null,

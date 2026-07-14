@@ -45,6 +45,11 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   // Tools always present); guard-exempt so it cycles even from a focused field.
   { key: 'tab', ctrl: true, shift: false, command: 'window.nextTab', scope: 'global', editableGuard: false, preventDefault: 'always' },
   { key: 'tab', ctrl: true, shift: true, command: 'window.prevTab', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  // Nav pane toggle (§ 9.2, M3) — canvas-scoped (the pane is about the active
+  // document), guard-exempt (F4 isn't a text key). Shift+F4 (task pane) stays
+  // reserved/unbound until M5. Ctrl+Shift+F (Search panel) binds in M3.3 when
+  // that panel exists (reserve-don't-remap).
+  { key: 'f4', command: 'view.navPane', scope: 'canvas', editableGuard: false, preventDefault: 'always' },
   // Undo/redo — app-global (2n.1). Ctrl+Y redo is shift-agnostic like the
   // listener it replaces.
   { key: 'z', ctrl: true, shift: false, command: 'edit.undo', scope: 'global', editableGuard: true, preventDefault: 'always' },

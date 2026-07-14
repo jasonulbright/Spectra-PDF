@@ -50,7 +50,9 @@ import { TabStrip } from './components/TabStrip';
 import { HomeTab } from './components/HomeTab';
 import { AboutDialog } from './components/AboutDialog';
 import { UpdateBar } from './components/UpdateBar';
+import { NavPane } from './components/navpane/NavPane';
 import { withRecent } from './lib/recent-files';
+import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
 import {
@@ -159,6 +161,12 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     localStorage.setItem('spectra-recent', JSON.stringify(recentFiles));
   }, [recentFiles]);
+
+  // Mirror the nav-pane state (M3) to the workbench-ui key — same one-effect
+  // pattern; the reducer/commands are the only writers.
+  useEffect(() => {
+    writeWorkbenchUi({ navPane: state.ui.navPane });
+  }, [state.ui.navPane]);
 
   const activeFile = state.activeFileId ? state.files.get(state.activeFileId) : null;
   const inspectorFile = inspector ? state.files.get(inspector.path) : null;
@@ -954,30 +962,38 @@ function AppContent(): React.ReactElement {
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col relative overflow-hidden">
-              <WorkspaceCanvasView
-                onOpenFiles={() => void handleOpenFile()}
-                onCloseFile={(path) => void handleCloseFile(path)}
-                onInspectPage={(path, pageNumber) => void handleInspectPage(path, pageNumber)}
+            <div className="flex-1 flex flex-row overflow-hidden">
+              {/* Left navigation pane (M3) — thumbnails etc. for the active doc */}
+              <NavPane
+                activeFile={activeFile ?? null}
+                onOpenPage={(path, pageNumber) => void handleInspectPage(path, pageNumber)}
                 onExtractText={handleExtractFromCanvas}
-                onRedactFile={handleRedactFile}
-                onApplyOcrLayer={handleApplyOcrLayer}
-                onAddPages={handleAddPages}
-                onFillFormValues={handleFillFormValues}
-                onAddFormField={handleAddFormField}
-                dropResolverRef={dropResolverRef}
               />
-              {inspector && inspectorFile?.buffer && (
-                <div className="absolute inset-0 z-40 bg-neutral-900">
-                  <PageInspector
-                    buffer={inspectorFile.buffer}
-                    page={inspector.page}
-                    onClose={() => setInspector(null)}
-                    onRotate={handleInspectorRotate}
-                    onDelete={handleInspectorDelete}
-                  />
-                </div>
-              )}
+              <div className="flex-1 flex flex-col relative overflow-hidden">
+                <WorkspaceCanvasView
+                  onOpenFiles={() => void handleOpenFile()}
+                  onCloseFile={(path) => void handleCloseFile(path)}
+                  onInspectPage={(path, pageNumber) => void handleInspectPage(path, pageNumber)}
+                  onExtractText={handleExtractFromCanvas}
+                  onRedactFile={handleRedactFile}
+                  onApplyOcrLayer={handleApplyOcrLayer}
+                  onAddPages={handleAddPages}
+                  onFillFormValues={handleFillFormValues}
+                  onAddFormField={handleAddFormField}
+                  dropResolverRef={dropResolverRef}
+                />
+                {inspector && inspectorFile?.buffer && (
+                  <div className="absolute inset-0 z-40 bg-neutral-900">
+                    <PageInspector
+                      buffer={inspectorFile.buffer}
+                      page={inspector.page}
+                      onClose={() => setInspector(null)}
+                      onRotate={handleInspectorRotate}
+                      onDelete={handleInspectorDelete}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </main>

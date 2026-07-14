@@ -7,6 +7,7 @@
 import { isDocTab } from '../state/types';
 import type { CommandContext } from './types';
 import type { CommandId } from './registry';
+import { NAV_PANEL_IDS } from './navpanels';
 
 // A leaf the renderer can draw without further resolution. `command` items are
 // resolved against COMMANDS (title, enablement, shortcut) by the renderer;
@@ -145,6 +146,19 @@ export const MENUS: MenuDef[] = [
     id: 'view',
     label: 'View',
     items: [
+      {
+        kind: 'submenu',
+        id: 'view-nav-panels',
+        label: 'Navigation Panels',
+        items: [
+          ...NAV_PANEL_IDS.map(
+            (id) => cmd(`view.navPanel.${id}`, `menuitem-navpanel-${id}`),
+          ),
+          sep,
+          cmd('view.navPane', 'menuitem-view-nav-pane'),
+        ],
+      },
+      sep,
       cmd('view.zoomIn', 'menuitem-view-zoom-in'),
       cmd('view.zoomOut', 'menuitem-view-zoom-out'),
       cmd('view.fit', 'menuitem-view-fit'),

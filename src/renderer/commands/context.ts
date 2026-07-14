@@ -27,6 +27,12 @@ export function registerCanvasServices(services: CanvasServices | null): void {
   canvasServices = services;
 }
 
+/** The board's live canvas services (camera + find), or null when the board
+ * isn't mounted. Nav-pane panels use it to drive centerOn navigation. */
+export function getCanvasServices(): CanvasServices | null {
+  return canvasServices;
+}
+
 /** Null until App mounts — command invocation is impossible before then. */
 export function getCommandContext(): CommandContext | null {
   if (!stateSource) return null;
