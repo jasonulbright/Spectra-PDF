@@ -446,7 +446,7 @@
   font-size: 11px;
   color: #6b7280;
 }
-.signatures-nav-card {
+.signature-nav-card {
   margin: 0 8px 6px;
   padding: 7px 9px;
   border: 1px solid #262626;
@@ -497,8 +497,11 @@
 }
 .signatures-nav-recheck-btn:hover:not(:disabled) { color: #e5e5e5; background: #262626; }
 .signatures-nav-recheck-btn:disabled { opacity: 0.5; }
+/* Panel-level verify failure — flagged red, distinct from the gray "no
+   signatures" empty state (which is plain .navpanel-empty). */
+.signatures-nav-error { color: #f87171; }
 
-[data-theme="light"] .signatures-nav-card { border-color: #e5e7eb; background: rgba(0, 0, 0, 0.015); }
+[data-theme="light"] .signature-nav-card { border-color: #e5e7eb; background: rgba(0, 0, 0, 0.015); }
 [data-theme="light"] .signature-nav-signer { color: #1f2937; }
 [data-theme="light"] .signatures-nav-footer { border-top-color: #e5e7eb; }
 [data-theme="light"] .signatures-nav-recheck-btn { border-color: #d1d5db; }

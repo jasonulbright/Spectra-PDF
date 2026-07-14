@@ -19,11 +19,11 @@ import type { NavPanelComponentProps } from './types';
 // and a visible-signature page jump would need the widget's /P from the engine
 // (M3 is renderer-only). Recorded as explicitly absent in the phase doc § 3.3.
 //
-// Auto-verifies on file identity change INCLUDING post-commit (fileKey folds in
-// undoStack length), so editing a signed file and committing re-runs the check
-// and the badge flips; Re-check re-runs it on demand. verify_signatures rides
-// the commit gate (useEngine.call), so a pending edit is flushed to the working
-// file before it's read.
+// Auto-verifies on the working file's BYTE identity (its buffer reference), so
+// editing + committing a signed file flips the badge but a Save (which doesn't
+// change the working bytes) doesn't re-run it; Re-check re-runs on demand.
+// verify_signatures rides the commit gate (useEngine.call), so a pending edit is
+// flushed to the working file before it's read. (Keying details on the effect.)
 
 export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): React.ReactElement {
   const { call } = useEngine();
@@ -32,12 +32,23 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
   const [busy, setBusy] = useState(false);
   const [nonce, setNonce] = useState(0);
 
-  const fileKey = activeFile
-    ? `${activeFile.path}#${activeFile.pageCount}#${activeFile.undoStack.length}`
-    : null;
-
+  // Re-verify on the WORKING FILE's byte identity, not an edit counter. The
+  // buffer reference changes on exactly the ops that rewrite the working file
+  // (UPDATE_FILE / COMMIT_PAGE_EDITS / UNDO / REDO — all through applyFileUpdate,
+  // which installs a new buffer), so editing a signed file flips the badge; it
+  // is UNCHANGED by Save (MARK_SAVED only clears dirty/undoStack — the bytes on
+  // disk are the same), so Save no longer triggers a pointless re-verify
+  // (review-caught). `nonce` is the manual Re-check trigger.
+  //
+  // Known, accepted: opening the panel while the active file has UNCOMMITTED
+  // page edits verifies twice — verify runs the commit gate (useEngine.call),
+  // which commits those edits and installs a new buffer, re-triggering this
+  // effect once. It converges (the second pass' gate is a no-op) and the
+  // cancelled-guard discards the first pass, so only the correct post-commit
+  // result ever renders; the cost is one extra engine round-trip in that flow.
+  const buffer = activeFile?.buffer ?? null;
+  const workingPath = activeFile?.workingPath ?? null;
   useEffect(() => {
-    const workingPath = activeFile?.workingPath;
     if (!workingPath) {
       setResult(null);
       setStatus('');
@@ -61,9 +72,10 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
     return () => {
       cancelled = true; // a mid-verify file switch must not land the old file's result
     };
-    // fileKey encodes the identity; nonce is the manual Re-check trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileKey, nonce, call]);
+    // buffer is the byte-identity signal (see above); workingPath covers a
+    // file switch that keeps the same buffer object identity (it can't, but the
+    // dep is honest); nonce is Re-check.
+  }, [workingPath, buffer, nonce, call]);
 
   if (!activeFile) {
     return (

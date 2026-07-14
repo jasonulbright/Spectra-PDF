@@ -39,6 +39,19 @@ describe('navigation pane — Signatures panel', () => {
     // dot reflects the shared classifier
     expect(await card.getAttribute('data-status')).toBe('valid');
 
+    // The card's CSS rule must actually match its className (a plural/singular
+    // selector typo left it unstyled — a class no JS/TS gate can catch). Assert
+    // the computed style really applied: non-zero padding + a border.
+    const cardStyle = await browser.execute(() => {
+      const el = document.querySelector('[data-testid="signature-nav-card"]');
+      if (!el) return null;
+      const s = getComputedStyle(el);
+      return { paddingTop: s.paddingTop, borderTopWidth: s.borderTopWidth };
+    });
+    expect(cardStyle).not.toBeNull();
+    expect(cardStyle!.paddingTop).not.toBe('0px');
+    expect(cardStyle!.borderTopWidth).not.toBe('0px');
+
     const caveat = $('[data-testid="signatures-nav-caveat"]');
     await caveat.waitForDisplayed({ timeout: 5_000 });
     expect(await caveat.getText()).toContain('not verified against a trusted authority');
