@@ -23,7 +23,8 @@ export type ChromeIconId =
   | 'overflow'
   | 'document'
   | 'pages'
-  | 'bookmarks';
+  | 'bookmarks'
+  | 'signatures';
 
 const base = {
   fill: 'none',
@@ -126,6 +127,13 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
   ),
   // Ribbon bookmark.
   bookmarks: <path d="M6 3h12v18l-6-4-6 4z" />,
+  // Signature squiggle over a baseline (nav-pane Signatures panel).
+  signatures: (
+    <>
+      <path d="M3 16c2.5 0 3.5-4 5.5-4s1.5 3 3.5 3 3-5 6-5" />
+      <path d="M3 20h18" />
+    </>
+  ),
 };
 
 interface ChromeIconProps {

@@ -440,6 +440,71 @@
 [data-theme="light"] .search-hit-page { color: #1f2937; }
 [data-theme="light"] .search-hit-snippet { color: #6b7280; }
 
+/* Signatures nav panel (M3.3b) — compact status read-view of verify_signatures. */
+.signatures-nav-count {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: #6b7280;
+}
+.signatures-nav-card {
+  margin: 0 8px 6px;
+  padding: 7px 9px;
+  border: 1px solid #262626;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.signature-nav-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.signature-nav-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.signature-nav-dot-valid { background: #22c55e; }
+.signature-nav-dot-modified { background: #f59e0b; }
+.signature-nav-dot-invalid { background: #ef4444; }
+.signature-nav-signer {
+  font-size: 12px;
+  color: #e5e5e5;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.signature-nav-status { font-size: 11px; color: #a3a3a3; }
+.signature-nav-detail { font-size: 10px; color: #6b7280; }
+.signature-nav-error { font-size: 10px; color: #f87171; }
+.signatures-nav-caveat {
+  margin: 4px 8px 8px;
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: rgba(253, 230, 138, 0.85);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 5px;
+}
+.signatures-nav-footer {
+  display: flex;
+  padding: 6px 8px;
+  border-top: 1px solid #262626;
+  flex-shrink: 0;
+}
+.signatures-nav-recheck-btn {
+  font-size: 12px;
+  color: #a3a3a3;
+  padding: 3px 8px;
+  border: 1px solid #404040;
+  border-radius: 4px;
+}
+.signatures-nav-recheck-btn:hover:not(:disabled) { color: #e5e5e5; background: #262626; }
+.signatures-nav-recheck-btn:disabled { opacity: 0.5; }
+
+[data-theme="light"] .signatures-nav-card { border-color: #e5e7eb; background: rgba(0, 0, 0, 0.015); }
+[data-theme="light"] .signature-nav-signer { color: #1f2937; }
+[data-theme="light"] .signatures-nav-footer { border-top-color: #e5e7eb; }
+[data-theme="light"] .signatures-nav-recheck-btn { border-color: #d1d5db; }
+[data-theme="light"] .signatures-nav-recheck-btn:hover:not(:disabled) { background: #e5e7eb; }
+[data-theme="light"] .signatures-nav-caveat { color: #92620e; }
+
 [data-theme="light"] .bookmark-title-input:hover,
 [data-theme="light"] .bookmark-title-input:focus { background: #f3f4f6; border-color: #d1d5db; }
 [data-theme="light"] .bookmark-page-input { background: #f3f4f6; border-color: #d1d5db; }

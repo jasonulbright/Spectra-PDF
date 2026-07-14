@@ -134,4 +134,42 @@ describe('window effects + accent theming', () => {
     expect(pair.select).not.toBeNull();
     expect(pair.select!.toLowerCase()).toBe(pair.accent.toLowerCase());
   });
+
+  it('extends the backdrop to the nav pane: strip translucent (frame), body opaque (content)', async () => {
+    // Mica re-key #2 (§ 10.3, Phase 4 M3): the nav-pane icon strip carries
+    // .app-rail (a frame surface — must tint like the M2 bars) and the panel
+    // body carries .app-content (must stay opaque). The nav pane only mounts on
+    // a doc tab, so open a file, ensure canvas, and open a panel first.
+    const kind = await invokeCommand<string>('get_window_backdrop');
+    await openByPaths([SAMPLE_PDF]);
+    await setView('canvas');
+    await browser.waitUntil(async () => (await getState()).view === 'canvas', {
+      timeoutMsg: 'view did not switch to canvas',
+    });
+    await $('[data-testid="nav-icon-strip"]').waitForDisplayed({ timeoutMsg: 'nav icon strip never mounted' });
+    if ((await $('[data-testid="navicon-pages"]').getAttribute('aria-pressed')) !== 'true') {
+      await $('[data-testid="navicon-pages"]').click();
+    }
+    await $('[data-testid="nav-panel-body"]').waitForDisplayed({ timeoutMsg: 'nav panel body never opened' });
+
+    const styles = await browser.execute(() => {
+      const bg = (sel: string) => {
+        const el = document.querySelector(sel);
+        return el ? getComputedStyle(el).backgroundColor : null;
+      };
+      return {
+        strip: bg('[data-testid="nav-icon-strip"]'),
+        body: bg('[data-testid="nav-panel-body"]'),
+      };
+    });
+    expect(styles.strip).not.toBeNull();
+    expect(styles.body).not.toBeNull();
+
+    if (kind === 'mica') {
+      const a = alphaOf(styles.strip!);
+      expect(a).toBeGreaterThan(0);
+      expect(a).toBeLessThan(1); // frame tint, like the three M2 bars
+      expect(alphaOf(styles.body!)).toBe(1); // panel body is opaque content
+    }
+  });
 });

@@ -7,6 +7,12 @@ import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerSignHandler } from '../testHarness';
 import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../components/SignerSourceFields';
 import type { SignerSource } from '../components/SignerSourceFields';
+import {
+  classifySignature,
+  SIGNATURE_STATUS_LABEL,
+  type SignatureEntry,
+  type VerifyResult,
+} from '../lib/signatures';
 
 interface SignResult {
   output: string;
@@ -16,27 +22,6 @@ interface SignResult {
   intact: boolean;
   covers_whole_document: boolean;
   signature_count: number;
-}
-
-interface SignatureEntry {
-  field: string | null;
-  signer: string | null;
-  valid: boolean;
-  intact: boolean;
-  trusted: boolean;
-  coverage: string;
-  covers_whole_document: boolean;
-  modified_after_signing: boolean;
-  digest_algorithm: string | null;
-  signing_time: string | null;
-  error?: string;
-}
-
-interface VerifyResult {
-  signed: boolean;
-  signature_count: number;
-  signatures: SignatureEntry[];
-  summary: { all_valid: boolean; any_modified_after_signing: boolean; trust_verified: boolean };
 }
 
 export function SignaturesPanel(): React.ReactElement {
@@ -329,12 +314,13 @@ export function SignaturesPanel(): React.ReactElement {
 }
 
 function SignatureCard({ sig }: { sig: SignatureEntry }): React.ReactElement {
-  const ok = sig.valid && sig.intact;
-  const badge = !ok
-    ? { text: 'Invalid', cls: 'bg-red-600/20 text-red-300 border-red-600/40' }
-    : sig.modified_after_signing
-      ? { text: 'Valid — document changed after signing', cls: 'bg-amber-500/15 text-amber-200 border-amber-500/40' }
-      : { text: 'Cryptographically valid', cls: 'bg-green-600/15 text-green-300 border-green-600/40' };
+  const status = classifySignature(sig);
+  const cls = {
+    invalid: 'bg-red-600/20 text-red-300 border-red-600/40',
+    modified: 'bg-amber-500/15 text-amber-200 border-amber-500/40',
+    valid: 'bg-green-600/15 text-green-300 border-green-600/40',
+  }[status];
+  const badge = { text: SIGNATURE_STATUS_LABEL[status], cls };
 
   return (
     <div data-testid="signature-card" className="rounded border border-neutral-800 bg-neutral-900/50 p-3 flex flex-col gap-1.5">
