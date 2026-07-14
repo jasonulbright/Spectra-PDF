@@ -29,13 +29,16 @@ describe('readWorkbenchUi', () => {
     expect(readWorkbenchUi(DEFAULTS).navPane).toEqual({ open: true, panel: 'bookmarks', width: 260 });
   });
 
-  it('coerces each field against defaults, clamping width', () => {
+  it('coerces each field against defaults, clamping width low and high', () => {
     store.set('workbench-ui', JSON.stringify({ navPane: { open: 'yes', panel: 'nope', width: 10 } }));
     expect(readWorkbenchUi(DEFAULTS).navPane).toEqual({
       open: false, // non-boolean → default
       panel: 'pages', // invalid id → default
       width: 180, // below min → clamped
     });
+    // An already-persisted oversized width self-heals on next boot.
+    store.set('workbench-ui', JSON.stringify({ navPane: { open: true, panel: 'pages', width: 5000 } }));
+    expect(readWorkbenchUi(DEFAULTS).navPane.width).toBe(520);
   });
 
   it('survives a non-object / malformed entry', () => {

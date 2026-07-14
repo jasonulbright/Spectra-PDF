@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { usePdfProxies } from '../../hooks/usePdfProxies';
-import { logRenderError } from '../canvas/raster';
+import { logRenderError, scheduleReblit } from '../canvas/raster';
 import { getCanvasServices } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { ContextMenu } from '../ContextMenu';
@@ -20,6 +20,10 @@ const ROW_H = 172; // fixed slot: thumbnail area + page-number label
 const THUMB_MAX_H = 136;
 const SIDE_PAD = 16; // horizontal padding inside the scroller
 const OVERSCAN = 3; // rows rendered beyond the viewport each side
+// Rotation-invariant raster budget (longest side, CSS px before dpr). Fixed so
+// a pending rotation never re-renders the raster (only the CSS transform/size
+// change) — the board's PageView convention.
+const RENDER_TARGET = 320;
 
 interface PageItem {
   docId: string;
@@ -54,7 +58,13 @@ function Thumbnail({
 }): React.ReactElement {
   const ref = useRef<HTMLCanvasElement>(null);
   const [ready, setReady] = useState(false);
+  // First paint lands immediately; a buffer-swap re-render (version bump)
+  // batches through the shared anti-ripple scheduler.
+  const hasPaintedRef = useRef(false);
 
+  // Display footprint (rotation-aware) — the raster below is NOT: it renders at
+  // a fixed budget from the natural dims, and CSS rotates + sizes it. So a
+  // pending rotation only updates the transform, never re-renders.
   const swapped = rotation === 90 || rotation === 270;
   const dispW = swapped ? natH : natW;
   const dispH = swapped ? natW : natH;
@@ -63,25 +73,39 @@ function Thumbnail({
   const natHpx = Math.max(1, natH * fit);
 
   useEffect(() => {
-    if (!proxy || fit <= 0) return;
+    if (!proxy) return;
     let cancelled = false;
     let task: RenderTask | null = null;
     setReady(false);
     (async () => {
       const page = await proxy.getPage(pageNumber);
       if (cancelled) return;
-      const [x0, , x1] = page.view;
-      const w = x1 - x0 || natW;
-      const scale = (natWpx * dprCap()) / w;
+      // Scale from the natural (rotation-correct) dims — NOT page.view, the raw
+      // MediaBox, which doesn't reflect an intrinsic /Rotate (review-caught:
+      // wrong density on scanned/faxed pages). Render offscreen, then blit.
+      const scale = (RENDER_TARGET * dprCap()) / Math.max(natW, natH);
       const viewport = page.getViewport({ scale });
-      const canvas = ref.current;
-      if (!canvas) return;
-      canvas.width = Math.max(1, Math.floor(viewport.width));
-      canvas.height = Math.max(1, Math.floor(viewport.height));
-      task = page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport });
+      const off = document.createElement('canvas');
+      off.width = Math.max(1, Math.floor(viewport.width));
+      off.height = Math.max(1, Math.floor(viewport.height));
+      task = page.render({ canvas: off, canvasContext: off.getContext('2d')!, viewport });
       await task.promise;
       if (cancelled) return;
-      setReady(true);
+      const paint = (): void => {
+        if (cancelled) return;
+        const canvas = ref.current;
+        if (!canvas) return;
+        canvas.width = off.width;
+        canvas.height = off.height;
+        canvas.getContext('2d')!.drawImage(off, 0, 0);
+        setReady(true);
+      };
+      if (hasPaintedRef.current) {
+        scheduleReblit(paint);
+      } else {
+        paint();
+        hasPaintedRef.current = true;
+      }
     })().catch(logRenderError('thumbnail'));
     return () => {
       cancelled = true;
@@ -92,7 +116,7 @@ function Thumbnail({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proxy, pageNumber, natWpx, version]);
+  }, [proxy, pageNumber, version]);
 
   return (
     <div
@@ -141,6 +165,15 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState({ h: 0, w: 0 });
+
+  // The panel stays mounted across doc-tab switches, so reset the scroll when
+  // the subject file changes — otherwise a deep scroll offset carried into a
+  // shorter file leaves the virtualization window past the end (empty panel,
+  // review-caught).
+  useEffect(() => {
+    setScrollTop(0);
+    if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
+  }, [activeFile?.path]);
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;

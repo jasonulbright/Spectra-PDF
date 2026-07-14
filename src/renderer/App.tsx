@@ -162,10 +162,13 @@ function AppContent(): React.ReactElement {
     localStorage.setItem('spectra-recent', JSON.stringify(recentFiles));
   }, [recentFiles]);
 
-  // Mirror the nav-pane state (M3) to the workbench-ui key — same one-effect
-  // pattern; the reducer/commands are the only writers.
+  // Mirror the nav-pane state (M3) to the workbench-ui key. Debounced: a resize
+  // drag dispatches a new width per pointermove, and an unthrottled synchronous
+  // localStorage write per event competes with the drag for main-thread time
+  // (review-caught). Each change reschedules; only the settled value persists.
   useEffect(() => {
-    writeWorkbenchUi({ navPane: state.ui.navPane });
+    const t = setTimeout(() => writeWorkbenchUi({ navPane: state.ui.navPane }), 200);
+    return () => clearTimeout(t);
   }, [state.ui.navPane]);
 
   const activeFile = state.activeFileId ? state.files.get(state.activeFileId) : null;

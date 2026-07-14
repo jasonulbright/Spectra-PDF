@@ -162,6 +162,7 @@ export interface NavPaneState {
 }
 
 export const NAV_PANE_MIN_WIDTH = 180;
+export const NAV_PANE_MAX_WIDTH = 520;
 export const NAV_PANE_DEFAULT_WIDTH = 240;
 
 // UI state the command registry needs to read (menus/toolbars can't read

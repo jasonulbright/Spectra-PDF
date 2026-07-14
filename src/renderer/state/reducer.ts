@@ -1,4 +1,4 @@
-import { AppState, AppAction, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_DEFAULT_WIDTH } from './types';
+import { AppState, AppAction, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_DEFAULT_WIDTH } from './types';
 import { carriesManifest } from '../lib/doc-names';
 
 // Re-project a display-normalized annotation rect when its page's display
@@ -989,7 +989,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ui: { ...state.ui, navPane: { ...state.ui.navPane, open: !state.ui.navPane.open } },
       };
     case 'UI_SET_NAV_PANE_WIDTH': {
-      const width = Math.max(NAV_PANE_MIN_WIDTH, Math.round(action.width));
+      // Clamp both ends — an overshooting drag (or a pointer leaving the window
+      // mid-drag) must not set a width that buries the board off-screen and
+      // then persists (review-caught).
+      const width = Math.min(NAV_PANE_MAX_WIDTH, Math.max(NAV_PANE_MIN_WIDTH, Math.round(action.width)));
       if (width === state.ui.navPane.width) return state;
       return { ...state, ui: { ...state.ui, navPane: { ...state.ui.navPane, width } } };
     }

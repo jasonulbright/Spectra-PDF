@@ -54,22 +54,26 @@ export function NavPane(props: NavPaneProps): React.ReactElement {
   return (
     <div className="nav-pane flex shrink-0" data-testid="nav-pane">
       <div className="nav-icon-strip app-rail" data-testid="nav-icon-strip">
-        {NAV_PANEL_DEFS.map((def) => (
+        {NAV_PANEL_DEFS.map((def) => {
+          // Highlight the panel actually SHOWN (activeDef, after the fallback),
+          // not the raw persisted id — which may be a not-yet-built panel
+          // (review-caught: strip would show nothing pressed while pages shows).
+          const isActive = open && activeDef.id === def.id;
+          return (
           <button
             key={def.id}
             type="button"
             data-testid={`navicon-${def.id}`}
             title={def.title}
             aria-label={def.title}
-            aria-pressed={open && panel === def.id}
+            aria-pressed={isActive}
             onClick={() => dispatch({ type: 'UI_OPEN_NAV_PANEL', panel: def.id })}
-            className={
-              'nav-icon-btn' + (open && panel === def.id ? ' active' : '')
-            }
+            className={'nav-icon-btn' + (isActive ? ' active' : '')}
           >
             <ChromeIcon icon={def.icon} />
           </button>
-        ))}
+          );
+        })}
       </div>
       {open && (
         <div

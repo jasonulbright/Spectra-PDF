@@ -164,9 +164,11 @@ describe('nav pane (M3)', () => {
     expect(s.ui.navPane.open).toBe(false);
   });
 
-  it('clamps the width to the minimum and no-ops when unchanged', () => {
+  it('clamps the width to both ends and no-ops when unchanged', () => {
     const s = appReducer(initialState, { type: 'UI_SET_NAV_PANE_WIDTH', width: 50 });
     expect(s.ui.navPane.width).toBe(180); // NAV_PANE_MIN_WIDTH
+    const huge = appReducer(initialState, { type: 'UI_SET_NAV_PANE_WIDTH', width: 9999 });
+    expect(huge.ui.navPane.width).toBe(520); // NAV_PANE_MAX_WIDTH — never buries the board
     const wide = appReducer(initialState, { type: 'UI_SET_NAV_PANE_WIDTH', width: 300 });
     expect(wide.ui.navPane.width).toBe(300);
     expect(appReducer(wide, { type: 'UI_SET_NAV_PANE_WIDTH', width: 300 })).toBe(wide);

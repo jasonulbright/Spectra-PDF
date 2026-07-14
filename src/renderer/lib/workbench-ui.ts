@@ -4,7 +4,7 @@
 // mirrors ui.navPane → here in one effect; boot hydration reads it back
 // through the validated parse so a corrupt entry can't propagate a bad shape
 // into state (the recent-files precedent).
-import { NAV_PANE_MIN_WIDTH, type NavPaneState, type NavPanelId } from '../state/types';
+import { NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, type NavPaneState, type NavPanelId } from '../state/types';
 
 const KEY = 'workbench-ui';
 const PANELS: readonly NavPanelId[] = ['pages', 'bookmarks', 'signatures', 'search'];
@@ -20,7 +20,7 @@ function coerceNavPane(raw: unknown, fallback: NavPaneState): NavPaneState {
   const panel = PANELS.includes(r.panel as NavPanelId) ? (r.panel as NavPanelId) : fallback.panel;
   const width =
     typeof r.width === 'number' && Number.isFinite(r.width)
-      ? Math.max(NAV_PANE_MIN_WIDTH, Math.round(r.width))
+      ? Math.min(NAV_PANE_MAX_WIDTH, Math.max(NAV_PANE_MIN_WIDTH, Math.round(r.width)))
       : fallback.width;
   return {
     open: typeof r.open === 'boolean' ? r.open : fallback.open,
