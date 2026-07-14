@@ -161,6 +161,13 @@ export interface NavPaneState {
   width: number; // px, clamped ≥ NAV_PANE_MIN_WIDTH
 }
 
+// Per-document view mode (Phase 4 M4, § 6.1). `document` = the continuous
+// single-column reading view (the 2.0 centerpiece); `organize` = the existing
+// strips board (page-management). Global (one mode, like `tool`) — a doc tab
+// renders one or the other. Entered via the toolbar toggle / Organize Pages
+// tool; `View ▸ Organize All Documents` forces the board.
+export type DocViewMode = 'document' | 'organize';
+
 export const NAV_PANE_MIN_WIDTH = 180;
 export const NAV_PANE_MAX_WIDTH = 520;
 export const NAV_PANE_DEFAULT_WIDTH = 240;
@@ -173,6 +180,9 @@ export interface UiState {
   focusedTab: FocusedTab;
   activeOp: string; // Sidebar Operation id; typed loosely here to avoid a component import cycle
   tool: CanvasTool;
+  // Document-pane view mode (M4). The board and the reading view are two
+  // renders of the same per-page cells (§ 6.2); commands/toolbar read this.
+  docViewMode: DocViewMode;
   // Canvas multi-select (2n.1) — view state, never the page-edit tier.
   // Positional PageRef ids: any buffer-identity change clears the selection
   // (the reducer does this where the buffers change; formerly a
@@ -266,6 +276,7 @@ export type AppAction =
   | { type: 'UI_SET_RECENT_FILES'; files: string[] }
   | { type: 'UI_SET_ACTIVE_OP'; op: string }
   | { type: 'UI_SET_TOOL'; tool: CanvasTool }
+  | { type: 'UI_SET_DOC_VIEW_MODE'; mode: DocViewMode }
   // Click selection with the canvas's modifier semantics (computed here —
   // range/toggle need the workspace-flattened order, which lives in state):
   // 'single' replaces; 'toggle' is Ctrl-click; 'range' is Shift-click from the

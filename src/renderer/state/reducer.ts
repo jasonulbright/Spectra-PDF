@@ -38,6 +38,7 @@ export const initialUiState: UiState = {
   focusedTab: 'home',
   activeOp: 'split',
   tool: 'select',
+  docViewMode: 'organize',
   selectedPageIds: NO_SELECTION,
   selectionAnchor: null,
   recentFiles: [],
@@ -912,6 +913,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_TOOL':
       if (action.tool === state.ui.tool) return state;
       return { ...state, ui: { ...state.ui, tool: action.tool } };
+    case 'UI_SET_DOC_VIEW_MODE':
+      if (action.mode === state.ui.docViewMode) return state;
+      return { ...state, ui: { ...state.ui, docViewMode: action.mode } };
     case 'UI_SELECT_PAGE': {
       const { selectedPageIds, selectionAnchor } = state.ui;
       if (action.mode === 'toggle') {

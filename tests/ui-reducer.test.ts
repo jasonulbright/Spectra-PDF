@@ -104,6 +104,13 @@ describe('ui tab/tool actions (Phase 4 M2)', () => {
     expect(s.ui.tool).toBe('redact');
   });
 
+  it('sets the document view mode (M4) and no-ops on the same mode', () => {
+    expect(initialState.ui.docViewMode).toBe('organize');
+    const doc = appReducer(initialState, { type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' });
+    expect(doc.ui.docViewMode).toBe('document');
+    expect(appReducer(doc, { type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' })).toBe(doc); // referential no-op
+  });
+
   it('sets the active operation', () => {
     const next = appReducer(initialState, { type: 'UI_SET_ACTIVE_OP', op: 'compress' });
     expect(next.ui.activeOp).toBe('compress');
