@@ -14,7 +14,7 @@ import {
 import type { OutlineNode, FlatNode } from '../../lib/outline-reorder';
 import { ChromeIcon } from '../chrome-icons';
 import { TEST_HARNESS_ENABLED, registerCanvasOutline } from '../../testHarness';
-import type { OpenFile } from '../../state/types';
+import type { OpenFile, PdfBuffer } from '../../state/types';
 import type { NavPanelComponentProps } from './types';
 
 // Bookmarks nav panel (Phase 4 M3.2) — the ONE bookmarks surface, merging the
@@ -60,7 +60,15 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const { call } = useEngine();
   const dispatch = useAppDispatch();
   const [nodes, setNodes] = useState<OutlineNode[]>([]);
-  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  // The buffer reference whose real outline currently populates `nodes`. Every
+  // op that rewrites the working file installs a NEW buffer (UPDATE_FILE /
+  // COMMIT via applyFileUpdate, undo/redo via REFRESH_BUFFER), so comparing the
+  // shown file's buffer to this is a timing-INDEPENDENT "is `nodes` current for
+  // what's on disk?" signal — no post-save key to predict, no per-chain counter
+  // (two review rounds found races in the undoStack-length prediction: a stale
+  // snapshot, a failed save leaving a phantom slot, an A→B→A reseed). null until
+  // the first load, or reset to null to force a reload (no file / failed save).
+  const [loadedBuffer, setLoadedBuffer] = useState<PdfBuffer | null>(null);
   const [status, setStatus] = useState('');
   const [drag, setDrag] = useState<DragState | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -77,69 +85,60 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const activeFileRef = useRef(activeFile);
   activeFileRef.current = activeFile;
 
-  const fileKey = activeFile
-    ? `${activeFile.path}#${activeFile.pageCount}#${activeFile.undoStack.length}`
-    : null;
-
-  // `loadedFor` = the fileKey whose real outline currently populates `nodes`.
-  // A mutator may ONLY persist when the shown tree is that file's loaded tree —
-  // otherwise it would write the empty initial `[]` (or the previous file's
-  // tree, mid-switch) over the target's real bookmarks, and `set_outline` is a
-  // full REPLACE, not a merge (review-caught HIGH). `mutableTarget()` returns
-  // the file to write to, or null while its outline is still loading. Reads via
-  // refs so the event-handler callbacks always see live values. (After our own
-  // save, `loadedFor` and the file's identity advance together in one batched
-  // flush — see `persist` — so this never false-negatives on a normal edit.)
-  const loadedForRef = useRef(loadedFor);
-  loadedForRef.current = loadedFor;
+  // A mutator may ONLY persist when the shown tree is the LOADED tree for the
+  // current file (its buffer === loadedBuffer) — otherwise it would write the
+  // empty initial `[]` (or, mid-switch, the previous file's tree) over the
+  // target's real bookmarks, and `set_outline` is a full REPLACE, not a merge
+  // (review-caught HIGH). Reads via refs so the event-handler callbacks see live
+  // values. `mutableTarget()` returns the file to write to, or null while its
+  // outline is still loading.
+  const loadedBufferRef = useRef(loadedBuffer);
+  loadedBufferRef.current = loadedBuffer;
   const mutableTarget = useCallback((): OpenFile | null => {
     const target = activeFileRef.current;
-    if (!target) return null;
-    const key = `${target.path}#${target.pageCount}#${target.undoStack.length}`;
-    return key === loadedForRef.current ? target : null;
+    if (!target || target.buffer == null) return null;
+    return target.buffer === loadedBufferRef.current ? target : null;
   }, []);
 
-  // (Re)load when the file's bytes change (external edits, undo, other ops).
-  // Our OWN saves advance loadedFor to the anticipated key (below) so they
-  // don't trigger a reload that would clobber an in-progress inline edit.
+  // (Re)load when the shown file's BYTES change to something `nodes` doesn't
+  // already reflect — a file switch, an external whole-file op / undo / redo, or
+  // a forced revert. Our OWN saves set loadedBuffer to the exact buffer they
+  // dispatched (see persist), so they never self-trigger a reload that would
+  // clobber an in-progress inline edit.
   useEffect(() => {
-    if (!activeFile) {
+    if (!activeFile || activeFile.buffer == null) {
       setNodes([]);
-      setLoadedFor(null);
+      setLoadedBuffer(null);
       return;
     }
-    if (fileKey === loadedFor) return;
+    if (activeFile.buffer === loadedBuffer) return;
+    const targetBuffer = activeFile.buffer;
     let cancelled = false;
     call('get_outline', { file: activeFile.workingPath })
       .then((res) => {
         if (cancelled) return;
         setNodes((res.outline as OutlineNode[]) ?? []);
-        setLoadedFor(fileKey);
+        setLoadedBuffer(targetBuffer);
         setStatus(res.truncated ? 'Outline truncated (too many bookmarks)' : '');
       })
       .catch((e: unknown) => setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`));
     return () => {
       cancelled = true;
     };
-  }, [activeFile, fileKey, loadedFor, call]);
+  }, [activeFile, loadedBuffer, call]);
 
   // One persist path, chained so a reorder and an edit-save can't interleave
   // (both stage the same working file). The `target` is captured by the caller
   // at mutation time and threaded through — NOT re-read from a ref here — so a
   // tab switch between the mutation and this deferred run can't redirect the
-  // write to a different file (review-caught HIGH). Panel-local state
-  // (loadedFor/status) is only touched while `target` is still the shown file:
-  // loadedFor advances to the post-save key so our own save doesn't self-
-  // trigger the reload effect, but if the user has moved on, we leave the
-  // now-foreground file's state alone (it reloads itself from disk).
+  // write to a different file (review-caught HIGH). On success we advance
+  // loadedBuffer to the EXACT buffer we dispatched, so the reload effect sees
+  // `nodes` as already-current and doesn't self-reload (no key prediction, so no
+  // chained-save / failed-save / ping-pong race). A failure resets loadedBuffer
+  // to null, forcing a reload that reverts the optimistic tree to disk truth.
+  // Panel-local state is only touched while `target` is still the shown file.
   const persist = useCallback(
-    async (next: OutlineNode[], target: OpenFile, expectedLen: number): Promise<void> => {
-      // `expectedLen` is the undoStack length this file will have AFTER this
-      // save lands — computed by queuePersist across the whole chain, not read
-      // from `target` (whose snapshot is stale for the 2nd+ save queued before
-      // the 1st's UPDATE_FILE re-render). Keeps loadedFor matching the real
-      // post-save fileKey so our own chained saves never self-trigger a reload.
-      const expectedKey = `${target.path}#${target.pageCount}#${expectedLen}`;
+    async (next: OutlineNode[], target: OpenFile): Promise<void> => {
       const stillShown = () => activeFileRef.current?.path === target.path;
       if (stillShown()) setStatus('Saving…');
       try {
@@ -158,13 +157,13 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
           snapshotPath,
         });
         if (stillShown()) {
-          setLoadedFor(expectedKey);
+          setLoadedBuffer(buffer); // exactly what UPDATE_FILE installed → no self-reload
           setStatus('');
         }
       } catch (e: unknown) {
         if (stillShown()) {
           setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
-          setLoadedFor(null); // reload from disk on failure so the view matches
+          setLoadedBuffer(null); // reload from disk on failure so the view matches
         }
       }
     },
@@ -173,27 +172,9 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const persistRef = useRef(persist);
   persistRef.current = persist;
   const saveChain = useRef<Promise<void>>(Promise.resolve());
-  // Deterministic post-save-length counter for the chain: each save appends
-  // exactly one undoStack entry, so seed from the LIVE length when the chain is
-  // idle and bump once per enqueue — so two same-file saves queued back-to-back
-  // predict N+1 and N+2, not both N+1 (which under-counted loadedFor and flipped
-  // the panel into a spurious reload/Loading flash — review-caught). Re-seed too
-  // when the target FILE changes mid-chain (edit A, switch to B, edit B before
-  // A's slow saves drain) — B's count must restart from B's own length.
-  const expectedLenRef = useRef(0);
-  const chainDepthRef = useRef(0);
-  const chainPathRef = useRef<string | null>(null);
   const queuePersist = useCallback((next: OutlineNode[], target: OpenFile): Promise<void> => {
-    if (chainDepthRef.current === 0 || chainPathRef.current !== target.path) {
-      expectedLenRef.current = target.undoStack.length;
-    }
-    chainPathRef.current = target.path;
-    const expectedLen = (expectedLenRef.current += 1);
-    chainDepthRef.current += 1;
-    const run = saveChain.current.then(() => persistRef.current(next, target, expectedLen));
-    saveChain.current = run.catch(() => {}).finally(() => {
-      chainDepthRef.current -= 1;
-    });
+    const run = saveChain.current.then(() => persistRef.current(next, target));
+    saveChain.current = run.catch(() => {});
     return run;
   }, []);
 
@@ -420,7 +401,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   // file's tree). Gate the interactive UI on it so a click during the load
   // window can't act on (and persist) a phantom tree — belt-and-suspenders with
   // mutableTarget(), which already refuses the write.
-  const loaded = fileKey !== null && fileKey === loadedFor;
+  const loaded = activeFile?.buffer != null && activeFile.buffer === loadedBuffer;
 
   if (!activeFile) {
     return <div className="navpanel-empty" data-testid="bookmarks-panel">No document open.</div>;
