@@ -18,6 +18,7 @@ import { useSearchContext } from '../../search/SearchProvider';
 import { useFind } from '../../search/useFind';
 import { normalizeQuery, highlightWords } from '../../search/normalize';
 import { FindBar } from './FindBar';
+import { DocumentView } from './DocumentView';
 import { buildOcrApplyPayload } from '../../lib/ocr-apply';
 import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
@@ -114,6 +115,16 @@ export function WorkspaceCanvasView({
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const canvasRef = useRef<CanvasHandle | null>(null);
+  // Document view (M4): its reading-mode CanvasHandle, and a ref-mirror of the
+  // mode so the registered `canvas()` getter routes to the active view.
+  const documentViewRef = useRef<CanvasHandle | null>(null);
+  const docViewMode = state.ui.docViewMode;
+  const docViewModeRef = useRef(docViewMode);
+  docViewModeRef.current = docViewMode;
+  // The single document the reading view shows (the active file's doc; the
+  // board shows ALL docs, the reading view one). Manifest partitions share a
+  // path — the reading view takes the first for now (M4.1).
+  const focusedDoc = docs.find((d) => d.path === state.activeFileId) ?? null;
 
   // Publish the external-drop resolver (2n.3) so App's drop handler can map a
   // drop point to the document + index under it. Reads live layout/canvas via
@@ -402,7 +413,7 @@ export function WorkspaceCanvasView({
   findRef.current = find;
   useEffect(() => {
     registerCanvasServices({
-      canvas: () => canvasRef.current,
+      canvas: () => (docViewModeRef.current === 'document' ? documentViewRef.current : canvasRef.current),
       find: {
         isOpen: () => findRef.current.open,
         open: () => findRef.current.openFind(),
@@ -1265,6 +1276,41 @@ export function WorkspaceCanvasView({
         (tool === 'forms' ? ' forms-mode' : '')
       }
     >
+      {docViewMode === 'document' && focusedDoc ? (
+        <DocumentView
+          ref={documentViewRef}
+          doc={focusedDoc}
+          proxies={proxies}
+          renderVersion={renderVersion}
+          selectedPageIds={selectedPageIds}
+          onSelectPage={onSelectPage}
+          onOpenPage={onOpenPage}
+          onPageContextMenu={onPageContextMenu}
+          tool={tool}
+          annotationColor={toolColor ?? undefined}
+          stampPreset={stampPreset}
+          redactionMarksByPage={redactionMarksByPage}
+          signaturePlacement={liveSigPlacement}
+          findMatchPageIds={findMatchPageIds}
+          findWordsByPage={findWordsByPage}
+          formWidgetsByPage={formWidgetsByPage}
+          formValuesByPath={pendingFormValues}
+          onSetFormValue={onSetFormValue}
+          onSignFieldRequest={onSignFieldRequest}
+          formsAddMode={formsAddMode}
+          newFieldPlacement={liveNewFieldPlacement}
+          onSetNewFieldRect={onSetNewFieldRect}
+          onClearNewFieldPlacement={onClearNewFieldPlacement}
+          onAddAnnotation={onAddAnnotation}
+          onUpdateAnnotation={onUpdateAnnotation}
+          onRecolorAnnotation={onRecolorAnnotation}
+          onRemoveAnnotation={onRemoveAnnotation}
+          onAddRedactionMark={onAddRedactionMark}
+          onRemoveRedactionMark={onRemoveRedactionMark}
+          onSetSignaturePlacement={onSetSignaturePlacement}
+          onClearSignaturePlacement={onClearSignaturePlacement}
+        />
+      ) : (
       <Canvas
         ref={canvasRef}
         contentWidth={layout.contentWidth}
@@ -1343,6 +1389,7 @@ export function WorkspaceCanvasView({
           <AddDocGhost width={MIN_DOC_WIDTH} onClick={onOpenFiles} />
         </div>
       </Canvas>
+      )}
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
 
@@ -1450,6 +1497,19 @@ export function WorkspaceCanvasView({
             ))}
           </div>
         )}
+        <button
+          data-testid="toggle-doc-view"
+          title={docViewMode === 'document' ? 'Switch to the page organizer' : 'Switch to the reading view'}
+          onClick={() =>
+            dispatch({
+              type: 'UI_SET_DOC_VIEW_MODE',
+              mode: docViewMode === 'document' ? 'organize' : 'document',
+            })
+          }
+          className="px-3 py-1.5 text-xs font-medium rounded-full shadow-lg border bg-neutral-800/90 text-neutral-300 border-neutral-700 hover:bg-neutral-700"
+        >
+          {docViewMode === 'document' ? 'Organize' : 'Read'}
+        </button>
         <button
           data-testid="toggle-find"
           title="Find in documents (Ctrl+F)"
