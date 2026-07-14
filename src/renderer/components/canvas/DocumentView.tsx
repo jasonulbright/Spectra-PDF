@@ -146,10 +146,16 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
 
   // Focus the scroller when the reading view appears so PageUp/PageDown/Home/End/
   // arrows/Space scroll it natively (those keys aren't in the keymap table, so
-  // they fall through to the focused scroll region). preventScroll: don't jump
-  // the page just from taking focus.
+  // they fall through to the focused scroll region). But NEVER steal focus from
+  // a field the user is editing — this mounts on every doc switch (keyed) and a
+  // guard-exempt Ctrl+Tab can fire it while a nav-panel input or the page box
+  // has focus (review-caught). A button/body focus (e.g. the toggle pill) is
+  // fine to take over from. preventScroll: taking focus mustn't jump the page.
   useEffect(() => {
-    scrollRef.current?.focus({ preventScroll: true });
+    const active = document.activeElement as HTMLElement | null;
+    const editingField =
+      !!active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+    if (!editingField) scrollRef.current?.focus({ preventScroll: true });
   }, []);
 
   const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -165,12 +171,26 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   const onCurrentPageChange = props.onCurrentPageChange;
   useEffect(() => {
     if (!onCurrentPageChange || pageCount === 0 || viewportH === 0) return;
-    // The page under the viewport CENTER — the one you're actually reading, and
-    // consistent with centerOn (which centers a page), so a jump-to-page N
-    // reports back as N rather than N−1.
-    const current = Math.min(pageCount, Math.max(1, Math.floor((scrollTop + viewportH / 2) / rowH) + 1));
-    onCurrentPageChange(current);
-  }, [scrollTop, rowH, pageCount, viewportH, onCurrentPageChange]);
+    // Current page = the page occupying the MOST of the viewport. Robust at the
+    // top (page 1 wins, fully visible), the bottom (last page wins), and after a
+    // centered jump (the jumped-to page wins) — unlike a top-edge or
+    // center-point sample, both of which mis-report once the viewport is taller
+    // than a page (report page 2 at the top / can't reach the boundary pages).
+    // O(visible pages): only the handful spanning the viewport are checked.
+    const vFirst = Math.max(0, Math.floor(scrollTop / rowH));
+    const vLast = Math.min(pageCount - 1, Math.floor((scrollTop + viewportH - 1) / rowH));
+    let best = vFirst;
+    let bestOverlap = -1;
+    for (let i = vFirst; i <= vLast; i++) {
+      const top = i * rowH;
+      const overlap = Math.min(top + pageHeight, scrollTop + viewportH) - Math.max(top, scrollTop);
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        best = i;
+      }
+    }
+    onCurrentPageChange(best + 1);
+  }, [scrollTop, rowH, pageHeight, pageCount, viewportH, onCurrentPageChange]);
 
   // The reading CanvasHandle — pure scroll + scale, no world matrix.
   const centerOn = useCallback(

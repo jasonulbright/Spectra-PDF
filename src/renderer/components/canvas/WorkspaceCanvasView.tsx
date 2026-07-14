@@ -143,9 +143,22 @@ export function WorkspaceCanvasView({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageBox, setPageBox] = useState('1');
   const pageBoxFocused = useRef(false);
+  // Whether the box was actually EDITED since it gained focus — so a blur after
+  // just focusing + wheel-scrolling (no typing) resyncs the readout instead of
+  // teleporting back to the frozen number (review-caught).
+  const pageBoxDirty = useRef(false);
   useEffect(() => {
     if (!pageBoxFocused.current) setPageBox(String(currentPage));
   }, [currentPage]);
+  // Reset the readout when entering Read mode or switching the focused doc: a
+  // fresh DocumentView starts at page 1, and until it reports back the box would
+  // otherwise show the previous doc's page (e.g. "40 / 3") (review-caught).
+  useEffect(() => {
+    if (docViewMode === 'document') {
+      setCurrentPage(1);
+      setPageBox('1');
+    }
+  }, [docViewMode, focusedDoc?.id]);
 
   // Publish the external-drop resolver (2n.3) so App's drop handler can map a
   // drop point to the document + index under it. Reads live layout/canvas via
@@ -1630,17 +1643,27 @@ export function WorkspaceCanvasView({
             <input
               data-testid="page-nav-box"
               value={pageBox}
-              onChange={(e) => setPageBox(e.target.value.replace(/[^0-9]/g, ''))}
+              onChange={(e) => {
+                setPageBox(e.target.value.replace(/[^0-9]/g, ''));
+                pageBoxDirty.current = true;
+              }}
               onFocus={(e) => {
                 pageBoxFocused.current = true;
+                pageBoxDirty.current = false;
                 e.target.select();
               }}
               onBlur={() => {
                 pageBoxFocused.current = false;
-                const max = focusedDoc.pages.length;
-                const n = Math.max(1, Math.min(max, parseInt(pageBox, 10) || currentPage));
-                activeCanvasHandle()?.centerOn(focusedDoc.pages[n - 1].id);
-                setPageBox(String(n));
+                // Only navigate if the user actually typed a new page — a blur
+                // after just focusing + scrolling must not snap back.
+                if (pageBoxDirty.current) {
+                  const max = focusedDoc.pages.length;
+                  const n = Math.max(1, Math.min(max, parseInt(pageBox, 10) || currentPage));
+                  activeCanvasHandle()?.centerOn(focusedDoc.pages[n - 1].id);
+                  setPageBox(String(n));
+                } else {
+                  setPageBox(String(currentPage));
+                }
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
