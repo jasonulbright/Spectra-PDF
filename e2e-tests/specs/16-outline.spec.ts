@@ -42,11 +42,16 @@ interface PdfOutlineItem {
 
 const titles = (items: PdfOutlineItem[]): string[] => items.map((i) => i.title);
 
+// M3.2b: the outline surface is now the nav-pane Bookmarks panel (the
+// right-rail OutlineSidebar retired). It registers the same harness hooks
+// (getOutlineOrder / reorderOutline) on mount, so only the "open it" step
+// changed — from the toggle-outline pill to the nav icon strip.
 async function showOutline(): Promise<void> {
-  const toggle = await $('[data-testid="toggle-outline"]');
-  await toggle.waitForClickable({ timeout: 15_000 });
-  await toggle.click();
-  // The sidebar registers its harness hooks on mount, then reads the outline
+  const icon = await $('[data-testid="navicon-bookmarks"]');
+  await icon.waitForClickable({ timeout: 15_000 });
+  const pressed = await icon.getAttribute('aria-pressed');
+  if (pressed !== 'true') await icon.click();
+  // The panel registers its harness hooks on mount, then reads the outline
   // through the engine. Each spec FILE launches a fresh app (see wdio.conf
   // afterSession reaping), so the first read here waits on the engine's cold
   // boot — which eagerly imports the full pyHanko stack (engine/__main__.py) —
@@ -55,7 +60,7 @@ async function showOutline(): Promise<void> {
   // engine read itself is instant, so a wider budget just absorbs boot jitter.
   await browser.waitUntil(async () => (await getOutlineOrder()).length > 0, {
     timeout: 20_000,
-    timeoutMsg: 'outline sidebar never populated',
+    timeoutMsg: 'bookmarks panel never populated',
   });
 }
 

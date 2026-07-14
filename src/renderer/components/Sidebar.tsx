@@ -14,7 +14,6 @@ export type Operation =
   | 'encrypt'
   | 'decrypt'
   | 'extract_text'
-  | 'outline'
   | 'watermark'
   | 'forms'
   | 'compare'
@@ -58,7 +57,6 @@ const groups: OpGroup[] = [
   ]},
   { name: 'Content', items: [
     { id: 'extract_text', label: 'Extract Text' },
-    { id: 'outline', label: 'Bookmarks' },
     { id: 'watermark', label: 'Watermark' },
     { id: 'forms', label: 'Fill Form' },
     { id: 'compare', label: 'Compare' },

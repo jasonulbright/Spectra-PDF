@@ -17,7 +17,6 @@ import {
   waitForHarness,
   openByPaths,
   setView,
-  setActiveOp,
   saveActiveAs,
   closeAllFiles,
   commitPendingEdits,
@@ -89,36 +88,49 @@ describe('release gates (2p)', () => {
     await waitForHarness();
     await closeAllFiles();
     await openByPaths([BOOKMARKED]);
-    await setView('operations');
-    await setActiveOp('outline');
+    // M3.2b: the bookmarks editor is the nav-pane Bookmarks panel now (the Tools
+    // OutlinePanel retired). Open it on the doc board via the nav icon strip.
+    await setView('canvas');
+    const icon = $('[data-testid="navicon-bookmarks"]');
+    await icon.waitForClickable({ timeout: 15_000 });
+    if ((await icon.getAttribute('aria-pressed')) !== 'true') await icon.click();
 
-    const firstTitle = $('[data-testid="outline-title"]');
+    const firstTitle = $('[data-testid="bookmark-title"]');
     await firstTitle.waitForDisplayed({ timeout: 15_000 });
-    // Rename the first bookmark (controlled input — see setReactInputValue).
-    await setReactInputValue('[data-testid="outline-title"]', 'Renamed Chapter');
-    // Add a new top-level bookmark and title it.
-    await $('[data-testid="outline-add"]').click();
-    const titles = await $$('[data-testid="outline-title"]');
-    const newIndex = (await titles.length) - 1;
-    await browser.execute(
-      function (index: number, value: string) {
-        const inputs = document.querySelectorAll('[data-testid="outline-title"]');
-        const input = inputs[index] as HTMLInputElement;
-        const setter = Object.getOwnPropertyDescriptor(
-          window.HTMLInputElement.prototype,
-          'value',
-        )!.set!;
-        setter.call(input, value);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-      },
-      newIndex,
-      'Appendix Z',
-    );
+    // Rename the first bookmark — focus + set + Enter commits (onBlur → save).
+    await firstTitle.click();
+    await setReactInputValue('[data-testid="bookmark-title"]', 'Renamed Chapter');
+    await browser.keys(['Enter']);
 
-    await $('[data-testid="outline-save"]').click();
+    // Add a new top-level bookmark and title its (last) input, then commit.
+    await $('[data-testid="bookmark-add"]').click();
+    await browser.execute(function (value: string) {
+      const inputs = document.querySelectorAll('[data-testid="bookmark-title"]');
+      const input = inputs[inputs.length - 1] as HTMLInputElement;
+      input.focus();
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )!.set!;
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      input.blur();
+    }, 'Appendix Z');
+
+    // The edits auto-save to the WORKING file async; a panel round-trip
+    // (switch away + back) reloads the outline from disk, proving the saves
+    // landed before saveActiveAs (a raw copy of the working file) captures them.
+    await $('[data-testid="navicon-pages"]').click();
+    await $('[data-testid="pages-panel"]').waitForDisplayed();
+    await $('[data-testid="navicon-bookmarks"]').click();
+    await $('[data-testid="bookmark-row"]').waitForDisplayed();
     await browser.waitUntil(
-      async () => (await $('[data-testid="outline-save"]').getText()) !== 'Saving…',
-      { timeout: 20_000 },
+      async () => {
+        const titles = await $$('[data-testid="bookmark-title"]').map((el) => el.getValue());
+        return titles[0] === 'Renamed Chapter' && titles.includes('Appendix Z');
+      },
+      { timeout: 15_000, timeoutMsg: 'bookmark edits did not persist to the working file' },
     );
 
     const dest = resolve(tmp, 'rebookmarked.pdf');

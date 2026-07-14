@@ -100,7 +100,6 @@ const GLYPHS: Record<Operation, React.JSX.Element> = {
     </>
   ),
   // Bookmark ribbon.
-  outline: <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />,
   // Water droplet.
   watermark: <path d="M12 2.7s6.5 7.2 6.5 11a6.5 6.5 0 0 1-13 0c0-3.8 6.5-11 6.5-11z" />,
   // Checked box with lines beside it.

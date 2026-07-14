@@ -13,6 +13,7 @@ import {
 } from '../../lib/outline-reorder';
 import type { OutlineNode, FlatNode } from '../../lib/outline-reorder';
 import { ChromeIcon } from '../chrome-icons';
+import { TEST_HARNESS_ENABLED, registerCanvasOutline } from '../../testHarness';
 import type { NavPanelComponentProps } from './types';
 
 // Bookmarks nav panel (Phase 4 M3.2) — the ONE bookmarks surface, merging the
@@ -302,6 +303,28 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   );
 
   useEffect(() => () => detachRef.current(), []);
+
+  // e2e harness (moved from OutlineSidebar in M3.2b): the tree drag is
+  // pointer-capture, so expose the reader + the exact drop path while mounted.
+  const queuePersistRef = useRef(queuePersist);
+  queuePersistRef.current = queuePersist;
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerCanvasOutline({
+      getOrder: () =>
+        flattenOutline(nodesRef.current).map((f) => ({
+          title: f.node.title,
+          depth: f.depth,
+          page: f.node.page,
+        })),
+      reorder: async (fromPath, overIndex, depth) => {
+        const next = moveOutlineNode(nodesRef.current, fromPath, overIndex, depth);
+        setNodes(next);
+        await queuePersistRef.current(next);
+      },
+    });
+    return () => registerCanvasOutline(null);
+  }, []);
 
   const flat = useMemo(() => flattenOutline(nodes), [nodes]);
   const draggedPath = drag?.started ? drag.path : null;

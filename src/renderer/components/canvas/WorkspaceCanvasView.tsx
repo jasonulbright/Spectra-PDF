@@ -42,7 +42,6 @@ import type { PageAnnotation, PdfBuffer } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { STAMP_PRESETS, ANNOTATION_PALETTE } from './PageCell';
 import { CommentSidebar } from './CommentSidebar';
-import { OutlineSidebar } from './OutlineSidebar';
 
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
@@ -154,15 +153,6 @@ export function WorkspaceCanvasView({
   const [toolColor, setToolColor] = useState<string | null>(null);
   const [stampPreset, setStampPreset] = useState<StampPreset | null>(null);
   const [showComments, setShowComments] = useState(false);
-  // Outline sidebar (2n.2). Shares the right rail with Comments — opening one
-  // closes the other. Scoped to the active file's bookmarks.
-  const [showOutline, setShowOutline] = useState(false);
-  const activeFile = state.activeFileId ? state.files.get(state.activeFileId) ?? null : null;
-  // The outline sidebar is per-file; close it when no file is active (e.g. all
-  // closed) so it doesn't linger and reopen showing a stale file's bookmarks.
-  useEffect(() => {
-    if (!state.activeFileId) setShowOutline(false);
-  }, [state.activeFileId]);
   // Pending redaction marks — transient view state, deliberately NOT the
   // page-edit tier (see lib/redaction.ts for why). They survive tool
   // switches and in-memory page edits, and die when their file's buffer
@@ -1467,24 +1457,10 @@ export function WorkspaceCanvasView({
         <button
           data-testid="toggle-comments"
           title="Show annotation notes"
-          onClick={() => {
-            setShowComments((v) => !v);
-            setShowOutline(false);
-          }}
+          onClick={() => setShowComments((v) => !v)}
           className={`px-3 py-1.5 text-xs font-medium rounded-full shadow-lg border ${showComments ? 'bg-blue-600 text-white border-blue-600' : 'bg-neutral-800/90 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
         >
           Comments
-        </button>
-        <button
-          data-testid="toggle-outline"
-          title="Show bookmarks — click to jump, drag to reorder"
-          onClick={() => {
-            setShowOutline((v) => !v);
-            setShowComments(false);
-          }}
-          className={`px-3 py-1.5 text-xs font-medium rounded-full shadow-lg border ${showOutline ? 'bg-blue-600 text-white border-blue-600' : 'bg-neutral-800/90 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
-        >
-          Outline
         </button>
         {tool !== 'select' && tool !== 'stamp' && (
           <div
@@ -1596,14 +1572,6 @@ export function WorkspaceCanvasView({
           onRecolorAnnotation={onRecolorAnnotation}
           onRemoveAnnotation={onRemoveAnnotation}
           onClose={() => setShowComments(false)}
-        />
-      )}
-
-      {showOutline && (
-        <OutlineSidebar
-          activeFile={activeFile}
-          onJumpToPage={onFindNavigate}
-          onClose={() => setShowOutline(false)}
         />
       )}
 

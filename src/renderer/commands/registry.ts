@@ -71,7 +71,7 @@ const PANEL_OPS = [
   'compress', 'grayscale', 'optimize', 'pdfa', 'pdf_version',
   'repair', 'rebuild', 'recover',
   'encrypt', 'decrypt',
-  'extract_text', 'outline', 'watermark', 'forms', 'compare', 'signatures', 'metadata',
+  'extract_text', 'watermark', 'forms', 'compare', 'signatures', 'metadata',
 ] as const;
 type PanelOp = (typeof PANEL_OPS)[number];
 
@@ -80,7 +80,7 @@ const PANEL_TITLES: Record<PanelOp, string> = {
   compress: 'Compress', grayscale: 'Convert to Grayscale', optimize: 'Optimize PDF',
   pdfa: 'Convert to PDF/A', pdf_version: 'Set PDF Version',
   encrypt: 'Encrypt PDF', decrypt: 'Decrypt PDF',
-  extract_text: 'Extract Text', metadata: 'Edit Metadata', outline: 'Bookmarks',
+  extract_text: 'Extract Text', metadata: 'Edit Metadata',
   watermark: 'Watermark', forms: 'Fill Form', compare: 'Compare PDFs',
   signatures: 'Signatures',
   repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',

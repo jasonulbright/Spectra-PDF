@@ -358,8 +358,8 @@ export interface TestHarness {
   deleteSelectedCanvasPages: () => void;
   /** Rotate the current canvas selection ±90 via the batched path (`[`/`]`). */
   rotateSelectedCanvasPages: (delta: 90 | 270) => void;
-  /** Flattened outline rows (title/depth/page) the sidebar currently shows.
-   * Outline sidebar must be mounted (toggle-outline). */
+  /** Flattened outline rows (title/depth/page) the bookmarks surface shows.
+   * The nav-pane Bookmarks panel must be mounted (M3.2b — navicon-bookmarks). */
   getOutlineOrder: () => { title: string; depth: number; page: number | null }[];
   /** Reorder an outline node via the exact drop path (moveOutlineNode ->
    * set_outline -> UPDATE_FILE); resolves after the save. */

@@ -80,7 +80,6 @@ const toolsGroups: { label: string; ops: CommandId[] }[] = [
     label: 'Content',
     ops: [
       'tools.panel.extract_text',
-      'tools.panel.outline',
       'tools.panel.watermark',
       'tools.panel.forms',
       'tools.panel.compare',
