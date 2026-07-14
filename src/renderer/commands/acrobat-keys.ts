@@ -50,9 +50,15 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   // reserved/unbound until M5.
   { key: 'f4', command: 'view.navPane', scope: 'canvas', editableGuard: false, preventDefault: 'always' },
   // Search panel (§ 9.2, M3.3) — Ctrl+Shift+F opens the nav-pane Search list
-  // (toggles closed on repeat). Canvas-scoped and guard-exempt, like Find; the
-  // shift split from Ctrl+F is why the Find binding below is now shift: false.
-  { key: 'f', ctrl: true, shift: true, command: 'view.navPanel.search', scope: 'canvas', editableGuard: false, preventDefault: 'always' },
+  // (the command toggles, so it also closes on repeat). Canvas-scoped. Unlike
+  // Find (Ctrl+F, guard-exempt), this is editableGuard:TRUE: the panel it opens
+  // autofocuses a text input, and because the command toggles, a guard-exempt
+  // binding would let a second Ctrl+Shift+F *from inside that input* close the
+  // panel and discard the half-typed query (review-caught). Guarded, the reflex
+  // re-press is a no-op; you still open Search from any non-field focus, and
+  // Find stays the always-available search. The shift split from Ctrl+F is why
+  // the Find binding below is now shift: false.
+  { key: 'f', ctrl: true, shift: true, command: 'view.navPanel.search', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   // Undo/redo — app-global (2n.1). Ctrl+Y redo is shift-agnostic like the
   // listener it replaces.
   { key: 'z', ctrl: true, shift: false, command: 'edit.undo', scope: 'global', editableGuard: true, preventDefault: 'always' },

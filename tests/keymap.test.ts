@@ -202,11 +202,22 @@ describe('dispatchKeyEvent', () => {
       canvas: () => null,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn() },
     });
-    const e = fakeEvent({ key: 'f', ctrl: true, shift: true, target: INPUT });
+    const e = fakeEvent({ key: 'f', ctrl: true, shift: true, target: DIV });
     dispatchKeyEvent(e);
     expect(e.defaultPrevented).toBe(true);
     expect(open).not.toHaveBeenCalled(); // NOT Find
     expect(dispatched).toEqual([{ type: 'UI_OPEN_NAV_PANEL', panel: 'search' }]);
+  });
+
+  it('Ctrl+Shift+F is edit-guarded — a re-press from inside the search box is a no-op', () => {
+    // Unlike Find, the Search command toggles; guarding it means a reflex
+    // re-press while the (autofocused) search input has focus can't close the
+    // panel and discard the query (review-caught MED).
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
+    const e = fakeEvent({ key: 'f', ctrl: true, shift: true, target: INPUT });
+    dispatchKeyEvent(e);
+    expect(e.defaultPrevented).toBe(false); // guarded: no preventDefault, no dispatch
+    expect(dispatched).toEqual([]);
   });
 
   it('canvas-scoped bindings fall through outside the canvas view', () => {

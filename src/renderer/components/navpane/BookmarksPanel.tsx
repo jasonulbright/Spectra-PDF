@@ -81,6 +81,24 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
     ? `${activeFile.path}#${activeFile.pageCount}#${activeFile.undoStack.length}`
     : null;
 
+  // `loadedFor` = the fileKey whose real outline currently populates `nodes`.
+  // A mutator may ONLY persist when the shown tree is that file's loaded tree —
+  // otherwise it would write the empty initial `[]` (or the previous file's
+  // tree, mid-switch) over the target's real bookmarks, and `set_outline` is a
+  // full REPLACE, not a merge (review-caught HIGH). `mutableTarget()` returns
+  // the file to write to, or null while its outline is still loading. Reads via
+  // refs so the event-handler callbacks always see live values. (After our own
+  // save, `loadedFor` and the file's identity advance together in one batched
+  // flush — see `persist` — so this never false-negatives on a normal edit.)
+  const loadedForRef = useRef(loadedFor);
+  loadedForRef.current = loadedFor;
+  const mutableTarget = useCallback((): OpenFile | null => {
+    const target = activeFileRef.current;
+    if (!target) return null;
+    const key = `${target.path}#${target.pageCount}#${target.undoStack.length}`;
+    return key === loadedForRef.current ? target : null;
+  }, []);
+
   // (Re)load when the file's bytes change (external edits, undo, other ops).
   // Our OWN saves advance loadedFor to the anticipated key (below) so they
   // don't trigger a reload that would clobber an in-progress inline edit.
@@ -166,9 +184,9 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const commitEdit = useCallback(() => {
     const base = editBaseline.current;
     editBaseline.current = null;
-    const target = activeFileRef.current;
+    const target = mutableTarget();
     if (target && base && !outlinesEqual(base, nodesRef.current)) void queuePersist(nodesRef.current, target);
-  }, [queuePersist]);
+  }, [queuePersist, mutableTarget]);
   // Commit a pending inline edit on unmount too — closing the pane / switching
   // panels while a field is dirty-but-not-yet-blurred must not lose it (the
   // async persist still lands via dispatch after unmount). commitEdit clears
@@ -191,17 +209,17 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   }, []);
 
   const addRoot = useCallback(() => {
-    const target = activeFileRef.current;
+    const target = mutableTarget();
     if (!target) return;
     const next = [...nodesRef.current, { title: 'Untitled', page: null, children: [] }];
     setNodes(next);
     rebaseIfEditing(next);
     void queuePersist(next, target);
-  }, [queuePersist, rebaseIfEditing]);
+  }, [queuePersist, rebaseIfEditing, mutableTarget]);
 
   const addChild = useCallback(
     (path: number[]) => {
-      const target = activeFileRef.current;
+      const target = mutableTarget();
       if (!target) return;
       const next = updateAt(nodesRef.current, path, (n) => ({
         ...n,
@@ -211,19 +229,19 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       rebaseIfEditing(next);
       void queuePersist(next, target);
     },
-    [queuePersist, rebaseIfEditing],
+    [queuePersist, rebaseIfEditing, mutableTarget],
   );
 
   const deleteNode = useCallback(
     (path: number[]) => {
-      const target = activeFileRef.current;
+      const target = mutableTarget();
       if (!target) return;
       const next = updateAt(nodesRef.current, path, () => null);
       setNodes(next);
       rebaseIfEditing(next);
       void queuePersist(next, target);
     },
-    [queuePersist, rebaseIfEditing],
+    [queuePersist, rebaseIfEditing, mutableTarget],
   );
 
   const jumpTo = useCallback(
@@ -286,7 +304,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       // Abort if the active file changed mid-drag — the cache + path index the
       // OLD tree; applying to the reloaded (different) file's outline would
       // corrupt it and save to the wrong file (same guard as the Pages panel).
-      const target = activeFileRef.current;
+      const target = mutableTarget();
       if (!target || s.filePath !== target.path) return;
       const { overIndex, depth } = projectFromCache(s, cache, e.clientX, e.clientY);
       const next = moveOutlineNode(nodesRef.current, s.path, overIndex, depth);
@@ -295,7 +313,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       rebaseIfEditing(next);
       void queuePersist(next, target);
     },
-    [queuePersist, rebaseIfEditing],
+    [queuePersist, rebaseIfEditing, mutableTarget],
   );
 
   const onHandlePointerDown = useCallback(
@@ -354,14 +372,19 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
           page: f.node.page,
         })),
       reorder: async (fromPath, overIndex, depth) => {
-        const target = activeFileRef.current;
+        const target = mutableTarget();
         if (!target) return;
         const next = moveOutlineNode(nodesRef.current, fromPath, overIndex, depth);
         setNodes(next);
+        rebaseIfEditing(next);
         await queuePersistRef.current(next, target);
       },
     });
     return () => registerCanvasOutline(null);
+    // Register once for the panel's lifetime; the reorder closure reads live
+    // values through refs (nodesRef/queuePersistRef) and the stable-identity
+    // mutableTarget/rebaseIfEditing callbacks (empty-dep useCallbacks).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const flat = useMemo(() => flattenOutline(nodes), [nodes]);
@@ -369,6 +392,12 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const rest = draggedPath ? restRows(flat, draggedPath) : [];
   const indicatorPath = draggedPath ? rest[drag!.overIndex]?.path ?? null : null;
   const indicatorAtEnd = draggedPath ? drag!.overIndex >= rest.length : false;
+  // The shown tree is trustworthy only once THIS file's outline has loaded —
+  // until then `nodes` is the empty initial value (or, mid-switch, the previous
+  // file's tree). Gate the interactive UI on it so a click during the load
+  // window can't act on (and persist) a phantom tree — belt-and-suspenders with
+  // mutableTarget(), which already refuses the write.
+  const loaded = fileKey !== null && fileKey === loadedFor;
 
   if (!activeFile) {
     return <div className="navpanel-empty" data-testid="bookmarks-panel">No document open.</div>;
@@ -377,8 +406,9 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   return (
     <div className="bookmarks-panel flex flex-col h-full min-h-0" data-testid="bookmarks-panel">
       <div className="navpanel-scroll bookmarks-list flex-1" ref={listRef}>
-        {flat.length === 0 && <p className="navpanel-empty">No bookmarks yet.</p>}
-        {flat.map((f) => {
+        {!loaded && <p className="navpanel-empty" data-testid="bookmarks-loading">Loading bookmarks…</p>}
+        {loaded && flat.length === 0 && <p className="navpanel-empty">No bookmarks yet.</p>}
+        {loaded && flat.map((f) => {
           const key = f.path.join('.');
           const isDragged = draggedPath != null && isPathPrefix(draggedPath, f.path);
           return (
@@ -459,10 +489,15 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
             </div>
           );
         })}
-        {indicatorAtEnd && <div className="outline-drop-indicator" style={{ marginLeft: drag!.depth * INDENT_PX }} />}
+        {loaded && indicatorAtEnd && <div className="outline-drop-indicator" style={{ marginLeft: drag!.depth * INDENT_PX }} />}
       </div>
       <div className="bookmarks-footer">
-        <button data-testid="bookmark-add" onClick={addRoot} className="bookmark-add-btn">
+        <button
+          data-testid="bookmark-add"
+          onClick={addRoot}
+          disabled={!loaded}
+          className="bookmark-add-btn disabled:opacity-50"
+        >
           + Add bookmark
         </button>
         {status && <span className="bookmark-status">{status}</span>}
