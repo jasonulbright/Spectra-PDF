@@ -3,7 +3,7 @@ import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { usePdfProxies } from '../../hooks/usePdfProxies';
 import { logRenderError, scheduleReblit } from '../canvas/raster';
-import { getCanvasServices } from '../../commands/context';
+import { getCanvasServices, pushEscapeInterceptor } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { computeReorderTarget } from '../../lib/page-reorder';
 import { ContextMenu } from '../ContextMenu';
@@ -206,12 +206,16 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
   // window handlers the latest items/selection; a per-drag `detachRef` removes
   // that drag's listeners (also on unmount), so no handler-identity juggling.
   const [dropGap, setDropGap] = useState<number | null>(null);
-  const dragRef = useRef<{ grabbedId: string; startX: number; startY: number; started: boolean; movingIds: string[] } | null>(null);
+  const dragRef = useRef<{ grabbedId: string; startX: number; startY: number; started: boolean; movingIds: string[]; filePath: string | undefined } | null>(null);
   const detachRef = useRef<() => void>(() => {});
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  // The file the drag started against — a mid-drag tab switch (Ctrl+Tab while
+  // the button is held) must NOT splice pages into a different open PDF.
+  const activeFilePathRef = useRef(activeFile?.path);
+  activeFilePathRef.current = activeFile?.path;
 
   const flatIndexAt = useCallback((clientY: number): number => {
     const el = scrollerRef.current;
@@ -256,6 +260,15 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       window.addEventListener('click', swallow, { capture: true, once: true });
       setTimeout(() => window.removeEventListener('click', swallow, true), 0);
 
+      // Abort if the active file changed mid-drag, or any moving page is no
+      // longer in the current file's items — else the reducer (which searches
+      // ALL workspace docs) would move them into whatever file is now shown
+      // (review-caught HIGH; the single-page path already self-guards via the
+      // `from` lookup below, this covers the multi path too).
+      if (s.filePath !== activeFilePathRef.current) return;
+      const currentIds = new Set(itemsRef.current.map((it) => it.page.id));
+      if (!s.movingIds.every((id) => currentIds.has(id))) return;
+
       const target = computeReorderTarget(
         itemsRef.current.map((it) => ({ docId: it.docId, pageId: it.page.id })),
         s.movingIds,
@@ -277,16 +290,33 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
   const onRowPointerDown = useCallback(
     (item: PageItem, e: React.PointerEvent): void => {
       if (e.button !== 0 || dragRef.current) return;
-      dragRef.current = { grabbedId: item.page.id, startX: e.clientX, startY: e.clientY, started: false, movingIds: [item.page.id] };
+      dragRef.current = {
+        grabbedId: item.page.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        started: false,
+        movingIds: [item.page.id],
+        filePath: activeFilePathRef.current,
+      };
       const onUp = (ev: PointerEvent) => finishDrag(ev.clientY, true);
-      const onCancel = () => finishDrag(0, false);
+      const cancel = () => finishDrag(0, false); // pointercancel / blur / Escape
       window.addEventListener('pointermove', dragMove);
       window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onCancel);
+      window.addEventListener('pointercancel', cancel);
+      // Match usePageDrag's safety nets: window blur and Escape abort the drag
+      // (review-caught — otherwise a focus loss strands the window listeners
+      // and a later unrelated click resolves the stale session).
+      window.addEventListener('blur', cancel);
+      const unEscape = pushEscapeInterceptor(() => {
+        cancel();
+        return true;
+      });
       detachRef.current = () => {
         window.removeEventListener('pointermove', dragMove);
         window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onCancel);
+        window.removeEventListener('pointercancel', cancel);
+        window.removeEventListener('blur', cancel);
+        unEscape();
       };
     },
     [dragMove, finishDrag],
