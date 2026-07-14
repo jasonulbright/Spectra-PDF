@@ -9,18 +9,8 @@ import { ChromeIcon, type ChromeIconId } from './chrome-icons';
 // The main toolbar (Phase 4 M2) — icon buttons driven by the command
 // registry over commands/toolbars data. Enablement comes from each command's
 // pure predicate; zoom/find self-disable off the document board (their
-// commands need the canvas services), so no toolbar-side view gating.
-
-const ICON_FOR: Record<CommandId, ChromeIconId> = {
-  'file.open': 'open',
-  'file.save': 'save',
-  'edit.undo': 'undo',
-  'edit.redo': 'redo',
-  'view.zoomOut': 'zoomOut',
-  'view.fit': 'fit',
-  'view.zoomIn': 'zoomIn',
-  'edit.find': 'find',
-} as Record<CommandId, ChromeIconId>;
+// commands need the canvas services), so no toolbar-side view gating. The
+// glyph rides on the toolbar node (tsc-total by construction — no side map).
 
 const TESTID_FOR: Partial<Record<CommandId, string>> = {
   'file.open': 'toolbar-open',
@@ -30,7 +20,7 @@ const TESTID_FOR: Partial<Record<CommandId, string>> = {
   'edit.find': 'toolbar-find',
 };
 
-function ToolbarButton({ command }: { command: CommandId }): React.ReactElement {
+function ToolbarButton({ command, icon }: { command: CommandId; icon: ChromeIconId }): React.ReactElement {
   const enabled = isCommandEnabled(command);
   const shortcut = shortcutForCommand(command);
   const title = shortcut ? `${COMMANDS[command].title} (${shortcut})` : COMMANDS[command].title;
@@ -44,7 +34,7 @@ function ToolbarButton({ command }: { command: CommandId }): React.ReactElement 
       aria-label={COMMANDS[command].title}
       className="w-7 h-7 flex items-center justify-center rounded text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors"
     >
-      <ChromeIcon icon={ICON_FOR[command]} />
+      <ChromeIcon icon={icon} />
     </button>
   );
 }
@@ -60,7 +50,7 @@ export function MainToolbar(): React.ReactElement {
         node.kind === 'separator' ? (
           <div key={i} className="w-px h-5 bg-neutral-700 mx-1" />
         ) : (
-          <ToolbarButton key={i} command={node.command} />
+          <ToolbarButton key={i} command={node.command} icon={node.icon} />
         ),
       )}
     </div>

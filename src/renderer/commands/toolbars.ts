@@ -1,32 +1,37 @@
 // The main toolbar as DATA (19-phase4 § 3.1). A flat list of registered
-// command ids with separators; the MainToolbar component renders each as an
-// icon button driven by the command (title→tooltip, when→disabled). Zoom and
-// Find need the board's canvas services, so their commands self-disable off
-// the board (canvas() === null) — no toolbar-side view gating needed.
+// command ids (each with its glyph) plus separators; the MainToolbar
+// component renders each as an icon button driven by the command
+// (title→tooltip, when→disabled). Zoom and Find need the board's canvas
+// services, so their commands self-disable off the board (canvas() === null)
+// — no toolbar-side view gating needed. The icon rides on the node (not a
+// side map) so a new entry can't compile without one (the GLYPHS precedent).
 import type { CommandId } from './registry';
+import type { ChromeIconId } from '../components/chrome-icons';
 
-export type ToolbarNode = { kind: 'command'; command: CommandId } | { kind: 'separator' };
+export type ToolbarNode =
+  | { kind: 'command'; command: CommandId; icon: ChromeIconId }
+  | { kind: 'separator' };
 
-const c = (command: CommandId): ToolbarNode => ({ kind: 'command', command });
+const c = (command: CommandId, icon: ChromeIconId): ToolbarNode => ({ kind: 'command', command, icon });
 const sep: ToolbarNode = { kind: 'separator' };
 
 export const MAIN_TOOLBAR: ToolbarNode[] = [
-  c('file.open'),
-  c('file.save'),
+  c('file.open', 'open'),
+  c('file.save', 'save'),
   sep,
-  c('edit.undo'),
-  c('edit.redo'),
+  c('edit.undo', 'undo'),
+  c('edit.redo', 'redo'),
   sep,
-  c('view.zoomOut'),
-  c('view.fit'),
-  c('view.zoomIn'),
+  c('view.zoomOut', 'zoomOut'),
+  c('view.fit', 'fit'),
+  c('view.zoomIn', 'zoomIn'),
   sep,
-  c('edit.find'),
+  c('edit.find', 'find'),
 ];
 
 /** Registered ids the toolbar references (integrity test). */
 export function toolbarCommandIds(): CommandId[] {
-  return MAIN_TOOLBAR.filter((n): n is { kind: 'command'; command: CommandId } => n.kind === 'command').map(
-    (n) => n.command,
-  );
+  return MAIN_TOOLBAR.filter(
+    (n): n is Extract<ToolbarNode, { kind: 'command' }> => n.kind === 'command',
+  ).map((n) => n.command);
 }

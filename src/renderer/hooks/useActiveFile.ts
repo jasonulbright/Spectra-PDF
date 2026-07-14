@@ -19,27 +19,34 @@ export function useActiveFile() {
   const openNewFiles = useCallback(async () => {
     const paths = await openFiles();
     let recent = state.ui.recentFiles;
-    for (const filePath of paths) {
-      recent = withRecent(recent, filePath);
-      if (state.files.has(filePath)) {
-        dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
-        continue;
+    let changed = false;
+    try {
+      for (const filePath of paths) {
+        if (state.files.has(filePath)) {
+          dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
+          recent = withRecent(recent, filePath); // only on success (review-caught)
+          changed = true;
+          continue;
+        }
+        const workingPath = await file.createWorkingCopy(filePath);
+        const buffer = await file.readBuffer(workingPath);
+        const info = await call('get_page_count', { file: workingPath });
+        dispatch({
+          type: 'OPEN_FILE',
+          path: filePath,
+          workingPath,
+          name: filePath.split(/[\\/]/).pop() || filePath,
+          pageCount: info.pages,
+          buffer,
+        });
+        recent = withRecent(recent, filePath);
+        changed = true;
       }
-      const workingPath = await file.createWorkingCopy(filePath);
-      const buffer = await file.readBuffer(workingPath);
-      const info = await call('get_page_count', { file: workingPath });
-      dispatch({
-        type: 'OPEN_FILE',
-        path: filePath,
-        workingPath,
-        name: filePath.split(/[\\/]/).pop() || filePath,
-        pageCount: info.pages,
-        buffer,
-      });
+    } finally {
+      // One dispatch so a multi-file batch doesn't clobber itself; in a finally
+      // so a malformed file mid-batch still records the files that did open.
+      if (changed) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
     }
-    // Track recent (ui slice + App's persistence effect) — one dispatch so
-    // multi-file opens don't clobber each other within the batch.
-    if (paths.length > 0) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
   }, [state.files, state.ui.recentFiles, call, openFiles, dispatch]);
 
   return { activeFile, allFiles, openNewFiles, state, dispatch };

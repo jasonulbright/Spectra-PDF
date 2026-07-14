@@ -276,8 +276,6 @@ export interface TestHarness {
   waitForEngine: (timeoutMs?: number) => Promise<void>;
   /** Pop the most recent error captured by the harness, if any. */
   consumeLastError: () => string | null;
-  /** Skip the welcome screen on the next reload. */
-  skipWelcome: () => void;
   /**
    * Add an annotation to the active file's first workspace page, bypassing
    * pointer-drag simulation (the canvas tools are pointer-capture based —
@@ -621,9 +619,6 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       const e = lastError;
       lastError = null;
       return e;
-    },
-    skipWelcome: () => {
-      localStorage.setItem('spectra-skip-welcome', 'true');
     },
     addAnnotation: async (annotation, timeoutMs = 10_000) => {
       const deadline = Date.now() + timeoutMs;

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useReducer, type Dispatch } from 'react';
 import { AppState, AppAction } from './types';
 import { appReducer, initialState } from './reducer';
+import { readRecent } from '../lib/recent-files';
 
 const StateContext = createContext<AppState>(initialState);
 const DispatchContext = createContext<Dispatch<AppAction>>(() => {});
@@ -12,12 +13,10 @@ const DispatchContext = createContext<Dispatch<AppAction>>(() => {});
 // `spectra-recent` key App has always persisted. Lazy so the reads happen
 // once per mount, not per render.
 function bootState(base: AppState): AppState {
-  let recentFiles: string[] = [];
-  try {
-    recentFiles = JSON.parse(localStorage.getItem('spectra-recent') || '[]') as string[];
-  } catch {
-    // corrupt entry — start empty, the next addRecent rewrites it
-  }
+  // readRecent validates shape (JSON-valid-but-non-array → []), so a corrupt
+  // entry can't propagate a non-array into ui.recentFiles and crash HomeTab's
+  // .map on first render (review-caught).
+  const recentFiles = readRecent();
   if (recentFiles.length === 0) return base;
   return { ...base, ui: { ...base.ui, recentFiles } };
 }

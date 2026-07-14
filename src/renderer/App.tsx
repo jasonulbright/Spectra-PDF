@@ -162,6 +162,10 @@ function AppContent(): React.ReactElement {
 
   const activeFile = state.activeFileId ? state.files.get(state.activeFileId) : null;
   const inspectorFile = inspector ? state.files.get(inspector.path) : null;
+  // Open, tab-bearing files (importOnly sources excluded) — the Tools-tab
+  // active-file switcher lists these so a panel can retarget without leaving
+  // the tab (a doc-tab click would move focus off Tools and unmount the panel).
+  const tabFileList = Array.from(state.files.values()).filter((f) => !f.importOnly);
 
   // Commit-failure banner: commits triggered from gates/effects have no
   // natural place to report, so failures surface here.
@@ -276,20 +280,29 @@ function AppContent(): React.ReactElement {
   const openByPaths = useCallback(async (paths: string[]) => {
     let recent = stateRef.current.ui.recentFiles;
     let lastOpened: string | null = null;
-    for (const filePath of paths) {
-      recent = withRecent(recent, filePath);
-      if (state.files.has(filePath)) {
-        dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
+    let changed = false;
+    try {
+      for (const filePath of paths) {
+        if (state.files.has(filePath)) {
+          dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
+          recent = withRecent(recent, filePath); // only on success — a cancel/throw
+          lastOpened = filePath;                  // must not pollute Recent (review-caught)
+          changed = true;
+          continue;
+        }
+        const prepared = await prepareFileBytes(filePath);
+        if (!prepared) continue; // cancelled encrypted file
+        dispatch({ type: 'OPEN_FILE', path: filePath, ...prepared });
+        recent = withRecent(recent, filePath);
         lastOpened = filePath;
-        continue;
+        changed = true;
       }
-      const prepared = await prepareFileBytes(filePath);
-      if (!prepared) continue; // cancelled encrypted file
-      dispatch({ type: 'OPEN_FILE', path: filePath, ...prepared });
-      lastOpened = filePath;
+    } finally {
+      // Flush whatever succeeded even if a later file threw (a malformed PDF
+      // mid-batch would otherwise strand the opened tabs unfocused + unrecorded).
+      if (changed) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
+      if (lastOpened) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: lastOpened } });
     }
-    if (paths.length > 0) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
-    if (lastOpened) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: lastOpened } });
   }, [state.files, dispatch, prepareFileBytes]);
 
   // Import one or more files' pages INTO an existing document at an index (the
@@ -889,9 +902,34 @@ function AppContent(): React.ReactElement {
       <TabStrip onCloseFile={(path) => void handleCloseFile(path)} />
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Tools tab: operations rail + the active panel */}
+        {/* Tools tab: active-file switcher + operations rail + the active panel */}
         {focusedTab === 'tools' && (
           <div className="app-rail flex flex-col shrink-0 border-r border-neutral-800">
+            {tabFileList.length > 0 && (
+              <div className="w-48 border-b border-neutral-800 py-2 shrink-0 max-h-48 overflow-y-auto">
+                <div className="px-4 pb-1 text-[10px] uppercase tracking-widest text-neutral-300 font-semibold">
+                  Active File
+                </div>
+                {tabFileList.map((f) => (
+                  <button
+                    key={f.path}
+                    data-testid="tools-active-file"
+                    onClick={() => dispatch({ type: 'SET_ACTIVE_FILE', path: f.path })}
+                    className={`w-full px-4 py-1.5 text-left text-sm truncate transition-colors ${
+                      f.dirty ? 'italic' : ''
+                    } ${
+                      state.activeFileId === f.path
+                        ? 'bg-neutral-700 text-white'
+                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
+                    }`}
+                    title={f.path}
+                  >
+                    {isFileDirty(f) && <span className="text-amber-400 mr-1 not-italic">*</span>}
+                    {f.name}
+                  </button>
+                ))}
+              </div>
+            )}
             <Sidebar active={activeOp} onSelect={(op) => invokeCommand(`tools.panel.${op}`)} />
           </div>
         )}

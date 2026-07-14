@@ -108,12 +108,6 @@ export async function consumeLastError(): Promise<string | null> {
   });
 }
 
-export async function skipWelcome(): Promise<void> {
-  await browser.execute(function () {
-    (window as any).__SPECTRA_TEST__.skipWelcome();
-  });
-}
-
 export interface TestAnnotationInput {
   kind: 'highlight' | 'freetext' | 'ink' | 'stamp';
   x: number;
