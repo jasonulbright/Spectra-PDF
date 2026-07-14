@@ -561,6 +561,23 @@
   cursor: grab;
 }
 
+/* Document view (M4) — the continuous reading column (plain scroller, not the
+   d3 board). Pages are absolutely positioned inside a full-height spacer by the
+   virtualizer; each row shows the page shadow + a white backing so a page reads
+   as a page even before its raster lands. */
+.docview-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #262626;
+}
+.docview-row {
+  background: #ffffff;
+  box-shadow: var(--page-shadow);
+}
+[data-theme="light"] .docview-scroll { background: #eceef1; }
+
 .canvas-viewport.panning {
   cursor: grabbing;
 }

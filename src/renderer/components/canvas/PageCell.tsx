@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
-import { displayWidthOf } from '../../canvas/layout';
+import { displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/layout';
 import { projectMarkRect, rotateNormalizedRect } from '../../lib/redaction';
 import type { RedactionMark } from '../../lib/redaction';
 import type { OcrWord } from '../../ocr/types';
@@ -363,7 +363,12 @@ function PageCellImpl({
   onSetSignaturePlacement,
   onClearSignaturePlacement,
 }: PageCellProps): React.JSX.Element {
-  const displayWidth = displayWidthOf(page);
+  // `displayWidthOf` gives the width at BASE_PAGE_HEIGHT; scale it by the actual
+  // `pageHeight` so the cell keeps the page's aspect at ANY height. The board
+  // passes pageHeight = BASE_PAGE_HEIGHT (factor 1 → unchanged); the Document
+  // view (M4) passes BASE × zoom, sizing the whole cell — raster, overlays, and
+  // font (below) all key off pageHeight, so the page scales uniformly.
+  const displayWidth = displayWidthOf(page) * (pageHeight / BASE_PAGE_HEIGHT);
   const annotateMode = tool !== 'select';
   // Rubber band for the annotation tools, in display-normalized coords.
   // Driven by window-level native listeners for the drag's duration — the
