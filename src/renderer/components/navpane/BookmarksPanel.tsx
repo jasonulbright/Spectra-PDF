@@ -14,6 +14,7 @@ import {
 import type { OutlineNode, FlatNode } from '../../lib/outline-reorder';
 import { ChromeIcon } from '../chrome-icons';
 import { TEST_HARNESS_ENABLED, registerCanvasOutline } from '../../testHarness';
+import type { OpenFile } from '../../state/types';
 import type { NavPanelComponentProps } from './types';
 
 // Bookmarks nav panel (Phase 4 M3.2) — the ONE bookmarks surface, merging the
@@ -66,10 +67,15 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const session = useRef<DragState | null>(null);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
-  // The file the drag started against — a mid-drag doc-tab switch must not
-  // apply a stale reorder (measured against the old tree) to a different file.
-  const activeFilePathRef = useRef(activeFile?.path);
-  activeFilePathRef.current = activeFile?.path;
+  // The live active file, as a ref — every mutator captures THIS at the moment
+  // it fires (all mutators run synchronously in event handlers, before any
+  // re-render), so the queued save targets the file the user was editing, not
+  // "whichever file is active when the microtask happens to run". Without this,
+  // a doc-tab switch (or closing the edited file) between an on-blur commit and
+  // its deferred persist would write the edited tree onto the newly-active
+  // file — the same stale-target hazard the drag guards with `s.filePath`.
+  const activeFileRef = useRef(activeFile);
+  activeFileRef.current = activeFile;
 
   const fileKey = activeFile
     ? `${activeFile.path}#${activeFile.pageCount}#${activeFile.undoStack.length}`
@@ -100,42 +106,52 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   }, [activeFile, fileKey, loadedFor, call]);
 
   // One persist path, chained so a reorder and an edit-save can't interleave
-  // (both stage the same working file). Advances loadedFor to the post-save key
-  // so this save doesn't self-trigger the reload effect.
+  // (both stage the same working file). The `target` is captured by the caller
+  // at mutation time and threaded through — NOT re-read from a ref here — so a
+  // tab switch between the mutation and this deferred run can't redirect the
+  // write to a different file (review-caught HIGH). Panel-local state
+  // (loadedFor/status) is only touched while `target` is still the shown file:
+  // loadedFor advances to the post-save key so our own save doesn't self-
+  // trigger the reload effect, but if the user has moved on, we leave the
+  // now-foreground file's state alone (it reloads itself from disk).
   const persist = useCallback(
-    async (next: OutlineNode[]): Promise<void> => {
-      if (!activeFile) return;
-      const expectedKey = `${activeFile.path}#${activeFile.pageCount}#${activeFile.undoStack.length + 1}`;
-      setStatus('Saving…');
+    async (next: OutlineNode[], target: OpenFile): Promise<void> => {
+      const expectedKey = `${target.path}#${target.pageCount}#${target.undoStack.length + 1}`;
+      const stillShown = () => activeFileRef.current?.path === target.path;
+      if (stillShown()) setStatus('Saving…');
       try {
-        const snapshotPath = await file.snapshot(activeFile.workingPath);
+        const snapshotPath = await file.snapshot(target.workingPath);
         await call('set_outline', {
-          file: activeFile.workingPath,
+          file: target.workingPath,
           outline: next,
-          output: activeFile.workingPath,
+          output: target.workingPath,
         });
-        const buffer = await file.readBuffer(activeFile.workingPath);
+        const buffer = await file.readBuffer(target.workingPath);
         dispatch({
           type: 'UPDATE_FILE',
-          path: activeFile.path,
-          pageCount: activeFile.pageCount,
+          path: target.path,
+          pageCount: target.pageCount,
           buffer,
           snapshotPath,
         });
-        setLoadedFor(expectedKey);
-        setStatus('');
+        if (stillShown()) {
+          setLoadedFor(expectedKey);
+          setStatus('');
+        }
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
-        setLoadedFor(null); // reload from disk on failure so the view matches
+        if (stillShown()) {
+          setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+          setLoadedFor(null); // reload from disk on failure so the view matches
+        }
       }
     },
-    [activeFile, call, dispatch],
+    [call, dispatch],
   );
   const persistRef = useRef(persist);
   persistRef.current = persist;
   const saveChain = useRef<Promise<void>>(Promise.resolve());
-  const queuePersist = useCallback((next: OutlineNode[]): Promise<void> => {
-    const run = saveChain.current.then(() => persistRef.current(next));
+  const queuePersist = useCallback((next: OutlineNode[], target: OpenFile): Promise<void> => {
+    const run = saveChain.current.then(() => persistRef.current(next, target));
     saveChain.current = run.catch(() => {});
     return run;
   }, []);
@@ -150,7 +166,8 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const commitEdit = useCallback(() => {
     const base = editBaseline.current;
     editBaseline.current = null;
-    if (base && !outlinesEqual(base, nodesRef.current)) void queuePersist(nodesRef.current);
+    const target = activeFileRef.current;
+    if (target && base && !outlinesEqual(base, nodesRef.current)) void queuePersist(nodesRef.current, target);
   }, [queuePersist]);
   // Commit a pending inline edit on unmount too — closing the pane / switching
   // panels while a field is dirty-but-not-yet-blurred must not lose it (the
@@ -165,31 +182,48 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
     setNodes((prev) => updateAt(prev, path, fn));
   }, [beginEdit]);
 
+  // Structural mutators: capture the target file, and — if an inline edit is
+  // still open — advance its baseline to the tree WE persist, so the eventual
+  // blur-commit doesn't re-detect this same structural change and fire a
+  // redundant second save (a stray extra undo step) (review-caught MED).
+  const rebaseIfEditing = useCallback((next: OutlineNode[]) => {
+    if (editBaseline.current) editBaseline.current = next;
+  }, []);
+
   const addRoot = useCallback(() => {
+    const target = activeFileRef.current;
+    if (!target) return;
     const next = [...nodesRef.current, { title: 'Untitled', page: null, children: [] }];
     setNodes(next);
-    void queuePersist(next);
-  }, [queuePersist]);
+    rebaseIfEditing(next);
+    void queuePersist(next, target);
+  }, [queuePersist, rebaseIfEditing]);
 
   const addChild = useCallback(
     (path: number[]) => {
+      const target = activeFileRef.current;
+      if (!target) return;
       const next = updateAt(nodesRef.current, path, (n) => ({
         ...n,
         children: [...n.children, { title: 'Untitled', page: null, children: [] }],
       }));
       setNodes(next);
-      void queuePersist(next);
+      rebaseIfEditing(next);
+      void queuePersist(next, target);
     },
-    [queuePersist],
+    [queuePersist, rebaseIfEditing],
   );
 
   const deleteNode = useCallback(
     (path: number[]) => {
+      const target = activeFileRef.current;
+      if (!target) return;
       const next = updateAt(nodesRef.current, path, () => null);
       setNodes(next);
-      void queuePersist(next);
+      rebaseIfEditing(next);
+      void queuePersist(next, target);
     },
-    [queuePersist],
+    [queuePersist, rebaseIfEditing],
   );
 
   const jumpTo = useCallback(
@@ -252,14 +286,16 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       // Abort if the active file changed mid-drag — the cache + path index the
       // OLD tree; applying to the reloaded (different) file's outline would
       // corrupt it and save to the wrong file (same guard as the Pages panel).
-      if (s.filePath !== activeFilePathRef.current) return;
+      const target = activeFileRef.current;
+      if (!target || s.filePath !== target.path) return;
       const { overIndex, depth } = projectFromCache(s, cache, e.clientX, e.clientY);
       const next = moveOutlineNode(nodesRef.current, s.path, overIndex, depth);
       if (outlinesEqual(next, nodesRef.current)) return; // structural no-op
       setNodes(next);
-      void queuePersist(next);
+      rebaseIfEditing(next);
+      void queuePersist(next, target);
     },
-    [queuePersist],
+    [queuePersist, rebaseIfEditing],
   );
 
   const onHandlePointerDown = useCallback(
@@ -273,7 +309,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         started: false,
         overIndex: 0,
         depth: 0,
-        filePath: activeFilePathRef.current,
+        filePath: activeFileRef.current?.path,
       };
       const onUp = (ev: PointerEvent) => dragEnd(ev);
       const cancel = () => {
@@ -318,9 +354,11 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
           page: f.node.page,
         })),
       reorder: async (fromPath, overIndex, depth) => {
+        const target = activeFileRef.current;
+        if (!target) return;
         const next = moveOutlineNode(nodesRef.current, fromPath, overIndex, depth);
         setNodes(next);
-        await queuePersistRef.current(next);
+        await queuePersistRef.current(next, target);
       },
     });
     return () => registerCanvasOutline(null);
@@ -397,6 +435,9 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
                     editNode(f.path, (n) => ({ ...n, page: v }));
                   }}
                   onBlur={commitEdit}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
                   className="bookmark-page-input"
                 />
                 <button

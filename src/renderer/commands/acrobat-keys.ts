@@ -47,17 +47,20 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 'tab', ctrl: true, shift: true, command: 'window.prevTab', scope: 'global', editableGuard: false, preventDefault: 'always' },
   // Nav pane toggle (§ 9.2, M3) — canvas-scoped (the pane is about the active
   // document), guard-exempt (F4 isn't a text key). Shift+F4 (task pane) stays
-  // reserved/unbound until M5. Ctrl+Shift+F (Search panel) binds in M3.3 when
-  // that panel exists (reserve-don't-remap).
+  // reserved/unbound until M5.
   { key: 'f4', command: 'view.navPane', scope: 'canvas', editableGuard: false, preventDefault: 'always' },
+  // Search panel (§ 9.2, M3.3) — Ctrl+Shift+F opens the nav-pane Search list
+  // (toggles closed on repeat). Canvas-scoped and guard-exempt, like Find; the
+  // shift split from Ctrl+F is why the Find binding below is now shift: false.
+  { key: 'f', ctrl: true, shift: true, command: 'view.navPanel.search', scope: 'canvas', editableGuard: false, preventDefault: 'always' },
   // Undo/redo — app-global (2n.1). Ctrl+Y redo is shift-agnostic like the
   // listener it replaces.
   { key: 'z', ctrl: true, shift: false, command: 'edit.undo', scope: 'global', editableGuard: true, preventDefault: 'always' },
   { key: 'z', ctrl: true, shift: true, command: 'edit.redo', scope: 'global', editableGuard: true, preventDefault: 'always' },
   { key: 'y', ctrl: true, command: 'edit.redo', scope: 'global', editableGuard: true, preventDefault: 'always' },
-  // Find (2m) — always wins, even from inside a text field. Shift-agnostic
-  // until M3 splits Ctrl+Shift+F off to the Search panel.
-  { key: 'f', ctrl: true, command: 'edit.find', scope: 'canvas', editableGuard: false, preventDefault: 'always' },
+  // Find (2m) — always wins, even from inside a text field. shift: false so it
+  // no longer swallows Ctrl+Shift+F (that now opens the Search panel, above).
+  { key: 'f', ctrl: true, shift: false, command: 'edit.find', scope: 'canvas', editableGuard: false, preventDefault: 'always' },
   // Canvas selection + page ops (2n.1). Delete/Backspace and [ / ] ignored
   // modifiers in the legacy listener; kept.
   { key: 'a', ctrl: true, command: 'edit.selectAll', scope: 'canvas', editableGuard: true, preventDefault: 'always' },

@@ -20,6 +20,10 @@ export interface Find {
   current: number;
   setQuery: (query: string) => void;
   openFind: () => void;
+  /** Open the bar seeded with a query and (optionally) jump to a page — the
+   * Search nav panel drives this so a result click highlights via the same
+   * tested find path (Phase 4 M3.3). */
+  openWith: (query: string, pageId?: string) => void;
   closeFind: () => void;
   next: () => void;
   prev: () => void;
@@ -90,6 +94,14 @@ export function useFind(
   );
 
   const openFind = useCallback(() => setOpen(true), []);
+  const openWith = useCallback(
+    (q: string, pageId?: string) => {
+      setOpen(true);
+      setQuery(q);
+      if (pageId) onNavigate(pageId);
+    },
+    [onNavigate],
+  );
   const closeFind = useCallback(() => {
     setOpen(false);
     setQuery('');
@@ -97,5 +109,5 @@ export function useFind(
   const next = useCallback(() => step(1), [step]);
   const prev = useCallback(() => step(-1), [step]);
 
-  return { open, query, result, matchedQuery, active, matchPages, current, setQuery, openFind, closeFind, next, prev };
+  return { open, query, result, matchedQuery, active, matchPages, current, setQuery, openFind, openWith, closeFind, next, prev };
 }

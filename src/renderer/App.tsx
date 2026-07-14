@@ -42,6 +42,7 @@ import type { NewFieldSpec } from './lib/form-authoring';
 import { DropZone } from './components/DropZone';
 import { OperationQueue } from './components/OperationQueue';
 import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
+import { SearchProvider } from './search/SearchProvider';
 import { SettingsPanel, getSettings } from './panels/SettingsPanel';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
@@ -1039,7 +1040,9 @@ export function App(): React.ReactElement {
   return (
     <QueueProvider>
       <AppStateProvider>
-        <AppContent />
+        <SearchProvider>
+          <AppContent />
+        </SearchProvider>
       </AppStateProvider>
     </QueueProvider>
   );

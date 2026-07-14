@@ -75,6 +75,9 @@ export interface CanvasServices {
   find: {
     isOpen(): boolean;
     open(): void;
+    /** Open seeded with a query and jump to a page — the Search nav panel's
+     * result click (Phase 4 M3.3). */
+    openWith(query: string, pageId?: string): void;
     close(): void;
   };
 }

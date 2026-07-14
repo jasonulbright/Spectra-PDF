@@ -128,6 +128,37 @@ describe('search engine', () => {
     expect(r.occurrences).toBe(1);
   });
 
+  it('snippetsFor returns a per-page context window, only for matching pages', async () => {
+    const doc = makeDoc('d1', 'C:/a.pdf', [pageRef('C:/a.pdf', 0), pageRef('C:/a.pdf', 1)]);
+    const docsRef = { current: [doc] };
+    extractMock
+      .mockResolvedValueOnce({ text: 'The quarterly invoice total is due', needsOcr: false })
+      .mockResolvedValueOnce({ text: 'unrelated content', needsOcr: false });
+    const { engine } = build(docsRef);
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    await flush();
+    const snips = engine.snippetsFor('invoice');
+    expect(snips.size).toBe(1);
+    expect(snips.get('C:/a.pdf#p0')).toContain('invoice'); // normalized (lowercased)
+    expect(snips.has('C:/a.pdf#p1')).toBe(false); // no match → absent
+    expect(engine.snippetsFor('   ').size).toBe(0); // empty query → empty
+  });
+
+  it('snippetsFor ellipsizes when the match is deep inside long text', async () => {
+    const filler = 'lorem ipsum dolor sit amet consectetur adipiscing elit sed'; // 58 chars > 40 radius
+    const doc = makeDoc('d1', 'C:/b.pdf', [pageRef('C:/b.pdf', 0)]);
+    const docsRef = { current: [doc] };
+    extractMock.mockResolvedValueOnce({ text: `${filler} SECRET ${filler}`, needsOcr: false });
+    const { engine } = build(docsRef);
+    engine.reconcile(docsRef.current, proxiesFor('C:/b.pdf'));
+    await flush();
+    const snip = engine.snippetsFor('secret').get('C:/b.pdf#p0');
+    expect(snip).toBeDefined();
+    expect(snip!.startsWith('…')).toBe(true);
+    expect(snip!.endsWith('…')).toBe(true);
+    expect(snip).toContain('secret');
+  });
+
   it('queues OCR for scanned pages and merges results into search', async () => {
     const doc = makeDoc('d1', 'C:/scan.pdf', [pageRef('C:/scan.pdf', 0)]);
     const docsRef = { current: [doc] };

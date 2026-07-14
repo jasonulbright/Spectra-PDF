@@ -15,6 +15,7 @@ export { sourceKeyOf } from './engine';
 
 export interface SearchIndex {
   search: (query: string) => SearchResult;
+  snippetsFor: (query: string) => Map<string, string>;
   version: number;
   ocrRemaining: number;
   hasScanned: boolean;
@@ -78,6 +79,7 @@ export function useSearchIndex(
   }, [engine]);
 
   const search = useCallback((query: string) => engine.search(query), [engine]);
+  const snippetsFor = useCallback((query: string) => engine.snippetsFor(query), [engine]);
   const getOcrWords = useCallback((sourceKey: string) => engine.getOcrWords(sourceKey), [engine]);
   const ocrReadySources = useCallback(() => engine.ocrReadySources(), [engine]);
 
@@ -91,6 +93,7 @@ export function useSearchIndex(
 
   return {
     search,
+    snippetsFor,
     version,
     ocrRemaining,
     hasScanned,

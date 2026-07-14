@@ -36,6 +36,10 @@ export const EMPTY_RESULT: SearchResult = {
 export interface SearchEngine {
   reconcile: (docs: OpenDocument[], proxies: Map<string, PDFDocumentProxy>) => void;
   search: (query: string) => SearchResult;
+  /** Per matching page, a short context window around the FIRST match — over
+   * the retained normalized page text (Phase 4 § 5.4, the Search panel). Keyed
+   * by page id; lowercase (the index stores normalized text). */
+  snippetsFor: (query: string) => Map<string, string>;
   setLanguage: (lang: string) => void;
   getOcrWords: (sourceKey: string) => OcrWord[] | undefined;
   /** Source keys (path:pageIndex) that were detected as scanned AND have OCR
@@ -258,6 +262,21 @@ export function createSearchEngine({ onChange, onProgress, getDocs }: EngineCall
         if (doc.pages.some((p) => pageIds.has(p.id))) docIds.add(doc.id);
       }
       return { pageIds, docIds, pages: pageIds.size, occurrences };
+    },
+
+    snippetsFor(query) {
+      const q = normalizeQuery(query);
+      const out = new Map<string, string>();
+      if (!q) return out;
+      const RADIUS = 40;
+      for (const [pageId, text] of pageText) {
+        const at = text.indexOf(q);
+        if (at === -1) continue;
+        const start = Math.max(0, at - RADIUS);
+        const end = Math.min(text.length, at + q.length + RADIUS);
+        out.set(pageId, (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : ''));
+      }
+      return out;
     },
 
     setLanguage(next) {

@@ -88,6 +88,11 @@ describe('resolveBinding', () => {
     expect(resolveBinding(fakeEvent({ key: 'y', ctrl: true, shift: true }))?.command).toBe('edit.redo');
   });
 
+  it('the shift split — Ctrl+F is Find, Ctrl+Shift+F is Search (M3.3)', () => {
+    expect(resolveBinding(fakeEvent({ key: 'f', ctrl: true }))?.command).toBe('edit.find');
+    expect(resolveBinding(fakeEvent({ key: 'f', ctrl: true, shift: true }))?.command).toBe('view.navPanel.search');
+  });
+
   it('unmodified Delete/Backspace and [ ] resolve regardless of modifiers (legacy semantics)', () => {
     expect(resolveBinding(fakeEvent({ key: 'Delete' }))?.command).toBe('document.deleteSelection');
     expect(resolveBinding(fakeEvent({ key: 'Backspace', ctrl: true }))?.command).toBe('document.deleteSelection');
@@ -181,12 +186,27 @@ describe('dispatchKeyEvent', () => {
     const open = vi.fn();
     registerCanvasServices({
       canvas: () => null,
-      find: { isOpen: () => false, open, close: vi.fn() },
+      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn() },
     });
     const e = fakeEvent({ key: 'f', ctrl: true, target: INPUT });
     dispatchKeyEvent(e);
     expect(e.defaultPrevented).toBe(true);
     expect(open).toHaveBeenCalledOnce();
+  });
+
+  it('Ctrl+Shift+F opens the Search nav panel (split from Find)', () => {
+    // The shift split (M3.3): plain Ctrl+F is Find; Ctrl+Shift+F is Search.
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
+    const open = vi.fn();
+    registerCanvasServices({
+      canvas: () => null,
+      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn() },
+    });
+    const e = fakeEvent({ key: 'f', ctrl: true, shift: true, target: INPUT });
+    dispatchKeyEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    expect(open).not.toHaveBeenCalled(); // NOT Find
+    expect(dispatched).toEqual([{ type: 'UI_OPEN_NAV_PANEL', panel: 'search' }]);
   });
 
   it('canvas-scoped bindings fall through outside the canvas view', () => {

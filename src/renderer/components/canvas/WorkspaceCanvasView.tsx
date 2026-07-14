@@ -13,7 +13,8 @@ import { useEngine } from '../../hooks/useEngine';
 import { dialog } from '../../lib/tauri-bridge';
 import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../SignerSourceFields';
 import type { SignerSource } from '../SignerSourceFields';
-import { useSearchIndex, sourceKeyOf } from '../../search/useSearchIndex';
+import { sourceKeyOf } from '../../search/useSearchIndex';
+import { useSearchContext } from '../../search/SearchProvider';
 import { useFind } from '../../search/useFind';
 import { normalizeQuery, highlightWords } from '../../search/normalize';
 import { FindBar } from './FindBar';
@@ -177,8 +178,10 @@ export function WorkspaceCanvasView({
   const [signError, setSignError] = useState<string | null>(null);
   const [signDone, setSignDone] = useState<{ signer: string | null; output: string; ok: boolean } | null>(null);
   const { call: engineCall } = useEngine();
-  // Find/OCR (2m): index over the open workspace; Ctrl+F opens the bar.
-  const searchIndex = useSearchIndex(docs, proxies, state.files);
+  // Find/OCR (2m): the ONE workspace search index, lifted to a provider so the
+  // Search nav panel shares it (Phase 4 M3.3 — double-instantiating would
+  // double the OCR work and desync results). Ctrl+F opens the bar.
+  const searchIndex = useSearchContext();
   const onFindNavigate = useCallback((pageId: string) => {
     canvasRef.current?.centerOn(pageId);
   }, []);
@@ -403,6 +406,7 @@ export function WorkspaceCanvasView({
       find: {
         isOpen: () => findRef.current.open,
         open: () => findRef.current.openFind(),
+        openWith: (q, pageId) => findRef.current.openWith(q, pageId),
         close: () => findRef.current.closeFind(),
       },
     });

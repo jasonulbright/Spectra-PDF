@@ -7,11 +7,12 @@
 // it without a cycle.
 import type { NavPanelId } from '../state/types';
 
-export const NAV_PANEL_IDS = ['pages', 'bookmarks'] as const satisfies readonly NavPanelId[];
+export const NAV_PANEL_IDS = ['pages', 'bookmarks', 'search'] as const satisfies readonly NavPanelId[];
 
 export type AvailableNavPanel = (typeof NAV_PANEL_IDS)[number];
 
 export const NAV_PANEL_TITLES: Record<AvailableNavPanel, string> = {
   pages: 'Pages',
   bookmarks: 'Bookmarks',
+  search: 'Search',
 };
