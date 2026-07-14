@@ -33,12 +33,14 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
   const [nonce, setNonce] = useState(0);
 
   // Re-verify on the WORKING FILE's byte identity, not an edit counter. The
-  // buffer reference changes on exactly the ops that rewrite the working file
-  // (UPDATE_FILE / COMMIT_PAGE_EDITS / UNDO / REDO — all through applyFileUpdate,
-  // which installs a new buffer), so editing a signed file flips the badge; it
-  // is UNCHANGED by Save (MARK_SAVED only clears dirty/undoStack — the bytes on
-  // disk are the same), so Save no longer triggers a pointless re-verify
-  // (review-caught). `nonce` is the manual Re-check trigger.
+  // buffer reference is replaced on exactly the ops that rewrite the working
+  // file: UPDATE_FILE / COMMIT_PAGE_EDITS through `applyFileUpdate`, and
+  // UNDO / REDO through the `REFRESH_BUFFER` their handlers dispatch right after
+  // (undo/redo themselves only move snapshot stacks). So editing a signed file
+  // flips the badge; the buffer is UNCHANGED by Save (MARK_SAVED only clears
+  // dirty/undoStack — the on-disk bytes are the same), so Save no longer
+  // triggers a pointless re-verify (review-caught). `nonce` is the manual
+  // Re-check trigger.
   //
   // Known, accepted: opening the panel while the active file has UNCOMMITTED
   // page edits verifies twice — verify runs the commit gate (useEngine.call),

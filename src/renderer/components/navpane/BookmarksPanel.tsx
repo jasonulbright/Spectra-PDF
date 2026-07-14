@@ -133,8 +133,13 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   // trigger the reload effect, but if the user has moved on, we leave the
   // now-foreground file's state alone (it reloads itself from disk).
   const persist = useCallback(
-    async (next: OutlineNode[], target: OpenFile): Promise<void> => {
-      const expectedKey = `${target.path}#${target.pageCount}#${target.undoStack.length + 1}`;
+    async (next: OutlineNode[], target: OpenFile, expectedLen: number): Promise<void> => {
+      // `expectedLen` is the undoStack length this file will have AFTER this
+      // save lands — computed by queuePersist across the whole chain, not read
+      // from `target` (whose snapshot is stale for the 2nd+ save queued before
+      // the 1st's UPDATE_FILE re-render). Keeps loadedFor matching the real
+      // post-save fileKey so our own chained saves never self-trigger a reload.
+      const expectedKey = `${target.path}#${target.pageCount}#${expectedLen}`;
       const stillShown = () => activeFileRef.current?.path === target.path;
       if (stillShown()) setStatus('Saving…');
       try {
@@ -168,9 +173,27 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const persistRef = useRef(persist);
   persistRef.current = persist;
   const saveChain = useRef<Promise<void>>(Promise.resolve());
+  // Deterministic post-save-length counter for the chain: each save appends
+  // exactly one undoStack entry, so seed from the LIVE length when the chain is
+  // idle and bump once per enqueue — so two same-file saves queued back-to-back
+  // predict N+1 and N+2, not both N+1 (which under-counted loadedFor and flipped
+  // the panel into a spurious reload/Loading flash — review-caught). Re-seed too
+  // when the target FILE changes mid-chain (edit A, switch to B, edit B before
+  // A's slow saves drain) — B's count must restart from B's own length.
+  const expectedLenRef = useRef(0);
+  const chainDepthRef = useRef(0);
+  const chainPathRef = useRef<string | null>(null);
   const queuePersist = useCallback((next: OutlineNode[], target: OpenFile): Promise<void> => {
-    const run = saveChain.current.then(() => persistRef.current(next, target));
-    saveChain.current = run.catch(() => {});
+    if (chainDepthRef.current === 0 || chainPathRef.current !== target.path) {
+      expectedLenRef.current = target.undoStack.length;
+    }
+    chainPathRef.current = target.path;
+    const expectedLen = (expectedLenRef.current += 1);
+    chainDepthRef.current += 1;
+    const run = saveChain.current.then(() => persistRef.current(next, target, expectedLen));
+    saveChain.current = run.catch(() => {}).finally(() => {
+      chainDepthRef.current -= 1;
+    });
     return run;
   }, []);
 
