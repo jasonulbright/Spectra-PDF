@@ -1,4 +1,4 @@
-import { AppState, AppAction, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer } from './types';
+import { AppState, AppAction, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState } from './types';
 import { carriesManifest } from '../lib/doc-names';
 
 // Re-project a display-normalized annotation rect when its page's display
@@ -32,14 +32,44 @@ export function rotateAnnotationRect(a: PageAnnotation, delta: number): PageAnno
   return { ...a, x: a.y, y: 1 - (a.x + a.w), w: a.h, h: a.w, ...(points ? { points } : {}) }; // 270
 }
 
+const NO_SELECTION: ReadonlySet<string> = new Set();
+
+export const initialUiState: UiState = {
+  view: 'welcome',
+  activeOp: 'split',
+  tool: 'select',
+  selectedPageIds: NO_SELECTION,
+  selectionAnchor: null,
+};
+
 export const initialState: AppState = {
   files: new Map(),
   activeFileId: null,
+  ui: initialUiState,
   workspace: { documents: [] },
   pageUndoStack: [],
   pageRedoStack: [],
   pageDirtyPaths: [],
 };
+
+// Selection holds positional PageRef ids (`path#pN`) that the indexer
+// rebuilds from the new on-disk order after any buffer-identity change. A
+// stale id would silently re-bind to a DIFFERENT physical page and get
+// deleted or rotated by the batched actions. Selection is view-only (no
+// data), so clearing it whenever a file's bytes change (or a file closes)
+// is the safe answer — formerly a WorkspaceCanvasView buffer-watching
+// effect; folded into the reducer cases that change buffers now that the
+// selection lives in the ui slice (Phase 4 M1).
+function clearSelection(state: AppState): AppState {
+  if (state.ui.selectedPageIds.size === 0 && state.ui.selectionAnchor === null) return state;
+  return { ...state, ui: { ...state.ui, selectedPageIds: NO_SELECTION, selectionAnchor: null } };
+}
+
+// Workspace-flattened page order (doc order, then page order) — the basis
+// for shift-range selection and select-all.
+function flatPageOrder(state: AppState): string[] {
+  return state.workspace.documents.flatMap((d) => d.pages.map((p) => p.id));
+}
 
 function mapDocument(
   documents: OpenDocument[],
@@ -152,6 +182,9 @@ function applyFileUpdate(
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'OPEN_FILE': {
+      // A REOPEN replaces the path's buffer — stale positional selection ids
+      // must not survive it (a fresh open leaves the selection alone).
+      const base = state.files.has(action.path) ? clearSelection(state) : state;
       const files = new Map(state.files);
       files.set(action.path, {
         path: action.path,
@@ -164,7 +197,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         redoStack: [],
       });
       return {
-        ...state,
+        ...base,
         files,
         activeFileId: action.path,
         // A REOPENED path's old workspace composition is stale the moment
@@ -207,6 +240,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, files };
     }
     case 'CLOSE_FILE': {
+      // A later reopen reuses the same positional page ids — clear selection.
+      const base = clearSelection(state);
       const files = new Map(state.files);
       files.delete(action.path);
       const activeFileId = state.activeFileId === action.path
@@ -232,7 +267,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         state.pageDirtyPaths.filter((p) => p !== action.path),
       );
       return {
-        ...state,
+        ...base,
         files,
         activeFileId,
         workspace: { documents },
@@ -246,11 +281,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UPDATE_FILE': {
       const files = applyFileUpdate(state.files, action);
       if (files === state.files) return state;
+      const base = clearSelection(state); // buffer replaced — positional selection ids are stale
       const tierEmpty =
         state.pageUndoStack.length === 0 &&
         state.pageRedoStack.length === 0 &&
         state.pageDirtyPaths.length === 0;
-      if (tierEmpty) return { ...state, files };
+      if (tierEmpty) return { ...base, files };
       // Defense-in-depth: the file's bytes were replaced while page edits
       // were pending — a caller bypassed the commit gate. In-memory history
       // and dirty compositions now reference stale buffers (cross-file moves
@@ -259,7 +295,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // re-derive from the current buffers.
       const invalidated = new Set([...state.pageDirtyPaths, action.path]);
       return {
-        ...state,
+        ...base,
         files,
         workspace: {
           documents: state.workspace.documents.filter((d) => !invalidated.has(d.path)),
@@ -278,8 +314,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       for (const update of action.updates) {
         files = applyFileUpdate(files, update);
       }
+      // Buffers replaced — stale positional selection ids must not survive.
+      const base = files === state.files ? state : clearSelection(state);
       return {
-        ...state,
+        ...base,
         files,
         pageUndoStack: [],
         pageRedoStack: [],
@@ -316,16 +354,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // one ever doesn't, invalidate it like UPDATE_FILE does.
       const existing = state.files.get(action.path);
       if (!existing) return state;
+      const base = clearSelection(state); // buffer replaced — positional selection ids are stale
       const files = new Map(state.files);
       files.set(action.path, { ...existing, pageCount: action.pageCount, buffer: action.buffer });
       const tierEmpty =
         state.pageUndoStack.length === 0 &&
         state.pageRedoStack.length === 0 &&
         state.pageDirtyPaths.length === 0;
-      if (tierEmpty) return { ...state, files };
+      if (tierEmpty) return { ...base, files };
       const invalidated = new Set([...state.pageDirtyPaths, action.path]);
       return {
-        ...state,
+        ...base,
         files,
         workspace: {
           documents: state.workspace.documents.filter((d) => !invalidated.has(d.path)),
@@ -801,6 +840,93 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // The commit bridge just materialized the edits to disk; the workspace
       // itself is left alone — the indexer re-derives it from the new buffers.
       return { ...state, pageUndoStack: [], pageRedoStack: [], pageDirtyPaths: [] };
+    case 'UI_SET_VIEW': {
+      if (action.view === state.ui.view) return state;
+      // Leaving the canvas view formerly unmounted WorkspaceCanvasView, which
+      // reset its local tool and selection. Now that both live in the ui
+      // slice they'd survive the round trip — reproduce the unmount semantics
+      // so M1 changes no behavior (M4's per-doc view state revisits this).
+      const leftCanvas = state.ui.view === 'canvas' && action.view !== 'canvas';
+      return {
+        ...state,
+        ui: leftCanvas
+          ? {
+              ...state.ui,
+              view: action.view,
+              tool: 'select',
+              selectedPageIds: NO_SELECTION,
+              selectionAnchor: null,
+            }
+          : { ...state.ui, view: action.view },
+      };
+    }
+    case 'UI_SET_ACTIVE_OP':
+      if (action.op === state.ui.activeOp) return state;
+      return { ...state, ui: { ...state.ui, activeOp: action.op } };
+    case 'UI_SET_TOOL':
+      if (action.tool === state.ui.tool) return state;
+      return { ...state, ui: { ...state.ui, tool: action.tool } };
+    case 'UI_SELECT_PAGE': {
+      const { selectedPageIds, selectionAnchor } = state.ui;
+      if (action.mode === 'toggle') {
+        // Ctrl-click: toggle this page in/out of the selection.
+        const next = new Set(selectedPageIds);
+        if (next.has(action.pageId)) next.delete(action.pageId);
+        else next.add(action.pageId);
+        return {
+          ...state,
+          ui: { ...state.ui, selectedPageIds: next, selectionAnchor: action.pageId },
+        };
+      }
+      if (action.mode === 'range' && selectionAnchor) {
+        // Shift-click: range across workspace-flattened order from the anchor.
+        // Keep the anchor so a further shift-click re-extends. An unresolvable
+        // anchor/page falls through to single-select (the canvas's behavior).
+        const order = flatPageOrder(state);
+        const a = order.indexOf(selectionAnchor);
+        const b = order.indexOf(action.pageId);
+        if (a !== -1 && b !== -1) {
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          return {
+            ...state,
+            ui: { ...state.ui, selectedPageIds: new Set(order.slice(lo, hi + 1)) },
+          };
+        }
+      }
+      if (action.mode === 'context' && selectedPageIds.has(action.pageId)) {
+        // Right-click on a page already in the selection keeps the whole
+        // selection (menu actions then apply to all); anchor moves to it.
+        if (selectionAnchor === action.pageId) return state;
+        return { ...state, ui: { ...state.ui, selectionAnchor: action.pageId } };
+      }
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          selectedPageIds: new Set([action.pageId]),
+          selectionAnchor: action.pageId,
+        },
+      };
+    }
+    case 'UI_SELECT_ALL_PAGES': {
+      const order = flatPageOrder(state);
+      if (order.length === 0) return state;
+      return {
+        ...state,
+        ui: { ...state.ui, selectedPageIds: new Set(order), selectionAnchor: order[0] },
+      };
+    }
+    case 'UI_CLEAR_SELECTION':
+      return clearSelection(state);
+    case 'UI_SET_SELECTION':
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          selectedPageIds: new Set(action.pageIds),
+          selectionAnchor: action.anchor,
+        },
+      };
     default:
       return state;
   }

@@ -10,6 +10,8 @@
  * scriptable remote control over the public IPC surface.
  */
 import { file, engine } from './lib/tauri-bridge';
+import { invokeCommand as invokeRegisteredCommand } from './commands/context';
+import { COMMANDS, type CommandId } from './commands/registry';
 
 export interface TestStateSnapshot {
   view: 'welcome' | 'operations' | 'canvas';
@@ -250,6 +252,12 @@ export interface TestHarness {
   setView: (view: 'welcome' | 'operations' | 'canvas') => void;
   /** Select an operation in the sidebar. */
   setActiveOp: (op: string) => void;
+  /** Invoke a command-registry entry — the ONE entry point the menus,
+   * toolbars and keymap share (Phase 4 M1). Returns false when the command's
+   * enablement predicate refused; throws on an unknown id. */
+  invokeCommand: (id: string) => boolean;
+  /** Arm a canvas interaction tool directly (absolute set, no pill toggle). */
+  setTool: (tool: string) => void;
   /** Snapshot of currently observable state, for assertions. */
   getState: () => TestStateSnapshot;
   /** Wait for the next state change matching a predicate (10s timeout). */
@@ -450,6 +458,7 @@ export interface TestHarnessDeps {
   openByPaths: (paths: string[]) => Promise<void>;
   setView: (view: 'welcome' | 'operations' | 'canvas') => void;
   setActiveOp: (op: string) => void;
+  setTool: (tool: string) => void;
   getStateSnapshot: () => TestStateSnapshot;
   subscribe: (listener: (s: TestStateSnapshot) => void) => () => void;
   /** First page of the active file's first workspace document, once the
@@ -570,6 +579,15 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     setView: (view) => deps.setView(view),
     setActiveOp: (op) => deps.setActiveOp(op),
+    invokeCommand: (id) => {
+      if (!(id in COMMANDS)) {
+        const msg = `invokeCommand: unknown command id "${id}"`;
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return invokeRegisteredCommand(id as CommandId);
+    },
+    setTool: (tool) => deps.setTool(tool),
     getState: () => deps.getStateSnapshot(),
     waitForState: (predicate, timeoutMs = 10_000) =>
       new Promise<TestStateSnapshot>((resolve, reject) => {

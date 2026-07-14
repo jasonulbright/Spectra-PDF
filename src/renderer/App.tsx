@@ -46,8 +46,15 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { UpdateBar } from './components/UpdateBar';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
-
-type ViewMode = 'operations' | 'canvas';
+import {
+  invokeCommand,
+  registerAppCommandHandlers,
+  setCommandStateSource,
+} from './commands/context';
+import { useKeymapDispatcher } from './commands/keymap';
+import { canUndo as canUndoState, canRedo as canRedoState } from './commands/registry';
+import type { AppCommandHandlers } from './commands/types';
+import type { CanvasTool, ViewMode } from './state/types';
 
 const panels: Record<Operation, React.ComponentType> = {
   split: SplitPanel, rotate: RotatePanel, delete: DeletePanel,
@@ -72,10 +79,22 @@ const titles: Record<Operation, string> = {
 };
 
 function AppContent(): React.ReactElement {
-  const [view, setView] = useState<ViewMode | 'welcome'>(() =>
-    localStorage.getItem('spectra-skip-welcome') === 'true' ? 'operations' : 'welcome'
+  const state = useAppState();
+  const dispatch = useAppDispatch();
+  // View/operation state lives in the ui slice now (Phase 4 M1) so the
+  // command registry can read and drive it; these wrappers keep the local
+  // call sites unchanged. The boot view (skip-welcome) is applied by
+  // AppStateProvider's initializer.
+  const view = state.ui.view;
+  const activeOp = state.ui.activeOp as Operation;
+  const setView = useCallback(
+    (v: ViewMode) => dispatch({ type: 'UI_SET_VIEW', view: v }),
+    [dispatch],
   );
-  const [activeOp, setActiveOp] = useState<Operation>('split');
+  const setActiveOp = useCallback(
+    (op: Operation) => dispatch({ type: 'UI_SET_ACTIVE_OP', op }),
+    [dispatch],
+  );
   const [showSettings, setShowSettings] = useState(false);
   const { items: queue, clear: clearQueue } = useOperationQueue();
   const [extractPage, setExtractPage] = useState<number | null>(null);
@@ -86,8 +105,6 @@ function AppContent(): React.ReactElement {
   // PageInspector overlay target (canvas view). `page` is the file's
   // committed page order — the opener commits pending edits first.
   const [inspector, setInspector] = useState<{ path: string; page: number } | null>(null);
-  const state = useAppState();
-  const dispatch = useAppDispatch();
   const { call, openFiles, saveFile } = useEngine();
   useWorkspaceIndexer();
 
@@ -355,7 +372,7 @@ function AppContent(): React.ReactElement {
       // Multiple files land as canvas strips — the merge surface (2o).
       setView('canvas');
     },
-    [openByPaths, importFilesIntoDoc, view],
+    [openByPaths, importFilesIntoDoc, view, setView],
   );
 
   const handleOpenFile = useCallback(async (): Promise<boolean> => {
@@ -393,14 +410,11 @@ function AppContent(): React.ReactElement {
       }
       setView('canvas');
     } else if (action === 'compress') {
-      setView('operations');
-      setActiveOp('compress');
+      invokeCommand('tools.panel.compress');
     } else if (action === 'secure') {
-      setView('operations');
-      setActiveOp('encrypt');
+      invokeCommand('tools.panel.encrypt');
     } else if (action === 'content') {
-      setView('operations');
-      setActiveOp('extract_text');
+      invokeCommand('tools.panel.extract_text');
     } else if (action === 'recent' && recentFiles.length > 0) {
       await openByPaths([recentFiles[0]]);
       setView('canvas');
@@ -408,7 +422,7 @@ function AppContent(): React.ReactElement {
       await openByPaths([action.slice(5)]);
       setView('canvas');
     }
-  }, [handleOpenFile, openByPaths, recentFiles, state.files]);
+  }, [handleOpenFile, openByPaths, recentFiles, state.files, setView]);
 
   // Snapshot + perform operation + reload
   const performOperation = useCallback(async (
@@ -580,40 +594,6 @@ function AppContent(): React.ReactElement {
     }
   }, [activeFile, state.pageRedoStack.length, reloadFile, dispatch]);
 
-  // App-global Undo/Redo keyboard shortcuts (2n.1): Ctrl/Cmd+Z undoes,
-  // Ctrl/Cmd+Shift+Z or Ctrl+Y redoes. Undo/redo is app-wide (not canvas-only),
-  // so it lives here beside the handlers. Skipped while typing in a field; refs
-  // keep the listener stable while always invoking the latest handler.
-  const undoRef = useRef(handleUndo);
-  undoRef.current = handleUndo;
-  const redoRef = useRef(handleRedo);
-  redoRef.current = handleRedo;
-  useEffect(() => {
-    const isEditable = (el: EventTarget | null): boolean => {
-      const n = el as HTMLElement | null;
-      if (!n || !n.tagName) return false;
-      return (
-        n.tagName === 'INPUT' ||
-        n.tagName === 'TEXTAREA' ||
-        n.tagName === 'SELECT' ||
-        n.isContentEditable
-      );
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (!(e.ctrlKey || e.metaKey) || isEditable(e.target)) return;
-      const k = e.key.toLowerCase();
-      if (k === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        void undoRef.current();
-      } else if ((k === 'z' && e.shiftKey) || k === 'y') {
-        e.preventDefault();
-        void redoRef.current();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
   // Run the commit ahead of a dependent step; on failure surface the error
   // and tell the caller to abort (the edits are still pending and retryable).
   const commitOrAbort = useCallback(async (): Promise<boolean> => {
@@ -641,8 +621,8 @@ function AppContent(): React.ReactElement {
   const handleExtractFromCanvas = useCallback((path: string, page: number) => {
     dispatch({ type: 'SET_ACTIVE_FILE', path });
     setExtractPage(page);
-    setView('operations'); // leaving the canvas commits, so the panel reads committed bytes
-    setActiveOp('extract_text');
+    // Leaving the canvas commits, so the panel reads committed bytes.
+    invokeCommand('tools.panel.extract_text');
   }, [dispatch]);
 
   // The inspector cannot outlive its file.
@@ -703,6 +683,48 @@ function AppContent(): React.ReactElement {
       dispatch({ type: 'CLOSE_FILE', path: f.path });
     }
   }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort]);
+
+  // --- Command layer (Phase 4 M1) ---------------------------------------
+  // The registry invokes the SAME handlers the buttons always ran; refs keep
+  // the one-time registration reading the latest closures. The state source
+  // feeds command enablement + the keymap dispatcher the live state.
+  const commandHandlers: AppCommandHandlers = {
+    openFiles: handleOpenFile,
+    save: handleSave,
+    saveAs: handleSaveAs,
+    closeFile: handleCloseFile,
+    closeAll: handleCloseAll,
+    undo: handleUndo,
+    redo: handleRedo,
+    applyPageEdits: commitAndReport,
+    openPreferences: () => setShowSettings(true),
+  };
+  const commandHandlersRef = useRef(commandHandlers);
+  commandHandlersRef.current = commandHandlers;
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  useEffect(() => {
+    const h = commandHandlersRef;
+    registerAppCommandHandlers({
+      openFiles: () => h.current.openFiles(),
+      save: () => h.current.save(),
+      saveAs: () => h.current.saveAs(),
+      closeFile: (path) => h.current.closeFile(path),
+      closeAll: () => h.current.closeAll(),
+      undo: () => h.current.undo(),
+      redo: () => h.current.redo(),
+      applyPageEdits: () => h.current.applyPageEdits(),
+      openPreferences: () => h.current.openPreferences(),
+    });
+    setCommandStateSource(() => ({ state: stateRef.current, dispatch }));
+    return () => {
+      registerAppCommandHandlers(null);
+      setCommandStateSource(null);
+    };
+  }, [dispatch]);
+  // The ONE window-level shortcut dispatcher (replaces the six hand-rolled
+  // keydown effects; scope order and the Escape chain live in commands/keymap).
+  useKeymapDispatcher();
 
   // Keep refs to current state so the close handler always sees latest values
   const filesRef = useRef(state.files);
@@ -775,7 +797,7 @@ function AppContent(): React.ReactElement {
     const unlisten = app.onTrayAction((action: string) => {
       if (action === 'merge') {
         // Merging is a canvas activity (2o).
-        setView('canvas');
+        invokeCommand('view.canvas');
       }
     });
     return () => { unlisten.then((fn) => fn()); };
@@ -790,7 +812,7 @@ function AppContent(): React.ReactElement {
       setView('canvas');
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, [openByPaths]);
+  }, [openByPaths, setView]);
 
   // Test harness — only compiled in when VITE_E2E=1 was set at build time.
   const harnessListenersRef = useRef<Set<(s: TestStateSnapshot) => void>>(new Set());
@@ -846,6 +868,7 @@ function AppContent(): React.ReactElement {
       openByPaths: (paths) => openByPaths(paths),
       setView: (v) => setView(v),
       setActiveOp: (op) => setActiveOp(op as Operation),
+      setTool: (tool) => dispatch({ type: 'UI_SET_TOOL', tool: tool as CanvasTool }),
       getStateSnapshot: () => harnessSnapshotRef.current(),
       subscribe: (listener) => {
         harnessListenersRef.current.add(listener);
@@ -868,7 +891,7 @@ function AppContent(): React.ReactElement {
       importPagesIntoDoc: (filePath, toDocId, toIndex) =>
         importFilesIntoDoc([filePath], toDocId, toIndex),
     });
-  }, [openByPaths, dispatch, importFilesIntoDoc]);
+  }, [openByPaths, dispatch, importFilesIntoDoc, setView, setActiveOp]);
 
   // Notify harness subscribers on every state-relevant change.
   useEffect(() => {
@@ -878,10 +901,9 @@ function AppContent(): React.ReactElement {
   }, [view, activeOp, state.files, state.activeFileId, activeFile?.dirty, activeFile?.pageCount]);
 
   const Panel = panels[activeOp];
-  const canUndo =
-    state.pageUndoStack.length > 0 || (activeFile ? activeFile.undoStack.length > 0 : false);
-  const canRedo =
-    state.pageRedoStack.length > 0 || (activeFile ? activeFile.redoStack.length > 0 : false);
+  // Enablement comes from the same pure predicates the command registry uses.
+  const canUndo = canUndoState(state);
+  const canRedo = canRedoState(state);
 
   return (
     <DropZone onFilesDropped={handleFilesDropped}>
@@ -891,7 +913,7 @@ function AppContent(): React.ReactElement {
         <div className="flex items-center gap-3">
           <h1 data-testid="app-title" className="text-lg font-semibold tracking-tight">Open PDF Studio</h1>
           <span data-testid="app-version" className="text-[10px] text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded">{appVersion}</span>
-          <button data-testid="settings-btn" onClick={() => setShowSettings(true)} className="w-6 h-6 flex items-center justify-center text-neutral-500 hover:text-neutral-300 rounded transition-colors" title="Settings">
+          <button data-testid="settings-btn" onClick={() => invokeCommand('edit.preferences')} className="w-6 h-6 flex items-center justify-center text-neutral-500 hover:text-neutral-300 rounded transition-colors" title="Settings">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
             </svg>
@@ -901,41 +923,41 @@ function AppContent(): React.ReactElement {
           {/* Undo / Save — in canvas view with an active file */}
           {view === 'canvas' && activeFile && (
             <>
-              <button data-testid="undo-btn" onClick={handleUndo} disabled={!canUndo} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Undo last action">
+              <button data-testid="undo-btn" onClick={() => invokeCommand('edit.undo')} disabled={!canUndo} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Undo last action">
                 Undo
               </button>
-              <button data-testid="redo-btn" onClick={handleRedo} disabled={!canRedo} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Redo">
+              <button data-testid="redo-btn" onClick={() => invokeCommand('edit.redo')} disabled={!canRedo} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Redo">
                 Redo
               </button>
-              <button data-testid="save-btn" onClick={handleSave} disabled={!isFileDirty(activeFile)} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Save to original file">
+              <button data-testid="save-btn" onClick={() => invokeCommand('file.save')} disabled={!isFileDirty(activeFile)} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Save to original file">
                 Save
               </button>
-              <button data-testid="save-as-btn" onClick={handleSaveAs} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium" title="Save as new file">
+              <button data-testid="save-as-btn" onClick={() => invokeCommand('file.saveAs')} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium" title="Save as new file">
                 Save As
               </button>
             </>
           )}
-          <button data-testid="open-pdf-btn" onClick={handleOpenFile} className="px-3 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium">
+          <button data-testid="open-pdf-btn" onClick={() => invokeCommand('file.open')} className="px-3 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium">
             Open PDF
           </button>
           <div data-testid="view-switcher" className="flex bg-neutral-800 rounded overflow-hidden">
             <button
               data-testid="view-home"
-              onClick={() => setView('welcome')}
+              onClick={() => invokeCommand('view.home')}
               className={`px-3 py-1 text-xs font-medium ${view === 'welcome' ? 'bg-neutral-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}`}
             >
               Home
             </button>
             <button
               data-testid="view-tools"
-              onClick={() => setView('operations')}
+              onClick={() => invokeCommand('view.tools')}
               className={`px-3 py-1 text-xs font-medium ${view === 'operations' ? 'bg-neutral-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}`}
             >
               Tools
             </button>
             <button
               data-testid="view-canvas"
-              onClick={() => setView('canvas')}
+              onClick={() => invokeCommand('view.canvas')}
               className={`px-3 py-1 text-xs font-medium ${view === 'canvas' ? 'bg-neutral-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}`}
             >
               Canvas
@@ -972,7 +994,7 @@ function AppContent(): React.ReactElement {
               <div className="w-48 border-b border-neutral-800 py-2 shrink-0">
                 <div className="flex items-center justify-between px-4 pb-1">
                 <span className="text-[10px] uppercase tracking-widest text-neutral-300 font-semibold">Active File</span>
-                <button onClick={handleCloseAll} className="text-neutral-500 hover:text-red-400 transition-colors" title="Close all files">
+                <button onClick={() => invokeCommand('file.closeAll')} className="text-neutral-500 hover:text-red-400 transition-colors" title="Close all files">
                   <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l8 8M9 1l-8 8"/></svg>
                 </button>
               </div>
@@ -1000,7 +1022,7 @@ function AppContent(): React.ReactElement {
                 ))}
               </div>
             )}
-            <Sidebar active={activeOp} onSelect={setActiveOp} />
+            <Sidebar active={activeOp} onSelect={(op) => invokeCommand(`tools.panel.${op}`)} />
           </div>
         )}
 
@@ -1027,7 +1049,6 @@ function AppContent(): React.ReactElement {
                 onCloseFile={(path) => void handleCloseFile(path)}
                 onInspectPage={(path, pageNumber) => void handleInspectPage(path, pageNumber)}
                 onExtractText={handleExtractFromCanvas}
-                onApplyChanges={() => void commitAndReport()}
                 onRedactFile={handleRedactFile}
                 onApplyOcrLayer={handleApplyOcrLayer}
                 onAddPages={handleAddPages}

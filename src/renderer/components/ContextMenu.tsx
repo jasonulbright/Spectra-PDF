@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { pushEscapeInterceptor } from '../commands/context';
 
 export interface MenuItem {
   label: string;
@@ -26,10 +27,13 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): React.R
     return () => document.removeEventListener('mousedown', handler);
   }, [onClose]);
 
+  // An open menu owns Escape (the keymap dispatcher's interceptor stack —
+  // Phase 4 M1; formerly this component's own document keydown listener).
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
+    return pushEscapeInterceptor(() => {
+      onClose();
+      return true;
+    });
   }, [onClose]);
 
   return (

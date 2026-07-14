@@ -1,0 +1,280 @@
+// The command system (Phase 4 M1): registry totality, enablement
+// predicates, invokeCommand gating, and the escape-interceptor stack.
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  COMMANDS,
+  COMMAND_IDS,
+  canRedo,
+  canUndo,
+  hasSelection,
+  isActiveFileDirty,
+  type CommandId,
+} from '../src/renderer/commands/registry';
+import {
+  escapeInterceptorCount,
+  getCommandContext,
+  invokeCommand,
+  pushEscapeInterceptor,
+  registerAppCommandHandlers,
+  registerCanvasServices,
+  runEscapeInterceptors,
+  setCommandStateSource,
+} from '../src/renderer/commands/context';
+import type { AppCommandHandlers } from '../src/renderer/commands/types';
+import { appReducer, initialState } from '../src/renderer/state/reducer';
+import type { AppAction, AppState, OpenFile } from '../src/renderer/state/types';
+
+function makeFile(path: string, extra: Partial<OpenFile> = {}): OpenFile {
+  return {
+    path,
+    workingPath: `${path}.working`,
+    name: path,
+    pageCount: 1,
+    buffer: [1],
+    dirty: false,
+    undoStack: [],
+    redoStack: [],
+    ...extra,
+  };
+}
+
+function stateWith(partial: Partial<AppState>): AppState {
+  return { ...initialState, ...partial, ui: { ...initialState.ui, ...(partial.ui ?? {}) } };
+}
+
+const noopHandlers = (): AppCommandHandlers => ({
+  openFiles: vi.fn(async () => true),
+  save: vi.fn(async () => {}),
+  saveAs: vi.fn(async () => {}),
+  closeFile: vi.fn(async () => {}),
+  closeAll: vi.fn(async () => {}),
+  undo: vi.fn(async () => {}),
+  redo: vi.fn(async () => {}),
+  applyPageEdits: vi.fn(async () => {}),
+  openPreferences: vi.fn(),
+});
+
+afterEach(() => {
+  setCommandStateSource(null);
+  registerAppCommandHandlers(null);
+  registerCanvasServices(null);
+});
+
+describe('registry totality', () => {
+  it('every declared id has a command with a namespace prefix and a title', () => {
+    const namespaces = ['file.', 'edit.', 'view.', 'document.', 'tools.', 'window.', 'help.'];
+    for (const id of COMMAND_IDS) {
+      const cmd = COMMANDS[id];
+      expect(cmd, id).toBeDefined();
+      expect(cmd.title.length, id).toBeGreaterThan(0);
+      expect(namespaces.some((ns) => id.startsWith(ns)), id).toBe(true);
+    }
+  });
+
+  it('the record carries no ids outside the declared union', () => {
+    expect(Object.keys(COMMANDS).sort()).toEqual([...COMMAND_IDS].sort());
+  });
+});
+
+describe('enablement helpers', () => {
+  it('canUndo/canRedo: page tier first, then the active file snapshots', () => {
+    expect(canUndo(initialState)).toBe(false);
+    const pageTier = stateWith({
+      pageUndoStack: [{ documents: [], dirtyPaths: [] }],
+    });
+    expect(canUndo(pageTier)).toBe(true);
+    const snapshots = stateWith({
+      activeFileId: 'a.pdf',
+      files: new Map([['a.pdf', makeFile('a.pdf', { undoStack: ['s1'], redoStack: ['s2'] })]]),
+    });
+    expect(canUndo(snapshots)).toBe(true);
+    expect(canRedo(snapshots)).toBe(true);
+    expect(canRedo(initialState)).toBe(false);
+  });
+
+  it('isActiveFileDirty covers whole-file dirt and pending page edits', () => {
+    const clean = stateWith({
+      activeFileId: 'a.pdf',
+      files: new Map([['a.pdf', makeFile('a.pdf')]]),
+    });
+    expect(isActiveFileDirty(clean)).toBe(false);
+    const dirty = stateWith({
+      activeFileId: 'a.pdf',
+      files: new Map([['a.pdf', makeFile('a.pdf', { dirty: true })]]),
+    });
+    expect(isActiveFileDirty(dirty)).toBe(true);
+    const pageDirty = stateWith({
+      activeFileId: 'a.pdf',
+      files: new Map([['a.pdf', makeFile('a.pdf')]]),
+      pageDirtyPaths: ['a.pdf'],
+    });
+    expect(isActiveFileDirty(pageDirty)).toBe(true);
+  });
+
+  it('hasSelection reads the ui slice', () => {
+    expect(hasSelection(initialState)).toBe(false);
+    expect(hasSelection(stateWith({ ui: { ...initialState.ui, selectedPageIds: new Set(['x']) } }))).toBe(true);
+  });
+});
+
+describe('invokeCommand', () => {
+  function wire(state: AppState): { dispatched: AppAction[]; handlers: AppCommandHandlers } {
+    const dispatched: AppAction[] = [];
+    // Reducer-backed dispatch so multi-dispatch commands see evolving state.
+    let current = state;
+    setCommandStateSource(() => ({
+      state: current,
+      dispatch: (a: AppAction) => {
+        dispatched.push(a);
+        current = appReducer(current, a);
+      },
+    }));
+    const handlers = noopHandlers();
+    registerAppCommandHandlers(handlers);
+    return { dispatched, handlers };
+  }
+
+  it('returns false with no registered context', () => {
+    expect(invokeCommand('file.open')).toBe(false);
+  });
+
+  it('runs an enabled command through the registered app handlers', () => {
+    const { handlers } = wire(initialState);
+    expect(invokeCommand('file.open')).toBe(true);
+    expect(handlers.openFiles).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a command whose predicate fails (save with nothing dirty)', () => {
+    const { handlers } = wire(initialState);
+    expect(invokeCommand('file.save')).toBe(false);
+    expect(handlers.save).not.toHaveBeenCalled();
+  });
+
+  it('tools.* toggle like the pills: re-invoking the active tool exits to Select', () => {
+    const { dispatched } = wire(stateWith({ ui: { ...initialState.ui, view: 'canvas' } }));
+    expect(invokeCommand('tools.highlight')).toBe(true);
+    expect(dispatched.at(-1)).toEqual({ type: 'UI_SET_TOOL', tool: 'highlight' });
+    expect(invokeCommand('tools.highlight')).toBe(true);
+    expect(dispatched.at(-1)).toEqual({ type: 'UI_SET_TOOL', tool: 'select' });
+  });
+
+  it('tools.* are canvas-scoped', () => {
+    wire(initialState); // view: welcome
+    expect(invokeCommand('tools.highlight')).toBe(false);
+  });
+
+  it('tools.panel.* navigates to the operations view with the op armed', () => {
+    const { dispatched } = wire(initialState);
+    expect(invokeCommand('tools.panel.compress')).toBe(true);
+    expect(dispatched).toEqual([
+      { type: 'UI_SET_VIEW', view: 'operations' },
+      { type: 'UI_SET_ACTIVE_OP', op: 'compress' },
+    ]);
+  });
+
+  it('document.deleteSelection deletes the batch then clears — even when the reducer rejects', () => {
+    const { dispatched } = wire(
+      stateWith({ ui: { ...initialState.ui, selectedPageIds: new Set(['stale#p0']), view: 'canvas' } }),
+    );
+    expect(invokeCommand('document.deleteSelection')).toBe(true);
+    expect(dispatched.map((a) => a.type)).toEqual(['DELETE_PAGE_REFS', 'UI_CLEAR_SELECTION']);
+  });
+
+  it('view commands drive the ui slice', () => {
+    const { dispatched } = wire(initialState);
+    expect(invokeCommand('view.canvas')).toBe(true);
+    expect(dispatched).toEqual([{ type: 'UI_SET_VIEW', view: 'canvas' }]);
+  });
+
+  it('zoom commands require a mounted canvas handle', () => {
+    wire(stateWith({ ui: { ...initialState.ui, view: 'canvas' } }));
+    expect(invokeCommand('view.zoomIn')).toBe(false);
+    const zoomIn = vi.fn();
+    registerCanvasServices({
+      canvas: () => ({
+        zoomIn,
+        zoomOut: vi.fn(),
+        reset: vi.fn(),
+        clientToWorld: () => null,
+        centerOn: vi.fn(),
+      }),
+      find: { isOpen: () => false, open: vi.fn(), close: vi.fn() },
+    });
+    expect(invokeCommand('view.zoomIn')).toBe(true);
+    expect(zoomIn).toHaveBeenCalledOnce();
+  });
+
+  it('edit.find opens the registered find bar', () => {
+    wire(initialState);
+    const open = vi.fn();
+    registerCanvasServices({
+      canvas: () => null,
+      find: { isOpen: () => false, open, close: vi.fn() },
+    });
+    expect(invokeCommand('edit.find')).toBe(true);
+    expect(open).toHaveBeenCalledOnce();
+  });
+});
+
+describe('escape interceptors', () => {
+  it('runs LIFO and stops at the first consumer', () => {
+    const calls: string[] = [];
+    const un1 = pushEscapeInterceptor(() => {
+      calls.push('first');
+      return true;
+    });
+    const un2 = pushEscapeInterceptor(() => {
+      calls.push('second');
+      return true;
+    });
+    expect(runEscapeInterceptors()).toBe(true);
+    expect(calls).toEqual(['second']);
+    un2();
+    expect(runEscapeInterceptors()).toBe(true);
+    expect(calls).toEqual(['second', 'first']);
+    un1();
+    expect(runEscapeInterceptors()).toBe(false);
+    expect(escapeInterceptorCount()).toBe(0);
+  });
+
+  it('a non-consuming interceptor falls through', () => {
+    const un = pushEscapeInterceptor(() => false);
+    expect(runEscapeInterceptors()).toBe(false);
+    un();
+  });
+});
+
+describe('getCommandContext', () => {
+  it('exposes registered services and null before registration', () => {
+    expect(getCommandContext()).toBeNull();
+    setCommandStateSource(() => ({ state: initialState, dispatch: () => {} }));
+    const ctx = getCommandContext();
+    expect(ctx?.state).toBe(initialState);
+    expect(ctx?.app).toBeNull();
+    expect(ctx?.canvas).toBeNull();
+  });
+});
+
+// Exhaustive smoke: every command either refuses cleanly or runs without
+// throwing against a registered context (no handler may assume unchecked
+// state). Guards the total record against a run() that dereferences state
+// its when() didn't check.
+describe('registry smoke', () => {
+  it('every command invokes or refuses without throwing, in every view', () => {
+    for (const view of ['welcome', 'operations', 'canvas'] as const) {
+      let current = stateWith({ ui: { ...initialState.ui, view } });
+      setCommandStateSource(() => ({
+        state: current,
+        dispatch: (a: AppAction) => {
+          current = appReducer(current, a);
+        },
+      }));
+      registerAppCommandHandlers(noopHandlers());
+      for (const id of COMMAND_IDS as readonly CommandId[]) {
+        expect(() => invokeCommand(id), `${id} in ${view}`).not.toThrow();
+      }
+      setCommandStateSource(null);
+      registerAppCommandHandlers(null);
+    }
+  });
+});

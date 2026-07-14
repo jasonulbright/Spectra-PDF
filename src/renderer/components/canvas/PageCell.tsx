@@ -10,7 +10,10 @@ import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import { PageView } from './PageView';
 
-export type CanvasTool = 'select' | 'highlight' | 'freetext' | 'ink' | 'stamp' | 'redact' | 'signature' | 'forms';
+// The tool union moved to the ui state slice (Phase 4 M1: commands and the
+// keymap read it for enablement); re-exported here for the overlay consumers.
+export type { CanvasTool } from '../../state/types';
+import type { CanvasTool } from '../../state/types';
 
 export interface AnnotationRect {
   x: number;

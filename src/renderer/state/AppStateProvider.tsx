@@ -5,8 +5,16 @@ import { appReducer, initialState } from './reducer';
 const StateContext = createContext<AppState>(initialState);
 const DispatchContext = createContext<Dispatch<AppAction>>(() => {});
 
+// Boot view: the welcome screen unless the user opted out (the same
+// localStorage gate App.tsx used to read; the key stays live per the
+// rename keep-list). Lazy so the read happens once per mount, not per render.
+function bootState(base: AppState): AppState {
+  const skip = localStorage.getItem('spectra-skip-welcome') === 'true';
+  return skip ? { ...base, ui: { ...base.ui, view: 'operations' } } : base;
+}
+
 export function AppStateProvider({ children }: { children: React.ReactNode }): React.ReactElement {
-  const [state, dispatch] = useReducer(appReducer, initialState);
+  const [state, dispatch] = useReducer(appReducer, initialState, bootState);
   return (
     <StateContext.Provider value={state}>
       <DispatchContext.Provider value={dispatch}>

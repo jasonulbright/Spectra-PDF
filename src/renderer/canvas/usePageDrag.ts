@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { pushEscapeInterceptor } from '../commands/context';
 import { computeDropTarget, DOC_HEIGHT } from './layout';
 import { INTO_MIN_SCREEN_PX } from './drop-target';
 import { buildDragGhost, moveDragGhost } from './drag-ghost';
@@ -38,6 +39,9 @@ interface DragSession {
   height: number;
   started: boolean;
   ghost: HTMLElement | null;
+  // Unregisters this drag's Escape-to-cancel from the keymap dispatcher's
+  // interceptor stack (Phase 4 M1; formerly an own window keydown listener).
+  unregisterEscape: () => void;
 }
 
 const DRAG_THRESHOLD_PX = 6;
@@ -83,6 +87,7 @@ export function usePageDrag(deps: PageDragDeps) {
     session.current = null;
     if (s?.ghost) s.ghost.remove();
     if (s) {
+      s.unregisterEscape();
       // Escape/pointercancel can tear down while the button is still held —
       // without this, the inert page element keeps the capture until release.
       try {
@@ -93,7 +98,6 @@ export function usePageDrag(deps: PageDragDeps) {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
-      window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('blur', onWindowBlur);
     }
     setDraggingPage(null);
@@ -157,10 +161,6 @@ export function usePageDrag(deps: PageDragDeps) {
     teardown();
   }
 
-  function onKeyDown(e: KeyboardEvent): void {
-    if (e.key === 'Escape') teardown();
-  }
-
   function onWindowBlur(): void {
     teardown();
   }
@@ -185,6 +185,13 @@ export function usePageDrag(deps: PageDragDeps) {
         height: rect.height,
         started: false,
         ghost: null,
+        // Escape cancels the drag — registered for the whole grab (pre-
+        // threshold too, like the listener it replaces; a no-drag Escape
+        // teardown is harmless).
+        unregisterEscape: pushEscapeInterceptor(() => {
+          teardown();
+          return true;
+        }),
       };
       try {
         el.setPointerCapture(e.pointerId);
@@ -194,7 +201,6 @@ export function usePageDrag(deps: PageDragDeps) {
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
       window.addEventListener('pointercancel', onPointerCancel);
-      window.addEventListener('keydown', onKeyDown);
       window.addEventListener('blur', onWindowBlur);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps

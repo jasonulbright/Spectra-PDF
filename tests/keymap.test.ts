@@ -1,0 +1,277 @@
+// The keymap layer (Phase 4 M1): table integrity, the pure resolver, the
+// dispatcher's scope order (interceptors → editable guard → bindings), and
+// the Escape chain.
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { KEY_BINDINGS, type KeyBinding } from '../src/renderer/commands/acrobat-keys';
+import { dispatchKeyEvent, isEditable, resolveBinding } from '../src/renderer/commands/keymap';
+import { COMMANDS } from '../src/renderer/commands/registry';
+import {
+  pushEscapeInterceptor,
+  registerAppCommandHandlers,
+  registerCanvasServices,
+  setCommandStateSource,
+} from '../src/renderer/commands/context';
+import { appReducer, initialState } from '../src/renderer/state/reducer';
+import type { AppAction, AppState } from '../src/renderer/state/types';
+
+interface FakeEventInit {
+  key: string;
+  ctrl?: boolean;
+  meta?: boolean;
+  shift?: boolean;
+  target?: unknown;
+}
+
+function fakeEvent(init: FakeEventInit): KeyboardEvent & { defaultPrevented: boolean } {
+  const e = {
+    key: init.key,
+    ctrlKey: init.ctrl ?? false,
+    metaKey: init.meta ?? false,
+    shiftKey: init.shift ?? false,
+    target: init.target ?? null,
+    defaultPrevented: false,
+    preventDefault(): void {
+      e.defaultPrevented = true;
+    },
+  };
+  return e as unknown as KeyboardEvent & { defaultPrevented: boolean };
+}
+
+const INPUT = { tagName: 'INPUT' } as unknown as EventTarget;
+const DIV = { tagName: 'DIV', isContentEditable: false } as unknown as EventTarget;
+
+afterEach(() => {
+  setCommandStateSource(null);
+  registerAppCommandHandlers(null);
+  registerCanvasServices(null);
+});
+
+describe('table integrity', () => {
+  it('every binding references a registered command', () => {
+    for (const b of KEY_BINDINGS) {
+      expect(COMMANDS[b.command], `${b.key} -> ${b.command}`).toBeDefined();
+    }
+  });
+
+  it('no two bindings can match the same key event', () => {
+    // Two bindings conflict when key matches and every constrained modifier
+    // is compatible (undefined = don't care, so it overlaps everything).
+    const compatible = (a: boolean | undefined, b: boolean | undefined): boolean =>
+      a === undefined || b === undefined || a === b;
+    const conflicts: string[] = [];
+    for (let i = 0; i < KEY_BINDINGS.length; i++) {
+      for (let j = i + 1; j < KEY_BINDINGS.length; j++) {
+        const a = KEY_BINDINGS[i] as KeyBinding;
+        const b = KEY_BINDINGS[j] as KeyBinding;
+        if (a.key === b.key && compatible(a.ctrl, b.ctrl) && compatible(a.shift, b.shift)) {
+          conflicts.push(`${a.key}: ${a.command} vs ${b.command}`);
+        }
+      }
+    }
+    expect(conflicts).toEqual([]);
+  });
+
+  it('escape is never a table binding — the chain owns it', () => {
+    expect(KEY_BINDINGS.some((b) => b.key === 'escape')).toBe(false);
+  });
+});
+
+describe('resolveBinding', () => {
+  it('resolves modifier chords case-insensitively (Ctrl+Shift+Z → redo)', () => {
+    expect(resolveBinding(fakeEvent({ key: 'Z', ctrl: true, shift: true }))?.command).toBe('edit.redo');
+    expect(resolveBinding(fakeEvent({ key: 'z', ctrl: true }))?.command).toBe('edit.undo');
+    expect(resolveBinding(fakeEvent({ key: 'z', meta: true }))?.command).toBe('edit.undo'); // Cmd = Ctrl
+  });
+
+  it("don't-care modifiers match either state (Ctrl+Y and Ctrl+Shift+Y both redo)", () => {
+    expect(resolveBinding(fakeEvent({ key: 'y', ctrl: true }))?.command).toBe('edit.redo');
+    expect(resolveBinding(fakeEvent({ key: 'y', ctrl: true, shift: true }))?.command).toBe('edit.redo');
+  });
+
+  it('unmodified Delete/Backspace and [ ] resolve regardless of modifiers (legacy semantics)', () => {
+    expect(resolveBinding(fakeEvent({ key: 'Delete' }))?.command).toBe('document.deleteSelection');
+    expect(resolveBinding(fakeEvent({ key: 'Backspace', ctrl: true }))?.command).toBe('document.deleteSelection');
+    expect(resolveBinding(fakeEvent({ key: ']' }))?.command).toBe('document.rotateSelectionCW');
+    expect(resolveBinding(fakeEvent({ key: '[' }))?.command).toBe('document.rotateSelectionCCW');
+  });
+
+  it('zoom accepts = and + (shifted or not)', () => {
+    expect(resolveBinding(fakeEvent({ key: '=', ctrl: true }))?.command).toBe('view.zoomIn');
+    expect(resolveBinding(fakeEvent({ key: '+', ctrl: true, shift: true }))?.command).toBe('view.zoomIn');
+    expect(resolveBinding(fakeEvent({ key: '-', ctrl: true }))?.command).toBe('view.zoomOut');
+    expect(resolveBinding(fakeEvent({ key: '0', ctrl: true }))?.command).toBe('view.fit');
+  });
+
+  it('returns null for unbound keys', () => {
+    expect(resolveBinding(fakeEvent({ key: 'p', ctrl: true }))).toBeNull(); // print is M-P, unbound at M1
+    expect(resolveBinding(fakeEvent({ key: 'z' }))).toBeNull(); // bare z: single-key accelerators are M6, default off
+  });
+});
+
+describe('isEditable', () => {
+  it('flags form fields and contenteditable, not plain elements', () => {
+    expect(isEditable(INPUT)).toBe(true);
+    expect(isEditable({ tagName: 'TEXTAREA' } as unknown as EventTarget)).toBe(true);
+    expect(isEditable({ tagName: 'SELECT' } as unknown as EventTarget)).toBe(true);
+    expect(isEditable({ tagName: 'DIV', isContentEditable: true } as unknown as EventTarget)).toBe(true);
+    expect(isEditable(DIV)).toBe(false);
+    expect(isEditable(null)).toBe(false);
+  });
+});
+
+// --- dispatcher ------------------------------------------------------------
+
+function wire(state: AppState): { dispatched: AppAction[]; current: () => AppState } {
+  const dispatched: AppAction[] = [];
+  let current = state;
+  setCommandStateSource(() => ({
+    state: current,
+    dispatch: (a: AppAction) => {
+      dispatched.push(a);
+      current = appReducer(current, a);
+    },
+  }));
+  return { dispatched, current: () => current };
+}
+
+function uiState(partial: Partial<AppState['ui']>): AppState {
+  return { ...initialState, ui: { ...initialState.ui, ...partial } };
+}
+
+describe('dispatchKeyEvent', () => {
+  it('does nothing before the context is registered', () => {
+    const e = fakeEvent({ key: 'z', ctrl: true });
+    expect(() => dispatchKeyEvent(e)).not.toThrow();
+    expect(e.defaultPrevented).toBe(false);
+  });
+
+  it('runs an enabled global binding (Ctrl+Z → undo) and preventDefaults', () => {
+    wire(uiState({}));
+    const undo = vi.fn(async () => {});
+    registerAppCommandHandlers({
+      openFiles: vi.fn(), save: vi.fn(), saveAs: vi.fn(), closeFile: vi.fn(), closeAll: vi.fn(),
+      undo, redo: vi.fn(), applyPageEdits: vi.fn(), openPreferences: vi.fn(),
+    } as never);
+    // Nothing to undo → command disabled, but the legacy listener still
+    // preventDefault'ed on the chord: 'always' semantics.
+    const e = fakeEvent({ key: 'z', ctrl: true });
+    dispatchKeyEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    expect(undo).not.toHaveBeenCalled();
+    // With page-tier history the command is enabled and runs.
+    wire({ ...uiState({}), pageUndoStack: [{ documents: [], dirtyPaths: [] }] });
+    registerAppCommandHandlers({
+      openFiles: vi.fn(), save: vi.fn(), saveAs: vi.fn(), closeFile: vi.fn(), closeAll: vi.fn(),
+      undo, redo: vi.fn(), applyPageEdits: vi.fn(), openPreferences: vi.fn(),
+    } as never);
+    dispatchKeyEvent(fakeEvent({ key: 'z', ctrl: true }));
+    expect(undo).toHaveBeenCalledOnce();
+  });
+
+  it('the editable guard swallows guarded bindings inside fields', () => {
+    const { dispatched } = wire(uiState({ view: 'canvas' }));
+    const e = fakeEvent({ key: 'a', ctrl: true, target: INPUT });
+    dispatchKeyEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+    expect(dispatched).toEqual([]);
+  });
+
+  it('Ctrl+F always wins — even from inside a field', () => {
+    wire(uiState({ view: 'canvas' }));
+    const open = vi.fn();
+    registerCanvasServices({
+      canvas: () => null,
+      find: { isOpen: () => false, open, close: vi.fn() },
+    });
+    const e = fakeEvent({ key: 'f', ctrl: true, target: INPUT });
+    dispatchKeyEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it('canvas-scoped bindings fall through outside the canvas view', () => {
+    const { dispatched } = wire(uiState({ view: 'operations' }));
+    const e = fakeEvent({ key: 'a', ctrl: true, target: DIV });
+    dispatchKeyEvent(e);
+    // No preventDefault: the browser's own select-all belongs to the page.
+    expect(e.defaultPrevented).toBe(false);
+    expect(dispatched).toEqual([]);
+  });
+
+  it('Ctrl+A in canvas selects all pages', () => {
+    const { dispatched } = wire(uiState({ view: 'canvas' }));
+    const e = fakeEvent({ key: 'a', ctrl: true, target: DIV });
+    dispatchKeyEvent(e);
+    expect(e.defaultPrevented).toBe(true); // legacy: pd before the (empty-workspace) no-op
+    expect(dispatched).toEqual([{ type: 'UI_SELECT_ALL_PAGES' }]);
+  });
+
+  it('Delete without a selection falls through (no preventDefault)', () => {
+    const { dispatched } = wire(uiState({ view: 'canvas' }));
+    const e = fakeEvent({ key: 'Delete', target: DIV });
+    dispatchKeyEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+    expect(dispatched).toEqual([]);
+  });
+
+  it('Delete with a selection dispatches the batched delete + clear', () => {
+    const { dispatched } = wire(uiState({ view: 'canvas', selectedPageIds: new Set(['x#p0']) }));
+    const e = fakeEvent({ key: 'Delete', target: DIV });
+    dispatchKeyEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    expect(dispatched.map((a) => a.type)).toEqual(['DELETE_PAGE_REFS', 'UI_CLEAR_SELECTION']);
+  });
+
+  it('] and [ rotate the selection', () => {
+    const { dispatched } = wire(uiState({ view: 'canvas', selectedPageIds: new Set(['x#p0']) }));
+    dispatchKeyEvent(fakeEvent({ key: ']', target: DIV }));
+    dispatchKeyEvent(fakeEvent({ key: '[', target: DIV }));
+    expect(dispatched).toEqual([
+      { type: 'ROTATE_PAGE_REFS', pageIds: ['x#p0'], delta: 90 },
+      { type: 'ROTATE_PAGE_REFS', pageIds: ['x#p0'], delta: 270 },
+    ]);
+  });
+});
+
+describe('the Escape chain', () => {
+  it('an interceptor (drag/menu) consumes Escape ahead of everything', () => {
+    const { dispatched } = wire(uiState({ view: 'canvas', tool: 'highlight' }));
+    const consumed = vi.fn(() => true);
+    const un = pushEscapeInterceptor(consumed);
+    dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
+    expect(consumed).toHaveBeenCalledOnce();
+    expect(dispatched).toEqual([]); // tool untouched
+    un();
+  });
+
+  it('exits the armed tool next (even from inside a field — legacy behavior)', () => {
+    const { dispatched } = wire(uiState({ view: 'canvas', tool: 'redact' }));
+    dispatchKeyEvent(fakeEvent({ key: 'Escape', target: INPUT }));
+    expect(dispatched).toEqual([{ type: 'UI_SET_TOOL', tool: 'select' }]);
+  });
+
+  it('clears the selection when no tool is armed (edit-guarded)', () => {
+    const { dispatched } = wire(uiState({ view: 'canvas', selectedPageIds: new Set(['x#p0']) }));
+    dispatchKeyEvent(fakeEvent({ key: 'Escape', target: INPUT }));
+    expect(dispatched).toEqual([]); // guarded inside a field
+    dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
+    expect(dispatched).toEqual([{ type: 'UI_CLEAR_SELECTION' }]);
+  });
+
+  it('tool exit takes priority over selection clear — one step per press', () => {
+    const { dispatched, current } = wire(
+      uiState({ view: 'canvas', tool: 'highlight', selectedPageIds: new Set(['x#p0']) }),
+    );
+    dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
+    expect(dispatched).toEqual([{ type: 'UI_SET_TOOL', tool: 'select' }]);
+    expect(current().ui.selectedPageIds.size).toBe(1);
+    dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
+    expect(dispatched.map((a) => a.type)).toEqual(['UI_SET_TOOL', 'UI_CLEAR_SELECTION']);
+  });
+
+  it('is inert outside the canvas view', () => {
+    const { dispatched } = wire(uiState({ view: 'operations', tool: 'select' }));
+    dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
+    expect(dispatched).toEqual([]);
+  });
+});

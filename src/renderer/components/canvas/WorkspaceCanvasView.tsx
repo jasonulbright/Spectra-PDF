@@ -28,6 +28,7 @@ import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
 import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge } from '../../testHarness';
+import { invokeCommand, registerCanvasServices } from '../../commands/context';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
 import { Canvas } from './Canvas';
@@ -52,7 +53,6 @@ interface WorkspaceCanvasViewProps {
   // Jump to the extract-text panel with the page pre-selected (same
   // workspace-position numbering; the engine gate commits before reading).
   onExtractText: (path: string, pageNumber: number) => void;
-  onApplyChanges: () => void;
   // Run the engine's redact on one file — App routes this through
   // performOperation, so the commit gate flushes pending page edits, a
   // snapshot lands on the undo chain, and the buffer reloads after.
@@ -98,7 +98,6 @@ export function WorkspaceCanvasView({
   onCloseFile,
   onInspectPage,
   onExtractText,
-  onApplyChanges,
   onRedactFile,
   onApplyOcrLayer,
   onAddPages,
@@ -133,14 +132,21 @@ export function WorkspaceCanvasView({
   }, [dropResolverRef]);
   // Multi-select is view state (never the page-edit tier): a set of selected
   // page ids plus the anchor for shift-range selection. Batched page ops
-  // (move/delete/rotate) act on the whole set as one undo step (2n.1).
-  const [selectedPageIds, setSelectedPageIds] = useState<ReadonlySet<string>>(NO_PAGE_IDS);
-  const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
+  // (move/delete/rotate) act on the whole set as one undo step (2n.1). It
+  // lives in the ui slice (Phase 4 M1) so command enablement can read it;
+  // buffer-identity invalidation moved into the reducer with it.
+  const selectedPageIds = state.ui.selectedPageIds;
   const [renderVersion, setRenderVersion] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string; pageId: string } | null>(
     null,
   );
-  const [tool, setTool] = useState<CanvasTool>('select');
+  // The armed interaction tool — ui slice too (the keymap's Escape chain and
+  // the tools.* commands drive it).
+  const tool = state.ui.tool;
+  const setTool = useCallback(
+    (t: CanvasTool) => dispatch({ type: 'UI_SET_TOOL', tool: t }),
+    [dispatch],
+  );
   // Color picker for the annotation tools: null keeps each tool's own default
   // (yellow highlight, dark freetext, blue ink); a pick applies to whichever
   // tool creates the next annotation, across tool switches.
@@ -384,133 +390,63 @@ export function WorkspaceCanvasView({
     }
   }, [pendingFormValues, onFillFormValues]);
 
-  // Workspace-flattened page order (doc order, then page order) — the basis for
-  // shift-range selection, select-all, and workspace-order group moves. Refs
-  // let the single keyboard listener read the latest order/selection without
-  // re-registering on every change.
+  // Workspace-flattened page order (doc order, then page order) — the basis
+  // for workspace-order group moves (selection semantics themselves moved
+  // into the reducer with the ui slice). Refs keep the harness registration
+  // stable while reading the latest order/selection.
   const flatOrder = useMemo(() => docs.flatMap((d) => d.pages.map((p) => p.id)), [docs]);
   const flatOrderRef = useRef(flatOrder);
   flatOrderRef.current = flatOrder;
   const selectionRef = useRef(selectedPageIds);
   selectionRef.current = selectedPageIds;
 
-  // Escape returns to Select from the highlight tool.
-  React.useEffect(() => {
-    if (tool === 'select') return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setTool('select');
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [tool]);
-
-  // Ctrl+F opens Find (2m).
-  const openFindRef = useRef(find.openFind);
-  openFindRef.current = find.openFind;
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
-        e.preventDefault();
-        openFindRef.current();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+  // Keyboard shortcuts (Escape chain, Ctrl+F, select-all/delete/rotate/zoom)
+  // are owned by the app-level keymap dispatcher now (commands/keymap.ts) —
+  // the canvas registers its camera + find services for the commands instead
+  // of its own window listeners (Phase 4 M1).
+  const findRef = useRef(find);
+  findRef.current = find;
+  useEffect(() => {
+    registerCanvasServices({
+      canvas: () => canvasRef.current,
+      find: {
+        isOpen: () => findRef.current.open,
+        open: () => findRef.current.openFind(),
+        close: () => findRef.current.closeFind(),
+      },
+    });
+    return () => registerCanvasServices(null);
   }, []);
 
-  // Selection actions, shared by the keyboard listener and the e2e harness.
-  // They read the latest order/selection via refs, so they're stable.
-  const selectAllPages = useCallback(() => {
-    const all = flatOrderRef.current;
-    if (all.length === 0) return;
-    setSelectedPageIds(new Set(all));
-    setSelectionAnchor(all[0] ?? null);
-  }, []);
-  const clearSelection = useCallback(() => {
-    setSelectedPageIds(NO_PAGE_IDS);
-    setSelectionAnchor(null);
-  }, []);
-  const deleteSelectedPages = useCallback(() => {
-    const sel = selectionRef.current;
-    if (sel.size === 0) return;
-    dispatch({ type: 'DELETE_PAGE_REFS', pageIds: [...sel] });
-    setSelectedPageIds(NO_PAGE_IDS);
-    setSelectionAnchor(null);
-  }, [dispatch]);
-  const rotateSelectedPages = useCallback(
-    (delta: 90 | 270) => {
-      const sel = selectionRef.current;
-      if (sel.size === 0) return;
-      dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: [...sel], delta });
-    },
+  const clearSelection = useCallback(
+    () => dispatch({ type: 'UI_CLEAR_SELECTION' }),
     [dispatch],
   );
-
-  // Canvas keyboard shortcuts (2n.1): select-all, delete, rotate, zoom, and
-  // Escape-to-clear. One stable window listener; never fires while typing in a
-  // field. Undo/redo (Ctrl+Z/Y) are app-global and live in App.tsx.
-  useEffect(() => {
-    const isEditable = (el: EventTarget | null): boolean => {
-      const n = el as HTMLElement | null;
-      if (!n || !n.tagName) return false;
-      return (
-        n.tagName === 'INPUT' ||
-        n.tagName === 'TEXTAREA' ||
-        n.tagName === 'SELECT' ||
-        n.isContentEditable
-      );
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (isEditable(e.target)) return;
-      const mod = e.ctrlKey || e.metaKey;
-      if (mod && (e.key === 'a' || e.key === 'A')) {
-        e.preventDefault();
-        selectAllPages();
-      } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectionRef.current.size === 0) return;
-        e.preventDefault();
-        deleteSelectedPages();
-      } else if (e.key === '[' || e.key === ']') {
-        if (selectionRef.current.size === 0) return;
-        e.preventDefault();
-        rotateSelectedPages(e.key === ']' ? 90 : 270);
-      } else if (e.key === 'Escape') {
-        // Tool exit is handled by the tool effect (mounted only off 'select');
-        // here Escape clears any page selection.
-        if (selectionRef.current.size > 0) clearSelection();
-      } else if (mod && (e.key === '=' || e.key === '+')) {
-        e.preventDefault();
-        canvasRef.current?.zoomIn();
-      } else if (mod && e.key === '-') {
-        e.preventDefault();
-        canvasRef.current?.zoomOut();
-      } else if (mod && e.key === '0') {
-        e.preventDefault();
-        canvasRef.current?.reset();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selectAllPages, clearSelection, deleteSelectedPages, rotateSelectedPages]);
+  // Batched selection ops route through the registry — the same entry point
+  // the Delete/[/] keys hit — so the context menu and harness stay one path.
+  const deleteSelectedPages = useCallback(() => {
+    invokeCommand('document.deleteSelection');
+  }, []);
 
   // e2e harness for multi-select (2n.1): modifier-click selection and the
   // pointer-capture group drag aren't reliably WebDriver-drivable, so the
   // canvas registers selection setters/readers + the batched delete/rotate
-  // paths here, mirroring the redaction/signature/OCR hooks.
+  // command paths here, mirroring the redaction/signature/OCR hooks.
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasSelection({
-      selectPageIds: (ids) => {
-        setSelectedPageIds(new Set(ids));
-        setSelectionAnchor(ids[ids.length - 1] ?? null);
-      },
+      selectPageIds: (ids) =>
+        dispatch({ type: 'UI_SET_SELECTION', pageIds: ids, anchor: ids[ids.length - 1] ?? null }),
       getSelectedPageIds: () => [...selectionRef.current],
       getWorkspacePageIds: () => [...flatOrderRef.current],
-      deleteSelected: () => deleteSelectedPages(),
-      rotateSelected: (delta) => rotateSelectedPages(delta),
+      deleteSelected: () => void invokeCommand('document.deleteSelection'),
+      rotateSelected: (delta) =>
+        void invokeCommand(
+          delta === 90 ? 'document.rotateSelectionCW' : 'document.rotateSelectionCCW',
+        ),
     });
     return () => registerCanvasSelection(null);
-  }, [deleteSelectedPages, rotateSelectedPages]);
+  }, [dispatch]);
 
   const onAddAnnotation = useCallback(
     (docId: string, pageId: string, annotation: PageAnnotation) =>
@@ -650,13 +586,8 @@ export function WorkspaceCanvasView({
       // A buffer change can rename/remove fields — a name-keyed sign target
       // must not survive it (the user re-clicks the widget, which re-reads).
       setSigFieldTarget((prev) => (prev && invalidated.has(prev.path) ? null : prev));
-      // Selection holds positional PageRef ids (`path#pN`) that the indexer
-      // rebuilds from the new on-disk order after any buffer change. A stale id
-      // would silently re-bind to a DIFFERENT physical page and get deleted or
-      // rotated by the batched actions — the same hazard as marks. Selection is
-      // view-only (no data), so clearing it on any reindex is the safe answer.
-      setSelectedPageIds(NO_PAGE_IDS);
-      setSelectionAnchor(null);
+      // (Selection shares the positional-id hazard; it lives in the ui slice
+      // now and the reducer clears it wherever buffers change.)
     }
   }, [state.files]);
 
@@ -1010,7 +941,7 @@ export function WorkspaceCanvasView({
       signingRef.current = false;
       setSigningBusy(false);
     }
-  }, [liveSigPlacement, sigFieldTarget, sigSource, sigPassword, sigReason, sigLocation, docs, state.files, state.pageDirtyPaths, engineCall]);
+  }, [liveSigPlacement, sigFieldTarget, sigSource, sigPassword, sigReason, sigLocation, docs, state.files, state.pageDirtyPaths, engineCall, setTool]);
 
   // Harness bridge (e2e builds only): redaction marks live here, out of the
   // reducer's reach, so the canvas registers its own handlers while mounted.
@@ -1125,8 +1056,12 @@ export function WorkspaceCanvasView({
       } else {
         dispatch({ type: 'MOVE_PAGES', pageIds: movingIds, toDocId: targetDocId, toIndex: index });
       }
-      setSelectedPageIds(new Set(movingIds));
-      setSelectionAnchor(movingIds[movingIds.length - 1]);
+      // A drag re-selects its moved pages on drop.
+      dispatch({
+        type: 'UI_SET_SELECTION',
+        pageIds: movingIds,
+        anchor: movingIds[movingIds.length - 1],
+      });
     },
     [dispatch, docs],
   );
@@ -1156,8 +1091,11 @@ export function WorkspaceCanvasView({
       } else {
         dispatch({ type: 'MOVE_PAGES_TO_NEW_DOC', pageIds: movingIds, docIndex, newDocId, newName });
       }
-      setSelectedPageIds(new Set(movingIds));
-      setSelectionAnchor(movingIds[movingIds.length - 1]);
+      dispatch({
+        type: 'UI_SET_SELECTION',
+        pageIds: movingIds,
+        anchor: movingIds[movingIds.length - 1],
+      });
     },
     [dispatch, docs],
   );
@@ -1172,31 +1110,12 @@ export function WorkspaceCanvasView({
 
   const onSelectPage = useCallback(
     (docId: string, pageId: string, e?: React.MouseEvent) => {
-      if (e && (e.metaKey || e.ctrlKey)) {
-        // Toggle this page in/out of the selection.
-        setSelectedPageIds((prev) => {
-          const next = new Set(prev);
-          if (next.has(pageId)) next.delete(pageId);
-          else next.add(pageId);
-          return next;
-        });
-        setSelectionAnchor(pageId);
-        return;
-      }
-      if (e && e.shiftKey && selectionAnchor) {
-        // Range-select across workspace-flattened order from the anchor.
-        const a = flatOrder.indexOf(selectionAnchor);
-        const b = flatOrder.indexOf(pageId);
-        if (a !== -1 && b !== -1) {
-          const [lo, hi] = a < b ? [a, b] : [b, a];
-          setSelectedPageIds(new Set(flatOrder.slice(lo, hi + 1)));
-          return; // keep the anchor so a further shift-click re-extends
-        }
-      }
-      setSelectedPageIds(new Set([pageId]));
-      setSelectionAnchor(pageId);
+      // Modifier semantics (toggle / shift-range / single) live in the
+      // reducer now — it has the workspace-flattened order and the anchor.
+      const mode = e && (e.metaKey || e.ctrlKey) ? 'toggle' : e && e.shiftKey ? 'range' : 'single';
+      dispatch({ type: 'UI_SELECT_PAGE', pageId, mode });
     },
-    [flatOrder, selectionAnchor],
+    [dispatch],
   );
 
   const onOpenPage = useCallback(
@@ -1213,11 +1132,10 @@ export function WorkspaceCanvasView({
     (docId: string, pageId: string, e: React.MouseEvent) => {
       // Right-clicking a page already in the selection keeps the whole
       // selection (menu actions then apply to all); otherwise select just it.
-      setSelectedPageIds((prev) => (prev.has(pageId) ? prev : new Set([pageId])));
-      setSelectionAnchor(pageId);
+      dispatch({ type: 'UI_SELECT_PAGE', pageId, mode: 'context' });
       setMenu({ x: e.clientX, y: e.clientY, docId, pageId });
     },
-    [],
+    [dispatch],
   );
 
   const rotateBy = useCallback(
@@ -1438,10 +1356,7 @@ export function WorkspaceCanvasView({
         slotHeight={layout.slotHeight}
         dragging={drag.draggingPage !== null}
         onSettle={() => setRenderVersion((v) => v + 1)}
-        onBackgroundClick={() => {
-          setSelectedPageIds(NO_PAGE_IDS);
-          setSelectionAnchor(null);
-        }}
+        onBackgroundClick={clearSelection}
         overlay={
           <HeaderLayer
             items={layout.items}
@@ -1520,7 +1435,7 @@ export function WorkspaceCanvasView({
         <div className="flex bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg overflow-hidden">
           <button
             title="Select and drag pages"
-            onClick={() => setTool('select')}
+            onClick={() => invokeCommand('tools.select')}
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'select' ? 'bg-neutral-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
             Select
@@ -1528,7 +1443,7 @@ export function WorkspaceCanvasView({
           <button
             data-testid="tool-highlight"
             title="Drag a box on a page to highlight (Esc to exit)"
-            onClick={() => setTool(tool === 'highlight' ? 'select' : 'highlight')}
+            onClick={() => invokeCommand('tools.highlight')}
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'highlight' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
             Highlight
@@ -1536,7 +1451,7 @@ export function WorkspaceCanvasView({
           <button
             data-testid="tool-freetext"
             title="Drag a box on a page to add text (Esc to exit)"
-            onClick={() => setTool(tool === 'freetext' ? 'select' : 'freetext')}
+            onClick={() => invokeCommand('tools.freetext')}
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'freetext' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
             Text
@@ -1544,7 +1459,7 @@ export function WorkspaceCanvasView({
           <button
             data-testid="tool-ink"
             title="Draw freehand on a page (Esc to exit)"
-            onClick={() => setTool(tool === 'ink' ? 'select' : 'ink')}
+            onClick={() => invokeCommand('tools.ink')}
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'ink' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
             Draw
@@ -1552,7 +1467,7 @@ export function WorkspaceCanvasView({
           <button
             data-testid="tool-stamp"
             title="Click a page to place a stamp (Esc to exit)"
-            onClick={() => setTool(tool === 'stamp' ? 'select' : 'stamp')}
+            onClick={() => invokeCommand('tools.stamp')}
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'stamp' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
             Stamp
@@ -1560,7 +1475,7 @@ export function WorkspaceCanvasView({
           <button
             data-testid="tool-redact"
             title="Drag a box on a page to mark it for redaction (Esc to exit)"
-            onClick={() => setTool(tool === 'redact' ? 'select' : 'redact')}
+            onClick={() => invokeCommand('tools.redact')}
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'redact' ? 'bg-red-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
             Redact
@@ -1568,7 +1483,7 @@ export function WorkspaceCanvasView({
           <button
             data-testid="tool-signature"
             title="Drag a box on a page to place a visible signature (Esc to exit)"
-            onClick={() => setTool(tool === 'signature' ? 'select' : 'signature')}
+            onClick={() => invokeCommand('tools.signature')}
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'signature' ? 'bg-violet-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
             Sign
@@ -1576,7 +1491,7 @@ export function WorkspaceCanvasView({
           <button
             data-testid="tool-forms"
             title="Fill form fields directly on the page (Esc to exit)"
-            onClick={() => setTool(tool === 'forms' ? 'select' : 'forms')}
+            onClick={() => invokeCommand('tools.forms')}
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'forms' ? 'bg-emerald-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
             Forms
@@ -1719,7 +1634,7 @@ export function WorkspaceCanvasView({
         {dirty && (
           <button
             data-testid="apply-page-edits-btn"
-            onClick={onApplyChanges}
+            onClick={() => invokeCommand('document.applyPageEdits')}
             className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded-full font-medium shadow-lg"
           >
             Apply changes

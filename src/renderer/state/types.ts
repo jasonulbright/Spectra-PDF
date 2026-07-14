@@ -114,9 +114,44 @@ export interface PageEditSnapshot {
   dirtyPaths: string[];
 }
 
+// The canvas interaction tool. Lives in the ui slice so command enablement
+// and the keymap can read it (Phase 4 M1); PageCell re-exports the type for
+// its overlay consumers. Generalizes to the 2.0 ToolId at M5.
+export type CanvasTool =
+  | 'select'
+  | 'highlight'
+  | 'freetext'
+  | 'ink'
+  | 'stamp'
+  | 'redact'
+  | 'signature'
+  | 'forms';
+
+// Main view. M2 replaces this with the tab-strip model ('home' | 'tools' |
+// per-doc tabs); until then the literals stay the pre-workbench names so the
+// e2e harness snapshots are unchanged.
+export type ViewMode = 'welcome' | 'operations' | 'canvas';
+
+// UI state the command registry needs to read (menus/toolbars can't read
+// component-local state — 19-phase4 § 4.3). Ephemeral interaction state
+// (in-flight drags, rubber bands, inline edits, pending marks/placements)
+// stays component-local: it has no command consumers.
+export interface UiState {
+  view: ViewMode;
+  activeOp: string; // Sidebar Operation id; typed loosely here to avoid a component import cycle
+  tool: CanvasTool;
+  // Canvas multi-select (2n.1) — view state, never the page-edit tier.
+  // Positional PageRef ids: any buffer-identity change clears the selection
+  // (the reducer does this where the buffers change; formerly a
+  // WorkspaceCanvasView effect).
+  selectedPageIds: ReadonlySet<string>;
+  selectionAnchor: string | null;
+}
+
 export interface AppState {
   files: Map<string, OpenFile>;
   activeFileId: string | null;
+  ui: UiState;
   // Parallel page-level view of `files`, kept in sync asynchronously by
   // useWorkspaceIndexer. The canvas view renders it; other views still read
   // `files` directly.
@@ -184,4 +219,19 @@ export type AppAction =
   | { type: 'REMOVE_DOC'; docId: string }
   | { type: 'UNDO_PAGE_OP' }
   | { type: 'REDO_PAGE_OP' }
-  | { type: 'CLEAR_PAGE_EDITS' };
+  | { type: 'CLEAR_PAGE_EDITS' }
+  // ui slice (Phase 4 M1). One dispatch pathway so the whole app state stays
+  // snapshot-testable; commands and the keymap read state.ui for enablement.
+  | { type: 'UI_SET_VIEW'; view: ViewMode }
+  | { type: 'UI_SET_ACTIVE_OP'; op: string }
+  | { type: 'UI_SET_TOOL'; tool: CanvasTool }
+  // Click selection with the canvas's modifier semantics (computed here —
+  // range/toggle need the workspace-flattened order, which lives in state):
+  // 'single' replaces; 'toggle' is Ctrl-click; 'range' is Shift-click from the
+  // anchor; 'context' is right-click (keep an existing multi-selection that
+  // contains the page, else select just it).
+  | { type: 'UI_SELECT_PAGE'; pageId: string; mode: 'single' | 'toggle' | 'range' | 'context' }
+  | { type: 'UI_SELECT_ALL_PAGES' }
+  | { type: 'UI_CLEAR_SELECTION' }
+  // Explicit set — drag re-select after a move, and the e2e harness.
+  | { type: 'UI_SET_SELECTION'; pageIds: string[]; anchor: string | null };

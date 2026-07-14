@@ -1,0 +1,84 @@
+// The command system — the load-bearing architecture of Phase 4
+// (docs/architecture/19-phase4-workbench-ui.md § 4). Everything visible
+// (menus, toolbars, context menus, tool tiles, the keymap) is data that
+// references command ids; handlers live in exactly one place.
+import type { Dispatch } from 'react';
+import type { AppAction, AppState } from '../state/types';
+import type { CanvasHandle } from '../canvas/canvas-handle';
+
+// Menu-bar namespaces (§ 4.1). Every command id must live under one of them —
+// enforced by the `satisfies` check on COMMAND_IDS in registry.ts. The
+// concrete ids are a finite union (typeof COMMAND_IDS[number]) so that
+// `COMMANDS: Record<CommandId, Command>` is a TOTAL record: adding an id
+// without a command (or vice versa) fails tsc — the tool-icons GLYPHS
+// precedent.
+export type CommandNamespace =
+  | `file.${string}`
+  | `edit.${string}`
+  | `view.${string}`
+  | `document.${string}`
+  | `tools.${string}`
+  | `window.${string}`
+  | `help.${string}`;
+
+/**
+ * App-level handlers the registry invokes — registered by App.tsx while
+ * mounted (the same handlers the header buttons ran before M1; commands are
+ * entry points, not re-implementations). Everything that only needs
+ * state+dispatch is implemented directly in the registry instead.
+ */
+export interface AppCommandHandlers {
+  /** Native open dialog → openByPaths. Resolves true if files were opened. */
+  openFiles(): Promise<boolean>;
+  /** Save active file to its original path (commit-gated). */
+  save(): Promise<void>;
+  /** Save active file via the native save dialog (commit-gated). */
+  saveAs(): Promise<void>;
+  /** Close one open file, with the unsaved-changes prompt. */
+  closeFile(path: string): Promise<void>;
+  /** Close every open file, with the unsaved-changes prompt. */
+  closeAll(): Promise<void>;
+  /** Two-tier undo/redo (page tier first, then disk snapshots). */
+  undo(): Promise<void>;
+  redo(): Promise<void>;
+  /** Materialize pending page edits — the "Apply changes" path
+   * (commitAndReport: failures surface on the commit-error banner). */
+  applyPageEdits(): Promise<void>;
+  /** Open the Settings modal (Edit ▸ Preferences… at M5). */
+  openPreferences(): void;
+}
+
+/**
+ * Services owned by the canvas view while it is mounted. Getter-shaped
+ * because the underlying handle/find state changes without re-registration.
+ */
+export interface CanvasServices {
+  /** The d3-zoom camera handle (null until the Canvas mounts its ref). */
+  canvas(): CanvasHandle | null;
+  /** The floating Find bar (2m). */
+  find: {
+    isOpen(): boolean;
+    open(): void;
+    close(): void;
+  };
+}
+
+export interface CommandContext {
+  state: AppState;
+  dispatch: Dispatch<AppAction>;
+  /** Null only before App's registration effect runs (never observable by user input). */
+  app: AppCommandHandlers | null;
+  /** Null while the canvas view is unmounted. */
+  canvas: CanvasServices | null;
+}
+
+export interface Command {
+  /** Menu/tooltip label (menus render from the registry at M2). */
+  title: string;
+  /** Pure enablement predicate — menus/toolbars gray consistently from this,
+   * and the keymap only runs enabled commands. Absent = always enabled.
+   * `disabled` is rendering-state only; features we don't ship are ABSENT
+   * (§ 3.3), never registered-and-disabled. */
+  when?: (ctx: CommandContext) => boolean;
+  run: (ctx: CommandContext) => void | Promise<void>;
+}
