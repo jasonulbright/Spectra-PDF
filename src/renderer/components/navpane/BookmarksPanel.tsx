@@ -70,6 +70,16 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   // the first load, or reset to null to force a reload (no file / failed save).
   const [loadedBuffer, setLoadedBuffer] = useState<PdfBuffer | null>(null);
   const [status, setStatus] = useState('');
+  // In-flight saves per file path (ref-counted across the whole chain). A save
+  // OWNS the authoritative post-write tree, so the reload effect must not fetch-
+  // and-apply over one — its own `set_outline`/`file.snapshot` fires the commit
+  // gate, which can swap the buffer and trigger a reload mid-write that would
+  // otherwise land a stale tree and desync `nodes` from `loadedBuffer` (a later
+  // edit then silently clobbers the saved change — review-caught HIGH). `revalidate`
+  // re-runs the reload effect once a path's chain drains (so a lone failed save's
+  // revert, or an external change that arrived during a save, still reloads).
+  const savesInFlight = useRef<Map<string, number>>(new Map());
+  const [revalidate, setRevalidate] = useState(0);
   const [drag, setDrag] = useState<DragState | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const session = useRef<DragState | null>(null);
@@ -112,11 +122,22 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       return;
     }
     if (activeFile.buffer === loadedBuffer) return;
+    // Don't fetch over an in-flight save for this file — it owns the post-write
+    // tree; `revalidate` re-runs us once its chain drains.
+    const path = activeFile.path;
+    if ((savesInFlight.current.get(path) ?? 0) > 0) return;
     const targetBuffer = activeFile.buffer;
     let cancelled = false;
     call('get_outline', { file: activeFile.workingPath })
       .then((res) => {
         if (cancelled) return;
+        // Discard a read that raced a write: a save started while it was in
+        // flight (it owns the tree and will set nodes/loadedBuffer itself), or
+        // the file's bytes moved since we launched (a save that started AND
+        // finished, or an external change) — either way this read is stale and
+        // the buffer-change re-runs the effect for a fresh one.
+        if ((savesInFlight.current.get(path) ?? 0) > 0) return;
+        if (activeFileRef.current?.buffer !== targetBuffer) return;
         setNodes((res.outline as OutlineNode[]) ?? []);
         setLoadedBuffer(targetBuffer);
         setStatus(res.truncated ? 'Outline truncated (too many bookmarks)' : '');
@@ -125,7 +146,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
     return () => {
       cancelled = true;
     };
-  }, [activeFile, loadedBuffer, call]);
+  }, [activeFile, loadedBuffer, revalidate, call]);
 
   // One persist path, chained so a reorder and an edit-save can't interleave
   // (both stage the same working file). The `target` is captured by the caller
@@ -173,8 +194,18 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   persistRef.current = persist;
   const saveChain = useRef<Promise<void>>(Promise.resolve());
   const queuePersist = useCallback((next: OutlineNode[], target: OpenFile): Promise<void> => {
+    const m = savesInFlight.current;
+    m.set(target.path, (m.get(target.path) ?? 0) + 1); // mark BEFORE the write's commit-gate can trigger a reload
     const run = saveChain.current.then(() => persistRef.current(next, target));
-    saveChain.current = run.catch(() => {});
+    saveChain.current = run.catch(() => {}).finally(() => {
+      const n = (m.get(target.path) ?? 1) - 1;
+      if (n <= 0) {
+        m.delete(target.path);
+        setRevalidate((v) => v + 1); // chain drained — let the reload effect re-check (revert / external change)
+      } else {
+        m.set(target.path, n);
+      }
+    });
     return run;
   }, []);
 

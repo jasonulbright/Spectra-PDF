@@ -2,7 +2,16 @@ import { resolve } from 'node:path';
 import { mkdtempSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
-import { waitForHarness, openByPaths, getState, closeAllFiles, setReactInputValue } from '../support/harness.js';
+import {
+  waitForHarness,
+  openByPaths,
+  getState,
+  closeAllFiles,
+  setReactInputValue,
+  getWorkspacePageIds,
+  selectCanvasPages,
+  rotateSelectedCanvasPages,
+} from '../support/harness.js';
 
 // bookmarked.pdf: outline = Chapter 1 [Section 1.1, Section 1.2], Chapter 2.
 const BOOKMARKED_PDF = resolve(__dirname, '..', 'fixtures', 'bookmarked.pdf');
@@ -71,5 +80,47 @@ describe('navigation pane — Bookmarks panel', () => {
       async () => (await $$('[data-testid="bookmark-row"]')).length === before + 1,
       { timeoutMsg: 'add bookmark did not create a row' },
     );
+  });
+
+  it('keeps a rename when a pending page edit commits mid-save (reload-vs-save race)', async () => {
+    // Regression for the review-caught HIGH: with an UNCOMMITTED page-tier edit
+    // pending, the bookmark save's `file.snapshot` runs the commit gate FIRST,
+    // which flushes the page edit and swaps the working buffer BEFORE
+    // `set_outline` — that swap used to fire a reload that landed a stale tree
+    // and clobbered the just-typed rename. Deterministic with the fix (the
+    // reload is serialized against the in-flight save). Fresh copy so the
+    // earlier tests' edits don't interfere.
+    const dir = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-bm-race-'));
+    const copy = resolve(dir, 'bookmarked.pdf');
+    copyFileSync(BOOKMARKED_PDF, copy);
+    await closeAllFiles();
+    await openByPaths([copy]);
+    await browser.waitUntil(async () => (await getState()).view === 'canvas', {
+      timeoutMsg: 'opening did not focus the doc tab',
+    });
+
+    // Open the panel FIRST (its own get_outline would otherwise flush the edit
+    // through the gate before the rename), THEN create the pending page edit.
+    await ensureBookmarksOpen();
+    await $('[data-testid="bookmark-row"]').waitForDisplayed();
+    const pageIds = await getWorkspacePageIds();
+    await selectCanvasPages([pageIds[0]]);
+    await rotateSelectedCanvasPages(90); // page-tier, uncommitted → the gate flushes it on the next engine call
+
+    // Rename bookmark 0 — its persist's commit gate flushes the rotation mid-save.
+    await $('[data-testid="bookmark-title"]').click();
+    await setReactInputValue('[data-testid="bookmark-title"]', 'RACE SURVIVED');
+    await browser.keys(['Enter']);
+
+    // Round-trip through disk (panel switch remounts → fresh get_outline): the
+    // rename must have survived the concurrent commit-gate buffer swap.
+    await $('[data-testid="navicon-pages"]').click();
+    await $('[data-testid="pages-panel"]').waitForDisplayed();
+    await $('[data-testid="navicon-bookmarks"]').click();
+    await $('[data-testid="bookmark-row"]').waitForDisplayed();
+    await browser.waitUntil(async () => (await firstTitle()) === 'RACE SURVIVED', {
+      timeout: 10_000,
+      timeoutMsg: 'rename was lost to the reload-vs-save race',
+    });
   });
 });
