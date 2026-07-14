@@ -539,6 +539,14 @@ function PageCellImpl({
     if (!annotateMode) cancelBand.current?.();
   }, [annotateMode]);
 
+  // Cancel any in-flight band/stroke if the cell unmounts mid-gesture. The
+  // band's pointermove/up listeners live on `window`, not this node, so under
+  // the Document view's virtualization a big scroll (wheel/Page Down) with the
+  // button still held can unmount the dragged page while its listeners keep
+  // running — the trailing pointerup would then commit a rect for a cell that's
+  // gone. Harmless on the always-mounted board (review-caught).
+  useEffect(() => () => cancelBand.current?.(), []);
+
   const finishEditing = (annotation: PageAnnotation, value: string): void => {
     setEditing(null);
     const note = value.trim();

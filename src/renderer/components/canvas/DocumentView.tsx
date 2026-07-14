@@ -111,6 +111,17 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   const [zoom, setZoom] = useState(1);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
+  // A "settle" signal for the raster: PageView's detail layer only re-renders
+  // when its `version` changes; on the board that comes from <Canvas onSettle>,
+  // which isn't mounted here. So after a zoom, bump this a beat later (debounced
+  // — a burst of Ctrl+= re-details once) and fold it into the version handed to
+  // each PageCell, so the visible page re-rasters crisp at the new size instead
+  // of staying a CSS-stretched (blurry) base raster (review-caught).
+  const [zoomVersion, setZoomVersion] = useState(0);
+  useEffect(() => {
+    const t = setTimeout(() => setZoomVersion((v) => v + 1), 140);
+    return () => clearTimeout(t);
+  }, [zoom]);
 
   const pageHeight = pageHeightAt(zoom);
   const gap = PAGE_GAP * zoom;
@@ -199,7 +210,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           page={page}
           pdf={proxies.get(page.sourceDocId) ?? null}
           pageHeight={pageHeight}
-          renderVersion={props.renderVersion}
+          renderVersion={props.renderVersion + zoomVersion}
           selected={props.selectedPageIds.has(page.id)}
           collapsed={false}
           visibleNumber={i + 1}

@@ -121,6 +121,17 @@ export function WorkspaceCanvasView({
   const docViewMode = state.ui.docViewMode;
   const docViewModeRef = useRef(docViewMode);
   docViewModeRef.current = docViewMode;
+  // The CanvasHandle of whichever view is active — the board's d3 camera, or the
+  // reading view's scroller. EVERY camera caller (find navigation, the zoom
+  // buttons, the registered canvasServices) must route through this: the
+  // board-only `canvasRef` is null while the reading view is mounted, so a
+  // direct `canvasRef.current?.…` silently no-ops in Document mode
+  // (review-caught). Stable identity (reads refs).
+  const activeCanvasHandle = useCallback(
+    (): CanvasHandle | null =>
+      docViewModeRef.current === 'document' ? documentViewRef.current : canvasRef.current,
+    [],
+  );
   // The single document the reading view shows (the active file's doc; the
   // board shows ALL docs, the reading view one). Manifest partitions share a
   // path — the reading view takes the first for now (M4.1).
@@ -194,8 +205,8 @@ export function WorkspaceCanvasView({
   // double the OCR work and desync results). Ctrl+F opens the bar.
   const searchIndex = useSearchContext();
   const onFindNavigate = useCallback((pageId: string) => {
-    canvasRef.current?.centerOn(pageId);
-  }, []);
+    activeCanvasHandle()?.centerOn(pageId);
+  }, [activeCanvasHandle]);
   const find = useFind(searchIndex.search, searchIndex.version, docs, onFindNavigate);
   const [applyingOcr, setApplyingOcr] = useState(false);
   const [ocrApplyError, setOcrApplyError] = useState<string | null>(null);
@@ -413,7 +424,7 @@ export function WorkspaceCanvasView({
   findRef.current = find;
   useEffect(() => {
     registerCanvasServices({
-      canvas: () => (docViewModeRef.current === 'document' ? documentViewRef.current : canvasRef.current),
+      canvas: () => activeCanvasHandle(),
       find: {
         isOpen: () => findRef.current.open,
         open: () => findRef.current.openFind(),
@@ -422,7 +433,7 @@ export function WorkspaceCanvasView({
       },
     });
     return () => registerCanvasServices(null);
-  }, []);
+  }, [activeCanvasHandle]);
 
   const clearSelection = useCallback(
     () => dispatch({ type: 'UI_CLEAR_SELECTION' }),
@@ -1278,6 +1289,7 @@ export function WorkspaceCanvasView({
     >
       {docViewMode === 'document' && focusedDoc ? (
         <DocumentView
+          key={focusedDoc.id}
           ref={documentViewRef}
           doc={focusedDoc}
           proxies={proxies}
@@ -1605,21 +1617,21 @@ export function WorkspaceCanvasView({
         <div className="flex bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg overflow-hidden">
           <button
             title="Zoom out"
-            onClick={() => canvasRef.current?.zoomOut()}
+            onClick={() => activeCanvasHandle()?.zoomOut()}
             className="px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-700"
           >
             −
           </button>
           <button
             title="Fit to view"
-            onClick={() => canvasRef.current?.reset()}
+            onClick={() => activeCanvasHandle()?.reset()}
             className="px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-700"
           >
             Fit
           </button>
           <button
             title="Zoom in"
-            onClick={() => canvasRef.current?.zoomIn()}
+            onClick={() => activeCanvasHandle()?.zoomIn()}
             className="px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-700"
           >
             +
