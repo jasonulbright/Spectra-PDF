@@ -22,7 +22,8 @@ export type ChromeIconId =
   | 'close'
   | 'overflow'
   | 'document'
-  | 'pages';
+  | 'pages'
+  | 'bookmarks';
 
 const base = {
   fill: 'none',
@@ -123,6 +124,8 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
       <path d="M8 20h11a1 1 0 0 0 1-1V7" />
     </>
   ),
+  // Ribbon bookmark.
+  bookmarks: <path d="M6 3h12v18l-6-4-6 4z" />,
 };
 
 interface ChromeIconProps {

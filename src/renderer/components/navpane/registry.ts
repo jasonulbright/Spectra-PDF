@@ -5,9 +5,11 @@
 import type { NavPanelDef } from './types';
 import { NAV_PANEL_TITLES, type AvailableNavPanel } from '../../commands/navpanels';
 import { PagesPanel } from './PagesPanel';
+import { BookmarksPanel } from './BookmarksPanel';
 
 export const NAV_PANEL_DEFS = [
   { id: 'pages', title: NAV_PANEL_TITLES.pages, icon: 'pages', Component: PagesPanel },
+  { id: 'bookmarks', title: NAV_PANEL_TITLES.bookmarks, icon: 'bookmarks', Component: BookmarksPanel },
 ] as const satisfies readonly NavPanelDef[];
 
 export function navPanelDef(id: string): NavPanelDef | undefined {
