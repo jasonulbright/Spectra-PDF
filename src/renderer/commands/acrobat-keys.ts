@@ -31,6 +31,20 @@ export interface KeyBinding {
 }
 
 export const KEY_BINDINGS: readonly KeyBinding[] = [
+  // File cluster (§ 9.2) — global chords fields don't own, always
+  // preventDefault (they'd otherwise hit WebView2's own Ctrl+S/Ctrl+O/Ctrl+P).
+  // 'whenEnabled' where the browser has no default worth suppressing and the
+  // command may be disabled (save/close/exit gate on an open/dirty file).
+  { key: 'o', ctrl: true, command: 'file.open', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  { key: 's', ctrl: true, shift: false, command: 'file.save', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  { key: 's', ctrl: true, shift: true, command: 'file.saveAs', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  { key: 'w', ctrl: true, command: 'file.close', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  { key: 'q', ctrl: true, command: 'file.exit', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  { key: 'k', ctrl: true, command: 'edit.preferences', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  // Tab cycling (§ 9.2). Ctrl+Tab / Ctrl+Shift+Tab — always available (Home +
+  // Tools always present); guard-exempt so it cycles even from a focused field.
+  { key: 'tab', ctrl: true, shift: false, command: 'window.nextTab', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  { key: 'tab', ctrl: true, shift: true, command: 'window.prevTab', scope: 'global', editableGuard: false, preventDefault: 'always' },
   // Undo/redo — app-global (2n.1). Ctrl+Y redo is shift-agnostic like the
   // listener it replaces.
   { key: 'z', ctrl: true, shift: false, command: 'edit.undo', scope: 'global', editableGuard: true, preventDefault: 'always' },

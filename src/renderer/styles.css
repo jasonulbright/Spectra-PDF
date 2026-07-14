@@ -139,12 +139,22 @@
    follows the accent like every other selection surface. */
 :root[style*="--accent"] .canvas-view { --select: var(--accent); }
 
+/* ── Workbench chrome (Phase 4 M2) ────────────────────────────────────────
+   The menu bar, main toolbar, and tab strip all carry `.app-shell-bar`, so
+   the Mica frame rules below (keyed on that class) tint them automatically —
+   the § 10.3 "re-key in the same slice" done by class reuse rather than new
+   selectors. They have no background of their own; in the solid look they
+   show `.app-shell` (bg-neutral-900 / light remap) through, exactly as the
+   old single header did, keeping the no-attribute fallback canonical.
+   The doc-tab lane scrolls horizontally with a thin, theme-following bar. */
+.app-tab-lane::-webkit-scrollbar { height: 0; }
+
 /* ── Window backdrop (Mica) ──────────────────────────────────────────────
    Set up only when the backend actually applied a backdrop — index.tsx
    stamps <html data-backdrop="mica"> before the first render. The frame
-   (header + tools rail) goes translucent so the Mica material shows
-   through; content surfaces get the exact background the shell used to
-   paint, so everything inside them renders as before. Without the
+   (menu bar + toolbar + tab strip + tools rail) goes translucent so the Mica
+   material shows through; content surfaces get the exact background the shell
+   used to paint, so everything inside them renders as before. Without the
    attribute this whole section is inert and the app is pixel-identical to
    the solid look.
    ──────────────────────────────────────────────────────────────────────── */

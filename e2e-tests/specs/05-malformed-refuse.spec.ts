@@ -34,6 +34,6 @@ describe('malformed PDF refusal', () => {
     expect(threw || error !== null).toBe(true);
 
     // App must still be responsive.
-    await expect($('[data-testid="app-title"]')).toBeDisplayed();
+    await expect($('[data-testid="menubar"]')).toBeDisplayed();
   });
 });

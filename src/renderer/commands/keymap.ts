@@ -5,8 +5,9 @@
 // isEditable helpers that predated Phase 4.
 import { useEffect } from 'react';
 import { KEY_BINDINGS, type KeyBinding } from './acrobat-keys';
-import { COMMANDS } from './registry';
+import { COMMANDS, type CommandId } from './registry';
 import { getCommandContext, runEscapeInterceptors } from './context';
+import { isDocTab } from '../state/types';
 import type { CommandContext } from './types';
 
 /** The single inline-edit guard (formerly duplicated in App.tsx and
@@ -37,6 +38,35 @@ function matches(b: KeyBinding, e: KeyLike): boolean {
   return true;
 }
 
+const KEY_LABELS: Record<string, string> = {
+  delete: 'Del',
+  backspace: 'Backspace',
+  tab: 'Tab',
+  escape: 'Esc',
+  ' ': 'Space',
+};
+
+function formatKey(key: string): string {
+  return KEY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key);
+}
+
+/**
+ * The display shortcut for a command, derived from the FIRST keymap binding
+ * that targets it (multi-bound commands like redo/zoom show their primary
+ * chord). Menus render from this, so a menu's label and the live binding can
+ * never drift — the § 4.4 PhotoGIMP property. Null when the command is
+ * unbound. Exported for the menu layer and its integrity test.
+ */
+export function shortcutForCommand(command: CommandId): string | null {
+  const b = KEY_BINDINGS.find((x) => x.command === command);
+  if (!b) return null;
+  const parts: string[] = [];
+  if (b.ctrl) parts.push('Ctrl');
+  if (b.shift) parts.push('Shift');
+  parts.push(formatKey(b.key));
+  return parts.join('+');
+}
+
 /** First matching binding in table order, or null. Pure — table-tested. */
 export function resolveBinding(
   e: KeyLike,
@@ -60,7 +90,7 @@ export function resolveBinding(
  */
 function dispatchEscape(ctx: CommandContext, target: EventTarget | null): void {
   if (runEscapeInterceptors()) return;
-  if (ctx.state.ui.view !== 'canvas') return;
+  if (!isDocTab(ctx.state.ui.focusedTab)) return;
   if (ctx.state.ui.tool !== 'select') {
     ctx.dispatch({ type: 'UI_SET_TOOL', tool: 'select' });
     return;
@@ -70,17 +100,33 @@ function dispatchEscape(ctx: CommandContext, target: EventTarget | null): void {
   }
 }
 
+// An open Radix menu (role="menu") or an app modal (data-app-modal) owns the
+// keyboard — the first scope in § 4.4 ("native menu/dialog handling wins").
+// While one is up, the dispatcher steps aside entirely: menu typeahead/arrows/
+// Escape are Radix's, and a chord like Ctrl+W must not close a file behind the
+// modal. Guarded by presence, not focus, so it holds even mid-animation.
+function overlayOpen(): boolean {
+  // role=menu: Radix menubar + dropdown content. role=dialog: Radix
+  // Confirm/Password dialogs. data-app-modal: the plain-div overlays
+  // (Preferences, About).
+  return (
+    typeof document !== 'undefined' &&
+    document.querySelector('[role="menu"], [role="dialog"], [data-app-modal]') !== null
+  );
+}
+
 /** The one window keydown handler. Exported for tests; installed by the hook. */
 export function dispatchKeyEvent(e: KeyboardEvent): void {
   const ctx = getCommandContext();
   if (!ctx) return;
+  if (overlayOpen()) return;
   if (e.key === 'Escape') {
     dispatchEscape(ctx, e.target);
     return;
   }
   const binding = resolveBinding(e);
   if (!binding) return;
-  if (binding.scope === 'canvas' && ctx.state.ui.view !== 'canvas') return;
+  if (binding.scope === 'canvas' && !isDocTab(ctx.state.ui.focusedTab)) return;
   if (binding.editableGuard && isEditable(e.target)) return;
   const cmd = COMMANDS[binding.command];
   const enabled = cmd.when ? cmd.when(ctx) : true;

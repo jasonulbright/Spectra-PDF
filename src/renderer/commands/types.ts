@@ -30,6 +30,9 @@ export type CommandNamespace =
 export interface AppCommandHandlers {
   /** Native open dialog → openByPaths. Resolves true if files were opened. */
   openFiles(): Promise<boolean>;
+  /** Open specific path(s) and focus the (last) opened document's tab — the
+   * File ▸ Open Recent and Home-tab recent/open flows. */
+  openPath(path: string): Promise<void>;
   /** Save active file to its original path (commit-gated). */
   save(): Promise<void>;
   /** Save active file via the native save dialog (commit-gated). */
@@ -46,6 +49,19 @@ export interface AppCommandHandlers {
   applyPageEdits(): Promise<void>;
   /** Open the Settings modal (Edit ▸ Preferences… at M5). */
   openPreferences(): void;
+  /** Open the Settings modal at its third-party-licenses section (Help ▸
+   * Third-party Licenses). Same surface as preferences until M5 splits it. */
+  openLicenses(): void;
+  /** Open the About dialog (name/version/repo). */
+  openAbout(): void;
+  /** Manual update check (Help ▸ Check for Updates) — surfaces the
+   * available-flow / up-to-date / enterprise-disabled states on the UpdateBar. */
+  checkForUpdates(): void;
+  /** Quit, honoring the unsaved-changes prompt (Exit / Ctrl+Q). Always
+   * closes when clean — the tray-minimize setting is for the window ×, not Exit. */
+  exit(): Promise<void>;
+  /** Hide the window to the system tray (Window ▸ Minimize to Tray). */
+  minimizeToTray(): Promise<void>;
 }
 
 /**

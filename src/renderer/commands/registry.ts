@@ -4,7 +4,8 @@
 // tool tiles and the keymap reference these ids; nothing re-implements a
 // handler. M1 registers every action that existed before the workbench;
 // M2+ chrome only *references* what is here.
-import type { AppState, CanvasTool } from '../state/types';
+import { isDocTab } from '../state/types';
+import type { AppState, CanvasTool, FocusedTab } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
 
 // --- Pure enablement helpers (unit-tested; menus gray from these) ---------
@@ -38,6 +39,26 @@ export function hasOpenFiles(state: AppState): boolean {
 
 export function hasSelection(state: AppState): boolean {
   return state.ui.selectedPageIds.size > 0;
+}
+
+/** Open files that get doc tabs — byte-only import sources (2n.3) don't. */
+export function tabFiles(state: AppState): string[] {
+  return [...state.files.values()].filter((f) => !f.importOnly).map((f) => f.path);
+}
+
+/** The visible tab order: Home | Tools | one tab per open document. */
+export function tabOrder(state: AppState): FocusedTab[] {
+  return ['home', 'tools', ...tabFiles(state).map((doc) => ({ doc }))];
+}
+
+/** Cycle the visible strip by ±1 from the focused tab (wraps). */
+export function cycledTab(state: AppState, delta: 1 | -1): FocusedTab {
+  const order = tabOrder(state);
+  const cur = state.ui.focusedTab;
+  const idx = order.findIndex((t) =>
+    isDocTab(t) ? isDocTab(cur) && t.doc === cur.doc : t === cur,
+  );
+  return order[(idx + delta + order.length) % order.length];
 }
 
 // --- Command definitions ---------------------------------------------------
@@ -89,7 +110,6 @@ export const COMMAND_IDS = [
   'edit.preferences',
   'view.home',
   'view.tools',
-  'view.canvas',
   'view.zoomIn',
   'view.zoomOut',
   'view.fit',
@@ -97,6 +117,14 @@ export const COMMAND_IDS = [
   'document.rotateSelectionCW',
   'document.rotateSelectionCCW',
   'document.applyPageEdits',
+  'window.nextTab',
+  'window.prevTab',
+  'window.minimizeToTray',
+  'help.about',
+  'help.licenses',
+  'help.checkUpdates',
+  'file.exit',
+  'file.clearRecent',
   ...CANVAS_TOOLS.map((t) => `tools.${t}` as const),
   ...PANEL_OPS.map((op) => `tools.panel.${op}` as const),
 ] as const;
@@ -106,7 +134,9 @@ export type CommandId = (typeof COMMAND_IDS)[number];
 // Every id must live under a menu-bar namespace (§ 4.1).
 COMMAND_IDS satisfies readonly CommandNamespace[];
 
-const inCanvas = (ctx: CommandContext): boolean => ctx.state.ui.view === 'canvas';
+// "In the document board" = a doc tab is focused (the canvas board is the
+// pane content at M2). Tool + selection commands only make sense there.
+const inCanvas = (ctx: CommandContext): boolean => isDocTab(ctx.state.ui.focusedTab);
 
 function toolCommand(tool: CanvasTool): Command {
   return {
@@ -124,7 +154,7 @@ function panelCommand(op: PanelOp): Command {
   return {
     title: PANEL_TITLES[op],
     run: ({ dispatch }) => {
-      dispatch({ type: 'UI_SET_VIEW', view: 'operations' });
+      dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
       dispatch({ type: 'UI_SET_ACTIVE_OP', op });
     },
   };
@@ -188,15 +218,11 @@ export const COMMANDS: Record<CommandId, Command> = {
   },
   'view.home': {
     title: 'Home',
-    run: ({ dispatch }) => dispatch({ type: 'UI_SET_VIEW', view: 'welcome' }),
+    run: ({ dispatch }) => dispatch({ type: 'UI_FOCUS_TAB', tab: 'home' }),
   },
   'view.tools': {
     title: 'Tools',
-    run: ({ dispatch }) => dispatch({ type: 'UI_SET_VIEW', view: 'operations' }),
-  },
-  'view.canvas': {
-    title: 'Canvas',
-    run: ({ dispatch }) => dispatch({ type: 'UI_SET_VIEW', view: 'canvas' }),
+    run: ({ dispatch }) => dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' }),
   },
   'view.zoomIn': {
     title: 'Zoom In',
@@ -240,6 +266,47 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Apply Page Edits',
     when: (ctx) => ctx.app !== null && ctx.state.pageDirtyPaths.length > 0,
     run: (ctx) => ctx.app!.applyPageEdits(),
+  },
+  'window.nextTab': {
+    title: 'Next Tab',
+    // Home + Tools are always present, so cycling is always meaningful.
+    run: ({ state, dispatch }) =>
+      dispatch({ type: 'UI_FOCUS_TAB', tab: cycledTab(state, 1) }),
+  },
+  'window.prevTab': {
+    title: 'Previous Tab',
+    run: ({ state, dispatch }) =>
+      dispatch({ type: 'UI_FOCUS_TAB', tab: cycledTab(state, -1) }),
+  },
+  'window.minimizeToTray': {
+    title: 'Minimize to Tray',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.minimizeToTray(),
+  },
+  'help.about': {
+    title: 'About Open PDF Studio',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openAbout(),
+  },
+  'help.licenses': {
+    title: 'Third-party Licenses',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openLicenses(),
+  },
+  'help.checkUpdates': {
+    title: 'Check for Updates',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.checkForUpdates(),
+  },
+  'file.exit': {
+    title: 'Exit',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.exit(),
+  },
+  'file.clearRecent': {
+    title: 'Clear Recent',
+    when: (ctx) => ctx.state.ui.recentFiles.length > 0,
+    run: ({ dispatch }) => dispatch({ type: 'UI_SET_RECENT_FILES', files: [] }),
   },
   ...(Object.fromEntries(
     CANVAS_TOOLS.map((t) => [`tools.${t}`, toolCommand(t)]),

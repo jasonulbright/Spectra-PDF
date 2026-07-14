@@ -29,6 +29,8 @@ import { useEngine } from './hooks/useEngine';
 import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
 import { indexOpenFile } from './lib/workspace';
 import type { PageRef, PdfBuffer } from './state/types';
+import { isDocTab, viewOf } from './state/types';
+import type { CanvasTool } from './state/types';
 import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
@@ -42,8 +44,13 @@ import { DropZone } from './components/DropZone';
 import { OperationQueue } from './components/OperationQueue';
 import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
 import { SettingsPanel, getSettings } from './panels/SettingsPanel';
-import { WelcomeScreen } from './components/WelcomeScreen';
+import { MenuBar } from './components/MenuBar';
+import { MainToolbar } from './components/MainToolbar';
+import { TabStrip } from './components/TabStrip';
+import { HomeTab } from './components/HomeTab';
+import { AboutDialog } from './components/AboutDialog';
 import { UpdateBar } from './components/UpdateBar';
+import { withRecent } from './lib/recent-files';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
 import {
@@ -52,9 +59,7 @@ import {
   setCommandStateSource,
 } from './commands/context';
 import { useKeymapDispatcher } from './commands/keymap';
-import { canUndo as canUndoState, canRedo as canRedoState } from './commands/registry';
 import type { AppCommandHandlers } from './commands/types';
-import type { CanvasTool, ViewMode } from './state/types';
 
 const panels: Record<Operation, React.ComponentType> = {
   split: SplitPanel, rotate: RotatePanel, delete: DeletePanel,
@@ -81,30 +86,27 @@ const titles: Record<Operation, string> = {
 function AppContent(): React.ReactElement {
   const state = useAppState();
   const dispatch = useAppDispatch();
-  // View/operation state lives in the ui slice now (Phase 4 M1) so the
-  // command registry can read and drive it; these wrappers keep the local
-  // call sites unchanged. The boot view (skip-welcome) is applied by
-  // AppStateProvider's initializer.
-  const view = state.ui.view;
+  // The tab model lives in the ui slice (Phase 4 M2) so the command registry,
+  // menus, and tab strip all read it. focusedTab replaces the old `view`.
+  const focusedTab = state.ui.focusedTab;
+  const inDocTab = isDocTab(focusedTab);
   const activeOp = state.ui.activeOp as Operation;
-  const setView = useCallback(
-    (v: ViewMode) => dispatch({ type: 'UI_SET_VIEW', view: v }),
-    [dispatch],
-  );
   const setActiveOp = useCallback(
     (op: Operation) => dispatch({ type: 'UI_SET_ACTIVE_OP', op }),
     [dispatch],
   );
   const [showSettings, setShowSettings] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+  // Manual "Check for Updates" (Help menu): bump a signal the UpdateBar
+  // watches, so the banner surfaces the available / up-to-date / disabled state.
+  const [updateCheckSignal, setUpdateCheckSignal] = useState(0);
   const { items: queue, clear: clearQueue } = useOperationQueue();
   const [extractPage, setExtractPage] = useState<number | null>(null);
-  const [recentFiles, setRecentFiles] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('spectra-recent') || '[]'); } catch { return []; }
-  });
   const [appVersion, setAppVersion] = useState('');
   // PageInspector overlay target (canvas view). `page` is the file's
   // committed page order — the opener commits pending edits first.
   const [inspector, setInspector] = useState<{ path: string; page: number } | null>(null);
+  const recentFiles = state.ui.recentFiles;
   const { call, openFiles, saveFile } = useEngine();
   useWorkspaceIndexer();
 
@@ -152,16 +154,13 @@ function AppContent(): React.ReactElement {
     app.getVersion().then((v) => setAppVersion(`v${v}`));
   }, []);
 
-  const addRecent = useCallback((filePath: string) => {
-    setRecentFiles((prev) => {
-      const next = [filePath, ...prev.filter((f) => f !== filePath)].slice(0, 10);
-      localStorage.setItem('spectra-recent', JSON.stringify(next));
-      return next;
-    });
-  }, []);
+  // Mirror the recent-files list (ui slice) to localStorage — the single
+  // persistence point; every mutation just dispatches UI_SET_RECENT_FILES.
+  useEffect(() => {
+    localStorage.setItem('spectra-recent', JSON.stringify(recentFiles));
+  }, [recentFiles]);
 
   const activeFile = state.activeFileId ? state.files.get(state.activeFileId) : null;
-  const allFiles = Array.from(state.files.values());
   const inspectorFile = inspector ? state.files.get(inspector.path) : null;
 
   // Commit-failure banner: commits triggered from gates/effects have no
@@ -173,12 +172,6 @@ function AppContent(): React.ReactElement {
   // ops, close) — all dirty files commit together because cross-file moves
   // entangle them. Uses the raw (ungated) snapshot to avoid re-entering the
   // commit gate.
-  //
-  // Every entry point (gate, Apply button, save/close, inspector open,
-  // leave-view effect) shares ONE in-flight run: two overlapping commits
-  // stage and rename the same working files and consume each other's temps —
-  // e.g. double-click a page and hit "Apply changes" during the ~200ms the
-  // first commit is writing, and the second rename hits ENOENT.
   const inflightCommit = useRef<Promise<void> | null>(null);
   const commitIfNeeded = useCallback((): Promise<void> => {
     if (inflightCommit.current) return inflightCommit.current;
@@ -273,19 +266,31 @@ function AppContent(): React.ReactElement {
     [call, showPasswordPrompt],
   );
 
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Open files, then focus the last opened document's tab (opening a file is
+  // an explicit request to view it — § M2 tab model). Already-open files are
+  // re-activated. Recent list accumulates once so a multi-open batch doesn't
+  // clobber itself.
   const openByPaths = useCallback(async (paths: string[]) => {
+    let recent = stateRef.current.ui.recentFiles;
+    let lastOpened: string | null = null;
     for (const filePath of paths) {
+      recent = withRecent(recent, filePath);
       if (state.files.has(filePath)) {
         dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
-        addRecent(filePath);
+        lastOpened = filePath;
         continue;
       }
       const prepared = await prepareFileBytes(filePath);
       if (!prepared) continue; // cancelled encrypted file
       dispatch({ type: 'OPEN_FILE', path: filePath, ...prepared });
-      addRecent(filePath);
+      lastOpened = filePath;
     }
-  }, [state.files, dispatch, addRecent, prepareFileBytes]);
+    if (paths.length > 0) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
+    if (lastOpened) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: lastOpened } });
+  }, [state.files, dispatch, prepareFileBytes]);
 
   // Import one or more files' pages INTO an existing document at an index (the
   // add-page ghost and per-position drops, 2n.3). Each file is registered
@@ -293,14 +298,6 @@ function AppContent(): React.ReactElement {
   // already open are reused. A cancelled encrypted file is skipped.
   const importFilesIntoDoc = useCallback(
     async (filePaths: string[], toDocId: string, toIndex: number) => {
-      // Prepare ALL files (async: working copy, unlock, index) BEFORE any
-      // dispatch. Registering a byte-only source and THEN awaiting before
-      // splicing its pages would open a window where the source is in
-      // state.files but referenced by no page AND the page tier is still empty
-      // — any unrelated reindex in that window (e.g. a just-committed file
-      // finishing its async index) would evict it, orphaning the pages we're
-      // about to splice (review-caught HIGH). So collect first, then register +
-      // splice back-to-back with no await between them.
       const toRegister: {
         path: string;
         workingPath: string;
@@ -339,27 +336,21 @@ function AppContent(): React.ReactElement {
         for (const d of docs) allPages.push(...d.pages);
       }
       if (allPages.length === 0) return;
-      // Synchronous from here — no await can let a reindex interleave and evict
-      // a not-yet-spliced source between the register and the splice.
       for (const reg of toRegister) dispatch({ type: 'REGISTER_IMPORT_SOURCE', ...reg });
       dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages });
     },
     [state.files, dispatch, prepareFileBytes],
   );
 
-  // Drag-drop handler: open files, then navigate based on count. Drops while
-  // in the canvas stay there — new files appear as strips in place.
   // The canvas publishes its drop resolver here (2n.3).
   const dropResolverRef = useRef<CanvasDropResolver | null>(null);
 
   const handleFilesDropped = useCallback(
     async (paths: string[], position?: { x: number; y: number }) => {
-      // A drop landing ON a document while in the canvas view imports its pages
-      // into that document at the drop point (2n.3). Tauri reports a physical
-      // position; the resolver wants webview CSS pixels. A miss (between/empty,
-      // or an unresolved point) falls through to the append behavior below —
-      // never a wrong-document import.
-      if (view === 'canvas' && position && dropResolverRef.current) {
+      // A drop landing ON a document while a doc tab is focused imports its
+      // pages into that document at the drop point (2n.3). A miss falls
+      // through to opening the files (which focuses the last one's tab).
+      if (inDocTab && position && dropResolverRef.current) {
         const dpr = window.devicePixelRatio || 1;
         const target = dropResolverRef.current(position.x / dpr, position.y / dpr);
         if (target) {
@@ -368,11 +359,8 @@ function AppContent(): React.ReactElement {
         }
       }
       await openByPaths(paths);
-      if (paths.length === 0 || view === 'canvas') return;
-      // Multiple files land as canvas strips — the merge surface (2o).
-      setView('canvas');
     },
-    [openByPaths, importFilesIntoDoc, view, setView],
+    [openByPaths, importFilesIntoDoc, inDocTab],
   );
 
   const handleOpenFile = useCallback(async (): Promise<boolean> => {
@@ -384,8 +372,7 @@ function AppContent(): React.ReactElement {
     return false;
   }, [openFiles, openByPaths]);
 
-  // Add-page ghost (2n.3): pick file(s) and import their pages into a document
-  // at an index via the byte-only import machinery.
+  // Add-page ghost (2n.3): pick file(s) and import their pages into a document.
   const handleAddPages = useCallback(
     async (docId: string, toIndex: number) => {
       const paths = await openFiles();
@@ -393,36 +380,6 @@ function AppContent(): React.ReactElement {
     },
     [openFiles, importFilesIntoDoc],
   );
-
-  const handleWelcomeAction = useCallback(async (action: string) => {
-    if (action === 'open') {
-      if (state.files.size > 0) {
-        setView('canvas');
-      } else {
-        const opened = await handleOpenFile();
-        if (opened) setView('canvas');
-      }
-    } else if (action === 'merge') {
-      // Merging is a canvas activity (2o): open files as strips, merge-up.
-      if (state.files.size === 0) {
-        const opened = await handleOpenFile();
-        if (!opened) return;
-      }
-      setView('canvas');
-    } else if (action === 'compress') {
-      invokeCommand('tools.panel.compress');
-    } else if (action === 'secure') {
-      invokeCommand('tools.panel.encrypt');
-    } else if (action === 'content') {
-      invokeCommand('tools.panel.extract_text');
-    } else if (action === 'recent' && recentFiles.length > 0) {
-      await openByPaths([recentFiles[0]]);
-      setView('canvas');
-    } else if (action.startsWith('open:')) {
-      await openByPaths([action.slice(5)]);
-      setView('canvas');
-    }
-  }, [handleOpenFile, openByPaths, recentFiles, state.files, setView]);
 
   // Snapshot + perform operation + reload
   const performOperation = useCallback(async (
@@ -432,23 +389,14 @@ function AppContent(): React.ReactElement {
   ) => {
     const f = state.files.get(filePath);
     if (!f) return;
-    // Snapshot before mutation. file.snapshot runs the commit gate first, so
-    // pending page edits are on disk before the snapshot and the engine call.
     const snapshotPath = await file.snapshot(f.workingPath);
-    // Perform operation on working copy
     await call(method, { ...params, file: f.workingPath, output: f.workingPath });
-    // Reload
     const result = await reloadFile(filePath);
     if (result) {
       dispatch({ type: 'UPDATE_FILE', path: filePath, pageCount: result.pageCount, buffer: result.buffer, snapshotPath });
     }
   }, [state.files, call, reloadFile, dispatch]);
 
-  // Canvas redaction — same snapshot/gate/reload flow as the inspector ops.
-  // Destructive by design, so it must NOT use the panels' save-to-new-file
-  // pattern: the snapshot keeps it undoable while the file is open, and the
-  // gate materializes pending page edits so the engine sees the page order
-  // and rotations the marks were drawn against.
   const handleRedactFile = useCallback(
     async (path: string, regions: { page: number; rect: [number, number, number, number] }[]) => {
       await performOperation(path, 'redact', { regions });
@@ -456,30 +404,16 @@ function AppContent(): React.ReactElement {
     [performOperation],
   );
 
-  // Bake on-canvas form values (2n.4b) — the renderer-side whole-file-op
-  // shape FormsPanel established (forms fill stays pdf-lib per CLAUDE.md):
-  // snapshot (gate flushes pending page edits, so the fill reads the
-  // committed bytes) → read → fillFormFields → write → UPDATE_FILE. The
-  // page count is re-read via reloadFile rather than trusted from the
-  // pre-gate closure — the gate's commit may have just changed it. The
-  // gate's commit can ALSO rename fields (a pending import's name collision,
-  // 2n.4(a)) — pending names re-resolve against the post-commit fields by
-  // fingerprint, all-or-nothing per file (review-caught HIGH: a name-only
-  // fill could silently land on the imported document's same-named field).
   const handleFillFormValues = useCallback(
     async (path: string, values: Record<string, FormFieldValue>) => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
-      // The fields the user typed against, from the CURRENT (pre-commit)
-      // buffer — read BEFORE the snapshot runs the gate.
       const preFields = f.buffer ? (await readFormFields(f.buffer)).fields : [];
       const snapshotPath = await file.snapshot(f.workingPath);
       const bytes = await file.readBuffer(f.workingPath);
       const postFields = (await readFormFields(bytes)).fields;
       const { resolved, skipped } = resolveFillTargets(preFields, postFields, values);
       if (skipped.length > 0) {
-        // Fail closed for the whole file — nothing written, the values stay
-        // pending on the canvas, the banner carries the reasons.
         throw new Error(skipped.map((s) => `"${s.name}": ${s.reason}`).join('; '));
       }
       const filled = await fillFormFields(bytes, resolved);
@@ -497,9 +431,6 @@ function AppContent(): React.ReactElement {
     [state.files, reloadFile, dispatch],
   );
 
-  // Author a new form field (2n.4c) — the same renderer-side whole-file-op
-  // shape as the fill above; the spec's pageIndex/rect are already in
-  // committed-order PDF space (the canvas converts before calling).
   const handleAddFormField = useCallback(
     async (path: string, spec: NewFieldSpec) => {
       const f = state.files.get(path);
@@ -521,10 +452,6 @@ function AppContent(): React.ReactElement {
     [state.files, reloadFile, dispatch],
   );
 
-  // Persist OCR text layers (2m) — same routing as redaction: the commit
-  // gate flushes pending page edits, a snapshot lands on the undo chain, and
-  // the buffer reloads (which also invalidates the search index for the
-  // file, so Find re-reads the now-searchable text).
   const handleApplyOcrLayer = useCallback(
     async (
       path: string,
@@ -535,8 +462,6 @@ function AppContent(): React.ReactElement {
     [performOperation],
   );
 
-  // Inspector overlay ops — engine-backed, so they run against the committed
-  // file (the inspector opener commits before handing over a page number).
   const handleInspectorRotate = useCallback(async (page: number, angle: number) => {
     if (!inspector) return;
     await performOperation(inspector.path, 'rotate', { pages: [page], angle });
@@ -545,20 +470,16 @@ function AppContent(): React.ReactElement {
   const handleInspectorDelete = useCallback(async (page: number) => {
     if (!inspector) return;
     await performOperation(inspector.path, 'delete', { pages: [page] });
-    setInspector(null); // page numbering shifted — the canvas is the safe place
+    setInspector(null);
   }, [inspector, performOperation]);
 
   const handleUndo = useCallback(async () => {
-    // Page-edit tier first: pending in-memory edits are always newer than the
-    // last disk snapshot (commit drains the tier before whole-file ops).
     if (state.pageUndoStack.length > 0) {
       dispatch({ type: 'UNDO_PAGE_OP' });
       return;
     }
     if (!activeFile || activeFile.undoStack.length === 0) return;
     const snapshotPath = activeFile.undoStack[activeFile.undoStack.length - 1];
-    // Capture the current state first so redo can come back to it. Raw
-    // snapshot — the page tier is empty here, the gate has nothing to do.
     const redoSnapshot = await file.snapshotRaw(activeFile.workingPath);
     await file.restoreSnapshot(activeFile.workingPath, snapshotPath);
     dispatch({ type: 'UNDO', path: activeFile.path, redoSnapshot });
@@ -608,27 +529,6 @@ function AppContent(): React.ReactElement {
       return false;
     }
   }, [commitIfNeeded]);
-
-  // Open the PageInspector overlay from the canvas. Pending edits commit
-  // first so the file's on-disk order matches the workspace numbering the
-  // canvas computed, and the inspector's engine ops hit the right page.
-  const handleInspectPage = useCallback(async (path: string, page: number) => {
-    if (!(await commitOrAbort())) return;
-    dispatch({ type: 'SET_ACTIVE_FILE', path });
-    setInspector({ path, page });
-  }, [commitOrAbort, dispatch]);
-
-  const handleExtractFromCanvas = useCallback((path: string, page: number) => {
-    dispatch({ type: 'SET_ACTIVE_FILE', path });
-    setExtractPage(page);
-    // Leaving the canvas commits, so the panel reads committed bytes.
-    invokeCommand('tools.panel.extract_text');
-  }, [dispatch]);
-
-  // The inspector cannot outlive its file.
-  useEffect(() => {
-    if (inspector && !state.files.has(inspector.path)) setInspector(null);
-  }, [inspector, state.files]);
 
   const handleSave = useCallback(async () => {
     if (!activeFile) return;
@@ -684,12 +584,26 @@ function AppContent(): React.ReactElement {
     }
   }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort]);
 
-  // --- Command layer (Phase 4 M1) ---------------------------------------
-  // The registry invokes the SAME handlers the buttons always ran; refs keep
-  // the one-time registration reading the latest closures. The state source
-  // feeds command enablement + the keymap dispatcher the live state.
+  // Exit the app (File ▸ Exit / Ctrl+Q) — always quits when clean; the
+  // tray-minimize setting governs the window × (below), not an explicit Exit.
+  const handleExit = useCallback(async () => {
+    const dirtyFiles = Array.from(state.files.values()).filter(isFileDirty);
+    if (dirtyFiles.length > 0) {
+      const names = dirtyFiles.map((f) => f.name).join(', ');
+      const result = await showConfirm(`Unsaved changes in: ${names}. Save before exiting?`);
+      if (result === 'cancel') return;
+      if (result === 'save') {
+        if (!(await commitOrAbort())) return;
+        for (const f of dirtyFiles) await file.saveAs(f.workingPath, f.path);
+      }
+    }
+    await app.confirmClose();
+  }, [state.files, isFileDirty, showConfirm, commitOrAbort]);
+
+  // --- Command layer (Phase 4 M1/M2) ------------------------------------
   const commandHandlers: AppCommandHandlers = {
     openFiles: handleOpenFile,
+    openPath: (path) => openByPaths([path]),
     save: handleSave,
     saveAs: handleSaveAs,
     closeFile: handleCloseFile,
@@ -698,15 +612,19 @@ function AppContent(): React.ReactElement {
     redo: handleRedo,
     applyPageEdits: commitAndReport,
     openPreferences: () => setShowSettings(true),
+    openLicenses: () => setShowSettings(true),
+    openAbout: () => setShowAbout(true),
+    checkForUpdates: () => setUpdateCheckSignal((n) => n + 1),
+    exit: handleExit,
+    minimizeToTray: async () => { await app.hideToTray(); },
   };
   const commandHandlersRef = useRef(commandHandlers);
   commandHandlersRef.current = commandHandlers;
-  const stateRef = useRef(state);
-  stateRef.current = state;
   useEffect(() => {
     const h = commandHandlersRef;
     registerAppCommandHandlers({
       openFiles: () => h.current.openFiles(),
+      openPath: (path) => h.current.openPath(path),
       save: () => h.current.save(),
       saveAs: () => h.current.saveAs(),
       closeFile: (path) => h.current.closeFile(path),
@@ -715,6 +633,11 @@ function AppContent(): React.ReactElement {
       redo: () => h.current.redo(),
       applyPageEdits: () => h.current.applyPageEdits(),
       openPreferences: () => h.current.openPreferences(),
+      openLicenses: () => h.current.openLicenses(),
+      openAbout: () => h.current.openAbout(),
+      checkForUpdates: () => h.current.checkForUpdates(),
+      exit: () => h.current.exit(),
+      minimizeToTray: () => h.current.minimizeToTray(),
     });
     setCommandStateSource(() => ({ state: stateRef.current, dispatch }));
     return () => {
@@ -722,9 +645,27 @@ function AppContent(): React.ReactElement {
       setCommandStateSource(null);
     };
   }, [dispatch]);
-  // The ONE window-level shortcut dispatcher (replaces the six hand-rolled
-  // keydown effects; scope order and the Escape chain live in commands/keymap).
+  // The ONE window-level shortcut dispatcher (M1).
   useKeymapDispatcher();
+
+  // Open the PageInspector overlay from the canvas. Pending edits commit first.
+  const handleInspectPage = useCallback(async (path: string, page: number) => {
+    if (!(await commitOrAbort())) return;
+    dispatch({ type: 'SET_ACTIVE_FILE', path });
+    setInspector({ path, page });
+  }, [commitOrAbort, dispatch]);
+
+  const handleExtractFromCanvas = useCallback((path: string, page: number) => {
+    dispatch({ type: 'SET_ACTIVE_FILE', path });
+    setExtractPage(page);
+    // Leaving the board commits, so the panel reads committed bytes.
+    invokeCommand('tools.panel.extract_text');
+  }, [dispatch]);
+
+  // The inspector cannot outlive its file.
+  useEffect(() => {
+    if (inspector && !state.files.has(inspector.path)) setInspector(null);
+  }, [inspector, state.files]);
 
   // Keep refs to current state so the close handler always sees latest values
   const filesRef = useRef(state.files);
@@ -736,8 +677,6 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     const unlisten = app.onBeforeClose(async () => {
       const minimizeToTray = getSettings().minimizeToTray === true;
-
-      // If no dirty files, either minimize to tray or close
       const dirtyFiles = Array.from(filesRef.current.values()).filter(
         (f) => f.dirty || pageDirtyRef.current.includes(f.path),
       );
@@ -754,13 +693,13 @@ function AppContent(): React.ReactElement {
         `Unsaved changes in: ${names}. Save before closing?`
       );
       if (result === 'cancel') {
-        return; // Do nothing — window stays open
+        return;
       }
       if (result === 'save') {
         try {
           await commitRef.current();
         } catch {
-          return; // commit failed — keep the window open, edits still pending
+          return;
         }
         for (const f of dirtyFiles) {
           await file.saveAs(f.workingPath, f.path);
@@ -773,55 +712,56 @@ function AppContent(): React.ReactElement {
       }
     });
     return () => { unlisten.then((fn) => fn()); };
-    // showConfirm is a stable useCallback([]) — listing it is a runtime
-    // no-op (the listener never re-registers); everything else the handler
-    // reads goes through refs above.
   }, [showConfirm]);
 
-  // Leaving the canvas commits pending page edits, making "in-memory edits
-  // exist only while in canvas view" the invariant — Pages/Inspector and the
-  // operation panels always see materialized state. On failure the banner
-  // shows and the tier stays pending (the engine-call/snapshot gates still
-  // protect any operation attempted meanwhile).
-  const prevViewRef = useRef(view);
+  // Leaving doc-tab-land commits pending page edits (the "in-memory edits
+  // exist only while a document tab is focused" invariant — the Tools panels
+  // and Home always see materialized state). Doc→doc switches don't commit
+  // (the tier is workspace-global). On failure the banner shows and the tier
+  // stays pending. Re-keyed from the old view-transition effect (§ 6.6).
+  const prevInDocRef = useRef(inDocTab);
   useEffect(() => {
-    const prev = prevViewRef.current;
-    prevViewRef.current = view;
-    if (prev === 'canvas' && view !== 'canvas') {
+    const prev = prevInDocRef.current;
+    prevInDocRef.current = inDocTab;
+    if (prev && !inDocTab) {
       void commitAndReport();
     }
-  }, [view, commitAndReport]);
+  }, [inDocTab, commitAndReport]);
 
-  // Handle tray actions (Quick Merge)
+  // Focus a document's tab (tray/shell flows), or Home when nothing is open.
+  const focusBoardOrHome = useCallback(() => {
+    const firstDoc = Array.from(filesRef.current.values()).find((f) => !f.importOnly);
+    dispatch({ type: 'UI_FOCUS_TAB', tab: firstDoc ? { doc: firstDoc.path } : 'home' });
+  }, [dispatch]);
+
+  // Handle tray actions (Quick Merge) — land on the document board (2o), or
+  // Home (its Open button) when nothing is open yet.
   useEffect(() => {
     const unlisten = app.onTrayAction((action: string) => {
-      if (action === 'merge') {
-        // Merging is a canvas activity (2o).
-        invokeCommand('view.canvas');
-      }
+      if (action === 'merge') focusBoardOrHome();
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, []);
+  }, [focusBoardOrHome]);
 
-  // Handle files opened via file association, context menu, or second instance
+  // Handle files opened via file association, context menu, or second instance.
+  // openByPaths focuses the opened doc's tab (strips + merge-up ARE the merge
+  // flow, 2o — a shell "merge" open lands there like any multi-open).
   useEffect(() => {
     const unlisten = app.onOpenFile(async (data: { files: string[]; merge: boolean }) => {
       await openByPaths(data.files);
-      // A shell "merge" open lands on the canvas like any multi-open —
-      // strips + merge-up ARE the merge flow (2o).
-      setView('canvas');
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, [openByPaths, setView]);
+  }, [openByPaths]);
 
   // Test harness — only compiled in when VITE_E2E=1 was set at build time.
   const harnessListenersRef = useRef<Set<(s: TestStateSnapshot) => void>>(new Set());
   const harnessSnapshotRef = useRef<() => TestStateSnapshot>(() => ({
-    view: 'welcome', activeOp: 'merge', fileCount: 0,
+    view: 'welcome', focusedTab: 'home', activeOp: 'merge', fileCount: 0,
     activeFileId: null, activeFile: null,
   }));
   harnessSnapshotRef.current = () => ({
-    view,
+    view: viewOf(focusedTab),
+    focusedTab,
     activeOp,
     fileCount: state.files.size,
     activeFileId: state.activeFileId,
@@ -862,11 +802,31 @@ function AppContent(): React.ReactElement {
       : null;
   };
 
+  // Map the legacy harness setView onto the tab model so pre-M2 specs keep
+  // working: welcome→Home, operations→Tools, canvas→the active (or first)
+  // document's tab (a no-op to Home when nothing is open).
+  const harnessSetView = useCallback(
+    (v: 'welcome' | 'operations' | 'canvas') => {
+      if (v === 'welcome') dispatch({ type: 'UI_FOCUS_TAB', tab: 'home' });
+      else if (v === 'operations') dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+      else {
+        const s = stateRef.current;
+        const target =
+          (s.activeFileId && !s.files.get(s.activeFileId)?.importOnly && s.activeFileId) ||
+          Array.from(s.files.values()).find((f) => !f.importOnly)?.path ||
+          null;
+        dispatch({ type: 'UI_FOCUS_TAB', tab: target ? { doc: target } : 'home' });
+      }
+    },
+    [dispatch],
+  );
+
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     installTestHarness({
       openByPaths: (paths) => openByPaths(paths),
-      setView: (v) => setView(v),
+      setView: (v) => harnessSetView(v),
+      focusTab: (tab) => dispatch({ type: 'UI_FOCUS_TAB', tab }),
       setActiveOp: (op) => setActiveOp(op as Operation),
       setTool: (tool) => dispatch({ type: 'UI_SET_TOOL', tool: tool as CanvasTool }),
       getStateSnapshot: () => harnessSnapshotRef.current(),
@@ -883,90 +843,30 @@ function AppContent(): React.ReactElement {
       dispatchRemoveAnnotation: (docId, pageId, annotationId) =>
         dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId }),
       commitPendingEdits: () => commitRef.current(),
-      // Test-only workspace reset: closes every open file (no dirty-save
-      // dialogs) so a spec can start each case from a clean workspace.
       closeAllFiles: () => {
         for (const f of filesRef.current.values()) dispatch({ type: 'CLOSE_FILE', path: f.path });
       },
       importPagesIntoDoc: (filePath, toDocId, toIndex) =>
         importFilesIntoDoc([filePath], toDocId, toIndex),
     });
-  }, [openByPaths, dispatch, importFilesIntoDoc, setView, setActiveOp]);
+  }, [openByPaths, dispatch, importFilesIntoDoc, harnessSetView, setActiveOp]);
 
   // Notify harness subscribers on every state-relevant change.
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     const snap = harnessSnapshotRef.current();
     harnessListenersRef.current.forEach((l) => l(snap));
-  }, [view, activeOp, state.files, state.activeFileId, activeFile?.dirty, activeFile?.pageCount]);
+  }, [focusedTab, activeOp, state.files, state.activeFileId, activeFile?.dirty, activeFile?.pageCount]);
 
   const Panel = panels[activeOp];
-  // Enablement comes from the same pure predicates the command registry uses.
-  const canUndo = canUndoState(state);
-  const canRedo = canRedoState(state);
 
   return (
     <DropZone onFilesDropped={handleFilesDropped}>
     <div className="app-shell h-screen bg-neutral-900 text-neutral-100 flex flex-col overflow-hidden">
-      {/* Header */}
-      <header data-testid="app-header" className="app-shell-bar flex items-center justify-between px-4 py-2 border-b border-neutral-800 shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 data-testid="app-title" className="text-lg font-semibold tracking-tight">Open PDF Studio</h1>
-          <span data-testid="app-version" className="text-[10px] text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded">{appVersion}</span>
-          <button data-testid="settings-btn" onClick={() => invokeCommand('edit.preferences')} className="w-6 h-6 flex items-center justify-center text-neutral-500 hover:text-neutral-300 rounded transition-colors" title="Settings">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Undo / Save — in canvas view with an active file */}
-          {view === 'canvas' && activeFile && (
-            <>
-              <button data-testid="undo-btn" onClick={() => invokeCommand('edit.undo')} disabled={!canUndo} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Undo last action">
-                Undo
-              </button>
-              <button data-testid="redo-btn" onClick={() => invokeCommand('edit.redo')} disabled={!canRedo} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Redo">
-                Redo
-              </button>
-              <button data-testid="save-btn" onClick={() => invokeCommand('file.save')} disabled={!isFileDirty(activeFile)} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30 rounded font-medium" title="Save to original file">
-                Save
-              </button>
-              <button data-testid="save-as-btn" onClick={() => invokeCommand('file.saveAs')} className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium" title="Save as new file">
-                Save As
-              </button>
-            </>
-          )}
-          <button data-testid="open-pdf-btn" onClick={() => invokeCommand('file.open')} className="px-3 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium">
-            Open PDF
-          </button>
-          <div data-testid="view-switcher" className="flex bg-neutral-800 rounded overflow-hidden">
-            <button
-              data-testid="view-home"
-              onClick={() => invokeCommand('view.home')}
-              className={`px-3 py-1 text-xs font-medium ${view === 'welcome' ? 'bg-neutral-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}`}
-            >
-              Home
-            </button>
-            <button
-              data-testid="view-tools"
-              onClick={() => invokeCommand('view.tools')}
-              className={`px-3 py-1 text-xs font-medium ${view === 'operations' ? 'bg-neutral-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}`}
-            >
-              Tools
-            </button>
-            <button
-              data-testid="view-canvas"
-              onClick={() => invokeCommand('view.canvas')}
-              className={`px-3 py-1 text-xs font-medium ${view === 'canvas' ? 'bg-neutral-600 text-white' : 'text-neutral-400 hover:text-neutral-200'}`}
-            >
-              Canvas
-            </button>
-          </div>
-        </div>
-      </header>
+      <MenuBar />
+      <MainToolbar />
 
-      <UpdateBar />
+      <UpdateBar checkSignal={updateCheckSignal} />
 
       {commitError && (
         <div data-testid="commit-error-bar" className="app-banner flex items-center gap-3 px-4 py-2 bg-red-600/20 border-b border-red-500/40 text-sm text-red-200 shrink-0">
@@ -986,51 +886,25 @@ function AppContent(): React.ReactElement {
         </div>
       )}
 
+      <TabStrip onCloseFile={(path) => void handleCloseFile(path)} />
+
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar — operations + open files in tools view */}
-        {view === 'operations' && (
+        {/* Tools tab: operations rail + the active panel */}
+        {focusedTab === 'tools' && (
           <div className="app-rail flex flex-col shrink-0 border-r border-neutral-800">
-            {allFiles.length > 0 && (
-              <div className="w-48 border-b border-neutral-800 py-2 shrink-0">
-                <div className="flex items-center justify-between px-4 pb-1">
-                <span className="text-[10px] uppercase tracking-widest text-neutral-300 font-semibold">Active File</span>
-                <button onClick={() => invokeCommand('file.closeAll')} className="text-neutral-500 hover:text-red-400 transition-colors" title="Close all files">
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l8 8M9 1l-8 8"/></svg>
-                </button>
-              </div>
-                {allFiles.map((f) => (
-                  <div key={f.path} className="flex items-center group">
-                    <button
-                      onClick={() => dispatch({ type: 'SET_ACTIVE_FILE', path: f.path })}
-                      className={`flex-1 px-4 py-1.5 text-left text-sm truncate transition-colors ${
-                        f.dirty ? 'italic' : ''
-                      } ${
-                        state.activeFileId === f.path ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
-                      }`}
-                      title={f.path}
-                    >
-                      {f.dirty && <span className="text-amber-400 mr-1 not-italic">*</span>}
-                      {f.name}
-                    </button>
-                    <button
-                      onClick={() => handleCloseFile(f.path)}
-                      className="px-2 text-neutral-500 hover:text-red-400 opacity-0 group-hover:opacity-100 text-xs"
-                    >
-                      x
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
             <Sidebar active={activeOp} onSelect={(op) => invokeCommand(`tools.panel.${op}`)} />
           </div>
         )}
 
-        {/* Main area */}
         <main className="app-content flex-1 flex flex-col overflow-hidden">
-          {view === 'welcome' ? (
-            <WelcomeScreen onAction={handleWelcomeAction} recentFiles={recentFiles} onSkipChanged={() => {}} onClearRecent={() => { setRecentFiles([]); localStorage.removeItem('spectra-recent'); }} />
-          ) : view === 'operations' ? (
+          {focusedTab === 'home' ? (
+            <HomeTab
+              recentFiles={recentFiles}
+              onOpen={() => invokeCommand('file.open')}
+              onOpenRecent={(path) => void openByPaths([path])}
+              onClearRecent={() => invokeCommand('file.clearRecent')}
+            />
+          ) : focusedTab === 'tools' ? (
             <div className="flex-1 flex flex-col p-6 min-h-0">
               <h2 className="text-lg font-medium mb-4 shrink-0">{titles[activeOp]}</h2>
               <div className="flex-1 min-h-0">
@@ -1040,7 +914,6 @@ function AppContent(): React.ReactElement {
                   <Panel />
                 )}
               </div>
-
             </div>
           ) : (
             <div className="flex-1 flex flex-col relative overflow-hidden">
@@ -1075,12 +948,12 @@ function AppContent(): React.ReactElement {
       {/* Operation queue */}
       <OperationQueue items={queue} onClear={clearQueue} />
 
-      {/* Settings modal — accessible from any view */}
+      {/* Settings modal — accessible from Edit ▸ Preferences / Help ▸ Licenses */}
       {showSettings && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setShowSettings(false)}>
+        <div data-app-modal className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setShowSettings(false)}>
           <div className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[500px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
-              <h3 className="text-sm font-semibold">Settings</h3>
+              <h3 className="text-sm font-semibold">Preferences</h3>
               <button onClick={() => setShowSettings(false)} className="text-neutral-500 hover:text-neutral-300 text-sm">Close</button>
             </div>
             <div className="p-5">
@@ -1089,13 +962,12 @@ function AppContent(): React.ReactElement {
           </div>
         </div>
       )}
-      {/* 3-choice confirm dialog (Save / Don't Save / Cancel) */}
+      {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
       <ConfirmDialog
         open={confirmState !== null}
         message={confirmState?.message ?? ''}
         onResult={handleConfirmResult}
       />
-      {/* Password prompt for encrypted PDFs */}
       <PasswordDialog
         open={passwordState !== null}
         fileName={passwordState?.fileName ?? ''}

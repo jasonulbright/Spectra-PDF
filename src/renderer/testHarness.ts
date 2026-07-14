@@ -12,9 +12,13 @@
 import { file, engine } from './lib/tauri-bridge';
 import { invokeCommand as invokeRegisteredCommand } from './commands/context';
 import { COMMANDS, type CommandId } from './commands/registry';
+import type { FocusedTab } from './state/types';
 
 export interface TestStateSnapshot {
+  // Legacy projection of the tab model (Phase 4 M2) — kept so pre-M2 specs'
+  // assertions hold: home→'welcome', tools→'operations', doc→'canvas'.
   view: 'welcome' | 'operations' | 'canvas';
+  focusedTab: FocusedTab;
   activeOp: string;
   fileCount: number;
   activeFileId: string | null;
@@ -248,8 +252,11 @@ export interface TestHarness {
   openByPaths: (paths: string[]) => Promise<void>;
   /** Save the active working copy to a known destination, no dialog. */
   saveActiveAs: (destPath: string) => Promise<void>;
-  /** Switch the main view. */
+  /** Switch the main view (legacy — maps onto the tab model: welcome→Home,
+   * operations→Tools, canvas→the active/first document's tab). */
   setView: (view: 'welcome' | 'operations' | 'canvas') => void;
+  /** Focus a tab directly (Phase 4 M2): 'home' | 'tools' | { doc: path }. */
+  focusTab: (tab: FocusedTab) => void;
   /** Select an operation in the sidebar. */
   setActiveOp: (op: string) => void;
   /** Invoke a command-registry entry — the ONE entry point the menus,
@@ -457,6 +464,7 @@ export interface TestHarness {
 export interface TestHarnessDeps {
   openByPaths: (paths: string[]) => Promise<void>;
   setView: (view: 'welcome' | 'operations' | 'canvas') => void;
+  focusTab: (tab: FocusedTab) => void;
   setActiveOp: (op: string) => void;
   setTool: (tool: string) => void;
   getStateSnapshot: () => TestStateSnapshot;
@@ -578,6 +586,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     setView: (view) => deps.setView(view),
+    focusTab: (tab) => deps.focusTab(tab),
     setActiveOp: (op) => deps.setActiveOp(op),
     invokeCommand: (id) => {
       if (!(id in COMMANDS)) {

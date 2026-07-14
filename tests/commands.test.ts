@@ -44,6 +44,7 @@ function stateWith(partial: Partial<AppState>): AppState {
 
 const noopHandlers = (): AppCommandHandlers => ({
   openFiles: vi.fn(async () => true),
+  openPath: vi.fn(async () => {}),
   save: vi.fn(async () => {}),
   saveAs: vi.fn(async () => {}),
   closeFile: vi.fn(async () => {}),
@@ -52,6 +53,11 @@ const noopHandlers = (): AppCommandHandlers => ({
   redo: vi.fn(async () => {}),
   applyPageEdits: vi.fn(async () => {}),
   openPreferences: vi.fn(),
+  openLicenses: vi.fn(),
+  openAbout: vi.fn(),
+  checkForUpdates: vi.fn(),
+  exit: vi.fn(async () => {}),
+  minimizeToTray: vi.fn(async () => {}),
 });
 
 afterEach(() => {
@@ -151,43 +157,65 @@ describe('invokeCommand', () => {
   });
 
   it('tools.* toggle like the pills: re-invoking the active tool exits to Select', () => {
-    const { dispatched } = wire(stateWith({ ui: { ...initialState.ui, view: 'canvas' } }));
+    const { dispatched } = wire(stateWith({ ui: { ...initialState.ui, focusedTab: { doc: 'x.pdf' } } }));
     expect(invokeCommand('tools.highlight')).toBe(true);
     expect(dispatched.at(-1)).toEqual({ type: 'UI_SET_TOOL', tool: 'highlight' });
     expect(invokeCommand('tools.highlight')).toBe(true);
     expect(dispatched.at(-1)).toEqual({ type: 'UI_SET_TOOL', tool: 'select' });
   });
 
-  it('tools.* are canvas-scoped', () => {
-    wire(initialState); // view: welcome
+  it('tools.* are scoped to a focused document tab', () => {
+    wire(initialState); // Home focused
     expect(invokeCommand('tools.highlight')).toBe(false);
   });
 
-  it('tools.panel.* navigates to the operations view with the op armed', () => {
+  it('tools.panel.* focuses the Tools tab with the op armed', () => {
     const { dispatched } = wire(initialState);
     expect(invokeCommand('tools.panel.compress')).toBe(true);
     expect(dispatched).toEqual([
-      { type: 'UI_SET_VIEW', view: 'operations' },
+      { type: 'UI_FOCUS_TAB', tab: 'tools' },
       { type: 'UI_SET_ACTIVE_OP', op: 'compress' },
     ]);
   });
 
   it('document.deleteSelection deletes the batch then clears — even when the reducer rejects', () => {
     const { dispatched } = wire(
-      stateWith({ ui: { ...initialState.ui, selectedPageIds: new Set(['stale#p0']), view: 'canvas' } }),
+      stateWith({ ui: { ...initialState.ui, selectedPageIds: new Set(['stale#p0']), focusedTab: { doc: 'x.pdf' } } }),
     );
     expect(invokeCommand('document.deleteSelection')).toBe(true);
     expect(dispatched.map((a) => a.type)).toEqual(['DELETE_PAGE_REFS', 'UI_CLEAR_SELECTION']);
   });
 
-  it('view commands drive the ui slice', () => {
+  it('view.home / view.tools focus their tabs', () => {
+    const { dispatched } = wire(stateWith({ ui: { ...initialState.ui, focusedTab: 'tools' } }));
+    expect(invokeCommand('view.home')).toBe(true);
+    expect(dispatched.at(-1)).toEqual({ type: 'UI_FOCUS_TAB', tab: 'home' });
+    expect(invokeCommand('view.tools')).toBe(true);
+    expect(dispatched.at(-1)).toEqual({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+  });
+
+  it('window.nextTab / prevTab cycle Home → Tools → docs', () => {
+    // Home + Tools always present; with no docs, next from Home → Tools.
     const { dispatched } = wire(initialState);
-    expect(invokeCommand('view.canvas')).toBe(true);
-    expect(dispatched).toEqual([{ type: 'UI_SET_VIEW', view: 'canvas' }]);
+    expect(invokeCommand('window.nextTab')).toBe(true);
+    expect(dispatched.at(-1)).toEqual({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+    expect(invokeCommand('window.prevTab')).toBe(true);
+    expect(dispatched.at(-1)).toEqual({ type: 'UI_FOCUS_TAB', tab: 'home' }); // wraps
+  });
+
+  it('file.clearRecent is disabled when the recent list is empty', () => {
+    wire(initialState); // recentFiles: []
+    expect(invokeCommand('file.clearRecent')).toBe(false);
+  });
+
+  it('file.clearRecent clears a non-empty recent list', () => {
+    const { dispatched } = wire(stateWith({ ui: { ...initialState.ui, recentFiles: ['a.pdf'] } }));
+    expect(invokeCommand('file.clearRecent')).toBe(true);
+    expect(dispatched.at(-1)).toEqual({ type: 'UI_SET_RECENT_FILES', files: [] });
   });
 
   it('zoom commands require a mounted canvas handle', () => {
-    wire(stateWith({ ui: { ...initialState.ui, view: 'canvas' } }));
+    wire(stateWith({ ui: { ...initialState.ui, focusedTab: { doc: 'x.pdf' } } }));
     expect(invokeCommand('view.zoomIn')).toBe(false);
     const zoomIn = vi.fn();
     registerCanvasServices({
@@ -260,9 +288,10 @@ describe('getCommandContext', () => {
 // state). Guards the total record against a run() that dereferences state
 // its when() didn't check.
 describe('registry smoke', () => {
-  it('every command invokes or refuses without throwing, in every view', () => {
-    for (const view of ['welcome', 'operations', 'canvas'] as const) {
-      let current = stateWith({ ui: { ...initialState.ui, view } });
+  it('every command invokes or refuses without throwing, on every tab', () => {
+    const tabs = ['home', 'tools', { doc: 'x.pdf' }] as const;
+    for (const tab of tabs) {
+      let current = stateWith({ ui: { ...initialState.ui, focusedTab: tab } });
       setCommandStateSource(() => ({
         state: current,
         dispatch: (a: AppAction) => {
@@ -271,7 +300,7 @@ describe('registry smoke', () => {
       }));
       registerAppCommandHandlers(noopHandlers());
       for (const id of COMMAND_IDS as readonly CommandId[]) {
-        expect(() => invokeCommand(id), `${id} in ${view}`).not.toThrow();
+        expect(() => invokeCommand(id), `${id} on ${JSON.stringify(tab)}`).not.toThrow();
       }
       setCommandStateSource(null);
       registerAppCommandHandlers(null);

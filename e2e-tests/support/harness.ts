@@ -4,8 +4,11 @@
  * VITE_E2E=1).
  */
 
+export type FocusedTab = 'home' | 'tools' | { doc: string };
+
 export interface TestStateSnapshot {
   view: 'welcome' | 'operations' | 'canvas';
+  focusedTab: FocusedTab;
   activeOp: string;
   fileCount: number;
   activeFileId: string | null;
@@ -55,6 +58,27 @@ export async function setView(view: TestStateSnapshot['view']): Promise<void> {
       (window as any).__SPECTRA_TEST__.setView(v);
     },
     view,
+  );
+}
+
+/** Focus a tab directly (Phase 4 M2): 'home' | 'tools' | { doc: path }. */
+export async function focusTab(tab: FocusedTab): Promise<void> {
+  await browser.execute<void, [FocusedTab]>(
+    function (t) {
+      (window as any).__SPECTRA_TEST__.focusTab(t);
+    },
+    tab,
+  );
+}
+
+/** Invoke a registered command via the harness (the menus/toolbar entry
+ * point). Returns the enablement verdict. */
+export async function invokeAppCommand(id: string): Promise<boolean> {
+  return await browser.execute<boolean, [string]>(
+    function (i) {
+      return (window as any).__SPECTRA_TEST__.invokeCommand(i);
+    },
+    id,
   );
 }
 

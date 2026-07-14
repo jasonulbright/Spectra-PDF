@@ -1,4 +1,4 @@
-import { AppState, AppAction, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState } from './types';
+import { AppState, AppAction, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab } from './types';
 import { carriesManifest } from '../lib/doc-names';
 
 // Re-project a display-normalized annotation rect when its page's display
@@ -35,12 +35,47 @@ export function rotateAnnotationRect(a: PageAnnotation, delta: number): PageAnno
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
 export const initialUiState: UiState = {
-  view: 'welcome',
+  focusedTab: 'home',
   activeOp: 'split',
   tool: 'select',
   selectedPageIds: NO_SELECTION,
   selectionAnchor: null,
+  recentFiles: [],
 };
+
+// Leaving doc-tab-land re-applies the board's parked-state semantics: the
+// tool disarms and the selection clears (pre-M2 this was the canvas
+// component's unmount; the commit-on-leave effect stays in App). Doc→doc
+// switches keep both — same board, different active file (§ 6.6).
+function focusTab(state: AppState, tab: FocusedTab): AppState {
+  const prev = state.ui.focusedTab;
+  const same =
+    prev === tab || (isDocTab(prev) && isDocTab(tab) && prev.doc === tab.doc);
+  if (same) return state;
+  // A doc tab must reference an open, tab-bearing file — a stale focus
+  // request (file closed underneath a queued dispatch) is rejected rather
+  // than rendered, and byte-only import sources (2n.3) never get tabs.
+  if (isDocTab(tab)) {
+    const f = state.files.get(tab.doc);
+    if (!f || f.importOnly) return state;
+  }
+  const leftDocLand = isDocTab(prev) && !isDocTab(tab);
+  return {
+    ...state,
+    // Focusing a doc tab IS activating that file (§ 4.3: focusedTab doubles
+    // as the SET_ACTIVE_FILE driver). Home/Tools leave the active file alone.
+    activeFileId: isDocTab(tab) ? tab.doc : state.activeFileId,
+    ui: leftDocLand
+      ? {
+          ...state.ui,
+          focusedTab: tab,
+          tool: 'select',
+          selectedPageIds: NO_SELECTION,
+          selectionAnchor: null,
+        }
+      : { ...state.ui, focusedTab: tab },
+  };
+}
 
 export const initialState: AppState = {
   files: new Map(),
@@ -200,6 +235,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...base,
         files,
         activeFileId: action.path,
+        // OPEN_FILE stays pure (just registers the file + sets it active).
+        // Landing on the opened doc's tab is the CALLER's decision — openByPaths
+        // focuses it, importFilesIntoDoc does not — so a background register
+        // (e.g. a page-import source) never yanks the user onto the board.
         // A REOPENED path's old workspace composition is stale the moment
         // the new bytes land — serving it until the async indexer catches up
         // briefly resurrects pre-reopen state (possibly already-edited docs;
@@ -266,10 +305,22 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         stripped,
         state.pageDirtyPaths.filter((p) => p !== action.path),
       );
+      // Closing the focused tab falls back to the next open doc's tab (the
+      // activeFileId fallback computed above), else Home. Closing an
+      // unfocused file leaves the strip alone.
+      const focusedClosed =
+        isDocTab(base.ui.focusedTab) && base.ui.focusedTab.doc === action.path;
+      // The activeFileId fallback can land on a byte-only import source
+      // (first remaining Map key) — such files never get tabs, so fall back
+      // to Home instead of focusing a ghost.
+      const fallbackTab: FocusedTab =
+        activeFileId && !files.get(activeFileId)?.importOnly ? { doc: activeFileId } : 'home';
+      const ui = focusedClosed ? { ...base.ui, focusedTab: fallbackTab } : base.ui;
       return {
         ...base,
         files,
         activeFileId,
+        ui,
         workspace: { documents },
         pageUndoStack: [],
         pageRedoStack: [],
@@ -277,7 +328,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
     case 'SET_ACTIVE_FILE':
-      return { ...state, activeFileId: action.path };
+      return {
+        ...state,
+        activeFileId: action.path,
+        // In doc-land the focused tab IS the active file — follow it (a
+        // strip click activates that document's tab). Elsewhere the tab
+        // strip stays put, exactly like the old rail-list selection.
+        ui:
+          isDocTab(state.ui.focusedTab) && state.files.has(action.path)
+            ? { ...state.ui, focusedTab: { doc: action.path } }
+            : state.ui,
+      };
     case 'UPDATE_FILE': {
       const files = applyFileUpdate(state.files, action);
       if (files === state.files) return state;
@@ -840,26 +901,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // The commit bridge just materialized the edits to disk; the workspace
       // itself is left alone — the indexer re-derives it from the new buffers.
       return { ...state, pageUndoStack: [], pageRedoStack: [], pageDirtyPaths: [] };
-    case 'UI_SET_VIEW': {
-      if (action.view === state.ui.view) return state;
-      // Leaving the canvas view formerly unmounted WorkspaceCanvasView, which
-      // reset its local tool and selection. Now that both live in the ui
-      // slice they'd survive the round trip — reproduce the unmount semantics
-      // so M1 changes no behavior (M4's per-doc view state revisits this).
-      const leftCanvas = state.ui.view === 'canvas' && action.view !== 'canvas';
-      return {
-        ...state,
-        ui: leftCanvas
-          ? {
-              ...state.ui,
-              view: action.view,
-              tool: 'select',
-              selectedPageIds: NO_SELECTION,
-              selectionAnchor: null,
-            }
-          : { ...state.ui, view: action.view },
-      };
-    }
+    case 'UI_FOCUS_TAB':
+      return focusTab(state, action.tab);
+    case 'UI_SET_RECENT_FILES':
+      return { ...state, ui: { ...state.ui, recentFiles: action.files } };
     case 'UI_SET_ACTIVE_OP':
       if (action.op === state.ui.activeOp) return state;
       return { ...state, ui: { ...state.ui, activeOp: action.op } };

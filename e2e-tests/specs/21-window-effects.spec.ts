@@ -50,7 +50,10 @@ describe('window effects + accent theming', () => {
 
   it('renders the shell per the backdrop: translucent frame, opaque content', async () => {
     const kind = await invokeCommand<string>('get_window_backdrop');
-    // Computed styles, not class lists — this is what actually composes.
+    // Computed styles, not class lists — this is what actually composes. The
+    // Phase 4 M2 frame is three bars (menu bar, main toolbar, tab strip), all
+    // carrying .app-shell-bar; every one must tint under Mica (spec-21
+    // extension per § 10.3 — the re-key done by class reuse).
     const styles = await browser.execute(() => {
       const bg = (sel: string) => {
         const el = document.querySelector(sel);
@@ -58,21 +61,27 @@ describe('window effects + accent theming', () => {
       };
       return {
         shell: bg('.app-shell'),
-        header: bg('[data-testid="app-header"]'),
+        menubar: bg('[data-testid="menubar"]'),
+        toolbar: bg('[data-testid="main-toolbar"]'),
+        tabstrip: bg('[data-testid="tab-strip"]'),
         content: bg('.app-content'),
       };
     });
     expect(styles.shell).not.toBeNull();
-    expect(styles.header).not.toBeNull();
+    expect(styles.menubar).not.toBeNull();
+    expect(styles.toolbar).not.toBeNull();
+    expect(styles.tabstrip).not.toBeNull();
     expect(styles.content).not.toBeNull();
 
     if (kind === 'mica') {
-      // Shell lets the material through; the frame carries a translucent
+      // Shell lets the material through; every frame bar carries a translucent
       // tint; content is exactly as opaque as the old shell background.
       expect(alphaOf(styles.shell!)).toBe(0);
-      const headerAlpha = alphaOf(styles.header!);
-      expect(headerAlpha).toBeGreaterThan(0);
-      expect(headerAlpha).toBeLessThan(1);
+      for (const bar of [styles.menubar!, styles.toolbar!, styles.tabstrip!]) {
+        const a = alphaOf(bar);
+        expect(a).toBeGreaterThan(0);
+        expect(a).toBeLessThan(1);
+      }
       expect(alphaOf(styles.content!)).toBe(1);
     } else {
       // Solid look: the shell paints opaque, exactly as before 3b.

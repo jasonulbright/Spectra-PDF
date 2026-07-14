@@ -56,36 +56,90 @@ const select = (s: AppState, pageIds: string[], anchor: string | null): AppState
 
 const selected = (s: AppState): string[] => [...s.ui.selectedPageIds].sort();
 
-describe('ui view/tool actions', () => {
-  it('sets the view', () => {
-    const next = appReducer(initialState, { type: 'UI_SET_VIEW', view: 'canvas' });
-    expect(next.ui.view).toBe('canvas');
+describe('ui tab/tool actions (Phase 4 M2)', () => {
+  it('focuses a tab', () => {
+    const next = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: 'tools' });
+    expect(next.ui.focusedTab).toBe('tools');
   });
 
-  it('is a no-op object-wise when the view is unchanged', () => {
-    const s = appReducer(initialState, { type: 'UI_SET_VIEW', view: 'canvas' });
-    expect(appReducer(s, { type: 'UI_SET_VIEW', view: 'canvas' })).toBe(s);
+  it('is a no-op object-wise when the tab is unchanged', () => {
+    const s = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: 'tools' });
+    expect(appReducer(s, { type: 'UI_FOCUS_TAB', tab: 'tools' })).toBe(s);
   });
 
-  it('leaving the canvas resets the tool and clears the selection (the old unmount semantics)', () => {
-    let s = appReducer(twoDocState(), { type: 'UI_SET_VIEW', view: 'canvas' });
+  it('focusing a doc tab activates that file', () => {
+    const next = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'b.pdf' } });
+    expect(next.ui.focusedTab).toEqual({ doc: 'b.pdf' });
+    expect(next.activeFileId).toBe('b.pdf');
+  });
+
+  it('rejects focusing a doc tab for a file that is not open', () => {
+    const s = twoDocState();
+    expect(appReducer(s, { type: 'UI_FOCUS_TAB', tab: { doc: 'gone.pdf' } })).toBe(s);
+  });
+
+  it('leaving doc-land resets the tool and clears the selection (old unmount semantics)', () => {
+    let s = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
     s = appReducer(s, { type: 'UI_SET_TOOL', tool: 'highlight' });
     s = select(s, ['a.pdf#p0', 'a.pdf#p1'], 'a.pdf#p1');
-    const next = appReducer(s, { type: 'UI_SET_VIEW', view: 'operations' });
+    const next = appReducer(s, { type: 'UI_FOCUS_TAB', tab: 'tools' });
     expect(next.ui.tool).toBe('select');
     expect(next.ui.selectedPageIds.size).toBe(0);
     expect(next.ui.selectionAnchor).toBeNull();
   });
 
-  it('switching between non-canvas views keeps the tool', () => {
-    let s = appReducer(initialState, { type: 'UI_SET_TOOL', tool: 'redact' });
-    s = appReducer(s, { type: 'UI_SET_VIEW', view: 'operations' });
-    expect(s.ui.tool).toBe('redact'); // only canvas → elsewhere resets
+  it('doc→doc switches keep the tool and selection (same board, different file)', () => {
+    let s = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
+    s = appReducer(s, { type: 'UI_SET_TOOL', tool: 'redact' });
+    s = select(s, ['a.pdf#p0'], 'a.pdf#p0');
+    const next = appReducer(s, { type: 'UI_FOCUS_TAB', tab: { doc: 'b.pdf' } });
+    expect(next.ui.tool).toBe('redact');
+    expect(next.ui.selectedPageIds.size).toBe(1);
+    expect(next.activeFileId).toBe('b.pdf');
+  });
+
+  it('home↔tools switches keep the tool (only leaving doc-land resets)', () => {
+    let s = appReducer(twoDocState(), { type: 'UI_SET_TOOL', tool: 'redact' });
+    s = appReducer(s, { type: 'UI_FOCUS_TAB', tab: 'tools' });
+    expect(s.ui.tool).toBe('redact');
   });
 
   it('sets the active operation', () => {
     const next = appReducer(initialState, { type: 'UI_SET_ACTIVE_OP', op: 'compress' });
     expect(next.ui.activeOp).toBe('compress');
+  });
+});
+
+describe('doc-tab lifecycle', () => {
+  it('SET_ACTIVE_FILE follows the tab in doc-land, not elsewhere', () => {
+    let s = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
+    s = appReducer(s, { type: 'SET_ACTIVE_FILE', path: 'b.pdf' });
+    expect(s.ui.focusedTab).toEqual({ doc: 'b.pdf' });
+    // From Tools, activating a file must not yank onto the board.
+    let t = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: 'tools' });
+    t = appReducer(t, { type: 'SET_ACTIVE_FILE', path: 'b.pdf' });
+    expect(t.ui.focusedTab).toBe('tools');
+  });
+
+  it('closing the focused doc falls back to the next doc, else Home', () => {
+    let s = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
+    s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(s.ui.focusedTab).toEqual({ doc: 'b.pdf' });
+    s = appReducer(s, { type: 'CLOSE_FILE', path: 'b.pdf' });
+    expect(s.ui.focusedTab).toBe('home');
+  });
+
+  it('closing an unfocused doc leaves the focused tab alone', () => {
+    let s = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'b.pdf' } });
+    s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(s.ui.focusedTab).toEqual({ doc: 'b.pdf' });
+  });
+});
+
+describe('recent files', () => {
+  it('sets the recent list', () => {
+    const next = appReducer(initialState, { type: 'UI_SET_RECENT_FILES', files: ['a.pdf', 'b.pdf'] });
+    expect(next.ui.recentFiles).toEqual(['a.pdf', 'b.pdf']);
   });
 });
 

@@ -4,7 +4,6 @@ import {
   waitForHarness,
   openByPaths,
   getState,
-  setView,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -22,11 +21,14 @@ describe('open valid PDF', () => {
     expect(state.activeFile!.dirty).toBe(false);
   });
 
-  it('switches into canvas view and exposes Save / Save As / Undo', async () => {
-    await setView('canvas');
-    await expect($('[data-testid="open-pdf-btn"]')).toBeDisplayed();
-    await expect($('[data-testid="save-as-btn"]')).toBeDisplayed();
-    await expect($('[data-testid="undo-btn"]')).toBeDisplayed();
-    await expect($('[data-testid="save-btn"]')).toBeDisabled();
+  it('opening focuses a document tab (the board) automatically', async () => {
+    const state = await getState();
+    // openByPaths lands on the opened doc's tab — the § M2 tab model.
+    expect(state.focusedTab).toEqual({ doc: SAMPLE_PDF });
+    expect(state.view).toBe('canvas'); // legacy projection of a doc tab
+    await expect($('[data-testid="tab-doc-0"]')).toBeDisplayed();
+    // The toolbar exposes Save (disabled while clean) and Undo.
+    await expect($('[data-testid="toolbar-save"]')).toBeDisabled();
+    await expect($('[data-testid="toolbar-undo"]')).toBeDisplayed();
   });
 });

@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { useEngine } from './useEngine';
 import { file } from '../lib/tauri-bridge';
+import { withRecent } from '../lib/recent-files';
 import type { OpenFile } from '../state/types';
 
 export function useActiveFile() {
@@ -17,7 +18,9 @@ export function useActiveFile() {
 
   const openNewFiles = useCallback(async () => {
     const paths = await openFiles();
+    let recent = state.ui.recentFiles;
     for (const filePath of paths) {
+      recent = withRecent(recent, filePath);
       if (state.files.has(filePath)) {
         dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
         continue;
@@ -33,14 +36,11 @@ export function useActiveFile() {
         pageCount: info.pages,
         buffer,
       });
-      // Track recent
-      try {
-        const recent = JSON.parse(localStorage.getItem('spectra-recent') || '[]');
-        const next = [filePath, ...recent.filter((f: string) => f !== filePath)].slice(0, 10);
-        localStorage.setItem('spectra-recent', JSON.stringify(next));
-      } catch { /* recent-files list is best-effort */ }
     }
-  }, [state.files, call, openFiles, dispatch]);
+    // Track recent (ui slice + App's persistence effect) — one dispatch so
+    // multi-file opens don't clobber each other within the batch.
+    if (paths.length > 0) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
+  }, [state.files, state.ui.recentFiles, call, openFiles, dispatch]);
 
   return { activeFile, allFiles, openNewFiles, state, dispatch };
 }

@@ -169,7 +169,7 @@ describe('dispatchKeyEvent', () => {
   });
 
   it('the editable guard swallows guarded bindings inside fields', () => {
-    const { dispatched } = wire(uiState({ view: 'canvas' }));
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
     const e = fakeEvent({ key: 'a', ctrl: true, target: INPUT });
     dispatchKeyEvent(e);
     expect(e.defaultPrevented).toBe(false);
@@ -177,7 +177,7 @@ describe('dispatchKeyEvent', () => {
   });
 
   it('Ctrl+F always wins — even from inside a field', () => {
-    wire(uiState({ view: 'canvas' }));
+    wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
     const open = vi.fn();
     registerCanvasServices({
       canvas: () => null,
@@ -190,7 +190,7 @@ describe('dispatchKeyEvent', () => {
   });
 
   it('canvas-scoped bindings fall through outside the canvas view', () => {
-    const { dispatched } = wire(uiState({ view: 'operations' }));
+    const { dispatched } = wire(uiState({ focusedTab: 'tools' }));
     const e = fakeEvent({ key: 'a', ctrl: true, target: DIV });
     dispatchKeyEvent(e);
     // No preventDefault: the browser's own select-all belongs to the page.
@@ -199,7 +199,7 @@ describe('dispatchKeyEvent', () => {
   });
 
   it('Ctrl+A in canvas selects all pages', () => {
-    const { dispatched } = wire(uiState({ view: 'canvas' }));
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
     const e = fakeEvent({ key: 'a', ctrl: true, target: DIV });
     dispatchKeyEvent(e);
     expect(e.defaultPrevented).toBe(true); // legacy: pd before the (empty-workspace) no-op
@@ -207,7 +207,7 @@ describe('dispatchKeyEvent', () => {
   });
 
   it('Delete without a selection falls through (no preventDefault)', () => {
-    const { dispatched } = wire(uiState({ view: 'canvas' }));
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
     const e = fakeEvent({ key: 'Delete', target: DIV });
     dispatchKeyEvent(e);
     expect(e.defaultPrevented).toBe(false);
@@ -215,7 +215,7 @@ describe('dispatchKeyEvent', () => {
   });
 
   it('Delete with a selection dispatches the batched delete + clear', () => {
-    const { dispatched } = wire(uiState({ view: 'canvas', selectedPageIds: new Set(['x#p0']) }));
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' }, selectedPageIds: new Set(['x#p0']) }));
     const e = fakeEvent({ key: 'Delete', target: DIV });
     dispatchKeyEvent(e);
     expect(e.defaultPrevented).toBe(true);
@@ -223,7 +223,7 @@ describe('dispatchKeyEvent', () => {
   });
 
   it('] and [ rotate the selection', () => {
-    const { dispatched } = wire(uiState({ view: 'canvas', selectedPageIds: new Set(['x#p0']) }));
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' }, selectedPageIds: new Set(['x#p0']) }));
     dispatchKeyEvent(fakeEvent({ key: ']', target: DIV }));
     dispatchKeyEvent(fakeEvent({ key: '[', target: DIV }));
     expect(dispatched).toEqual([
@@ -235,7 +235,7 @@ describe('dispatchKeyEvent', () => {
 
 describe('the Escape chain', () => {
   it('an interceptor (drag/menu) consumes Escape ahead of everything', () => {
-    const { dispatched } = wire(uiState({ view: 'canvas', tool: 'highlight' }));
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' }, tool: 'highlight' }));
     const consumed = vi.fn(() => true);
     const un = pushEscapeInterceptor(consumed);
     dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
@@ -245,13 +245,13 @@ describe('the Escape chain', () => {
   });
 
   it('exits the armed tool next (even from inside a field — legacy behavior)', () => {
-    const { dispatched } = wire(uiState({ view: 'canvas', tool: 'redact' }));
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' }, tool: 'redact' }));
     dispatchKeyEvent(fakeEvent({ key: 'Escape', target: INPUT }));
     expect(dispatched).toEqual([{ type: 'UI_SET_TOOL', tool: 'select' }]);
   });
 
   it('clears the selection when no tool is armed (edit-guarded)', () => {
-    const { dispatched } = wire(uiState({ view: 'canvas', selectedPageIds: new Set(['x#p0']) }));
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' }, selectedPageIds: new Set(['x#p0']) }));
     dispatchKeyEvent(fakeEvent({ key: 'Escape', target: INPUT }));
     expect(dispatched).toEqual([]); // guarded inside a field
     dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
@@ -260,7 +260,7 @@ describe('the Escape chain', () => {
 
   it('tool exit takes priority over selection clear — one step per press', () => {
     const { dispatched, current } = wire(
-      uiState({ view: 'canvas', tool: 'highlight', selectedPageIds: new Set(['x#p0']) }),
+      uiState({ focusedTab: { doc: 'x.pdf' }, tool: 'highlight', selectedPageIds: new Set(['x#p0']) }),
     );
     dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
     expect(dispatched).toEqual([{ type: 'UI_SET_TOOL', tool: 'select' }]);
@@ -270,7 +270,7 @@ describe('the Escape chain', () => {
   });
 
   it('is inert outside the canvas view', () => {
-    const { dispatched } = wire(uiState({ view: 'operations', tool: 'select' }));
+    const { dispatched } = wire(uiState({ focusedTab: 'tools', tool: 'select' }));
     dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
     expect(dispatched).toEqual([]);
   });

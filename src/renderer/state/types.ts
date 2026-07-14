@@ -127,17 +127,33 @@ export type CanvasTool =
   | 'signature'
   | 'forms';
 
-// Main view. M2 replaces this with the tab-strip model ('home' | 'tools' |
-// per-doc tabs); until then the literals stay the pre-workbench names so the
-// e2e harness snapshots are unchanged.
+// The tab-strip model (Phase 4 M2, § 3.1): Home | Tools | one tab per open
+// document. A doc tab focuses that file and shows the document pane (at M2:
+// the all-docs organize board with that file active; M4 adds the per-doc
+// Document view). The legacy ViewMode literals survive only as the harness
+// snapshot's derived view (home→'welcome', tools→'operations', doc→'canvas')
+// so pre-M2 e2e specs keep their assertions.
+export type FocusedTab = 'home' | 'tools' | { doc: string };
 export type ViewMode = 'welcome' | 'operations' | 'canvas';
+
+/** Doc-tab-land = a document tab is focused (the canvas board is showing). */
+export function isDocTab(tab: FocusedTab): tab is { doc: string } {
+  return typeof tab === 'object';
+}
+
+/** The harness/back-compat projection of the tab model. */
+export function viewOf(tab: FocusedTab): ViewMode {
+  if (tab === 'home') return 'welcome';
+  if (tab === 'tools') return 'operations';
+  return 'canvas';
+}
 
 // UI state the command registry needs to read (menus/toolbars can't read
 // component-local state — 19-phase4 § 4.3). Ephemeral interaction state
 // (in-flight drags, rubber bands, inline edits, pending marks/placements)
 // stays component-local: it has no command consumers.
 export interface UiState {
-  view: ViewMode;
+  focusedTab: FocusedTab;
   activeOp: string; // Sidebar Operation id; typed loosely here to avoid a component import cycle
   tool: CanvasTool;
   // Canvas multi-select (2n.1) — view state, never the page-edit tier.
@@ -146,6 +162,9 @@ export interface UiState {
   // WorkspaceCanvasView effect).
   selectedPageIds: ReadonlySet<string>;
   selectionAnchor: string | null;
+  // Recent files (the `spectra-recent` list) — in state because the File ▸
+  // Open Recent menu and the Home tab render it; App owns persistence.
+  recentFiles: string[];
 }
 
 export interface AppState {
@@ -220,9 +239,12 @@ export type AppAction =
   | { type: 'UNDO_PAGE_OP' }
   | { type: 'REDO_PAGE_OP' }
   | { type: 'CLEAR_PAGE_EDITS' }
-  // ui slice (Phase 4 M1). One dispatch pathway so the whole app state stays
-  // snapshot-testable; commands and the keymap read state.ui for enablement.
-  | { type: 'UI_SET_VIEW'; view: ViewMode }
+  // ui slice (Phase 4 M1/M2). One dispatch pathway so the whole app state
+  // stays snapshot-testable; commands and the keymap read state.ui.
+  // Focusing a doc tab syncs activeFileId; entering doc-land is always
+  // caller/command-driven (the reducer never yanks the user onto the board).
+  | { type: 'UI_FOCUS_TAB'; tab: FocusedTab }
+  | { type: 'UI_SET_RECENT_FILES'; files: string[] }
   | { type: 'UI_SET_ACTIVE_OP'; op: string }
   | { type: 'UI_SET_TOOL'; tool: CanvasTool }
   // Click selection with the canvas's modifier semantics (computed here —
