@@ -136,6 +136,16 @@ export function WorkspaceCanvasView({
   // board shows ALL docs, the reading view one). Manifest partitions share a
   // path — the reading view takes the first for now (M4.1).
   const focusedDoc = docs.find((d) => d.path === state.activeFileId) ?? null;
+  // Reading-view page navigation (M4.1b): the current page (from DocumentView's
+  // scroll tracking) + the editable page box. `pageBox` mirrors currentPage
+  // except while the user is typing in it (so a scroll doesn't clobber a
+  // half-typed number).
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageBox, setPageBox] = useState('1');
+  const pageBoxFocused = useRef(false);
+  useEffect(() => {
+    if (!pageBoxFocused.current) setPageBox(String(currentPage));
+  }, [currentPage]);
 
   // Publish the external-drop resolver (2n.3) so App's drop handler can map a
   // drop point to the document + index under it. Reads live layout/canvas via
@@ -1293,6 +1303,7 @@ export function WorkspaceCanvasView({
           ref={documentViewRef}
           doc={focusedDoc}
           proxies={proxies}
+          onCurrentPageChange={setCurrentPage}
           renderVersion={renderVersion}
           selectedPageIds={selectedPageIds}
           onSelectPage={onSelectPage}
@@ -1613,6 +1624,32 @@ export function WorkspaceCanvasView({
           >
             Apply changes
           </button>
+        )}
+        {docViewMode === 'document' && focusedDoc && (
+          <div className="flex items-center gap-1 px-3 py-1.5 bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg text-xs text-neutral-300">
+            <input
+              data-testid="page-nav-box"
+              value={pageBox}
+              onChange={(e) => setPageBox(e.target.value.replace(/[^0-9]/g, ''))}
+              onFocus={(e) => {
+                pageBoxFocused.current = true;
+                e.target.select();
+              }}
+              onBlur={() => {
+                pageBoxFocused.current = false;
+                const max = focusedDoc.pages.length;
+                const n = Math.max(1, Math.min(max, parseInt(pageBox, 10) || currentPage));
+                activeCanvasHandle()?.centerOn(focusedDoc.pages[n - 1].id);
+                setPageBox(String(n));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+              className="w-9 text-center bg-neutral-900 border border-neutral-700 rounded"
+              aria-label="Current page"
+            />
+            <span data-testid="page-nav-total">/ {focusedDoc.pages.length}</span>
+          </div>
         )}
         <div className="flex bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg overflow-hidden">
           <button

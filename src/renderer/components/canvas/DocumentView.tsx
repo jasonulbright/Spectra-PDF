@@ -144,6 +144,14 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     return () => ro.disconnect();
   }, []);
 
+  // Focus the scroller when the reading view appears so PageUp/PageDown/Home/End/
+  // arrows/Space scroll it natively (those keys aren't in the keymap table, so
+  // they fall through to the focused scroll region). preventScroll: don't jump
+  // the page just from taking focus.
+  useEffect(() => {
+    scrollRef.current?.focus({ preventScroll: true });
+  }, []);
+
   const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     setScrollTop(e.currentTarget.scrollTop);
   }, []);
@@ -157,7 +165,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   const onCurrentPageChange = props.onCurrentPageChange;
   useEffect(() => {
     if (!onCurrentPageChange || pageCount === 0 || viewportH === 0) return;
-    const current = Math.min(pageCount, Math.floor(scrollTop / rowH) + 1);
+    // The page under the viewport CENTER — the one you're actually reading, and
+    // consistent with centerOn (which centers a page), so a jump-to-page N
+    // reports back as N rather than N−1.
+    const current = Math.min(pageCount, Math.max(1, Math.floor((scrollTop + viewportH / 2) / rowH) + 1));
     onCurrentPageChange(current);
   }, [scrollTop, rowH, pageCount, viewportH, onCurrentPageChange]);
 
@@ -251,6 +262,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       ref={scrollRef}
       className="docview-scroll"
       data-testid="document-view"
+      tabIndex={0}
       onScroll={onScroll}
     >
       <div className="docview-spacer" style={{ height: contentHeight, position: 'relative' }}>

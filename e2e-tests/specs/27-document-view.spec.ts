@@ -1,6 +1,13 @@
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { waitForHarness, openByPaths, getState, closeAllFiles, setView } from '../support/harness.js';
+import {
+  waitForHarness,
+  openByPaths,
+  getState,
+  closeAllFiles,
+  setView,
+  setReactInputValue,
+} from '../support/harness.js';
 
 // Phase 4 M4.1: the continuous reading Document view. Default is the Organize
 // board; a pill toggles to the reading column, which hosts the SAME PageCells
@@ -51,6 +58,26 @@ describe('document view (M4.1)', () => {
     await browser.waitUntil(async () => (await pageWidth()) > before, {
       timeout: 10_000,
       timeoutMsg: 'Zoom+ did not enlarge the page — the button is not routed to the reading view',
+    });
+  });
+
+  it('shows a page indicator matching the document, and jumping scrolls', async () => {
+    const pageCount = (await getState()).activeFile?.pageCount ?? 0;
+    expect(pageCount).toBeGreaterThan(0);
+    // The indicator's total matches the document.
+    expect(await $('[data-testid="page-nav-total"]').getText()).toContain(`/ ${pageCount}`);
+    if (pageCount < 2) return; // single-page fixture — no page below the fold to jump to
+    const scrollTop = () =>
+      browser.execute(
+        () => (document.querySelector('[data-testid="document-view"]') as HTMLElement | null)?.scrollTop ?? 0,
+      );
+    const before = await scrollTop();
+    await $('[data-testid="page-nav-box"]').click();
+    await setReactInputValue('[data-testid="page-nav-box"]', String(pageCount));
+    await browser.keys(['Enter']);
+    await browser.waitUntil(async () => (await scrollTop()) > before, {
+      timeout: 10_000,
+      timeoutMsg: 'jumping to the last page did not scroll the reading view',
     });
   });
 
