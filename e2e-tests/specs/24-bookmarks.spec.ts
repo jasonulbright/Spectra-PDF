@@ -112,15 +112,29 @@ describe('navigation pane — Bookmarks panel', () => {
     await setReactInputValue('[data-testid="bookmark-title"]', 'RACE SURVIVED');
     await browser.keys(['Enter']);
 
-    // Round-trip through disk (panel switch remounts → fresh get_outline): the
-    // rename must have survived the concurrent commit-gate buffer swap.
+    // Wait for the save to settle (the rotation it flushed marks the file dirty),
+    // then assert the LIVE (still-mounted) title — this is where the bug shows:
+    // the stale reload would have reverted `nodes` in memory to the pre-rename
+    // tree. Disk is written from an immutable payload and is correct either way,
+    // so the in-memory value is the discriminating observation.
+    await browser.waitUntil(async () => (await getState()).activeFile?.dirty === true, {
+      timeout: 10_000,
+      timeoutMsg: 'bookmark save never settled (file not dirty)',
+    });
+    await browser.waitUntil(async () => (await firstTitle()) === 'RACE SURVIVED', {
+      timeout: 10_000,
+      timeoutMsg: 'rename was reverted in memory by the reload-vs-save race',
+    });
+
+    // And the disk round-trip (panel switch remounts → fresh get_outline) — a
+    // plain persistence check on top of the in-memory one.
     await $('[data-testid="navicon-pages"]').click();
     await $('[data-testid="pages-panel"]').waitForDisplayed();
     await $('[data-testid="navicon-bookmarks"]').click();
     await $('[data-testid="bookmark-row"]').waitForDisplayed();
     await browser.waitUntil(async () => (await firstTitle()) === 'RACE SURVIVED', {
       timeout: 10_000,
-      timeoutMsg: 'rename was lost to the reload-vs-save race',
+      timeoutMsg: 'rename did not persist to disk',
     });
   });
 });

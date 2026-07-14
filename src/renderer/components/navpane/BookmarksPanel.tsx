@@ -107,7 +107,13 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const mutableTarget = useCallback((): OpenFile | null => {
     const target = activeFileRef.current;
     if (!target || target.buffer == null) return null;
-    return target.buffer === loadedBufferRef.current ? target : null;
+    // Valid when the shown tree is the loaded tree for this file, OR a save is
+    // already in flight for it: during a save the buffer churns (commit gate →
+    // UPDATE_FILE) while `nodes` stays the authoritative working tree (the
+    // reload is suppressed), so a concurrent edit is fine and queues after —
+    // without this it would be silently dropped in that window (review-caught).
+    if (target.buffer === loadedBufferRef.current) return target;
+    return (savesInFlight.current.get(target.path) ?? 0) > 0 ? target : null;
   }, []);
 
   // (Re)load when the shown file's BYTES change to something `nodes` doesn't
@@ -432,7 +438,14 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   // file's tree). Gate the interactive UI on it so a click during the load
   // window can't act on (and persist) a phantom tree — belt-and-suspenders with
   // mutableTarget(), which already refuses the write.
-  const loaded = activeFile?.buffer != null && activeFile.buffer === loadedBuffer;
+  // Loaded (rows interactive) when the shown tree is this file's loaded tree, OR
+  // a save is in flight for it — during a save the buffer churns but `nodes` is
+  // the authoritative working tree, so keeping rows mounted avoids a spurious
+  // "Loading…" flash and, more importantly, avoids a forced unmount-blur that
+  // would silently drop a concurrent edit in another field (review-caught).
+  const loaded =
+    activeFile?.buffer != null &&
+    (activeFile.buffer === loadedBuffer || (savesInFlight.current.get(activeFile.path) ?? 0) > 0);
 
   if (!activeFile) {
     return <div className="navpanel-empty" data-testid="bookmarks-panel">No document open.</div>;
