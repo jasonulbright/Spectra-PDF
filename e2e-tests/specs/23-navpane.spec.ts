@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { waitForHarness, openByPaths, getState } from '../support/harness.js';
+import { waitForHarness, openByPaths, getState, getWorkspacePageIds } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
@@ -62,5 +62,50 @@ describe('navigation pane — Pages panel', () => {
     await $('[data-testid="nav-panel-body"]').waitForDisplayed({
       timeoutMsg: 'F4 did not reopen the nav pane',
     });
+  });
+
+  it('drag-reorders a thumbnail (real W3C pointer drag → page tier)', async () => {
+    await ensurePagesOpen();
+    const ids = await getWorkspacePageIds();
+    expect(ids.length).toBe(5); // sample.pdf
+
+    // Grab thumb 0's center; drop at thumb 1's lower edge (always on-screen —
+    // the 2nd row) → an insertion after page 1.
+    const rects = (await browser.execute(function (a: string, b: string) {
+      const byId = (id: string): DOMRect =>
+        Array.from(document.querySelectorAll('[data-testid="thumb"]'))
+          .find((e) => e.getAttribute('data-page-id') === id)!
+          .getBoundingClientRect();
+      const ra = byId(a);
+      const rb = byId(b);
+      return {
+        a: { x: ra.left + ra.width / 2, y: ra.top + ra.height / 2 },
+        drop: { x: rb.left + rb.width / 2, y: rb.bottom - 6 },
+      };
+    }, ids[0], ids[1])) as { a: { x: number; y: number }; drop: { x: number; y: number } };
+
+    // Trusted pointer events through the panel's window listeners (the
+    // 20-release-gates canvas-drag mechanism).
+    await browser
+      .action('pointer', { parameters: { pointerType: 'mouse' } })
+      .move({ x: Math.round(rects.a.x), y: Math.round(rects.a.y) })
+      .down()
+      .pause(80)
+      .move({ x: Math.round(rects.a.x), y: Math.round(rects.a.y) + 12 }) // cross the 6px threshold
+      .pause(80)
+      .move({ x: Math.round(rects.drop.x), y: Math.round(rects.drop.y) })
+      .pause(120)
+      .up()
+      .perform();
+
+    // Page 0 is no longer first — it moved down (page tier; robust to the exact
+    // landing index).
+    await browser.waitUntil(
+      async () => {
+        const order = await getWorkspacePageIds();
+        return order.length === 5 && order[0] !== ids[0] && order.includes(ids[0]);
+      },
+      { timeout: 10_000, timeoutMsg: 'the thumbnail drag never reordered the pages' },
+    );
   });
 });

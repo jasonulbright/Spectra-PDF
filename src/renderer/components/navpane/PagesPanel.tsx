@@ -5,6 +5,7 @@ import { usePdfProxies } from '../../hooks/usePdfProxies';
 import { logRenderError, scheduleReblit } from '../canvas/raster';
 import { getCanvasServices } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
+import { computeReorderTarget } from '../../lib/page-reorder';
 import { ContextMenu } from '../ContextMenu';
 import type { NavPanelComponentProps } from './types';
 import type { PageRef } from '../../state/types';
@@ -198,6 +199,102 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
 
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string; pageId: string } | null>(null);
 
+  // ── Drag-reorder (M3.1b) ─────────────────────────────────────────────────
+  // A linear-list pointer drag (window-level listeners, the canvas pattern —
+  // HTML5 DnD can't complete in the webview). Below the threshold it's a click
+  // (select); above, it reorders via MOVE_PAGE/MOVE_PAGES. Refs feed the stable
+  // window handlers the latest items/selection; a per-drag `detachRef` removes
+  // that drag's listeners (also on unmount), so no handler-identity juggling.
+  const [dropGap, setDropGap] = useState<number | null>(null);
+  const dragRef = useRef<{ grabbedId: string; startX: number; startY: number; started: boolean; movingIds: string[] } | null>(null);
+  const detachRef = useRef<() => void>(() => {});
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+
+  const flatIndexAt = useCallback((clientY: number): number => {
+    const el = scrollerRef.current;
+    if (!el) return 0;
+    const y = clientY - el.getBoundingClientRect().top + el.scrollTop;
+    return Math.max(0, Math.min(itemsRef.current.length, Math.round(y / ROW_H)));
+  }, []);
+
+  const dragMove = useCallback(
+    (e: PointerEvent): void => {
+      const s = dragRef.current;
+      if (!s) return;
+      if (!s.started) {
+        if (Math.hypot(e.clientX - s.startX, e.clientY - s.startY) < 6) return;
+        s.started = true;
+        // Capture the moving set at drag start: the whole selection if the
+        // grabbed page is part of a multi-selection, else just that page.
+        const sel = selectedRef.current;
+        s.movingIds =
+          sel.has(s.grabbedId) && sel.size > 1
+            ? itemsRef.current.filter((it) => sel.has(it.page.id)).map((it) => it.page.id)
+            : [s.grabbedId];
+      }
+      setDropGap(flatIndexAt(e.clientY));
+    },
+    [flatIndexAt],
+  );
+
+  // Finish a drag. `drop` = pointerup (apply the move); false = cancel/unmount.
+  const finishDrag = useCallback(
+    (clientY: number, drop: boolean): void => {
+      const s = dragRef.current;
+      dragRef.current = null;
+      detachRef.current();
+      setDropGap(null);
+      if (!drop || !s || !s.started) return; // below threshold → a click; onClick selects
+      // Swallow the click that follows a completed drag so it doesn't reselect.
+      const swallow = (ev: MouseEvent): void => {
+        ev.stopPropagation();
+        ev.preventDefault();
+      };
+      window.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener('click', swallow, true), 0);
+
+      const target = computeReorderTarget(
+        itemsRef.current.map((it) => ({ docId: it.docId, pageId: it.page.id })),
+        s.movingIds,
+        flatIndexAt(clientY),
+      );
+      if (!target) return;
+      if (s.movingIds.length === 1) {
+        const from = itemsRef.current.find((it) => it.page.id === s.movingIds[0]);
+        if (!from) return;
+        dispatch({ type: 'MOVE_PAGE', fromDocId: from.docId, toDocId: target.toDocId, pageId: s.movingIds[0], toIndex: target.toIndex });
+      } else {
+        dispatch({ type: 'MOVE_PAGES', pageIds: s.movingIds, toDocId: target.toDocId, toIndex: target.toIndex });
+      }
+      dispatch({ type: 'UI_SET_SELECTION', pageIds: s.movingIds, anchor: s.movingIds[s.movingIds.length - 1] });
+    },
+    [dispatch, flatIndexAt],
+  );
+
+  const onRowPointerDown = useCallback(
+    (item: PageItem, e: React.PointerEvent): void => {
+      if (e.button !== 0 || dragRef.current) return;
+      dragRef.current = { grabbedId: item.page.id, startX: e.clientX, startY: e.clientY, started: false, movingIds: [item.page.id] };
+      const onUp = (ev: PointerEvent) => finishDrag(ev.clientY, true);
+      const onCancel = () => finishDrag(0, false);
+      window.addEventListener('pointermove', dragMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onCancel);
+      detachRef.current = () => {
+        window.removeEventListener('pointermove', dragMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+      };
+    },
+    [dragMove, finishDrag],
+  );
+
+  // Detach an in-flight drag's listeners if the panel unmounts.
+  useEffect(() => () => detachRef.current(), []);
+
   const onThumbClick = useCallback(
     (item: PageItem, e: React.MouseEvent) => {
       const mode = e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'range' : 'single';
@@ -256,6 +353,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
               data-page-id={item.page.id}
               className={'thumb-row' + (isSelected ? ' selected' : '')}
               style={{ position: 'absolute', top: index * ROW_H, height: ROW_H, left: 0, right: 0 }}
+              onPointerDown={(e) => onRowPointerDown(item, e)}
               onClick={(e) => onThumbClick(item, e)}
               onContextMenu={(e) => onThumbContextMenu(item, e)}
             >
@@ -272,6 +370,9 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
             </div>
           );
         })}
+        {dropGap !== null && (
+          <div className="thumb-drop-indicator" data-testid="thumb-drop-indicator" style={{ top: dropGap * ROW_H }} />
+        )}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
     </div>

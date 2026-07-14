@@ -288,6 +288,16 @@
 .thumb-frame canvas { transition: opacity 0.15s ease; }
 .thumb-label { font-size: 11px; color: #a3a3a3; }
 .thumb-row.selected .thumb-label { color: #ffffff; }
+.thumb-drop-indicator {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  background: #0078d4;
+  border-radius: 1px;
+  z-index: 6;
+  pointer-events: none;
+}
 
 [data-theme="light"] .nav-icon-strip,
 [data-theme="light"] .nav-panel-body { border-right-color: #e5e7eb; }
