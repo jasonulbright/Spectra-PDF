@@ -1,6 +1,6 @@
 import type { CanvasServices } from './types';
 
-// A one-slot "open Find as soon as there's a canvas to open it on".
+// A one-slot "open Find as soon as there's a canvas showing THIS document".
 //
 // `CanvasServices` only exist while WorkspaceCanvasView is mounted, i.e. while a
 // DOCUMENT tab is focused. A command that focuses a doc tab and then wants Find
@@ -14,36 +14,57 @@ import type { CanvasServices } from './types';
 // So park the intent and let the mount drain it — the same park-then-flush shape
 // M4.1c used for cross-document find jumps.
 //
+// The park is KEYED TO ITS TARGET, and the drain checks that the canvas which
+// mounted is showing that target. A bare boolean would fire on whatever canvas
+// mounted next: park for a.pdf, change your mind, open b.pdf an hour later, and
+// Find springs open there for no reason the user can see. The first draft
+// documented "callers must guarantee a doc tab lands" as the mitigation — but an
+// invariant that depends on future writers remembering is one that will break
+// (the same lesson M4.1c and this slice's own activeToolId fix already paid
+// for), so the module enforces it rather than asking.
+//
 // This lives in its own module rather than in `context.ts` because `context`
 // imports `COMMANDS` from `registry`, and `registry` is what needs to request a
 // find — routing it through context would close an import cycle.
 
-let pending = false;
+/** The document path a parked request is waiting for; null = nothing parked. */
+let pendingFor: string | null = null;
 
 /**
- * Open the find bar, now if the canvas is mounted, else on its next mount.
+ * Open the find bar on `path`, now if its canvas is mounted, else on its mount.
  *
- * The park is consumed by the next registration and does not expire on its own,
- * so every caller must be one that GUARANTEES a document tab lands (i.e. it
- * gates on a real, non-import-only active file). A caller that focuses nothing
- * would leave the bar to spring open on whatever document the user opened next.
+ * `current` is the caller's live services (null when no canvas is mounted).
+ * Passing them in rather than reading a module slot keeps this module a leaf.
  */
-export function openFindWhenCanvasReady(current: CanvasServices | null): void {
+export function openFindWhenCanvasReady(
+  current: CanvasServices | null,
+  path: string,
+): void {
   if (current) {
     current.find.open();
     return;
   }
-  pending = true;
+  pendingFor = path;
 }
 
-/** Called by `registerCanvasServices` — the moment the find service exists. */
-export function drainPendingFind(services: CanvasServices | null): void {
-  if (!services || !pending) return;
-  pending = false;
-  services.find.open();
+/**
+ * Called by `registerCanvasServices` — the moment the find service exists.
+ *
+ * `shownDoc` is the document that canvas is showing (null if it isn't showing
+ * one). A park only drains onto the document it was taken for; any other
+ * navigation DISCARDS it, so a forgotten request can't ambush a later document.
+ */
+export function drainPendingFind(
+  services: CanvasServices | null,
+  shownDoc: string | null,
+): void {
+  if (!services || pendingFor === null) return;
+  const target = pendingFor;
+  pendingFor = null;
+  if (target === shownDoc) services.find.open();
 }
 
 /** Test seam: drop a parked request so cases can't leak into each other. */
 export function resetPendingFind(): void {
-  pending = false;
+  pendingFor = null;
 }

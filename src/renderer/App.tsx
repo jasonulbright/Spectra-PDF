@@ -301,7 +301,14 @@ function AppContent(): React.ReactElement {
     let changed = false;
     try {
       for (const filePath of paths) {
-        if (state.files.has(filePath)) {
+        // Already open as a real DOCUMENT → just re-activate it. A byte-only
+        // import source doesn't count: it has an entry in `files` but no tab,
+        // nothing ever upgrades the flag, and `focusTab` rejects a doc tab for
+        // it — so treating it as "already open" made File ▸ Open on a file you
+        // had previously imported pages FROM a permanent no-op with no
+        // feedback. Fall through and open it properly instead.
+        const existing = state.files.get(filePath);
+        if (existing && !existing.importOnly) {
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
           recent = withRecent(recent, filePath); // only on success — a cancel/throw
           lastOpened = filePath;                  // must not pollute Recent (review-caught)

@@ -13,6 +13,23 @@ import { openFindWhenCanvasReady } from './find-intent';
 
 // --- Pure enablement helpers (unit-tested; menus gray from these) ---------
 
+/**
+ * The active file's path, but only if it is a document we can actually SHOW.
+ *
+ * `activeFileId` alone isn't that: an import-only source (bytes dragged in to
+ * supply pages, never opened as a document) has an entry in `files` but no tab,
+ * and `focusTab` rejects a doc tab for it. Closing the last real file can leave
+ * one as the active id, so this is reachable. A caller that focuses a doc tab
+ * must gate on THIS, or it dispatches a focus that silently no-ops and then
+ * carries on as though the document were in front.
+ */
+function showableDoc(state: AppState): string | null {
+  const path = state.activeFileId;
+  if (!path) return null;
+  const f = state.files.get(path);
+  return f && !f.importOnly ? path : null;
+}
+
 export function canUndo(state: AppState): boolean {
   if (state.pageUndoStack.length > 0) return true;
   const f = state.activeFileId ? state.files.get(state.activeFileId) : null;
@@ -32,8 +49,19 @@ export function isActiveFileDirty(state: AppState): boolean {
   return f.dirty || state.pageDirtyPaths.includes(f.path);
 }
 
+/**
+ * There is an active file the user can act on.
+ *
+ * Excludes byte-only import sources: they live in `files` but have no tab and
+ * are never shown, and `CLOSE_FILE`'s active-id fallback can land on one, so
+ * "activeFileId is set" is NOT the same question. Without the `importOnly`
+ * check, closing your only real document after having imported pages from
+ * another file left File ▸ Save As and File ▸ Close enabled in the menu,
+ * pointed at a ghost — Save As would open a native dialog named after a file
+ * the user isn't looking at, and Close would silently discard it.
+ */
 export function hasActiveFile(state: AppState): boolean {
-  return state.activeFileId !== null && state.files.has(state.activeFileId);
+  return showableDoc(state) !== null;
 }
 
 export function hasOpenFiles(state: AppState): boolean {
@@ -146,22 +174,6 @@ COMMAND_IDS satisfies readonly CommandNamespace[];
 // pane content at M2). Tool + selection commands only make sense there.
 const inCanvas = (ctx: CommandContext): boolean => isDocTab(ctx.state.ui.focusedTab);
 
-/**
- * The active file's path, but only if it is a document we can actually SHOW.
- *
- * `activeFileId` alone isn't that: an import-only source (bytes dragged in to
- * supply pages, never opened as a document) has an entry in `files` but no tab,
- * and `focusTab` rejects a doc tab for it. Closing the last real file can leave
- * one as the active id, so this is reachable. A caller that focuses a doc tab
- * must gate on THIS, or it dispatches a focus that silently no-ops and then
- * carries on as though the document were in front.
- */
-function showableDoc(state: AppState): string | null {
-  const path = state.activeFileId;
-  if (!path) return null;
-  const f = state.files.get(path);
-  return f && !f.importOnly ? path : null;
-}
 
 function toolCommand(tool: CanvasTool): Command {
   return {
@@ -402,10 +414,17 @@ export const COMMANDS: Record<CommandId, Command> = {
         when: (ctx) => tool.ops.length > 0 || showableDoc(ctx.state) !== null,
         run: (ctx) => {
           const { state, dispatch } = ctx;
-          // Activating a tool arms its interaction mode (§ 7) — for EVERY tool
-          // that names one, not just the canvas-mode ones. Prepare Form and
-          // Fill & Sign each host a panel AND want their widget mode live.
-          if (tool.canvasTool) dispatch({ type: 'UI_SET_TOOL', tool: tool.canvasTool });
+          // Activating a tool arms its interaction mode (§ 7) — for EVERY tool,
+          // not just the canvas-mode ones (Prepare Form and Fill & Sign each
+          // host a panel AND want their widget mode live). Unconditional with a
+          // 'select' default, NOT `if (tool.canvasTool)`: a tool whose mode is
+          // "none" must DISARM the last one. Nothing else clears `ui.tool` —
+          // `focusTab` only resets it when LEAVING a doc tab, so Tools→Tools and
+          // Tools→doc never qualify — and a stale mode is live on the canvas
+          // (PageCell branches on it), so opening Prepare Form, going back, then
+          // opening Protect would leave Forms mode armed under a tool that never
+          // asked for it.
+          dispatch({ type: 'UI_SET_TOOL', tool: tool.canvasTool ?? 'select' });
           if (tool.ops.length === 0) {
             // Canvas-mode tool (Comment, Redact, Scan & OCR): there is no form to
             // fill — the work IS the document. So open the document and arm the
@@ -413,12 +432,13 @@ export const COMMANDS: Record<CommandId, Command> = {
             // nothing to show. Acrobat does the same: picking Comment puts you on
             // the page with the markup tools live.
             const path = showableDoc(state);
-            if (path) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
+            if (!path) return; // unreachable: `when` above requires one.
+            dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
             // Scan & OCR's whole surface is Find's "Make searchable" (2m), so the
             // tool opens Find rather than inventing a second entry point for it.
             // Deferred, not called on ctx.canvas: the tab focus above has only
             // been SCHEDULED, so the canvas is still unmounted right now.
-            if (tool.id === 'ocr') openFindWhenCanvasReady(ctx.canvas);
+            if (tool.id === 'ocr') openFindWhenCanvasReady(ctx.canvas, path);
             return;
           }
           dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });

@@ -7,6 +7,7 @@ import {
   canRedo,
   canUndo,
   hasSelection,
+  hasActiveFile,
   isActiveFileDirty,
   type CommandId,
 } from '../src/renderer/commands/registry';
@@ -125,6 +126,69 @@ describe('enablement helpers', () => {
     expect(hasSelection(initialState)).toBe(false);
     expect(hasSelection(stateWith({ ui: { ...initialState.ui, selectedPageIds: new Set(['x']) } }))).toBe(true);
   });
+
+  it('hasActiveFile ignores a GHOST import-only active file', () => {
+    // CLOSE_FILE's active-id fallback can land on a byte-only import source:
+    // it lives in `files` but has no tab and is never shown. It backs File ▸
+    // Save As / Close, so counting it left those enabled against a file the
+    // user isn't looking at — Save As would open a native dialog named after
+    // it, Close would silently discard it.
+    const ghost = stateWith({
+      activeFileId: 'src.pdf',
+      files: new Map([['src.pdf', makeFile('src.pdf', { importOnly: true })]]),
+    });
+    expect(hasActiveFile(ghost)).toBe(false);
+    const real = stateWith({
+      activeFileId: 'a.pdf',
+      files: new Map([['a.pdf', makeFile('a.pdf')]]),
+    });
+    expect(hasActiveFile(real)).toBe(true);
+  });
+});
+
+describe('the ghost import-source hazard (2n.3)', () => {
+  // A byte-only import source is an entry in `files` with no tab, no strip, and
+  // no way to become a real document on its own — nothing ever flips the flag.
+  // Every consumer that means "a document the user can see" must exclude it;
+  // several meant `activeFileId !== null`, which is a different question.
+  it('CLOSE_FILE really can leave a ghost as the active file', () => {
+    // Pins the precondition the guards defend against — if this ever stops
+    // being reachable, the guards are still right but the tests below are moot.
+    let s = appReducer(initialState, {
+      type: 'OPEN_FILE', path: 'a.pdf', workingPath: 'a.w', name: 'a.pdf',
+      pageCount: 1, buffer: [1],
+    });
+    s = appReducer(s, {
+      type: 'REGISTER_IMPORT_SOURCE', path: 'src.pdf', workingPath: 'src.w',
+      name: 'src.pdf', pageCount: 1, buffer: [2],
+    });
+    s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(s.activeFileId).toBe('src.pdf');
+    expect(s.files.get('src.pdf')?.importOnly).toBe(true);
+    // The tab fallback IS ghost-aware; the active id is not — hence the guards.
+    expect(s.ui.focusedTab).toBe('home');
+    expect(hasActiveFile(s)).toBe(false);
+  });
+
+  it('OPEN_FILE upgrades a ghost into a real document', () => {
+    // What App.openByPaths relies on: its "already open → just re-activate"
+    // shortcut must NOT fire for a ghost (focusTab rejects a doc tab for one,
+    // so File ▸ Open on a file you had imported pages from was a permanent
+    // no-op). Falling through to OPEN_FILE has to actually fix it.
+    let s = appReducer(initialState, {
+      type: 'REGISTER_IMPORT_SOURCE', path: 'src.pdf', workingPath: 'src.w',
+      name: 'src.pdf', pageCount: 1, buffer: [2],
+    });
+    expect(s.files.get('src.pdf')?.importOnly).toBe(true);
+    s = appReducer(s, {
+      type: 'OPEN_FILE', path: 'src.pdf', workingPath: 'src.w2', name: 'src.pdf',
+      pageCount: 1, buffer: [3],
+    });
+    expect(s.files.get('src.pdf')?.importOnly).toBeFalsy();
+    // …and now a doc tab for it is accepted, where before it was rejected.
+    s = appReducer(s, { type: 'UI_FOCUS_TAB', tab: { doc: 'src.pdf' } });
+    expect(s.ui.focusedTab).toEqual({ doc: 'src.pdf' });
+  });
 });
 
 describe('invokeCommand', () => {
@@ -194,11 +258,21 @@ describe('invokeCommand', () => {
   it('tools.open.* opens a form-backed tool on the Tools tab at its first op', () => {
     const { dispatched, finalState } = wire(initialState);
     expect(invokeCommand('tools.open.protect')).toBe(true);
-    expect(dispatched).toEqual([
-      { type: 'UI_FOCUS_TAB', tab: 'tools' },
-      { type: 'UI_SET_ACTIVE_OP', op: 'encrypt' },
-    ]);
+    expect(dispatched).toContainEqual({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+    expect(dispatched).toContainEqual({ type: 'UI_SET_ACTIVE_OP', op: 'encrypt' });
     expect(finalState().ui.activeToolId).toBe('protect');
+  });
+
+  it('opening a tool with no canvas mode DISARMS the last tool’s mode', () => {
+    // Nothing else clears `ui.tool`: focusTab only resets it when LEAVING a doc
+    // tab, so Tools→Tools never qualifies. Without a disarm, Prepare Form →
+    // back → Protect leaves Forms mode live on the canvas under a tool that
+    // never asked for it (PageCell branches on ui.tool, so it changes clicks).
+    const { finalState } = wire(initialState);
+    invokeCommand('tools.open.prepareform');
+    expect(finalState().ui.tool).toBe('forms');
+    invokeCommand('tools.open.protect'); // no canvasTool of its own
+    expect(finalState().ui.tool).toBe('select');
   });
 
   it('tools.open.* for a canvas-mode tool opens the DOCUMENT and arms the mode', () => {
@@ -268,6 +342,33 @@ describe('invokeCommand', () => {
     registerCanvasServices(null); // leave the doc tab
     registerCanvasServices(services); // come back to it
     expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('a parked Find is DISCARDED if a different document comes up instead', () => {
+    // The park names the doc it was taken for. Without that, asking for OCR on
+    // a.pdf, changing your mind, and opening b.pdf later would spring the find
+    // bar open on b.pdf for no reason the user can see.
+    const open = vi.fn();
+    const { finalState } = wire(
+      stateWith({
+        files: new Map([
+          ['a.pdf', makeFile('a.pdf')],
+          ['b.pdf', makeFile('b.pdf')],
+        ]),
+        activeFileId: 'a.pdf',
+      }),
+    );
+    expect(invokeCommand('tools.open.ocr')).toBe(true); // parks for a.pdf
+    expect(finalState().ui.focusedTab).toEqual({ doc: 'a.pdf' });
+
+    // The user goes to b.pdf instead; ITS canvas is what mounts.
+    invokeCommand('window.nextTab');
+    expect(finalState().ui.focusedTab).toEqual({ doc: 'b.pdf' });
+    registerCanvasServices({
+      canvas: () => null,
+      find: { isOpen: () => false, open, close: vi.fn() },
+    });
+    expect(open).not.toHaveBeenCalled();
   });
 
   it('tools.open.ocr opens Find immediately when the canvas IS mounted', () => {

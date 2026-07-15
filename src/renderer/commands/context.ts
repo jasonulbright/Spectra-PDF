@@ -7,6 +7,7 @@ import { COMMANDS, type CommandId } from './registry';
 import { drainPendingFind } from './find-intent';
 import type { AppCommandHandlers, CanvasServices, CommandContext } from './types';
 import type { AppAction, AppState } from '../state/types';
+import { isDocTab } from '../state/types';
 import type { Dispatch } from 'react';
 
 type StateSource = () => { state: AppState; dispatch: Dispatch<AppAction> };
@@ -27,8 +28,12 @@ export function registerAppCommandHandlers(handlers: AppCommandHandlers | null):
 export function registerCanvasServices(services: CanvasServices | null): void {
   canvasServices = services;
   // Registration happens in the canvas view's mount effect — exactly the moment
-  // a parked Find request becomes servable. See commands/find-intent.
-  drainPendingFind(services);
+  // a parked Find request becomes servable. The parked request names the doc it
+  // was taken for, so tell the drain which doc actually came up: any other
+  // navigation discards it rather than ambushing that document with a find bar.
+  // See commands/find-intent.
+  const tab = stateSource?.().state.ui.focusedTab;
+  drainPendingFind(services, tab && isDocTab(tab) ? tab.doc : null);
 }
 
 /** The board's live canvas services (camera + find), or null when the board
