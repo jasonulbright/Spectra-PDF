@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
-import { displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/layout';
+import { displayWidthAt, displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/layout';
 import { projectMarkRect, rotateNormalizedRect } from '../../lib/redaction';
 import type { RedactionMark } from '../../lib/redaction';
 import type { OcrWord } from '../../ocr/types';
@@ -369,12 +369,22 @@ function PageCellImpl({
   onSetSignaturePlacement,
   onClearSignaturePlacement,
 }: PageCellProps): React.JSX.Element {
-  // `displayWidthOf` gives the width at BASE_PAGE_HEIGHT; scale it by the actual
-  // `pageHeight` so the cell keeps the page's aspect at ANY height. The board
-  // passes pageHeight = BASE_PAGE_HEIGHT (factor 1 → unchanged); the Document
-  // view (M4) passes BASE × zoom, sizing the whole cell — raster, overlays, and
-  // font (below) all key off pageHeight, so the page scales uniformly.
-  const displayWidth = displayWidthOf(page) * (pageHeight / BASE_PAGE_HEIGHT);
+  // The cell's width. Two formulas, deliberately:
+  //  - The BOARD keeps `displayWidthOf`'s width-at-BASE_PAGE_HEIGHT, scaled by
+  //    pageHeight (a factor of 1 there). Its integer-at-280 rounding is what the
+  //    board's own packing math (`computeLayout`) measures with, so the two must
+  //    not diverge.
+  //  - The READING view takes the page's EXACT aspect. It scales the cell far
+  //    past thumbnail size, and scaling an already-rounded width amplifies that
+  //    rounding linearly with zoom — which the text layer (whose geometry comes
+  //    from the page's real points, via pdf.js) then disagrees with, drifting
+  //    selection off the glyphs (review-caught, measured: ~20px at 16x). The
+  //    reading view is exactly where a page must be a page, to the pixel.
+  // `textLayer` marks the reading view; raster, overlays and font all key off
+  // pageHeight/displayWidth, so the whole cell stays consistent either way.
+  const displayWidth = textLayer
+    ? displayWidthAt(page, pageHeight)
+    : displayWidthOf(page) * (pageHeight / BASE_PAGE_HEIGHT);
   const annotateMode = tool !== 'select';
   // Rubber band for the annotation tools, in display-normalized coords.
   // Driven by window-level native listeners for the drag's duration — the

@@ -1,4 +1,4 @@
-import { BASE_PAGE_HEIGHT } from './layout';
+
 
 // Which page is "current" in the reading view (Phase 4 M4.1b).
 //
@@ -193,13 +193,13 @@ const SAFE_ELEMENT_EXTENT = 30_000_000;
  * escape, if it ever matters, is to drop the full-height spacer for a translated
  * window — a virtualization redesign, not a zoom change.
  */
-export function maxZoomFor(pageCount: number, widestDisplayWidthAtBase = 0): number {
+export function maxZoomFor(pageCount: number, widestWidthAtZoom1 = 0): number {
   const bounds: number[] = [MAX_ZOOM];
   if (pageCount > 0) {
     // Height axis: the spacer is `pageCount` rows tall.
     bounds.push(SAFE_ELEMENT_EXTENT / (pageCount * (READING_BASE_HEIGHT + READING_PAGE_GAP)));
   }
-  if (widestDisplayWidthAtBase > 0) {
+  if (widestWidthAtZoom1 > 0) {
     // Width axis: M4.1f gave the spacer a REAL width (the widest page) so wide
     // pages are reachable — which means the width can blow the same element cap.
     // BOTH axes must be bounded or the fix for one becomes the bug in the other:
@@ -207,9 +207,9 @@ export function maxZoomFor(pageCount: number, widestDisplayWidthAtBase = 0): num
     // [0 0 14400 26]) overflows on WIDTH at max zoom, and its far edge becomes
     // unreachable by horizontal scroll — defeating exactly what M4.1f exists for
     // (review-caught: the height bound never looks at aspect).
-    bounds.push(
-      (SAFE_ELEMENT_EXTENT * BASE_PAGE_HEIGHT) / (widestDisplayWidthAtBase * READING_BASE_HEIGHT),
-    );
+    // Width scales linearly with zoom (the widest page is `widestWidthAtZoom1 *
+    // zoom` wide), so the bound is just the extent over it.
+    bounds.push(SAFE_ELEMENT_EXTENT / widestWidthAtZoom1);
   }
   // Never below MIN_ZOOM: a document whose extent overflows even at MIN_ZOOM
   // would otherwise invert the clamp (max < min). It stays pinned at the floor,
@@ -220,11 +220,11 @@ export function maxZoomFor(pageCount: number, widestDisplayWidthAtBase = 0): num
 /**
  * Clamp to the view's range AND to what this document can render (see above).
  *
- * `widestDisplayWidthAtBase` is `max(displayWidthOf(page))` across the document
+ * `widestWidthAtZoom1` is `max(displayWidthAt(page, READING_BASE_HEIGHT))` across the doc
  * — zoom-independent, so callers memoise it on the page list.
  */
-export const clampZoom = (z: number, pageCount: number, widestDisplayWidthAtBase = 0): number =>
-  Math.min(maxZoomFor(pageCount, widestDisplayWidthAtBase), Math.max(MIN_ZOOM, z));
+export const clampZoom = (z: number, pageCount: number, widestWidthAtZoom1 = 0): number =>
+  Math.min(maxZoomFor(pageCount, widestWidthAtZoom1), Math.max(MIN_ZOOM, z));
 
 /** A page's own geometry, as the reading view needs it for the zoom presets. */
 export interface PageGeometry {

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { TextLayer } from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { logRenderError } from './raster';
+import { logRenderError, REBLIT_QUIET_MS } from './raster';
 
-// Match the raster's own zoom-settle window (raster.ts REBLIT_QUIET_MS) so a
-// zoom burst rebuilds text and pixels on the same beat rather than twice.
-const SETTLE_MS = 140;
+// Settle a zoom burst before rebuilding. IMPORTED, not a copied number: the
+// raster already settles on this beat, and text and pixels drifting onto
+// different cadences would mean two rebuild storms per burst instead of one.
+const SETTLE_MS = REBLIT_QUIET_MS;
 
 // Selectable text over a rendered page (Phase 4 M4.2, § 6.3).
 //

@@ -17,7 +17,7 @@ import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
-import { BASE_PAGE_HEIGHT, displayWidthOf } from '../../canvas/layout';
+import { BASE_PAGE_HEIGHT, displayWidthAt, displayWidthOf } from '../../canvas/layout';
 import { isEditable } from '../../commands/keymap';
 import {
   actualSizeZoom,
@@ -146,7 +146,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // and the spacer's own width below.
   const widestAtBase = useMemo(() => {
     let w = 0;
-    for (const p of doc.pages) w = Math.max(w, displayWidthOf(p));
+    for (const p of doc.pages) w = Math.max(w, displayWidthAt(p, READING_BASE_HEIGHT));
     return w;
   }, [doc.pages]);
   const zoom = clampZoom(zoomState, pageCount, widestAtBase);
@@ -180,7 +180,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // a doc narrower than the pane still centres instead of hugging the left edge.
   // Widest-of-ALL-pages (not just the rendered window) so the width doesn't
   // jitter as you scroll past a wide page.
-  const contentWidth = Math.ceil(widestAtBase * (pageHeight / BASE_PAGE_HEIGHT));
+  const contentWidth = Math.ceil(widestAtBase * (pageHeight / READING_BASE_HEIGHT));
 
   // Track the scroll position + viewport height (drives virtualization + the
   // current-page report). ResizeObserver keeps viewportH live on pane resize.

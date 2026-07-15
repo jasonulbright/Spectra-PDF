@@ -13,7 +13,7 @@ import {
   type JumpAnchor,
   type ReadingMetrics,
 } from '../src/renderer/canvas/reading-page';
-import { BASE_PAGE_HEIGHT, displayWidthOf } from '../src/renderer/canvas/layout';
+import { BASE_PAGE_HEIGHT, displayWidthAt, displayWidthOf } from '../src/renderer/canvas/layout';
 
 // Mirrors DocumentView's real constants so these cases are the ones a user hits.
 const READING_BASE_HEIGHT = 960;
@@ -350,6 +350,37 @@ describe('zoom presets — Actual Size / Fit Width', () => {
   const LETTER = { id: 'p', width: 612, height: 792, rotation: 0 as const }; // 72dpi points
   const A4 = { id: 'p', width: 595, height: 842, rotation: 0 as const };
 
+  // M4.2 round-2 regression. The board's `displayWidthOf` rounds the width to a
+  // whole pixel AT BASE_PAGE_HEIGHT (280) — right for thumbnail packing, wrong
+  // for the reading view, which SCALES that already-rounded number, amplifying
+  // the aspect error linearly with zoom. The pdf.js text layer derives its own
+  // geometry from the page's real points, so the two disagree and selection
+  // drifts off the glyphs (measured: ~20px at 16x). The reading view must size
+  // from the TRUE aspect.
+  describe('displayWidthAt — exact aspect for the reading view', () => {
+    it('is the page aspect exactly, at any height', () => {
+      for (const h of [280, 960, 960 * 16, 960 * 64]) {
+        expect(displayWidthAt(LETTER, h)).toBeCloseTo(h * (612 / 792), 9);
+      }
+    });
+
+    it('swaps the axes for a quarter-turned page', () => {
+      expect(displayWidthAt({ ...LETTER, rotation: 90 }, 960)).toBeCloseTo(960 * (792 / 612), 9);
+    });
+
+    it('falls back to the reference aspect for an unresolved 0x0 page', () => {
+      expect(displayWidthAt({ id: 'x', width: 0, height: 0 }, 960)).toBeCloseTo(960 * (612 / 792), 9);
+    });
+
+    it('DIVERGES from the scaled board width by more than a pixel at reading zooms', () => {
+      // The bug, pinned: this is why the reading view can't reuse displayWidthOf.
+      const boardAt = (h: number): number => displayWidthOf(LETTER) * (h / BASE_PAGE_HEIGHT);
+      const drift = (h: number): number => Math.abs(boardAt(h) - displayWidthAt(LETTER, h));
+      expect(drift(BASE_PAGE_HEIGHT)).toBeLessThan(1); // fine where it was designed to be used
+      expect(drift(960 * 16)).toBeGreaterThan(10); // and badly wrong where it wasn't
+    });
+  });
+
   describe('naturalDisplayHeight', () => {
     it('is the page height when upright', () => {
       expect(naturalDisplayHeight(LETTER)).toBe(792);
@@ -533,9 +564,9 @@ describe('zoom presets — Actual Size / Fit Width', () => {
     it('bounds zoom on the WIDTH axis too (a degenerate wide page)', () => {
       // A spec-legal MediaBox [0 0 14400 26] — 200in x 0.36in, aspect ~554:1.
       const degenerate = { id: 'w', width: 14400, height: 26, rotation: 0 as const };
-      const widest = displayWidthOf(degenerate);
+      const widest = displayWidthAt(degenerate, READING_BASE_HEIGHT);
       const widthAt = (zoom: number): number =>
-        widest * ((READING_BASE_HEIGHT * zoom) / BASE_PAGE_HEIGHT);
+        widest * zoom;
       // Unbounded on width, max zoom would overflow the element cap...
       expect(widthAt(MAX_ZOOM)).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
       // ...and the page COUNT bound alone never looks at aspect, so it allows it.
@@ -549,12 +580,12 @@ describe('zoom presets — Actual Size / Fit Width', () => {
 
     it('leaves ordinary page shapes unbounded on width', () => {
       for (const p of [LETTER, A4, { id: 'l', width: 792, height: 612 }]) {
-        expect(maxZoomFor(10, displayWidthOf(p))).toBe(MAX_ZOOM);
+        expect(maxZoomFor(10, displayWidthAt(p, READING_BASE_HEIGHT))).toBe(MAX_ZOOM);
       }
     });
 
     it('takes the TIGHTER of the two axis bounds', () => {
-      const wide = displayWidthOf({ id: 'w', width: 14400, height: 26, rotation: 0 });
+      const wide = displayWidthAt({ id: 'w', width: 14400, height: 26, rotation: 0 }, READING_BASE_HEIGHT);
       // A long doc of degenerate pages: both axes bind; the result must satisfy both.
       const z = maxZoomFor(600, wide);
       expect(z).toBeLessThanOrEqual(maxZoomFor(600));

@@ -60,6 +60,31 @@ export function displayWidthOf(page: PageLike): number {
     : pageDisplayWidth(page.width, page.height);
 }
 
+/**
+ * The page's EXACT display width at a given display height — the page's true
+ * aspect, unrounded.
+ *
+ * `displayWidthOf` rounds the width to a whole pixel **at BASE_PAGE_HEIGHT
+ * (280)**, which is right for the board (integer thumbnail widths, stable
+ * packing) and wrong for the reading view: that rounding is up to 0.5px of
+ * aspect error at 280, and the reading view scales the already-rounded number,
+ * so the error is AMPLIFIED linearly by zoom (~1.7px at zoom 1, ~20px at 16x,
+ * ~79px at 64x). The raster fills whatever box it's given, so it just looks very
+ * slightly off-aspect — but the pdf.js text layer computes its own geometry from
+ * the page's REAL points, so the two disagree and selection hit-boxes drift off
+ * the glyphs, worst at the trailing edge (review-caught, measured). Anything
+ * overlaying a page at reading scale must size it from the true aspect.
+ */
+export function displayWidthAt(page: PageLike, displayHeight: number): number {
+  const rotated = page.rotation === 90 || page.rotation === 270;
+  const w = rotated ? page.height : page.width;
+  const h = rotated ? page.width : page.height;
+  // Same guard as pageDisplayWidth: pages report 0x0 until their viewport
+  // resolves — fall back to the reference (US Letter) aspect.
+  if (w <= 0 || h <= 0) return displayHeight * (612 / 792);
+  return displayHeight * (w / h);
+}
+
 // Greedy row wrap, identical to what flexbox produces for the same explicit
 // pixel widths and gap. `exclude` drops the collapsed (dragged) page(s), which
 // leave the flex flow via position:absolute and so don't affect wrapping. It's
