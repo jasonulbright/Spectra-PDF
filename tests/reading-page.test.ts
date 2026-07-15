@@ -107,6 +107,26 @@ describe('currentPageFor — reading view current page', () => {
     it('handles a single-page doc', () => {
       expect(currentPageFor(metrics({ zoom: 1, pageCount: 1, viewportH: 800, scrollTop: 0 }))).toBe(1);
     });
+
+    // Round-6 regression: scrollTop is state fed by the scroll EVENT, but a
+    // page-tier delete shrinks pageCount/contentHeight synchronously — so for one
+    // render scrollTop points past the end of the shorter content. Unclamped,
+    // vFirst ran past vLast and the early-return named a page the viewport
+    // wasn't showing (it was scrolled past the content — blank).
+    it('clamps a scrollTop left stale past the end by a page-tier delete', () => {
+      // 5 pages @ zoom 1 (rowH 984), 800px pane, scrolled to the bottom...
+      const before = metrics({ zoom: 1, pageCount: 5, viewportH: 800, scrollTop: 0 });
+      const wasAtBottom = before.contentHeight - 800; // 4120
+      // ...then page 5 is deleted: pageCount/contentHeight shrink NOW, scrollTop lags.
+      const m = metrics({ zoom: 1, pageCount: 4, viewportH: 800, scrollTop: wasAtBottom });
+      expect(m.scrollTop).toBeGreaterThan(m.contentHeight - 800); // genuinely out of range
+      // Page 4 is the last page and is what the browser's clamp will land on.
+      expect(currentPageFor(m)).toBe(4);
+    });
+
+    it('clamps a negative scrollTop (elastic/overscroll)', () => {
+      expect(currentPageFor(metrics({ zoom: 1, pageCount: 5, viewportH: 800, scrollTop: -120 }))).toBe(1);
+    });
   });
 });
 

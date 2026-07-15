@@ -37,20 +37,31 @@ const TIE_EPS = 0.5;
  * the page box stops snapping back (review-caught, twice: first the tie-break,
  * then the boundary clamps that "fixed" it).
  *
- * DELIBERATELY BEST-EFFORT, and it fails SAFE. An anchor cannot survive a
- * COMMIT: committing rebuilds the file, the async reindex re-derives every
- * PageRef from the new buffer, and BOTH `id` and `sourcePageIndex` are assigned
- * positionally there (`lib/workspace.ts`) — so no field of a page survives a
- * rebuild to be matched against. (`PageRef.id`'s "stable" only means it survives
- * a REORDER, where the live reducers carry the same objects through.) Preserving
- * identity across a commit is the identity-model surgery `18-phase3-polish.md`
- * weighed and declined, and trusting POSITION across a reindex instead would be
- * unsound — a reindex can legitimately re-compose the doc (an externally-edited
- * file reopened). So a reindex drops the anchor and the view speaks for itself:
- * the readout falls back to `currentPageFor`, whose at-top/at-end answer is the
- * documented contract for that viewport — less specific, never wrong. The only
- * visible cost is that a jump to a boundary-ADJACENT page (2, or N-1) stops
- * being remembered once you Save; the scroll-derived answer takes over.
+ * DELIBERATELY BEST-EFFORT, and it fails SAFE: any reindex drops it. As shipped,
+ * nothing about a page survives one — `lib/workspace.ts` re-derives every
+ * PageRef from the new buffer and assigns BOTH `id` and `sourcePageIndex`
+ * positionally. (`PageRef.id`'s "stable" only ever meant "survives a REORDER",
+ * where the live reducers carry the same objects through.)
+ *
+ * For an engine-authored or external reindex that is also IRREDUCIBLE: the
+ * renderer didn't author those bytes, so position can't be trusted (a reopened,
+ * externally-edited file can re-compose the doc while scroll/zoom/pane all stay
+ * equal) and content-fingerprint matching is the identity-model surgery
+ * `18-phase3-polish.md` weighed and declined.
+ *
+ * For the JS page-tier COMMIT it is a COST decision, not an impossibility — be
+ * honest about which (review-caught: the first draft of this note conflated
+ * them). `workspace-commit.ts` `planCommit` builds the new file FROM the
+ * pre-commit `PageRef[]`, 1:1 and in order, so the app does know the old-id →
+ * new-position mapping at that moment; `COMMIT_PAGE_EDITS` simply doesn't carry
+ * it, leaving identity to the blind positional formula. Threading it through is
+ * bounded but lands page-identity plumbing in the most invariant-dense path in
+ * the app (atomic multi-file commit, single in-flight run, the commit gate) and
+ * would still need width/height + rotation reconciliation for baked rotations —
+ * a poor trade for remembering ONE page-number readout. So: not done, and the
+ * cost is bounded — a jump to a boundary-ADJACENT page (2, or N-1) stops being
+ * remembered once you Save, and `currentPageFor`'s at-top/at-end answer takes
+ * over. Revisit if a second consumer ever needs cross-commit page identity.
  */
 export interface JumpAnchor {
   /** The scroll offset the jump actually LANDED on (post browser clamp). */
@@ -115,10 +126,20 @@ export function anchorHolds(
  * Returns 1 for a degenerate/empty viewport.
  */
 export function currentPageFor(m: ReadingMetrics): number {
-  const { scrollTop, viewportH, rowH, pageHeight, pageCount, contentHeight } = m;
+  const { viewportH, rowH, pageHeight, pageCount, contentHeight } = m;
   if (pageCount <= 0 || viewportH <= 0 || rowH <= 0) return 1;
 
-  const vFirst = Math.max(0, Math.floor(scrollTop / rowH));
+  // `scrollTop` is React state fed by the scroll EVENT, but a page-tier edit
+  // shrinks pageCount/contentHeight SYNCHRONOUSLY — so for one render it can
+  // point past the end of the now-shorter content, before the browser clamps the
+  // DOM and fires the corrective scroll event. Clamp to the reachable range so
+  // the readout names the page that will actually be on screen (review-caught:
+  // deleting the last page while scrolled to it reported a page number over what
+  // was, that frame, a blank viewport).
+  const maxScroll = Math.max(0, contentHeight - viewportH);
+  const scrollTop = Math.min(Math.max(0, m.scrollTop), maxScroll);
+
+  const vFirst = Math.max(0, Math.min(pageCount - 1, Math.floor(scrollTop / rowH)));
   const vLast = Math.min(pageCount - 1, Math.floor((scrollTop + viewportH - 1) / rowH));
   if (vLast < vFirst) return Math.min(pageCount, vFirst + 1);
 
