@@ -121,11 +121,37 @@ export function anchorHolds(
   if (!anchor) return false;
   if (anchor.page < 1 || anchor.page > m.pageCount) return false;
   if (!pageIdAtAnchorSlot || pageIdAtAnchorSlot !== anchor.pageId) return false;
+  // Clamp here too — this module's rule is that EVERY consumer of scrollTop
+  // clamps, so it enforces it internally rather than trusting callers. Without
+  // it, deleting pages AFTER the anchored page (which leaves the anchor's slot
+  // and identity intact) shrinks the content while the stale scrollTop still
+  // matches `anchor.scrollTop` bit-for-bit — so the anchor wrongly HELD and
+  // reported a page the pane was no longer showing (review-caught: the third
+  // unclamped consumer, found two rounds after the first two were fixed).
+  const scrollTop = clampScrollTop(m.scrollTop, m.contentHeight, m.viewportH);
   return (
     anchor.rowH === m.rowH &&
     anchor.viewportH === m.viewportH &&
-    Math.abs(m.scrollTop - anchor.scrollTop) <= ANCHOR_EPS
+    Math.abs(scrollTop - anchor.scrollTop) <= ANCHOR_EPS
   );
+}
+
+/**
+ * The page index window to render, padded by `overscan`.
+ *
+ * Extracted (not inline in DocumentView) so the clamp is testable: an unclamped
+ * `first` could exceed `last` after a page-tier delete, and the row loop then
+ * emitted NOTHING — a blank pane — which no test could catch while the maths
+ * lived in the component. `last < first` here means "nothing to render".
+ */
+export function visibleRange(m: ReadingMetrics, overscan: number): { first: number; last: number } {
+  const { rowH, viewportH, pageCount, contentHeight } = m;
+  if (pageCount <= 0 || rowH <= 0) return { first: 0, last: -1 };
+  const scrollTop = clampScrollTop(m.scrollTop, contentHeight, viewportH);
+  return {
+    first: Math.max(0, Math.floor(scrollTop / rowH) - overscan),
+    last: Math.min(pageCount - 1, Math.ceil((scrollTop + viewportH) / rowH) + overscan),
+  };
 }
 
 /**

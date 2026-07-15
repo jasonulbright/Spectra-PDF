@@ -20,8 +20,8 @@ import { BASE_PAGE_HEIGHT, displayWidthOf } from '../../canvas/layout';
 import { isEditable } from '../../commands/keymap';
 import {
   anchorHolds,
-  clampScrollTop,
   currentPageFor,
+  visibleRange,
   type JumpAnchor,
 } from '../../canvas/reading-page';
 import { PageCell } from './PageCell';
@@ -169,14 +169,13 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     setScrollTop(e.currentTarget.scrollTop);
   }, []);
 
-  // Visible page range [first, last], padded by OVERSCAN. Computed from the
-  // CLAMPED offset for the same reason the readout is: a page-tier delete
-  // shrinks the content synchronously while `scrollTop` state lags one render,
-  // and an unclamped `first` could exceed `last` — the row loop then emits no
-  // cells and the pane paints blank for that frame (review-caught).
-  const clampedTop = clampScrollTop(scrollTop, contentHeight, viewportH);
-  const first = Math.max(0, Math.floor(clampedTop / rowH) - OVERSCAN);
-  const last = Math.min(pageCount - 1, Math.ceil((clampedTop + viewportH) / rowH) + OVERSCAN);
+  // Visible page range [first, last], padded by OVERSCAN — pure + tested
+  // (canvas/reading-page.ts), because an unclamped `first` could exceed `last`
+  // after a page-tier delete and the row loop would emit no cells at all.
+  const { first, last } = visibleRange(
+    { scrollTop, viewportH, rowH, pageHeight, pageCount, contentHeight },
+    OVERSCAN,
+  );
 
   // A jump's recorded intent — see JumpAnchor's header for why scroll position
   // alone cannot answer this at the extremes.

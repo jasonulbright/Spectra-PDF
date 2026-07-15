@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   anchorHolds,
   currentPageFor,
+  visibleRange,
   type JumpAnchor,
   type ReadingMetrics,
 } from '../src/renderer/canvas/reading-page';
@@ -137,6 +138,40 @@ describe('currentPageFor — reading view current page', () => {
   });
 });
 
+// Round-7's "blank pane" bug lived inline in DocumentView, so no test could
+// reach it; the window is pure now precisely so this is covered.
+describe('visibleRange — the rendered window', () => {
+  const OVERSCAN = 2;
+
+  it('never inverts when a delete leaves scrollTop stale past the end (blank-pane regression)', () => {
+    // 10 pages @ zoom 1 in an 800px pane, scrolled to the bottom...
+    const before = metrics({ zoom: 1, pageCount: 10, viewportH: 800, scrollTop: 0 });
+    const wasAtBottom = before.contentHeight - 800; // 9040
+    // ...then the last 3 are multi-select deleted; scrollTop lags for one render.
+    const m = metrics({ zoom: 1, pageCount: 7, viewportH: 800, scrollTop: wasAtBottom });
+    const { first, last } = visibleRange(m, OVERSCAN);
+    // Unclamped this produced first=7 > last=6 -> the row loop emitted NOTHING.
+    expect(first).toBeLessThanOrEqual(last);
+    // ...and the window must contain the page the readout names.
+    const reported = currentPageFor(m);
+    expect(reported - 1).toBeGreaterThanOrEqual(first);
+    expect(reported - 1).toBeLessThanOrEqual(last);
+  });
+
+  it('covers the visible pages in the ordinary case', () => {
+    const m = metrics({ zoom: 1, pageCount: 50, viewportH: 800, scrollTop: 984 * 10 });
+    const { first, last } = visibleRange(m, OVERSCAN);
+    expect(first).toBeLessThanOrEqual(10);
+    expect(last).toBeGreaterThanOrEqual(10);
+    expect(last).toBeLessThanOrEqual(49);
+  });
+
+  it('reports an empty window for an empty doc', () => {
+    const { first, last } = visibleRange(metrics({ zoom: 1, pageCount: 0, viewportH: 800, scrollTop: 0 }), OVERSCAN);
+    expect(last).toBeLessThan(first);
+  });
+});
+
 // The scroll-derived rules above CANNOT answer a boundary-adjacent jump: centring
 // page 2 wants a negative scrollTop and centring page 49/50 overshoots maxScroll,
 // so both land on exactly the scroll offset that "scrolled to the top/bottom"
@@ -264,6 +299,29 @@ describe('anchorHolds — a jump wins until the user scrolls away', () => {
     expect(pagesAt(reindexed, a)).toBe('f.pdf#p1'); // same physical page, new id
     expect(anchorHolds(a, m, pagesAt(reindexed, a))).toBe(false);
     expect(currentPageFor(m)).toBe(1); // fails safe to the at-top contract
+  });
+
+  // Round-8: deleting pages AFTER the anchored page leaves the anchor's slot and
+  // identity intact and can leave scrollTop bit-identical to where the jump
+  // landed — while that offset is now past the end of the shorter document. The
+  // anchor must not hold over a position the pane can no longer be at.
+  it('drops when trailing deletes put the anchored offset out of reach (identity intact)', () => {
+    const z = 0.25;
+    const vh = 800;
+    const big = metrics({ zoom: z, pageCount: 50, viewportH: vh, scrollTop: 0 });
+    const landed = scrollTopForCenterOn(25, big, vh);
+    const a: JumpAnchor = {
+      scrollTop: landed,
+      page: 25,
+      pageId: 'f.pdf#p24',
+      rowH: big.rowH,
+      viewportH: vh,
+    };
+    // Delete the trailing pages: page 25 itself is untouched, so its id still
+    // sits in slot 25 and only the clamp can catch this.
+    const m = metrics({ zoom: z, pageCount: 26, viewportH: vh, scrollTop: landed });
+    expect(landed).toBeGreaterThan(m.contentHeight - vh); // genuinely out of reach now
+    expect(anchorHolds(a, m, 'f.pdf#p24')).toBe(false);
   });
 
   it('still holds when pages change in a way that keeps the slot (e.g. an annotation edit)', () => {
