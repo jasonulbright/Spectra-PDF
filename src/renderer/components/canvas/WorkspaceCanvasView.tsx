@@ -132,10 +132,31 @@ export function WorkspaceCanvasView({
       docViewModeRef.current === 'document' ? documentViewRef.current : canvasRef.current,
     [],
   );
-  // The single document the reading view shows (the active file's doc; the
-  // board shows ALL docs, the reading view one). Manifest partitions share a
-  // path — the reading view takes the first for now (M4.1).
-  const focusedDoc = docs.find((d) => d.path === state.activeFileId) ?? null;
+  // Which document the reading view shows (the board shows ALL docs, the
+  // reading view exactly one). An explicit per-doc focus — set by a jump that
+  // lands in another file or another `.pdfx` partition — wins; otherwise the
+  // active file's FIRST document. The fallback is load-bearing: `focusedDocId`
+  // holds a positional `OpenDocument.id`, so a reindex can retire it, and
+  // resolving through the default then keeps the view on the active file
+  // instead of blanking.
+  const focusedDoc =
+    (state.ui.focusedDocId ? docs.find((d) => d.id === state.ui.focusedDocId) : null) ??
+    docs.find((d) => d.path === state.activeFileId) ??
+    null;
+  const focusedDocRef = useRef(focusedDoc);
+  focusedDocRef.current = focusedDoc;
+  // A jump whose target lives in a document the reading view isn't showing:
+  // parked here until that document's view has mounted (see onFindNavigate).
+  const pendingJumpRef = useRef<string | null>(null);
+  useEffect(() => {
+    const pid = pendingJumpRef.current;
+    if (!pid) return;
+    // Only once the newly focused doc actually owns the target (refs are
+    // populated during commit, so its handle is live by the time this runs).
+    if (!focusedDoc?.pages.some((p) => p.id === pid)) return;
+    pendingJumpRef.current = null;
+    activeCanvasHandle()?.centerOn(pid);
+  }, [focusedDoc, docViewMode, activeCanvasHandle]);
   // Reading-view page navigation (M4.1b): the current page (from DocumentView's
   // scroll tracking) + the editable page box. `pageBox` mirrors currentPage
   // except while the user is typing in it (so a scroll doesn't clobber a
@@ -237,9 +258,25 @@ export function WorkspaceCanvasView({
   // Search nav panel shares it (Phase 4 M3.3 — double-instantiating would
   // double the OCR work and desync results). Ctrl+F opens the bar.
   const searchIndex = useSearchContext();
-  const onFindNavigate = useCallback((pageId: string) => {
-    activeCanvasHandle()?.centerOn(pageId);
-  }, [activeCanvasHandle]);
+  // A jump that lands in a document the current view isn't showing. The board
+  // renders every doc, so it can always centre directly; the reading view shows
+  // exactly ONE, so a match in another file (or another `.pdfx` partition) has
+  // to bring that document to the front FIRST and centre once it has mounted —
+  // otherwise `centerOn` finds no such page and returns silently while Find's
+  // "N of M" counter has already advanced (review-caught).
+  const onFindNavigate = useCallback(
+    (pageId: string) => {
+      const owner = docsRef.current.find((d) => d.pages.some((p) => p.id === pageId));
+      if (!owner) return;
+      if (docViewModeRef.current === 'document' && owner.id !== focusedDocRef.current?.id) {
+        pendingJumpRef.current = pageId;
+        dispatch({ type: 'UI_FOCUS_DOC', docId: owner.id });
+        return; // the flush effect centres once that doc's view is mounted
+      }
+      activeCanvasHandle()?.centerOn(pageId);
+    },
+    [activeCanvasHandle, dispatch],
+  );
   const find = useFind(searchIndex.search, searchIndex.version, docs, onFindNavigate);
   const [applyingOcr, setApplyingOcr] = useState(false);
   const [ocrApplyError, setOcrApplyError] = useState<string | null>(null);

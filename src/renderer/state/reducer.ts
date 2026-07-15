@@ -39,6 +39,7 @@ export const initialUiState: UiState = {
   activeOp: 'split',
   tool: 'select',
   docViewMode: 'organize',
+  focusedDocId: null,
   selectedPageIds: NO_SELECTION,
   selectionAnchor: null,
   recentFiles: [],
@@ -71,11 +72,15 @@ function focusTab(state: AppState, tab: FocusedTab): AppState {
       ? {
           ...state.ui,
           focusedTab: tab,
+          // A per-doc focus names a partition of the file being left — it can't
+          // survive the move (it would strand the reading view on a document
+          // the new tab doesn't own). Back to "that file's first document".
+          focusedDocId: null,
           tool: 'select',
           selectedPageIds: NO_SELECTION,
           selectionAnchor: null,
         }
-      : { ...state.ui, focusedTab: tab },
+      : { ...state.ui, focusedTab: tab, focusedDocId: null },
   };
 }
 
@@ -916,6 +921,21 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_DOC_VIEW_MODE':
       if (action.mode === state.ui.docViewMode) return state;
       return { ...state, ui: { ...state.ui, docViewMode: action.mode } };
+    case 'UI_FOCUS_DOC': {
+      if (action.docId === state.ui.focusedDocId) return state;
+      // Focusing a document also activates the FILE that owns it — the reading
+      // view resolves through `activeFileId`, and the tab strip must follow, so
+      // the two can't disagree about which file is in front.
+      const owner = action.docId
+        ? state.workspace.documents.find((d) => d.id === action.docId)
+        : null;
+      if (action.docId && !owner) return state; // unknown doc: reject, don't strand
+      const ui = { ...state.ui, focusedDocId: action.docId };
+      if (!owner || owner.path === state.activeFileId) return { ...state, ui };
+      const f = state.files.get(owner.path);
+      if (!f || f.importOnly) return state; // same guard focusTab applies
+      return { ...state, activeFileId: owner.path, ui: { ...ui, focusedTab: { doc: owner.path } } };
+    }
     case 'UI_SELECT_PAGE': {
       const { selectedPageIds, selectionAnchor } = state.ui;
       if (action.mode === 'toggle') {

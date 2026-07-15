@@ -56,6 +56,64 @@ const select = (s: AppState, pageIds: string[], anchor: string | null): AppState
 
 const selected = (s: AppState): string[] => [...s.ui.selectedPageIds].sort();
 
+// M4.1c — per-document focus for the reading view. The board renders every doc
+// at once, but the reading view renders exactly ONE, and a tab addresses a FILE
+// while a `.pdfx` partitions one file into several documents — so without this
+// the reading view could only ever show a file's FIRST partition.
+describe('ui per-document focus (M4.1c)', () => {
+  // One .pdfx file partitioned into two documents, sharing a path.
+  function partitionedState(): AppState {
+    const a = makeFile('book.pdfx', 5);
+    return stateWith(
+      [a],
+      [
+        makeDoc(a, 'book.pdfx#0', makePages('book.pdfx', 3)),
+        makeDoc(a, 'book.pdfx#1', makePages('book.pdfx', 2, 3)),
+      ],
+    );
+  }
+
+  it('focuses a partition of the already-active file', () => {
+    const s = appReducer(
+      { ...partitionedState(), activeFileId: 'book.pdfx' },
+      { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
+    );
+    expect(s.ui.focusedDocId).toBe('book.pdfx#1');
+    expect(s.activeFileId).toBe('book.pdfx'); // unchanged — same file
+  });
+
+  it('focusing a doc in ANOTHER file activates that file and its tab', () => {
+    const s = appReducer(twoDocState(), { type: 'UI_FOCUS_DOC', docId: 'b.pdf#0' });
+    expect(s.ui.focusedDocId).toBe('b.pdf#0');
+    expect(s.activeFileId).toBe('b.pdf');
+    expect(s.ui.focusedTab).toEqual({ doc: 'b.pdf' });
+  });
+
+  it('rejects an unknown doc rather than stranding the reading view', () => {
+    const before = twoDocState();
+    expect(appReducer(before, { type: 'UI_FOCUS_DOC', docId: 'gone.pdf#7' })).toBe(before);
+  });
+
+  it('switching tabs clears a per-doc focus (it names the file being left)', () => {
+    const focused = appReducer(twoDocState(), { type: 'UI_FOCUS_DOC', docId: 'b.pdf#0' });
+    expect(focused.ui.focusedDocId).toBe('b.pdf#0');
+    const switched = appReducer(focused, { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
+    expect(switched.ui.focusedDocId).toBeNull();
+    // ...and leaving doc-land entirely also clears it.
+    const home = appReducer(focused, { type: 'UI_FOCUS_TAB', tab: 'home' });
+    expect(home.ui.focusedDocId).toBeNull();
+  });
+
+  it('clearing to null returns to the default (first doc of the active file)', () => {
+    const focused = appReducer(
+      { ...partitionedState(), activeFileId: 'book.pdfx' },
+      { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
+    );
+    const cleared = appReducer(focused, { type: 'UI_FOCUS_DOC', docId: null });
+    expect(cleared.ui.focusedDocId).toBeNull();
+  });
+});
+
 describe('ui tab/tool actions (Phase 4 M2)', () => {
   it('focuses a tab', () => {
     const next = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: 'tools' });

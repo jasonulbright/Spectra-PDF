@@ -183,6 +183,15 @@ export interface UiState {
   // Document-pane view mode (M4). The board and the reading view are two
   // renders of the same per-page cells (§ 6.2); commands/toolbar read this.
   docViewMode: DocViewMode;
+  // WHICH document the reading view shows (M4.1c), as an `OpenDocument.id`.
+  // The board renders every doc at once, but the reading view renders exactly
+  // one — and a tab addresses a FILE, while a `.pdfx` partitions one file into
+  // several documents. Without this, "the focused doc" could only ever be the
+  // FIRST partition of the active file, so partitions 2+ were unreachable in
+  // Read mode and a Find match inside one could never be shown. null = default
+  // to the active file's first document. Resolution falls back to that default
+  // when the id no longer exists (ids are positional and rebuilt on reindex).
+  focusedDocId: string | null;
   // Canvas multi-select (2n.1) — view state, never the page-edit tier.
   // Positional PageRef ids: any buffer-identity change clears the selection
   // (the reducer does this where the buffers change; formerly a
@@ -277,6 +286,7 @@ export type AppAction =
   | { type: 'UI_SET_ACTIVE_OP'; op: string }
   | { type: 'UI_SET_TOOL'; tool: CanvasTool }
   | { type: 'UI_SET_DOC_VIEW_MODE'; mode: DocViewMode }
+  | { type: 'UI_FOCUS_DOC'; docId: string | null }
   // Click selection with the canvas's modifier semantics (computed here —
   // range/toggle need the workspace-flattened order, which lives in state):
   // 'single' replaces; 'toggle' is Ctrl-click; 'range' is Shift-click from the
