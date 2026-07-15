@@ -217,6 +217,28 @@ describe('anchorHolds — a jump wins until the user scrolls away', () => {
     expect(anchorHolds(a, m, pagesAt(reordered, a))).toBe(false);
   });
 
+  // Documented, intended degradation (round-5 review). A commit rebuilds the
+  // file and the async reindex reassigns every id positionally from the new
+  // buffer (lib/workspace.ts), so an anchor taken while an earlier in-memory
+  // delete had "gapped" the ids can't match afterwards — and NO field survives a
+  // rebuild to match on (sourcePageIndex is renumbered too). Trusting position
+  // across a reindex would be unsound (a reindex can legitimately re-compose the
+  // doc). So it drops and the scroll-derived answer takes over: still the
+  // documented at-top contract, just less specific than the remembered jump.
+  it('drops across a commit reindex (ids renumber) and falls back to the honest scroll answer', () => {
+    // Pre-commit: page 1 was deleted in memory, so slot 1 holds id `p2`.
+    const gapped = idsFor(pageCount).slice(1);
+    const a: JumpAnchor = { scrollTop: 0, page: 2, pageId: gapped[1], rowH: base.rowH, viewportH };
+    expect(a.pageId).toBe('f.pdf#p2');
+    const m = metrics({ zoom, pageCount: pageCount - 1, viewportH, scrollTop: 0 });
+    expect(anchorHolds(a, m, pagesAt(gapped, a))).toBe(true); // holds before the commit
+    // Post-commit reindex: ids are reassigned contiguously from 0 off the new file.
+    const reindexed = idsFor(pageCount - 1);
+    expect(pagesAt(reindexed, a)).toBe('f.pdf#p1'); // same physical page, new id
+    expect(anchorHolds(a, m, pagesAt(reindexed, a))).toBe(false);
+    expect(currentPageFor(m)).toBe(1); // fails safe to the at-top contract
+  });
+
   it('still holds when pages change in a way that keeps the slot (e.g. an annotation edit)', () => {
     // The pages ARRAY is a new reference after any page-tier dispatch, so the
     // guard must compare identity, not reference — else every annotation edit

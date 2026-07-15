@@ -36,6 +36,21 @@ const TIE_EPS = 0.5;
  * it MEANT, and that wins until the user scrolls away from it — which is how
  * the page box stops snapping back (review-caught, twice: first the tie-break,
  * then the boundary clamps that "fixed" it).
+ *
+ * DELIBERATELY BEST-EFFORT, and it fails SAFE. An anchor cannot survive a
+ * COMMIT: committing rebuilds the file, the async reindex re-derives every
+ * PageRef from the new buffer, and BOTH `id` and `sourcePageIndex` are assigned
+ * positionally there (`lib/workspace.ts`) — so no field of a page survives a
+ * rebuild to be matched against. (`PageRef.id`'s "stable" only means it survives
+ * a REORDER, where the live reducers carry the same objects through.) Preserving
+ * identity across a commit is the identity-model surgery `18-phase3-polish.md`
+ * weighed and declined, and trusting POSITION across a reindex instead would be
+ * unsound — a reindex can legitimately re-compose the doc (an externally-edited
+ * file reopened). So a reindex drops the anchor and the view speaks for itself:
+ * the readout falls back to `currentPageFor`, whose at-top/at-end answer is the
+ * documented contract for that viewport — less specific, never wrong. The only
+ * visible cost is that a jump to a boundary-ADJACENT page (2, or N-1) stops
+ * being remembered once you Save; the scroll-derived answer takes over.
  */
 export interface JumpAnchor {
   /** The scroll offset the jump actually LANDED on (post browser clamp). */
