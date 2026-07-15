@@ -129,11 +129,17 @@ export const TOOL_DEFS: readonly ToolDef[] = [
 
 export const TOOL_IDS: readonly ToolId[] = TOOL_DEFS.map((t) => t.id);
 
-export function toolById(id: ToolId): ToolDef | undefined {
+/** The tool with this id, or undefined. Takes a `string` on purpose — the ui
+ * slice stores `activeToolId` loosely (it can't import this without a cycle),
+ * so callers arrive with a string and an unknown id must be answerable, not a
+ * cast that pretends it can't happen. */
+export function toolById(id: string): ToolDef | undefined {
   return TOOL_DEFS.find((t) => t.id === id);
 }
 
-/** The tool that hosts an operation (each op belongs to exactly one). */
-export function toolForOp(op: Operation): ToolDef | undefined {
-  return TOOL_DEFS.find((t) => t.ops.includes(op));
+/** The tool that hosts an operation (each op belongs to exactly one). Takes a
+ * `string` for the same reason as toolById — `UiState.activeOp` is a loose
+ * `string`, and the reducer must be able to ask this about any of them. */
+export function toolForOp(op: string): ToolDef | undefined {
+  return TOOL_DEFS.find((t) => (t.ops as readonly string[]).includes(op));
 }

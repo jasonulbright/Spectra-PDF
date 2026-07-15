@@ -53,7 +53,7 @@ import { UpdateBar } from './components/UpdateBar';
 import { NavPane } from './components/navpane/NavPane';
 import { ToolsCenter } from './components/ToolsCenter';
 import { ToolIcon } from './components/tool-icons';
-import { toolById, type ToolId } from './commands/tools';
+import { toolById } from './commands/tools';
 import { withRecent } from './lib/recent-files';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
@@ -99,7 +99,7 @@ function AppContent(): React.ReactElement {
   // The tool whose task pane the Tools tab is showing. null = show the Tools
   // Center (the tile grid) instead — "no tool open" is a real state, not an
   // absence to paper over, so the tab always has something to say.
-  const activeTool = state.ui.activeToolId ? toolById(state.ui.activeToolId as ToolId) : null;
+  const activeTool = state.ui.activeToolId ? toolById(state.ui.activeToolId) : null;
   const setActiveOp = useCallback(
     (op: Operation) => dispatch({ type: 'UI_SET_ACTIVE_OP', op }),
     [dispatch],

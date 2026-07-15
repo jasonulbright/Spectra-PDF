@@ -1,5 +1,8 @@
 import { AppState, AppAction, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_DEFAULT_WIDTH } from './types';
 import { carriesManifest } from '../lib/doc-names';
+// Safe from the reducer: commands/tools has type-only imports, so it carries no
+// runtime dependency back into the state or component layers.
+import { toolForOp } from '../commands/tools';
 
 // Re-project a display-normalized annotation rect when its page's display
 // rotates by `delta` quarter-turns clockwise: annotation coords always live
@@ -994,9 +997,18 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return focusTab(state, action.tab);
     case 'UI_SET_RECENT_FILES':
       return { ...state, ui: { ...state.ui, recentFiles: action.files } };
-    case 'UI_SET_ACTIVE_OP':
-      if (action.op === state.ui.activeOp) return state;
-      return { ...state, ui: { ...state.ui, activeOp: action.op } };
+    case 'UI_SET_ACTIVE_OP': {
+      // Arming an operation OPENS its owning tool, structurally — the Tools tab
+      // renders the tool's header + op switcher around `panels[activeOp]`, so
+      // the two disagreeing means the header names one tool while the body
+      // shows another's panel (or the tile grid renders while an op is
+      // invisibly active). Deriving it here instead of asking every dispatcher
+      // to pair a UI_OPEN_TOOL is the M4.1c lesson: an invariant that depends
+      // on future writers remembering is one that will break.
+      const toolId = toolForOp(action.op)?.id ?? null;
+      if (action.op === state.ui.activeOp && toolId === state.ui.activeToolId) return state;
+      return { ...state, ui: { ...state.ui, activeOp: action.op, activeToolId: toolId } };
+    }
     case 'UI_OPEN_TOOL':
       if (action.toolId === state.ui.activeToolId) return state;
       return { ...state, ui: { ...state.ui, activeToolId: action.toolId } };

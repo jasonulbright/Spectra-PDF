@@ -8,7 +8,8 @@ import { isDocTab } from '../state/types';
 import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
 import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
-import { TOOL_DEFS, TOOL_IDS, toolForOp } from './tools';
+import { TOOL_DEFS, TOOL_IDS } from './tools';
+import { openFindWhenCanvasReady } from './find-intent';
 
 // --- Pure enablement helpers (unit-tested; menus gray from these) ---------
 
@@ -145,6 +146,23 @@ COMMAND_IDS satisfies readonly CommandNamespace[];
 // pane content at M2). Tool + selection commands only make sense there.
 const inCanvas = (ctx: CommandContext): boolean => isDocTab(ctx.state.ui.focusedTab);
 
+/**
+ * The active file's path, but only if it is a document we can actually SHOW.
+ *
+ * `activeFileId` alone isn't that: an import-only source (bytes dragged in to
+ * supply pages, never opened as a document) has an entry in `files` but no tab,
+ * and `focusTab` rejects a doc tab for it. Closing the last real file can leave
+ * one as the active id, so this is reachable. A caller that focuses a doc tab
+ * must gate on THIS, or it dispatches a focus that silently no-ops and then
+ * carries on as though the document were in front.
+ */
+function showableDoc(state: AppState): string | null {
+  const path = state.activeFileId;
+  if (!path) return null;
+  const f = state.files.get(path);
+  return f && !f.importOnly ? path : null;
+}
+
 function toolCommand(tool: CanvasTool): Command {
   return {
     title: TOOL_TITLES[tool],
@@ -162,10 +180,11 @@ function panelCommand(op: PanelOp): Command {
     title: PANEL_TITLES[op],
     run: ({ dispatch }) => {
       dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
-      // Open the TOOL that hosts this operation, so a menu item and a Tools
-      // Center tile land in the same place. Without this the menu would drop
-      // the user on the tile grid with the operation invisibly "active".
-      dispatch({ type: 'UI_OPEN_TOOL', toolId: toolForOp(op)?.id ?? null });
+      // UI_SET_ACTIVE_OP opens the TOOL that hosts this operation too, so a menu
+      // item and a Tools Center tile land in the same place — otherwise the menu
+      // would drop the user on the tile grid with the operation invisibly
+      // "active". That re-homing lives in the reducer, not here, so it holds for
+      // every dispatcher (the e2e harness sets activeOp directly).
       dispatch({ type: 'UI_SET_ACTIVE_OP', op });
     },
   };
@@ -375,29 +394,37 @@ export const COMMANDS: Record<CommandId, Command> = {
       `tools.open.${tool.id}`,
       {
         title: tool.title,
-        // A tool whose work happens ON the page needs a page open.
-        when: (ctx) => tool.ops.length > 0 || ctx.state.activeFileId !== null,
+        // A tool whose work happens ON the page needs a page to show. Not just
+        // "activeFileId is set": an import-only source is bytes with no tab, and
+        // `focusTab` rejects it — leaving us to arm a mode on a document the
+        // user can't see. (CLOSE_FILE can leave a ghost import-only file as the
+        // active one, so this is reachable, not theoretical.)
+        when: (ctx) => tool.ops.length > 0 || showableDoc(ctx.state) !== null,
         run: (ctx) => {
           const { state, dispatch } = ctx;
+          // Activating a tool arms its interaction mode (§ 7) — for EVERY tool
+          // that names one, not just the canvas-mode ones. Prepare Form and
+          // Fill & Sign each host a panel AND want their widget mode live.
+          if (tool.canvasTool) dispatch({ type: 'UI_SET_TOOL', tool: tool.canvasTool });
           if (tool.ops.length === 0) {
             // Canvas-mode tool (Comment, Redact, Scan & OCR): there is no form to
             // fill — the work IS the document. So open the document and arm the
             // mode, rather than parking the user on a Tools tab that would have
             // nothing to show. Acrobat does the same: picking Comment puts you on
             // the page with the markup tools live.
-            if (state.activeFileId) {
-              dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: state.activeFileId } });
-            }
-            if (tool.canvasTool) dispatch({ type: 'UI_SET_TOOL', tool: tool.canvasTool });
+            const path = showableDoc(state);
+            if (path) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
             // Scan & OCR's whole surface is Find's "Make searchable" (2m), so the
             // tool opens Find rather than inventing a second entry point for it.
-            if (tool.id === 'ocr') ctx.canvas?.find.open();
+            // Deferred, not called on ctx.canvas: the tab focus above has only
+            // been SCHEDULED, so the canvas is still unmounted right now.
+            if (tool.id === 'ocr') openFindWhenCanvasReady(ctx.canvas);
             return;
           }
           dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
-          dispatch({ type: 'UI_OPEN_TOOL', toolId: tool.id });
           // Land on the tool's first operation — opening a tool should show its
-          // work, not an empty shell.
+          // work, not an empty shell. UI_SET_ACTIVE_OP re-homes activeToolId
+          // onto the op's owning tool, so this also opens `tool`.
           dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
         },
       } satisfies Command,

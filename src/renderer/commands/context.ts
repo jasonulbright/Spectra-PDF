@@ -4,6 +4,7 @@
 // services while mounted. invokeCommand() is the ONE entry point every
 // caller shares — keymap, UI buttons, menus (M2), and the e2e harness.
 import { COMMANDS, type CommandId } from './registry';
+import { drainPendingFind } from './find-intent';
 import type { AppCommandHandlers, CanvasServices, CommandContext } from './types';
 import type { AppAction, AppState } from '../state/types';
 import type { Dispatch } from 'react';
@@ -25,6 +26,9 @@ export function registerAppCommandHandlers(handlers: AppCommandHandlers | null):
 
 export function registerCanvasServices(services: CanvasServices | null): void {
   canvasServices = services;
+  // Registration happens in the canvas view's mount effect — exactly the moment
+  // a parked Find request becomes servable. See commands/find-intent.
+  drainPendingFind(services);
 }
 
 /** The board's live canvas services (camera + find), or null when the board

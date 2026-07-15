@@ -21,6 +21,7 @@ import {
   setCommandStateSource,
 } from '../src/renderer/commands/context';
 import { KEY_BINDINGS } from '../src/renderer/commands/acrobat-keys';
+import { resetPendingFind } from '../src/renderer/commands/find-intent';
 import type { AppCommandHandlers } from '../src/renderer/commands/types';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import type { AppAction, AppState, OpenFile } from '../src/renderer/state/types';
@@ -65,6 +66,8 @@ afterEach(() => {
   setCommandStateSource(null);
   registerAppCommandHandlers(null);
   registerCanvasServices(null);
+  // Module-level slot: a case that parks a Find must not leak into the next.
+  resetPendingFind();
 });
 
 describe('registry totality', () => {
@@ -125,7 +128,12 @@ describe('enablement helpers', () => {
 });
 
 describe('invokeCommand', () => {
-  function wire(state: AppState): { dispatched: AppAction[]; handlers: AppCommandHandlers } {
+  function wire(state: AppState): {
+    dispatched: AppAction[];
+    handlers: AppCommandHandlers;
+    /** State after every dispatch — for invariants the reducer derives. */
+    finalState: () => AppState;
+  } {
     const dispatched: AppAction[] = [];
     // Reducer-backed dispatch so multi-dispatch commands see evolving state.
     let current = state;
@@ -138,7 +146,7 @@ describe('invokeCommand', () => {
     }));
     const handlers = noopHandlers();
     registerAppCommandHandlers(handlers);
-    return { dispatched, handlers };
+    return { dispatched, handlers, finalState: () => current };
   }
 
   it('returns false with no registered context', () => {
@@ -171,26 +179,26 @@ describe('invokeCommand', () => {
   });
 
   it('tools.panel.* focuses the Tools tab with the op armed, inside its owning tool', () => {
-    const { dispatched } = wire(initialState);
+    const { dispatched , finalState } = wire(initialState);
     expect(invokeCommand('tools.panel.compress')).toBe(true);
     expect(dispatched).toEqual([
       { type: 'UI_FOCUS_TAB', tab: 'tools' },
-      // Compress lives under Optimize (M5 § 7). Without this the Tools tab
-      // would render the tile grid with the op invisibly "active" — the menu
-      // item would look like it did nothing.
-      { type: 'UI_OPEN_TOOL', toolId: 'optimize' },
       { type: 'UI_SET_ACTIVE_OP', op: 'compress' },
     ]);
+    // Compress lives under Optimize (M5 § 7), and arming the op must OPEN that
+    // tool — otherwise the Tools tab renders the tile grid with the op
+    // invisibly "active" and the menu item looks like it did nothing.
+    expect(finalState().ui.activeToolId).toBe('optimize');
   });
 
   it('tools.open.* opens a form-backed tool on the Tools tab at its first op', () => {
-    const { dispatched } = wire(initialState);
+    const { dispatched, finalState } = wire(initialState);
     expect(invokeCommand('tools.open.protect')).toBe(true);
     expect(dispatched).toEqual([
       { type: 'UI_FOCUS_TAB', tab: 'tools' },
-      { type: 'UI_OPEN_TOOL', toolId: 'protect' },
       { type: 'UI_SET_ACTIVE_OP', op: 'encrypt' },
     ]);
+    expect(finalState().ui.activeToolId).toBe('protect');
   });
 
   it('tools.open.* for a canvas-mode tool opens the DOCUMENT and arms the mode', () => {
@@ -201,8 +209,8 @@ describe('invokeCommand', () => {
     );
     expect(invokeCommand('tools.open.comment')).toBe(true);
     expect(dispatched).toEqual([
-      { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } },
       { type: 'UI_SET_TOOL', tool: 'highlight' },
+      { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } },
     ]);
   });
 
@@ -217,7 +225,52 @@ describe('invokeCommand', () => {
     expect(invokeCommand('tools.open.protect')).toBe(true);
   });
 
-  it('tools.open.ocr opens Find, where Make Searchable lives', () => {
+  it('tools.open.* for a canvas-mode tool refuses a GHOST import-only active file', () => {
+    // Closing the last real file can leave a byte-only import source as the
+    // active id. focusTab rejects a doc tab for it, so arming the mode anyway
+    // would strand Highlight on a document the user cannot see — and it would
+    // then be live on the next real doc they open.
+    const { dispatched } = wire(
+      stateWith({
+        files: new Map([['src.pdf', makeFile('src.pdf', { importOnly: true })]]),
+        activeFileId: 'src.pdf',
+      }),
+    );
+    expect(invokeCommand('tools.open.comment')).toBe(false);
+    expect(dispatched).toEqual([]);
+  });
+
+  it('tools.open.ocr opens Find once the canvas mounts — not at invoke time', () => {
+    // The REAL precondition: the tile lives on the Tools tab, where the canvas
+    // is unmounted, so no find service exists when the command runs. It must
+    // park the intent and let the mount drain it, or the tool is a dead click.
+    const open = vi.fn();
+    wire(stateWith({ files: new Map([['a.pdf', makeFile('a.pdf')]]), activeFileId: 'a.pdf' }));
+    expect(invokeCommand('tools.open.ocr')).toBe(true);
+    expect(open).not.toHaveBeenCalled(); // nothing to call it on yet
+
+    registerCanvasServices({
+      canvas: () => null,
+      find: { isOpen: () => false, open, close: vi.fn() },
+    });
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('a parked Find is consumed once, not re-opened on every later mount', () => {
+    const open = vi.fn();
+    wire(stateWith({ files: new Map([['a.pdf', makeFile('a.pdf')]]), activeFileId: 'a.pdf' }));
+    invokeCommand('tools.open.ocr');
+    const services = {
+      canvas: () => null,
+      find: { isOpen: () => false, open, close: vi.fn() },
+    };
+    registerCanvasServices(services);
+    registerCanvasServices(null); // leave the doc tab
+    registerCanvasServices(services); // come back to it
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('tools.open.ocr opens Find immediately when the canvas IS mounted', () => {
     const open = vi.fn();
     wire(stateWith({ files: new Map([['a.pdf', makeFile('a.pdf')]]), activeFileId: 'a.pdf' }));
     registerCanvasServices({
@@ -226,6 +279,31 @@ describe('invokeCommand', () => {
     });
     expect(invokeCommand('tools.open.ocr')).toBe(true);
     expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('arming an op from OUTSIDE the registry still opens its tool', () => {
+    // The e2e harness (and any future caller) dispatches UI_SET_ACTIVE_OP raw.
+    // The re-homing lives in the reducer precisely so it cannot be forgotten:
+    // without it the Tools tab shows the tile grid while `watermark` is armed.
+    const next = appReducer(
+      stateWith({ ui: { ...initialState.ui, focusedTab: 'tools' } }),
+      { type: 'UI_SET_ACTIVE_OP', op: 'watermark' },
+    );
+    expect(next.ui.activeOp).toBe('watermark');
+    expect(next.ui.activeToolId).toBe('watermark');
+    // …and switching to an op owned by a DIFFERENT tool re-homes, so the pane
+    // header can never name one tool while showing another's panel.
+    const moved = appReducer(next, { type: 'UI_SET_ACTIVE_OP', op: 'encrypt' });
+    expect(moved.ui.activeToolId).toBe('protect');
+  });
+
+  it('tools.open.* arms the canvas mode for a tool that has BOTH a pane and a mode', () => {
+    // Prepare Form hosts the `forms` panel AND wants widget mode live (§ 7:
+    // activating a tool arms its interaction mode — for every tool that names
+    // one, not only the ops-less ones).
+    const { dispatched } = wire(initialState);
+    expect(invokeCommand('tools.open.prepareform')).toBe(true);
+    expect(dispatched).toContainEqual({ type: 'UI_SET_TOOL', tool: 'forms' });
   });
 
   it('document.deleteSelection deletes the batch then clears — even when the reducer rejects', () => {
