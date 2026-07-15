@@ -155,7 +155,44 @@ export const MIN_ZOOM = 0.02;
 export const MAX_ZOOM = 64;
 export const ZOOM_STEP = 1.2;
 
-export const clampZoom = (z: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+/** One US-Letter page's height at zoom 1 (a comfortable reading size). */
+export const READING_BASE_HEIGHT = 960;
+/** Vertical gap between pages at zoom 1 (scales with zoom). */
+export const READING_PAGE_GAP = 24;
+
+/**
+ * Ceiling for the scroller's content height, with margin under Chromium's
+ * per-element size limit (~33.55M px — LayoutUnit's 26.6 fixed-point range;
+ * WebView2 is Chromium).
+ *
+ * This is a REAL DOM height, not a raster: the reading view sizes its spacer
+ * `pageCount * rowH`. Past the limit the element silently clamps, so the tail of
+ * the document becomes unreachable by scrolling AND `centerOn` can't land there
+ * — while the page box keeps reporting the page it *meant*, so it reads e.g.
+ * "800 / 1000" over page ~532, durably (review-caught: the widened MAX_ZOOM
+ * made this reachable at ~533 pages, where the old ceiling needed ~5,683 and so
+ * hid it).
+ */
+const SAFE_CONTENT_HEIGHT = 30_000_000;
+
+/**
+ * The largest zoom this document can take without its spacer exceeding
+ * `SAFE_CONTENT_HEIGHT` — i.e. the point past which pages would stop being
+ * reachable. Every page stays scrollable at any zoom the view allows.
+ */
+export function maxZoomFor(pageCount: number): number {
+  if (pageCount <= 0) return MAX_ZOOM;
+  const rowHAtZoom1 = READING_BASE_HEIGHT + READING_PAGE_GAP;
+  const fits = SAFE_CONTENT_HEIGHT / (pageCount * rowHAtZoom1);
+  // Never below MIN_ZOOM: a document so long that even MIN_ZOOM overflows would
+  // otherwise invert the clamp (max < min). It stays pinned at the floor, which
+  // is honest — that is genuinely as far out as the view goes.
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, fits));
+}
+
+/** Clamp to the view's range AND to what this document can render (see above). */
+export const clampZoom = (z: number, pageCount: number): number =>
+  Math.min(maxZoomFor(pageCount), Math.max(MIN_ZOOM, z));
 
 /** A page's own geometry, as the reading view needs it for the zoom presets. */
 export interface PageGeometry {

@@ -5,6 +5,7 @@ import {
   clampZoom,
   currentPageFor,
   fitWidthZoom,
+  maxZoomFor,
   naturalDisplayHeight,
   visibleRange,
   MAX_ZOOM,
@@ -427,7 +428,7 @@ describe('zoom presets — Actual Size / Fit Width', () => {
       for (const pane of [800, 1600, 2560, 3440, 5120, 7680]) {
         const z = fitWidthZoom(pane, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
         expect(within(z), `pane ${pane}px -> zoom ${z}`).toBe(true);
-        expect(clampZoom(z)).toBeCloseTo(z, 6); // the clamp is a no-op: honest fit
+        expect(clampZoom(z, 10)).toBeCloseTo(z, 6); // the clamp is a no-op: honest fit
       }
     });
 
@@ -444,9 +445,9 @@ describe('zoom presets — Actual Size / Fit Width', () => {
       for (const p of pages) {
         const z = actualSizeZoom(p, READING_BASE_HEIGHT);
         expect(within(z), `${p.id} -> zoom ${z}`).toBe(true);
-        expect(clampZoom(z)).toBeCloseTo(z, 6);
+        expect(clampZoom(z, 10)).toBeCloseTo(z, 6);
         // ...and it really is the page's true height.
-        expect(READING_BASE_HEIGHT * clampZoom(z)).toBeCloseTo(naturalDisplayHeight(p), 4);
+        expect(READING_BASE_HEIGHT * clampZoom(z, 10)).toBeCloseTo(naturalDisplayHeight(p), 4);
       }
     });
 
@@ -458,9 +459,55 @@ describe('zoom presets — Actual Size / Fit Width', () => {
     });
 
     it('still bounds pathological input', () => {
-      expect(clampZoom(Number.POSITIVE_INFINITY)).toBe(MAX_ZOOM);
-      expect(clampZoom(0)).toBe(MIN_ZOOM);
-      expect(clampZoom(-3)).toBe(MIN_ZOOM);
+      expect(clampZoom(Number.POSITIVE_INFINITY, 10)).toBe(MAX_ZOOM);
+      expect(clampZoom(0, 10)).toBe(MIN_ZOOM);
+      expect(clampZoom(-3, 10)).toBe(MIN_ZOOM);
+    });
+  });
+
+  // The spacer is a REAL DOM height (pageCount * rowH), and Chromium caps a
+  // single element at ~33.55M px. Widening MAX_ZOOM to 64 made that reachable at
+  // ~533 pages (rowH ~63,000px) where the old ceiling of 6 needed ~5,683 — past
+  // it the document's tail silently stops being scrollable AND centerOn can't
+  // land there, while the page box still reports the page it meant.
+  describe('maxZoomFor — zoom can never make the document unreachable', () => {
+    const rowHAtZoom1 = 960 + 24;
+    const CHROMIUM_ELEMENT_CAP = 33_554_428;
+    const contentHeightAt = (pageCount: number, zoom: number): number =>
+      pageCount * rowHAtZoom1 * zoom;
+
+    it('keeps the spacer under the browser cap at every page count', () => {
+      for (const pageCount of [1, 10, 533, 600, 1000, 5000, 34_000, 200_000]) {
+        const z = maxZoomFor(pageCount);
+        expect(contentHeightAt(pageCount, z), `${pageCount} pages @ zoom ${z}`).toBeLessThan(
+          CHROMIUM_ELEMENT_CAP,
+        );
+      }
+    });
+
+    it('a 600-page doc cannot be zoomed into unreachability (the regression)', () => {
+      // Unbounded, MAX_ZOOM=64 would give 600 * 984 * 64 = 37.7M px — over the cap.
+      expect(contentHeightAt(600, MAX_ZOOM)).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
+      expect(contentHeightAt(600, maxZoomFor(600))).toBeLessThan(CHROMIUM_ELEMENT_CAP);
+      expect(clampZoom(MAX_ZOOM, 600)).toBeLessThan(MAX_ZOOM); // the stepper is bounded too
+    });
+
+    it('leaves ordinary documents the full range (the cap must not tax normal use)', () => {
+      for (const pageCount of [1, 20, 100, 300]) {
+        expect(maxZoomFor(pageCount)).toBe(MAX_ZOOM);
+      }
+    });
+
+    it('never inverts the clamp for an absurdly long document', () => {
+      // A doc so long that even MIN_ZOOM overflows must pin at the floor, not
+      // produce max < min (which would make clampZoom return the max).
+      const z = maxZoomFor(50_000_000);
+      expect(z).toBe(MIN_ZOOM);
+      expect(clampZoom(1, 50_000_000)).toBe(MIN_ZOOM);
+    });
+
+    it('treats an empty doc as unconstrained', () => {
+      expect(maxZoomFor(0)).toBe(MAX_ZOOM);
     });
   });
 });

@@ -25,8 +25,8 @@ import {
   currentPageFor,
   fitWidthZoom,
   visibleRange,
-  MAX_ZOOM,
-  MIN_ZOOM,
+  READING_BASE_HEIGHT,
+  READING_PAGE_GAP as PAGE_GAP,
   ZOOM_STEP,
   type JumpAnchor,
 } from '../../canvas/reading-page';
@@ -45,8 +45,8 @@ import { PageCell } from './PageCell';
 // One US-Letter page is ~this tall at zoom 1 (a comfortable reading size on a
 // typical pane); zoom multiplies it. Independent of BASE_PAGE_HEIGHT (the
 // board's thumbnail size).
-const READING_BASE_HEIGHT = 960;
-const PAGE_GAP = 24; // vertical px between pages, at zoom 1 (scales with zoom)
+
+
 const OVERSCAN = 2; // pages rendered beyond each viewport edge
 // Breathing room Fit Width leaves either side of the page. Exactly double the
 // 8px custom scrollbar (styles.css), so if the fit's own zoom change flips the
@@ -264,6 +264,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // exactly as they are in Acrobat.
   const pagesRef = useRef(doc.pages);
   pagesRef.current = doc.pages;
+  // The zoom ceiling depends on the page COUNT (see maxZoomFor), and the
+  // handle's zoom calls are imperative, so they read it off a ref.
+  const pageCountRef = useRef(pageCount);
+  pageCountRef.current = pageCount;
   const currentPage = useCallback((): PageRef | null => {
     const pages = pagesRef.current;
     return pages[Math.min(pages.length, Math.max(1, currentPageRef.current)) - 1] ?? null;
@@ -272,7 +276,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   const actualSize = useCallback(() => {
     const page = currentPage();
     if (!page) return;
-    setZoom(clampZoom(actualSizeZoom(page, READING_BASE_HEIGHT)));
+    setZoom(clampZoom(actualSizeZoom(page, READING_BASE_HEIGHT), pageCountRef.current));
   }, [currentPage]);
 
   const fitWidth = useCallback(() => {
@@ -284,15 +288,20 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     const available = el.clientWidth - FIT_WIDTH_GUTTER;
     const z = fitWidthZoom(available, displayWidthOf(page), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
     if (z <= 0) return; // pane not measured yet — leave the zoom alone
-    setZoom(clampZoom(z));
+    setZoom(clampZoom(z, pageCountRef.current));
   }, [currentPage]);
 
   useImperativeHandle(
     ref,
     (): CanvasHandle => ({
-      zoomIn: () => setZoom((z) => Math.min(MAX_ZOOM, z * ZOOM_STEP)),
-      zoomOut: () => setZoom((z) => Math.max(MIN_ZOOM, z / ZOOM_STEP)),
-      reset: () => setZoom(1),
+      // Every zoom path goes through clampZoom, which bounds by the DOCUMENT's
+      // size as well as the view's range — past that the spacer would exceed the
+      // browser's element-height limit and the tail of the doc would stop being
+      // reachable (see maxZoomFor). That includes `reset`: a document long
+      // enough that even zoom 1 overflows must not be forced back to it.
+      zoomIn: () => setZoom((z) => clampZoom(z * ZOOM_STEP, pageCountRef.current)),
+      zoomOut: () => setZoom((z) => clampZoom(z / ZOOM_STEP, pageCountRef.current)),
+      reset: () => setZoom(clampZoom(1, pageCountRef.current)),
       actualSize,
       fitWidth,
       // The reading view has no world transform; tools resolve coordinates
