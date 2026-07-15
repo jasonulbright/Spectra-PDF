@@ -498,12 +498,30 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // guarantees a manifest's names are unique — `uniqueDocName` is applied at
       // rename time, not to arbitrary/older manifests). As with the reading
       // view's jump anchor, there is no identity across a rebuild, so this fails
-      // SAFE and pays for it: a whole-file op on a `.pdfx` you're reading
-      // resets you to its first partition. Preserving the position needs real
-      // cross-commit identity — see `canvas/reading-page.ts`'s JumpAnchor note.
-      const ui = state.ui.focusedDocId?.startsWith(`${action.path}#`)
-        ? { ...state.ui, focusedDocId: null }
-        : state.ui;
+      // SAFE and pays for it. Be honest about the size of that bill: this fires
+      // on ANY buffer-identity change for the path, which is more than "engine
+      // whole-file ops" — committing ANY page-tier edit (an annotation counts),
+      // file-level Undo/Redo (`REFRESH_BUFFER`), and — because the commit gate
+      // flushes EVERY dirty path atomically — an engine op run on a COMPLETELY
+      // DIFFERENT file will reindex this one too. Each of those resets a `.pdfx`
+      // reader to the file's first partition. Always safe, never wrong content,
+      // and re-navigable; preserving the position needs real cross-commit
+      // identity (see `canvas/reading-page.ts`'s JumpAnchor note).
+      //
+      // Ownership is tested against the real documents, NOT a string prefix:
+      // paths may contain '#' (raw OS paths from the file dialog), so
+      // `id.startsWith(path + '#')` would let "a.pdf" match a doc of the
+      // distinct open file "a.pdf#draft.pdf" and clear its focus (review-caught;
+      // over-clear only, but it is not what the code claims to do). The second
+      // clause covers a focus whose doc has since left `prev` (its file was
+      // closed) while the incoming set re-claims that id — it must not silently
+      // re-bind to whatever now holds it.
+      const focusedId = state.ui.focusedDocId;
+      const ownedByThisPath =
+        !!focusedId &&
+        (prev.some((d) => d.id === focusedId && d.path === action.path) ||
+          action.documents.some((d) => d.id === focusedId));
+      const ui = ownedByThisPath ? { ...state.ui, focusedDocId: null } : state.ui;
       return { ...state, files, ui, workspace: { documents } };
     }
     case 'REORDER_PAGES': {

@@ -193,6 +193,30 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(again.ui.focusedDocId).toBe('book.pdfx#1');
   });
 
+  // Ownership is tested against the real documents, not a string prefix: OS
+  // paths may contain '#', so "a.pdf" is a literal prefix of the DISTINCT open
+  // file "a.pdf#draft.pdf", whose doc ids start with "a.pdf#".
+  it('does not clear another file whose path merely starts with the re-indexed one', () => {
+    const a = makeFile('a.pdf', 2);
+    const b = makeFile('a.pdf#draft.pdf', 2); // a legal, distinct path
+    const start = stateWith(
+      [a, b],
+      [
+        makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2)),
+        makeDoc(b, 'a.pdf#draft.pdf#0', makePages('a.pdf#draft.pdf', 2)),
+      ],
+    );
+    const focused = appReducer(start, { type: 'UI_FOCUS_DOC', docId: 'a.pdf#draft.pdf#0' });
+    expect(focused.ui.focusedDocId).toBe('a.pdf#draft.pdf#0');
+    // Re-indexing 'a.pdf' must not touch the OTHER file's focus.
+    const reindexed = appReducer(focused, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2))],
+    });
+    expect(reindexed.ui.focusedDocId).toBe('a.pdf#draft.pdf#0');
+  });
+
   it('leaves a per-doc focus alone when a DIFFERENT path re-indexes', () => {
     const b = makeFile('b.pdf', 2);
     const focused = appReducer(twoDocState(), { type: 'UI_FOCUS_DOC', docId: 'b.pdf#0' });
