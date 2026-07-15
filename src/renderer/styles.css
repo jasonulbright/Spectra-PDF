@@ -1583,3 +1583,126 @@
   font-family: Helvetica, Arial, sans-serif;
   pointer-events: auto;
 }
+
+/* ── Tools Center + task panes (Phase 4 M5, § 7) ───────────────────────────
+   The Tools tab's two states. With no tool open you get the tile grid — the
+   tab answers "what job are you here to do?"; with one open you get its task
+   pane, headed by the tool's name and a way back to the grid.
+
+   Dark defaults + a light remap, per the nav-pane pattern above (semantic
+   tokens are M7).
+   ──────────────────────────────────────────────────────────────────────── */
+.tools-center {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px 32px 40px;
+}
+.tools-center-heading {
+  font-size: 20px;
+  font-weight: 500;
+  color: #e5e5e5;
+  margin-bottom: 4px;
+}
+.tools-center-sub {
+  font-size: 12px;
+  color: #a3a3a3;
+  margin-bottom: 20px;
+}
+.tools-grid {
+  display: grid;
+  /* Tiles size themselves: the grid is a fluid number of ~220px columns, so
+     the Tools tab reflows with the window instead of pinning a column count
+     that only looks right at one width. */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.tool-tile {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: start;
+  padding: 14px;
+  text-align: left;
+  border: 1px solid #2e2e2e;
+  border-radius: 6px;
+  background: #1f1f1f;
+  cursor: default;
+  transition: background-color 90ms ease, border-color 90ms ease;
+}
+.tool-tile:hover { background: #262626; border-color: #3d3d3d; }
+.tool-tile:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+.tool-tile-icon {
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 5px;
+  background: #2e2e2e;
+  color: #cfcfcf;
+}
+.tool-tile:hover .tool-tile-icon { color: #ffffff; }
+.tool-tile-title { font-size: 13px; font-weight: 500; color: #e5e5e5; }
+.tool-tile-desc { font-size: 11px; line-height: 1.45; color: #949494; }
+
+.tool-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.tool-back {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: #a3a3a3;
+  cursor: default;
+}
+.tool-back:hover { background: #262626; color: #e5e5e5; }
+.tool-back:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+
+/* The within-tool operation switcher: a tool is the JOB, these are the ways of
+   doing it. Only rendered when a tool hosts more than one. */
+.tool-op-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #2e2e2e;
+}
+.tool-op {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #a3a3a3;
+  cursor: default;
+}
+.tool-op:hover { background: #262626; color: #e5e5e5; }
+.tool-op.active { background: #0078d4; color: #ffffff; }
+.tool-op:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+
+[data-theme="light"] .tools-center-heading { color: #111827; }
+[data-theme="light"] .tools-center-sub { color: #6b7280; }
+[data-theme="light"] .tool-tile {
+  background: #ffffff;
+  border-color: #e5e7eb;
+}
+[data-theme="light"] .tool-tile:hover { background: #f9fafb; border-color: #d1d5db; }
+[data-theme="light"] .tool-tile-icon { background: #f3f4f6; color: #4b5563; }
+[data-theme="light"] .tool-tile:hover .tool-tile-icon { color: #111827; }
+[data-theme="light"] .tool-tile-title { color: #111827; }
+[data-theme="light"] .tool-tile-desc { color: #6b7280; }
+[data-theme="light"] .tool-back { color: #4b5563; }
+[data-theme="light"] .tool-back:hover { background: #f3f4f6; color: #111827; }
+[data-theme="light"] .tool-op-switch { border-bottom-color: #e5e7eb; }
+[data-theme="light"] .tool-op { color: #4b5563; }
+[data-theme="light"] .tool-op:hover { background: #f3f4f6; color: #111827; }
+[data-theme="light"] .tool-op.active { background: #0078d4; color: #ffffff; }

@@ -51,6 +51,9 @@ import { HomeTab } from './components/HomeTab';
 import { AboutDialog } from './components/AboutDialog';
 import { UpdateBar } from './components/UpdateBar';
 import { NavPane } from './components/navpane/NavPane';
+import { ToolsCenter } from './components/ToolsCenter';
+import { ToolIcon } from './components/tool-icons';
+import { toolById, type ToolId } from './commands/tools';
 import { withRecent } from './lib/recent-files';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
@@ -93,6 +96,10 @@ function AppContent(): React.ReactElement {
   const focusedTab = state.ui.focusedTab;
   const inDocTab = isDocTab(focusedTab);
   const activeOp = state.ui.activeOp as Operation;
+  // The tool whose task pane the Tools tab is showing. null = show the Tools
+  // Center (the tile grid) instead — "no tool open" is a real state, not an
+  // absence to paper over, so the tab always has something to say.
+  const activeTool = state.ui.activeToolId ? toolById(state.ui.activeToolId as ToolId) : null;
   const setActiveOp = useCallback(
     (op: Operation) => dispatch({ type: 'UI_SET_ACTIVE_OP', op }),
     [dispatch],
@@ -914,8 +921,11 @@ function AppContent(): React.ReactElement {
       <TabStrip onCloseFile={(path) => void handleCloseFile(path)} />
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Tools tab: active-file switcher + operations rail + the active panel */}
-        {focusedTab === 'tools' && (
+        {/* Tools tab: active-file switcher + operations rail + the active panel.
+            The rail is the WITHIN-tool picker, so it only exists once a tool is
+            open — beside the Tools Center it would be a second, competing picker
+            for the same choice. */}
+        {focusedTab === 'tools' && activeTool && (
           <div className="app-rail flex flex-col shrink-0 border-r border-neutral-800">
             {tabFileList.length > 0 && (
               <div className="w-48 border-b border-neutral-800 py-2 shrink-0 max-h-48 overflow-y-auto">
@@ -955,8 +965,43 @@ function AppContent(): React.ReactElement {
               onClearRecent={() => invokeCommand('file.clearRecent')}
             />
           ) : focusedTab === 'tools' ? (
+            !activeTool ? (
+            // The tab's landing state: what job are you here to do? (§ 7)
+            <ToolsCenter onOpenTool={(id) => invokeCommand(`tools.open.${id}`)} />
+          ) : (
             <div className="flex-1 flex flex-col p-6 min-h-0">
-              <h2 className="text-lg font-medium mb-4 shrink-0">{titles[activeOp]}</h2>
+              <div className="tool-pane-head shrink-0">
+                <button
+                  type="button"
+                  data-testid="tool-back"
+                  className="tool-back"
+                  onClick={() => dispatch({ type: 'UI_OPEN_TOOL', toolId: null })}
+                  title="All tools"
+                >
+                  ‹ Tools
+                </button>
+                <h2 className="text-lg font-medium">{activeTool.title}</h2>
+              </div>
+              {/* A tool that hosts several operations lists them: the tool is the
+                  JOB, these are the ways of doing it. One-op tools show no
+                  switcher — a single-item list is noise. */}
+              {activeTool.ops.length > 1 && (
+                <div className="tool-op-switch shrink-0" data-testid="tool-op-switch">
+                  {activeTool.ops.map((op) => (
+                    <button
+                      key={op}
+                      type="button"
+                      data-testid={`tool-op-${op}`}
+                      aria-pressed={activeOp === op}
+                      className={'tool-op' + (activeOp === op ? ' active' : '')}
+                      onClick={() => invokeCommand(`tools.panel.${op}`)}
+                    >
+                      <ToolIcon op={op} />
+                      {titles[op]}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex-1 min-h-0">
                 {activeOp === 'extract_text' ? (
                   <ExtractTextPanel initialPage={extractPage} onConsumeInitialPage={() => setExtractPage(null)} />
@@ -965,6 +1010,7 @@ function AppContent(): React.ReactElement {
                 )}
               </div>
             </div>
+            )
           ) : (
             <div className="flex-1 flex flex-row overflow-hidden">
               {/* Left navigation pane (M3) — thumbnails etc. for the active doc */}

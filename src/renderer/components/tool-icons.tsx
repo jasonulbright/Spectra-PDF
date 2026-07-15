@@ -161,6 +161,17 @@ interface ToolIconProps {
   className?: string;
 }
 
+/**
+ * Every operation the app has, at runtime.
+ *
+ * Derived from `GLYPHS`, which TypeScript already forces to be TOTAL over
+ * `Operation` — so this list cannot drift from the union, and adding an
+ * operation without a glyph still fails to compile. The tools registry's
+ * "nothing orphaned" test needs a runtime list to check against; deriving it
+ * here beats hand-maintaining a second copy that could silently fall behind.
+ */
+export const OPERATIONS = Object.keys(GLYPHS) as Operation[];
+
 export function ToolIcon({ op, size = 15, className }: ToolIconProps): React.JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...base} aria-hidden="true">

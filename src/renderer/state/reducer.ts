@@ -37,6 +37,7 @@ const NO_SELECTION: ReadonlySet<string> = new Set();
 export const initialUiState: UiState = {
   focusedTab: 'home',
   activeOp: 'split',
+  activeToolId: null,
   tool: 'select',
   // A document opens in the READING view (M4.1g, the end of M4). This is the
   // Acrobat model and § 6.1's stated default: a PDF is something you read; the
@@ -996,6 +997,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_ACTIVE_OP':
       if (action.op === state.ui.activeOp) return state;
       return { ...state, ui: { ...state.ui, activeOp: action.op } };
+    case 'UI_OPEN_TOOL':
+      if (action.toolId === state.ui.activeToolId) return state;
+      return { ...state, ui: { ...state.ui, activeToolId: action.toolId } };
     case 'UI_SET_TOOL':
       if (action.tool === state.ui.tool) return state;
       return { ...state, ui: { ...state.ui, tool: action.tool } };

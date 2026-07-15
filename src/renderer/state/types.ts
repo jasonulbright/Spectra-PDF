@@ -179,6 +179,11 @@ export const NAV_PANE_DEFAULT_WIDTH = 240;
 export interface UiState {
   focusedTab: FocusedTab;
   activeOp: string; // Sidebar Operation id; typed loosely here to avoid a component import cycle
+  // Which TOOL the Tools tab has open (a `ToolId`; loosely typed for the same
+  // reason). null = show the Tools Center grid — that is the tab's landing
+  // state, and the reason this can't just be derived from `activeOp`, which
+  // always names some operation.
+  activeToolId: string | null;
   tool: CanvasTool;
   // Document-pane view mode (M4). The board and the reading view are two
   // renders of the same per-page cells (§ 6.2); commands/toolbar read this.
@@ -293,6 +298,7 @@ export type AppAction =
   | { type: 'UI_FOCUS_TAB'; tab: FocusedTab }
   | { type: 'UI_SET_RECENT_FILES'; files: string[] }
   | { type: 'UI_SET_ACTIVE_OP'; op: string }
+  | { type: 'UI_OPEN_TOOL'; toolId: string | null }
   | { type: 'UI_SET_TOOL'; tool: CanvasTool }
   | { type: 'UI_SET_DOC_VIEW_MODE'; mode: DocViewMode }
   | { type: 'UI_FOCUS_DOC'; docId: string | null }

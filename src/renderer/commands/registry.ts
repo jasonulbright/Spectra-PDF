@@ -8,6 +8,7 @@ import { isDocTab } from '../state/types';
 import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
 import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
+import { TOOL_DEFS, TOOL_IDS, toolForOp } from './tools';
 
 // --- Pure enablement helpers (unit-tested; menus gray from these) ---------
 
@@ -132,6 +133,7 @@ export const COMMAND_IDS = [
   'file.clearRecent',
   ...CANVAS_TOOLS.map((t) => `tools.${t}` as const),
   ...PANEL_OPS.map((op) => `tools.panel.${op}` as const),
+  ...TOOL_IDS.map((id) => `tools.open.${id}` as const),
 ] as const;
 
 export type CommandId = (typeof COMMAND_IDS)[number];
@@ -160,6 +162,10 @@ function panelCommand(op: PanelOp): Command {
     title: PANEL_TITLES[op],
     run: ({ dispatch }) => {
       dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+      // Open the TOOL that hosts this operation, so a menu item and a Tools
+      // Center tile land in the same place. Without this the menu would drop
+      // the user on the tile grid with the operation invisibly "active".
+      dispatch({ type: 'UI_OPEN_TOOL', toolId: toolForOp(op)?.id ?? null });
       dispatch({ type: 'UI_SET_ACTIVE_OP', op });
     },
   };
@@ -362,4 +368,39 @@ export const COMMANDS: Record<CommandId, Command> = {
   ...(Object.fromEntries(
     PANEL_OPS.map((op) => [`tools.panel.${op}`, panelCommand(op)]),
   ) as Record<`tools.panel.${PanelOp}`, Command>),
+  // One command per TOOL (§ 7) — what the Tools menu and the Tools Center tiles
+  // both invoke, so the two can never disagree about what a tool opens.
+  ...(Object.fromEntries(
+    TOOL_DEFS.map((tool) => [
+      `tools.open.${tool.id}`,
+      {
+        title: tool.title,
+        // A tool whose work happens ON the page needs a page open.
+        when: (ctx) => tool.ops.length > 0 || ctx.state.activeFileId !== null,
+        run: (ctx) => {
+          const { state, dispatch } = ctx;
+          if (tool.ops.length === 0) {
+            // Canvas-mode tool (Comment, Redact, Scan & OCR): there is no form to
+            // fill — the work IS the document. So open the document and arm the
+            // mode, rather than parking the user on a Tools tab that would have
+            // nothing to show. Acrobat does the same: picking Comment puts you on
+            // the page with the markup tools live.
+            if (state.activeFileId) {
+              dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: state.activeFileId } });
+            }
+            if (tool.canvasTool) dispatch({ type: 'UI_SET_TOOL', tool: tool.canvasTool });
+            // Scan & OCR's whole surface is Find's "Make searchable" (2m), so the
+            // tool opens Find rather than inventing a second entry point for it.
+            if (tool.id === 'ocr') ctx.canvas?.find.open();
+            return;
+          }
+          dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+          dispatch({ type: 'UI_OPEN_TOOL', toolId: tool.id });
+          // Land on the tool's first operation — opening a tool should show its
+          // work, not an empty shell.
+          dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
+        },
+      } satisfies Command,
+    ]),
+  ) as Record<`tools.open.${(typeof TOOL_IDS)[number]}`, Command>),
 };

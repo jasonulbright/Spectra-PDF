@@ -170,13 +170,62 @@ describe('invokeCommand', () => {
     expect(invokeCommand('tools.highlight')).toBe(false);
   });
 
-  it('tools.panel.* focuses the Tools tab with the op armed', () => {
+  it('tools.panel.* focuses the Tools tab with the op armed, inside its owning tool', () => {
     const { dispatched } = wire(initialState);
     expect(invokeCommand('tools.panel.compress')).toBe(true);
     expect(dispatched).toEqual([
       { type: 'UI_FOCUS_TAB', tab: 'tools' },
+      // Compress lives under Optimize (M5 § 7). Without this the Tools tab
+      // would render the tile grid with the op invisibly "active" — the menu
+      // item would look like it did nothing.
+      { type: 'UI_OPEN_TOOL', toolId: 'optimize' },
       { type: 'UI_SET_ACTIVE_OP', op: 'compress' },
     ]);
+  });
+
+  it('tools.open.* opens a form-backed tool on the Tools tab at its first op', () => {
+    const { dispatched } = wire(initialState);
+    expect(invokeCommand('tools.open.protect')).toBe(true);
+    expect(dispatched).toEqual([
+      { type: 'UI_FOCUS_TAB', tab: 'tools' },
+      { type: 'UI_OPEN_TOOL', toolId: 'protect' },
+      { type: 'UI_SET_ACTIVE_OP', op: 'encrypt' },
+    ]);
+  });
+
+  it('tools.open.* for a canvas-mode tool opens the DOCUMENT and arms the mode', () => {
+    // Comment has no ops — its work is a mode on the page, so parking the user
+    // on the Tools tab would show them an empty pane. It must route to the doc.
+    const { dispatched } = wire(
+      stateWith({ files: new Map([['a.pdf', makeFile('a.pdf')]]), activeFileId: 'a.pdf' }),
+    );
+    expect(invokeCommand('tools.open.comment')).toBe(true);
+    expect(dispatched).toEqual([
+      { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } },
+      { type: 'UI_SET_TOOL', tool: 'highlight' },
+    ]);
+  });
+
+  it('tools.open.* for a canvas-mode tool is disabled with no document open', () => {
+    wire(initialState);
+    // There is nothing to comment on / redact / OCR without a document, and the
+    // tool has no pane of its own to fall back to.
+    expect(invokeCommand('tools.open.comment')).toBe(false);
+    expect(invokeCommand('tools.open.redact')).toBe(false);
+    expect(invokeCommand('tools.open.ocr')).toBe(false);
+    // A tool with its own pane stays reachable — the panels prompt for a file.
+    expect(invokeCommand('tools.open.protect')).toBe(true);
+  });
+
+  it('tools.open.ocr opens Find, where Make Searchable lives', () => {
+    const open = vi.fn();
+    wire(stateWith({ files: new Map([['a.pdf', makeFile('a.pdf')]]), activeFileId: 'a.pdf' }));
+    registerCanvasServices({
+      canvas: () => null,
+      find: { isOpen: () => false, open, close: vi.fn() },
+    });
+    expect(invokeCommand('tools.open.ocr')).toBe(true);
+    expect(open).toHaveBeenCalledTimes(1);
   });
 
   it('document.deleteSelection deletes the batch then clears — even when the reducer rejects', () => {
