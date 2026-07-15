@@ -173,6 +173,9 @@ function AppContent(): React.ReactElement {
   // active-file switcher lists these so a panel can retarget without leaving
   // the tab (a doc-tab click would move focus off Tools and unmount the panel).
   const tabFileList = Array.from(state.files.values()).filter((f) => !f.importOnly);
+  // The active file, but only if the document picker below actually lists it.
+  const selectableFile =
+    tabFileList.some((f) => f.path === state.activeFileId) ? state.activeFileId : null;
 
   // Commit-failure banner: commits triggered from gates/effects have no
   // natural place to report, so failures surface here.
@@ -993,9 +996,19 @@ function AppContent(): React.ReactElement {
                     <span className="tool-pane-file-label">File</span>
                     <select
                       data-testid="tools-active-file"
-                      value={state.activeFileId ?? ''}
+                      // Clamped to a file this list actually offers. React
+                      // resolves a controlled <select> whose value matches no
+                      // <option> by selecting the FIRST one — so an active file
+                      // that isn't in the list wouldn't show as "unset", it
+                      // would confidently name the wrong document while the
+                      // panels worked on another. The reducer now guarantees the
+                      // active file is never a ghost, so this is defence in
+                      // depth: if the invariant ever breaks, show nothing rather
+                      // than a lie.
+                      value={selectableFile ?? ''}
                       onChange={(e) => dispatch({ type: 'SET_ACTIVE_FILE', path: e.target.value })}
                     >
+                      {selectableFile === null && <option value="">—</option>}
                       {tabFileList.map((f) => (
                         <option key={f.path} value={f.path}>
                           {isFileDirty(f) ? `* ${f.name}` : f.name}

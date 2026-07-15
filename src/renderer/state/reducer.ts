@@ -336,8 +336,22 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const base = clearSelection(state);
       const files = new Map(state.files);
       files.delete(action.path);
+      // Fall back to the next file the user can actually SEE — never a
+      // byte-only import source. Ghosts have no tab and are never shown, so
+      // making one "the active file" hands every panel an invisible target:
+      // the Tools tab's document picker (which lists only real files) then
+      // can't match it and, being a native <select>, confidently highlights a
+      // DIFFERENT file while the panels operate on the ghost.
+      //
+      // The tab fallback below already skipped ghosts; only the tab. Fixing the
+      // active id at the source makes that guard belt-and-braces instead of the
+      // thing holding the invariant up — the M5.1 lesson (see CLAUDE.md § Design
+      // invariants: activeFileId !== null is NOT "a document the user can see").
+      // All ghosts left = nothing to be active; null is the honest answer.
+      const nextActive =
+        [...files.values()].find((f) => !f.importOnly)?.path ?? null;
       const activeFileId = state.activeFileId === action.path
-        ? (files.size > 0 ? files.keys().next().value ?? null : null)
+        ? nextActive
         : state.activeFileId;
       // Drop the file's documents, and strip its pages out of every other
       // document — pending cross-file moves referencing it could never be

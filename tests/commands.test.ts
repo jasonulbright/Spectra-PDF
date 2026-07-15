@@ -151,9 +151,12 @@ describe('the ghost import-source hazard (2n.3)', () => {
   // no way to become a real document on its own — nothing ever flips the flag.
   // Every consumer that means "a document the user can see" must exclude it;
   // several meant `activeFileId !== null`, which is a different question.
-  it('CLOSE_FILE really can leave a ghost as the active file', () => {
-    // Pins the precondition the guards defend against — if this ever stops
-    // being reachable, the guards are still right but the tests below are moot.
+  it('CLOSE_FILE lands on neither a ghost tab nor a ghost active file', () => {
+    // Both fallbacks, checked together. The tab fallback was ghost-aware from
+    // the start; the ACTIVE-ID fallback wasn't, and M5.2's review showed why
+    // that mattered — see the two cases below. Now that the active id can't be
+    // a ghost either, the tab guard is belt-and-braces rather than the thing
+    // holding the invariant up, and both must stay true.
     let s = appReducer(initialState, {
       type: 'OPEN_FILE', path: 'a.pdf', workingPath: 'a.w', name: 'a.pdf',
       pageCount: 1, buffer: [1],
@@ -168,12 +171,64 @@ describe('the ghost import-source hazard (2n.3)', () => {
     s = appReducer(s, { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
     expect(s.ui.focusedTab).toEqual({ doc: 'a.pdf' });
     s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
-    expect(s.activeFileId).toBe('src.pdf');
-    expect(s.files.get('src.pdf')?.importOnly).toBe(true);
-    // The tab fallback IS ghost-aware — it must NOT land on the ghost's
-    // (nonexistent) tab. The active id is not ghost-aware, hence the guards.
+    expect(s.files.get('src.pdf')?.importOnly).toBe(true); // the ghost survives
+    expect(s.activeFileId).toBeNull();
     expect(s.ui.focusedTab).toBe('home');
     expect(hasActiveFile(s)).toBe(false);
+  });
+
+  it('CLOSE_FILE never falls back onto a ghost when a REAL file remains', () => {
+    // The Map's first remaining key can be a ghost while real files sit behind
+    // it (open A, import from C, open B — insertion order is A, C, B). Closing
+    // A used to make C — invisible, tab-less — the active file, which handed
+    // every Tools panel an unseeable target while the tab quietly went Home.
+    // The Tools tab's document picker lists only real files, so it couldn't
+    // match C: React resolves a controlled <select> with no matching option by
+    // selecting the FIRST one, so it would have confidently displayed B while
+    // the panels operated on C. The old rail degraded honestly (nothing looked
+    // selected); a <select> degrades to a lie, which is worse.
+    let s = appReducer(initialState, {
+      type: 'OPEN_FILE', path: 'a.pdf', workingPath: 'a.w', name: 'a.pdf',
+      pageCount: 1, buffer: [1],
+    });
+    s = appReducer(s, {
+      type: 'REGISTER_IMPORT_SOURCE', path: 'ghost.pdf', workingPath: 'g.w',
+      name: 'ghost.pdf', pageCount: 1, buffer: [2],
+    });
+    s = appReducer(s, {
+      type: 'OPEN_FILE', path: 'b.pdf', workingPath: 'b.w', name: 'b.pdf',
+      pageCount: 1, buffer: [3],
+    });
+    // The ghost really is ahead of b.pdf in the Map — otherwise this passes for
+    // the wrong reason.
+    expect([...s.files.keys()]).toEqual(['a.pdf', 'ghost.pdf', 'b.pdf']);
+    // Go BACK to a.pdf before closing it. Without this the fallback never runs
+    // at all (`OPEN_FILE b.pdf` already made b active, so closing a doesn't
+    // touch activeFileId) and the case passes against the unfixed code —
+    // it did, until the mutation check caught it.
+    s = appReducer(s, { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
+    expect(s.activeFileId).toBe('a.pdf');
+
+    s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(s.activeFileId).toBe('b.pdf'); // the real file, not the ghost ahead of it
+    expect(hasActiveFile(s)).toBe(true);
+    expect(s.ui.focusedTab).toEqual({ doc: 'b.pdf' });
+  });
+
+  it('CLOSE_FILE leaves NO active file when only ghosts remain', () => {
+    // Nothing the user can see is open, so there is nothing to be active. null
+    // is the honest answer — better than naming bytes with no window.
+    let s = appReducer(initialState, {
+      type: 'OPEN_FILE', path: 'a.pdf', workingPath: 'a.w', name: 'a.pdf',
+      pageCount: 1, buffer: [1],
+    });
+    s = appReducer(s, {
+      type: 'REGISTER_IMPORT_SOURCE', path: 'ghost.pdf', workingPath: 'g.w',
+      name: 'ghost.pdf', pageCount: 1, buffer: [2],
+    });
+    s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(s.activeFileId).toBeNull();
+    expect(s.ui.focusedTab).toBe('home');
   });
 
   it('OPEN_FILE upgrades a ghost into a real document', () => {
