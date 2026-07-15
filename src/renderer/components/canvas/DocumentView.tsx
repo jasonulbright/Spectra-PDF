@@ -175,7 +175,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // a doc narrower than the pane still centres instead of hugging the left edge.
   // Widest-of-ALL-pages (not just the rendered window) so the width doesn't
   // jitter as you scroll past a wide page.
-  const contentWidth = Math.ceil(widestAtBase * (pageHeight / READING_BASE_HEIGHT));
+  // Exact, NOT ceil'd: CSS takes fractional widths, and rounding UP can make the
+  // spacer a fraction of a pixel wider than a pane the page genuinely fits,
+  // opening a scrollbar over nothing (review-caught — a ~0.2px band of pane
+  // widths, reachable under display scaling).
+  const contentWidth = widestAtBase * (pageHeight / READING_BASE_HEIGHT);
 
   // Track the scroll position + viewport height (drives virtualization + the
   // current-page report). ResizeObserver keeps viewportH live on pane resize.

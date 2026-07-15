@@ -459,7 +459,7 @@ describe('zoom presets — Actual Size / Fit Width', () => {
     it('Fit Width is exact on panes up to an 8K-wide window', () => {
       // 4459px was the old ceiling — a maximized 5K/ultrawide already broke it.
       for (const pane of [800, 1600, 2560, 3440, 5120, 7680]) {
-        const z = fitWidthZoom(pane, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
+        const z = fitWidthZoom(pane, displayWidthAt(LETTER, READING_BASE_HEIGHT));
         expect(within(z), `pane ${pane}px -> zoom ${z}`).toBe(true);
         expect(clampZoom(z, 10)).toBeCloseTo(z, 6); // the clamp is a no-op: honest fit
       }
@@ -486,7 +486,7 @@ describe('zoom presets — Actual Size / Fit Width', () => {
 
     it('the stepper shares the presets range (a preset must never exceed the ceiling)', () => {
       // If MAX_ZOOM were below a reachable preset, the next Ctrl+= would zoom OUT.
-      const widest = fitWidthZoom(7680, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
+      const widest = fitWidthZoom(7680, displayWidthAt(LETTER, READING_BASE_HEIGHT));
       expect(MAX_ZOOM).toBeGreaterThan(widest);
       expect(MIN_ZOOM).toBeLessThan(actualSizeZoom({ id: 'tiny', width: 144, height: 72 }, READING_BASE_HEIGHT));
     });
