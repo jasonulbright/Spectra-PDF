@@ -334,7 +334,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         pageDirtyPaths: dirtyPaths,
       };
     }
-    case 'SET_ACTIVE_FILE':
+    case 'SET_ACTIVE_FILE': {
+      // A per-doc focus names a partition of the file being left — like
+      // focusTab, drop it so the reading view can't keep rendering the old
+      // file's document while the tab strip says another file is active
+      // (review-caught: reopening an already-open file dispatches only
+      // SET_ACTIVE_FILE, so the stale id survived and won the resolution).
+      const cleared =
+        state.ui.focusedDocId !== null && action.path !== state.activeFileId
+          ? { ...state.ui, focusedDocId: null }
+          : state.ui;
       return {
         ...state,
         activeFileId: action.path,
@@ -343,9 +352,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         // strip stays put, exactly like the old rail-list selection.
         ui:
           isDocTab(state.ui.focusedTab) && state.files.has(action.path)
-            ? { ...state.ui, focusedTab: { doc: action.path } }
-            : state.ui,
+            ? { ...cleared, focusedTab: { doc: action.path } }
+            : cleared,
       };
+    }
     case 'UPDATE_FILE': {
       const files = applyFileUpdate(state.files, action);
       if (files === state.files) return state;
@@ -469,18 +479,30 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         state.pageUndoStack,
         state.pageRedoStack,
       );
-      // A per-doc focus into THIS path is stale the moment its documents are
+      // A per-doc focus into THIS path can be stale once its documents are
       // re-derived: `OpenDocument.id` is positional (`path#docIndex`), so the
-      // same id string can now name a DIFFERENT partition — reordering two
-      // `.pdfx` strips and committing swaps what `book.pdfx#1` means, and the
-      // reading view would silently show the other partition with no signal.
-      // Same invalidation every other buffer-replacing case applies to the
-      // positional selection ids; dropping to null re-resolves to the active
-      // file's first document (review-caught).
-      const ui =
-        state.ui.focusedDocId?.startsWith(`${action.path}#`)
-          ? { ...state.ui, focusedDocId: null }
-          : state.ui;
+      // same id string can come back naming a DIFFERENT partition — reordering
+      // two `.pdfx` strips and committing swaps what `book.pdfx#1` means, and
+      // the reading view would silently show the other partition with no signal
+      // (the positional-id re-binding class CLAUDE.md records for redaction
+      // marks). But clear only when the CONTENT under that id actually moved:
+      // a reindex fires for ANY buffer change — a bookmark rename, an OCR pass —
+      // and blanket-clearing would snap the reading view back to partition 1 for
+      // edits that changed nothing about the partitions (both review-caught, one
+      // round apart). Page ids are positional over the whole file, so an
+      // unchanged composition re-derives an identical page-id list.
+      const focusedId = state.ui.focusedDocId;
+      let ui = state.ui;
+      if (focusedId && focusedId.startsWith(`${action.path}#`)) {
+        const before = prev.find((d) => d.id === focusedId);
+        const after = documents.find((d) => d.id === focusedId);
+        const sameContent =
+          !!before &&
+          !!after &&
+          before.pages.length === after.pages.length &&
+          before.pages.every((p, i) => p.id === after.pages[i].id);
+        if (!sameContent) ui = { ...state.ui, focusedDocId: null };
+      }
       return { ...state, files, ui, workspace: { documents } };
     }
     case 'REORDER_PAGES': {

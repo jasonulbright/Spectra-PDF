@@ -129,6 +129,60 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(reindexed.ui.focusedDocId).toBeNull();
   });
 
+  // A reindex fires for ANY buffer change (a bookmark rename, an OCR pass), so
+  // clearing on every touch would snap the reading view back to partition 1 for
+  // edits that changed nothing about the partitions.
+  it('KEEPS a per-doc focus when a reindex re-derives identical partitions', () => {
+    const a = makeFile('book.pdfx', 5);
+    const focused = appReducer(
+      { ...partitionedState(), activeFileId: 'book.pdfx' },
+      { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
+    );
+    // e.g. a bookmark rename: new buffer, same manifest -> same partitions.
+    const reindexed = appReducer(focused, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'book.pdfx',
+      documents: [
+        makeDoc(a, 'book.pdfx#0', makePages('book.pdfx', 3)),
+        makeDoc(a, 'book.pdfx#1', makePages('book.pdfx', 2, 3)),
+      ],
+    });
+    expect(reindexed.ui.focusedDocId).toBe('book.pdfx#1');
+  });
+
+  it('drops a per-doc focus when the focused id vanishes (partitions collapse to one)', () => {
+    const a = makeFile('book.pdfx', 5);
+    const focused = appReducer(
+      { ...partitionedState(), activeFileId: 'book.pdfx' },
+      { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
+    );
+    const reindexed = appReducer(focused, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'book.pdfx',
+      documents: [makeDoc(a, 'book.pdfx#0', makePages('book.pdfx', 5))],
+    });
+    expect(reindexed.ui.focusedDocId).toBeNull();
+  });
+
+  // Reopening an already-open file dispatches only SET_ACTIVE_FILE — the stale
+  // focus survived and outranked the active file in resolution.
+  it('drops a per-doc focus when the active file changes underneath it', () => {
+    const focused = appReducer(twoDocState(), { type: 'UI_FOCUS_DOC', docId: 'b.pdf#0' });
+    expect(focused.ui.focusedDocId).toBe('b.pdf#0');
+    const switched = appReducer(focused, { type: 'SET_ACTIVE_FILE', path: 'a.pdf' });
+    expect(switched.activeFileId).toBe('a.pdf');
+    expect(switched.ui.focusedDocId).toBeNull();
+  });
+
+  it('keeps a per-doc focus when SET_ACTIVE_FILE re-activates the same file', () => {
+    const s = appReducer(
+      { ...partitionedState(), activeFileId: 'book.pdfx' },
+      { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
+    );
+    const again = appReducer(s, { type: 'SET_ACTIVE_FILE', path: 'book.pdfx' });
+    expect(again.ui.focusedDocId).toBe('book.pdfx#1');
+  });
+
   it('leaves a per-doc focus alone when a DIFFERENT path re-indexes', () => {
     const b = makeFile('b.pdf', 2);
     const focused = appReducer(twoDocState(), { type: 'UI_FOCUS_DOC', docId: 'b.pdf#0' });

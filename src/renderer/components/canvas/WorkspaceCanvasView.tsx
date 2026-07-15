@@ -139,8 +139,16 @@ export function WorkspaceCanvasView({
   // holds a positional `OpenDocument.id`, so a reindex can retire it, and
   // resolving through the default then keeps the view on the active file
   // instead of blanking.
+  // The `d.path === activeFileId` clause is a STRUCTURAL guard, not redundancy:
+  // it makes "the reading view shows a document of the active file" true by
+  // construction, so no future action can strand it on another file's document
+  // by forgetting to clear the focus (review-caught via SET_ACTIVE_FILE, which
+  // did exactly that — now also cleared, but the invariant no longer depends on
+  // every writer remembering).
   const focusedDoc =
-    (state.ui.focusedDocId ? docs.find((d) => d.id === state.ui.focusedDocId) : null) ??
+    (state.ui.focusedDocId
+      ? docs.find((d) => d.id === state.ui.focusedDocId && d.path === state.activeFileId)
+      : null) ??
     docs.find((d) => d.path === state.activeFileId) ??
     null;
   const focusedDocRef = useRef(focusedDoc);
