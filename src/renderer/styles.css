@@ -577,9 +577,17 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  /* auto, NOT hidden: rows are centred, so a page wider than the pane would be
+     clipped on BOTH edges with no way to reach them — which is routine at Actual
+     Size for landscape/large-format pages, i.e. exactly where actual size
+     matters. The spacer takes the widest page's width (DocumentView). */
+  overflow-x: auto;
   background: #262626;
 }
+/* min-width keeps the centring honest when the document is NARROWER than the
+   pane: without it the spacer would shrink to the page and `left: 50%` would
+   centre within that, hugging the left edge instead of the viewport. */
+.docview-spacer { min-width: 100%; }
 .docview-row {
   background: #ffffff;
   box-shadow: var(--page-shadow);

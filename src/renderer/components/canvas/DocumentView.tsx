@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -161,6 +162,20 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // (widths vary by aspect), so offsets are a simple arithmetic series — the
   // virtualizer needs only counts, and centerOn/current-page are O(1).
   const contentHeight = pageCount * rowH;
+
+  // The widest page decides the scrollable WIDTH (M4.1f). Without this the
+  // spacer is only as wide as the pane, and a page wider than it — routine at
+  // Actual Size on anything landscape or large-format — is clipped symmetrically
+  // by the centring with no way to reach its edges, which makes "Actual Size"
+  // useless on exactly the documents that need it. Paired with `min-width: 100%`
+  // in CSS so a doc narrower than the pane still centres instead of hugging the
+  // left edge. Widest-of-ALL-pages (not just the rendered window) so the width
+  // doesn't jitter as you scroll past a wide page.
+  const contentWidth = useMemo(() => {
+    let w = 0;
+    for (const p of doc.pages) w = Math.max(w, displayWidthOf(p) * (pageHeight / BASE_PAGE_HEIGHT));
+    return Math.ceil(w);
+  }, [doc.pages, pageHeight]);
 
   // Track the scroll position + viewport height (drives virtualization + the
   // current-page report). ResizeObserver keeps viewportH live on pane resize.
@@ -393,7 +408,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       tabIndex={0}
       onScroll={onScroll}
     >
-      <div className="docview-spacer" style={{ height: contentHeight, position: 'relative' }}>
+      <div
+        className="docview-spacer"
+        style={{ height: contentHeight, width: contentWidth, position: 'relative' }}
+      >
         {rows}
       </div>
     </div>
