@@ -179,6 +179,17 @@ const SAFE_CONTENT_HEIGHT = 30_000_000;
  * The largest zoom this document can take without its spacer exceeding
  * `SAFE_CONTENT_HEIGHT` — i.e. the point past which pages would stop being
  * reachable. Every page stays scrollable at any zoom the view allows.
+ *
+ * KNOWN BOUND, accepted: for a document of several thousand pages this ceiling
+ * can fall BELOW a preset's honest target, so Actual Size / Fit Width then
+ * render short of their label (e.g. Fit Width on a 5120px pane is honest to
+ * ~4,400 pages; a 10,000-page doc gets ~44% of the pane). That is inherent to
+ * laying the column out under ONE full-height DOM spacer — once row height must
+ * be capped for reachability, no zoom-only fix exists. It fails SAFE (renders
+ * smaller; never unreachable, never a wrong page number), and reachability beats
+ * fidelity: a page you cannot scroll to is worse than one rendered small. The
+ * escape, if it ever matters, is to drop the full-height spacer for a translated
+ * window — a virtualization redesign, not a zoom change.
  */
 export function maxZoomFor(pageCount: number): number {
   if (pageCount <= 0) return MAX_ZOOM;

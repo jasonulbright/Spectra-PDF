@@ -125,29 +125,41 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
 ): React.JSX.Element {
   const { doc, proxies } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState(1);
+  const [zoomState, setZoom] = useState(1);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
+
+  const pageCount = doc.pages.length;
+  // The EFFECTIVE zoom, re-derived every render — the document's page count is
+  // half of what makes a zoom valid (see maxZoomFor), and it changes UNDER a
+  // stable zoom: an Undo/Import/merge grows the doc without remounting this view
+  // (`OpenDocument.id` survives page-tier edits, and the view is keyed on it), so
+  // clamping only where zoom is WRITTEN left the existing zoom stale and the
+  // spacer over the browser's element cap with no zoom press at all — and the
+  // next Ctrl+= then visibly zoomed OUT. Deriving makes "the zoom is renderable"
+  // true by construction rather than something every writer must remember; it
+  // also covers the initial state, which no write site ever sees.
+  const zoom = clampZoom(zoomState, pageCount);
+  const pageHeight = pageHeightAt(zoom);
+  const gap = PAGE_GAP * zoom;
+  const rowH = pageHeight + gap;
+
   // A "settle" signal for the raster: PageView's detail layer only re-renders
   // when its `version` changes; on the board that comes from <Canvas onSettle>,
   // which isn't mounted here. So after a zoom, bump this a beat later (debounced
   // — a burst of Ctrl+= re-details once) and fold it into the version handed to
   // each PageCell, so the visible page re-rasters crisp at the new size instead
-  // of staying a CSS-stretched (blurry) base raster (review-caught).
+  // of staying a CSS-stretched (blurry) base raster (review-caught). Keyed on the
+  // EFFECTIVE zoom, so a re-derived clamp re-details too.
   const [zoomVersion, setZoomVersion] = useState(0);
   useEffect(() => {
     const t = setTimeout(() => setZoomVersion((v) => v + 1), 140);
     return () => clearTimeout(t);
   }, [zoom]);
 
-  const pageHeight = pageHeightAt(zoom);
-  const gap = PAGE_GAP * zoom;
-  const rowH = pageHeight + gap;
-
   // Cumulative Y offset of each page (top of its row). Pages are uniform-height
   // (widths vary by aspect), so offsets are a simple arithmetic series — the
   // virtualizer needs only counts, and centerOn/current-page are O(1).
-  const pageCount = doc.pages.length;
   const contentHeight = pageCount * rowH;
 
   // Track the scroll position + viewport height (drives virtualization + the
@@ -268,6 +280,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // handle's zoom calls are imperative, so they read it off a ref.
   const pageCountRef = useRef(pageCount);
   pageCountRef.current = pageCount;
+  // The steppers must step from the EFFECTIVE zoom, not the raw state: stepping
+  // from a state the derivation has already clamped down would move the wrong
+  // way (or not at all).
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
   const currentPage = useCallback((): PageRef | null => {
     const pages = pagesRef.current;
     return pages[Math.min(pages.length, Math.max(1, currentPageRef.current)) - 1] ?? null;
@@ -299,8 +316,8 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       // browser's element-height limit and the tail of the doc would stop being
       // reachable (see maxZoomFor). That includes `reset`: a document long
       // enough that even zoom 1 overflows must not be forced back to it.
-      zoomIn: () => setZoom((z) => clampZoom(z * ZOOM_STEP, pageCountRef.current)),
-      zoomOut: () => setZoom((z) => clampZoom(z / ZOOM_STEP, pageCountRef.current)),
+      zoomIn: () => setZoom(clampZoom(zoomRef.current * ZOOM_STEP, pageCountRef.current)),
+      zoomOut: () => setZoom(clampZoom(zoomRef.current / ZOOM_STEP, pageCountRef.current)),
       reset: () => setZoom(clampZoom(1, pageCountRef.current)),
       actualSize,
       fitWidth,

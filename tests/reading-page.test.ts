@@ -509,5 +509,30 @@ describe('zoom presets — Actual Size / Fit Width', () => {
     it('treats an empty doc as unconstrained', () => {
       expect(maxZoomFor(0)).toBe(MAX_ZOOM);
     });
+
+    // Round-3 regression. The count is half of what makes a zoom valid, and it
+    // changes UNDER a stable zoom (Undo/Import/merge grow the doc without
+    // remounting the view). Clamping only where zoom is WRITTEN left the existing
+    // zoom stale and the spacer over the cap with no zoom press at all — so
+    // DocumentView derives `zoom = clampZoom(zoomState, pageCount)` every render.
+    // These pin the derivation's contract.
+    it('re-clamps a previously-valid zoom when the document GROWS under it', () => {
+      // 476 pages @ 64x is legitimate — maxZoomFor doesn't reduce it...
+      expect(maxZoomFor(476)).toBe(MAX_ZOOM);
+      expect(clampZoom(MAX_ZOOM, 476)).toBe(MAX_ZOOM);
+      // ...then an Undo/Import brings it to 534 pages while zoom state stays 64.
+      expect(contentHeightAt(534, MAX_ZOOM)).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
+      const effective = clampZoom(MAX_ZOOM, 534); // what the render now derives
+      expect(effective).toBeLessThan(MAX_ZOOM);
+      expect(contentHeightAt(534, effective)).toBeLessThan(CHROMIUM_ELEMENT_CAP);
+    });
+
+    it('clamps the INITIAL zoom of 1 for a document long enough to overflow at 1x', () => {
+      // No write site ever sees the initial state, so only the derivation covers it.
+      expect(contentHeightAt(34_101, 1)).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
+      const effective = clampZoom(1, 34_101);
+      expect(effective).toBeLessThan(1);
+      expect(contentHeightAt(34_101, effective)).toBeLessThan(CHROMIUM_ELEMENT_CAP);
+    });
   });
 });
