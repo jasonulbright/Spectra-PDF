@@ -18,7 +18,7 @@ import type { CanvasTool, StampPreset } from './PageCell';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import { BASE_PAGE_HEIGHT, displayWidthOf } from '../../canvas/layout';
 import { isEditable } from '../../commands/keymap';
-import { currentPageFor } from '../../canvas/reading-page';
+import { anchorHolds, currentPageFor, type JumpAnchor } from '../../canvas/reading-page';
 import { PageCell } from './PageCell';
 
 // The continuous reading view (Phase 4 M4, § 6): one document, a single
@@ -168,16 +168,28 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   const first = Math.max(0, Math.floor(scrollTop / rowH) - OVERSCAN);
   const last = Math.min(pageCount - 1, Math.ceil((scrollTop + viewportH) / rowH) + OVERSCAN);
 
-  // Report the current page (nearest the viewport top). Debounced to a rAF-ish
-  // cadence by React's batching; the parent dedupes.
+  // A jump's recorded intent — see JumpAnchor's header for why scroll position
+  // alone cannot answer this at the extremes.
+  const jumpAnchorRef = useRef<JumpAnchor | null>(null);
+
+  // Report the current page. Debounced to a rAF-ish cadence by React's
+  // batching; the parent dedupes.
   const onCurrentPageChange = props.onCurrentPageChange;
+  const onCurrentPageChangeRef = useRef(onCurrentPageChange);
+  onCurrentPageChangeRef.current = onCurrentPageChange;
   useEffect(() => {
     if (!onCurrentPageChange || pageCount === 0 || viewportH === 0) return;
-    // Pure math (canvas/reading-page.ts) — the tie-break is subtle enough to
-    // need its own tests; see that module's header.
-    onCurrentPageChange(
-      currentPageFor({ scrollTop, viewportH, rowH, pageHeight, pageCount, contentHeight }),
-    );
+    const m = { scrollTop, viewportH, rowH, pageHeight, pageCount, contentHeight };
+    // A jump wins until the user scrolls away from where it landed; then the
+    // anchor is dropped and the view speaks for itself. Both halves are pure
+    // (canvas/reading-page.ts) — the tie-break and the extremes are subtle
+    // enough to own tests; see that module's header.
+    if (anchorHolds(jumpAnchorRef.current, m)) {
+      onCurrentPageChange(jumpAnchorRef.current!.page);
+      return;
+    }
+    jumpAnchorRef.current = null;
+    onCurrentPageChange(currentPageFor(m));
   }, [scrollTop, rowH, pageHeight, pageCount, viewportH, contentHeight, onCurrentPageChange]);
 
   // The reading CanvasHandle — pure scroll + scale, no world matrix.
@@ -191,6 +203,19 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       const top = idx * rowH;
       const offset = Math.max(0, (el.clientHeight - pageHeight) / 2);
       el.scrollTo({ top: Math.max(0, top - offset), behavior: 'auto' });
+      // Record where it actually LANDED (behavior:'auto' settles scrollTop
+      // synchronously, so this is the browser's own clamp applied) together with
+      // what it meant, so the scroll event this fires can't "correct" a jump to
+      // a boundary-adjacent page into the boundary page itself.
+      jumpAnchorRef.current = {
+        scrollTop: el.scrollTop,
+        page: idx + 1,
+        rowH,
+        viewportH: el.clientHeight,
+      };
+      // Report immediately: a jump that doesn't move the view (already parked
+      // there) fires no scroll event, so the effect above would never re-run.
+      onCurrentPageChangeRef.current?.(idx + 1);
     },
     [doc.pages, rowH, pageHeight],
   );

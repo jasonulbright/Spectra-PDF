@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { currentPageFor, type ReadingMetrics } from '../src/renderer/canvas/reading-page';
+import {
+  anchorHolds,
+  currentPageFor,
+  type JumpAnchor,
+  type ReadingMetrics,
+} from '../src/renderer/canvas/reading-page';
 
 // Mirrors DocumentView's real constants so these cases are the ones a user hits.
 const READING_BASE_HEIGHT = 960;
@@ -51,6 +56,9 @@ describe('currentPageFor — reading view current page', () => {
     const pageCount = 50;
     const viewportH = 800;
 
+    // NOTE: this one does not discriminate the tie-break fix (the old
+    // topmost-wins code also said 1 here). It pins the OTHER regression
+    // direction: a pure centre-proximity rule reports 2 at the top of the doc.
     it('reports page 1 at the top, not the centred page', () => {
       const m = metrics({ zoom, pageCount, viewportH, scrollTop: 0 });
       expect(currentPageFor(m)).toBe(1);
@@ -91,11 +99,77 @@ describe('currentPageFor — reading view current page', () => {
       expect(currentPageFor(metrics({ zoom: 1, pageCount: 10, viewportH: 0, scrollTop: 0 }))).toBe(1);
     });
 
-    it('never exceeds the page count when the whole doc fits', () => {
+    it('reports page 1 when the whole doc fits (both extremes true at once)', () => {
       const m = metrics({ zoom: 0.233, pageCount: 3, viewportH: 800, scrollTop: 0 });
-      const p = currentPageFor(m);
-      expect(p).toBeGreaterThanOrEqual(1);
-      expect(p).toBeLessThanOrEqual(3);
+      expect(currentPageFor(m)).toBe(1);
     });
+
+    it('handles a single-page doc', () => {
+      expect(currentPageFor(metrics({ zoom: 1, pageCount: 1, viewportH: 800, scrollTop: 0 }))).toBe(1);
+    });
+  });
+});
+
+// The scroll-derived rules above CANNOT answer a boundary-adjacent jump: centring
+// page 2 wants a negative scrollTop and centring page 49/50 overshoots maxScroll,
+// so both land on exactly the scroll offset that "scrolled to the top/bottom"
+// occupies. The jump anchor records intent so those report what the user asked
+// for. (Round-3 review caught the clamps reopening the snap-back here.)
+describe('anchorHolds — a jump wins until the user scrolls away', () => {
+  const zoom = 0.233;
+  const pageCount = 50;
+  const viewportH = 800;
+  const base = metrics({ zoom, pageCount, viewportH, scrollTop: 0 });
+  const maxScroll = base.contentHeight - viewportH;
+
+  /** centerOn's real landing spot: centre, clamped to the scrollable range. */
+  function landOn(page: number): number {
+    return Math.min(maxScroll, scrollTopForCenterOn(page, base, viewportH));
+  }
+
+  function anchorFor(page: number): JumpAnchor {
+    return { scrollTop: landOn(page), page, rowH: base.rowH, viewportH };
+  }
+
+  it('a jump to page 2 clamps to the very top — scroll math says 1, the anchor says 2', () => {
+    const scrollTop = landOn(2);
+    expect(scrollTop).toBe(0); // it really does saturate
+    const m = metrics({ zoom, pageCount, viewportH, scrollTop });
+    expect(currentPageFor(m)).toBe(1); // why the anchor is needed
+    expect(anchorHolds(anchorFor(2), m)).toBe(true);
+  });
+
+  it('a jump to page 49 saturates at maxScroll — scroll math says 50, the anchor says 49', () => {
+    const scrollTop = landOn(49);
+    expect(scrollTop).toBe(maxScroll); // it really does saturate
+    const m = metrics({ zoom, pageCount, viewportH, scrollTop });
+    expect(currentPageFor(m)).toBe(50); // why the anchor is needed
+    expect(anchorHolds(anchorFor(49), m)).toBe(true);
+  });
+
+  it('drops once the user scrolls away from where the jump landed', () => {
+    const a = anchorFor(25);
+    const moved = metrics({ zoom, pageCount, viewportH, scrollTop: a.scrollTop + 40 });
+    expect(anchorHolds(a, moved)).toBe(false);
+  });
+
+  it('survives a sub-pixel scroll settle', () => {
+    const a = anchorFor(25);
+    const jitter = metrics({ zoom, pageCount, viewportH, scrollTop: a.scrollTop + 0.5 });
+    expect(anchorHolds(a, jitter)).toBe(true);
+  });
+
+  it('is invalidated by a zoom or a resize (the layout it was taken under is gone)', () => {
+    const a = anchorFor(25);
+    const zoomed = metrics({ zoom: 0.5, pageCount, viewportH, scrollTop: a.scrollTop });
+    expect(anchorHolds(a, zoomed)).toBe(false);
+    const resized = metrics({ zoom, pageCount, viewportH: 600, scrollTop: a.scrollTop });
+    expect(anchorHolds(a, resized)).toBe(false);
+  });
+
+  it('rejects a stale anchor pointing past the current doc', () => {
+    const shorter = metrics({ zoom, pageCount: 3, viewportH, scrollTop: 0 });
+    expect(anchorHolds({ scrollTop: 0, page: 40, rowH: shorter.rowH, viewportH }, shorter)).toBe(false);
+    expect(anchorHolds(null, shorter)).toBe(false);
   });
 });

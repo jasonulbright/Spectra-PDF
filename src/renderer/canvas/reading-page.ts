@@ -25,6 +25,46 @@ export interface ReadingMetrics {
 const TIE_EPS = 0.5;
 
 /**
+ * A programmatic jump's intent, recorded by `centerOn`.
+ *
+ * Scroll position ALONE is ambiguous at the scroll extremes and cannot be made
+ * unambiguous by any formula: "scrolled to the top" and "jumped to page 2 of a
+ * pane showing pages 1-3" are the SAME scrollTop (centring page 2 wants a
+ * negative offset, so it clamps to 0), yet must report 1 and 2 respectively.
+ * Same at the end: jumping to page 49 of 50 saturates at maxScroll, which is
+ * also where "scrolled to the bottom" (page 50) lands. So a jump records what
+ * it MEANT, and that wins until the user scrolls away from it — which is how
+ * the page box stops snapping back (review-caught, twice: first the tie-break,
+ * then the boundary clamps that "fixed" it).
+ */
+export interface JumpAnchor {
+  /** The scroll offset the jump actually LANDED on (post browser clamp). */
+  scrollTop: number;
+  /** 1-based page the jump meant. */
+  page: number;
+  /** Layout the anchor was taken under — a zoom/resize invalidates it. */
+  rowH: number;
+  viewportH: number;
+}
+
+/** Sub-pixel slack for "the view is still parked where the jump left it". */
+const ANCHOR_EPS = 1;
+
+/**
+ * Whether a recorded jump still describes the current view: same layout, and
+ * the user hasn't scrolled away from where the jump landed.
+ */
+export function anchorHolds(anchor: JumpAnchor | null | undefined, m: ReadingMetrics): boolean {
+  if (!anchor) return false;
+  if (anchor.page < 1 || anchor.page > m.pageCount) return false;
+  return (
+    anchor.rowH === m.rowH &&
+    anchor.viewportH === m.viewportH &&
+    Math.abs(m.scrollTop - anchor.scrollTop) <= ANCHOR_EPS
+  );
+}
+
+/**
  * The 1-based current page: the one occupying the most of the viewport, with
  * ties broken deliberately.
  *
