@@ -40,6 +40,7 @@ export const initialUiState: UiState = {
   tool: 'select',
   docViewMode: 'organize',
   focusedDocId: null,
+  currentPageId: null,
   selectedPageIds: NO_SELECTION,
   selectionAnchor: null,
   recentFiles: [],
@@ -76,11 +77,13 @@ function focusTab(state: AppState, tab: FocusedTab): AppState {
           // survive the move (it would strand the reading view on a document
           // the new tab doesn't own). Back to "that file's first document".
           focusedDocId: null,
+          // ...and the reading position belonged to that document too.
+          currentPageId: null,
           tool: 'select',
           selectedPageIds: NO_SELECTION,
           selectionAnchor: null,
         }
-      : { ...state.ui, focusedTab: tab, focusedDocId: null },
+      : { ...state.ui, focusedTab: tab, focusedDocId: null, currentPageId: null },
   };
 }
 
@@ -341,8 +344,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // (review-caught: reopening an already-open file dispatches only
       // SET_ACTIVE_FILE, so the stale id survived and won the resolution).
       const cleared =
-        state.ui.focusedDocId !== null && action.path !== state.activeFileId
-          ? { ...state.ui, focusedDocId: null }
+        action.path !== state.activeFileId &&
+        (state.ui.focusedDocId !== null || state.ui.currentPageId !== null)
+          ? { ...state.ui, focusedDocId: null, currentPageId: null }
           : state.ui;
       return {
         ...state,
@@ -521,7 +525,21 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         !!focusedId &&
         (prev.some((d) => d.id === focusedId && d.path === action.path) ||
           action.documents.some((d) => d.id === focusedId));
-      const ui = ownedByThisPath ? { ...state.ui, focusedDocId: null } : state.ui;
+      // The reading position is positional too, and re-derived ids are REUSED —
+      // so a surviving `currentPageId` could highlight a different physical page
+      // in the Pages panel. Same trigger, same reasoning (roadmap § F).
+      const currentOfThisPath =
+        !!state.ui.currentPageId &&
+        (prev.some((d) => d.path === action.path && d.pages.some((p) => p.id === state.ui.currentPageId)) ||
+          action.documents.some((d) => d.pages.some((p) => p.id === state.ui.currentPageId)));
+      const ui =
+        ownedByThisPath || currentOfThisPath
+          ? {
+              ...state.ui,
+              focusedDocId: ownedByThisPath ? null : state.ui.focusedDocId,
+              currentPageId: currentOfThisPath ? null : state.ui.currentPageId,
+            }
+          : state.ui;
       return { ...state, files, ui, workspace: { documents } };
     }
     case 'REORDER_PAGES': {
@@ -974,6 +992,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_DOC_VIEW_MODE':
       if (action.mode === state.ui.docViewMode) return state;
       return { ...state, ui: { ...state.ui, docViewMode: action.mode } };
+    case 'UI_SET_CURRENT_PAGE':
+      if (action.pageId === state.ui.currentPageId) return state;
+      return { ...state, ui: { ...state.ui, currentPageId: action.pageId } };
     case 'UI_FOCUS_DOC': {
       if (action.docId === state.ui.focusedDocId) return state;
       // Focusing a document also activates the FILE that owns it — the reading

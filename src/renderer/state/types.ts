@@ -192,6 +192,15 @@ export interface UiState {
   // to the active file's first document. Resolution falls back to that default
   // when the id no longer exists (ids are positional and rebuilt on reindex).
   focusedDocId: string | null;
+  // The page the reading view is currently ON (M4.1e), as a `PageRef.id`. The
+  // Pages nav panel highlights and scroll-follows it, which is a DIFFERENT thing
+  // from `selectedPageIds` — you can be reading page 40 with nothing selected,
+  // or have a selection you scrolled away from. Reading-view only (the board
+  // shows every page at once and reports no "current"), so it is null there.
+  // Positional like every id here, so it is invalidated on the same triggers as
+  // `focusedDocId`; a stale one would only mis-highlight, but it would still be
+  // wrong (see roadmap § F).
+  currentPageId: string | null;
   // Canvas multi-select (2n.1) — view state, never the page-edit tier.
   // Positional PageRef ids: any buffer-identity change clears the selection
   // (the reducer does this where the buffers change; formerly a
@@ -287,6 +296,7 @@ export type AppAction =
   | { type: 'UI_SET_TOOL'; tool: CanvasTool }
   | { type: 'UI_SET_DOC_VIEW_MODE'; mode: DocViewMode }
   | { type: 'UI_FOCUS_DOC'; docId: string | null }
+  | { type: 'UI_SET_CURRENT_PAGE'; pageId: string | null }
   // Click selection with the canvas's modifier semantics (computed here —
   // range/toggle need the workspace-flattened order, which lives in state):
   // 'single' replaces; 'toggle' is Ctrl-click; 'range' is Shift-click from the

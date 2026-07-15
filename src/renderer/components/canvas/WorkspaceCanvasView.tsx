@@ -199,6 +199,20 @@ export function WorkspaceCanvasView({
     }
   }, [docViewMode, focusedDoc?.id]);
 
+  // Publish the reading position so the Pages nav panel can highlight and
+  // scroll-follow it (M4.1e). Resolved to a PageRef id here — the panel matches
+  // ids, and reconstructing one from a number there would duplicate this view's
+  // page-order knowledge. Null in Organize mode: the board shows every page at
+  // once and has no "current" page, so the panel must not claim one.
+  const currentPageId =
+    docViewMode === 'document' ? (focusedDoc?.pages[currentPage - 1]?.id ?? null) : null;
+  useEffect(() => {
+    dispatch({ type: 'UI_SET_CURRENT_PAGE', pageId: currentPageId });
+  }, [currentPageId, dispatch]);
+  // ...and it belongs to this view: leaving it entirely must not strand a
+  // highlight the panel would keep showing.
+  useEffect(() => () => void dispatch({ type: 'UI_SET_CURRENT_PAGE', pageId: null }), [dispatch]);
+
   // Publish the external-drop resolver (2n.3) so App's drop handler can map a
   // drop point to the document + index under it. Reads live layout/canvas via
   // refs; an 'into' target imports, a 'between' target returns null so App

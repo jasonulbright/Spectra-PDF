@@ -280,6 +280,13 @@
 }
 .thumb-row:hover { background: #1f1f1f; }
 .thumb-row.selected { background: rgba(0, 120, 212, 0.22); }
+/* The page being READ. Deliberately NOT the selection's fill: "you are here" and
+   "this is a delete/rotate target" are different claims, and the two can be true
+   of different pages at once (or the same one — hence a marker that composes
+   with .selected rather than replacing it). A left rule reads as a position
+   indicator without competing with the selection fill. */
+.thumb-row.current { box-shadow: inset 3px 0 0 var(--accent, #0078d4); }
+.thumb-row.current .thumb-label { color: #e5e5e5; font-weight: 600; }
 .thumb-frame {
   position: relative;
   background: #ffffff;
@@ -524,6 +531,7 @@
 [data-theme="light"] .thumb-row:hover { background: #f3f4f6; }
 [data-theme="light"] .thumb-label { color: #6b7280; }
 [data-theme="light"] .thumb-row.selected .thumb-label { color: #111827; }
+[data-theme="light"] .thumb-row.current .thumb-label { color: #111827; }
 
 /* ── Canvas workspace view ────────────────────────────────────────────────
    Ported from PDFx's canvas styles, scoped under .canvas-view. PDFx's theme

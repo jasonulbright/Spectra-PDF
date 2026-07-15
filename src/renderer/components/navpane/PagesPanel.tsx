@@ -338,6 +338,25 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
     [dispatch],
   );
 
+  // Scroll-follow the page being read (M4.1e). Keyed on the page id ALONE, so it
+  // fires when the reading view moves to a different page and NOT on the user's
+  // own panel scrolling (which would fight them) — `scrollTop` is deliberately
+  // not a dependency. Only nudges when the row is actually out of view, so
+  // scrolling within the current page never yanks the panel.
+  const currentPageId = state.ui.currentPageId;
+  useEffect(() => {
+    if (!currentPageId) return;
+    const el = scrollerRef.current;
+    if (!el) return;
+    const index = itemsRef.current.findIndex((it) => it.page.id === currentPageId);
+    if (index < 0) return; // not this file's page (or a stale id) — leave the panel be
+    const top = index * ROW_H;
+    const bottom = top + ROW_H;
+    if (top < el.scrollTop) el.scrollTo({ top, behavior: 'auto' });
+    else if (bottom > el.scrollTop + el.clientHeight)
+      el.scrollTo({ top: bottom - el.clientHeight, behavior: 'auto' });
+  }, [currentPageId]);
+
   const onThumbContextMenu = useCallback(
     (item: PageItem, e: React.MouseEvent) => {
       e.preventDefault();
@@ -379,13 +398,19 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
         {windowItems.map((item, i) => {
           const index = start + i;
           const isSelected = selected.has(item.page.id);
+          // The page being READ is a different thing from the selection — you
+          // can read page 40 with nothing selected, or select a page and scroll
+          // away from it — so it gets its own marker rather than reusing
+          // `selected` (which would falsely imply a delete/rotate target).
+          const isCurrent = item.page.id === currentPageId;
           const proxy = proxies.get(item.page.sourceDocId);
           return (
             <div
               key={item.page.id}
               data-testid="thumb"
               data-page-id={item.page.id}
-              className={'thumb-row' + (isSelected ? ' selected' : '')}
+              data-current={isCurrent ? 'true' : undefined}
+              className={'thumb-row' + (isSelected ? ' selected' : '') + (isCurrent ? ' current' : '')}
               style={{ position: 'absolute', top: index * ROW_H, height: ROW_H, left: 0, right: 0 }}
               onPointerDown={(e) => onRowPointerDown(item, e)}
               onClick={(e) => onThumbClick(item, e)}

@@ -228,6 +228,48 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(reindexed.ui.focusedDocId).toBe('b.pdf#0');
   });
 
+  // M4.1e — the reading position the Pages panel highlights/scroll-follows. It
+  // is a positional id like every other, so it invalidates on the same triggers
+  // (roadmap § F): a stale one would mis-highlight a different physical page.
+  it('tracks the current page and clears it on a tab switch', () => {
+    // Start IN doc-land: focusTab short-circuits a no-op switch, so reading
+    // position must be established on a real doc tab first.
+    const inDoc = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
+    const s = appReducer(inDoc, { type: 'UI_SET_CURRENT_PAGE', pageId: 'a.pdf#p2' });
+    expect(s.ui.currentPageId).toBe('a.pdf#p2');
+    // ...to another doc tab, and out of doc-land entirely.
+    expect(appReducer(s, { type: 'UI_FOCUS_TAB', tab: { doc: 'b.pdf' } }).ui.currentPageId).toBeNull();
+    expect(appReducer(s, { type: 'UI_FOCUS_TAB', tab: 'home' }).ui.currentPageId).toBeNull();
+  });
+
+  it('clears the current page when the active file changes underneath it', () => {
+    const s = appReducer(twoDocState(), { type: 'UI_SET_CURRENT_PAGE', pageId: 'b.pdf#p0' });
+    expect(appReducer(s, { type: 'SET_ACTIVE_FILE', path: 'a.pdf' }).ui.currentPageId).toBeNull();
+  });
+
+  it('clears the current page when its own file re-indexes (ids are REUSED)', () => {
+    const a = makeFile('a.pdf', 3);
+    const s = appReducer(twoDocState(), { type: 'UI_SET_CURRENT_PAGE', pageId: 'a.pdf#p2' });
+    const reindexed = appReducer(s, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))],
+    });
+    expect(reindexed.ui.currentPageId).toBeNull();
+  });
+
+  it('leaves the current page alone when a DIFFERENT file re-indexes', () => {
+    const b = makeFile('b.pdf', 2);
+    const s = appReducer(twoDocState(), { type: 'UI_SET_CURRENT_PAGE', pageId: 'b.pdf#p0' });
+    const reindexed = appReducer(s, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [makeDoc(makeFile('a.pdf', 3), 'a.pdf#0', makePages('a.pdf', 3))],
+    });
+    expect(reindexed.ui.currentPageId).toBe('b.pdf#p0');
+    void b;
+  });
+
   it('clearing to null returns to the default (first doc of the active file)', () => {
     const focused = appReducer(
       { ...partitionedState(), activeFileId: 'book.pdfx' },
