@@ -394,6 +394,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onClearNewFieldPlacement={props.onClearNewFieldPlacement}
           onPageContextMenu={props.onPageContextMenu}
           onPagePointerDown={NO_PAGE_POINTER}
+          textLayer
           onAddAnnotation={props.onAddAnnotation}
           onUpdateAnnotation={props.onUpdateAnnotation}
           onRecolorAnnotation={props.onRecolorAnnotation}

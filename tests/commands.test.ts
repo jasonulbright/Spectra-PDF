@@ -20,6 +20,7 @@ import {
   runEscapeInterceptors,
   setCommandStateSource,
 } from '../src/renderer/commands/context';
+import { KEY_BINDINGS } from '../src/renderer/commands/acrobat-keys';
 import type { AppCommandHandlers } from '../src/renderer/commands/types';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import type { AppAction, AppState, OpenFile } from '../src/renderer/state/types';
@@ -305,5 +306,38 @@ describe('registry smoke', () => {
       setCommandStateSource(null);
       registerAppCommandHandlers(null);
     }
+  });
+});
+
+// M4.2 — Ctrl+A is context-dependent (§ 9.2): PAGES on the board, TEXT in the
+// reading view. The reading view has real selectable text (pdf.js TextLayer), so
+// select-all there must fall through to the browser rather than select pages.
+describe('edit.selectAll is view-dependent', () => {
+  const enabledOn = (mode: 'organize' | 'document'): boolean => {
+    const state = stateWith({
+      files: new Map([['x.pdf', makeFile('x.pdf')]]),
+      activeFileId: 'x.pdf',
+      ui: { ...initialState.ui, focusedTab: { doc: 'x.pdf' }, docViewMode: mode },
+    });
+    setCommandStateSource(() => ({ state, dispatch: () => {} }));
+    registerAppCommandHandlers(noopHandlers());
+    const ctx = getCommandContext()!;
+    return COMMANDS['edit.selectAll'].when?.(ctx) ?? true;
+  };
+
+  it('selects pages on the Organize board', () => {
+    expect(enabledOn('organize')).toBe(true);
+  });
+
+  it('stands aside in the reading view so the browser selects TEXT', () => {
+    expect(enabledOn('document')).toBe(false);
+  });
+
+  it('its binding only preventDefaults when enabled, or the fall-through is dead', () => {
+    // 'always' would swallow Ctrl+A in the reading view and leave it doing
+    // nothing at all — the binding and the when() have to agree.
+    const b = KEY_BINDINGS.find((k) => k.command === 'edit.selectAll' && k.ctrl && k.key === 'a');
+    expect(b).toBeDefined();
+    expect(b!.preventDefault).toBe('whenEnabled');
   });
 });

@@ -202,8 +202,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     run: (ctx) => ctx.app!.redo(),
   },
   'edit.selectAll': {
-    title: 'Select All',
-    when: inCanvas,
+    title: 'Select All Pages',
+    // Context-dependent, per § 9.2: Ctrl+A selects PAGES on the board, but TEXT
+    // in the reading view — where a document is something you read, and Acrobat
+    // selects its text. Disabling here (with the binding's `whenEnabled`) lets
+    // the browser's own select-all run on the focused reading pane, which is
+    // both the correct behaviour and better than any select-all we could write.
+    when: (ctx) => inCanvas(ctx) && ctx.state.ui.docViewMode !== 'document',
     run: ({ dispatch }) => dispatch({ type: 'UI_SELECT_ALL_PAGES' }),
   },
   'edit.deselect': {

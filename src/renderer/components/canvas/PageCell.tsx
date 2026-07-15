@@ -9,6 +9,7 @@ import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import { PageView } from './PageView';
+import { PageTextLayer } from './PageTextLayer';
 
 // The tool union moved to the ui state slice (Phase 4 M1: commands and the
 // keymap read it for enablement); re-exported here for the overlay consumers.
@@ -261,6 +262,10 @@ interface PageCellProps {
   collapsed: boolean;
   visibleNumber: number;
   tool: CanvasTool;
+  /** Mount pdf.js's selectable text over the page (§ 6.3). Reading view only —
+   * the board is an arrangement surface, where text at thumbnail size isn't
+   * usefully selectable and the spans would fight the page-drag. */
+  textLayer?: boolean;
   // Overrides the kind-default color for newly created annotations (color
   // picker in the floating toolbar); undefined keeps the per-kind default.
   annotationColor?: string;
@@ -336,6 +341,7 @@ function PageCellImpl({
   collapsed,
   visibleNumber,
   tool,
+  textLayer,
   annotationColor,
   stampPreset,
   redactionMarks,
@@ -602,6 +608,16 @@ function PageCellImpl({
         displayWidth={displayWidth}
         displayHeight={pageHeight}
       />
+      {textLayer && (
+        <PageTextLayer
+          pdf={pdf}
+          pageNumber={page.sourcePageIndex + 1}
+          rotation={page.rotation}
+          displayWidth={displayWidth}
+          displayHeight={pageHeight}
+          active={tool === 'select'}
+        />
+      )}
       {(page.annotations ?? []).map((a) => {
         // pdf.js's base raster (PageView) already draws every real annotation
         // in the CURRENTLY LOADED file with AnnotationMode.ENABLE — including

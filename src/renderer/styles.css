@@ -588,6 +588,63 @@
    pane: without it the spacer would shrink to the page and `left: 50%` would
    centre within that, hugging the left edge instead of the viewport. */
 .docview-spacer { min-width: 100%; }
+
+/* pdf.js text layer (M4.2, § 6.3) — selectable text over the raster.
+   These rules are pdf.js's OWN contract, hand-copied from its
+   `web/pdf_viewer.css`: it positions each span with `left`/`top` plus a
+   `--font-height`/`--scale-x`/`--rotate` custom-property triple and expects the
+   stylesheet to turn those into `font-size`/`transform`. Importing its viewer
+   CSS wholesale is not an option (6k lines of a viewer chrome we don't use), so
+   the geometry rules are reproduced here and the decorative ones (find
+   highlight, editor) omitted. `--scale-factor` is set per-page in
+   PageTextLayer. Do not "tidy" these — they are an external contract; if pdf.js
+   changes them, text lands in the wrong place. */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 2; /* over the raster, under the annotation/form overlays */
+  --total-scale-factor: calc(var(--scale-factor) * var(--user-unit, 1));
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.textLayer .markedContent { display: contents; }
+/* pdf.js emits these for images; they aren't text and must not be selectable. */
+.textLayer span[role='img'] {
+  user-select: none;
+  cursor: default;
+}
+/* The selection itself — the spans are transparent, so this is what the user
+   actually sees. Accent-tinted so it reads as ours in both themes. */
+.textLayer ::selection {
+  background: color-mix(in srgb, var(--accent, #0078d4) 45%, transparent);
+}
 .docview-row {
   background: #ffffff;
   box-shadow: var(--page-shadow);
