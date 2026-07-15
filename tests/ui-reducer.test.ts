@@ -129,25 +129,35 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(reindexed.ui.focusedDocId).toBeNull();
   });
 
-  // A reindex fires for ANY buffer change (a bookmark rename, an OCR pass), so
-  // clearing on every touch would snap the reading view back to partition 1 for
-  // edits that changed nothing about the partitions.
-  it('KEEPS a per-doc focus when a reindex re-derives identical partitions', () => {
-    const a = makeFile('book.pdfx', 5);
+  // THE case that makes a "did the content actually move?" check unsound, and
+  // why this clears unconditionally. Two partitions of EQUAL page count swap:
+  // page ids are `path#p{ABSOLUTE index}`, so slot #1's id array is bit-identical
+  // before and after (both ['#p2','#p3']) while it now names the OTHER partition.
+  // Any comparison of ids/lengths sees "unchanged" and keeps a focus pointing at
+  // the wrong content.
+  it('drops the focus when equal-size partitions swap (identical ids, different content)', () => {
+    const a = makeFile('book.pdfx', 4);
+    const alpha = makePages('book.pdfx', 2); // #p0 #p1
+    const beta = makePages('book.pdfx', 2, 2); // #p2 #p3
+    const start = stateWith(
+      [a],
+      [makeDoc(a, 'book.pdfx#0', alpha), makeDoc(a, 'book.pdfx#1', beta)],
+    );
     const focused = appReducer(
-      { ...partitionedState(), activeFileId: 'book.pdfx' },
+      { ...start, activeFileId: 'book.pdfx' },
       { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
     );
-    // e.g. a bookmark rename: new buffer, same manifest -> same partitions.
+    // Beta moved up and the commit reindexed: slot #1 is now Alpha, but its
+    // derived ids are the SAME strings Beta's slot had.
     const reindexed = appReducer(focused, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'book.pdfx',
       documents: [
-        makeDoc(a, 'book.pdfx#0', makePages('book.pdfx', 3)),
-        makeDoc(a, 'book.pdfx#1', makePages('book.pdfx', 2, 3)),
+        makeDoc(a, 'book.pdfx#0', makePages('book.pdfx', 2)),
+        makeDoc(a, 'book.pdfx#1', makePages('book.pdfx', 2, 2)),
       ],
     });
-    expect(reindexed.ui.focusedDocId).toBe('book.pdfx#1');
+    expect(reindexed.ui.focusedDocId).toBeNull();
   });
 
   it('drops a per-doc focus when the focused id vanishes (partitions collapse to one)', () => {

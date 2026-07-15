@@ -479,30 +479,31 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         state.pageUndoStack,
         state.pageRedoStack,
       );
-      // A per-doc focus into THIS path can be stale once its documents are
+      // A per-doc focus into THIS path is stale the moment its documents are
       // re-derived: `OpenDocument.id` is positional (`path#docIndex`), so the
-      // same id string can come back naming a DIFFERENT partition — reordering
-      // two `.pdfx` strips and committing swaps what `book.pdfx#1` means, and
-      // the reading view would silently show the other partition with no signal
-      // (the positional-id re-binding class CLAUDE.md records for redaction
-      // marks). But clear only when the CONTENT under that id actually moved:
-      // a reindex fires for ANY buffer change — a bookmark rename, an OCR pass —
-      // and blanket-clearing would snap the reading view back to partition 1 for
-      // edits that changed nothing about the partitions (both review-caught, one
-      // round apart). Page ids are positional over the whole file, so an
-      // unchanged composition re-derives an identical page-id list.
-      const focusedId = state.ui.focusedDocId;
-      let ui = state.ui;
-      if (focusedId && focusedId.startsWith(`${action.path}#`)) {
-        const before = prev.find((d) => d.id === focusedId);
-        const after = documents.find((d) => d.id === focusedId);
-        const sameContent =
-          !!before &&
-          !!after &&
-          before.pages.length === after.pages.length &&
-          before.pages.every((p, i) => p.id === after.pages[i].id);
-        if (!sameContent) ui = { ...state.ui, focusedDocId: null };
-      }
+      // same id string can come back naming a DIFFERENT partition — reorder two
+      // `.pdfx` strips, commit, and `book.pdfx#1` means the other one, which the
+      // reading view would show with no signal (the positional-id re-binding
+      // class CLAUDE.md records for redaction marks). Dropping to null
+      // re-resolves to the active file's first document.
+      //
+      // DO NOT "optimise" this into a check for whether the content actually
+      // moved — that was tried and is UNSOUND (review-caught). Page ids are
+      // `path#p{ABSOLUTE page index}` (`partitionPages` walks a cumulative
+      // cursor), so they encode a partition's POSITION, not its identity:
+      // swapping two partitions of EQUAL page count re-derives a bit-identical
+      // page-id array for each slot while the content is completely different,
+      // so a comparison sees "unchanged" and keeps a focus that now names the
+      // wrong partition. Partition NAMES aren't a sound key either (nothing
+      // guarantees a manifest's names are unique — `uniqueDocName` is applied at
+      // rename time, not to arbitrary/older manifests). As with the reading
+      // view's jump anchor, there is no identity across a rebuild, so this fails
+      // SAFE and pays for it: a whole-file op on a `.pdfx` you're reading
+      // resets you to its first partition. Preserving the position needs real
+      // cross-commit identity — see `canvas/reading-page.ts`'s JumpAnchor note.
+      const ui = state.ui.focusedDocId?.startsWith(`${action.path}#`)
+        ? { ...state.ui, focusedDocId: null }
+        : state.ui;
       return { ...state, files, ui, workspace: { documents } };
     }
     case 'REORDER_PAGES': {
