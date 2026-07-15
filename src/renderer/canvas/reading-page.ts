@@ -88,6 +88,22 @@ export interface JumpAnchor {
 const ANCHOR_EPS = 1;
 
 /**
+ * Clamp a scroll offset to what the pane can actually reach.
+ *
+ * `scrollTop` is React state fed by the scroll EVENT, but a page-tier edit
+ * shrinks `pageCount`/`contentHeight` SYNCHRONOUSLY — so for one render the
+ * offset can point past the end of the now-shorter content, before the browser
+ * clamps the DOM and fires the corrective scroll event. EVERY consumer of
+ * scrollTop must clamp, or it computes against a position that doesn't exist:
+ * the readout named a page over a blank pane, and the virtualization window
+ * produced `first > last` and rendered NOTHING (both review-caught, one round
+ * apart — the second because only the readout was fixed the first time).
+ */
+export function clampScrollTop(scrollTop: number, contentHeight: number, viewportH: number): number {
+  return Math.min(Math.max(0, scrollTop), Math.max(0, contentHeight - viewportH));
+}
+
+/**
  * Whether a recorded jump still describes the current view: same layout, the
  * page it meant is still the page sitting at that slot, and the user hasn't
  * scrolled away from where the jump landed.
@@ -129,16 +145,7 @@ export function currentPageFor(m: ReadingMetrics): number {
   const { viewportH, rowH, pageHeight, pageCount, contentHeight } = m;
   if (pageCount <= 0 || viewportH <= 0 || rowH <= 0) return 1;
 
-  // `scrollTop` is React state fed by the scroll EVENT, but a page-tier edit
-  // shrinks pageCount/contentHeight SYNCHRONOUSLY — so for one render it can
-  // point past the end of the now-shorter content, before the browser clamps the
-  // DOM and fires the corrective scroll event. Clamp to the reachable range so
-  // the readout names the page that will actually be on screen (review-caught:
-  // deleting the last page while scrolled to it reported a page number over what
-  // was, that frame, a blank viewport).
-  const maxScroll = Math.max(0, contentHeight - viewportH);
-  const scrollTop = Math.min(Math.max(0, m.scrollTop), maxScroll);
-
+  const scrollTop = clampScrollTop(m.scrollTop, contentHeight, viewportH);
   const vFirst = Math.max(0, Math.min(pageCount - 1, Math.floor(scrollTop / rowH)));
   const vLast = Math.min(pageCount - 1, Math.floor((scrollTop + viewportH - 1) / rowH));
   if (vLast < vFirst) return Math.min(pageCount, vFirst + 1);

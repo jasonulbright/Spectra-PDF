@@ -108,20 +108,27 @@ describe('currentPageFor — reading view current page', () => {
       expect(currentPageFor(metrics({ zoom: 1, pageCount: 1, viewportH: 800, scrollTop: 0 }))).toBe(1);
     });
 
-    // Round-6 regression: scrollTop is state fed by the scroll EVENT, but a
-    // page-tier delete shrinks pageCount/contentHeight synchronously — so for one
-    // render scrollTop points past the end of the shorter content. Unclamped,
-    // vFirst ran past vLast and the early-return named a page the viewport
-    // wasn't showing (it was scrolled past the content — blank).
-    it('clamps a scrollTop left stale past the end by a page-tier delete', () => {
-      // 5 pages @ zoom 1 (rowH 984), 800px pane, scrolled to the bottom...
-      const before = metrics({ zoom: 1, pageCount: 5, viewportH: 800, scrollTop: 0 });
-      const wasAtBottom = before.contentHeight - 800; // 4120
-      // ...then page 5 is deleted: pageCount/contentHeight shrink NOW, scrollTop lags.
-      const m = metrics({ zoom: 1, pageCount: 4, viewportH: 800, scrollTop: wasAtBottom });
-      expect(m.scrollTop).toBeGreaterThan(m.contentHeight - 800); // genuinely out of range
-      // Page 4 is the last page and is what the browser's clamp will land on.
-      expect(currentPageFor(m)).toBe(4);
+    // Round-6/7 regression. scrollTop is state fed by the scroll EVENT, but a
+    // page-tier delete shrinks pageCount/contentHeight SYNCHRONOUSLY, so for one
+    // render the offset points past the end of the shorter content.
+    //
+    // This case is chosen to DISCRIMINATE: round 6's first attempt at a test used
+    // a tail-delete that still overflowed the pane, where the old code's
+    // `Math.min(pageCount, vFirst+1)` cap happened to give the right answer
+    // anyway — it passed against the unclamped code and proved nothing (caught by
+    // round 7, which reverted the fix and re-ran the suite). The divergence is
+    // real only when the SHRUNKEN doc now fits the pane: unclamped, the stale
+    // nonzero offset skips the at-top branch and names the LAST page, while the
+    // pane is (once the browser clamps) showing page 1 at the top.
+    it('clamps a stale scrollTop when the shrunken doc now fits the pane', () => {
+      // A 10-page doc at 50% zoom in a 1000px pane, scrolled to the bottom...
+      const before = metrics({ zoom: 0.5, pageCount: 10, viewportH: 1000, scrollTop: 0 });
+      const wasAtBottom = before.contentHeight - 1000; // 3920
+      // ...then all but 2 pages are deleted. The remaining doc (984px) now FITS
+      // the 1000px pane, so the only reachable offset is 0 — but state still says 3920.
+      const m = metrics({ zoom: 0.5, pageCount: 2, viewportH: 1000, scrollTop: wasAtBottom });
+      expect(m.contentHeight).toBeLessThan(m.viewportH); // the whole doc fits now
+      expect(currentPageFor(m)).toBe(1); // unclamped code answered 2 (the last page)
     });
 
     it('clamps a negative scrollTop (elastic/overscroll)', () => {
