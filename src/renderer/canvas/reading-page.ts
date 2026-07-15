@@ -1,3 +1,5 @@
+import { BASE_PAGE_HEIGHT } from './layout';
+
 // Which page is "current" in the reading view (Phase 4 M4.1b).
 //
 // Extracted as pure math because the tie-break is subtle and got this wrong
@@ -173,11 +175,11 @@ export const READING_PAGE_GAP = 24;
  * made this reachable at ~533 pages, where the old ceiling needed ~5,683 and so
  * hid it).
  */
-const SAFE_CONTENT_HEIGHT = 30_000_000;
+const SAFE_ELEMENT_EXTENT = 30_000_000;
 
 /**
  * The largest zoom this document can take without its spacer exceeding
- * `SAFE_CONTENT_HEIGHT` — i.e. the point past which pages would stop being
+ * `SAFE_ELEMENT_EXTENT` on EITHER axis — i.e. the point past which pages would stop being
  * reachable. Every page stays scrollable at any zoom the view allows.
  *
  * KNOWN BOUND, accepted: for a document of several thousand pages this ceiling
@@ -191,19 +193,38 @@ const SAFE_CONTENT_HEIGHT = 30_000_000;
  * escape, if it ever matters, is to drop the full-height spacer for a translated
  * window — a virtualization redesign, not a zoom change.
  */
-export function maxZoomFor(pageCount: number): number {
-  if (pageCount <= 0) return MAX_ZOOM;
-  const rowHAtZoom1 = READING_BASE_HEIGHT + READING_PAGE_GAP;
-  const fits = SAFE_CONTENT_HEIGHT / (pageCount * rowHAtZoom1);
-  // Never below MIN_ZOOM: a document so long that even MIN_ZOOM overflows would
-  // otherwise invert the clamp (max < min). It stays pinned at the floor, which
-  // is honest — that is genuinely as far out as the view goes.
-  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, fits));
+export function maxZoomFor(pageCount: number, widestDisplayWidthAtBase = 0): number {
+  const bounds: number[] = [MAX_ZOOM];
+  if (pageCount > 0) {
+    // Height axis: the spacer is `pageCount` rows tall.
+    bounds.push(SAFE_ELEMENT_EXTENT / (pageCount * (READING_BASE_HEIGHT + READING_PAGE_GAP)));
+  }
+  if (widestDisplayWidthAtBase > 0) {
+    // Width axis: M4.1f gave the spacer a REAL width (the widest page) so wide
+    // pages are reachable — which means the width can blow the same element cap.
+    // BOTH axes must be bounded or the fix for one becomes the bug in the other:
+    // a degenerate but spec-legal page (aspect ≳488:1, e.g. MediaBox
+    // [0 0 14400 26]) overflows on WIDTH at max zoom, and its far edge becomes
+    // unreachable by horizontal scroll — defeating exactly what M4.1f exists for
+    // (review-caught: the height bound never looks at aspect).
+    bounds.push(
+      (SAFE_ELEMENT_EXTENT * BASE_PAGE_HEIGHT) / (widestDisplayWidthAtBase * READING_BASE_HEIGHT),
+    );
+  }
+  // Never below MIN_ZOOM: a document whose extent overflows even at MIN_ZOOM
+  // would otherwise invert the clamp (max < min). It stays pinned at the floor,
+  // which is honest — that is genuinely as far out as the view goes.
+  return Math.max(MIN_ZOOM, Math.min(...bounds));
 }
 
-/** Clamp to the view's range AND to what this document can render (see above). */
-export const clampZoom = (z: number, pageCount: number): number =>
-  Math.min(maxZoomFor(pageCount), Math.max(MIN_ZOOM, z));
+/**
+ * Clamp to the view's range AND to what this document can render (see above).
+ *
+ * `widestDisplayWidthAtBase` is `max(displayWidthOf(page))` across the document
+ * — zoom-independent, so callers memoise it on the page list.
+ */
+export const clampZoom = (z: number, pageCount: number, widestDisplayWidthAtBase = 0): number =>
+  Math.min(maxZoomFor(pageCount, widestDisplayWidthAtBase), Math.max(MIN_ZOOM, z));
 
 /** A page's own geometry, as the reading view needs it for the zoom presets. */
 export interface PageGeometry {

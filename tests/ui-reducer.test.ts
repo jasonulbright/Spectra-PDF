@@ -258,6 +258,31 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(reindexed.ui.currentPageId).toBeNull();
   });
 
+  // Clause 2 of the ownership test (`action.documents.some(...)`) exists for a
+  // close-then-reopen: the id is gone from `prev` but the incoming set RE-CLAIMS
+  // it, and it must not silently re-bind to whatever now holds that slot. Both
+  // other tests have the id in `prev` too, so clause 1 alone would pass them —
+  // this one fails without clause 2.
+  it('clears an id absent from prev but RE-CLAIMED by the incoming documents', () => {
+    const a = makeFile('a.pdf', 3);
+    // a.pdf is open but has no indexed documents yet (just closed/reopened).
+    const s0 = stateWith([a], []);
+    const s = appReducer(s0, { type: 'UI_SET_CURRENT_PAGE', pageId: 'a.pdf#p1' });
+    expect(s.ui.currentPageId).toBe('a.pdf#p1');
+    const reindexed = appReducer(s, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))], // re-claims a.pdf#p1
+    });
+    expect(reindexed.ui.currentPageId).toBeNull();
+  });
+
+  it('is a no-op for the same current page (the scroll-driven dispatch must not churn)', () => {
+    const s = appReducer(twoDocState(), { type: 'UI_SET_CURRENT_PAGE', pageId: 'a.pdf#p1' });
+    // Same value -> same state reference, so useReducer consumers bail out.
+    expect(appReducer(s, { type: 'UI_SET_CURRENT_PAGE', pageId: 'a.pdf#p1' })).toBe(s);
+  });
+
   it('leaves the current page alone when a DIFFERENT file re-indexes', () => {
     const b = makeFile('b.pdf', 2);
     const s = appReducer(twoDocState(), { type: 'UI_SET_CURRENT_PAGE', pageId: 'b.pdf#p0' });

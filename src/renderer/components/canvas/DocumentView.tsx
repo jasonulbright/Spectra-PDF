@@ -140,7 +140,16 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // next Ctrl+= then visibly zoomed OUT. Deriving makes "the zoom is renderable"
   // true by construction rather than something every writer must remember; it
   // also covers the initial state, which no write site ever sees.
-  const zoom = clampZoom(zoomState, pageCount);
+  // The widest page at the BOARD's base height — zoom-independent, so it's a
+  // property of the document, memoised on the page list. Feeds BOTH the zoom
+  // ceiling (the spacer's width can blow the element cap just as its height can)
+  // and the spacer's own width below.
+  const widestAtBase = useMemo(() => {
+    let w = 0;
+    for (const p of doc.pages) w = Math.max(w, displayWidthOf(p));
+    return w;
+  }, [doc.pages]);
+  const zoom = clampZoom(zoomState, pageCount, widestAtBase);
   const pageHeight = pageHeightAt(zoom);
   const gap = PAGE_GAP * zoom;
   const rowH = pageHeight + gap;
@@ -163,19 +172,15 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // virtualizer needs only counts, and centerOn/current-page are O(1).
   const contentHeight = pageCount * rowH;
 
-  // The widest page decides the scrollable WIDTH (M4.1f). Without this the
-  // spacer is only as wide as the pane, and a page wider than it — routine at
-  // Actual Size on anything landscape or large-format — is clipped symmetrically
-  // by the centring with no way to reach its edges, which makes "Actual Size"
-  // useless on exactly the documents that need it. Paired with `min-width: 100%`
-  // in CSS so a doc narrower than the pane still centres instead of hugging the
-  // left edge. Widest-of-ALL-pages (not just the rendered window) so the width
-  // doesn't jitter as you scroll past a wide page.
-  const contentWidth = useMemo(() => {
-    let w = 0;
-    for (const p of doc.pages) w = Math.max(w, displayWidthOf(p) * (pageHeight / BASE_PAGE_HEIGHT));
-    return Math.ceil(w);
-  }, [doc.pages, pageHeight]);
+  // The scrollable WIDTH (M4.1f). Without a real width the spacer is only as
+  // wide as the pane, and a page wider than it — routine at Actual Size on
+  // anything landscape or large-format — is clipped symmetrically by the
+  // centring with no way to reach its edges, making "Actual Size" useless on
+  // exactly the documents that need it. Paired with `min-width: 100%` in CSS so
+  // a doc narrower than the pane still centres instead of hugging the left edge.
+  // Widest-of-ALL-pages (not just the rendered window) so the width doesn't
+  // jitter as you scroll past a wide page.
+  const contentWidth = Math.ceil(widestAtBase * (pageHeight / BASE_PAGE_HEIGHT));
 
   // Track the scroll position + viewport height (drives virtualization + the
   // current-page report). ResizeObserver keeps viewportH live on pane resize.
@@ -293,6 +298,8 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   pagesRef.current = doc.pages;
   // The zoom ceiling depends on the page COUNT (see maxZoomFor), and the
   // handle's zoom calls are imperative, so they read it off a ref.
+  const widestAtBaseRef = useRef(widestAtBase);
+  widestAtBaseRef.current = widestAtBase;
   const pageCountRef = useRef(pageCount);
   pageCountRef.current = pageCount;
   // The steppers must step from the EFFECTIVE zoom, not the raw state: stepping
@@ -308,7 +315,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   const actualSize = useCallback(() => {
     const page = currentPage();
     if (!page) return;
-    setZoom(clampZoom(actualSizeZoom(page, READING_BASE_HEIGHT), pageCountRef.current));
+    setZoom(clampZoom(actualSizeZoom(page, READING_BASE_HEIGHT), pageCountRef.current, widestAtBaseRef.current));
   }, [currentPage]);
 
   const fitWidth = useCallback(() => {
@@ -320,7 +327,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     const available = el.clientWidth - FIT_WIDTH_GUTTER;
     const z = fitWidthZoom(available, displayWidthOf(page), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
     if (z <= 0) return; // pane not measured yet — leave the zoom alone
-    setZoom(clampZoom(z, pageCountRef.current));
+    setZoom(clampZoom(z, pageCountRef.current, widestAtBaseRef.current));
   }, [currentPage]);
 
   useImperativeHandle(
@@ -331,9 +338,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       // browser's element-height limit and the tail of the doc would stop being
       // reachable (see maxZoomFor). That includes `reset`: a document long
       // enough that even zoom 1 overflows must not be forced back to it.
-      zoomIn: () => setZoom(clampZoom(zoomRef.current * ZOOM_STEP, pageCountRef.current)),
-      zoomOut: () => setZoom(clampZoom(zoomRef.current / ZOOM_STEP, pageCountRef.current)),
-      reset: () => setZoom(clampZoom(1, pageCountRef.current)),
+      zoomIn: () => setZoom(clampZoom(zoomRef.current * ZOOM_STEP, pageCountRef.current, widestAtBaseRef.current)),
+      zoomOut: () => setZoom(clampZoom(zoomRef.current / ZOOM_STEP, pageCountRef.current, widestAtBaseRef.current)),
+      reset: () => setZoom(clampZoom(1, pageCountRef.current, widestAtBaseRef.current)),
       actualSize,
       fitWidth,
       // The reading view has no world transform; tools resolve coordinates

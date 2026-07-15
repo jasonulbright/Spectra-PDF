@@ -527,6 +527,40 @@ describe('zoom presets — Actual Size / Fit Width', () => {
       expect(contentHeightAt(534, effective)).toBeLessThan(CHROMIUM_ELEMENT_CAP);
     });
 
+    // M4.1f gave the spacer a REAL width so wide pages are reachable — which
+    // means WIDTH can blow the same element cap that height can. Bounding one
+    // axis and not the other makes the fix for one the bug in the other.
+    it('bounds zoom on the WIDTH axis too (a degenerate wide page)', () => {
+      // A spec-legal MediaBox [0 0 14400 26] — 200in x 0.36in, aspect ~554:1.
+      const degenerate = { id: 'w', width: 14400, height: 26, rotation: 0 as const };
+      const widest = displayWidthOf(degenerate);
+      const widthAt = (zoom: number): number =>
+        widest * ((READING_BASE_HEIGHT * zoom) / BASE_PAGE_HEIGHT);
+      // Unbounded on width, max zoom would overflow the element cap...
+      expect(widthAt(MAX_ZOOM)).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
+      // ...and the page COUNT bound alone never looks at aspect, so it allows it.
+      expect(maxZoomFor(1)).toBe(MAX_ZOOM);
+      // With the width bound, the spacer stays reachable.
+      const z = maxZoomFor(1, widest);
+      expect(z).toBeLessThan(MAX_ZOOM);
+      expect(widthAt(z)).toBeLessThan(CHROMIUM_ELEMENT_CAP);
+      expect(clampZoom(MAX_ZOOM, 1, widest)).toBe(z);
+    });
+
+    it('leaves ordinary page shapes unbounded on width', () => {
+      for (const p of [LETTER, A4, { id: 'l', width: 792, height: 612 }]) {
+        expect(maxZoomFor(10, displayWidthOf(p))).toBe(MAX_ZOOM);
+      }
+    });
+
+    it('takes the TIGHTER of the two axis bounds', () => {
+      const wide = displayWidthOf({ id: 'w', width: 14400, height: 26, rotation: 0 });
+      // A long doc of degenerate pages: both axes bind; the result must satisfy both.
+      const z = maxZoomFor(600, wide);
+      expect(z).toBeLessThanOrEqual(maxZoomFor(600));
+      expect(z).toBeLessThanOrEqual(maxZoomFor(1, wide));
+    });
+
     it('clamps the INITIAL zoom of 1 for a document long enough to overflow at 1x', () => {
       // No write site ever sees the initial state, so only the derivation covers it.
       expect(contentHeightAt(34_101, 1)).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
