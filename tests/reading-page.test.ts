@@ -127,16 +127,29 @@ describe('anchorHolds — a jump wins until the user scrolls away', () => {
     return Math.min(maxScroll, scrollTopForCenterOn(page, base, viewportH));
   }
 
+  /** Page ids the way the reducer makes them (positional: `path#pN`). */
+  const idsFor = (n: number): string[] => Array.from({ length: n }, (_, i) => `f.pdf#p${i}`);
+  const pagesAt = (ids: string[], anchor: JumpAnchor): string | undefined => ids[anchor.page - 1];
+
   function anchorFor(page: number): JumpAnchor {
-    return { scrollTop: landOn(page), page, rowH: base.rowH, viewportH };
+    return {
+      scrollTop: landOn(page),
+      page,
+      pageId: idsFor(pageCount)[page - 1],
+      rowH: base.rowH,
+      viewportH,
+    };
   }
+
+  const ids = idsFor(pageCount);
 
   it('a jump to page 2 clamps to the very top — scroll math says 1, the anchor says 2', () => {
     const scrollTop = landOn(2);
     expect(scrollTop).toBe(0); // it really does saturate
     const m = metrics({ zoom, pageCount, viewportH, scrollTop });
     expect(currentPageFor(m)).toBe(1); // why the anchor is needed
-    expect(anchorHolds(anchorFor(2), m)).toBe(true);
+    const a = anchorFor(2);
+    expect(anchorHolds(a, m, pagesAt(ids, a))).toBe(true);
   });
 
   it('a jump to page 49 saturates at maxScroll — scroll math says 50, the anchor says 49', () => {
@@ -144,32 +157,73 @@ describe('anchorHolds — a jump wins until the user scrolls away', () => {
     expect(scrollTop).toBe(maxScroll); // it really does saturate
     const m = metrics({ zoom, pageCount, viewportH, scrollTop });
     expect(currentPageFor(m)).toBe(50); // why the anchor is needed
-    expect(anchorHolds(anchorFor(49), m)).toBe(true);
+    const a = anchorFor(49);
+    expect(anchorHolds(a, m, pagesAt(ids, a))).toBe(true);
   });
 
   it('drops once the user scrolls away from where the jump landed', () => {
     const a = anchorFor(25);
     const moved = metrics({ zoom, pageCount, viewportH, scrollTop: a.scrollTop + 40 });
-    expect(anchorHolds(a, moved)).toBe(false);
+    expect(anchorHolds(a, moved, pagesAt(ids, a))).toBe(false);
   });
 
   it('survives a sub-pixel scroll settle', () => {
     const a = anchorFor(25);
     const jitter = metrics({ zoom, pageCount, viewportH, scrollTop: a.scrollTop + 0.5 });
-    expect(anchorHolds(a, jitter)).toBe(true);
+    expect(anchorHolds(a, jitter, pagesAt(ids, a))).toBe(true);
   });
 
   it('is invalidated by a zoom or a resize (the layout it was taken under is gone)', () => {
     const a = anchorFor(25);
     const zoomed = metrics({ zoom: 0.5, pageCount, viewportH, scrollTop: a.scrollTop });
-    expect(anchorHolds(a, zoomed)).toBe(false);
+    expect(anchorHolds(a, zoomed, pagesAt(ids, a))).toBe(false);
     const resized = metrics({ zoom, pageCount, viewportH: 600, scrollTop: a.scrollTop });
-    expect(anchorHolds(a, resized)).toBe(false);
+    expect(anchorHolds(a, resized, pagesAt(ids, a))).toBe(false);
   });
 
   it('rejects a stale anchor pointing past the current doc', () => {
     const shorter = metrics({ zoom, pageCount: 3, viewportH, scrollTop: 0 });
-    expect(anchorHolds({ scrollTop: 0, page: 40, rowH: shorter.rowH, viewportH }, shorter)).toBe(false);
-    expect(anchorHolds(null, shorter)).toBe(false);
+    const stale: JumpAnchor = {
+      scrollTop: 0,
+      page: 40,
+      pageId: 'f.pdf#p39',
+      rowH: shorter.rowH,
+      viewportH,
+    };
+    expect(anchorHolds(stale, shorter, undefined)).toBe(false);
+    expect(anchorHolds(null, shorter, undefined)).toBe(false);
+  });
+
+  // Round-4 regression: a page-tier edit renumbers pages WITHOUT remounting the
+  // reading view and can leave scrollTop untouched, so layout+scroll both still
+  // "match" while a different page now occupies the slot.
+  it('drops when a page-tier delete renumbers the page out from under it', () => {
+    // Jump to page 2 (lands at scrollTop 0), then delete the page above it.
+    const a = anchorFor(2);
+    expect(a.scrollTop).toBe(0);
+    const afterDelete = idsFor(pageCount).slice(1); // page 1 removed; ids shift up
+    const m = metrics({ zoom, pageCount: pageCount - 1, viewportH, scrollTop: 0 });
+    // scrollTop is still 0 and the layout is identical — only identity catches it.
+    expect(anchorHolds(a, m, pagesAt(afterDelete, a))).toBe(false);
+    // ...and the view now correctly speaks for itself: that slot IS page 1.
+    expect(currentPageFor(m)).toBe(1);
+  });
+
+  it('drops when a reorder swaps a different page into the anchored slot', () => {
+    const a = anchorFor(25);
+    const reordered = idsFor(pageCount);
+    [reordered[24], reordered[30]] = [reordered[30], reordered[24]];
+    const m = metrics({ zoom, pageCount, viewportH, scrollTop: a.scrollTop });
+    expect(anchorHolds(a, m, pagesAt(reordered, a))).toBe(false);
+  });
+
+  it('still holds when pages change in a way that keeps the slot (e.g. an annotation edit)', () => {
+    // The pages ARRAY is a new reference after any page-tier dispatch, so the
+    // guard must compare identity, not reference — else every annotation edit
+    // would needlessly drop a valid anchor and reopen the snap-back.
+    const a = anchorFor(2);
+    const sameOrderNewArray = idsFor(pageCount).map((s) => `${s}`);
+    const m = metrics({ zoom, pageCount, viewportH, scrollTop: a.scrollTop });
+    expect(anchorHolds(a, m, pagesAt(sameOrderNewArray, a))).toBe(true);
   });
 });

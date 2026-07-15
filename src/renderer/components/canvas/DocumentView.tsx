@@ -184,13 +184,26 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     // anchor is dropped and the view speaks for itself. Both halves are pure
     // (canvas/reading-page.ts) — the tie-break and the extremes are subtle
     // enough to own tests; see that module's header.
-    if (anchorHolds(jumpAnchorRef.current, m)) {
-      onCurrentPageChange(jumpAnchorRef.current!.page);
+    const a = jumpAnchorRef.current;
+    // `doc.pages` is the composition guard: a page-tier edit renumbers pages
+    // without remounting this view, so the anchor must re-prove that the page it
+    // meant still sits in that slot.
+    if (anchorHolds(a, m, a ? doc.pages[a.page - 1]?.id : null)) {
+      onCurrentPageChange(a!.page);
       return;
     }
     jumpAnchorRef.current = null;
     onCurrentPageChange(currentPageFor(m));
-  }, [scrollTop, rowH, pageHeight, pageCount, viewportH, contentHeight, onCurrentPageChange]);
+  }, [
+    scrollTop,
+    rowH,
+    pageHeight,
+    pageCount,
+    viewportH,
+    contentHeight,
+    doc.pages,
+    onCurrentPageChange,
+  ]);
 
   // The reading CanvasHandle — pure scroll + scale, no world matrix.
   const centerOn = useCallback(
@@ -206,18 +219,16 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       // Record where it actually LANDED (behavior:'auto' settles scrollTop
       // synchronously, so this is the browser's own clamp applied) together with
       // what it meant, so the scroll event this fires can't "correct" a jump to
-      // a boundary-adjacent page into the boundary page itself.
-      jumpAnchorRef.current = {
-        scrollTop: el.scrollTop,
-        page: idx + 1,
-        rowH,
-        viewportH: el.clientHeight,
-      };
+      // a boundary-adjacent page into the boundary page itself. `viewportH` is
+      // the STATE the reporter compares against — not the live `el.clientHeight`
+      // used for the offset above — so the two can never disagree and silently
+      // stop the anchor from ever holding.
+      jumpAnchorRef.current = { scrollTop: el.scrollTop, page: idx + 1, pageId, rowH, viewportH };
       // Report immediately: a jump that doesn't move the view (already parked
       // there) fires no scroll event, so the effect above would never re-run.
       onCurrentPageChangeRef.current?.(idx + 1);
     },
-    [doc.pages, rowH, pageHeight],
+    [doc.pages, rowH, pageHeight, viewportH],
   );
 
   useImperativeHandle(

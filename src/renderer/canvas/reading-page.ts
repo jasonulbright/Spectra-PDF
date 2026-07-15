@@ -42,6 +42,17 @@ export interface JumpAnchor {
   scrollTop: number;
   /** 1-based page the jump meant. */
   page: number;
+  /**
+   * Identity of that page. A page-tier edit (delete/reorder/import) renumbers
+   * pages WITHOUT remounting the reading view — `OpenDocument.id` is
+   * `path#docIndex` and no page-tier reducer branch touches it — and can leave
+   * the scroll offset untouched too (deleting the page at the top keeps
+   * scrollTop 0). Layout and scroll therefore both still "match" while the page
+   * under the viewport has silently become a different one, so the anchor also
+   * pins WHICH page it meant (review-caught: a jump to page 2 followed by
+   * deleting page 1 reported "2 / 49" while showing page 1).
+   */
+  pageId: string;
   /** Layout the anchor was taken under — a zoom/resize invalidates it. */
   rowH: number;
   viewportH: number;
@@ -51,12 +62,23 @@ export interface JumpAnchor {
 const ANCHOR_EPS = 1;
 
 /**
- * Whether a recorded jump still describes the current view: same layout, and
- * the user hasn't scrolled away from where the jump landed.
+ * Whether a recorded jump still describes the current view: same layout, the
+ * page it meant is still the page sitting at that slot, and the user hasn't
+ * scrolled away from where the jump landed.
+ *
+ * @param pageIdAtAnchorSlot id of the page currently at the anchor's 1-based
+ *   `page` slot (i.e. `doc.pages[anchor.page - 1]?.id`). Fails CLOSED — an
+ *   absent or different id means the composition moved under the anchor and the
+ *   view must speak for itself again.
  */
-export function anchorHolds(anchor: JumpAnchor | null | undefined, m: ReadingMetrics): boolean {
+export function anchorHolds(
+  anchor: JumpAnchor | null | undefined,
+  m: ReadingMetrics,
+  pageIdAtAnchorSlot: string | null | undefined,
+): boolean {
   if (!anchor) return false;
   if (anchor.page < 1 || anchor.page > m.pageCount) return false;
+  if (!pageIdAtAnchorSlot || pageIdAtAnchorSlot !== anchor.pageId) return false;
   return (
     anchor.rowH === m.rowH &&
     anchor.viewportH === m.viewportH &&
