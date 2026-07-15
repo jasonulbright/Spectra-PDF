@@ -21,6 +21,7 @@ import {
   runEscapeInterceptors,
   setCommandStateSource,
 } from '../src/renderer/commands/context';
+import { showableDoc, showableFile, tabFiles } from '../src/renderer/state/selectors';
 import { KEY_BINDINGS } from '../src/renderer/commands/acrobat-keys';
 import { resetPendingFind } from '../src/renderer/commands/find-intent';
 import type { AppCommandHandlers } from '../src/renderer/commands/types';
@@ -143,6 +144,41 @@ describe('enablement helpers', () => {
       files: new Map([['a.pdf', makeFile('a.pdf')]]),
     });
     expect(hasActiveFile(real)).toBe(true);
+  });
+});
+
+describe('showableDoc / showableFile / tabFiles (state/selectors)', () => {
+  // The ONE answer to "which document can the user act on?", shared by the
+  // menus (hasActiveFile / isActiveFileDirty), the Tools tab's file picker,
+  // useActiveFile's getter, and tools.open.*. Testing it here is what makes
+  // those four guards tested — they have no implementation of their own to get
+  // wrong, which is the point of the consolidation.
+  const ghost = stateWith({
+    activeFileId: 'src.pdf',
+    files: new Map([
+      ['src.pdf', makeFile('src.pdf', { importOnly: true })],
+      ['a.pdf', makeFile('a.pdf')],
+    ]),
+  });
+
+  it('refuses a ghost, resolves a real file, and answers null for neither', () => {
+    expect(showableDoc(ghost)).toBeNull();
+    expect(showableFile(ghost)).toBeNull();
+    const real = stateWith({
+      activeFileId: 'a.pdf',
+      files: new Map([['a.pdf', makeFile('a.pdf')]]),
+    });
+    expect(showableDoc(real)).toBe('a.pdf');
+    expect(showableFile(real)?.path).toBe('a.pdf');
+    expect(showableDoc(initialState)).toBeNull();
+    // An id naming a file that isn't open resolves to nothing, not a throw.
+    expect(showableDoc(stateWith({ activeFileId: 'gone.pdf' }))).toBeNull();
+  });
+
+  it('tabFiles omits ghosts — they are never offered to the user', () => {
+    // Feeds Compare's "compare against" list. A ghost has no window, so naming
+    // it there offers a document the user never opened and cannot look at.
+    expect(tabFiles(ghost).map((f) => f.path)).toEqual(['a.pdf']);
   });
 });
 

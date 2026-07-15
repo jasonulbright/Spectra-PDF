@@ -28,6 +28,7 @@ import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
 import { indexOpenFile } from './lib/workspace';
 import type { PageRef, PdfBuffer } from './state/types';
 import { isDocTab, viewOf } from './state/types';
+import { showableDoc, tabFiles } from './state/selectors';
 import type { CanvasTool } from './state/types';
 import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
@@ -172,10 +173,11 @@ function AppContent(): React.ReactElement {
   // Open, tab-bearing files (importOnly sources excluded) — the Tools-tab
   // active-file switcher lists these so a panel can retarget without leaving
   // the tab (a doc-tab click would move focus off Tools and unmount the panel).
-  const tabFileList = Array.from(state.files.values()).filter((f) => !f.importOnly);
-  // The active file, but only if the document picker below actually lists it.
-  const selectableFile =
-    tabFileList.some((f) => f.path === state.activeFileId) ? state.activeFileId : null;
+  const tabFileList = tabFiles(state);
+  // The active file, but only if it is one the picker below lists — the SAME
+  // question showableDoc answers for the menus, so it gets the same (tested)
+  // answer rather than a second implementation that could drift from it.
+  const selectableFile = showableDoc(state);
 
   // Commit-failure banner: commits triggered from gates/effects have no
   // natural place to report, so failures surface here.

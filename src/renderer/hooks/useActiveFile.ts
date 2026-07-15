@@ -3,6 +3,8 @@ import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { useEngine } from './useEngine';
 import { file } from '../lib/tauri-bridge';
 import { withRecent } from '../lib/recent-files';
+import { runCommitGate } from '../lib/commit-gate';
+import { showableFile, tabFiles } from '../state/selectors';
 import type { OpenFile } from '../state/types';
 
 export function useActiveFile() {
@@ -11,14 +13,16 @@ export function useActiveFile() {
   const { call, openFiles } = useEngine();
 
   // Never a byte-only import source: it has no tab and is never rendered, so a
-  // panel acting on it would be acting on a file the user cannot see. The
-  // reducer already refuses to make one active — this is the same rule stated
-  // where the panels read it, so a future writer can't reintroduce the gap
-  // upstream and have it silently arrive here.
-  const active = state.activeFileId ? state.files.get(state.activeFileId) : undefined;
-  const activeFile: OpenFile | null = active && !active.importOnly ? active : null;
+  // panel acting on it would be acting on a file the user cannot see — and File
+  // ▸ Save would write over the real file it was imported from. The reducer
+  // refuses to make one active; asking the shared selector states the same rule
+  // where the panels read it, and gives it one tested implementation.
+  const activeFile: OpenFile | null = showableFile(state);
 
-  const allFiles = Array.from(state.files.values());
+  // Tab-bearing files only. This is what panels OFFER the user (Compare's
+  // "compare against" list), and a ghost has no window — it would be a name in a
+  // dropdown for a document they never opened and cannot look at.
+  const allFiles = tabFiles(state);
 
   const openNewFiles = useCallback(async () => {
     const paths = await openFiles();
@@ -43,6 +47,17 @@ export function useActiveFile() {
           recent = withRecent(recent, filePath); // only on success (review-caught)
           changed = true;
           continue;
+        }
+        if (existing?.importOnly) {
+          // Upgrading a ghost REPLACES bytes that other documents' pending pages
+          // still point into, positionally (`sourceDocId` + `sourcePageIndex`,
+          // resolved at commit by `bytesFor`). Flush first, so those pages are
+          // materialized into their own files and nothing references these bytes
+          // any more. The third thing `openByPaths` does that this sibling
+          // didn't — reachable via Compare's "Open another…", the one caller
+          // that runs with a real file already active and its page edits
+          // possibly still pending.
+          await runCommitGate();
         }
         const workingPath = await file.createWorkingCopy(filePath);
         const buffer = await file.readBuffer(workingPath);

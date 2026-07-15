@@ -5,6 +5,7 @@
 // handler. M1 registers every action that existed before the workbench;
 // M2+ chrome only *references* what is here.
 import { isDocTab } from '../state/types';
+import { showableDoc, tabFiles as tabFileEntries } from '../state/selectors';
 import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
 import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
@@ -13,23 +14,6 @@ import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
 
 // --- Pure enablement helpers (unit-tested; menus gray from these) ---------
-
-/**
- * The active file's path, but only if it is a document we can actually SHOW.
- *
- * `activeFileId` alone isn't that: an import-only source (bytes dragged in to
- * supply pages, never opened as a document) has an entry in `files` but no tab,
- * and `focusTab` rejects a doc tab for it. Closing the last real file can leave
- * one as the active id, so this is reachable. A caller that focuses a doc tab
- * must gate on THIS, or it dispatches a focus that silently no-ops and then
- * carries on as though the document were in front.
- */
-function showableDoc(state: AppState): string | null {
-  const path = state.activeFileId;
-  if (!path) return null;
-  const f = state.files.get(path);
-  return f && !f.importOnly ? path : null;
-}
 
 export function canUndo(state: AppState): boolean {
   if (state.pageUndoStack.length > 0) return true;
@@ -86,7 +70,7 @@ export function hasSelection(state: AppState): boolean {
 
 /** Open files that get doc tabs — byte-only import sources (2n.3) don't. */
 export function tabFiles(state: AppState): string[] {
-  return [...state.files.values()].filter((f) => !f.importOnly).map((f) => f.path);
+  return tabFileEntries(state).map((f) => f.path);
 }
 
 /** The visible tab order: Home | Tools | one tab per open document. */
