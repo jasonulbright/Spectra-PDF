@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { usePdfProxies } from '../../hooks/usePdfProxies';
 import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
@@ -153,10 +153,20 @@ export function WorkspaceCanvasView({
   // Reset the readout when entering Read mode or switching the focused doc: a
   // fresh DocumentView starts at page 1, and until it reports back the box would
   // otherwise show the previous doc's page (e.g. "40 / 3") (review-caught).
-  useEffect(() => {
+  // useLayoutEffect, not useEffect: `page-nav-total` reads the NEW doc's page
+  // count in the same render, so a passive effect would paint one frame of a
+  // stale numerator against the new total — the very "40 / 3" this closes.
+  // Unlike the mirror-effect above this deliberately writes even while the box
+  // is FOCUSED: on a doc switch a half-typed number targets a document that is
+  // no longer shown, so keeping it would be worse than replacing it. Clearing
+  // `pageBoxDirty` with it is the load-bearing half — a guard-exempt Ctrl+Tab
+  // can switch docs mid-edit without ever blurring the input, and a dirty flag
+  // surviving that would make the next blur "navigate" on the stale edit.
+  useLayoutEffect(() => {
     if (docViewMode === 'document') {
       setCurrentPage(1);
       setPageBox('1');
+      pageBoxDirty.current = false;
     }
   }, [docViewMode, focusedDoc?.id]);
 

@@ -17,6 +17,8 @@ import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import { BASE_PAGE_HEIGHT, displayWidthOf } from '../../canvas/layout';
+import { isEditable } from '../../commands/keymap';
+import { currentPageFor } from '../../canvas/reading-page';
 import { PageCell } from './PageCell';
 
 // The continuous reading view (Phase 4 M4, § 6): one document, a single
@@ -152,10 +154,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // has focus (review-caught). A button/body focus (e.g. the toggle pill) is
   // fine to take over from. preventScroll: taking focus mustn't jump the page.
   useEffect(() => {
-    const active = document.activeElement as HTMLElement | null;
-    const editingField =
-      !!active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
-    if (!editingField) scrollRef.current?.focus({ preventScroll: true });
+    // Reuse the ONE canonical inline-edit guard (commands/keymap.ts) rather than
+    // re-deriving it — a hand-rolled copy here missed SELECT and would still
+    // steal focus from a dropdown (e.g. the new-form-field Type select).
+    if (!isEditable(document.activeElement)) scrollRef.current?.focus({ preventScroll: true });
   }, []);
 
   const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -171,26 +173,12 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   const onCurrentPageChange = props.onCurrentPageChange;
   useEffect(() => {
     if (!onCurrentPageChange || pageCount === 0 || viewportH === 0) return;
-    // Current page = the page occupying the MOST of the viewport. Robust at the
-    // top (page 1 wins, fully visible), the bottom (last page wins), and after a
-    // centered jump (the jumped-to page wins) — unlike a top-edge or
-    // center-point sample, both of which mis-report once the viewport is taller
-    // than a page (report page 2 at the top / can't reach the boundary pages).
-    // O(visible pages): only the handful spanning the viewport are checked.
-    const vFirst = Math.max(0, Math.floor(scrollTop / rowH));
-    const vLast = Math.min(pageCount - 1, Math.floor((scrollTop + viewportH - 1) / rowH));
-    let best = vFirst;
-    let bestOverlap = -1;
-    for (let i = vFirst; i <= vLast; i++) {
-      const top = i * rowH;
-      const overlap = Math.min(top + pageHeight, scrollTop + viewportH) - Math.max(top, scrollTop);
-      if (overlap > bestOverlap) {
-        bestOverlap = overlap;
-        best = i;
-      }
-    }
-    onCurrentPageChange(best + 1);
-  }, [scrollTop, rowH, pageHeight, pageCount, viewportH, onCurrentPageChange]);
+    // Pure math (canvas/reading-page.ts) — the tie-break is subtle enough to
+    // need its own tests; see that module's header.
+    onCurrentPageChange(
+      currentPageFor({ scrollTop, viewportH, rowH, pageHeight, pageCount, contentHeight }),
+    );
+  }, [scrollTop, rowH, pageHeight, pageCount, viewportH, contentHeight, onCurrentPageChange]);
 
   // The reading CanvasHandle — pure scroll + scale, no world matrix.
   const centerOn = useCallback(
