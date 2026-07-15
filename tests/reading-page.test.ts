@@ -415,35 +415,37 @@ describe('zoom presets — Actual Size / Fit Width', () => {
   });
 
   describe('fitWidthZoom', () => {
-    // The reading view renders width = displayWidthOf(page) * pageHeight / BASE_PAGE_HEIGHT,
-    // so a correct fit is the zoom whose resulting width equals the pane.
-    function renderedWidth(page: Parameters<typeof displayWidthOf>[0], zoom: number): number {
-      return displayWidthOf(page) * ((READING_BASE_HEIGHT * zoom) / BASE_PAGE_HEIGHT);
-    }
+    // The REAL render path: PageCell sizes the reading view's cell with
+    // displayWidthAt(page, pageHeight). A correct fit is the zoom whose resulting
+    // width equals the pane — asserted through that same function, so a future
+    // divergence between solve and render fails here (round 3 caught exactly
+    // that: the solve still used the board's rounded width after the render had
+    // moved to the true aspect, and Fit Width quietly undershot).
+    const widthAtZoom1 = (page: Parameters<typeof displayWidthAt>[0]): number =>
+      displayWidthAt(page, READING_BASE_HEIGHT);
+    const renderedWidth = (page: Parameters<typeof displayWidthAt>[0], zoom: number): number =>
+      displayWidthAt(page, READING_BASE_HEIGHT * zoom);
 
     it('produces exactly the available width', () => {
-      const available = 900;
-      const z = fitWidthZoom(available, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
-      expect(renderedWidth(LETTER, z)).toBeCloseTo(available, 4);
+      for (const available of [900, 1920, 5120]) {
+        const z = fitWidthZoom(available, widthAtZoom1(LETTER));
+        expect(renderedWidth(LETTER, z)).toBeCloseTo(available, 6);
+      }
     });
 
     it('accounts for rotation (a quarter-turned page is wider, so it fits smaller)', () => {
       const available = 900;
-      const upright = fitWidthZoom(available, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
-      const turned = fitWidthZoom(
-        available,
-        displayWidthOf({ ...LETTER, rotation: 90 }),
-        BASE_PAGE_HEIGHT,
-        READING_BASE_HEIGHT,
-      );
-      expect(turned).toBeLessThan(upright);
-      expect(renderedWidth({ ...LETTER, rotation: 90 }, turned)).toBeCloseTo(available, 4);
+      const turned = { ...LETTER, rotation: 90 as const };
+      const zUp = fitWidthZoom(available, widthAtZoom1(LETTER));
+      const zTurned = fitWidthZoom(available, widthAtZoom1(turned));
+      expect(zTurned).toBeLessThan(zUp);
+      expect(renderedWidth(turned, zTurned)).toBeCloseTo(available, 6);
     });
 
     it('returns 0 for an unmeasured pane so the caller leaves the zoom alone', () => {
-      expect(fitWidthZoom(0, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT)).toBe(0);
-      expect(fitWidthZoom(-5, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT)).toBe(0);
-      expect(fitWidthZoom(900, 0, BASE_PAGE_HEIGHT, READING_BASE_HEIGHT)).toBe(0);
+      expect(fitWidthZoom(0, widthAtZoom1(LETTER))).toBe(0);
+      expect(fitWidthZoom(-5, widthAtZoom1(LETTER))).toBe(0);
+      expect(fitWidthZoom(900, 0)).toBe(0);
     });
   });
 

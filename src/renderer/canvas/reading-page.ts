@@ -163,6 +163,18 @@ export const READING_BASE_HEIGHT = 960;
 export const READING_PAGE_GAP = 24;
 
 /**
+ * How long a zoom burst settles before the expensive re-renders run.
+ *
+ * ONE constant for the whole reading view: a held Ctrl+= arrives as an OS key
+ * repeat, and both the detail raster and the text layer must rebuild on the SAME
+ * beat — two cadences would mean two rebuild storms per burst, competing for the
+ * one pdf.js worker (review-caught: the text layer had reached for `raster.ts`'s
+ * `REBLIT_QUIET_MS`, which governs a different mechanism — the post-commit
+ * re-blit batcher — and silently landed 20ms off the view's own timer).
+ */
+export const ZOOM_SETTLE_MS = 140;
+
+/**
  * Ceiling for the scroller's content height, with margin under Chromium's
  * per-element size limit (~33.55M px — LayoutUnit's 26.6 fixed-point range;
  * WebView2 is Chromium).
@@ -264,22 +276,22 @@ export function actualSizeZoom(page: PageGeometry, readingBaseHeight: number): n
  * Zoom that fits the page's width to the available pane width — Acrobat's Fit
  * Width (Ctrl+2).
  *
- * `displayWidthAtBase` is the page's rotation-aware width at the BOARD's base
- * height (`canvas/layout.ts` `displayWidthOf`), because that is the ratio the
- * reading view already renders with: `width = displayWidthAtBase * pageHeight /
- * boardBaseHeight`. Solving that for the height whose width equals the pane and
- * converting to zoom gives the below. Returns 0 for degenerate input so callers
- * clamp rather than divide by zero.
+ * `widthAtZoom1` is the page's rendered width at zoom 1 — i.e.
+ * `displayWidthAt(page, READING_BASE_HEIGHT)`, the SAME basis `maxZoomFor` takes.
+ * Width is linear in zoom, so the fit is just the ratio.
+ *
+ * Deliberately expressed in the view's OWN units rather than re-deriving from
+ * base heights: the earlier form took the board's `displayWidthOf` and the two
+ * base heights, and was exact only because the solve and the render happened to
+ * use the same formula — so when the render switched to the true aspect
+ * (`displayWidthAt`) the cancellation silently broke and Fit Width undershot the
+ * pane by a growing margin (review-caught, ~8.6px on a 5K pane). One basis, no
+ * cancellation to break. Returns 0 for degenerate input so callers clamp rather
+ * than divide by zero.
  */
-export function fitWidthZoom(
-  availableWidth: number,
-  displayWidthAtBase: number,
-  boardBaseHeight: number,
-  readingBaseHeight: number,
-): number {
-  if (availableWidth <= 0 || displayWidthAtBase <= 0 || readingBaseHeight <= 0) return 0;
-  const pageHeight = (availableWidth * boardBaseHeight) / displayWidthAtBase;
-  return pageHeight / readingBaseHeight;
+export function fitWidthZoom(availableWidth: number, widthAtZoom1: number): number {
+  if (availableWidth <= 0 || widthAtZoom1 <= 0) return 0;
+  return availableWidth / widthAtZoom1;
 }
 
 /**

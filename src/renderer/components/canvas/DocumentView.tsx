@@ -17,7 +17,7 @@ import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
-import { BASE_PAGE_HEIGHT, displayWidthAt, displayWidthOf } from '../../canvas/layout';
+import { displayWidthAt } from '../../canvas/layout';
 import { isEditable } from '../../commands/keymap';
 import {
   actualSizeZoom,
@@ -28,6 +28,7 @@ import {
   visibleRange,
   READING_BASE_HEIGHT,
   READING_PAGE_GAP as PAGE_GAP,
+  ZOOM_SETTLE_MS,
   ZOOM_STEP,
   type JumpAnchor,
 } from '../../canvas/reading-page';
@@ -42,11 +43,6 @@ import { PageCell } from './PageCell';
 // handful of live cells. Zoom drives `pageHeight` (PageCell sizes the whole
 // cell — raster, overlays, font — off it), so the reading `CanvasHandle` is
 // pure scroll + a scale number, no world matrix.
-
-// One US-Letter page is ~this tall at zoom 1 (a comfortable reading size on a
-// typical pane); zoom multiplies it. Independent of BASE_PAGE_HEIGHT (the
-// board's thumbnail size).
-
 
 const OVERSCAN = 2; // pages rendered beyond each viewport edge
 // Breathing room Fit Width leaves either side of the page. Exactly double the
@@ -140,10 +136,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // next Ctrl+= then visibly zoomed OUT. Deriving makes "the zoom is renderable"
   // true by construction rather than something every writer must remember; it
   // also covers the initial state, which no write site ever sees.
-  // The widest page at the BOARD's base height — zoom-independent, so it's a
-  // property of the document, memoised on the page list. Feeds BOTH the zoom
-  // ceiling (the spacer's width can blow the element cap just as its height can)
-  // and the spacer's own width below.
+  // The widest page's rendered width AT ZOOM 1 — a property of the document, so
+  // memoised on the page list. Feeds BOTH the zoom ceiling (the spacer's width
+  // can blow the element cap just as its height can) and the spacer's own width.
   const widestAtBase = useMemo(() => {
     let w = 0;
     for (const p of doc.pages) w = Math.max(w, displayWidthAt(p, READING_BASE_HEIGHT));
@@ -163,7 +158,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // EFFECTIVE zoom, so a re-derived clamp re-details too.
   const [zoomVersion, setZoomVersion] = useState(0);
   useEffect(() => {
-    const t = setTimeout(() => setZoomVersion((v) => v + 1), 140);
+    const t = setTimeout(() => setZoomVersion((v) => v + 1), ZOOM_SETTLE_MS);
     return () => clearTimeout(t);
   }, [zoom]);
 
@@ -325,7 +320,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     // clientWidth already excludes a vertical scrollbar; the gutter keeps the
     // page off the pane's edges the way Acrobat's Fit Width does.
     const available = el.clientWidth - FIT_WIDTH_GUTTER;
-    const z = fitWidthZoom(available, displayWidthOf(page), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
+    const z = fitWidthZoom(available, displayWidthAt(page, READING_BASE_HEIGHT));
     if (z <= 0) return; // pane not measured yet — leave the zoom alone
     setZoom(clampZoom(z, pageCountRef.current, widestAtBaseRef.current));
   }, [currentPage]);
@@ -359,7 +354,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   for (let i = first; i <= last; i++) {
     const page = doc.pages[i];
     if (!page) continue;
-    const width = displayWidthOf(page) * (pageHeight / BASE_PAGE_HEIGHT);
+    // MUST be the same width PageCell renders (it uses the exact aspect here —
+    // `textLayer` is set below). This row is what CENTRES the page, so a
+    // divergent formula offsets it in the pane and over-reports the scrollable
+    // width — the round-2 drift, relocated one level up (review-caught).
+    const width = displayWidthAt(page, pageHeight);
     rows.push(
       <div
         key={page.id}
