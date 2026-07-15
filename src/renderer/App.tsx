@@ -3,7 +3,6 @@ import { AppStateProvider, useAppState, useAppDispatch } from './state/AppStateP
 import { file, app } from './lib/tauri-bridge';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
 import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
-import { Sidebar, Operation } from './components/Sidebar';
 import { PageInspector } from './components/PageInspector';
 import { SplitPanel } from './panels/SplitPanel';
 import { RotatePanel } from './panels/RotatePanel';
@@ -54,6 +53,7 @@ import { NavPane } from './components/navpane/NavPane';
 import { ToolsCenter } from './components/ToolsCenter';
 import { ToolIcon } from './components/tool-icons';
 import { toolById } from './commands/tools';
+import { OPERATION_TITLES, type Operation } from './commands/operations';
 import { withRecent } from './lib/recent-files';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
@@ -75,17 +75,6 @@ const panels: Record<Operation, React.ComponentType> = {
   watermark: WatermarkPanel, forms: FormsPanel, compare: ComparePanel,
   signatures: SignaturesPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
-};
-
-const titles: Record<Operation, string> = {
-  split: 'Split by Range', rotate: 'Rotate Pages', delete: 'Delete Pages',
-  compress: 'Compress', grayscale: 'Convert to Grayscale', optimize: 'Optimize PDF',
-  pdfa: 'Convert to PDF/A', pdf_version: 'Set PDF Version',
-  encrypt: 'Encrypt PDF', decrypt: 'Decrypt PDF',
-  extract_text: 'Extract Text', metadata: 'Edit Metadata',
-  watermark: 'Watermark', forms: 'Fill Form', compare: 'Compare PDFs',
-  signatures: 'Signatures',
-  repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',
 };
 
 function AppContent(): React.ReactElement {
@@ -969,42 +958,7 @@ function AppContent(): React.ReactElement {
       <TabStrip onCloseFile={(path) => void handleCloseFile(path)} />
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Tools tab: active-file switcher + operations rail + the active panel.
-            The rail is the WITHIN-tool picker, so it only exists once a tool is
-            open — beside the Tools Center it would be a second, competing picker
-            for the same choice. */}
-        {focusedTab === 'tools' && activeTool && (
-          <div className="app-rail flex flex-col shrink-0 border-r border-neutral-800">
-            {tabFileList.length > 0 && (
-              <div className="w-48 border-b border-neutral-800 py-2 shrink-0 max-h-48 overflow-y-auto">
-                <div className="px-4 pb-1 text-[10px] uppercase tracking-widest text-neutral-300 font-semibold">
-                  Active File
-                </div>
-                {tabFileList.map((f) => (
-                  <button
-                    key={f.path}
-                    data-testid="tools-active-file"
-                    onClick={() => dispatch({ type: 'SET_ACTIVE_FILE', path: f.path })}
-                    className={`w-full px-4 py-1.5 text-left text-sm truncate transition-colors ${
-                      f.dirty ? 'italic' : ''
-                    } ${
-                      state.activeFileId === f.path
-                        ? 'bg-neutral-700 text-white'
-                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
-                    }`}
-                    title={f.path}
-                  >
-                    {isFileDirty(f) && <span className="text-amber-400 mr-1 not-italic">*</span>}
-                    {f.name}
-                  </button>
-                ))}
-              </div>
-            )}
-            <Sidebar active={activeOp} onSelect={(op) => invokeCommand(`tools.panel.${op}`)} />
-          </div>
-        )}
-
-        <main className="app-content flex-1 flex flex-col overflow-hidden">
+          <main className="app-content flex-1 flex flex-col overflow-hidden">
           {focusedTab === 'home' ? (
             <HomeTab
               recentFiles={recentFiles}
@@ -1029,6 +983,27 @@ function AppContent(): React.ReactElement {
                   ‹ Tools
                 </button>
                 <h2 className="text-lg font-medium">{activeTool.title}</h2>
+                {/* Which document the tool acts on. The Tools tab isn't a doc
+                    tab, so the panels need a target named somewhere — this is
+                    the old rail's Active File list, as one control instead of a
+                    standing column. Hidden for a single file: a picker with one
+                    choice asks a question that has no other answer. */}
+                {tabFileList.length > 1 && (
+                  <label className="tool-pane-file">
+                    <span className="tool-pane-file-label">File</span>
+                    <select
+                      data-testid="tools-active-file"
+                      value={state.activeFileId ?? ''}
+                      onChange={(e) => dispatch({ type: 'SET_ACTIVE_FILE', path: e.target.value })}
+                    >
+                      {tabFileList.map((f) => (
+                        <option key={f.path} value={f.path}>
+                          {isFileDirty(f) ? `* ${f.name}` : f.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
               {/* A tool that hosts several operations lists them: the tool is the
                   JOB, these are the ways of doing it. One-op tools show no
@@ -1045,7 +1020,7 @@ function AppContent(): React.ReactElement {
                       onClick={() => invokeCommand(`tools.panel.${op}`)}
                     >
                       <ToolIcon op={op} />
-                      {titles[op]}
+                      {OPERATION_TITLES[op]}
                     </button>
                   ))}
                 </div>

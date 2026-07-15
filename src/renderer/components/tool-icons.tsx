@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Operation } from './Sidebar';
+import type { Operation } from '../commands/operations';
 
 /**
  * Tool-rail glyphs — one per operation, in the app's established icon
@@ -20,6 +20,9 @@ const base = {
 
 // Path data per operation; single-glyph additions like dashes are carried
 // per-path so the shared svg wrapper stays uniform.
+// Total over Operation, so adding an op without a glyph fails tsc. The runtime
+// list of operations lives in commands/operations (the canonical source); this
+// map must merely COVER it, which the Record type already guarantees.
 const GLYPHS: Record<Operation, React.JSX.Element> = {
   // A page cut by a dashed line down the middle.
   split: (
@@ -161,16 +164,6 @@ interface ToolIconProps {
   className?: string;
 }
 
-/**
- * Every operation the app has, at runtime.
- *
- * Derived from `GLYPHS`, which TypeScript already forces to be TOTAL over
- * `Operation` — so this list cannot drift from the union, and adding an
- * operation without a glyph still fails to compile. The tools registry's
- * "nothing orphaned" test needs a runtime list to check against; deriving it
- * here beats hand-maintaining a second copy that could silently fall behind.
- */
-export const OPERATIONS = Object.keys(GLYPHS) as Operation[];
 
 export function ToolIcon({ op, size = 15, className }: ToolIconProps): React.JSX.Element {
   return (

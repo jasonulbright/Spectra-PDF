@@ -1,4 +1,4 @@
-import type { Operation } from '../components/Sidebar';
+import type { Operation } from './operations';
 import type { CanvasTool } from '../state/types';
 
 // The workbench's TOOLS (Phase 4 M5, § 7) — the data the Tools Center tiles,
@@ -6,7 +6,7 @@ import type { CanvasTool } from '../state/types';
 // keymap, this is DATA over the command registry, not hand-placed UI: that is
 // what makes "Acrobat-like" a configuration we can test rather than pixels.
 //
-// The shape of the change: 21 operations, grouped into 12 tools by the JOB the
+// The shape of the change: 19 operations, grouped into 12 tools by the JOB the
 // user came to do. The old rail's groups (Pages / Transform / Repair / Security
 // / Content) were a taxonomy of the ENGINE — they named what the code does. A
 // forms author does not think "I need a Content operation"; they think "I'm

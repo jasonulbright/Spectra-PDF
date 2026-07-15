@@ -10,7 +10,6 @@ interface Settings {
   defaultOutputDir: string;
   compressionQuality: string;
   theme: string;
-  expandAllTools: boolean;
   minimizeToTray: boolean;
   startMinimized: boolean;
 }
@@ -25,7 +24,6 @@ const DEFAULTS: Settings = {
   defaultOutputDir: '',
   compressionQuality: 'ebook',
   theme: 'system',
-  expandAllTools: false,
   minimizeToTray: false,
   startMinimized: false,
 };
@@ -67,9 +65,6 @@ function loadSettings(): Settings {
     if (!stored) return DEFAULTS;
     const parsed = JSON.parse(stored);
     // Fix string-boolean corruption from earlier bug
-    if (typeof parsed.expandAllTools === 'string') {
-      parsed.expandAllTools = parsed.expandAllTools === 'true';
-    }
     if (typeof parsed.minimizeToTray === 'string') {
       parsed.minimizeToTray = parsed.minimizeToTray === 'true';
     }
@@ -268,16 +263,6 @@ export function SettingsPanel(): React.ReactElement {
           <option value="light">Light</option>
         </select>
       </div>
-
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={settings.expandAllTools}
-          onChange={() => update('expandAllTools', !settings.expandAllTools)}
-          className="rounded bg-neutral-800 border-neutral-700"
-        />
-        <span className="text-sm text-neutral-400">Expand all tool groups in sidebar</span>
-      </label>
 
       <label className="flex items-center gap-2 cursor-pointer">
         <input

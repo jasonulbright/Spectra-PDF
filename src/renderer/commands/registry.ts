@@ -9,6 +9,7 @@ import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/type
 import type { Command, CommandContext, CommandNamespace } from './types';
 import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
 import { TOOL_DEFS, TOOL_IDS } from './tools';
+import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
 
 // --- Pure enablement helpers (unit-tested; menus gray from these) ---------
@@ -94,28 +95,6 @@ export function cycledTab(state: AppState, delta: 1 | -1): FocusedTab {
 
 // --- Command definitions ---------------------------------------------------
 
-// The operation panels (retiring at M5 into tools/dialogs; until then each
-// gets a navigation command so menus/tiles/welcome actions share one path).
-const PANEL_OPS = [
-  'split', 'rotate', 'delete',
-  'compress', 'grayscale', 'optimize', 'pdfa', 'pdf_version',
-  'repair', 'rebuild', 'recover',
-  'encrypt', 'decrypt',
-  'extract_text', 'watermark', 'forms', 'compare', 'signatures', 'metadata',
-] as const;
-type PanelOp = (typeof PANEL_OPS)[number];
-
-const PANEL_TITLES: Record<PanelOp, string> = {
-  split: 'Split by Range', rotate: 'Rotate Pages', delete: 'Delete Pages',
-  compress: 'Compress', grayscale: 'Convert to Grayscale', optimize: 'Optimize PDF',
-  pdfa: 'Convert to PDF/A', pdf_version: 'Set PDF Version',
-  encrypt: 'Encrypt PDF', decrypt: 'Decrypt PDF',
-  extract_text: 'Extract Text', metadata: 'Edit Metadata',
-  watermark: 'Watermark', forms: 'Fill Form', compare: 'Compare PDFs',
-  signatures: 'Signatures',
-  repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',
-};
-
 // Canvas interaction tools (the floating pill set). Activation toggles like
 // the pills: picking the active tool returns to Select.
 const CANVAS_TOOLS = [
@@ -161,7 +140,7 @@ export const COMMAND_IDS = [
   'file.exit',
   'file.clearRecent',
   ...CANVAS_TOOLS.map((t) => `tools.${t}` as const),
-  ...PANEL_OPS.map((op) => `tools.panel.${op}` as const),
+  ...OPERATIONS.map((op) => `tools.panel.${op}` as const),
   ...TOOL_IDS.map((id) => `tools.open.${id}` as const),
 ] as const;
 
@@ -187,9 +166,9 @@ function toolCommand(tool: CanvasTool): Command {
   };
 }
 
-function panelCommand(op: PanelOp): Command {
+function panelCommand(op: Operation): Command {
   return {
-    title: PANEL_TITLES[op],
+    title: OPERATION_TITLES[op],
     run: ({ dispatch }) => {
       dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
       // UI_SET_ACTIVE_OP opens the TOOL that hosts this operation too, so a menu
@@ -397,8 +376,8 @@ export const COMMANDS: Record<CommandId, Command> = {
     CANVAS_TOOLS.map((t) => [`tools.${t}`, toolCommand(t)]),
   ) as Record<`tools.${(typeof CANVAS_TOOLS)[number]}`, Command>),
   ...(Object.fromEntries(
-    PANEL_OPS.map((op) => [`tools.panel.${op}`, panelCommand(op)]),
-  ) as Record<`tools.panel.${PanelOp}`, Command>),
+    OPERATIONS.map((op) => [`tools.panel.${op}`, panelCommand(op)]),
+  ) as Record<`tools.panel.${Operation}`, Command>),
   // One command per TOOL (§ 7) — what the Tools menu and the Tools Center tiles
   // both invoke, so the two can never disagree about what a tool opens.
   ...(Object.fromEntries(

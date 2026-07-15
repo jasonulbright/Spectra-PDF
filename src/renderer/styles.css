@@ -1706,3 +1706,38 @@
 [data-theme="light"] .tool-op { color: #4b5563; }
 [data-theme="light"] .tool-op:hover { background: #f3f4f6; color: #111827; }
 [data-theme="light"] .tool-op.active { background: #0078d4; color: #ffffff; }
+
+/* The task pane's document picker (M5.2) — replaces the retired rail's standing
+   "Active File" column. The Tools tab isn't a doc tab, so a tool's panels need
+   their target named somewhere; one control in the pane head says it without
+   spending a column on it. Only rendered with >1 file open. */
+.tool-pane-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.tool-pane-file-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: #a3a3a3;
+}
+.tool-pane-file select {
+  max-width: 240px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid #2e2e2e;
+  background: #1f1f1f;
+  color: #e5e5e5;
+  font-size: 12px;
+}
+.tool-pane-file select:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+
+[data-theme="light"] .tool-pane-file-label { color: #6b7280; }
+[data-theme="light"] .tool-pane-file select {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  color: #111827;
+}

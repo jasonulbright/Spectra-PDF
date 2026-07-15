@@ -1,11 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import { TOOL_DEFS, TOOL_IDS, toolById, toolForOp, type ToolId } from '../src/renderer/commands/tools';
-import { OPERATIONS } from '../src/renderer/components/tool-icons';
+import { OPERATIONS, OPERATION_TITLES } from '../src/renderer/commands/operations';
 
-// The tools registry (M5, § 7) regroups 21 engine operations into 12 tools named
-// for the JOB. These pin the properties the UI relies on — above all that no
-// operation can be orphaned by a future edit, which is the whole risk of moving
-// from "one rail listing everything" to "tools that group things".
+// The tools registry (M5, § 7) regroups the 19 engine operations into 12 tools
+// named for the JOB. These pin the properties the UI relies on — above all that
+// no operation can be orphaned by a future edit, which is the whole risk of
+// moving from "one rail listing everything" to "tools that group things".
+
+describe('the operation set', () => {
+  it('has no duplicate entries', () => {
+    // The one property the type system can't see: `Operation` is derived from
+    // this array, so a repeated entry collapses in the union while the ARRAY
+    // still carries both — every `Record<Operation, …>` stays total and tsc
+    // stays quiet, but anything iterating OPERATIONS (the command ids, the
+    // totality check below) silently doubles it.
+    expect([...new Set(OPERATIONS)]).toEqual([...OPERATIONS]);
+  });
+
+  it('titles every operation', () => {
+    // Record<Operation, string> makes this total at compile time; this catches
+    // the other direction — a title left as an empty string.
+    for (const op of OPERATIONS) {
+      expect(OPERATION_TITLES[op]?.length, `${op} has no title`).toBeGreaterThan(0);
+    }
+  });
+});
 
 describe('tools registry', () => {
   it('reaches EVERY operation through exactly one tool', () => {
