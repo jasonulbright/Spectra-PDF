@@ -2,7 +2,7 @@ import { AppState, AppAction, FocusedTab, OpenDocument, OpenFile, PageAnnotation
 import { carriesManifest } from '../lib/doc-names';
 // Safe from the reducer: commands/tools has type-only imports, so it carries no
 // runtime dependency back into the state or component layers.
-import { toolForOp } from '../commands/tools';
+import { toolById, toolForOp } from '../commands/tools';
 
 // Re-project a display-normalized annotation rect when its page's display
 // rotates by `delta` quarter-turns clockwise: annotation coords always live
@@ -236,6 +236,35 @@ function applyFileUpdate(
     redoStack: [], // new action clears redo
   });
   return next;
+}
+
+/**
+ * Open (or close, with null) a Tools-tab tool, and put the canvas mode where
+ * that tool says it belongs.
+ *
+ * THE ONE PLACE `activeToolId` CHANGES. Both actions that open a tool route
+ * here, because the two are not independent: `ui.tool` is live on the canvas
+ * (PageCell branches on it), nothing else clears it — `focusTab` only resets on
+ * LEAVING a doc tab, so Tools→Tools and Tools→doc never qualify — and so a mode
+ * left armed by a tool the user has since closed goes silently live the moment
+ * they click back onto a document: every form widget interactive, plain drags
+ * swallowed, with no chrome saying why. A tool whose mode is "none", and the
+ * tile grid (`toolId: null`, no tool open at all), must DISARM the last one.
+ *
+ * This bug was fixed FOUR times before landing here — once at each dispatcher
+ * that happened to be under review that round (`tools.open.*`, then again for a
+ * second variable, then `tools.panel.*` via the rail and the Tools menu, then
+ * the ‹ Tools back button, which an earlier round's own notes had already named
+ * as a door and left open). Every one of those fixes was correct and none of
+ * them was enough, because the rule isn't about any dispatcher: opening a tool
+ * DETERMINES the canvas mode, so the code that changes the tool must be the code
+ * that sets the mode. Anything else is a rule that survives only as long as the
+ * next author remembers it.
+ */
+function openTool(ui: UiState, toolId: string | null): UiState {
+  const tool = (toolId ? toolById(toolId)?.canvasTool : undefined) ?? 'select';
+  if (toolId === ui.activeToolId && tool === ui.tool) return ui;
+  return { ...ui, activeToolId: toolId, tool };
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -998,44 +1027,20 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_RECENT_FILES':
       return { ...state, ui: { ...state.ui, recentFiles: action.files } };
     case 'UI_SET_ACTIVE_OP': {
-      // Arming an operation OPENS its owning tool AND arms that tool's canvas
-      // mode — both derived here, structurally, rather than asked of every
-      // dispatcher.
-      //
-      // `activeToolId`, because the Tools tab renders the tool's header + op
-      // switcher around `panels[activeOp]`: the two disagreeing means the header
-      // names one tool while the body shows another's panel (or the tile grid
-      // renders while an op is invisibly active).
-      //
-      // `tool`, because nothing else clears it — `focusTab` only resets on
-      // LEAVING a doc tab, so Tools→Tools never qualifies. Picking Encrypt from
-      // the rail or the Tools menu after Prepare Form otherwise left `forms`
-      // mode armed, and it went live the moment the user returned to a document:
-      // every widget interactive, plain drags swallowed, while the chrome said
-      // "Encrypt PDF". A tool whose mode is "none" must DISARM the last one.
-      //
-      // This is the M4.1c lesson, twice: an invariant that depends on future
-      // writers remembering is one that will break. It broke here three times —
-      // once per variable, each fixed at the call site — before landing in the
-      // one place every dispatcher must pass through.
+      // Arming an operation OPENS its owning tool: the Tools tab renders that
+      // tool's header + op switcher around `panels[activeOp]`, so the two
+      // disagreeing means the header names one tool while the body shows
+      // another's panel (or the tile grid renders while an op is invisibly
+      // active). Derived here rather than asked of every dispatcher.
       const owner = toolForOp(action.op);
-      const toolId = owner?.id ?? null;
-      const canvasTool = owner?.canvasTool ?? 'select';
-      if (
-        action.op === state.ui.activeOp &&
-        toolId === state.ui.activeToolId &&
-        canvasTool === state.ui.tool
-      ) {
-        return state;
-      }
-      return {
-        ...state,
-        ui: { ...state.ui, activeOp: action.op, activeToolId: toolId, tool: canvasTool },
-      };
+      const ui = openTool(state.ui, owner?.id ?? null);
+      if (action.op === state.ui.activeOp && ui === state.ui) return state;
+      return { ...state, ui: { ...ui, activeOp: action.op } };
     }
-    case 'UI_OPEN_TOOL':
-      if (action.toolId === state.ui.activeToolId) return state;
-      return { ...state, ui: { ...state.ui, activeToolId: action.toolId } };
+    case 'UI_OPEN_TOOL': {
+      const ui = openTool(state.ui, action.toolId);
+      return ui === state.ui ? state : { ...state, ui };
+    }
     case 'UI_SET_TOOL':
       if (action.tool === state.ui.tool) return state;
       return { ...state, ui: { ...state.ui, tool: action.tool } };

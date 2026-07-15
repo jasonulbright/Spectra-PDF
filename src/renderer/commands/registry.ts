@@ -423,15 +423,21 @@ export const COMMANDS: Record<CommandId, Command> = {
             const path = showableDoc(state);
             if (!path) return; // unreachable: `when` above requires one.
             dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
-            // § 7: activating a tool arms its mode. This is the ops-less
-            // branch's own arm — the ops branch gets it from the reducer via
-            // UI_SET_ACTIVE_OP instead, since these tools have no op to derive
-            // it from. Ordering is not load-bearing (the target is always a DOC
-            // tab, and `focusTab` only resets the mode when LEAVING doc land, so
-            // this focus can never stomp the arm whichever way round they go);
-            // arm last regardless, so the rule "the last word on ui.tool belongs
-            // to the tool being opened" holds without a case analysis.
-            dispatch({ type: 'UI_SET_TOOL', tool: tool.canvasTool ?? 'select' });
+            // § 7: activating a tool arms its mode. These tools have no op, so
+            // the reducer's `openTool` never sees them — this is their own arm.
+            //
+            // CONDITIONAL here, where the Tools-tab tools disarm unconditionally,
+            // and the difference is real rather than an oversight: a Tools-tab
+            // tool REPLACES what you were doing (and you had to leave the
+            // document to reach it, which resets the mode anyway), whereas these
+            // land you ON the page. Scan & OCR is the case that forces the
+            // distinction — it has no mode because it isn't one; it just opens
+            // Find. Disarming the user's Highlight to open a search box would be
+            // gratuitous, so a tool that doesn't take over the canvas leaves it
+            // alone. Ordering isn't load-bearing (the target is always a DOC tab
+            // and `focusTab` only resets when LEAVING doc land, so this focus
+            // can't stomp the arm either way round).
+            if (tool.canvasTool) dispatch({ type: 'UI_SET_TOOL', tool: tool.canvasTool });
             // Scan & OCR's whole surface is Find's "Make searchable" (2m), so the
             // tool opens Find rather than inventing a second entry point for it.
             // Deferred, not called on ctx.canvas: the tab focus above has only

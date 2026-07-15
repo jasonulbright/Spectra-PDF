@@ -203,6 +203,7 @@ describe('invokeCommand', () => {
     handlers: AppCommandHandlers;
     /** State after every dispatch — for invariants the reducer derives. */
     finalState: () => AppState;
+    dispatchRaw: (a: AppAction) => void;
   } {
     const dispatched: AppAction[] = [];
     // Reducer-backed dispatch so multi-dispatch commands see evolving state.
@@ -216,7 +217,17 @@ describe('invokeCommand', () => {
     }));
     const handlers = noopHandlers();
     registerAppCommandHandlers(handlers);
-    return { dispatched, handlers, finalState: () => current };
+    return {
+      dispatched,
+      handlers,
+      finalState: () => current,
+      // Dispatch straight at the wired reducer — for UI that dispatches without
+      // going through a command (the ‹ Tools back button).
+      dispatchRaw: (a) => {
+        dispatched.push(a);
+        current = appReducer(current, a);
+      },
+    };
   }
 
   it('returns false with no registered context', () => {
@@ -430,6 +441,36 @@ describe('invokeCommand', () => {
     const { finalState } = wire(initialState);
     expect(invokeCommand('tools.open.prepareform')).toBe(true);
     expect(finalState().ui.tool).toBe('forms');
+  });
+
+  it('the ‹ Tools back button disarms the closed tool’s mode', () => {
+    // The fourth door onto the same bug. Prepare Form arms `forms`; closing to
+    // the tile grid left it armed, and it went live the moment the user clicked
+    // back onto a document — every widget interactive, plain drags swallowed,
+    // with nothing on screen saying why.
+    const { finalState, dispatchRaw } = wire(
+      stateWith({ files: new Map([['a.pdf', makeFile('a.pdf')]]), activeFileId: 'a.pdf' }),
+    );
+    invokeCommand('tools.open.prepareform');
+    expect(finalState().ui.tool).toBe('forms');
+    dispatchRaw({ type: 'UI_OPEN_TOOL', toolId: null }); // the ‹ Tools button
+    expect(finalState().ui.activeToolId).toBeNull();
+    expect(finalState().ui.tool).toBe('select');
+  });
+
+  it('Scan & OCR does NOT disarm the canvas tool — it only opens Find', () => {
+    // It has no mode because it isn't one. A Tools-tab tool replaces what you
+    // were doing; this lands you on the page, so taking away the user's
+    // Highlight to show a search box would be gratuitous.
+    const { finalState } = wire(
+      stateWith({
+        files: new Map([['a.pdf', makeFile('a.pdf')]]),
+        activeFileId: 'a.pdf',
+        ui: { ...initialState.ui, focusedTab: { doc: 'a.pdf' }, tool: 'highlight' },
+      }),
+    );
+    expect(invokeCommand('tools.open.ocr')).toBe(true);
+    expect(finalState().ui.tool).toBe('highlight');
   });
 
   it('picking an op from the RAIL or the Tools menu re-arms that op’s tool mode', () => {

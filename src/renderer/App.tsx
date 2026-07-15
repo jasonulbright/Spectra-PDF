@@ -307,7 +307,12 @@ function AppContent(): React.ReactElement {
         // it — so treating it as "already open" made File ▸ Open on a file you
         // had previously imported pages FROM a permanent no-op with no
         // feedback. Fall through and open it properly instead.
-        const existing = state.files.get(filePath);
+        // Off the ref, not the closure: this loop awaits (the password prompt,
+        // the commit gate, the byte read), so `state.files` is stale from the
+        // second iteration on — the same reason `recent` is threaded above. A
+        // stale read here re-opens a path an earlier iteration already opened,
+        // leaking its working copy.
+        const existing = stateRef.current.files.get(filePath);
         if (existing && !existing.importOnly) {
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
           recent = withRecent(recent, filePath); // only on success — a cancel/throw
@@ -340,7 +345,7 @@ function AppContent(): React.ReactElement {
       if (changed) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
       if (lastOpened) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: lastOpened } });
     }
-  }, [state.files, dispatch, prepareFileBytes]);
+  }, [dispatch, prepareFileBytes]);
 
   // Import one or more files' pages INTO an existing document at an index (the
   // add-page ghost and per-position drops, 2n.3). Each file is registered
