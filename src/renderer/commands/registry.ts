@@ -43,9 +43,20 @@ export function canRedo(state: AppState): boolean {
   return f ? f.redoStack.length > 0 : false;
 }
 
-/** Dirty = whole-file dirty OR pending page-tier edits touching the file. */
+/**
+ * Dirty = whole-file dirty OR pending page-tier edits touching the file.
+ *
+ * Gates File ▸ Save, whose handler writes the working copy back over
+ * `activeFile.path` with no dialog. So it asks `showableDoc`, not
+ * `activeFileId`: for a byte-only import source that path is the ORIGINAL file
+ * the user imported from, and "Save" would silently overwrite it — a file with
+ * no tab, no dirty marker, and nothing on screen to connect it to the action.
+ * `hasActiveFile` (Save As / Close) already refused; Save was the one that
+ * didn't, which is the wrong way round for the destructive one.
+ */
 export function isActiveFileDirty(state: AppState): boolean {
-  const f = state.activeFileId ? state.files.get(state.activeFileId) : null;
+  const path = showableDoc(state);
+  const f = path ? state.files.get(path) : null;
   if (!f) return false;
   return f.dirty || state.pageDirtyPaths.includes(f.path);
 }

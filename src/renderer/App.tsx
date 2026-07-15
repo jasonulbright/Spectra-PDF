@@ -1001,10 +1001,11 @@ function AppContent(): React.ReactElement {
                       // <option> by selecting the FIRST one — so an active file
                       // that isn't in the list wouldn't show as "unset", it
                       // would confidently name the wrong document while the
-                      // panels worked on another. The reducer now guarantees the
-                      // active file is never a ghost, so this is defence in
-                      // depth: if the invariant ever breaks, show nothing rather
-                      // than a lie.
+                      // panels worked on another. Defence in depth — the reducer
+                      // refuses to make a ghost active, so this should be
+                      // unreachable; it stays because the failure mode it
+                      // prevents is a control that LIES rather than one that
+                      // looks broken, and that is the wrong way to degrade.
                       value={selectableFile ?? ''}
                       onChange={(e) => dispatch({ type: 'SET_ACTIVE_FILE', path: e.target.value })}
                     >

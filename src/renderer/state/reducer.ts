@@ -395,6 +395,21 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
     case 'SET_ACTIVE_FILE': {
+      // A byte-only import source can never be the ACTIVE file. It has no tab
+      // and is never rendered, so making it active hands every panel an
+      // invisible target — and the damage isn't cosmetic: `isActiveFileDirty`
+      // would light up File ▸ Save, whose handler writes the working copy back
+      // to `activeFile.path`, which for an import source is the ORIGINAL file
+      // the user picked. That is a silent overwrite of a real file on disk,
+      // with no dialog and no dirty indicator anywhere (no tab to show one).
+      //
+      // Reject rather than coerce: the caller asked for something incoherent,
+      // and a reducer that quietly substitutes a different file is its own bug.
+      // This is what makes "the active file is never a ghost" TRUE — the other
+      // writers were already safe (OPEN_FILE upgrades the entry in the same
+      // dispatch; REGISTER_IMPORT_SOURCE deliberately doesn't touch the active
+      // file; CLOSE_FILE's fallback skips ghosts), and this was the hole.
+      if (state.files.get(action.path)?.importOnly) return state;
       // A per-doc focus names a partition of the file being left — like
       // focusTab, drop it so the reading view can't keep rendering the old
       // file's document while the tab strip says another file is active

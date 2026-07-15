@@ -215,6 +215,29 @@ describe('the ghost import-source hazard (2n.3)', () => {
     expect(s.ui.focusedTab).toEqual({ doc: 'b.pdf' });
   });
 
+  it('CLOSE_FILE’s TAB fallback refuses a ghost that was already active', () => {
+    // The tab guard survives its own belt-and-braces status: the active-id
+    // fallback only runs when the CLOSED file was the active one, so a ghost
+    // that is already active when an unrelated file closes flows straight
+    // through — and the tab must still not try to focus it. The reviewer showed
+    // no test reached this clause (it could be deleted with the suite green);
+    // this is that test.
+    let s = appReducer(initialState, {
+      type: 'OPEN_FILE', path: 'a.pdf', workingPath: 'a.w', name: 'a.pdf',
+      pageCount: 1, buffer: [1],
+    });
+    s = appReducer(s, {
+      type: 'REGISTER_IMPORT_SOURCE', path: 'ghost.pdf', workingPath: 'g.w',
+      name: 'ghost.pdf', pageCount: 1, buffer: [2],
+    });
+    s = appReducer(s, { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
+    // Force the state SET_ACTIVE_FILE now refuses, to prove the downstream
+    // guard independently rather than leaning on the upstream one.
+    s = { ...s, activeFileId: 'ghost.pdf' };
+    s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(s.ui.focusedTab).toBe('home'); // not { doc: 'ghost.pdf' }
+  });
+
   it('CLOSE_FILE leaves NO active file when only ghosts remain', () => {
     // Nothing the user can see is open, so there is nothing to be active. null
     // is the honest answer — better than naming bytes with no window.
@@ -229,6 +252,44 @@ describe('the ghost import-source hazard (2n.3)', () => {
     s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
     expect(s.activeFileId).toBeNull();
     expect(s.ui.focusedTab).toBe('home');
+  });
+
+  it('SET_ACTIVE_FILE REFUSES a ghost — Save would overwrite the real file', () => {
+    // The worst reachable path this milestone found. A ghost's `path` is the
+    // ORIGINAL file the user imported from, and File ▸ Save writes the working
+    // copy back over `activeFile.path` with no dialog. So a ghost active file
+    // is not a cosmetic mix-up: it is a silent overwrite of a real file on
+    // disk, with no tab and no dirty marker anywhere to connect it to.
+    let s = appReducer(initialState, {
+      type: 'OPEN_FILE', path: 'main.pdf', workingPath: 'm.w', name: 'main.pdf',
+      pageCount: 1, buffer: [1],
+    });
+    s = appReducer(s, {
+      type: 'REGISTER_IMPORT_SOURCE', path: 'appendix.pdf', workingPath: 'a.w',
+      name: 'appendix.pdf', pageCount: 1, buffer: [2],
+    });
+    const before = s.activeFileId;
+    s = appReducer(s, { type: 'SET_ACTIVE_FILE', path: 'appendix.pdf' });
+    expect(s.activeFileId).toBe(before); // refused, not coerced elsewhere
+  });
+
+  it('Save stays disabled for a dirty ghost, like Save As and Close already were', () => {
+    // Belt-and-braces for the same hazard, one layer down: even if some future
+    // writer got a ghost into activeFileId, the gate on the DESTRUCTIVE command
+    // must not open. `hasActiveFile` refused all along; `isActiveFileDirty` —
+    // which gates Save — didn't, which is the wrong way round.
+    const ghost = stateWith({
+      activeFileId: 'appendix.pdf',
+      files: new Map([['appendix.pdf', makeFile('appendix.pdf', { importOnly: true, dirty: true })]]),
+    });
+    expect(isActiveFileDirty(ghost)).toBe(false);
+    expect(hasActiveFile(ghost)).toBe(false);
+    // ...and a real dirty file still enables it.
+    const real = stateWith({
+      activeFileId: 'a.pdf',
+      files: new Map([['a.pdf', makeFile('a.pdf', { dirty: true })]]),
+    });
+    expect(isActiveFileDirty(real)).toBe(true);
   });
 
   it('OPEN_FILE upgrades a ghost into a real document', () => {
