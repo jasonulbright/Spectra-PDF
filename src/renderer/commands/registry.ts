@@ -414,17 +414,6 @@ export const COMMANDS: Record<CommandId, Command> = {
         when: (ctx) => tool.ops.length > 0 || showableDoc(ctx.state) !== null,
         run: (ctx) => {
           const { state, dispatch } = ctx;
-          // Activating a tool arms its interaction mode (§ 7) — for EVERY tool,
-          // not just the canvas-mode ones (Prepare Form and Fill & Sign each
-          // host a panel AND want their widget mode live). Unconditional with a
-          // 'select' default, NOT `if (tool.canvasTool)`: a tool whose mode is
-          // "none" must DISARM the last one. Nothing else clears `ui.tool` —
-          // `focusTab` only resets it when LEAVING a doc tab, so Tools→Tools and
-          // Tools→doc never qualify — and a stale mode is live on the canvas
-          // (PageCell branches on it), so opening Prepare Form, going back, then
-          // opening Protect would leave Forms mode armed under a tool that never
-          // asked for it.
-          dispatch({ type: 'UI_SET_TOOL', tool: tool.canvasTool ?? 'select' });
           if (tool.ops.length === 0) {
             // Canvas-mode tool (Comment, Redact, Scan & OCR): there is no form to
             // fill — the work IS the document. So open the document and arm the
@@ -434,6 +423,15 @@ export const COMMANDS: Record<CommandId, Command> = {
             const path = showableDoc(state);
             if (!path) return; // unreachable: `when` above requires one.
             dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
+            // § 7: activating a tool arms its mode. This is the ops-less
+            // branch's own arm — the ops branch gets it from the reducer via
+            // UI_SET_ACTIVE_OP instead, since these tools have no op to derive
+            // it from. Ordering is not load-bearing (the target is always a DOC
+            // tab, and `focusTab` only resets the mode when LEAVING doc land, so
+            // this focus can never stomp the arm whichever way round they go);
+            // arm last regardless, so the rule "the last word on ui.tool belongs
+            // to the tool being opened" holds without a case analysis.
+            dispatch({ type: 'UI_SET_TOOL', tool: tool.canvasTool ?? 'select' });
             // Scan & OCR's whole surface is Find's "Make searchable" (2m), so the
             // tool opens Find rather than inventing a second entry point for it.
             // Deferred, not called on ctx.canvas: the tab focus above has only
@@ -443,8 +441,10 @@ export const COMMANDS: Record<CommandId, Command> = {
           }
           dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
           // Land on the tool's first operation — opening a tool should show its
-          // work, not an empty shell. UI_SET_ACTIVE_OP re-homes activeToolId
-          // onto the op's owning tool, so this also opens `tool`.
+          // work, not an empty shell. UI_SET_ACTIVE_OP derives BOTH activeToolId
+          // and the canvas mode from the op, so this one dispatch opens `tool`
+          // and arms it; doing it here as well would just be a second, stompable
+          // copy of a rule the reducer already owns.
           dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
         },
       } satisfies Command,

@@ -162,10 +162,16 @@ describe('the ghost import-source hazard (2n.3)', () => {
       type: 'REGISTER_IMPORT_SOURCE', path: 'src.pdf', workingPath: 'src.w',
       name: 'src.pdf', pageCount: 1, buffer: [2],
     });
+    // Be ON a.pdf's tab when it closes — otherwise CLOSE_FILE's focusedClosed
+    // branch never runs and the tab-fallback assertion below passes vacuously
+    // (it did: the whole suite stayed green with that guard deleted).
+    s = appReducer(s, { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
+    expect(s.ui.focusedTab).toEqual({ doc: 'a.pdf' });
     s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
     expect(s.activeFileId).toBe('src.pdf');
     expect(s.files.get('src.pdf')?.importOnly).toBe(true);
-    // The tab fallback IS ghost-aware; the active id is not — hence the guards.
+    // The tab fallback IS ghost-aware — it must NOT land on the ghost's
+    // (nonexistent) tab. The active id is not ghost-aware, hence the guards.
     expect(s.ui.focusedTab).toBe('home');
     expect(hasActiveFile(s)).toBe(false);
   });
@@ -278,14 +284,33 @@ describe('invokeCommand', () => {
   it('tools.open.* for a canvas-mode tool opens the DOCUMENT and arms the mode', () => {
     // Comment has no ops — its work is a mode on the page, so parking the user
     // on the Tools tab would show them an empty pane. It must route to the doc.
-    const { dispatched } = wire(
+    // Asserted on the resulting STATE, not the dispatch sequence: the order is
+    // an implementation detail, "you end up on the page with Highlight live"
+    // is the behavior.
+    const { finalState } = wire(
       stateWith({ files: new Map([['a.pdf', makeFile('a.pdf')]]), activeFileId: 'a.pdf' }),
     );
     expect(invokeCommand('tools.open.comment')).toBe(true);
-    expect(dispatched).toEqual([
-      { type: 'UI_SET_TOOL', tool: 'highlight' },
-      { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } },
-    ]);
+    expect(finalState().ui.focusedTab).toEqual({ doc: 'a.pdf' });
+    expect(finalState().ui.tool).toBe('highlight');
+  });
+
+  it('a canvas-mode tool opens the ACTIVE file, not the focused tab’s file', () => {
+    // The tab and the active file can disagree; the tool acts on the active
+    // file, so it must bring THAT document forward and arm the mode there.
+    const { finalState } = wire(
+      stateWith({
+        files: new Map([
+          ['a.pdf', makeFile('a.pdf')],
+          ['b.pdf', makeFile('b.pdf')],
+        ]),
+        activeFileId: 'b.pdf',
+        ui: { ...initialState.ui, focusedTab: { doc: 'a.pdf' } },
+      }),
+    );
+    expect(invokeCommand('tools.open.redact')).toBe(true);
+    expect(finalState().ui.focusedTab).toEqual({ doc: 'b.pdf' });
+    expect(finalState().ui.tool).toBe('redact');
   });
 
   it('tools.open.* for a canvas-mode tool is disabled with no document open', () => {
@@ -402,9 +427,23 @@ describe('invokeCommand', () => {
     // Prepare Form hosts the `forms` panel AND wants widget mode live (§ 7:
     // activating a tool arms its interaction mode — for every tool that names
     // one, not only the ops-less ones).
-    const { dispatched } = wire(initialState);
+    const { finalState } = wire(initialState);
     expect(invokeCommand('tools.open.prepareform')).toBe(true);
-    expect(dispatched).toContainEqual({ type: 'UI_SET_TOOL', tool: 'forms' });
+    expect(finalState().ui.tool).toBe('forms');
+  });
+
+  it('picking an op from the RAIL or the Tools menu re-arms that op’s tool mode', () => {
+    // The gap that made the reducer own this: `tools.panel.*` (the rail and the
+    // Tools menu, both shipped and reachable) never touched `ui.tool`, and a
+    // Tools→Tools focus doesn't trip focusTab's reset. So Prepare Form → rail ▸
+    // Encrypt left `forms` armed under a pane headed "Encrypt PDF", live on the
+    // canvas the moment the user went back to a document.
+    const { finalState } = wire(initialState);
+    invokeCommand('tools.open.prepareform');
+    expect(finalState().ui.tool).toBe('forms');
+    invokeCommand('tools.panel.encrypt'); // the rail / Tools menu path
+    expect(finalState().ui.activeToolId).toBe('protect');
+    expect(finalState().ui.tool).toBe('select');
   });
 
   it('document.deleteSelection deletes the batch then clears — even when the reducer rejects', () => {

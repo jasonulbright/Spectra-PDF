@@ -33,7 +33,7 @@ import type { CanvasTool } from './state/types';
 import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
-import { setCommitGate } from './lib/commit-gate';
+import { setCommitGate, runCommitGate } from './lib/commit-gate';
 import { fillFormFields, readFormFields } from './lib/forms';
 import type { FormFieldValue } from './lib/forms';
 import { resolveFillTargets } from './lib/form-overlay';
@@ -314,6 +314,18 @@ function AppContent(): React.ReactElement {
           lastOpened = filePath;                  // must not pollute Recent (review-caught)
           changed = true;
           continue;
+        }
+        if (existing?.importOnly) {
+          // Upgrading a ghost REPLACES bytes that other documents' pending
+          // pages still point into (`PageRef.sourceDocId` + a positional
+          // `sourcePageIndex`, resolved at commit by `bytesFor`). If the file
+          // changed on disk since the import, those indices now mean something
+          // else — a silent wrong page, or a throw at commit. Flush first, so
+          // the imported pages are materialized into their own files and
+          // nothing references these bytes any more. `prepareFileBytes` can't
+          // be relied on for this: its only engine call is `check_encrypted`,
+          // which is an INTERNAL_METHOD and so deliberately ungated.
+          await runCommitGate();
         }
         const prepared = await prepareFileBytes(filePath);
         if (!prepared) continue; // cancelled encrypted file

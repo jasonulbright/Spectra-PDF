@@ -998,16 +998,40 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_RECENT_FILES':
       return { ...state, ui: { ...state.ui, recentFiles: action.files } };
     case 'UI_SET_ACTIVE_OP': {
-      // Arming an operation OPENS its owning tool, structurally — the Tools tab
-      // renders the tool's header + op switcher around `panels[activeOp]`, so
-      // the two disagreeing means the header names one tool while the body
-      // shows another's panel (or the tile grid renders while an op is
-      // invisibly active). Deriving it here instead of asking every dispatcher
-      // to pair a UI_OPEN_TOOL is the M4.1c lesson: an invariant that depends
-      // on future writers remembering is one that will break.
-      const toolId = toolForOp(action.op)?.id ?? null;
-      if (action.op === state.ui.activeOp && toolId === state.ui.activeToolId) return state;
-      return { ...state, ui: { ...state.ui, activeOp: action.op, activeToolId: toolId } };
+      // Arming an operation OPENS its owning tool AND arms that tool's canvas
+      // mode — both derived here, structurally, rather than asked of every
+      // dispatcher.
+      //
+      // `activeToolId`, because the Tools tab renders the tool's header + op
+      // switcher around `panels[activeOp]`: the two disagreeing means the header
+      // names one tool while the body shows another's panel (or the tile grid
+      // renders while an op is invisibly active).
+      //
+      // `tool`, because nothing else clears it — `focusTab` only resets on
+      // LEAVING a doc tab, so Tools→Tools never qualifies. Picking Encrypt from
+      // the rail or the Tools menu after Prepare Form otherwise left `forms`
+      // mode armed, and it went live the moment the user returned to a document:
+      // every widget interactive, plain drags swallowed, while the chrome said
+      // "Encrypt PDF". A tool whose mode is "none" must DISARM the last one.
+      //
+      // This is the M4.1c lesson, twice: an invariant that depends on future
+      // writers remembering is one that will break. It broke here three times —
+      // once per variable, each fixed at the call site — before landing in the
+      // one place every dispatcher must pass through.
+      const owner = toolForOp(action.op);
+      const toolId = owner?.id ?? null;
+      const canvasTool = owner?.canvasTool ?? 'select';
+      if (
+        action.op === state.ui.activeOp &&
+        toolId === state.ui.activeToolId &&
+        canvasTool === state.ui.tool
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        ui: { ...state.ui, activeOp: action.op, activeToolId: toolId, tool: canvasTool },
+      };
     }
     case 'UI_OPEN_TOOL':
       if (action.toolId === state.ui.activeToolId) return state;
