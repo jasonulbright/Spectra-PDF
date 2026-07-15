@@ -1,7 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TextLayer } from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { logRenderError } from './raster';
+
+// Match the raster's own zoom-settle window (raster.ts REBLIT_QUIET_MS) so a
+// zoom burst rebuilds text and pixels on the same beat rather than twice.
+const SETTLE_MS = 140;
 
 // Selectable text over a rendered page (Phase 4 M4.2, § 6.3).
 //
@@ -42,9 +46,24 @@ export function PageTextLayer({
 }: PageTextLayerProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Rebuilding is EXPENSIVE — a worker round-trip (`streamTextContent`) plus a
+  // full span rebuild, per mounted page. Zoom changes arrive as a burst (OS key
+  // repeat on a held Ctrl+=), so settle first, exactly as the raster's own
+  // `zoomVersion` does and for the same reason. Seeded with the initial size so
+  // first paint is immediate; only CHANGES wait. A layer that is briefly stale
+  // during a burst costs nothing visible — the spans are transparent, so only
+  // selection hit-boxes lag by a frame or two.
+  const [settled, setSettled] = useState({ w: displayWidth, h: displayHeight });
+  useEffect(() => {
+    if (settled.w === displayWidth && settled.h === displayHeight) return;
+    const t = setTimeout(() => setSettled({ w: displayWidth, h: displayHeight }), SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [displayWidth, displayHeight, settled.w, settled.h]);
+  const { w: layoutW, h: layoutH } = settled;
+
   useEffect(() => {
     const container = containerRef.current;
-    if (!pdf || !container || displayWidth <= 0 || displayHeight <= 0) return;
+    if (!pdf || !container || layoutW <= 0 || layoutH <= 0) return;
     let cancelled = false;
     let layer: TextLayer | null = null;
 
@@ -52,17 +71,23 @@ export function PageTextLayer({
       try {
         const page = await pdf.getPage(pageNumber);
         if (cancelled) return;
-        // Bake the rotation into the VIEWPORT rather than CSS-rotating the
-        // container (which is how PageView handles the raster). pdf.js then
-        // positions every span in the rotated frame itself, so the text lines up
-        // with the pixels at 90/270 without us re-projecting anything — and
-        // `page.rotate` (the file's own rotation) has to be added, since our
-        // in-memory quarter-turns are relative to it, not absolute.
-        const base = page.getViewport({ scale: 1, rotation: (page.rotate + rotation) % 360 });
+        // `rotation` here is ABSOLUTE: our in-memory quarter-turns are relative
+        // to the file's own `page.rotate`, so they add.
+        //
+        // Note what this does and does NOT do. pdf.js does NOT reposition spans
+        // for rotation — `PageViewport.rawDims` comes from the viewBox alone, so
+        // every span's left/top is identical at 0° and 90°. The rotation reaches
+        // the DOM only as the `data-main-rotation` attribute that TextLayer's
+        // constructor stamps on the container, and pdf.js's OWN stylesheet
+        // rotates it (we carry those rules — see `.textLayer[data-main-rotation]`
+        // in styles.css; without them the text sits unrotated over a rotated
+        // raster and selection grabs the wrong glyphs — review-caught).
+        const spin = (page.rotate + rotation) % 360;
+        const base = page.getViewport({ scale: 1, rotation: spin });
         // Uniform scale: the cell keeps the page's aspect, so either axis gives
         // the same factor. Height is the one the reading view drives.
-        const scale = displayHeight / base.height;
-        const viewport = page.getViewport({ scale, rotation: (page.rotate + rotation) % 360 });
+        const scale = layoutH / base.height;
+        const viewport = page.getViewport({ scale, rotation: spin });
         // pdf.js's span CSS is expressed in terms of --scale-factor; nothing
         // sets it for us because we construct TextLayer directly instead of
         // going through its viewer's setLayerDimensions.
@@ -87,7 +112,7 @@ export function PageTextLayer({
       // place for the new zoom/rotation.
       container.replaceChildren();
     };
-  }, [pdf, pageNumber, rotation, displayWidth, displayHeight]);
+  }, [pdf, pageNumber, rotation, layoutW, layoutH]);
 
   return (
     <div

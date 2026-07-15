@@ -69,11 +69,10 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 'f', ctrl: true, shift: false, command: 'edit.find', scope: 'canvas', editableGuard: false, preventDefault: 'always' },
   // Canvas selection + page ops (2n.1). Delete/Backspace and [ / ] ignored
   // modifiers in the legacy listener; kept.
-  // whenEnabled, NOT always: in the reading view `edit.selectAll` disables so
-  // that Ctrl+A falls through to the browser's select-all over the text layer
-  // (§ 9.2 — pages on the board, text in the document view). 'always' would
-  // preventDefault even while disabled and leave the key doing nothing at all.
-  { key: 'a', ctrl: true, command: 'edit.selectAll', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
+  // 'always': Ctrl+A selects PAGES in both views and must never fall through to
+  // the browser's select-all, which in the VIRTUALIZED reading view would grab
+  // only the mounted pages' text and silently mislead. See `edit.selectAll`.
+  { key: 'a', ctrl: true, command: 'edit.selectAll', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   { key: 'delete', command: 'document.deleteSelection', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
   { key: 'backspace', command: 'document.deleteSelection', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
   { key: ']', command: 'document.rotateSelectionCW', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },

@@ -309,10 +309,14 @@ describe('registry smoke', () => {
   });
 });
 
-// M4.2 — Ctrl+A is context-dependent (§ 9.2): PAGES on the board, TEXT in the
-// reading view. The reading view has real selectable text (pdf.js TextLayer), so
-// select-all there must fall through to the browser rather than select pages.
-describe('edit.selectAll is view-dependent', () => {
+// M4.2 — Ctrl+A selects PAGES in BOTH views, and must NOT fall through to the
+// browser's select-all in the reading view. § 9.2 originally specified TEXT
+// there (Acrobat's behaviour); it was tried and reverted, because the reading
+// view is VIRTUALIZED — only mounted pages have text spans — so native
+// select-all can reach only the on-screen pages and Ctrl+C would silently copy
+// a fraction of the document. These pin the reverted decision so it isn't
+// "restored" from the plan without re-reading why.
+describe('edit.selectAll selects pages in BOTH views (virtualization)', () => {
   const enabledOn = (mode: 'organize' | 'document'): boolean => {
     const state = stateWith({
       files: new Map([['x.pdf', makeFile('x.pdf')]]),
@@ -329,15 +333,13 @@ describe('edit.selectAll is view-dependent', () => {
     expect(enabledOn('organize')).toBe(true);
   });
 
-  it('stands aside in the reading view so the browser selects TEXT', () => {
-    expect(enabledOn('document')).toBe(false);
+  it('ALSO selects pages in the reading view — never a partial text select-all', () => {
+    expect(enabledOn('document')).toBe(true);
   });
 
-  it('its binding only preventDefaults when enabled, or the fall-through is dead', () => {
-    // 'always' would swallow Ctrl+A in the reading view and leave it doing
-    // nothing at all — the binding and the when() have to agree.
+  it('always preventDefaults, so the browser can never run a partial select-all', () => {
     const b = KEY_BINDINGS.find((k) => k.command === 'edit.selectAll' && k.ctrl && k.key === 'a');
     expect(b).toBeDefined();
-    expect(b!.preventDefault).toBe('whenEnabled');
+    expect(b!.preventDefault).toBe('always');
   });
 });

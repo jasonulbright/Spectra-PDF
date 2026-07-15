@@ -203,12 +203,20 @@ export const COMMANDS: Record<CommandId, Command> = {
   },
   'edit.selectAll': {
     title: 'Select All Pages',
-    // Context-dependent, per § 9.2: Ctrl+A selects PAGES on the board, but TEXT
-    // in the reading view — where a document is something you read, and Acrobat
-    // selects its text. Disabling here (with the binding's `whenEnabled`) lets
-    // the browser's own select-all run on the focused reading pane, which is
-    // both the correct behaviour and better than any select-all we could write.
-    when: (ctx) => inCanvas(ctx) && ctx.state.ui.docViewMode !== 'document',
+    // Selects PAGES in BOTH views, deliberately — see § 9.2's amendment.
+    //
+    // § 9.2 originally had Ctrl+A select TEXT in the reading view (Acrobat's
+    // behaviour), and that was tried: disable here, let the browser's native
+    // select-all run over the text layer. It was REVERTED because the reading
+    // view is VIRTUALIZED — only the pages within the scroll window have text
+    // spans in the DOM at all — so native select-all can physically only reach
+    // the handful of mounted pages. Ctrl+A then Ctrl+C would put a few pages of
+    // text on the clipboard while the user believed they had copied the
+    // document, silently and with no way to notice (review-caught). A
+    // well-defined "select all pages" (which the reading view's own context menu
+    // can act on) beats a select-all that quietly lies about its scope; drag-,
+    // double-click- and triple-click-selection all still work on the text.
+    when: inCanvas,
     run: ({ dispatch }) => dispatch({ type: 'UI_SELECT_ALL_PAGES' }),
   },
   'edit.deselect': {

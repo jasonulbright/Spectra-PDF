@@ -611,11 +611,25 @@
   forced-color-adjust: none;
   transform-origin: 0 0;
   caret-color: CanvasText;
-  z-index: 2; /* over the raster, under the annotation/form overlays */
+  /* z-index 0, NOT a positive value: the annotation/redaction/signature
+     controls in PageCell are z-index:auto siblings that come LATER in the DOM,
+     so an explicitly-stacked layer here would paint (and hit-test) OVER them and
+     swallow their clicks — and they only render under the Select tool, which is
+     exactly when this layer is pointer-interactive (review-caught: the delete ×
+     and recolor swatches went dead in Read view). At 0 the tie breaks on tree
+     order: above the raster (earlier), below the overlays (later). */
+  z-index: 0;
   --total-scale-factor: calc(var(--scale-factor) * var(--user-unit, 1));
   --min-font-size: 1;
   --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
   --min-font-size-inv: calc(1 / var(--min-font-size));
+  /* TextLayer's constructor sizes this container via `setLayerDimensions`, which
+     emits `round(down, var(--total-scale-factor) * Npx, var(--scale-round-x))`.
+     pdf.js defines these on its VIEWER root (`.pdfViewer`), which we don't have
+     — and an undefined var makes the whole width/height declaration invalid at
+     computed-value time, i.e. an unsized layer. They must be declared here. */
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
 }
 .textLayer :is(span, br) {
   color: transparent;
@@ -635,6 +649,20 @@
   transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 }
 .textLayer .markedContent { display: contents; }
+/* THE ROTATION. pdf.js does NOT bake rotation into span positions — its
+   `PageViewport.rawDims` is derived from the viewBox alone, never from
+   scale/rotation, so passing `rotation` to getViewport leaves every span's
+   left/top byte-identical. The viewport's rotation surfaces ONLY as the
+   `data-main-rotation` attribute that TextLayer's constructor stamps on the
+   container, and pdf.js's own stylesheet is what actually turns it — so
+   omitting these rules leaves the text unrotated over a rotated raster and
+   selection grabs the wrong glyphs (review-caught by running the real
+   TextLayer: same span coords at rotation 0 and 90, differing only in the
+   attribute). Copied verbatim from pdf_viewer.css — part of the same external
+   contract as the rules above. */
+.textLayer[data-main-rotation='90'] { transform: rotate(90deg) translateY(-100%); }
+.textLayer[data-main-rotation='180'] { transform: rotate(180deg) translate(-100%, -100%); }
+.textLayer[data-main-rotation='270'] { transform: rotate(270deg) translateX(-100%); }
 /* pdf.js emits these for images; they aren't text and must not be selectable. */
 .textLayer span[role='img'] {
   user-select: none;
