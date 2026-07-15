@@ -2,10 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   actualSizeZoom,
   anchorHolds,
+  clampZoom,
   currentPageFor,
   fitWidthZoom,
   naturalDisplayHeight,
   visibleRange,
+  MAX_ZOOM,
+  MIN_ZOOM,
   type JumpAnchor,
   type ReadingMetrics,
 } from '../src/renderer/canvas/reading-page';
@@ -409,6 +412,55 @@ describe('zoom presets — Actual Size / Fit Width', () => {
       expect(fitWidthZoom(0, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT)).toBe(0);
       expect(fitWidthZoom(-5, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT)).toBe(0);
       expect(fitWidthZoom(900, 0, BASE_PAGE_HEIGHT, READING_BASE_HEIGHT)).toBe(0);
+    });
+  });
+
+  // The clamp is what makes a preset LIE: it runs, nothing errors, and the view
+  // simply isn't at actual size / fit width — with no zoom readout to notice by.
+  // So the shipped range must be wide enough that no realistic page or pane
+  // reaches it. The old [0.1, 6] (sized for the +/- stepper) failed both ends.
+  describe('the shipped zoom range does not clamp realistic presets', () => {
+    const within = (z: number): boolean => z > MIN_ZOOM && z < MAX_ZOOM;
+
+    it('Fit Width is exact on panes up to an 8K-wide window', () => {
+      // 4459px was the old ceiling — a maximized 5K/ultrawide already broke it.
+      for (const pane of [800, 1600, 2560, 3440, 5120, 7680]) {
+        const z = fitWidthZoom(pane, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
+        expect(within(z), `pane ${pane}px -> zoom ${z}`).toBe(true);
+        expect(clampZoom(z)).toBeCloseTo(z, 6); // the clamp is a no-op: honest fit
+      }
+    });
+
+    it('Actual Size is exact from a business card to a large-format drawing', () => {
+      const pages = [
+        // 2x1in label/ID card: 72pt tall -> zoom 0.075, BELOW the old 0.1 floor,
+        // which rendered it at ~133% while claiming "Actual Size".
+        { id: 'label-2x1in', width: 144, height: 72 },
+        { id: 'card-3.5x2in', width: 252, height: 144 },
+        LETTER,
+        A4,
+        { id: 'arch-e', width: 2592, height: 3456 }, // 36x48in drawing
+      ];
+      for (const p of pages) {
+        const z = actualSizeZoom(p, READING_BASE_HEIGHT);
+        expect(within(z), `${p.id} -> zoom ${z}`).toBe(true);
+        expect(clampZoom(z)).toBeCloseTo(z, 6);
+        // ...and it really is the page's true height.
+        expect(READING_BASE_HEIGHT * clampZoom(z)).toBeCloseTo(naturalDisplayHeight(p), 4);
+      }
+    });
+
+    it('the stepper shares the presets range (a preset must never exceed the ceiling)', () => {
+      // If MAX_ZOOM were below a reachable preset, the next Ctrl+= would zoom OUT.
+      const widest = fitWidthZoom(7680, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
+      expect(MAX_ZOOM).toBeGreaterThan(widest);
+      expect(MIN_ZOOM).toBeLessThan(actualSizeZoom({ id: 'tiny', width: 144, height: 72 }, READING_BASE_HEIGHT));
+    });
+
+    it('still bounds pathological input', () => {
+      expect(clampZoom(Number.POSITIVE_INFINITY)).toBe(MAX_ZOOM);
+      expect(clampZoom(0)).toBe(MIN_ZOOM);
+      expect(clampZoom(-3)).toBe(MIN_ZOOM);
     });
   });
 });

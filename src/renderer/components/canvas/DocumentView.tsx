@@ -21,9 +21,13 @@ import { isEditable } from '../../commands/keymap';
 import {
   actualSizeZoom,
   anchorHolds,
+  clampZoom,
   currentPageFor,
   fitWidthZoom,
   visibleRange,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  ZOOM_STEP,
   type JumpAnchor,
 } from '../../canvas/reading-page';
 import { PageCell } from './PageCell';
@@ -44,13 +48,13 @@ import { PageCell } from './PageCell';
 const READING_BASE_HEIGHT = 960;
 const PAGE_GAP = 24; // vertical px between pages, at zoom 1 (scales with zoom)
 const OVERSCAN = 2; // pages rendered beyond each viewport edge
-const MIN_ZOOM = 0.1;
-const MAX_ZOOM = 6;
-const ZOOM_STEP = 1.2;
-// Breathing room Fit Width leaves either side of the page.
+// Breathing room Fit Width leaves either side of the page. Exactly double the
+// 8px custom scrollbar (styles.css), so if the fit's own zoom change flips the
+// scrollbar's visibility the row can only come out narrower than the pane,
+// never wider — the delta is absorbed rather than clipping.
 const FIT_WIDTH_GUTTER = 16;
-
-const clampZoom = (z: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+// MIN_ZOOM / MAX_ZOOM / ZOOM_STEP / clampZoom live in canvas/reading-page.ts —
+// the range is load-bearing for the presets (see its header) and tested there.
 
 // The reading view has no page-reorder drag (Organize-view-only), so a page
 // press in select mode is a no-op; the annotate/redact/form tools handle their

@@ -136,6 +136,27 @@ export function anchorHolds(
   );
 }
 
+// The reading view's zoom range, shared by the stepper and the presets.
+//
+// Deliberately WIDE — roughly Acrobat's own 8%–6400% in spirit. It must be,
+// because a preset computes a MEANINGFUL target and clamping is what makes it
+// lie: the earlier [0.1, 6] range (sized for the +/- stepper around 1.0)
+// silently broke Fit Width on any pane wider than ~4459px (a maximized 5K /
+// ultrawide) and Actual Size on any page under 96pt — a 2×1in label or ID card
+// rendered at ~133% while the command claimed "Actual Size" (review-caught).
+// The stepper and the presets MUST share one range: a preset that could exceed
+// the stepper's ceiling would make the next Ctrl+= zoom *out*.
+//
+// Wide is cheap here because the raster is budget-capped, not zoom-scaled
+// (`raster.ts`: BASE_RASTER 1100, and the detail overlay is capped at
+// MAX_DETAIL 4096 over only the VISIBLE region), and the column is virtualized —
+// so a 64× page costs a tall <div>, not a giant bitmap.
+export const MIN_ZOOM = 0.02;
+export const MAX_ZOOM = 64;
+export const ZOOM_STEP = 1.2;
+
+export const clampZoom = (z: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+
 /** A page's own geometry, as the reading view needs it for the zoom presets. */
 export interface PageGeometry {
   /** Natural size at PDF scale 1 (72dpi points === CSS px). */
