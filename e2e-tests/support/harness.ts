@@ -641,3 +641,19 @@ export async function mergeNoticeText(): Promise<string | null> {
     return (window as any).__SPECTRA_TEST__.mergeNoticeText();
   });
 }
+
+/**
+ * Choose the document pane's view (absolute set, no pill toggle).
+ *
+ * A document opens in the reading view since M4.1g, so a spec driving
+ * BOARD-only behaviour (the page-reorder drag, the strips, the doc headers)
+ * must ask for 'organize' rather than assume it.
+ */
+export async function setDocViewMode(mode: 'organize' | 'document'): Promise<void> {
+  await browser.execute<void, ['organize' | 'document']>(
+    function (m) {
+      (window as any).__SPECTRA_TEST__.setDocViewMode(m);
+    },
+    mode,
+  );
+}

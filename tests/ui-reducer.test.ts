@@ -353,11 +353,21 @@ describe('ui tab/tool actions (Phase 4 M2)', () => {
     expect(s.ui.tool).toBe('redact');
   });
 
+  // M4.1g: a document OPENS in the reading view (§ 6.1 — a PDF is something you
+  // read; the board is the tool you switch to when you want to rearrange it).
+  // Pinned so the flip can't be silently reverted: it was held back until every
+  // default-flip gate closed, and un-flipping would quietly undo that milestone.
+  it('opens in the READING view by default', () => {
+    expect(initialState.ui.docViewMode).toBe('document');
+  });
+
   it('sets the document view mode (M4) and no-ops on the same mode', () => {
-    expect(initialState.ui.docViewMode).toBe('organize');
-    const doc = appReducer(initialState, { type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' });
+    const board = appReducer(initialState, { type: 'UI_SET_DOC_VIEW_MODE', mode: 'organize' });
+    expect(board.ui.docViewMode).toBe('organize');
+    expect(appReducer(board, { type: 'UI_SET_DOC_VIEW_MODE', mode: 'organize' })).toBe(board); // referential no-op
+    const doc = appReducer(board, { type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' });
     expect(doc.ui.docViewMode).toBe('document');
-    expect(appReducer(doc, { type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' })).toBe(doc); // referential no-op
+    expect(appReducer(doc, { type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' })).toBe(doc);
   });
 
   it('sets the active operation', () => {

@@ -38,7 +38,17 @@ export const initialUiState: UiState = {
   focusedTab: 'home',
   activeOp: 'split',
   tool: 'select',
-  docViewMode: 'organize',
+  // A document opens in the READING view (M4.1g, the end of M4). This is the
+  // Acrobat model and § 6.1's stated default: a PDF is something you read; the
+  // strips board is the tool you switch to when you want to REARRANGE it — which
+  // is also why the board survives untouched as an equal, one-click peer rather
+  // than being replaced.
+  //
+  // The flip was deliberately held until every § "gates before the default flip"
+  // item closed (cross-document Find, text selection, zoom presets, Pages-panel
+  // sync, horizontal reach, e2e) — the flip is the moment the reading view
+  // becomes the experience, so the completeness rule binds here at the latest.
+  docViewMode: 'document',
   focusedDocId: null,
   currentPageId: null,
   selectedPageIds: NO_SELECTION,

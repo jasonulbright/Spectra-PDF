@@ -265,6 +265,11 @@ export interface TestHarness {
   invokeCommand: (id: string) => boolean;
   /** Arm a canvas interaction tool directly (absolute set, no pill toggle). */
   setTool: (tool: string) => void;
+  /** Choose the document pane's view (absolute set, no pill toggle). A document
+   * opens in 'document' (the reading view) since M4.1g, so a spec that drives
+   * BOARD-only behaviour — the page-reorder drag, the strips — must ask for
+   * 'organize' rather than assume it. */
+  setDocViewMode: (mode: 'organize' | 'document') => void;
   /** Snapshot of currently observable state, for assertions. */
   getState: () => TestStateSnapshot;
   /** Wait for the next state change matching a predicate (10s timeout). */
@@ -465,6 +470,7 @@ export interface TestHarnessDeps {
   focusTab: (tab: FocusedTab) => void;
   setActiveOp: (op: string) => void;
   setTool: (tool: string) => void;
+  setDocViewMode: (mode: 'organize' | 'document') => void;
   getStateSnapshot: () => TestStateSnapshot;
   subscribe: (listener: (s: TestStateSnapshot) => void) => () => void;
   /** First page of the active file's first workspace document, once the
@@ -595,6 +601,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       return invokeRegisteredCommand(id as CommandId);
     },
     setTool: (tool) => deps.setTool(tool),
+    setDocViewMode: (mode) => deps.setDocViewMode(mode),
     getState: () => deps.getStateSnapshot(),
     waitForState: (predicate, timeoutMs = 10_000) =>
       new Promise<TestStateSnapshot>((resolve, reject) => {

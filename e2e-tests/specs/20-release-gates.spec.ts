@@ -17,6 +17,7 @@ import {
   waitForHarness,
   openByPaths,
   setView,
+  setDocViewMode,
   saveActiveAs,
   closeAllFiles,
   commitPendingEdits,
@@ -146,6 +147,9 @@ describe('release gates (2p)', () => {
     await closeAllFiles();
     await openByPaths([source]);
     await setView('canvas');
+    // This drives the BOARD's page cells; documents open in the reading view
+    // since M4.1g, so ask for the board explicitly.
+    await setDocViewMode('organize');
 
     let ids: string[] = [];
     await browser.waitUntil(
@@ -202,6 +206,9 @@ describe('release gates (2p)', () => {
     await closeAllFiles();
     await openByPaths([source]);
     await setView('canvas');
+    // The page-reorder drag is Organize-view-only by design (the reading view
+    // is a column, not an arrangement surface) — select the board explicitly.
+    await setDocViewMode('organize');
 
     let ids: string[] = [];
     await browser.waitUntil(

@@ -43,21 +43,31 @@ describe('document view (M4.1)', () => {
     await setView('canvas');
   });
 
-  it('defaults to the Organize board (no reading column)', async () => {
-    expect(await $('[data-testid="document-view"]').isExisting()).toBe(false);
-  });
-
-  it('toggles to the reading view and renders pages', async () => {
-    await $('[data-testid="toggle-doc-view"]').click();
+  // M4.1g: a document now OPENS in the reading view. Pinned end-to-end (the
+  // reducer test pins the state; this pins that it's what actually renders).
+  it('opens in the reading view and renders pages', async () => {
     await $('[data-testid="document-view"]').waitForDisplayed({
       timeout: 10_000,
-      timeoutMsg: 'reading view did not appear',
+      timeoutMsg: 'a document did not open in the reading view',
     });
     // A page's raster cell mounts in the column (PageView renders when near).
     await browser.waitUntil(
       async () => (await $$('[data-testid="document-view"] .pageview')).length > 0,
       { timeout: 15_000, timeoutMsg: 'no page rendered in the reading view' },
     );
+  });
+
+  it('toggles to the Organize board and back', async () => {
+    await $('[data-testid="toggle-doc-view"]').click();
+    await browser.waitUntil(async () => !(await $('[data-testid="document-view"]').isExisting()), {
+      timeout: 10_000,
+      timeoutMsg: 'the board did not take over on toggle',
+    });
+    await $('[data-testid="toggle-doc-view"]').click();
+    await $('[data-testid="document-view"]').waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: 'the reading view did not come back on toggle',
+    });
   });
 
   it('the floating zoom buttons resize pages in the reading view', async () => {
@@ -98,13 +108,6 @@ describe('document view (M4.1)', () => {
     });
   });
 
-  it('toggles back to the board', async () => {
-    await $('[data-testid="toggle-doc-view"]').click();
-    await browser.waitUntil(async () => !(await $('[data-testid="document-view"]').isExisting()), {
-      timeout: 10_000,
-      timeoutMsg: 'reading view did not close on toggle-back',
-    });
-  });
 });
 
 // M4.1c gate: the reading view shows exactly ONE document, but Find matches
@@ -145,10 +148,14 @@ describe('reading view: a Find match in another open file (M4.1c)', () => {
       timeout: 10_000,
       timeoutMsg: 'file A never became active',
     });
-    if (!(await $('[data-testid="document-view"]').isExisting())) {
-      await $('[data-testid="toggle-doc-view"]').click();
-    }
-    await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 10_000 });
+    // Just wait for it — a document opens in the reading view now. (Do NOT
+    // "click the toggle if it isn't there": the view only mounts once the
+    // workspace has INDEXED the file, so that check fires during the indexing
+    // window and toggles away to the board instead.)
+    await $('[data-testid="document-view"]').waitForDisplayed({
+      timeout: 15_000,
+      timeoutMsg: 'file A did not open in the reading view',
+    });
 
     // ...then Find a term that only exists in file B, and navigate to it.
     await $('[data-testid="toggle-find"]').click();
