@@ -300,11 +300,19 @@ function AppContent(): React.ReactElement {
     let lastOpened: string | null = null;
     let changed = false;
     try {
-      // Opening the same path twice in one batch is opening it once. Nothing
-      // upstream dedupes: the CLI and second-instance handlers both build this
-      // list straight off argv, so `openpdfstudio.exe a.pdf a.pdf` really does
-      // arrive as two entries. Deduping HERE (not in Rust) covers every caller —
-      // CLI, second instance, the open dialog, drag-and-drop.
+      // The same path STRING twice in one batch is one open. Nothing upstream
+      // dedupes: the CLI and second-instance handlers both build this list
+      // straight off argv, so `openpdfstudio.exe a.pdf a.pdf` really does arrive
+      // as two entries. Deduping HERE (not in Rust) covers every caller — CLI,
+      // second instance, the open dialog, drag-and-drop.
+      //
+      // String equality, NOT path identity: `C:\a.pdf` and `c:\A.PDF` are the
+      // same file on Windows and this won't merge them. That's deliberate, not
+      // an oversight — `state.files` is keyed by the raw path string app-wide
+      // (tabs, recent, activeFileId all take string identity for file
+      // identity), so canonicalizing only here would make this function
+      // disagree with everything downstream. The whole-app gap is tracked in
+      // the punchlist; don't paper over it with a local normalize.
       //
       // This can't be left to the already-open check below: that reads state
       // React hasn't flushed yet. The loop only awaits BEFORE each dispatch,
