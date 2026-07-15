@@ -71,6 +71,18 @@ export interface AppCommandHandlers {
 export interface CanvasServices {
   /** The d3-zoom camera handle (null until the Canvas mounts its ref). */
   canvas(): CanvasHandle | null;
+  /**
+   * Bring a page into view, wherever it lives (M4.1c).
+   *
+   * ALWAYS prefer this over `canvas().centerOn()` for a page the caller didn't
+   * get from the currently-shown document. The board renders every document, so
+   * centring works for any page there — but the reading view renders exactly
+   * ONE, and `centerOn` silently returns for a page it doesn't own. This routes
+   * through the owning document first (focusing it, then centring once its view
+   * has mounted), so a jump into another open file or another `.pdfx` partition
+   * actually lands instead of no-oping.
+   */
+  jumpToPage(pageId: string): void;
   /** The floating Find bar (2m). */
   find: {
     isOpen(): boolean;

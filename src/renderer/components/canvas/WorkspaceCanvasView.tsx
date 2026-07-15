@@ -146,7 +146,7 @@ export function WorkspaceCanvasView({
   const focusedDocRef = useRef(focusedDoc);
   focusedDocRef.current = focusedDoc;
   // A jump whose target lives in a document the reading view isn't showing:
-  // parked here until that document's view has mounted (see onFindNavigate).
+  // parked here until that document's view has mounted (see jumpToPage).
   const pendingJumpRef = useRef<string | null>(null);
   useEffect(() => {
     const pid = pendingJumpRef.current;
@@ -264,7 +264,15 @@ export function WorkspaceCanvasView({
   // to bring that document to the front FIRST and centre once it has mounted —
   // otherwise `centerOn` finds no such page and returns silently while Find's
   // "N of M" counter has already advanced (review-caught).
-  const onFindNavigate = useCallback(
+  //
+  // This is THE jump entry point for every caller that can name a page in any
+  // open document — Find/Search, the comments sidebar, and the Pages/Bookmarks
+  // nav panels (which list every partition of the active file, so they hit the
+  // same blindness; review-caught: they were still calling `centerOn` directly
+  // and silently no-oped into a partition the reading view wasn't showing).
+  // Only the reading view's own page box may bypass it — it is scoped to the
+  // shown document by definition.
+  const jumpToPage = useCallback(
     (pageId: string) => {
       const owner = docsRef.current.find((d) => d.pages.some((p) => p.id === pageId));
       if (!owner) return;
@@ -277,7 +285,7 @@ export function WorkspaceCanvasView({
     },
     [activeCanvasHandle, dispatch],
   );
-  const find = useFind(searchIndex.search, searchIndex.version, docs, onFindNavigate);
+  const find = useFind(searchIndex.search, searchIndex.version, docs, jumpToPage);
   const [applyingOcr, setApplyingOcr] = useState(false);
   const [ocrApplyError, setOcrApplyError] = useState<string | null>(null);
 
@@ -492,9 +500,15 @@ export function WorkspaceCanvasView({
   // of its own window listeners (Phase 4 M1).
   const findRef = useRef(find);
   findRef.current = find;
+  const jumpToPageRef = useRef(jumpToPage);
+  jumpToPageRef.current = jumpToPage;
   useEffect(() => {
     registerCanvasServices({
       canvas: () => activeCanvasHandle(),
+      // Cross-document-aware jump. Panels MUST use this rather than
+      // `canvas().centerOn` — the reading view shows one document, so centring
+      // a page in another one silently does nothing.
+      jumpToPage: (pageId) => jumpToPageRef.current(pageId),
       find: {
         isOpen: () => findRef.current.open,
         open: () => findRef.current.openFind(),
@@ -1750,7 +1764,7 @@ export function WorkspaceCanvasView({
         <CommentSidebar
           docs={docs}
           onSelectPage={onSelectPage}
-          onJumpToPage={onFindNavigate}
+          onJumpToPage={jumpToPage}
           onUpdateAnnotation={onUpdateAnnotation}
           onRecolorAnnotation={onRecolorAnnotation}
           onRemoveAnnotation={onRemoveAnnotation}

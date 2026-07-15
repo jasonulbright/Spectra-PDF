@@ -104,6 +104,42 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(home.ui.focusedDocId).toBeNull();
   });
 
+  // `OpenDocument.id` is POSITIONAL (`path#docIndex`), reassigned from scratch on
+  // every reindex — so the same id string can come back meaning a DIFFERENT
+  // partition. Same invalidation every other buffer-replacing case applies to
+  // positional selection ids.
+  it('drops a per-doc focus into a path whose documents are re-indexed', () => {
+    const a = makeFile('book.pdfx', 5);
+    const focused = appReducer(
+      { ...partitionedState(), activeFileId: 'book.pdfx' },
+      { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
+    );
+    expect(focused.ui.focusedDocId).toBe('book.pdfx#1');
+    // The two partitions are reordered and committed; the reindex hands back
+    // the SAME id strings now naming swapped content.
+    const reindexed = appReducer(focused, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'book.pdfx',
+      documents: [
+        makeDoc(a, 'book.pdfx#0', makePages('book.pdfx', 2, 3)),
+        makeDoc(a, 'book.pdfx#1', makePages('book.pdfx', 3)),
+      ],
+    });
+    // Without this the view silently showed the OTHER partition under the same id.
+    expect(reindexed.ui.focusedDocId).toBeNull();
+  });
+
+  it('leaves a per-doc focus alone when a DIFFERENT path re-indexes', () => {
+    const b = makeFile('b.pdf', 2);
+    const focused = appReducer(twoDocState(), { type: 'UI_FOCUS_DOC', docId: 'b.pdf#0' });
+    const reindexed = appReducer(focused, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [makeDoc(makeFile('a.pdf', 3), 'a.pdf#0', makePages('a.pdf', 3))],
+    });
+    expect(reindexed.ui.focusedDocId).toBe('b.pdf#0');
+  });
+
   it('clearing to null returns to the default (first doc of the active file)', () => {
     const focused = appReducer(
       { ...partitionedState(), activeFileId: 'book.pdfx' },

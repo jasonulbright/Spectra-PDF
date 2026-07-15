@@ -329,7 +329,11 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
     (item: PageItem, e: React.MouseEvent) => {
       const mode = e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'range' : 'single';
       dispatch({ type: 'UI_SELECT_PAGE', pageId: item.page.id, mode });
-      getCanvasServices()?.canvas()?.centerOn(item.page.id);
+      // jumpToPage, not canvas().centerOn: this list shows EVERY partition of
+      // the active file, so a thumbnail can name a page the reading view isn't
+      // showing — centring would select it and then silently not move
+      // (review-caught).
+      getCanvasServices()?.jumpToPage(item.page.id);
     },
     [dispatch],
   );

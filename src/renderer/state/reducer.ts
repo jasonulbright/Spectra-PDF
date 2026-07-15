@@ -469,7 +469,19 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         state.pageUndoStack,
         state.pageRedoStack,
       );
-      return { ...state, files, workspace: { documents } };
+      // A per-doc focus into THIS path is stale the moment its documents are
+      // re-derived: `OpenDocument.id` is positional (`path#docIndex`), so the
+      // same id string can now name a DIFFERENT partition — reordering two
+      // `.pdfx` strips and committing swaps what `book.pdfx#1` means, and the
+      // reading view would silently show the other partition with no signal.
+      // Same invalidation every other buffer-replacing case applies to the
+      // positional selection ids; dropping to null re-resolves to the active
+      // file's first document (review-caught).
+      const ui =
+        state.ui.focusedDocId?.startsWith(`${action.path}#`)
+          ? { ...state.ui, focusedDocId: null }
+          : state.ui;
+      return { ...state, files, ui, workspace: { documents } };
     }
     case 'REORDER_PAGES': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
