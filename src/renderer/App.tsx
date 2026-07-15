@@ -300,18 +300,34 @@ function AppContent(): React.ReactElement {
     let lastOpened: string | null = null;
     let changed = false;
     try {
-      for (const filePath of paths) {
+      // Opening the same path twice in one batch is opening it once. Nothing
+      // upstream dedupes: the CLI and second-instance handlers both build this
+      // list straight off argv, so `openpdfstudio.exe a.pdf a.pdf` really does
+      // arrive as two entries. Deduping HERE (not in Rust) covers every caller —
+      // CLI, second instance, the open dialog, drag-and-drop.
+      //
+      // This can't be left to the already-open check below: that reads state
+      // React hasn't flushed yet. The loop only awaits BEFORE each dispatch,
+      // never after, so the next iteration's read runs in the same tick as the
+      // previous OPEN_FILE and still sees the file as absent — `stateRef` is as
+      // stale as the closure was for this particular read. A duplicate would
+      // open twice, leaking the first working copy (`create_working_copy` mints
+      // a fresh temp dir per call and nothing purges them) and prompting twice
+      // for an encrypted file's password.
+      for (const filePath of [...new Set(paths)]) {
         // Already open as a real DOCUMENT → just re-activate it. A byte-only
         // import source doesn't count: it has an entry in `files` but no tab,
         // nothing ever upgrades the flag, and `focusTab` rejects a doc tab for
         // it — so treating it as "already open" made File ▸ Open on a file you
         // had previously imported pages FROM a permanent no-op with no
         // feedback. Fall through and open it properly instead.
-        // Off the ref, not the closure: this loop awaits (the password prompt,
-        // the commit gate, the byte read), so `state.files` is stale from the
-        // second iteration on — the same reason `recent` is threaded above. A
-        // stale read here re-opens a path an earlier iteration already opened,
-        // leaking its working copy.
+        // Off the ref, not the closure: the closure's `state.files` is stale for
+        // the whole call (the same reason `recent` is threaded above), so a
+        // file opened by an earlier, separate openByPaths call would be missed.
+        // The ref is current as of the last completed render — which is enough
+        // here precisely because the dedupe above already handles the one case
+        // it can't see (a duplicate within this batch, dispatched but not yet
+        // flushed).
         const existing = stateRef.current.files.get(filePath);
         if (existing && !existing.importOnly) {
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });

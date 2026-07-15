@@ -406,6 +406,17 @@ export const COMMANDS: Record<CommandId, Command> = {
       `tools.open.${tool.id}`,
       {
         title: tool.title,
+        // CONSTRAINT FOR WHOEVER ADDS THE TOOLS MENU (§ 9.1): today the ONLY
+        // caller is the Tools Center tile, and the Tools Center only renders
+        // when `activeToolId === null`. The ops-less branch below relies on
+        // that — it arms a canvas mode without touching `activeToolId`, which
+        // is only coherent because no tool can be open when it runs. A second
+        // entry point (a menu item, a keybinding) invoked while a tool IS open
+        // would leave the Tools tab showing Prepare Form's pane while the canvas
+        // is in Highlight mode — the same "the tool and its mode disagree" class
+        // this slice closed four times. Give the ops-less branch an explicit
+        // `activeToolId` story before adding one; don't just wire it up.
+        //
         // A tool whose work happens ON the page needs a page to show. Not just
         // "activeFileId is set": an import-only source is bytes with no tab, and
         // `focusTab` rejects it — leaving us to arm a mode on a document the
