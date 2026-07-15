@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import {
+  actualSizeZoom,
   anchorHolds,
   currentPageFor,
+  fitWidthZoom,
+  naturalDisplayHeight,
   visibleRange,
   type JumpAnchor,
   type ReadingMetrics,
 } from '../src/renderer/canvas/reading-page';
+import { BASE_PAGE_HEIGHT, displayWidthOf } from '../src/renderer/canvas/layout';
 
 // Mirrors DocumentView's real constants so these cases are the ones a user hits.
 const READING_BASE_HEIGHT = 960;
@@ -332,5 +336,79 @@ describe('anchorHolds — a jump wins until the user scrolls away', () => {
     const sameOrderNewArray = idsFor(pageCount).map((s) => `${s}`);
     const m = metrics({ zoom, pageCount, viewportH, scrollTop: a.scrollTop });
     expect(anchorHolds(a, m, pagesAt(sameOrderNewArray, a))).toBe(true);
+  });
+});
+
+// Zoom presets (M4.1d). `zoom` is relative to the reading view's base page
+// height (960), NOT to the PDF's natural size — so 100% is not zoom 1.
+describe('zoom presets — Actual Size / Fit Width', () => {
+  const READING_BASE_HEIGHT = 960;
+  const LETTER = { id: 'p', width: 612, height: 792, rotation: 0 as const }; // 72dpi points
+  const A4 = { id: 'p', width: 595, height: 842, rotation: 0 as const };
+
+  describe('naturalDisplayHeight', () => {
+    it('is the page height when upright', () => {
+      expect(naturalDisplayHeight(LETTER)).toBe(792);
+    });
+
+    it('is the page WIDTH when quarter-turned (that edge runs vertically now)', () => {
+      expect(naturalDisplayHeight({ ...LETTER, rotation: 90 })).toBe(612);
+      expect(naturalDisplayHeight({ ...LETTER, rotation: 270 })).toBe(612);
+      expect(naturalDisplayHeight({ ...LETTER, rotation: 180 })).toBe(792);
+    });
+
+    it('falls back to US Letter for a page whose dimensions have not resolved (0x0)', () => {
+      expect(naturalDisplayHeight({ width: 0, height: 0 })).toBe(792);
+    });
+  });
+
+  describe('actualSizeZoom', () => {
+    it('renders a Letter page at its true 792pt height', () => {
+      const z = actualSizeZoom(LETTER, READING_BASE_HEIGHT);
+      expect(z).toBeCloseTo(792 / 960, 6);
+      expect(READING_BASE_HEIGHT * z).toBeCloseTo(792, 6); // the point of the preset
+    });
+
+    it('differs per page size and per rotation (why it acts on the CURRENT page)', () => {
+      expect(actualSizeZoom(A4, READING_BASE_HEIGHT)).not.toBeCloseTo(
+        actualSizeZoom(LETTER, READING_BASE_HEIGHT),
+        4,
+      );
+      expect(READING_BASE_HEIGHT * actualSizeZoom({ ...LETTER, rotation: 90 }, READING_BASE_HEIGHT))
+        .toBeCloseTo(612, 6);
+    });
+  });
+
+  describe('fitWidthZoom', () => {
+    // The reading view renders width = displayWidthOf(page) * pageHeight / BASE_PAGE_HEIGHT,
+    // so a correct fit is the zoom whose resulting width equals the pane.
+    function renderedWidth(page: Parameters<typeof displayWidthOf>[0], zoom: number): number {
+      return displayWidthOf(page) * ((READING_BASE_HEIGHT * zoom) / BASE_PAGE_HEIGHT);
+    }
+
+    it('produces exactly the available width', () => {
+      const available = 900;
+      const z = fitWidthZoom(available, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
+      expect(renderedWidth(LETTER, z)).toBeCloseTo(available, 4);
+    });
+
+    it('accounts for rotation (a quarter-turned page is wider, so it fits smaller)', () => {
+      const available = 900;
+      const upright = fitWidthZoom(available, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
+      const turned = fitWidthZoom(
+        available,
+        displayWidthOf({ ...LETTER, rotation: 90 }),
+        BASE_PAGE_HEIGHT,
+        READING_BASE_HEIGHT,
+      );
+      expect(turned).toBeLessThan(upright);
+      expect(renderedWidth({ ...LETTER, rotation: 90 }, turned)).toBeCloseTo(available, 4);
+    });
+
+    it('returns 0 for an unmeasured pane so the caller leaves the zoom alone', () => {
+      expect(fitWidthZoom(0, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT)).toBe(0);
+      expect(fitWidthZoom(-5, displayWidthOf(LETTER), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT)).toBe(0);
+      expect(fitWidthZoom(900, 0, BASE_PAGE_HEIGHT, READING_BASE_HEIGHT)).toBe(0);
+    });
   });
 });

@@ -136,6 +136,62 @@ export function anchorHolds(
   );
 }
 
+/** A page's own geometry, as the reading view needs it for the zoom presets. */
+export interface PageGeometry {
+  /** Natural size at PDF scale 1 (72dpi points === CSS px). */
+  width: number;
+  height: number;
+  /** Pending quarter-turns — swaps which natural edge is displayed. */
+  rotation?: number;
+}
+
+/**
+ * The page's natural DISPLAYED height in CSS px — what "100%" means for it.
+ *
+ * Rotation-aware: at 90/270 the page's natural WIDTH is what runs vertically.
+ * Falls back to US Letter (792pt) for a page whose dimensions haven't resolved
+ * yet (pdf.js reports 0×0 until its viewport arrives — the same case
+ * `pageDisplayWidth` guards).
+ */
+export function naturalDisplayHeight(page: PageGeometry): number {
+  const rotated = page.rotation === 90 || page.rotation === 270;
+  const h = rotated ? page.width : page.height;
+  return h > 0 ? h : 792;
+}
+
+/**
+ * Zoom that renders the page at its true size — Acrobat's Actual Size (Ctrl+1).
+ *
+ * `zoom` here is relative to the reading view's own base page height, NOT to the
+ * PDF's natural size, so 100% is not zoom 1: a US Letter page is 792pt tall
+ * against a 960px base, i.e. zoom 0.825.
+ */
+export function actualSizeZoom(page: PageGeometry, readingBaseHeight: number): number {
+  return naturalDisplayHeight(page) / readingBaseHeight;
+}
+
+/**
+ * Zoom that fits the page's width to the available pane width — Acrobat's Fit
+ * Width (Ctrl+2).
+ *
+ * `displayWidthAtBase` is the page's rotation-aware width at the BOARD's base
+ * height (`canvas/layout.ts` `displayWidthOf`), because that is the ratio the
+ * reading view already renders with: `width = displayWidthAtBase * pageHeight /
+ * boardBaseHeight`. Solving that for the height whose width equals the pane and
+ * converting to zoom gives the below. Returns 0 for degenerate input so callers
+ * clamp rather than divide by zero.
+ */
+export function fitWidthZoom(
+  availableWidth: number,
+  displayWidthAtBase: number,
+  boardBaseHeight: number,
+  readingBaseHeight: number,
+): number {
+  if (availableWidth <= 0 || displayWidthAtBase <= 0 || readingBaseHeight <= 0) return 0;
+  const pageHeight = (availableWidth * boardBaseHeight) / displayWidthAtBase;
+  return pageHeight / readingBaseHeight;
+}
+
 /**
  * The page index window to render, padded by `overscan`.
  *

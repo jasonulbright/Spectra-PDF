@@ -7,6 +7,19 @@ export interface CanvasHandle {
   zoomIn(): void;
   zoomOut(): void;
   reset(): void;
+  /**
+   * Zoom presets — Acrobat's Actual Size (Ctrl+1) and Fit Width (Ctrl+2).
+   *
+   * OPTIONAL because they are reading-view concepts the Organize board has no
+   * honest answer for: it lays pages out as fixed-height thumbnails in a d3
+   * world, so "render this page at its true PDF size" and "fit this page's
+   * width to the pane" name nothing there. The board therefore doesn't
+   * implement them and the commands disable in that view (§ 3.3: absent, not
+   * faked — never bound to some other behaviour just to have the key do
+   * something).
+   */
+  actualSize?(): void;
+  fitWidth?(): void;
   clientToWorld(clientX: number, clientY: number): { x: number; y: number; k: number } | null;
   /** Pan/zoom the camera to center the given page (by its data-page-id
    * cell). Built for Find navigation (2m); outline click-to-jump (2n)

@@ -161,6 +161,8 @@ export const MENUS: MenuDef[] = [
       cmd('view.zoomIn', 'menuitem-view-zoom-in'),
       cmd('view.zoomOut', 'menuitem-view-zoom-out'),
       cmd('view.fit', 'menuitem-view-fit'),
+      cmd('view.actualSize', 'menuitem-view-actual-size'),
+      cmd('view.fitWidth', 'menuitem-view-fit-width'),
     ],
   },
   {

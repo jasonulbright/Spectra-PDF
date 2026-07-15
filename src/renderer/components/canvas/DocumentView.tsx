@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import type { OpenDocument, PageAnnotation } from '../../state/types';
+import type { OpenDocument, PageAnnotation, PageRef } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
@@ -19,8 +19,10 @@ import type { CanvasHandle } from '../../canvas/canvas-handle';
 import { BASE_PAGE_HEIGHT, displayWidthOf } from '../../canvas/layout';
 import { isEditable } from '../../commands/keymap';
 import {
+  actualSizeZoom,
   anchorHolds,
   currentPageFor,
+  fitWidthZoom,
   visibleRange,
   type JumpAnchor,
 } from '../../canvas/reading-page';
@@ -45,6 +47,10 @@ const OVERSCAN = 2; // pages rendered beyond each viewport edge
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 6;
 const ZOOM_STEP = 1.2;
+// Breathing room Fit Width leaves either side of the page.
+const FIT_WIDTH_GUTTER = 16;
+
+const clampZoom = (z: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
 // The reading view has no page-reorder drag (Organize-view-only), so a page
 // press in select mode is a no-op; the annotate/redact/form tools handle their
@@ -180,6 +186,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // A jump's recorded intent — see JumpAnchor's header for why scroll position
   // alone cannot answer this at the extremes.
   const jumpAnchorRef = useRef<JumpAnchor | null>(null);
+  // The page the reader is on, mirrored for the zoom presets: Acrobat's Actual
+  // Size / Fit Width act on the CURRENT page (pages in one file can differ in
+  // size and rotation), and the presets are imperative-handle calls, not
+  // renders, so they need it off a ref rather than through the parent.
+  const currentPageRef = useRef(1);
 
   // Report the current page. Debounced to a rAF-ish cadence by React's
   // batching; the parent dedupes.
@@ -198,11 +209,14 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     // without remounting this view, so the anchor must re-prove that the page it
     // meant still sits in that slot.
     if (anchorHolds(a, m, a ? doc.pages[a.page - 1]?.id : null)) {
+      currentPageRef.current = a!.page;
       onCurrentPageChange(a!.page);
       return;
     }
     jumpAnchorRef.current = null;
-    onCurrentPageChange(currentPageFor(m));
+    const p = currentPageFor(m);
+    currentPageRef.current = p;
+    onCurrentPageChange(p);
   }, [
     scrollTop,
     rowH,
@@ -235,10 +249,39 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       jumpAnchorRef.current = { scrollTop: el.scrollTop, page: idx + 1, pageId, rowH, viewportH };
       // Report immediately: a jump that doesn't move the view (already parked
       // there) fires no scroll event, so the effect above would never re-run.
+      currentPageRef.current = idx + 1;
       onCurrentPageChangeRef.current?.(idx + 1);
     },
     [doc.pages, rowH, pageHeight, viewportH],
   );
+
+  // Both presets act on the CURRENT page — pages within one file can differ in
+  // size and rotation, so "actual size" and "fit width" are per-page answers,
+  // exactly as they are in Acrobat.
+  const pagesRef = useRef(doc.pages);
+  pagesRef.current = doc.pages;
+  const currentPage = useCallback((): PageRef | null => {
+    const pages = pagesRef.current;
+    return pages[Math.min(pages.length, Math.max(1, currentPageRef.current)) - 1] ?? null;
+  }, []);
+
+  const actualSize = useCallback(() => {
+    const page = currentPage();
+    if (!page) return;
+    setZoom(clampZoom(actualSizeZoom(page, READING_BASE_HEIGHT)));
+  }, [currentPage]);
+
+  const fitWidth = useCallback(() => {
+    const page = currentPage();
+    const el = scrollRef.current;
+    if (!page || !el) return;
+    // clientWidth already excludes a vertical scrollbar; the gutter keeps the
+    // page off the pane's edges the way Acrobat's Fit Width does.
+    const available = el.clientWidth - FIT_WIDTH_GUTTER;
+    const z = fitWidthZoom(available, displayWidthOf(page), BASE_PAGE_HEIGHT, READING_BASE_HEIGHT);
+    if (z <= 0) return; // pane not measured yet — leave the zoom alone
+    setZoom(clampZoom(z));
+  }, [currentPage]);
 
   useImperativeHandle(
     ref,
@@ -246,6 +289,8 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       zoomIn: () => setZoom((z) => Math.min(MAX_ZOOM, z * ZOOM_STEP)),
       zoomOut: () => setZoom((z) => Math.max(MIN_ZOOM, z / ZOOM_STEP)),
       reset: () => setZoom(1),
+      actualSize,
+      fitWidth,
       // The reading view has no world transform; tools resolve coordinates
       // element-relative (PageCell reads its own getBoundingClientRect), so the
       // camera-space projection the board exposes for its drop math isn't
@@ -253,7 +298,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       clientToWorld: () => null,
       centerOn,
     }),
-    [centerOn],
+    [centerOn, actualSize, fitWidth],
   );
 
   // Rows are computed inline each render (PageCell is memo'd, so unchanged

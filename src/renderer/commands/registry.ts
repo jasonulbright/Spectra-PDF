@@ -116,6 +116,8 @@ export const COMMAND_IDS = [
   'view.zoomIn',
   'view.zoomOut',
   'view.fit',
+  'view.actualSize',
+  'view.fitWidth',
   'document.deleteSelection',
   'document.rotateSelectionCW',
   'document.rotateSelectionCCW',
@@ -257,6 +259,20 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Fit to View',
     when: (ctx) => ctx.canvas?.canvas() != null,
     run: (ctx) => ctx.canvas!.canvas()!.reset(),
+  },
+  // Reading-view only: the board has no honest notion of a page's true size or
+  // of fitting one page's width, so it doesn't implement these and they DISABLE
+  // there rather than doing something else (§ 3.3 — the `when` reads the
+  // optional method's presence, which is the capability, not the view mode).
+  'view.actualSize': {
+    title: 'Actual Size',
+    when: (ctx) => ctx.canvas?.canvas()?.actualSize != null,
+    run: (ctx) => ctx.canvas!.canvas()!.actualSize!(),
+  },
+  'view.fitWidth': {
+    title: 'Fit Width',
+    when: (ctx) => ctx.canvas?.canvas()?.fitWidth != null,
+    run: (ctx) => ctx.canvas!.canvas()!.fitWidth!(),
   },
   'document.deleteSelection': {
     title: 'Delete Selected Pages',

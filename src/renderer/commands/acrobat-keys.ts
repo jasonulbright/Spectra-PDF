@@ -80,4 +80,9 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: '+', ctrl: true, command: 'view.zoomIn', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   { key: '-', ctrl: true, command: 'view.zoomOut', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   { key: '0', ctrl: true, command: 'view.fit', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
+  // Acrobat's zoom presets. Ctrl+1/Ctrl+2 sit beside Ctrl+0 (Fit Page) and are
+  // reading-view only — the commands' `when` disables them on the board, so the
+  // keys are inert there rather than doing something unexpected.
+  { key: '1', ctrl: true, command: 'view.actualSize', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
+  { key: '2', ctrl: true, command: 'view.fitWidth', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
 ];
