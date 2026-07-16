@@ -218,7 +218,6 @@ describe('ui per-document focus (M4.1c)', () => {
   });
 
   it('leaves a per-doc focus alone when a DIFFERENT path re-indexes', () => {
-    const b = makeFile('b.pdf', 2);
     const focused = appReducer(twoDocState(), { type: 'UI_FOCUS_DOC', docId: 'b.pdf#0' });
     const reindexed = appReducer(focused, {
       type: 'SET_WORKSPACE_DOCUMENTS',
@@ -404,8 +403,14 @@ describe('doc-tab lifecycle', () => {
 
 describe('recent files', () => {
   it('sets the recent list', () => {
-    const next = appReducer(initialState, { type: 'UI_SET_RECENT_FILES', files: ['a.pdf', 'b.pdf'] });
-    expect(next.ui.recentFiles).toEqual(['a.pdf', 'b.pdf']);
+    const next = appReducer(initialState, {
+      type: 'UI_SET_RECENT_FILES',
+      files: [{ path: 'a.pdf', openedAt: 1752600000000 }, { path: 'b.pdf', openedAt: null }],
+    });
+    expect(next.ui.recentFiles).toEqual([
+      { path: 'a.pdf', openedAt: 1752600000000 },
+      { path: 'b.pdf', openedAt: null },
+    ]);
   });
 });
 

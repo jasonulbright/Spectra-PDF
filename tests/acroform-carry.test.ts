@@ -17,9 +17,9 @@ import {
   PDFName,
   PDFNumber,
   PDFBool,
+  PDFRef,
+  PDFString,
 } from 'pdf-lib';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — no type declarations for the deep legacy import
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { buildPdf, buildPdfx } from '../src/renderer/lib/pdfx-build';
 import { readFormFields, fillFormFields } from '../src/renderer/lib/forms';
@@ -100,7 +100,7 @@ async function fieldMap(bytes: Uint8Array) {
 
 // Independent per-page widget read via pdf.js (fieldName -> fieldValue).
 async function pdfjsFieldValues(bytes: Uint8Array, pageNumber: number): Promise<Map<string, unknown>> {
-  const pdf = await pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
+  const pdf = await pdfjs.getDocument({ data: bytes.slice() }).promise;
   const annots = (await (await pdf.getPage(pageNumber)).getAnnotations()) as {
     fieldName?: string;
     fieldValue?: unknown;
@@ -284,14 +284,14 @@ describe('multi-source rebuilds (the import machinery)', () => {
     const page = doc.addPage([600, 800]);
     const form = doc.getForm();
     const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
-    const fontGroup: Record<string, unknown> = {};
+    const fontGroup: Record<string, PDFRef> = {};
     let y = 700;
     for (const f of fonts) {
       const field = form.createTextField(f.fieldName);
       field.setText('x');
       field.addToPage(page, { x: 50, y, width: 200, height: 20 });
       y -= 40;
-      const dict: Record<string, unknown> = { Type: 'Font', Subtype: 'Type1', BaseFont: f.base };
+      const dict: Record<string, string | PDFRef> = { Type: 'Font', Subtype: 'Type1', BaseFont: f.base };
       if (f.encoding) dict.Encoding = f.encoding;
       if (f.embedded) dict.FontDescriptor = doc.context.register(doc.context.obj({ Type: 'FontDescriptor' }));
       fontGroup[f.key] = doc.context.register(doc.context.obj(dict));
@@ -394,7 +394,7 @@ describe('multi-source rebuilds (the import machinery)', () => {
   // their rendering IS their /CharProcs. The allow-list must refuse both.
   async function withRawDrFont(
     fieldName: string,
-    makeFont: (doc: PDFDocument) => unknown,
+    makeFont: (doc: PDFDocument) => PDFRef,
   ): Promise<Uint8Array> {
     const doc = await PDFDocument.create();
     const page = doc.addPage([600, 800]);

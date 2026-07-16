@@ -51,7 +51,7 @@ const recentSubmenu: MenuNode = {
         if (recent.length === 0) {
           return [{ label: 'No Recent Files', disabled: true, run: () => {} }];
         }
-        return recent.slice(0, 10).map((path) => ({
+        return recent.slice(0, 10).map(({ path }) => ({
           label: path.split(/[\\/]/).pop() || path,
           testid: 'menuitem-recent',
           run: (c: CommandContext) => void c.app?.openPath(path),

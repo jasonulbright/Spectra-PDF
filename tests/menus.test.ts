@@ -69,7 +69,7 @@ describe('dynamic sections', () => {
   it('Open Recent shows a disabled placeholder when empty, else the paths', () => {
     const build = dynamicBuild('file', 'recent-list');
     expect(build(ctxWith({}))).toEqual([expect.objectContaining({ disabled: true })]);
-    const items = build(ctxWith({ ui: { ...initialState.ui, recentFiles: ['C:\\docs\\a.pdf'] } }));
+    const items = build(ctxWith({ ui: { ...initialState.ui, recentFiles: [{ path: 'C:\\docs\\a.pdf', openedAt: null }] } }));
     expect(items).toHaveLength(1);
     expect(items[0].label).toBe('a.pdf');
     expect(items[0].disabled).toBeFalsy();

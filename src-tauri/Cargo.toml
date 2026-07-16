@@ -30,4 +30,8 @@ windows = { version = "0.61", features = ["UI_ViewManagement", "Win32_Graphics_P
 tokio = { version = "1", features = ["sync", "io-util"] }
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
+# Windows-safe fs::canonicalize (strips the \\?\ verbatim prefix): file
+# identity is the raw path STRING app-wide, so every path must enter the
+# renderer in ONE canonical spelling (M7 — the path-identity gate).
+dunce = "1"
 clap = { version = "4", features = ["derive"] }

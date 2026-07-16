@@ -109,6 +109,14 @@ export const app = {
   getGsPath: () => invoke<string>('get_gs_path'),
   /** Installed Windows printers + the default (the Print dialog's picker). */
   listPrinters: () => invoke<PrinterList>('list_printers'),
+  /** The path-identity gate (M7): file identity is the raw path string
+   * app-wide, so every path entering the open/import funnels resolves to ONE
+   * canonical spelling first. Rust producers (dialogs, argv, second
+   * instance) canonicalize at the source; this covers paths that arrive
+   * through the WEBVIEW (drops, the harness, recents persisted before the
+   * gate existed). */
+  canonicalizePaths: (paths: string[]) =>
+    invoke<string[]>('canonicalize_paths', { paths }),
   getBundledGsInfo: () => invoke<GsInfo>('get_bundled_gs_info'),
   detectExternalGs: () => invoke<GsInfo | null>('detect_external_gs'),
   getVersion: () => invoke<string>('get_app_version'),

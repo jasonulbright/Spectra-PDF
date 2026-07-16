@@ -237,7 +237,10 @@ describe('dispatchKeyEvent', () => {
     const open = vi.fn();
     registerCanvasServices({
       canvas: () => null,
-      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn() },
+      jumpToPage: vi.fn(),
+      openPageForReading: vi.fn(),
+      goToPage: () => false,
+      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
     const e = fakeEvent({ key: 'f', ctrl: true, target: INPUT });
     dispatchKeyEvent(e);
@@ -251,7 +254,10 @@ describe('dispatchKeyEvent', () => {
     const open = vi.fn();
     registerCanvasServices({
       canvas: () => null,
-      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn() },
+      jumpToPage: vi.fn(),
+      openPageForReading: vi.fn(),
+      goToPage: () => false,
+      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
     const e = fakeEvent({ key: 'f', ctrl: true, shift: true, target: DIV });
     dispatchKeyEvent(e);

@@ -6,8 +6,6 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — no type declarations for the deep legacy import
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { addFormField } from '../src/renderer/lib/form-authoring';
 import { readFormFields, fillFormFields } from '../src/renderer/lib/forms';
@@ -48,7 +46,7 @@ describe('addFormField', () => {
     expect(m2.get('notes')).toMatchObject({ value: 'created then filled' });
 
     // Independent reader sees the widget as a real field.
-    const pdf = await pdfjs.getDocument({ data: filled.slice(), isEvalSupported: false }).promise;
+    const pdf = await pdfjs.getDocument({ data: filled.slice() }).promise;
     const annots = (await (await pdf.getPage(1)).getAnnotations()) as { fieldName?: string; fieldValue?: unknown }[];
     expect(annots.some((a) => a.fieldName === 'notes' && a.fieldValue === 'created then filled')).toBe(true);
     await pdf.loadingTask.destroy();
@@ -106,7 +104,8 @@ describe('addFormField', () => {
     const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const { PDFName, PDFDict, PDFNumber } = await import('pdf-lib');
     const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
-    expect((acro.get(PDFName.of('SigFlags')) as InstanceType<typeof PDFNumber>).asNumber()).toBe(1);
+    const sigFlags = acro.get(PDFName.of('SigFlags'));
+    expect(sigFlags instanceof PDFNumber ? sigFlags.asNumber() : sigFlags).toBe(1);
   });
 
   it('places on the requested page of a multi-page file', async () => {
@@ -174,8 +173,8 @@ describe('addFormField', () => {
     const reread = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const acro = reread.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
     const tops = acro.lookup(PDFName.of('Fields'), PDFArray);
-    const topT = (tops.lookup(0, PDFDict).get(PDFName.of('T')) as InstanceType<typeof PDFHexString>);
-    expect(String(topT.decodeText ? topT.decodeText() : topT)).toBe('address');
+    const topT = tops.lookup(0, PDFDict).get(PDFName.of('T'));
+    expect(String(topT instanceof PDFHexString ? topT.decodeText() : topT)).toBe('address');
 
     // The signature path (no pdf-lib backstop) must refuse via OUR check…
     await expect(
@@ -198,7 +197,7 @@ describe('addFormField', () => {
     // A field whose /T is a ref to a string — no authoring tool writes this,
     // but the walk must still see the name.
     const tRef = doc.context.register(PDFString.of('indirect-named'));
-    const weird = doc.context.obj({ FT: 'Tx' }) as InstanceType<typeof PDFDict>;
+    const weird = doc.context.obj({ FT: 'Tx' });
     weird.set(PDFName.of('T'), tRef);
     fields.push(doc.context.register(weird));
     const bytes = await doc.save({ updateFieldAppearances: false });

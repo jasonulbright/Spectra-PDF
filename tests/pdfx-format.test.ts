@@ -5,8 +5,6 @@ import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 // The legacy build runs in Node without a browser worker; the app itself uses
 // the standard build via src/renderer/lib/pdfRenderer.ts.
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — no type declarations for the deep legacy import
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import {
@@ -27,7 +25,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 
 async function loadPdf(bytes: Uint8Array): Promise<PDFDocumentProxy> {
   // pdf.js may transfer the underlying buffer to its worker — hand it a copy
-  return (await pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false })
+  return (await pdfjs.getDocument({ data: bytes.slice() })
     .promise) as PDFDocumentProxy;
 }
 

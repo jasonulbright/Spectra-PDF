@@ -3,7 +3,7 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { getSettings } from './SettingsPanel';
+import { ensureGsPath } from './SettingsPanel';
 
 export function RebuildPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
@@ -17,7 +17,7 @@ export function RebuildPanel(): React.ReactElement {
     if (!output) return;
     setBusy(true); setStatus('Rebuilding PDF (Tier 2: Ghostscript round-trip)...');
     try {
-      const r = await call('rebuild', { file: activeFile.workingPath, output, gs_path: getSettings().gsPath });
+      const r = await call('rebuild', { file: activeFile.workingPath, output, gs_path: await ensureGsPath() });
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.rebuilt_size / 1024).toFixed(0);
       setStatus(`Rebuilt: ${orig} KB -> ${out} KB, ${r.pages} pages.`);

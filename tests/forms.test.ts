@@ -2,8 +2,6 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — no type declarations for the deep legacy import
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { readFormFields, fillFormFields } from '../src/renderer/lib/forms';
 
@@ -54,7 +52,7 @@ async function makeFormPdf(): Promise<Uint8Array> {
 // stubs in getFieldObjects whose `value` is undefined, so the flat widget
 // list is the honest cross-check.
 async function fieldValuesFromPdfjs(bytes: Uint8Array): Promise<Map<string, unknown>> {
-  const pdf = await pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
+  const pdf = await pdfjs.getDocument({ data: bytes.slice() }).promise;
   const annots = (await (await pdf.getPage(1)).getAnnotations()) as {
     fieldName?: string;
     fieldValue?: unknown;
@@ -67,7 +65,7 @@ async function fieldValuesFromPdfjs(bytes: Uint8Array): Promise<Map<string, unkn
 
 // Whether any interactive form widget survives (for the flatten check).
 async function hasFormWidgets(bytes: Uint8Array): Promise<boolean> {
-  const pdf = await pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
+  const pdf = await pdfjs.getDocument({ data: bytes.slice() }).promise;
   const annots = (await (await pdf.getPage(1)).getAnnotations()) as { fieldName?: string }[];
   const any = annots.some((a) => a.fieldName !== undefined);
   await pdf.loadingTask.destroy();
@@ -75,7 +73,7 @@ async function hasFormWidgets(bytes: Uint8Array): Promise<boolean> {
 }
 
 async function pageText(bytes: Uint8Array): Promise<string> {
-  const pdf = await pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
+  const pdf = await pdfjs.getDocument({ data: bytes.slice() }).promise;
   const page = await pdf.getPage(1);
   const content = (await page.getTextContent()) as { items: { str?: string }[] };
   const text = content.items.map((it) => it.str ?? '').join(' ');
@@ -240,7 +238,7 @@ describe('readFormFields widget geometry (2n.4b)', () => {
         Subtype: 'Widget',
         FT: 'Sig',
         Rect: rect,
-      }) as InstanceType<typeof PDFDict>;
+      });
       sig.set(PDFName.of('T'), PDFHexString.fromText(name));
       if (withV) sig.set(PDFName.of('V'), doc.context.obj({}));
       const ref = doc.context.register(sig);
@@ -252,7 +250,7 @@ describe('readFormFields widget geometry (2n.4b)', () => {
     addSig('sig-done', true, [300, 200, 450, 240]);
 
     // Widget-less pure-data field.
-    const ghost = doc.context.obj({ FT: 'Tx' }) as InstanceType<typeof PDFDict>;
+    const ghost = doc.context.obj({ FT: 'Tx' });
     ghost.set(PDFName.of('T'), PDFHexString.fromText('ghost'));
     fields.push(doc.context.register(ghost));
 

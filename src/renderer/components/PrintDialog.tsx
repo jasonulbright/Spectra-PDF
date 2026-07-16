@@ -4,7 +4,7 @@ import { useEngine } from '../hooks/useEngine';
 import { app } from '../lib/tauri-bridge';
 import { useAppModal } from '../hooks/useAppModal';
 import { runCommitGate } from '../lib/commit-gate';
-import { getSettings } from '../panels/SettingsPanel';
+import { ensureGsPath } from '../panels/SettingsPanel';
 import {
   buildPrintParams,
   copiesError,
@@ -100,7 +100,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
       await call('print', buildPrintParams({
         file: activeFile.workingPath,
         printer,
-        gsPath: getSettings().gsPath,
+        gsPath: await ensureGsPath(),
         pages: rangeMode === 'custom' ? rangeText : '',
         copies: Number(copies.trim()),
         fit,

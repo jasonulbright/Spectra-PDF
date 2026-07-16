@@ -11,8 +11,9 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": ["node"]
   },
-  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"],
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

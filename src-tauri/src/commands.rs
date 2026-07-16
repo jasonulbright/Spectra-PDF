@@ -5,6 +5,33 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 
+// ── Path canonicalization (M7 — the path-identity gate) ──────────────────
+//
+// File identity is the raw path STRING app-wide (`state.files` is keyed on
+// it; tabs/recents/PageRef.sourceDocId take string equality), and Windows
+// hands the same file over as several spellings — case, slash direction,
+// 8.3 short names, mapped drives. The fix is ONE rule: every path
+// canonicalizes at the Rust boundary before the renderer ever sees it, so
+// string identity IS identity for every existing consumer. `dunce` because
+// std's canonicalize returns \\?\-prefixed verbatim paths on Windows, which
+// would leak into titles and recents.
+
+pub(crate) fn canonical_path(p: &str) -> String {
+    dunce::canonicalize(p)
+        .map(|pb| pb.to_string_lossy().to_string())
+        // A path that doesn't resolve (not-yet-created Save As target, race)
+        // passes through untouched — refusing here would break flows that
+        // legitimately name new files.
+        .unwrap_or_else(|_| p.to_string())
+}
+
+/// Renderer-callable form, for paths that arrive THROUGH the webview (file
+/// drops) rather than from a Rust producer.
+#[tauri::command]
+pub async fn canonicalize_paths(paths: Vec<String>) -> Result<Vec<String>, String> {
+    Ok(paths.iter().map(|p| canonical_path(p)).collect())
+}
+
 // ── File dialogs ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -26,7 +53,7 @@ pub async fn open_files_dialog(
             let mut out = Vec::new();
             for p in paths {
                 if let Ok(pb) = p.into_path() {
-                    out.push(pb.to_string_lossy().to_string());
+                    out.push(canonical_path(&pb.to_string_lossy()));
                 }
             }
             Ok(out)
@@ -52,7 +79,10 @@ pub async fn save_file_dialog(
     let result = builder.blocking_save_file();
     match result {
         Some(path) => match path.into_path() {
-            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            // An EXISTING target canonicalizes (overwrite flows can be
+            // reopened later under the same spelling); a brand-new file
+            // fails to resolve and passes through as the dialog spelled it.
+            Ok(pb) => Ok(Some(canonical_path(&pb.to_string_lossy()))),
             Err(e) => Err(format!("Path error: {}", e)),
         },
         None => Ok(None),

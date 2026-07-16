@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { appReducer, initialState, rotateAnnotationRect } from '../src/renderer/state/reducer';
-import type { AppState, OpenDocument, OpenFile, PageRef } from '../src/renderer/state/types';
+import type { AppState, OpenDocument, OpenFile, PageAnnotation, PageRef } from '../src/renderer/state/types';
 
 function makeFile(path: string, pageCount: number, name?: string): OpenFile {
   return {
@@ -740,7 +740,7 @@ describe('annotation rects follow page rotation', () => {
     expect(rotateAnnotationRect(base, 180)).toMatchObject({ x: 0.6, y: 0.65, w: 0.3, h: 0.15 });
     expect(rotateAnnotationRect(base, 270)).toMatchObject({ x: 0.2, y: 0.6, w: 0.15, h: 0.3 });
     // Four quarter-turns compose back to the original (within float noise).
-    let r = base;
+    let r: PageAnnotation = base;
     for (let i = 0; i < 4; i++) r = rotateAnnotationRect(r, 90);
     expect(r.x).toBeCloseTo(base.x, 10);
     expect(r.y).toBeCloseTo(base.y, 10);
@@ -797,7 +797,7 @@ describe('annotation rects follow page rotation', () => {
     expect(rotated.points![2]).toBeCloseTo(0.7, 10);
     expect(rotated.points![3]).toBeCloseTo(0.4, 10);
     // Four quarter-turns compose back to the original.
-    let r = ink;
+    let r: PageAnnotation = ink;
     for (let i = 0; i < 4; i++) r = rotateAnnotationRect(r, 90);
     expect(r.points![0]).toBeCloseTo(ink.points[0], 10);
     expect(r.points![1]).toBeCloseTo(ink.points[1], 10);

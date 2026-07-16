@@ -2,8 +2,6 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { PDFDocument, PDFName, PDFHexString, degrees } from 'pdf-lib';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — no type declarations for the deep legacy import
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { importPageAnnotations } from '../src/renderer/lib/annotation-import';
@@ -17,7 +15,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 ).href;
 
 async function loadPdf(bytes: Uint8Array): Promise<PDFDocumentProxy> {
-  return (await pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false })
+  return (await pdfjs.getDocument({ data: bytes.slice() })
     .promise) as PDFDocumentProxy;
 }
 

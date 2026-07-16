@@ -556,7 +556,10 @@ describe('invokeCommand', () => {
 
     registerCanvasServices({
       canvas: () => null,
-      find: { isOpen: () => false, open, close: vi.fn() },
+      jumpToPage: vi.fn(),
+      openPageForReading: vi.fn(),
+      goToPage: () => false,
+      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
     expect(open).toHaveBeenCalledTimes(1);
   });
@@ -567,7 +570,10 @@ describe('invokeCommand', () => {
     invokeCommand('tools.open.ocr');
     const services = {
       canvas: () => null,
-      find: { isOpen: () => false, open, close: vi.fn() },
+      jumpToPage: vi.fn(),
+      openPageForReading: vi.fn(),
+      goToPage: () => false,
+      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     };
     registerCanvasServices(services);
     registerCanvasServices(null); // leave the doc tab
@@ -597,7 +603,10 @@ describe('invokeCommand', () => {
     expect(finalState().ui.focusedTab).toEqual({ doc: 'b.pdf' });
     registerCanvasServices({
       canvas: () => null,
-      find: { isOpen: () => false, open, close: vi.fn() },
+      jumpToPage: vi.fn(),
+      openPageForReading: vi.fn(),
+      goToPage: () => false,
+      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
     expect(open).not.toHaveBeenCalled();
   });
@@ -607,7 +616,10 @@ describe('invokeCommand', () => {
     wire(stateWith({ files: new Map([['a.pdf', makeFile('a.pdf')]]), activeFileId: 'a.pdf' }));
     registerCanvasServices({
       canvas: () => null,
-      find: { isOpen: () => false, open, close: vi.fn() },
+      jumpToPage: vi.fn(),
+      openPageForReading: vi.fn(),
+      goToPage: () => false,
+      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
     expect(invokeCommand('tools.open.ocr')).toBe(true);
     expect(open).toHaveBeenCalledTimes(1);
@@ -724,7 +736,7 @@ describe('invokeCommand', () => {
   });
 
   it('file.clearRecent clears a non-empty recent list', () => {
-    const { dispatched } = wire(stateWith({ ui: { ...initialState.ui, recentFiles: ['a.pdf'] } }));
+    const { dispatched } = wire(stateWith({ ui: { ...initialState.ui, recentFiles: [{ path: 'a.pdf', openedAt: null }] } }));
     expect(invokeCommand('file.clearRecent')).toBe(true);
     expect(dispatched.at(-1)).toEqual({ type: 'UI_SET_RECENT_FILES', files: [] });
   });
@@ -741,7 +753,10 @@ describe('invokeCommand', () => {
         clientToWorld: () => null,
         centerOn: vi.fn(),
       }),
-      find: { isOpen: () => false, open: vi.fn(), close: vi.fn() },
+      jumpToPage: vi.fn(),
+      openPageForReading: vi.fn(),
+      goToPage: () => false,
+      find: { isOpen: () => false, open: vi.fn(), openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
     expect(invokeCommand('view.zoomIn')).toBe(true);
     expect(zoomIn).toHaveBeenCalledOnce();
@@ -752,7 +767,10 @@ describe('invokeCommand', () => {
     const open = vi.fn();
     registerCanvasServices({
       canvas: () => null,
-      find: { isOpen: () => false, open, close: vi.fn() },
+      jumpToPage: vi.fn(),
+      openPageForReading: vi.fn(),
+      goToPage: () => false,
+      find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
     expect(invokeCommand('edit.find')).toBe(true);
     expect(open).toHaveBeenCalledOnce();

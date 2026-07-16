@@ -53,7 +53,10 @@ pub fn run() {
                     .iter()
                     .skip(1)
                     .filter(|a| !a.starts_with('-') && a.to_lowercase().ends_with(".pdf"))
-                    .cloned()
+                    // The path-identity gate (M7): argv is the wild-west
+                    // producer — Explorer, scripts and shells spell the same
+                    // file every way there is.
+                    .map(|a| commands::canonical_path(a))
                     .collect();
                 let merge = argv.iter().any(|a| a == "--merge");
 
@@ -83,6 +86,7 @@ pub fn run() {
             commands::save_as,
             commands::get_gs_path,
             commands::list_printers,
+            commands::canonicalize_paths,
             commands::get_bundled_gs_info,
             commands::detect_external_gs,
             commands::get_app_version,
@@ -202,7 +206,7 @@ pub fn run() {
                 .iter()
                 .skip(1)
                 .filter(|a| !a.starts_with('-') && a.to_lowercase().ends_with(".pdf"))
-                .cloned()
+                .map(|a| commands::canonical_path(a))
                 .collect();
             let merge = args.iter().any(|a| a == "--merge");
 
@@ -256,5 +260,32 @@ mod tests {
         assert!(!backdrop_supported(21999));
         assert!(backdrop_supported(22000)); // Win11 21H2 (fallback attribute)
         assert!(backdrop_supported(22631)); // Win11 23H2 (documented backdrop API)
+    }
+
+    #[test]
+    fn canonical_path_unifies_windows_spellings() {
+        // The path-identity gate (M7): case, slash direction and 8.3 short
+        // names must all resolve to ONE string, and the result must not wear
+        // std::fs::canonicalize's \\?\ verbatim prefix.
+        let dir = std::env::temp_dir().join("opstudio-canon-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Sample File.pdf");
+        std::fs::write(&file, b"x").unwrap();
+
+        let canonical = crate::commands::canonical_path(&file.to_string_lossy());
+        assert!(!canonical.starts_with(r"\\?\"), "{canonical}");
+
+        let lower = file.to_string_lossy().to_lowercase();
+        let slashy = file.to_string_lossy().replace('\\', "/");
+        assert_eq!(crate::commands::canonical_path(&lower), canonical);
+        assert_eq!(crate::commands::canonical_path(&slashy), canonical);
+
+        // A path that doesn't exist passes through untouched — Save As
+        // targets are usually new files.
+        let ghost = dir.join("does-not-exist.pdf");
+        let ghost_str = ghost.to_string_lossy().to_string();
+        assert_eq!(crate::commands::canonical_path(&ghost_str), ghost_str);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

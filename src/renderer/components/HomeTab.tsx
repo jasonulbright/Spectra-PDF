@@ -1,13 +1,15 @@
 import React from 'react';
 import { ChromeIcon } from './chrome-icons';
+import { formatOpenedAt, type RecentEntry } from '../lib/recent-files';
 
 // The Home tab (Phase 4 M2, § 8) — the Acrobat-DC Home surface that replaces
-// WelcomeScreen. A recent-files table (name + folder), an Open button, and a
-// drop-target hint. Home is a tab you leave, not a gate you disable, so the
-// old "skip this screen" toggle is gone.
+// WelcomeScreen. A recent-files table (name + folder + opened-when, the M2
+// deviation closed at M7), an Open button, and a drop-target hint. Home is a
+// tab you leave, not a gate you disable, so the old "skip this screen"
+// toggle is gone.
 
 interface HomeTabProps {
-  recentFiles: string[];
+  recentFiles: RecentEntry[];
   onOpen: () => void;
   onOpenRecent: (path: string) => void;
   onClearRecent: () => void;
@@ -60,7 +62,7 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent }: Ho
           <p className="text-sm text-neutral-600 py-6 text-center">No recent files yet.</p>
         ) : (
           <div className="flex flex-col">
-            {recentFiles.map((path) => (
+            {recentFiles.map(({ path, openedAt }) => (
               <button
                 key={path}
                 data-testid="home-recent-item"
@@ -72,6 +74,12 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent }: Ho
                 <div className="min-w-0 flex-1">
                   <div className="text-sm text-neutral-200 truncate">{path.split(/[\\/]/).pop()}</div>
                   <div className="text-xs text-neutral-500 truncate">{folderOf(path)}</div>
+                </div>
+                <div
+                  data-testid="home-recent-opened"
+                  className="text-xs text-neutral-500 whitespace-nowrap shrink-0"
+                >
+                  {formatOpenedAt(openedAt, Date.now())}
                 </div>
               </button>
             ))}

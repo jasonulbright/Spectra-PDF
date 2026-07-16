@@ -2524,6 +2524,7 @@ name = "openpdfstudio"
 version = "1.0.0"
 dependencies = [
  "clap",
+ "dunce",
  "serde",
  "serde_json",
  "tauri",

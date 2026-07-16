@@ -3,7 +3,7 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { getSettings } from './SettingsPanel';
+import { ensureGsPath } from './SettingsPanel';
 
 export function GrayscalePanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
@@ -17,7 +17,7 @@ export function GrayscalePanel(): React.ReactElement {
     if (!output) return;
     setBusy(true); setStatus('Converting to grayscale...');
     try {
-      const r = await call('grayscale', { file: activeFile.workingPath, output, gs_path: getSettings().gsPath });
+      const r = await call('grayscale', { file: activeFile.workingPath, output, gs_path: await ensureGsPath() });
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.output_size / 1024).toFixed(0);
       setStatus(`${orig} KB \u2192 ${out} KB`);

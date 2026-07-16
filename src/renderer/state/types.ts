@@ -234,7 +234,7 @@ export interface UiState {
   selectionAnchor: string | null;
   // Recent files (the `spectra-recent` list) — in state because the File ▸
   // Open Recent menu and the Home tab render it; App owns persistence.
-  recentFiles: string[];
+  recentFiles: import('../lib/recent-files').RecentEntry[];
   // Left navigation pane (M3). App mirrors it to the `workbench-ui` key.
   navPane: NavPaneState;
 }
@@ -316,7 +316,7 @@ export type AppAction =
   // Focusing a doc tab syncs activeFileId; entering doc-land is always
   // caller/command-driven (the reducer never yanks the user onto the board).
   | { type: 'UI_FOCUS_TAB'; tab: FocusedTab }
-  | { type: 'UI_SET_RECENT_FILES'; files: string[] }
+  | { type: 'UI_SET_RECENT_FILES'; files: import('../lib/recent-files').RecentEntry[] }
   | { type: 'UI_SET_ACTIVE_OP'; op: string }
   | { type: 'UI_OPEN_TOOL'; toolId: string | null }
   | { type: 'UI_SET_TOOL'; tool: CanvasTool }

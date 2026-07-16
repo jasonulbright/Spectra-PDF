@@ -3,7 +3,7 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { getSettings } from './SettingsPanel';
+import { ensureGsPath, getSettings } from './SettingsPanel';
 
 const PRESET_DPI: Record<string, number> = { screen: 72, ebook: 150, printer: 300, prepress: 300 };
 
@@ -31,11 +31,10 @@ export function CompressPanel(): React.ReactElement {
     if (!activeFile) return;
     const output = await saveFile('compressed.pdf');
     if (!output) return;
-    const settings = getSettings();
     setBusy(true); setStatus('Compressing...');
     try {
       const params: Record<string, unknown> = {
-        file: activeFile.workingPath, output, gs_path: settings.gsPath,
+        file: activeFile.workingPath, output, gs_path: await ensureGsPath(),
       };
       if (quality === 'custom') {
         params.dpi = dpi;

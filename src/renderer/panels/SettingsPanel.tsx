@@ -24,25 +24,50 @@ async function resolveGsPath(): Promise<void> {
   if (gsPathResolved) return;
   gsPathResolved = true;
   try {
-    cachedBundledGs = await app.getBundledGsInfo();
+    try {
+      cachedBundledGs = await app.getBundledGsInfo();
+    } catch {
+      // Fall back to direct path resolution.
+      const bundledPath = await app.getGsPath();
+      cachedBundledGs = { path: bundledPath, version: '', product: 'GPL Ghostscript', vendor: 'Artifex Software' };
+    }
+    try {
+      cachedExternalGs = await app.detectExternalGs();
+    } catch {
+      cachedExternalGs = null;
+    }
+    // Ensure gsPath is set for operations; auto-heal if external GS disappeared
+    const current = loadSettings();
+    if (!current.gsPath || current.gsSource === 'builtin' ||
+        (current.gsSource === 'external' && !cachedExternalGs)) {
+      saveSettings({ ...current, gsPath: cachedBundledGs.path, gsSource: 'builtin' });
+    }
   } catch {
-    // Fall back to direct path resolution.
-    const bundledPath = await app.getGsPath();
-    cachedBundledGs = { path: bundledPath, version: '', product: 'GPL Ghostscript', vendor: 'Artifex Software' };
-  }
-  try {
-    cachedExternalGs = await app.detectExternalGs();
-  } catch {
-    cachedExternalGs = null;
-  }
-  // Ensure gsPath is set for operations; auto-heal if external GS disappeared
-  const current = loadSettings();
-  if (!current.gsPath || current.gsSource === 'builtin' ||
-      (current.gsSource === 'external' && !cachedExternalGs)) {
-    saveSettings({ ...current, gsPath: cachedBundledGs.path, gsSource: 'builtin' });
+    // BOTH resolution calls failed (one early IPC hiccup). Un-pin the
+    // attempt: a resolver that rejects once must not stay a permanently
+    // rejected promise that kills every gs feature for the whole session
+    // (review-caught HIGH) — ensureGsPath retries a failed attempt.
+    gsPathResolved = false;
   }
 }
-resolveGsPath();
+let gsPathReady = resolveGsPath();
+
+/**
+ * The gs path, guaranteed resolved (M7 polish — an M-P review disposition).
+ * `getSettings().gsPath` is '' for the first IPC round-trip after a fresh
+ * launch (the resolver persists asynchronously), and a gs job started in
+ * that window failed with a raw spawn error. Every gs caller awaits this
+ * instead of reading the setting cold. A failed resolution attempt retries
+ * on the next call rather than being cached forever.
+ */
+export async function ensureGsPath(): Promise<string> {
+  await gsPathReady;
+  if (!gsPathResolved) {
+    gsPathReady = resolveGsPath();
+    await gsPathReady;
+  }
+  return loadSettings().gsPath || cachedBundledGs?.path || '';
+}
 
 
 

@@ -3,7 +3,7 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { getSettings } from './SettingsPanel';
+import { ensureGsPath } from './SettingsPanel';
 import { getDocumentProxy } from '../lib/pdfDocCache';
 import { renderPageToCanvas } from '../lib/pdfRenderer';
 import {
@@ -99,7 +99,7 @@ export function ComparePanel(): React.ReactElement {
         const res = (await call('compare_visual', {
           file_a: activeFile.workingPath,
           file_b: targetFile.workingPath,
-          gs_path: getSettings().gsPath,
+          gs_path: await ensureGsPath(),
         })) as unknown as VisualCompareResult;
         setVisualResult(res);
         const first = listableVisualPages(res.pages).find((p) => p.only_in == null);

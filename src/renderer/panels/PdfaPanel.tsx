@@ -3,7 +3,7 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { getSettings } from './SettingsPanel';
+import { ensureGsPath } from './SettingsPanel';
 
 export function PdfaPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
@@ -18,7 +18,7 @@ export function PdfaPanel(): React.ReactElement {
     if (!output) return;
     setBusy(true); setStatus('Converting to PDF/A...');
     try {
-      const r = await call('convert_pdfa', { file: activeFile.workingPath, output, level, gs_path: getSettings().gsPath });
+      const r = await call('convert_pdfa', { file: activeFile.workingPath, output, level, gs_path: await ensureGsPath() });
       setStatus(`Converted to ${r.level} (${(r.output_size / 1024).toFixed(0)} KB)`);
     } catch (e: unknown) { setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`); }
     finally { setBusy(false); }

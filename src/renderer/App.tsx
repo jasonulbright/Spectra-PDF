@@ -344,19 +344,21 @@ function AppContent(): React.ReactElement {
     let lastOpened: string | null = null;
     let changed = false;
     try {
-      // The same path STRING twice in one batch is one open. Nothing upstream
-      // dedupes: the CLI and second-instance handlers both build this list
-      // straight off argv, so `openpdfstudio.exe a.pdf a.pdf` really does arrive
-      // as two entries. Deduping HERE (not in Rust) covers every caller — CLI,
-      // second instance, the open dialog, drag-and-drop.
+      // THE PATH-IDENTITY GATE (M7). File identity is the raw path string
+      // app-wide (`state.files` keys, tabs, recents, activeFileId,
+      // PageRef.sourceDocId), and Windows spells the same file many ways —
+      // case, slash direction, 8.3 short names. Rust producers (dialogs,
+      // argv, second instance) canonicalize at the source; this covers what
+      // arrives through the webview (drops, recents persisted before the
+      // gate, the harness), so `C:\a.pdf` and `c:\A.PDF` are ONE file from
+      // here on. One authority (the Rust canonicalizer), applied at the one
+      // funnel every open flows through — NOT a local string normalize,
+      // which is what the old tracked gap warned against.
+      const canonical = await app.canonicalizePaths(paths);
       //
-      // String equality, NOT path identity: `C:\a.pdf` and `c:\A.PDF` are the
-      // same file on Windows and this won't merge them. That's deliberate, not
-      // an oversight — `state.files` is keyed by the raw path string app-wide
-      // (tabs, recent, activeFileId all take string identity for file
-      // identity), so canonicalizing only here would make this function
-      // disagree with everything downstream. The whole-app gap is tracked in
-      // the punchlist; don't paper over it with a local normalize.
+      // The same path twice in one batch is one open. Nothing upstream
+      // dedupes: `openpdfstudio.exe a.pdf a.pdf` really arrives as two
+      // entries — and post-gate, `a.pdf A.PDF` collapses here too.
       //
       // This can't be left to the already-open check below: that reads state
       // React hasn't flushed yet. The loop only awaits BEFORE each dispatch,
@@ -366,7 +368,7 @@ function AppContent(): React.ReactElement {
       // open twice, leaking the first working copy (`create_working_copy` mints
       // a fresh temp dir per call and nothing purges them) and prompting twice
       // for an encrypted file's password.
-      for (const filePath of [...new Set(paths)]) {
+      for (const filePath of [...new Set(canonical)]) {
         // Already open as a real DOCUMENT → just re-activate it. A byte-only
         // import source doesn't count: it has an entry in `files` but no tab,
         // nothing ever upgrades the flag, and `focusTab` rejects a doc tab for
@@ -383,7 +385,7 @@ function AppContent(): React.ReactElement {
         const existing = stateRef.current.files.get(filePath);
         if (existing && !existing.importOnly) {
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
-          recent = withRecent(recent, filePath); // only on success — a cancel/throw
+          recent = withRecent(recent, filePath, Date.now()); // only on success — a cancel/throw
           lastOpened = filePath;                  // must not pollute Recent (review-caught)
           changed = true;
           continue;
@@ -403,7 +405,7 @@ function AppContent(): React.ReactElement {
         const prepared = await prepareFileBytes(filePath);
         if (!prepared) continue; // cancelled encrypted file
         dispatch({ type: 'OPEN_FILE', path: filePath, ...prepared });
-        recent = withRecent(recent, filePath);
+        recent = withRecent(recent, filePath, Date.now());
         lastOpened = filePath;
         changed = true;
       }
@@ -420,7 +422,16 @@ function AppContent(): React.ReactElement {
   // byte-only (no strip) and its pages spliced in — atomic, undoable. Files
   // already open are reused. A cancelled encrypted file is skipped.
   const importFilesIntoDoc = useCallback(
-    async (filePaths: string[], toDocId: string, toIndex: number) => {
+    async (rawPaths: string[], toDocId: string, toIndex: number) => {
+      // Import sources are `files` entries keyed by path too — the same
+      // identity gate as openByPaths (a case-variant drop must reuse the
+      // already-registered source, not mint a second ghost) INCLUDING its
+      // batch dedup: post-canonicalization, two spellings in one dialog
+      // batch are the same string, and `state.files` is a stale snapshot
+      // for this whole call — without the Set both passes take the
+      // "unregistered" branch and IMPORT_PAGES splices duplicate PageRef
+      // ids into the document (review-caught).
+      const filePaths = [...new Set(await app.canonicalizePaths(rawPaths))];
       const toRegister: {
         path: string;
         workingPath: string;

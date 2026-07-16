@@ -488,7 +488,7 @@ describe('zoom presets — Actual Size / Fit Width', () => {
       // If MAX_ZOOM were below a reachable preset, the next Ctrl+= would zoom OUT.
       const widest = fitWidthZoom(7680, displayWidthAt(LETTER, READING_BASE_HEIGHT));
       expect(MAX_ZOOM).toBeGreaterThan(widest);
-      expect(MIN_ZOOM).toBeLessThan(actualSizeZoom({ id: 'tiny', width: 144, height: 72 }, READING_BASE_HEIGHT));
+      expect(MIN_ZOOM).toBeLessThan(actualSizeZoom({ width: 144, height: 72 }, READING_BASE_HEIGHT));
     });
 
     it('still bounds pathological input', () => {
