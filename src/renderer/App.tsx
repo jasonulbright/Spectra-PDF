@@ -897,10 +897,10 @@ function AppContent(): React.ReactElement {
       else if (v === 'operations') dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
       else {
         const s = stateRef.current;
-        const target =
-          (s.activeFileId && !s.files.get(s.activeFileId)?.importOnly && s.activeFileId) ||
-          Array.from(s.files.values()).find((f) => !f.importOnly)?.path ||
-          null;
+        // The shared rule, not a copy of it — the harness must answer "which
+        // document is in front?" exactly as production does, or 16 e2e specs
+        // silently drift from the app they're testing.
+        const target = showableDoc(s) ?? tabFiles(s)[0]?.path ?? null;
         dispatch({ type: 'UI_FOCUS_TAB', tab: target ? { doc: target } : 'home' });
       }
     },
