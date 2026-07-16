@@ -97,9 +97,10 @@ jobs:
   e2e:
     name: E2E (WebdriverIO + tauri-driver)
     runs-on: windows-latest
-    # 30 was enough for the ~25-spec suite; the 39-spec suite + a cold debug
-    # cargo build (cache misses on every Cargo.lock change) got the v2.0.0
-    # push cancelled AT the cap mid-suite with every step green until then.
+    # The job cap is a backstop, not the failure detector — the pre-flight
+    # step below is what catches "no session can be created at all" (runner
+    # image drift) in minutes instead of grinding 39 specs' worth of session
+    # retries into this cap and reporting a useless grey "cancelled".
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v6
@@ -148,7 +149,12 @@ jobs:
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked
 
-      - name: Install msedgedriver matching runner Edge
+      - name: Install msedgedriver matching runner WebView2 Runtime
+        # msedgedriver-tool resolves against the installed WebView2 RUNTIME
+        # (registry pv of the EdgeUpdate WebView2 client), not Edge-the-browser
+        # — the step's old name said "Edge" and misled a whole investigation.
+        # wdio.conf.ts onPrepare re-runs the tool anyway (self-healing rule);
+        # this step exists to have the tool compiled + on PATH.
         run: |
           cargo install --git https://github.com/chippers/msedgedriver-tool
           $cargoBin = "$env:USERPROFILE\.cargo\bin"
@@ -158,6 +164,38 @@ jobs:
           echo "$cargoBin" >> $env:GITHUB_PATH
         shell: pwsh
 
+      # Runner-image 20260714 (WebView2 150) broke session creation wholesale:
+      # msedgedriver matched the runtime exactly, tauri-driver was unchanged,
+      # the app process started (engine ready) — but the webview subprocess
+      # never wrote DevToolsActivePort. Same 150/150 pairing works on real
+      # Win11 hardware, so the delta is the image's virtual display + WebView2
+      # 150's GPU init: the classic DevToolsActivePort-missing signature.
+      # Software rendering removes the GPU from the equation on CI only —
+      # the raster pipeline under test is canvas/CPU work regardless.
+      - name: Session pre-flight (fail fast on runner-image drift)
+        timeout-minutes: 8
+        run: npx wdio run wdio.conf.ts --spec specs/01-boot.spec.ts
+        working-directory: e2e-tests
+        env:
+          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--disable-gpu"
+
       - name: Run WebdriverIO suite
+        timeout-minutes: 40
         run: npm test
         working-directory: e2e-tests
+        env:
+          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--disable-gpu"
+
+      - name: Dump WebView2 crash diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          try {
+            Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000,1001} -MaxEvents 40 -ErrorAction Stop |
+              Where-Object { $_.Message -match 'msedgewebview2|openpdfstudio|msedgedriver' } |
+              Format-List TimeCreated, Id, Message
+          } catch { Write-Host "no matching crash events" }
+          try {
+            Get-ChildItem "$env:TEMP" -Filter "*EBWebView*" -Recurse -Depth 2 -ErrorAction Stop |
+              Select-Object -First 20 -ExpandProperty FullName
+          } catch { Write-Host "no EBWebView temp dirs" }
