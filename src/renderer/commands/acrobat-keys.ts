@@ -103,11 +103,19 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 'backspace', command: 'document.deleteSelection', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
   { key: ']', command: 'document.rotateSelectionCW', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
   { key: '[', command: 'document.rotateSelectionCCW', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
-  // Zoom cluster — '=' and '+' both zoom in (with or without shift, matching
-  // the legacy `e.key === '=' || e.key === '+'` check).
-  { key: '=', ctrl: true, command: 'view.zoomIn', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
-  { key: '+', ctrl: true, command: 'view.zoomIn', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
-  { key: '-', ctrl: true, command: 'view.zoomOut', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
+  // Zoom cluster. The legacy shift-lax matching ('=' OR '+', any shift) ended
+  // at M6.1: Acrobat's preset gives Ctrl+Shift+Plus/Minus to ROTATE VIEW, so
+  // zoom keeps the shiftless main-row keys ('='/'-') and the numpad keys
+  // (which produce '+'/'-' with shiftKey false), and the shifted pair rotates.
+  { key: '=', ctrl: true, shift: false, command: 'view.zoomIn', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
+  { key: '+', ctrl: true, shift: false, command: 'view.zoomIn', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
+  { key: '-', ctrl: true, shift: false, command: 'view.zoomOut', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
+  // Rotate View (§ 9.2 — '?' rows, bound here, re-verified at the M6.5
+  // freeze). Ctrl+Shift+= produces key '+' on US layouts; Ctrl+Shift+- gives
+  // '_' on the main row but '-' from the numpad, so both spellings bind.
+  { key: '+', ctrl: true, shift: true, command: 'view.rotateCW', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
+  { key: '_', ctrl: true, shift: true, command: 'view.rotateCCW', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
+  { key: '-', ctrl: true, shift: true, command: 'view.rotateCCW', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   { key: '0', ctrl: true, command: 'view.fit', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   // Acrobat's zoom presets. Ctrl+1/Ctrl+2 sit beside Ctrl+0 (Fit Page) and are
   // reading-view only — the commands' `when` disables them on the board, so the

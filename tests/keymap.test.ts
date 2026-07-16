@@ -100,10 +100,15 @@ describe('resolveBinding', () => {
     expect(resolveBinding(fakeEvent({ key: '[' }))?.command).toBe('document.rotateSelectionCCW');
   });
 
-  it('zoom accepts = and + (shifted or not)', () => {
+  it('zoom keeps the shiftless keys; the SHIFTED pair rotates the view (M6.1)', () => {
+    // The legacy '=' OR '+' any-shift matching ended when the Acrobat preset
+    // claimed Ctrl+Shift+Plus/Minus for Rotate View (§ 9.2).
     expect(resolveBinding(fakeEvent({ key: '=', ctrl: true }))?.command).toBe('view.zoomIn');
-    expect(resolveBinding(fakeEvent({ key: '+', ctrl: true, shift: true }))?.command).toBe('view.zoomIn');
+    expect(resolveBinding(fakeEvent({ key: '+', ctrl: true }))?.command).toBe('view.zoomIn'); // numpad plus
     expect(resolveBinding(fakeEvent({ key: '-', ctrl: true }))?.command).toBe('view.zoomOut');
+    expect(resolveBinding(fakeEvent({ key: '+', ctrl: true, shift: true }))?.command).toBe('view.rotateCW');
+    expect(resolveBinding(fakeEvent({ key: '_', ctrl: true, shift: true }))?.command).toBe('view.rotateCCW');
+    expect(resolveBinding(fakeEvent({ key: '-', ctrl: true, shift: true }))?.command).toBe('view.rotateCCW'); // numpad minus
     expect(resolveBinding(fakeEvent({ key: '0', ctrl: true }))?.command).toBe('view.fit');
   });
 

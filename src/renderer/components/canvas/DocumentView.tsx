@@ -60,6 +60,9 @@ const NO_PAGE_POINTER = (): void => {};
 
 export interface DocumentViewProps {
   doc: OpenDocument;
+  /** Rotate View's render-only quarter-turn for this file (M6.1); composed
+   * with each page's own pending rotation for every display/capture read. */
+  viewRotation?: 0 | 90 | 180 | 270;
   proxies: Map<string, PDFDocumentProxy>;
   renderVersion: number;
   selectedPageIds: ReadonlySet<string>;
@@ -119,11 +122,28 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   props,
   ref,
 ): React.JSX.Element {
-  const { doc, proxies } = props;
+  const { doc, proxies, viewRotation = 0 } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [zoomState, setZoom] = useState(1);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
+
+  // Rotate View (M6.1): every DISPLAY read in this component sees the page at
+  // its EFFECTIVE rotation — (page.rotation + viewRotation), composed once
+  // here. The page-tier `doc.pages` stays what commits; only what renders and
+  // captures turns. Sizing MUST read these too (the row wrapper, the widest
+  // page, both zoom presets): a 90° page whose cell swapped aspect under an
+  // unswapped row clips and mis-centers.
+  const viewPages = useMemo(
+    () =>
+      viewRotation === 0
+        ? doc.pages
+        : doc.pages.map((p) => ({
+            ...p,
+            rotation: (((p.rotation + viewRotation) % 360) + 360) % 360 as 0 | 90 | 180 | 270,
+          })),
+    [doc.pages, viewRotation],
+  );
 
   const pageCount = doc.pages.length;
   // The EFFECTIVE zoom, re-derived every render — the document's page count is
@@ -140,9 +160,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // can blow the element cap just as its height can) and the spacer's own width.
   const widestAtBase = useMemo(() => {
     let w = 0;
-    for (const p of doc.pages) w = Math.max(w, displayWidthAt(p, READING_BASE_HEIGHT));
+    for (const p of viewPages) w = Math.max(w, displayWidthAt(p, READING_BASE_HEIGHT));
     return w;
-  }, [doc.pages]);
+  }, [viewPages]);
   const zoom = clampZoom(zoomState, pageCount, widestAtBase);
   const pageHeight = pageHeightAt(zoom);
   const gap = PAGE_GAP * zoom;
@@ -292,8 +312,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // Both presets act on the CURRENT page — pages within one file can differ in
   // size and rotation, so "actual size" and "fit width" are per-page answers,
   // exactly as they are in Acrobat.
-  const pagesRef = useRef(doc.pages);
-  pagesRef.current = doc.pages;
+  // The EFFECTIVE pages — currentPage() feeds the zoom presets' sizing math,
+  // which must see the rotation the display shows.
+  const pagesRef = useRef(viewPages);
+  pagesRef.current = viewPages;
   // The zoom ceiling depends on the page COUNT (see maxZoomFor), and the
   // handle's zoom calls are imperative, so they read it off a ref.
   const widestAtBaseRef = useRef(widestAtBase);
@@ -355,7 +377,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // cells skip re-render; the per-page overlay maps come pre-grouped from WCV).
   const rows: React.JSX.Element[] = [];
   for (let i = first; i <= last; i++) {
-    const page = doc.pages[i];
+    const page = viewPages[i];
     if (!page) continue;
     // MUST be the same width PageCell renders (it uses the exact aspect here —
     // `textLayer` is set below). This row is what CENTRES the page, so a
@@ -371,6 +393,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
         <PageCell
           docId={doc.id}
           page={page}
+          viewRotation={viewRotation}
           pdf={proxies.get(page.sourceDocId) ?? null}
           pageHeight={pageHeight}
           renderVersion={props.renderVersion + zoomVersion}

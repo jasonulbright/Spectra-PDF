@@ -3,7 +3,7 @@ import { showsFormWidgets } from '../../commands/tools';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthAt, displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/layout';
-import { projectMarkRect, rotateNormalizedRect } from '../../lib/redaction';
+import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '../../lib/redaction';
 import type { RedactionMark } from '../../lib/redaction';
 import type { OcrWord } from '../../ocr/types';
 import type { SignaturePlacement } from '../../lib/signature-placement';
@@ -55,6 +55,24 @@ function defaultColorFor(kind: PageAnnotation['kind']): string {
   if (kind === 'freetext') return FREETEXT_COLOR;
   if (kind === 'ink') return INK_COLOR;
   return HIGHLIGHT_COLOR;
+}
+
+/** Rotate View's content wrapper: children turn with the page when a style
+ * is supplied (freetext/stamp text, the inline editor), pass through
+ * untouched when not — so the flat path renders byte-identical JSX. */
+function MaybeTurn({
+  style,
+  children,
+}: {
+  style: React.CSSProperties | undefined;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  if (!style) return <>{children}</>;
+  return (
+    <div className="page-annot-turn" style={style}>
+      {children}
+    </div>
+  );
 }
 
 // One form widget on the page (2n.4b). Interactive only in forms mode; in
@@ -256,6 +274,15 @@ function FormWidgetView({
 interface PageCellProps {
   docId: string;
   page: PageRef;
+  /** Rotate View's render-only delta (M6.1). The `page` prop arrives with it
+   * ALREADY composed into `page.rotation` (the reading view builds effective
+   * pages), which is what makes marks/signature/field capture — whose
+   * `rotationAtDraw` seam composes generally — and every re-projecting
+   * overlay correct with no further work. This prop exists for the ONE
+   * overlay family without that seam: annotations, whose stored rects stay
+   * in the page.rotation frame and so must be projected by the delta at
+   * render and un-projected at capture. Zero on the Organize board, always. */
+  viewRotation?: 0 | 90 | 180 | 270;
   pdf: PDFDocumentProxy | null;
   pageHeight: number;
   renderVersion: number;
@@ -333,6 +360,7 @@ interface PageCellProps {
 function PageCellImpl({
   docId,
   page,
+  viewRotation = 0,
   pdf,
   pageHeight,
   renderVersion,
@@ -402,6 +430,17 @@ function PageCellImpl({
     (FREETEXT_FONT_PT / (page.rotation === 90 || page.rotation === 270 ? page.width : page.height)) *
       pageHeight || FREETEXT_FONT_PT;
 
+  // Annotations store geometry in the page.rotation frame; the pointer works
+  // in the DISPLAYED (view-rotated) frame. These translate at the edges —
+  // capture un-projects (here), render projects (displayAnnot below) — so the
+  // stored frame, the reducer's eager re-projection on REAL rotations, and
+  // the builder's inversion all stay untouched by Rotate View (M6.1).
+  const inverseView = (360 - viewRotation) % 360;
+  const toStoredRect = (r: AnnotationRect): AnnotationRect =>
+    viewRotation === 0 ? r : { ...r, ...rotateNormalizedRect(r, inverseView) };
+  const toStoredPoints = (pts: number[]): number[] =>
+    viewRotation === 0 ? pts : rotateNormalizedPoints(pts, inverseView);
+
   const handleInkDown = (e: React.PointerEvent<HTMLElement>): void => {
     bandActive.current = true;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -425,8 +464,13 @@ function PageCellImpl({
       bandActive.current = false;
       cancelBand.current = null;
       setInkPoints(null);
-      const xs = points.filter((_, i) => i % 2 === 0);
-      const ys = points.filter((_, i) => i % 2 === 1);
+      // Un-project the stroke into the stored frame FIRST, then take the
+      // bbox — a bbox un-projected as a rect and one recomputed from
+      // un-projected points agree, but deriving both from one source can't
+      // drift.
+      const stored = toStoredPoints(points);
+      const xs = stored.filter((_, i) => i % 2 === 0);
+      const ys = stored.filter((_, i) => i % 2 === 1);
       const minX = Math.min(...xs);
       const minY = Math.min(...ys);
       const w = Math.max(...xs) - minX;
@@ -440,7 +484,7 @@ function PageCellImpl({
           w,
           h,
           color: annotationColor ?? INK_COLOR,
-          points,
+          points: stored,
         });
       }
     };
@@ -475,13 +519,18 @@ function PageCellImpl({
       const rect = e.currentTarget.getBoundingClientRect();
       const cx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       const cy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-      onAddAnnotation(docId, page.id, {
-        id: crypto.randomUUID(),
-        kind: 'stamp',
+      // Built in the DISPLAY frame (the stamp reads upright on the view you
+      // placed it on), then stored un-projected like every annotation.
+      const placed = toStoredRect({
         x: Math.max(0, Math.min(1 - STAMP_W, cx - STAMP_W / 2)),
         y: Math.max(0, Math.min(1 - STAMP_H, cy - STAMP_H / 2)),
         w: STAMP_W,
         h: STAMP_H,
+      });
+      onAddAnnotation(docId, page.id, {
+        id: crypto.randomUUID(),
+        kind: 'stamp',
+        ...placed,
         color: annotationColor ?? stampPreset.color,
         note: stampPreset.label,
       });
@@ -531,7 +580,7 @@ function PageCellImpl({
           const annotation: PageAnnotation = {
             id: crypto.randomUUID(),
             kind,
-            ...latest,
+            ...toStoredRect(latest),
             color: annotationColor ?? defaultColorFor(kind),
           };
           onAddAnnotation(docId, page.id, annotation);
@@ -640,6 +689,33 @@ function PageCellImpl({
           a.importedOriginal.hasAppearance && // else pdf.js draws nothing to avoid duplicating
           a.color === a.importedOriginal.color &&
           (a.note ?? '') === (a.importedOriginal.contents ?? '');
+        // Rotate View (M6.1): stored geometry lives in the page.rotation
+        // frame; the cell displays the view-rotated frame. Project here —
+        // the capture path un-projects, so the pair is identity when flat.
+        const da =
+          viewRotation === 0
+            ? a
+            : {
+                ...a,
+                ...rotateNormalizedRect(a, viewRotation),
+                points: a.points ? rotateNormalizedPoints(a.points, viewRotation) : a.points,
+              };
+        // Text bodies (freetext/stamp + the inline editor) turn WITH the page
+        // — a counter-sized wrapper rotated about its center, the PageView
+        // canvas technique. Hover chrome stays screen-upright outside it.
+        const turnsWithPage =
+          viewRotation !== 0 && (a.kind === 'freetext' || a.kind === 'stamp');
+        const swapTurn = viewRotation === 90 || viewRotation === 270;
+        const turnStyle: React.CSSProperties | undefined = turnsWithPage
+          ? {
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              width: swapTurn ? da.h * pageHeight : da.w * displayWidth,
+              height: swapTurn ? da.w * displayWidth : da.h * pageHeight,
+              transform: `translate(-50%,-50%) rotate(${viewRotation}deg)`,
+            }
+          : undefined;
         return (
         <div
           key={a.id}
@@ -651,10 +727,10 @@ function PageCellImpl({
           }
           title={a.kind === 'highlight' || a.kind === 'ink' ? a.note : undefined}
           style={{
-            left: `${a.x * 100}%`,
-            top: `${a.y * 100}%`,
-            width: `${a.w * 100}%`,
-            height: `${a.h * 100}%`,
+            left: `${da.x * 100}%`,
+            top: `${da.y * 100}%`,
+            width: `${da.w * 100}%`,
+            height: `${da.h * 100}%`,
             ...(pristineImport
               ? {}
               : a.kind === 'highlight'
@@ -679,9 +755,9 @@ function PageCellImpl({
           {a.kind === 'ink' && !pristineImport && (
             <svg className="page-annot-ink-svg" viewBox="0 0 1 1" preserveAspectRatio="none">
               <polyline
-                points={(a.points ?? [])
+                points={(da.points ?? [])
                   .map((v, i) =>
-                    i % 2 === 0 ? (a.w > 0 ? (v - a.x) / a.w : 0.5) : (a.h > 0 ? (v - a.y) / a.h : 0.5),
+                    i % 2 === 0 ? (da.w > 0 ? (v - da.x) / da.w : 0.5) : (da.h > 0 ? (v - da.y) / da.h : 0.5),
                   )
                   .reduce<string[]>((acc, v, i) => {
                     if (i % 2 === 0) acc.push(`${v}`);
@@ -695,31 +771,39 @@ function PageCellImpl({
               />
             </svg>
           )}
-          {a.kind === 'freetext' && editing !== a.id && !pristineImport && (
-            <span className="page-annot-text-body">{a.note}</span>
-          )}
-          {a.kind === 'stamp' && !pristineImport && <span className="page-annot-stamp-label">{a.note}</span>}
+          <MaybeTurn style={turnStyle}>
+            {a.kind === 'freetext' && editing !== a.id && !pristineImport && (
+              <span className="page-annot-text-body">{a.note}</span>
+            )}
+            {a.kind === 'stamp' && !pristineImport && (
+              <span className="page-annot-stamp-label">{a.note}</span>
+            )}
+          </MaybeTurn>
           {editing === a.id ? (
-            <textarea
-              className="page-annot-editor"
-              style={{ fontSize: freetextFontPx, color: a.color }}
-              autoFocus
-              defaultValue={a.note ?? ''}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              onDoubleClick={(e) => e.stopPropagation()}
-              onBlur={(e) => finishEditing(a, e.currentTarget.value)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  finishEditing(a, a.note ?? ''); // revert (removes if never had text)
-                } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                  e.preventDefault();
-                  finishEditing(a, e.currentTarget.value);
-                }
-              }}
-            />
+            // The inline editor turns with the page too (same wrapper) — the
+            // text you type reads the way it will render.
+            <MaybeTurn style={turnStyle}>
+              <textarea
+                className="page-annot-editor"
+                style={{ fontSize: freetextFontPx, color: a.color }}
+                autoFocus
+                defaultValue={a.note ?? ''}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                onBlur={(e) => finishEditing(a, e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    finishEditing(a, a.note ?? ''); // revert (removes if never had text)
+                  } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    finishEditing(a, e.currentTarget.value);
+                  }
+                }}
+              />
+            </MaybeTurn>
           ) : (
             !annotateMode && (
               <>

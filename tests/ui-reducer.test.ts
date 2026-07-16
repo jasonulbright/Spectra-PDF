@@ -550,3 +550,58 @@ describe('selection invalidation on buffer-identity changes', () => {
     expect(selected(next)).toEqual(['b.pdf#p0']);
   });
 });
+
+describe('UI_ROTATE_VIEW (M6.1 — Rotate View, render-only)', () => {
+  const rotate = (s: AppState, path: string, delta: 90 | 270): AppState =>
+    appReducer(s, { type: 'UI_ROTATE_VIEW', path, delta });
+
+  it('cycles per quarter-turn and drops the key at upright', () => {
+    let s = twoDocState();
+    s = rotate(s, 'a.pdf', 90);
+    expect(s.ui.viewRotationByPath['a.pdf']).toBe(90);
+    s = rotate(s, 'a.pdf', 90);
+    expect(s.ui.viewRotationByPath['a.pdf']).toBe(180);
+    s = rotate(s, 'a.pdf', 270);
+    expect(s.ui.viewRotationByPath['a.pdf']).toBe(90);
+    s = rotate(s, 'a.pdf', 270);
+    // Back upright: the entry is REMOVED, not stored as 0 — only turned
+    // files carry state.
+    expect('a.pdf' in s.ui.viewRotationByPath).toBe(false);
+  });
+
+  it('is per-path: rotating a leaves b upright', () => {
+    let s = twoDocState();
+    s = rotate(s, 'a.pdf', 90);
+    expect(s.ui.viewRotationByPath['b.pdf']).toBeUndefined();
+    s = rotate(s, 'b.pdf', 270);
+    expect(s.ui.viewRotationByPath['a.pdf']).toBe(90);
+    expect(s.ui.viewRotationByPath['b.pdf']).toBe(270);
+  });
+
+  it('NEVER touches the page tier', () => {
+    let s = twoDocState();
+    s = rotate(s, 'a.pdf', 90);
+    for (const d of s.workspace.documents) {
+      for (const p of d.pages) expect(p.rotation).toBe(0);
+    }
+    expect(s.pageDirtyPaths).toEqual([]);
+    expect(s.pageUndoStack.length).toBe(0);
+  });
+
+  it('rejects unknown paths and import-only ghosts', () => {
+    const s = twoDocState();
+    expect(rotate(s, 'nope.pdf', 90)).toBe(s);
+    const ghost = { ...makeFile('ghost.pdf', 1), importOnly: true };
+    const withGhost = { ...s, files: new Map([...s.files, ['ghost.pdf', ghost]]) };
+    expect(rotate(withGhost, 'ghost.pdf', 90)).toBe(withGhost);
+  });
+
+  it('CLOSE_FILE drops the closed file’s rotation — a reopen starts upright', () => {
+    let s = twoDocState();
+    s = rotate(s, 'a.pdf', 90);
+    s = rotate(s, 'b.pdf', 90);
+    s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect('a.pdf' in s.ui.viewRotationByPath).toBe(false);
+    expect(s.ui.viewRotationByPath['b.pdf']).toBe(90); // untouched
+  });
+});

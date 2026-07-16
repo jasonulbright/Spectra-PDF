@@ -173,6 +173,16 @@ export const MENUS: MenuDef[] = [
         ],
       },
       sep,
+      {
+        kind: 'submenu',
+        id: 'view-rotate',
+        label: 'Rotate View',
+        items: [
+          cmd('view.rotateCW', 'menuitem-view-rotate-cw'),
+          cmd('view.rotateCCW', 'menuitem-view-rotate-ccw'),
+        ],
+      },
+      sep,
       cmd('view.documentView', 'menuitem-view-document'),
       cmd('tools.open.organize', 'menuitem-view-organize'),
       cmd('view.organizeAll', 'menuitem-view-organize-all'),

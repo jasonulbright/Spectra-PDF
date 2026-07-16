@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRedactionRegions,
   projectMarkRect,
+  rotateNormalizedPoint,
+  rotateNormalizedPoints,
   rotateNormalizedRect,
 } from '../src/renderer/lib/redaction';
 import type { PageGeometry, RedactionMark } from '../src/renderer/lib/redaction';
@@ -237,5 +239,36 @@ describe('buildRedactionRegions', () => {
     expect(skippedMarkIds).toEqual(['gone']);
     expect(files).toHaveLength(1);
     expect(files[0].markIds).toEqual(['kept']);
+  });
+});
+
+describe('rotateNormalizedPoint(s) — the rect projector’s point twin (M6.1)', () => {
+  it('matches rotateNormalizedRect on zero-size corners, every delta', () => {
+    for (const d of [0, 90, 180, 270]) {
+      for (const [x, y] of [[0, 0], [1, 1], [0.25, 0.7], [0.5, 0.5]]) {
+        const viaRect = rotateNormalizedRect({ x, y, w: 0, h: 0 }, d);
+        const viaPoint = rotateNormalizedPoint(x, y, d);
+        expect(viaPoint.x).toBeCloseTo(viaRect.x, 12);
+        expect(viaPoint.y).toBeCloseTo(viaRect.y, 12);
+      }
+    }
+  });
+
+  it('inverts cleanly: rotate then counter-rotate is identity', () => {
+    for (const d of [90, 180, 270]) {
+      const p = rotateNormalizedPoint(0.3, 0.8, d);
+      const back = rotateNormalizedPoint(p.x, p.y, (360 - d) % 360);
+      expect(back.x).toBeCloseTo(0.3, 12);
+      expect(back.y).toBeCloseTo(0.8, 12);
+    }
+  });
+
+  it('maps flat point lists pairwise', () => {
+    expect(rotateNormalizedPoints([0.2, 0.4, 0.6, 0.9], 90)).toEqual([
+      1 - 0.4, 0.2, 1 - 0.9, 0.6,
+    ]);
+    // delta 0 returns the same reference — the flat path costs nothing.
+    const pts = [0.1, 0.2];
+    expect(rotateNormalizedPoints(pts, 0)).toBe(pts);
   });
 });

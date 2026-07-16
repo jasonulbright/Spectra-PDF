@@ -1420,6 +1420,7 @@ export function WorkspaceCanvasView({
           key={focusedDoc.id}
           ref={documentViewRef}
           doc={focusedDoc}
+          viewRotation={state.ui.viewRotationByPath[focusedDoc.path] ?? 0}
           proxies={proxies}
           onCurrentPageChange={setCurrentPage}
           renderVersion={renderVersion}

@@ -206,6 +206,13 @@ export interface UiState {
   // to the active file's first document. Resolution falls back to that default
   // when the id no longer exists (ids are positional and rebuilt on reindex).
   focusedDocId: string | null;
+  // Rotate View (M6.1, § 9.1/§ 9.2): render-only quarter-turns of the READING
+  // view's display, per file path. NEVER the page tier — Document ▸ Rotate
+  // Pages… is the persisted edit; this is how you look at the page, dropped on
+  // close and never persisted. Keyed by path (a tab's worth of reading), only
+  // non-zero entries stored. The board never reads it: the board is where REAL
+  // rotation lives, and a view gesture must not read as a page edit.
+  viewRotationByPath: Record<string, 0 | 90 | 180 | 270>;
   // The page the reading view is currently ON (M4.1e), as a `PageRef.id`. The
   // Pages nav panel highlights and scroll-follows it, which is a DIFFERENT thing
   // from `selectedPageIds` — you can be reading page 40 with nothing selected,
@@ -310,6 +317,7 @@ export type AppAction =
   | { type: 'UI_OPEN_TOOL'; toolId: string | null }
   | { type: 'UI_SET_TOOL'; tool: CanvasTool }
   | { type: 'UI_SET_DOC_VIEW_MODE'; mode: DocViewMode }
+  | { type: 'UI_ROTATE_VIEW'; path: string; delta: 90 | 270 }
   | { type: 'UI_FOCUS_DOC'; docId: string | null }
   | { type: 'UI_SET_CURRENT_PAGE'; pageId: string | null }
   // Click selection with the canvas's modifier semantics (computed here —

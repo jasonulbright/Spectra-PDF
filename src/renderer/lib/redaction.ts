@@ -70,6 +70,34 @@ export function rotateNormalizedRect(
   return r;
 }
 
+/** The point twin of rotateNormalizedRect — same top-left-origin clockwise
+ * quarter-turn, for per-point geometry (ink strokes under Rotate View, M6.1).
+ * Consistency with the rect form is unit-asserted: a zero-size rect's corner
+ * must land where the point does. */
+export function rotateNormalizedPoint(
+  x: number,
+  y: number,
+  delta: number,
+): { x: number; y: number } {
+  const d = ((delta % 360) + 360) % 360;
+  if (d === 90) return { x: 1 - y, y: x };
+  if (d === 180) return { x: 1 - x, y: 1 - y };
+  if (d === 270) return { x: y, y: 1 - x };
+  return { x, y };
+}
+
+/** rotateNormalizedPoint over a flat [x0,y0,x1,y1,…] list. */
+export function rotateNormalizedPoints(points: number[], delta: number): number[] {
+  const d = ((delta % 360) + 360) % 360;
+  if (d === 0) return points;
+  const out: number[] = [];
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    const p = rotateNormalizedPoint(points[i], points[i + 1], d);
+    out.push(p.x, p.y);
+  }
+  return out;
+}
+
 // Where a mark should render on a page whose in-memory rotation has changed
 // since the mark was drawn.
 export function projectMarkRect(

@@ -55,6 +55,7 @@ export const initialUiState: UiState = {
   docViewMode: 'document',
   focusedDocId: null,
   currentPageId: null,
+  viewRotationByPath: {},
   selectedPageIds: NO_SELECTION,
   selectionAnchor: null,
   recentFiles: [],
@@ -401,7 +402,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // to Home instead of focusing a ghost.
       const fallbackTab: FocusedTab =
         activeFileId && !files.get(activeFileId)?.importOnly ? { doc: activeFileId } : 'home';
-      const ui = focusedClosed ? { ...base.ui, focusedTab: fallbackTab } : base.ui;
+      let ui = focusedClosed ? { ...base.ui, focusedTab: fallbackTab } : base.ui;
+      // Rotate View is per-open-tab display state — a reopen starts upright.
+      if (ui.viewRotationByPath[action.path] !== undefined) {
+        const { [action.path]: _dropped, ...viewRotationByPath } = ui.viewRotationByPath;
+        ui = { ...ui, viewRotationByPath };
+      }
       return {
         ...base,
         files,
@@ -1095,6 +1101,19 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_DOC_VIEW_MODE':
       if (action.mode === state.ui.docViewMode) return state;
       return { ...state, ui: { ...state.ui, docViewMode: action.mode } };
+    case 'UI_ROTATE_VIEW': {
+      // Render-only quarter-turn of the reading display (M6.1). Only real,
+      // showable files can be rotated — a view state for a ghost would be
+      // unreachable-to-clear (no tab to close it from).
+      const f = state.files.get(action.path);
+      if (!f || f.importOnly) return state;
+      const cur = state.ui.viewRotationByPath[action.path] ?? 0;
+      const next = (((cur + action.delta) % 360) + 360) % 360 as 0 | 90 | 180 | 270;
+      const viewRotationByPath = { ...state.ui.viewRotationByPath };
+      if (next === 0) delete viewRotationByPath[action.path];
+      else viewRotationByPath[action.path] = next;
+      return { ...state, ui: { ...state.ui, viewRotationByPath } };
+    }
     case 'UI_SET_CURRENT_PAGE':
       if (action.pageId === state.ui.currentPageId) return state;
       return { ...state, ui: { ...state.ui, currentPageId: action.pageId } };

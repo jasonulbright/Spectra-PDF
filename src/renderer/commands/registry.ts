@@ -150,6 +150,8 @@ export const COMMAND_IDS = [
   'view.documentView',
   'view.organizeAll',
   'view.goToPage',
+  'view.rotateCW',
+  'view.rotateCCW',
   'document.insertBlankPage',
   'document.insertFromFile',
   'document.deleteSelection',
@@ -466,6 +468,24 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Organize All Documents',
     when: inCanvas,
     run: ({ dispatch }) => dispatch({ type: 'UI_SET_DOC_VIEW_MODE', mode: 'organize' }),
+  },
+  // Rotate View (M6.1, § 9.1) — render-only quarter-turns of the READING
+  // display, per file; never the page tier (that's Document ▸ Rotate Pages…,
+  // and the two menu labels carry Acrobat's own distinction). Reading-view
+  // only: the board is where real rotation lives.
+  'view.rotateCW': {
+    title: 'Rotate View Clockwise',
+    when: (ctx) =>
+      inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && hasActiveFile(ctx.state),
+    run: ({ state, dispatch }) =>
+      dispatch({ type: 'UI_ROTATE_VIEW', path: showableDoc(state)!, delta: 90 }),
+  },
+  'view.rotateCCW': {
+    title: 'Rotate View Counterclockwise',
+    when: (ctx) =>
+      inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && hasActiveFile(ctx.state),
+    run: ({ state, dispatch }) =>
+      dispatch({ type: 'UI_ROTATE_VIEW', path: showableDoc(state)!, delta: 270 }),
   },
   // Ctrl+Shift+N (§ 9.2): land the caret in the reading view's page box.
   'view.goToPage': {
