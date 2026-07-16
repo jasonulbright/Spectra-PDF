@@ -61,3 +61,10 @@ project-manifest.json
 # pinned tesseract.js packages; vendored in the product, not in git (same
 # class as resources/python).
 /public/ocr/
+
+# Internal dev record — local working files, NEVER committed (kept out of the
+# public repo; history was rewritten 2026-07-16 to remove them).
+CLAUDE.md
+docs/PUNCHLIST.md
+docs/architecture/
+docs/reviews/
