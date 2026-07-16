@@ -14,6 +14,9 @@ import {
 // second source of truth that would silently omit a new mode from the
 // orphan-ownership check below and quietly pass.
 import { CANVAS_MODES } from '../src/renderer/commands/registry';
+// The TYPE is still needed (the ownership map below is keyed by it) — what this
+// slice removed was the hand-listed copy of its MEMBERS, not the import.
+import type { CanvasTool } from '../src/renderer/state/types';
 import { OPERATIONS, OPERATION_TITLES } from '../src/renderer/commands/operations';
 
 // The tools registry (M5, § 7) regroups the 19 engine operations into 12 tools
