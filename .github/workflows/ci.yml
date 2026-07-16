@@ -97,7 +97,10 @@ jobs:
   e2e:
     name: E2E (WebdriverIO + tauri-driver)
     runs-on: windows-latest
-    timeout-minutes: 30
+    # 30 was enough for the ~25-spec suite; the 39-spec suite + a cold debug
+    # cargo build (cache misses on every Cargo.lock change) got the v2.0.0
+    # push cancelled AT the cap mid-suite with every step green until then.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v6
 
