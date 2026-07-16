@@ -59,8 +59,6 @@ const recentSubmenu: MenuNode = {
       },
     },
     sep,
-    cmd('file.properties', 'menuitem-file-properties'),
-    sep,
     cmd('file.clearRecent', 'menuitem-file-clear-recent'),
   ],
 };
@@ -109,6 +107,8 @@ export const MENUS: MenuDef[] = [
       cmd('file.saveAs', 'menuitem-file-save-as'),
       cmd('file.close', 'menuitem-file-close'),
       cmd('file.closeAll', 'menuitem-file-close-all'),
+      sep,
+      cmd('file.properties', 'menuitem-file-properties'),
       sep,
       cmd('file.exit', 'menuitem-file-exit'),
     ],

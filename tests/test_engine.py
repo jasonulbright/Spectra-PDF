@@ -2228,3 +2228,15 @@ class TestPdfVersion:
         out = os.path.join(tmp_dir, "v17.pdf")
         set_pdf_version(file=sample_pdf, output=out, version="1.7")
         assert get_pdf_version(file=out)["version"] == "1.7"
+
+    def test_set_reports_the_real_BEFORE_version(self, sample_pdf, tmp_dir):
+        # The same bug lived in set_pdf_version's own `original_version`, and
+        # the round-trip above does NOT catch it: that reads the OUTPUT back
+        # through get_pdf_version and never looks at what set_pdf_version said
+        # the input was. It surfaced as "PDF 1.. -> PDF 1.7" in the Optimize
+        # pane and in the CLI's JSON.
+        out = os.path.join(tmp_dir, "v17b.pdf")
+        r = set_pdf_version(file=sample_pdf, output=out, version="1.7")
+        assert r["original_version"] == pikepdf.open(sample_pdf).pdf_version
+        assert re.fullmatch(r"\d+\.\d+", r["original_version"]), r["original_version"]
+        assert r["target_version"] == "1.7"

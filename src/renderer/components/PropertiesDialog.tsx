@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { invokeCommand } from '../commands/context';
+import { runCommitGate } from '../lib/commit-gate';
 import type { PdfBuffer } from '../state/types';
 
 // File ▸ Properties… (Ctrl+D) — § 3.2's re-homing of the Metadata panel, the
@@ -50,20 +51,41 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
   useEffect(() => {
     if (!workingPath) return;
     let cancelled = false;
-    call('get_metadata', { file: workingPath })
-      .then((r) => {
+    void (async () => {
+      // FLUSH FIRST. Every number in this dialog describes the document's
+      // BYTES — metadata and version are read out of the working copy, and
+      // pageCount/size come from `files`, which only moves on a real byte op.
+      // Pending page-tier edits live in `workspace` and touch none of that, so
+      // without this a Properties opened right after deleting a page reports
+      // the page as still there, disagreeing with the page counter a few pixels
+      // away. This is the commit gate's stated job — "before anything READS or
+      // replaces file bytes" (CLAUDE.md) — and the reason these three reads are
+      // INTERNAL_METHODS (individually ungated: a panel reading on mount must
+      // not commit) is exactly why the gate has to be asked for here.
+      try {
+        await runCommitGate();
+      } catch (e: unknown) {
+        if (!cancelled) setStatus(`Could not apply pending edits: ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
+      if (cancelled) return;
+      try {
+        const r = await call('get_metadata', { file: workingPath });
         if (cancelled) return;
         setTitle(r.title || '');
         setAuthor(r.author || '');
         setSubject(r.subject || '');
         setKeywords(r.keywords || '');
-      })
-      .catch((e: unknown) => {
+      } catch (e: unknown) {
         if (!cancelled) setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
-      });
-    call('get_pdf_version', { file: workingPath })
-      .then((r) => { if (!cancelled) setVersion(r.version as string); })
-      .catch(() => { if (!cancelled) setVersion(null); });
+      }
+      try {
+        const v = await call('get_pdf_version', { file: workingPath });
+        if (!cancelled) setVersion(v.version);
+      } catch {
+        if (!cancelled) setVersion(null);
+      }
+    })();
     return () => { cancelled = true; };
   }, [workingPath, call]);
 

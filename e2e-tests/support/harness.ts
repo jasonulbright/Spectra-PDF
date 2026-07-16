@@ -48,6 +48,20 @@ export async function openByPaths(paths: string[]): Promise<void> {
   if (typeof result === 'string') throw new Error(`openByPaths failed: ${result}`);
 }
 
+/**
+ * Start an open WITHOUT waiting for it to finish.
+ *
+ * `openByPaths` awaits the app's promise — which, for a password-protected
+ * file, does not resolve until the prompt is answered. Awaiting it and then
+ * trying to type the password deadlocks: the script is still blocked inside the
+ * call that put the prompt on screen.
+ */
+export async function startOpenByPaths(paths: string[]): Promise<void> {
+  await browser.execute((p: string[]) => {
+    void (window as any).__SPECTRA_TEST__.openByPaths(p);
+  }, paths);
+}
+
 export async function getState(): Promise<TestStateSnapshot> {
   return await browser.execute<TestStateSnapshot, []>(function () {
     return (window as any).__SPECTRA_TEST__.getState();

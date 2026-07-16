@@ -39,6 +39,7 @@ export function PasswordDialog({ open, fileName, error, onResult }: PasswordDial
           </Dialog.Description>
           <form onSubmit={handleSubmit}>
             <input
+              data-testid="password-input"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -58,6 +59,7 @@ export function PasswordDialog({ open, fileName, error, onResult }: PasswordDial
                 Cancel
               </button>
               <button
+                data-testid="password-submit"
                 type="submit"
                 className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded transition-colors"
               >

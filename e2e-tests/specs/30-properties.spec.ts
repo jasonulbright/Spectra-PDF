@@ -1,8 +1,18 @@
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { waitForHarness, openByPaths, closeAllFiles, getState } from '../support/harness.js';
+import {
+  waitForHarness,
+  openByPaths,
+  startOpenByPaths,
+  closeAllFiles,
+  getState,
+} from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
+// AES-256, user password "secret" — checked in beside the other fixtures
+// (signed.pdf, scanned.pdf) because nothing in the JS toolchain can encrypt a
+// PDF, and the Security tab has no discriminating test without one.
+const ENCRYPTED_PDF = resolve(__dirname, '..', 'fixtures', 'encrypted.pdf');
 
 // Phase 4 M5.5b: File ▸ Properties… (Ctrl+D) — § 3.2's re-homing of the Metadata
 // panel, the PDF-version read and the encryption status into one dialog about
@@ -37,10 +47,7 @@ describe('document properties', () => {
     expect(await $('[data-testid="props-path"]').getText()).toBe(SAMPLE_PDF);
   });
 
-  it('Security reports the ORIGINAL file’s protection, not the working copy’s', async () => {
-    // The working copy is decrypted on open, so asking IT would always answer
-    // "None" — confidently and uselessly. The fixture isn't protected, so
-    // "None" is right here; the point is which file was asked.
+  it('Security says "None" for an unprotected file', async () => {
     await $('[data-testid="props-tab-security"]').click();
     await browser.waitUntil(
       async () => (await $('[data-testid="props-encrypted"]').getText()) !== 'Unknown',
@@ -50,9 +57,45 @@ describe('document properties', () => {
     await expect($('[data-testid="props-protect"]')).toBeDisplayed();
   });
 
-  it('closes, and Ctrl+D is inert with no document to describe', async () => {
+  it('Security reports the ORIGINAL file’s protection, not the working copy’s', async () => {
+    // THE case that discriminates. Opening an encrypted PDF decrypts the
+    // WORKING copy, so a dialog asking the working copy would answer "None" —
+    // and would pass the unprotected case above identically. Only a genuinely
+    // protected file can tell the two implementations apart.
     await $('[data-testid="props-close"]').click();
-    await $('[data-testid="properties-dialog"]').waitForDisplayed({ reverse: true });
+    await closeAllFiles();
+    // NOT awaited: the open does not resolve until the prompt is answered.
+    await startOpenByPaths([ENCRYPTED_PDF]);
+    // The password prompt appears on open; answer it, exactly as a user would.
+    await $('[data-testid="password-input"]').waitForDisplayed({
+      timeoutMsg: 'no password prompt for the encrypted fixture',
+    });
+    await $('[data-testid="password-input"]').setValue('secret');
+    await $('[data-testid="password-submit"]').click();
+    await browser.waitUntil(async () => (await getState()).fileCount === 1, {
+      timeoutMsg: 'the encrypted fixture never opened',
+    });
+
+    await browser.keys(['Control', 'd']);
+    await $('[data-testid="props-tab-security"]').waitForDisplayed();
+    await $('[data-testid="props-tab-security"]').click();
+    await browser.waitUntil(
+      async () => (await $('[data-testid="props-encrypted"]').getText()) !== 'Unknown',
+      { timeoutMsg: 'encryption status never resolved for the encrypted file' },
+    );
+    // The working copy is decrypted by now; the file on disk is not. Asking the
+    // working copy would say "None" here — which is the whole point.
+    expect(await $('[data-testid="props-encrypted"]').getText()).toBe(
+      'This file requires a password to open',
+    );
+    await $('[data-testid="props-close"]').click();
+  });
+
+  it('Ctrl+D is inert with no document to describe', async () => {
+    await $('[data-testid="properties-dialog"]').waitForDisplayed({
+      reverse: true,
+      timeoutMsg: 'the dialog outlived its Close',
+    });
     await closeAllFiles();
     expect((await getState()).fileCount).toBe(0);
     await browser.keys(['Control', 'd']);

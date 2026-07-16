@@ -40,7 +40,12 @@ def set_pdf_version(
     output_path = Path(output)
 
     with pikepdf.open(file) as pdf:
-        original_version = f"{pdf.pdf_version[0]}.{pdf.pdf_version[1]}"
+        # Same string-indexed-as-a-tuple bug as get_pdf_version had, in its
+        # sibling twenty lines away — fixed there and missed here on the first
+        # pass. It reported "1.." as the BEFORE version in the Optimize pane's
+        # "PDF 1.. → PDF 1.7" and in the CLI's JSON. The conversion itself was
+        # always correct; only the number it told you about was wrong.
+        original_version = pdf.pdf_version
         pdf.save(output_path, min_version=version)
 
     return {
