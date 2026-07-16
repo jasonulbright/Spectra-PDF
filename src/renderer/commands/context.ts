@@ -105,3 +105,38 @@ export function runEscapeInterceptors(): boolean {
 export function escapeInterceptorCount(): number {
   return escapeInterceptors.length;
 }
+
+// --- App-modal stack (M6.5 — the dialog keyboard model) --------------------
+//
+// The plain-div dialog shells (Preferences, About, Properties, Print)
+// register their close handler while mounted. The keymap dispatcher owns the
+// routing: while any modal is up, Escape closes the TOP of this stack — one
+// rule for every dialog instead of a per-dialog handler (M5.5b's recorded
+// gap), and the always-preventDefault chords keep suppressing the webview's
+// own UI (Ctrl+P/S/O — M-P's recorded gap) without running. Radix surfaces
+// (menus, Confirm/Password dialogs) keep owning their own keys; this stack
+// is only for the shells that have none.
+
+const appModalStack: (() => void)[] = [];
+
+/** Register a modal's close handler; returns its unregister function. */
+export function pushAppModal(onClose: () => void): () => void {
+  appModalStack.push(onClose);
+  return () => {
+    const i = appModalStack.lastIndexOf(onClose);
+    if (i !== -1) appModalStack.splice(i, 1);
+  };
+}
+
+/** Close the top-most registered app modal. True if one was closed. */
+export function closeTopAppModal(): boolean {
+  const top = appModalStack[appModalStack.length - 1];
+  if (!top) return false;
+  top();
+  return true;
+}
+
+/** Test-only: the current modal-stack depth. */
+export function appModalCount(): number {
+  return appModalStack.length;
+}

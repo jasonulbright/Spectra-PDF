@@ -65,6 +65,10 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 'd', ctrl: true, shift: true, command: 'tools.panel.delete', scope: 'global', editableGuard: true, preventDefault: 'always' },
   { key: 'r', ctrl: true, shift: true, command: 'tools.panel.rotate', scope: 'global', editableGuard: true, preventDefault: 'always' },
   { key: 'i', ctrl: true, shift: true, command: 'document.insertFromFile', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  // Ctrl+Shift+T (§ 9.2 — the "M6 call", made at the M6.5 freeze: current
+  // Acrobat's published table lists it as the Insert BLANK Pages tool, so it
+  // binds; the version-variant worry was Acrobat CLASSIC's Crop).
+  { key: 't', ctrl: true, shift: true, command: 'document.insertBlankPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
   // Go to page (§ 9.2): focus the reading view's page box.
   { key: 'n', ctrl: true, shift: true, command: 'view.goToPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
   // Find next/prev (§ 9.2): F3 / Shift+F3 with the Ctrl+G aliases. Global
@@ -81,9 +85,12 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 'tab', ctrl: true, shift: false, command: 'window.nextTab', scope: 'global', editableGuard: false, preventDefault: 'always' },
   { key: 'tab', ctrl: true, shift: true, command: 'window.prevTab', scope: 'global', editableGuard: false, preventDefault: 'always' },
   // Nav pane toggle (§ 9.2, M3) — canvas-scoped (the pane is about the active
-  // document), guard-exempt (F4 isn't a text key). Shift+F4 (task pane) stays
-  // reserved/unbound until M5.
-  { key: 'f4', command: 'view.navPane', scope: 'canvas', editableGuard: false, preventDefault: 'always' },
+  // document), guard-exempt (F4 isn't a text key).
+  { key: 'f4', shift: false, command: 'view.navPane', scope: 'canvas', editableGuard: false, preventDefault: 'always' },
+  // Shift+F4 (§ 9.2 — VERIFIED at the M6.5 freeze: keycombiner's Acrobat
+  // collection lists "open or close the Task pane"): toggles the Tools tab.
+  // Global — the toggle works FROM the Tools tab too, that's its point.
+  { key: 'f4', shift: true, command: 'view.toolsPane', scope: 'global', editableGuard: false, preventDefault: 'always' },
   // Search panel (§ 9.2, M3.3) — Ctrl+Shift+F opens the nav-pane Search list
   // (the command toggles, so it also closes on repeat). Canvas-scoped. Unlike
   // Find (Ctrl+F, guard-exempt), this is editableGuard:TRUE: the panel it opens

@@ -6,7 +6,12 @@
 import { useEffect } from 'react';
 import { KEY_BINDINGS, type KeyBinding } from './acrobat-keys';
 import { COMMANDS, type CommandId } from './registry';
-import { getCommandContext, runEscapeInterceptors } from './context';
+import {
+  appModalCount,
+  closeTopAppModal,
+  getCommandContext,
+  runEscapeInterceptors,
+} from './context';
 import { isDocTab, type CanvasTool } from '../state/types';
 import { getSettings } from '../lib/app-settings';
 import type { CommandContext } from './types';
@@ -105,18 +110,27 @@ function dispatchEscape(ctx: CommandContext, target: EventTarget | null): void {
   }
 }
 
-// An open Radix menu (role="menu") or an app modal (data-app-modal) owns the
-// keyboard — the first scope in § 4.4 ("native menu/dialog handling wins").
-// While one is up, the dispatcher steps aside entirely: menu typeahead/arrows/
-// Escape are Radix's, and a chord like Ctrl+W must not close a file behind the
-// modal. Guarded by presence, not focus, so it holds even mid-animation.
-function overlayOpen(): boolean {
-  // role=menu: Radix menubar + dropdown content. role=dialog: Radix
-  // Confirm/Password dialogs. data-app-modal: the plain-div overlays
-  // (Preferences, About).
+// Overlay ownership (§ 4.4 "native menu/dialog handling wins", reworked at
+// M6.5 into the dialog keyboard model):
+//  1. An open Radix MENU owns the keyboard entirely (typeahead/arrows/its
+//     own Escape) — the dispatcher steps aside.
+//  2. The plain-div app modals (Preferences/About/Properties/Print) register
+//     on the app-modal STACK via useAppModal. While one is up, the
+//     dispatcher closes the TOP on Escape — one rule for every dialog
+//     (M5.5b's recorded gap) — and still preventDefaults the
+//     always-suppress chords so Ctrl+P/S/O can't summon the webview's own
+//     UI over a modal (M-P's recorded gap). Commands never RUN.
+//  3. A Radix DIALOG (Confirm/Password) owns its keys like a menu — they
+//     ship Escape/focus handling. Detected by DOM presence; ours are
+//     distinguished by having registered on the stack.
+function radixMenuOpen(): boolean {
+  return typeof document !== 'undefined' && document.querySelector('[role="menu"]') !== null;
+}
+
+function radixDialogOpen(): boolean {
   return (
     typeof document !== 'undefined' &&
-    document.querySelector('[role="menu"], [role="dialog"], [data-app-modal]') !== null
+    document.querySelector('[role="dialog"]:not([data-app-modal] [role="dialog"]), [data-app-modal]') !== null
   );
 }
 
@@ -152,11 +166,51 @@ export function dispatchWindowBlur(): void {
   }
 }
 
+/**
+ * Browser accelerators the webview must NEVER act on, bound or not (M6.5):
+ * reload blanks the whole app state, browser zoom rescales the chrome, F7
+ * raises the caret-browsing prompt, and Ctrl+U/J/H open browser surfaces.
+ * Checked on every path that declines a key — a canvas-scoped Ctrl+= on the
+ * Home tab must still not zoom the WEBVIEW just because our binding didn't
+ * take it. (Ctrl+Shift+R is already a bound 'always' chord — rotate pane.)
+ */
+function suppressBrowserDefault(e: KeyLike & { preventDefault(): void }): void {
+  const k = e.key.toLowerCase();
+  const mod = e.ctrlKey || e.metaKey;
+  if (
+    k === 'f5' ||
+    k === 'f7' ||
+    (mod && ['r', 'u', 'j', 'h', '=', '+', '-', '0'].includes(k))
+  ) {
+    e.preventDefault();
+  }
+}
+
 /** The one window keydown handler. Exported for tests; installed by the hook. */
 export function dispatchKeyEvent(e: KeyboardEvent): void {
   const ctx = getCommandContext();
   if (!ctx) return;
-  if (overlayOpen()) return;
+  if (radixMenuOpen()) {
+    // Radix owns navigation/typeahead/Escape — but the webview's own
+    // accelerators are still OURS to refuse: F5 over an open File menu
+    // reloaded the entire app (review-caught HIGH).
+    suppressBrowserDefault(e);
+    return;
+  }
+  if (appModalCount() > 0) {
+    if (e.key === 'Escape') {
+      if (closeTopAppModal()) e.preventDefault();
+      return;
+    }
+    const suppressed = resolveBinding(e);
+    if (suppressed?.preventDefault === 'always') e.preventDefault();
+    suppressBrowserDefault(e);
+    return;
+  }
+  if (radixDialogOpen()) {
+    suppressBrowserDefault(e);
+    return;
+  }
   // Space temporary hand: hold to pan, release to get your mode back. Guarded
   // like a text key (Space in a field types a space), doc-tab only. Runs
   // before the table — Space has no binding. preventDefault is NOT gated on
@@ -177,7 +231,10 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
     return;
   }
   const binding = resolveBinding(e);
-  if (!binding) return;
+  if (!binding) {
+    suppressBrowserDefault(e);
+    return;
+  }
   // Pref-gated bindings (the single-key accelerators, M6.4) are dead until
   // their Settings switch is on. Checked here, not in resolveBinding — the
   // resolver stays pure/table-testable, and a dead binding must fall through
@@ -187,8 +244,20 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
   // the OS repeat rate and land on parity (review-caught). Held Ctrl+Z /
   // `]` keep repeating — those commands are meant to.
   if (binding.requiresPref && (e.repeat || !getSettings()[binding.requiresPref])) return;
-  if (binding.scope === 'canvas' && !isDocTab(ctx.state.ui.focusedTab)) return;
-  if (binding.editableGuard && isEditable(e.target)) return;
+  if (binding.scope === 'canvas' && !isDocTab(ctx.state.ui.focusedTab)) {
+    // The key stays ours even where the binding declined it: a canvas-scoped
+    // Ctrl+= on the Home tab must not zoom the WEBVIEW.
+    suppressBrowserDefault(e);
+    return;
+  }
+  if (binding.editableGuard && isEditable(e.target)) {
+    // The guard hands the key to the FIELD — but only field semantics:
+    // Ctrl+Z/A stay native editing (not in the suppress list), while a
+    // browser accelerator like Ctrl+= must not zoom the webview just
+    // because a find input has focus.
+    suppressBrowserDefault(e);
+    return;
+  }
   const cmd = COMMANDS[binding.command];
   const enabled = cmd.when ? cmd.when(ctx) : true;
   if (binding.preventDefault === 'always' || enabled) e.preventDefault();

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { useAppState } from '../state/AppStateProvider';
-import { MAIN_TOOLBAR } from '../commands/toolbars';
+import { MAIN_TOOLBAR, type ToolbarNode } from '../commands/toolbars';
 import { COMMANDS, type CommandId } from '../commands/registry';
 import { shortcutForCommand } from '../commands/keymap';
 import { invokeCommand, isCommandEnabled } from '../commands/context';
@@ -22,16 +22,33 @@ const TESTID_FOR: Partial<Record<CommandId, string>> = {
   'edit.find': 'toolbar-find',
 };
 
-function ToolbarButton({ command, icon, pressed }: { command: CommandId; icon: ChromeIconId; pressed?: boolean }): React.ReactElement {
+function ToolbarButton({
+  command,
+  icon,
+  pressed,
+  tabbable,
+  buttonRef,
+  onFocus,
+}: {
+  command: CommandId;
+  icon: ChromeIconId;
+  pressed?: boolean;
+  tabbable: boolean;
+  buttonRef: (el: HTMLButtonElement | null) => void;
+  onFocus: () => void;
+}): React.ReactElement {
   const enabled = isCommandEnabled(command);
   const shortcut = shortcutForCommand(command);
   const title = shortcut ? `${COMMANDS[command].title} (${shortcut})` : COMMANDS[command].title;
   return (
     <button
       type="button"
+      ref={buttonRef}
       data-testid={TESTID_FOR[command]}
       disabled={!enabled}
       aria-pressed={pressed}
+      tabIndex={tabbable ? 0 : -1}
+      onFocus={onFocus}
       onClick={() => invokeCommand(command)}
       title={title}
       aria-label={COMMANDS[command].title}
@@ -56,18 +73,71 @@ export function MainToolbar(): React.ReactElement {
     if (command === 'tools.select') return state.ui.tool === 'select';
     return undefined;
   };
+  // Roving tabindex (§ 10.5, M6.5): the toolbar is ONE Tab stop; arrows move
+  // within it, skipping disabled buttons. The roving index follows real focus
+  // (mouse clicks included), so Tab always leaves from where the user was.
+  const buttons = MAIN_TOOLBAR.filter(
+    (n): n is Extract<ToolbarNode, { kind: 'command' }> => n.kind === 'command',
+  );
+  const [rovingIdx, setRovingIdx] = useState(0);
+  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // The roving index is a FOCUS memory, not a truth about tabbability: the
+  // remembered button can be DISABLED by state it doesn't control (Save
+  // after saving, Undo at the bottom of its stack) — and a disabled button
+  // is excluded from Tab regardless of tabIndex, which left the whole
+  // toolbar Tab-unreachable (review-caught). The tab stop is re-derived
+  // against live enablement every render.
+  const effectiveIdx = isCommandEnabled(buttons[rovingIdx]?.command)
+    ? rovingIdx
+    : buttons.findIndex((b) => isCommandEnabled(b.command));
+  const moveFocus = (from: number, delta: 1 | -1 | 'home' | 'end'): void => {
+    const enabled = (i: number): boolean => !!buttonRefs.current[i] && !buttonRefs.current[i]!.disabled;
+    let target = -1;
+    if (delta === 'home') target = buttons.findIndex((_, i) => enabled(i));
+    else if (delta === 'end') {
+      for (let i = buttons.length - 1; i >= 0; i--) if (enabled(i)) { target = i; break; }
+    } else {
+      for (let i = from + delta; i >= 0 && i < buttons.length; i += delta) {
+        if (enabled(i)) { target = i; break; }
+      }
+    }
+    if (target === -1) return;
+    setRovingIdx(target);
+    buttonRefs.current[target]?.focus();
+  };
+  const onToolbarKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); moveFocus(rovingIdx, 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); moveFocus(rovingIdx, -1); }
+    else if (e.key === 'Home') { e.preventDefault(); moveFocus(rovingIdx, 'home'); }
+    else if (e.key === 'End') { e.preventDefault(); moveFocus(rovingIdx, 'end'); }
+  };
+  let commandIdx = -1;
   return (
     <div
       data-testid="main-toolbar"
+      role="toolbar"
+      aria-label="Main toolbar"
+      onKeyDown={onToolbarKeyDown}
       className="app-shell-bar app-toolbar flex items-center gap-0.5 px-1.5 h-9 border-b border-neutral-800 shrink-0"
     >
-      {MAIN_TOOLBAR.map((node, i) =>
-        node.kind === 'separator' ? (
-          <div key={i} className="w-px h-5 bg-neutral-700 mx-1" />
-        ) : (
-          <ToolbarButton key={i} command={node.command} icon={node.icon} pressed={pressedFor(node.command)} />
-        ),
-      )}
+      {MAIN_TOOLBAR.map((node, i) => {
+        if (node.kind === 'separator') {
+          return <div key={i} className="w-px h-5 bg-neutral-700 mx-1" />;
+        }
+        commandIdx += 1;
+        const idx = commandIdx;
+        return (
+          <ToolbarButton
+            key={i}
+            command={node.command}
+            icon={node.icon}
+            pressed={pressedFor(node.command)}
+            tabbable={idx === effectiveIdx}
+            buttonRef={(el) => { buttonRefs.current[idx] = el; }}
+            onFocus={() => setRovingIdx(idx)}
+          />
+        );
+      })}
     </div>
   );
 }

@@ -68,7 +68,41 @@ import {
   setCommandStateSource,
 } from './commands/context';
 import { useKeymapDispatcher } from './commands/keymap';
+import { useAppModal } from './hooks/useAppModal';
 import type { AppCommandHandlers } from './commands/types';
+
+// The Preferences shell — a component (not inline JSX) so it can carry the
+// shared dialog keyboard/focus contract (useAppModal, M6.5).
+function PreferencesModal({
+  category,
+  onClose,
+}: {
+  category: PrefCategory;
+  onClose: () => void;
+}): React.ReactElement {
+  const shellRef = useAppModal(onClose);
+  return (
+    <div data-app-modal className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={onClose}>
+      <div
+        ref={shellRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Preferences"
+        className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[640px] max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
+          <h3 className="text-sm font-semibold">Preferences</h3>
+          <button data-testid="prefs-close" onClick={onClose} className="text-neutral-500 hover:text-neutral-300 text-sm">Close</button>
+        </div>
+        <div className="p-5">
+          <SettingsPanel initialCategory={category} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const panels: Record<Operation, React.ComponentType> = {
   split: SplitPanel, rotate: RotatePanel, delete: DeletePanel,
@@ -1151,17 +1185,7 @@ function AppContent(): React.ReactElement {
 
       {/* Settings modal — accessible from Edit ▸ Preferences / Help ▸ Licenses */}
       {showSettings !== null && (
-        <div data-app-modal className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setShowSettings(null)}>
-          <div className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[640px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
-              <h3 className="text-sm font-semibold">Preferences</h3>
-              <button data-testid="prefs-close" onClick={() => setShowSettings(null)} className="text-neutral-500 hover:text-neutral-300 text-sm">Close</button>
-            </div>
-            <div className="p-5">
-              <SettingsPanel initialCategory={showSettings} />
-            </div>
-          </div>
-        </div>
+        <PreferencesModal category={showSettings} onClose={() => setShowSettings(null)} />
       )}
       {showProperties && <PropertiesDialog onClose={() => setShowProperties(false)} />}
       {showPrint && <PrintDialog onClose={() => setShowPrint(false)} />}

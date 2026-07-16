@@ -1,4 +1,5 @@
 import React from 'react';
+import { useAppModal } from '../hooks/useAppModal';
 
 // About dialog (Phase 4 M2) — the app name/version/repo, moved out of the
 // old header chrome (the native title bar carries the name now). Version is
@@ -12,6 +13,7 @@ interface AboutDialogProps {
 const REPO_URL = 'https://github.com/jasonulbright/Open-PDF-Studio';
 
 export function AboutDialog({ version, onClose }: AboutDialogProps): React.ReactElement {
+  const shellRef = useAppModal(onClose);
   return (
     <div
       data-app-modal
@@ -20,6 +22,11 @@ export function AboutDialog({ version, onClose }: AboutDialogProps): React.React
       data-testid="about-dialog"
     >
       <div
+        ref={shellRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="About Open PDF Studio"
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[380px]"
         onClick={(e) => e.stopPropagation()}
       >

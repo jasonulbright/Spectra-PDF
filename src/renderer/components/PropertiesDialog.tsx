@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { invokeCommand } from '../commands/context';
+import { useAppModal } from '../hooks/useAppModal';
 import { runCommitGate } from '../lib/commit-gate';
 import type { PdfBuffer } from '../state/types';
 
@@ -259,6 +260,8 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
 }
 
 function Shell({ children, onClose }: { children: React.ReactNode; onClose: () => void }): React.JSX.Element {
+  // Escape-closes / focus-trap / focus-restore — the shared dialog contract.
+  const shellRef = useAppModal(onClose);
   return (
     <div
       data-app-modal
@@ -266,6 +269,11 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
       onClick={onClose}
     >
       <div
+        ref={shellRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Document Properties"
         data-testid="properties-dialog"
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[640px] max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

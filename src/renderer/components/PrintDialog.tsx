@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { app } from '../lib/tauri-bridge';
+import { useAppModal } from '../hooks/useAppModal';
 import { runCommitGate } from '../lib/commit-gate';
 import { getSettings } from '../panels/SettingsPanel';
 import {
@@ -251,6 +252,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
 }
 
 function Shell({ children, onClose }: { children: React.ReactNode; onClose: () => void }): React.JSX.Element {
+  const shellRef = useAppModal(onClose);
   return (
     <div
       data-app-modal
@@ -258,6 +260,11 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
       onClick={onClose}
     >
       <div
+        ref={shellRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Print"
         data-testid="print-dialog"
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[520px] max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

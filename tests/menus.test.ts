@@ -111,11 +111,13 @@ describe('§ 9.1 completeness (M6.3)', () => {
     );
   });
 
-  it('View has the zoom submenu and all three view-mode items', () => {
+  it('View has the zoom submenu, all three view-mode items, rotate view, and the panes', () => {
     expect(idsIn('view')).toEqual(
       expect.arrayContaining([
         'view.zoomIn', 'view.actualSize', 'view.fitWidth',
         'view.documentView', 'tools.open.organize', 'view.organizeAll',
+        'view.rotateCW', 'view.rotateCCW',
+        'view.navPane', 'view.toolsPane',
       ]),
     );
   });

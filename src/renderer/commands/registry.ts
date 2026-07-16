@@ -152,6 +152,7 @@ export const COMMAND_IDS = [
   'view.goToPage',
   'view.rotateCW',
   'view.rotateCCW',
+  'view.toolsPane',
   'document.insertBlankPage',
   'document.insertFromFile',
   'document.deleteSelection',
@@ -486,6 +487,20 @@ export const COMMANDS: Record<CommandId, Command> = {
       inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && hasActiveFile(ctx.state),
     run: ({ state, dispatch }) =>
       dispatch({ type: 'UI_ROTATE_VIEW', path: showableDoc(state)!, delta: 270 }),
+  },
+  // Shift+F4 (§ 9.2, verified at the M6.5 freeze): Acrobat's "open or close
+  // the Task pane". Ours is the Tools tab — toggle to it, and back to the
+  // document you were on (or Home when none).
+  'view.toolsPane': {
+    title: 'Tools Pane',
+    run: ({ state, dispatch }) => {
+      if (state.ui.focusedTab === 'tools') {
+        const doc = showableDoc(state);
+        dispatch({ type: 'UI_FOCUS_TAB', tab: doc ? { doc } : 'home' });
+      } else {
+        dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+      }
+    },
   },
   // Ctrl+Shift+N (§ 9.2): land the caret in the reading view's page box.
   'view.goToPage': {

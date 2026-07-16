@@ -158,6 +158,7 @@ export const MENUS: MenuDef[] = [
           cmd('view.navPane', 'menuitem-view-nav-pane'),
         ],
       },
+      cmd('view.toolsPane', 'menuitem-view-tools-pane'),
       sep,
       {
         kind: 'submenu',

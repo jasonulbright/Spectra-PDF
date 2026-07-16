@@ -12,9 +12,11 @@ import {
   type CommandId,
 } from '../src/renderer/commands/registry';
 import {
+  appModalCount,
   escapeInterceptorCount,
   getCommandContext,
   invokeCommand,
+  pushAppModal,
   pushEscapeInterceptor,
   registerAppCommandHandlers,
   registerCanvasServices,
@@ -1000,5 +1002,148 @@ describe('single-key accelerators at the DISPATCHER (M6.4)', () => {
     dispatchKeyEvent(letter('h', true));
     dispatchKeyEvent(letter('h', true));
     expect(finalState().ui.tool).toBe('hand');
+  });
+});
+
+describe('the app-modal keyboard model (M6.5)', () => {
+  function docTabWithFile(): AppState {
+    const f = { path: 'x.pdf', workingPath: 'x.pdf.w', name: 'x.pdf', pageCount: 1, buffer: [1] as unknown as PdfBuffer, dirty: false, undoStack: [], redoStack: [] };
+    return stateWith({
+      activeFileId: 'x.pdf',
+      files: new Map([['x.pdf', f as OpenFile]]),
+      ui: { ...initialState.ui, focusedTab: { doc: 'x.pdf' } },
+    });
+  }
+  function evt(init: Partial<KeyboardEvent> & { key: string }): KeyboardEvent & { defaultPrevented: boolean } {
+    const e = {
+      repeat: false, target: null,
+      ctrlKey: false, metaKey: false, shiftKey: false, altKey: false,
+      defaultPrevented: false,
+      preventDefault() { e.defaultPrevented = true; },
+      ...init,
+    };
+    return e as unknown as KeyboardEvent & { defaultPrevented: boolean };
+  }
+
+  it('Escape closes the TOP modal of the stack, once each', () => {
+    let current = docTabWithFile();
+    setCommandStateSource(() => ({
+      state: current,
+      dispatch: (a: AppAction) => { current = appReducer(current, a); },
+    }));
+    const closed: string[] = [];
+    const popA = pushAppModal(() => closed.push('preferences'));
+    const popB = pushAppModal(() => closed.push('print'));
+    expect(appModalCount()).toBe(2);
+
+    const esc = evt({ key: 'Escape' });
+    dispatchKeyEvent(esc);
+    expect(closed).toEqual(['print']); // the TOP one
+    expect(esc.defaultPrevented).toBe(true);
+    popB(); // the dialog unmounts in response
+    dispatchKeyEvent(evt({ key: 'Escape' }));
+    expect(closed).toEqual(['print', 'preferences']);
+    popA();
+    expect(appModalCount()).toBe(0);
+  });
+
+  it('while a modal is up, always-suppress chords preventDefault but never RUN', () => {
+    let current = docTabWithFile();
+    const dispatched: AppAction[] = [];
+    setCommandStateSource(() => ({
+      state: current,
+      dispatch: (a: AppAction) => { dispatched.push(a); current = appReducer(current, a); },
+    }));
+    const handlers = noopHandlers();
+    registerAppCommandHandlers(handlers);
+    const pop = pushAppModal(() => {});
+
+    // Ctrl+P is 'always' — the webview's own print UI must stay suppressed
+    // over a modal (the M-P recorded gap)…
+    const p = evt({ key: 'p', ctrlKey: true });
+    dispatchKeyEvent(p);
+    expect(p.defaultPrevented).toBe(true);
+    expect(handlers.openPrint).not.toHaveBeenCalled();
+    // …and Ctrl+W must not close a file behind the modal.
+    const w = evt({ key: 'w', ctrlKey: true });
+    dispatchKeyEvent(w);
+    expect(handlers.closeFile).not.toHaveBeenCalled();
+    expect(dispatched).toEqual([]);
+    pop();
+  });
+});
+
+describe('browser-default suppression (M6.5)', () => {
+  function homeTab(): AppState {
+    return stateWith({ ui: { ...initialState.ui, focusedTab: 'home' } });
+  }
+  function evt(init: Partial<KeyboardEvent> & { key: string }): KeyboardEvent & { defaultPrevented: boolean } {
+    const e = {
+      repeat: false, target: null,
+      ctrlKey: false, metaKey: false, shiftKey: false, altKey: false,
+      defaultPrevented: false,
+      preventDefault() { e.defaultPrevented = true; },
+      ...init,
+    };
+    return e as unknown as KeyboardEvent & { defaultPrevented: boolean };
+  }
+  const wire = (s: AppState): AppAction[] => {
+    const dispatched: AppAction[] = [];
+    let current = s;
+    setCommandStateSource(() => ({
+      state: current,
+      dispatch: (a: AppAction) => { dispatched.push(a); current = appReducer(current, a); },
+    }));
+    return dispatched;
+  };
+
+  it('reload chords never reach the webview — they would blank the app', () => {
+    const dispatched = wire(homeTab());
+    for (const k of [evt({ key: 'F5' }), evt({ key: 'r', ctrlKey: true }), evt({ key: 'F7' })]) {
+      dispatchKeyEvent(k);
+      expect(k.defaultPrevented, k.key).toBe(true);
+    }
+    expect(dispatched).toEqual([]);
+  });
+
+  it('a canvas-scoped zoom chord declined on Home still cannot zoom the WEBVIEW', () => {
+    const dispatched = wire(homeTab());
+    const plus = evt({ key: '=', ctrlKey: true });
+    dispatchKeyEvent(plus);
+    expect(plus.defaultPrevented).toBe(true);
+    expect(dispatched).toEqual([]);
+  });
+
+  it('the editable guard keeps NATIVE field editing: Ctrl+Z in an input is untouched', () => {
+    wire(stateWith({ ui: { ...initialState.ui, focusedTab: { doc: 'x.pdf' } } }));
+    const z = evt({ key: 'z', ctrlKey: true, target: { tagName: 'INPUT' } as unknown as EventTarget });
+    dispatchKeyEvent(z);
+    expect(z.defaultPrevented).toBe(false);
+  });
+});
+
+describe('browser-default suppression from FIELDS (M6.5)', () => {
+  it('Ctrl+= in a text input cannot zoom the webview; Ctrl+Z stays native', () => {
+    let current = stateWith({ ui: { ...initialState.ui, focusedTab: { doc: 'x.pdf' } } });
+    setCommandStateSource(() => ({
+      state: current,
+      dispatch: (a: AppAction) => { current = appReducer(current, a); },
+    }));
+    const field = { tagName: 'INPUT' } as unknown as EventTarget;
+    const mk = (key: string): KeyboardEvent & { defaultPrevented: boolean } => {
+      const e = {
+        key, repeat: false, target: field,
+        ctrlKey: true, metaKey: false, shiftKey: false, altKey: false,
+        defaultPrevented: false,
+        preventDefault() { e.defaultPrevented = true; },
+      };
+      return e as unknown as KeyboardEvent & { defaultPrevented: boolean };
+    };
+    const zoom = mk('=');
+    dispatchKeyEvent(zoom);
+    expect(zoom.defaultPrevented).toBe(true); // app-hostile: suppressed
+    const undo = mk('z');
+    dispatchKeyEvent(undo);
+    expect(undo.defaultPrevented).toBe(false); // field editing: native
   });
 });

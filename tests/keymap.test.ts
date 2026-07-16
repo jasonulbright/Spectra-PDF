@@ -150,10 +150,13 @@ describe('resolveBinding', () => {
     expect(resolveBinding(fakeEvent({ key: 'g', ctrl: true, shift: true }))?.command).toBe('edit.findPrev');
   });
 
-  it('Ctrl+Shift+T stays reserved until the M6.5 verification pass', () => {
-    // Version-variant in Acrobat (classic: Crop, which we don't ship).
-    // Reserve-don't-remap: unbound beats a guess.
-    expect(resolveBinding(fakeEvent({ key: 't', ctrl: true, shift: true }))).toBeNull();
+  it('the M6.5 freeze bound the last verified rows', () => {
+    // Ctrl+Shift+T — VERIFIED as current Acrobat's Insert Blank Pages at the
+    // freeze (the version-variant worry was classic's Crop). Shift+F4 — the
+    // task-pane toggle, verified; F4 alone stays the nav pane.
+    expect(resolveBinding(fakeEvent({ key: 't', ctrl: true, shift: true }))?.command).toBe('document.insertBlankPage');
+    expect(resolveBinding(fakeEvent({ key: 'F4' }))?.command).toBe('view.navPane');
+    expect(resolveBinding(fakeEvent({ key: 'F4', shift: true }))?.command).toBe('view.toolsPane');
   });
 
   it('returns null for unbound keys', () => {
