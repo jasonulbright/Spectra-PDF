@@ -43,7 +43,7 @@ import { DropZone } from './components/DropZone';
 import { OperationQueue } from './components/OperationQueue';
 import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
 import { SearchProvider } from './search/SearchProvider';
-import { SettingsPanel, getSettings } from './panels/SettingsPanel';
+import { SettingsPanel, getSettings, type PrefCategory } from './panels/SettingsPanel';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
 import { TabStrip } from './components/TabStrip';
@@ -86,10 +86,8 @@ function AppContent(): React.ReactElement {
   const focusedTab = state.ui.focusedTab;
   const inDocTab = isDocTab(focusedTab);
   const activeOp = state.ui.activeOp as Operation;
-  // The tool whose task pane the Tools tab is showing. null = show the Tools
-  // Center (the tile grid) instead — "no tool open" is a real state, not an
-  // absence to paper over, so the tab always has something to say.
-  // The tool whose pane the Tools tab shows. `activeToolId` outlives the
+  // The tool whose pane the Tools tab shows; null = the tile grid ("no tool
+  // open" is a real state, not an absence to paper over). `activeToolId` outlives the
   // document it was opened on (deliberately — Escape disarms the mode, not the
   // tool), so an ops-less tool with nothing to act on has NOTHING to put here:
   // its pane is a fence saying "this works on the page" plus a button that
@@ -101,7 +99,10 @@ function AppContent(): React.ReactElement {
     (op: Operation) => dispatch({ type: 'UI_SET_ACTIVE_OP', op }),
     [dispatch],
   );
-  const [showSettings, setShowSettings] = useState(false);
+  // Which Preferences category is open, or null for closed. Carrying the
+  // category (rather than a boolean) is what lets Help ▸ Third-party Licenses
+  // land ON the licences, instead of at the top of a scroll.
+  const [showSettings, setShowSettings] = useState<PrefCategory | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   // Manual "Check for Updates" (Help menu): bump a signal the UpdateBar
   // watches, so the banner surfaces the available / up-to-date / disabled state.
@@ -703,8 +704,8 @@ function AppContent(): React.ReactElement {
     undo: handleUndo,
     redo: handleRedo,
     applyPageEdits: commitAndReport,
-    openPreferences: () => setShowSettings(true),
-    openLicenses: () => setShowSettings(true),
+    openPreferences: () => setShowSettings('general'),
+    openLicenses: () => setShowSettings('licenses'),
     openAbout: () => setShowAbout(true),
     checkForUpdates: () => setUpdateCheckSignal((n) => n + 1),
     exit: handleExit,
@@ -1131,15 +1132,15 @@ function AppContent(): React.ReactElement {
       <OperationQueue items={queue} onClear={clearQueue} />
 
       {/* Settings modal — accessible from Edit ▸ Preferences / Help ▸ Licenses */}
-      {showSettings && (
-        <div data-app-modal className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setShowSettings(false)}>
-          <div className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[500px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      {showSettings !== null && (
+        <div data-app-modal className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={() => setShowSettings(null)}>
+          <div className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[640px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
               <h3 className="text-sm font-semibold">Preferences</h3>
-              <button onClick={() => setShowSettings(false)} className="text-neutral-500 hover:text-neutral-300 text-sm">Close</button>
+              <button data-testid="prefs-close" onClick={() => setShowSettings(null)} className="text-neutral-500 hover:text-neutral-300 text-sm">Close</button>
             </div>
             <div className="p-5">
-              <SettingsPanel />
+              <SettingsPanel initialCategory={showSettings} />
             </div>
           </div>
         </div>

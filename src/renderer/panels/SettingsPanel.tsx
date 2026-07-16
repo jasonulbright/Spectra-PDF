@@ -154,7 +154,34 @@ function GsInfoDisplay({ info, label }: { info: GsInfo | null; label: string }):
   );
 }
 
-export function SettingsPanel(): React.ReactElement {
+/**
+ * Preferences categories (§ 7). Data, like every other list in the workbench:
+ * the nav renders from it, so a category cannot exist in one and be missing
+ * from the other. `Record<PrefCategory, …>` keeps the labels total.
+ *
+ * The flat scroll this replaces put Ghostscript, compression, theme, tray and
+ * the licence notice in one column — fine at six settings, illegible at twenty,
+ * and it gave Help ▸ Third-party Licenses nowhere to land except "the top of
+ * the modal, scroll down".
+ */
+export const PREF_CATEGORIES = ['general', 'appearance', 'engine', 'tray', 'licenses'] as const;
+export type PrefCategory = (typeof PREF_CATEGORIES)[number];
+
+export const PREF_CATEGORY_LABELS: Record<PrefCategory, string> = {
+  general: 'General',
+  appearance: 'Appearance',
+  engine: 'Engine',
+  tray: 'Tray & Startup',
+  licenses: 'Updates & Licenses',
+};
+
+export interface SettingsPanelProps {
+  /** Which category to open on. Help ▸ Third-party Licenses lands on its own. */
+  initialCategory?: PrefCategory;
+}
+
+export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProps = {}): React.ReactElement {
+  const [category, setCategory] = useState<PrefCategory>(initialCategory);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [status, setStatus] = useState('');
   const [bundledGs, setBundledGs] = useState<GsInfo | null>(cachedBundledGs);
@@ -206,7 +233,23 @@ export function SettingsPanel(): React.ReactElement {
   const activeGs = settings.gsSource === 'external' && externalGs ? externalGs : bundledGs;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="prefs">
+      <nav className="prefs-nav" aria-label="Preferences categories">
+        {PREF_CATEGORIES.map((c) => (
+          <button
+            key={c}
+            type="button"
+            data-testid={`prefs-cat-${c}`}
+            aria-pressed={category === c}
+            className={'prefs-cat' + (category === c ? ' active' : '')}
+            onClick={() => setCategory(c)}
+          >
+            {PREF_CATEGORY_LABELS[c]}
+          </button>
+        ))}
+      </nav>
+      <div className="prefs-body flex flex-col gap-6" data-testid={`prefs-body-${category}`}>
+      {category === 'engine' && (
       <div>
         <label className="block text-sm text-neutral-400 mb-2">Ghostscript Engine</label>
         <GsInfoDisplay info={activeGs} label={settings.gsSource === 'external' ? 'External (System)' : 'Built-in (Bundled)'} />
@@ -236,7 +279,9 @@ export function SettingsPanel(): React.ReactElement {
         )}
         <p className="text-xs text-neutral-500 mt-1">Used for Compress and PDF/A conversion</p>
       </div>
+      )}
 
+      {category === 'general' && (
       <div>
         <label className="block text-sm text-neutral-400 mb-1">Default Compression Quality</label>
         <select
@@ -250,7 +295,9 @@ export function SettingsPanel(): React.ReactElement {
           <option value="prepress">Prepress (300 dpi, highest)</option>
         </select>
       </div>
+      )}
 
+      {category === 'appearance' && (
       <div>
         <label className="block text-sm text-neutral-400 mb-1">Theme</label>
         <select
@@ -263,7 +310,10 @@ export function SettingsPanel(): React.ReactElement {
           <option value="light">Light</option>
         </select>
       </div>
+      )}
 
+      {category === 'tray' && (
+      <>
       <label className="flex items-center gap-2 cursor-pointer">
         <input
           type="checkbox"
@@ -320,8 +370,11 @@ export function SettingsPanel(): React.ReactElement {
         />
         <span className="text-sm text-neutral-400">Start with Windows</span>
       </label>
+      </>
+      )}
 
-      <div data-testid="licenses-note" className="border-t border-neutral-800 pt-4">
+      {category === 'licenses' && (
+      <div data-testid="licenses-note">
         <label className="block text-sm text-neutral-400 mb-2">Third-party components</label>
         <div className="text-xs text-neutral-500 space-y-1.5">
           <p>
@@ -339,8 +392,10 @@ export function SettingsPanel(): React.ReactElement {
           </p>
         </div>
       </div>
+      )}
 
       <StatusBar message={status} />
+      </div>
     </div>
   );
 }

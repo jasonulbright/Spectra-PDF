@@ -1826,3 +1826,35 @@
   color: #a3a3a3;
 }
 [data-theme="light"] .tool-on-canvas { color: #4b5563; }
+
+/* ── Preferences (Phase 4 M5.5, § 7) ──────────────────────────────────────
+   Category nav + one section at a time, replacing a flat scroll of every
+   setting. The nav is what gives Help ▸ Third-party Licenses somewhere to land.
+   ──────────────────────────────────────────────────────────────────────── */
+.prefs {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.prefs-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.prefs-cat {
+  padding: 5px 9px;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: left;
+  color: #a3a3a3;
+  cursor: default;
+}
+.prefs-cat:hover { background: #262626; color: #e5e5e5; }
+.prefs-cat.active { background: #0078d4; color: #ffffff; }
+.prefs-cat:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+.prefs-body { min-width: 0; }
+
+[data-theme="light"] .prefs-cat { color: #4b5563; }
+[data-theme="light"] .prefs-cat:hover { background: #f3f4f6; color: #111827; }
+[data-theme="light"] .prefs-cat.active { background: #0078d4; color: #ffffff; }
