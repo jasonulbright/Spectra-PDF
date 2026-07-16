@@ -56,6 +56,8 @@ export interface AppCommandHandlers {
   openPreferences(): void;
   /** Open the Document Properties dialog (File ▸ Properties…, Ctrl+D). */
   openProperties(): void;
+  /** Open the Print dialog (File ▸ Print…, Ctrl+P — M-P, § 3.4). */
+  openPrint(): void;
   /** Open the Settings modal at its third-party-licenses section (Help ▸
    * Third-party Licenses). Same surface as preferences until M5 splits it. */
   openLicenses(): void;

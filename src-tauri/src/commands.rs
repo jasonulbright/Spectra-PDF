@@ -304,6 +304,14 @@ fn run_gs_version(exe_path: &str) -> Result<String, String> {
     }
 }
 
+// ── Printers ─────────────────────────────────────────────────────────────
+
+/// Installed Windows printers + the default — the Print dialog's picker.
+#[tauri::command]
+pub async fn list_printers() -> Result<crate::printers::PrinterList, String> {
+    crate::printers::enumerate()
+}
+
 // ── System accent color ──────────────────────────────────────────────────
 
 /// Windows accent color as "#RRGGBB".

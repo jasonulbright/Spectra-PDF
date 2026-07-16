@@ -41,6 +41,11 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 'w', ctrl: true, command: 'file.close', scope: 'global', editableGuard: false, preventDefault: 'always' },
   { key: 'q', ctrl: true, command: 'file.exit', scope: 'global', editableGuard: false, preventDefault: 'always' },
   { key: 'k', ctrl: true, command: 'edit.preferences', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  // Ctrl+P — Print (M-P, § 3.4). 'always': WebView2 has its own Ctrl+P print
+  // UI, which must never appear, enabled or not. shift: false — Ctrl+Shift+P
+  // is Acrobat's Page Setup, which we don't ship; reserve-don't-remap says it
+  // stays unbound rather than falling through to Print.
+  { key: 'p', ctrl: true, shift: false, command: 'file.print', scope: 'global', editableGuard: false, preventDefault: 'always' },
   // Ctrl+D is Acrobat's Document Properties (§ 9.2). whenEnabled, not always:
   // with no document open it must fall through rather than be swallowed.
   { key: 'd', ctrl: true, command: 'file.properties', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },

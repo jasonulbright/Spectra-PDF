@@ -123,6 +123,7 @@ export const COMMAND_IDS = [
   'file.open',
   'file.openInPlace',
   'file.properties',
+  'file.print',
   'tools.close',
   'file.save',
   'file.saveAs',
@@ -268,6 +269,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Properties…',
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.openProperties(),
+  },
+  // File ▸ Print… (Ctrl+P) — M-P, § 3.4. Needs a document to print; a ghost
+  // import source is refused like everywhere else (hasActiveFile).
+  'file.print': {
+    title: 'Print…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.openPrint(),
   },
   'tools.close': {
     title: 'Close Tool',

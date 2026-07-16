@@ -108,6 +108,8 @@ export const MENUS: MenuDef[] = [
       cmd('file.close', 'menuitem-file-close'),
       cmd('file.closeAll', 'menuitem-file-close-all'),
       sep,
+      cmd('file.print', 'menuitem-file-print'),
+      sep,
       cmd('file.properties', 'menuitem-file-properties'),
       sep,
       cmd('file.exit', 'menuitem-file-exit'),

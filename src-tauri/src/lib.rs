@@ -1,6 +1,7 @@
 pub mod cli;
 mod commands;
 mod engine;
+mod printers;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
@@ -81,6 +82,7 @@ pub fn run() {
             commands::restore_snapshot,
             commands::save_as,
             commands::get_gs_path,
+            commands::list_printers,
             commands::get_bundled_gs_info,
             commands::detect_external_gs,
             commands::get_app_version,

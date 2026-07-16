@@ -107,8 +107,13 @@ describe('resolveBinding', () => {
     expect(resolveBinding(fakeEvent({ key: '0', ctrl: true }))?.command).toBe('view.fit');
   });
 
+  it('Ctrl+P prints; Ctrl+Shift+P stays reserved (Page Setup, unshipped)', () => {
+    // Bound at M-P. 'always' preventDefault: WebView2 has its own Ctrl+P UI.
+    expect(resolveBinding(fakeEvent({ key: 'p', ctrl: true }))?.command).toBe('file.print');
+    expect(resolveBinding(fakeEvent({ key: 'p', ctrl: true, shift: true }))).toBeNull();
+  });
+
   it('returns null for unbound keys', () => {
-    expect(resolveBinding(fakeEvent({ key: 'p', ctrl: true }))).toBeNull(); // print is M-P, unbound at M1
     expect(resolveBinding(fakeEvent({ key: 'z' }))).toBeNull(); // bare z: single-key accelerators are M6, default off
   });
 });

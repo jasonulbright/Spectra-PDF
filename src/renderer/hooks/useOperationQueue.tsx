@@ -29,6 +29,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   compare_text: 'Compare',
   compare_visual: 'Compare (visual)',
   apply_ocr_layer: 'Apply OCR Text',
+  print: 'Print',
   verify_signatures: 'Verify Signatures',
   // NB: the default getFriendlyName path uses only params.file — the signing
   // password is never referenced, so it can't reach the operation log.
@@ -87,6 +88,11 @@ export function getFriendlyName(method: string, params: Record<string, unknown> 
       return `${base} ${params.ranges || 'all'} — ${file}`;
     case 'extract_text':
       return `${base} ${formatPages(params.pages)} — ${file}`;
+    case 'print': {
+      const copies = Number(params.copies);
+      const times = copies > 1 ? ` ×${copies}` : '';
+      return `${base} ${formatPages(params.pages)}${times} — ${file}`;
+    }
     case 'compress':
       return `${base} (${params.quality || 'ebook'}) — ${file}`;
     case 'convert_pdfa':

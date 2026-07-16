@@ -83,6 +83,28 @@ pub enum CliCommand {
     Check(CheckArgs),
     /// Process all PDFs in a directory (batch mode)
     Batch(BatchArgs),
+    /// Print a PDF to a Windows printer (via bundled Ghostscript)
+    Print(PrintArgs),
+    /// List installed Windows printers (JSON: names + default)
+    Printers,
+}
+
+#[derive(Args)]
+pub struct PrintArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Exact Windows printer name (see the `printers` subcommand)
+    #[arg(short, long)]
+    pub printer: String,
+    /// Page range like "1-3,5" (default: all pages)
+    #[arg(long, default_value = "")]
+    pub pages: String,
+    /// Number of copies (1-99)
+    #[arg(long, default_value_t = 1)]
+    pub copies: u32,
+    /// Scale mode: "fit" (scale to paper) or "actual" (100%)
+    #[arg(long, default_value = "fit")]
+    pub fit: String,
 }
 
 #[derive(Args)]
@@ -684,6 +706,23 @@ fn collect_pdfs(dir: &Path) -> Result<Vec<PathBuf>, String> {
 
 /// Run the CLI. Returns the exit code.
 pub fn run(command: CliCommand) -> i32 {
+    // Printer enumeration is pure winspool — no Python engine to spawn.
+    if matches!(command, CliCommand::Printers) {
+        return match crate::printers::enumerate() {
+            Ok(list) => {
+                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                    "printers": list.printers,
+                    "default": list.default,
+                })).unwrap());
+                0
+            }
+            Err(msg) => {
+                eprintln!("error: {}", msg);
+                1
+            }
+        };
+    }
+
     let mut engine = match CliEngine::start() {
         Ok(e) => e,
         Err(msg) => {
@@ -723,6 +762,24 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
             engine.call("compress", params)
         }
+
+        CliCommand::Print(args) => {
+            let gs = resolve_gs();
+            engine.call(
+                "print",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "printer": args.printer,
+                    "pages": args.pages,
+                    "copies": args.copies,
+                    "fit": args.fit,
+                    "gs_path": gs.to_string_lossy(),
+                }),
+            )
+        }
+
+        // Handled in run() before the engine spawns.
+        CliCommand::Printers => unreachable!("printers is dispatched before engine start"),
 
         CliCommand::Rotate(args) => {
             engine.call(

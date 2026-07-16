@@ -100,8 +100,15 @@ export interface GsInfo {
   vendor: string;
 }
 
+export interface PrinterList {
+  printers: string[];
+  default: string | null;
+}
+
 export const app = {
   getGsPath: () => invoke<string>('get_gs_path'),
+  /** Installed Windows printers + the default (the Print dialog's picker). */
+  listPrinters: () => invoke<PrinterList>('list_printers'),
   getBundledGsInfo: () => invoke<GsInfo>('get_bundled_gs_info'),
   detectExternalGs: () => invoke<GsInfo | null>('detect_external_gs'),
   getVersion: () => invoke<string>('get_app_version'),

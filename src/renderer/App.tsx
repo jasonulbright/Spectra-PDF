@@ -49,6 +49,7 @@ import { TabStrip } from './components/TabStrip';
 import { HomeTab } from './components/HomeTab';
 import { AboutDialog } from './components/AboutDialog';
 import { PropertiesDialog } from './components/PropertiesDialog';
+import { PrintDialog } from './components/PrintDialog';
 import { UpdateBar } from './components/UpdateBar';
 import { NavPane } from './components/navpane/NavPane';
 import { ToolsCenter } from './components/ToolsCenter';
@@ -105,6 +106,7 @@ function AppContent(): React.ReactElement {
   const [showSettings, setShowSettings] = useState<PrefCategory | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showProperties, setShowProperties] = useState(false);
+  const [showPrint, setShowPrint] = useState(false);
   // Manual "Check for Updates" (Help menu): bump a signal the UpdateBar
   // watches, so the banner surfaces the available / up-to-date / disabled state.
   const [updateCheckSignal, setUpdateCheckSignal] = useState(0);
@@ -707,6 +709,7 @@ function AppContent(): React.ReactElement {
     applyPageEdits: commitAndReport,
     openPreferences: () => setShowSettings('general'),
     openProperties: () => setShowProperties(true),
+    openPrint: () => setShowPrint(true),
     openLicenses: () => setShowSettings('licenses'),
     openAbout: () => setShowAbout(true),
     checkForUpdates: () => setUpdateCheckSignal((n) => n + 1),
@@ -730,6 +733,7 @@ function AppContent(): React.ReactElement {
       applyPageEdits: () => h.current.applyPageEdits(),
       openPreferences: () => h.current.openPreferences(),
       openProperties: () => h.current.openProperties(),
+      openPrint: () => h.current.openPrint(),
       openLicenses: () => h.current.openLicenses(),
       openAbout: () => h.current.openAbout(),
       checkForUpdates: () => h.current.checkForUpdates(),
@@ -1149,6 +1153,7 @@ function AppContent(): React.ReactElement {
         </div>
       )}
       {showProperties && <PropertiesDialog onClose={() => setShowProperties(false)} />}
+      {showPrint && <PrintDialog onClose={() => setShowPrint(false)} />}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
       <ConfirmDialog
         open={confirmState !== null}

@@ -16,6 +16,7 @@ from engine.pdfa import convert_pdfa
 from engine.encrypt import encrypt, decrypt
 from engine.extract_text import extract_text
 from engine.metadata import get_metadata, set_metadata
+from engine.printer import FIT_SWITCHES, MAX_COPIES, build_gs_args, parse_page_spec, print_pdf
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
 from engine.reversion import get_pdf_version, set_pdf_version
 from engine.validate import validate_pdf
@@ -2240,3 +2241,313 @@ class TestPdfVersion:
         assert r["original_version"] == pikepdf.open(sample_pdf).pdf_version
         assert re.fullmatch(r"\d+\.\d+", r["original_version"]), r["original_version"]
         assert r["target_version"] == "1.7"
+
+
+# ── Print (M-P) ───────────────────────────────────────────────────────────
+
+
+class TestPrintPageSpec:
+    """parse_page_spec is strict on purpose — the 2e lesson: a lax parse
+    turned a typo'd page filter into a whole-document operation."""
+
+    def test_empty_means_all_pages(self):
+        assert parse_page_spec("", 5) == ""
+        assert parse_page_spec("   ", 5) == ""
+
+    def test_normalizes_whitespace(self):
+        assert parse_page_spec("1-3, 5", 5) == "1-3,5"
+        assert parse_page_spec(" 2 ", 5) == "2"
+
+    def test_single_pages_and_ranges(self):
+        assert parse_page_spec("1,3,5", 5) == "1,3,5"
+        assert parse_page_spec("2-4", 5) == "2-4"
+        assert parse_page_spec("1-1", 5) == "1-1"
+
+    @pytest.mark.parametrize("bad", [
+        "abc", "1-2-3", ",", "1,,2", "0", "5-2", "-3", "3-", "1.5", "1;2",
+        # Unicode digits: Python's int() parses "١٢" as 12, but the token is
+        # forwarded to gs -sPageList VERBATIM, whose parser is ASCII-only —
+        # accepting it here would mean "valid" ranges that fail every job.
+        "١٢", "2³",
+    ])
+    def test_rejects_malformed_tokens(self, bad):
+        with pytest.raises(ValueError):
+            parse_page_spec(bad, 5)
+
+    def test_rejects_pages_beyond_the_document(self):
+        with pytest.raises(ValueError, match="beyond the document"):
+            parse_page_spec("6", 5)
+        with pytest.raises(ValueError, match="beyond the document"):
+            parse_page_spec("1-99", 5)
+
+
+class TestPrintArgs:
+    def test_exact_argv_fit_all_pages(self):
+        args = build_gs_args("C:\\in.pdf", "My Printer", "", "fit", "C:\\gs.exe")
+        assert args == [
+            "C:\\gs.exe",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-dQUIET",
+            "-dSAFER",
+            "-sDEVICE=mswinpr2",
+            "-dNoCancel",
+            "-sOutputFile=%printer%My Printer",
+            "-dFIXEDMEDIA",
+            "-dFitPage",
+            "C:\\in.pdf",
+        ]
+
+    def test_exact_argv_actual_with_pages(self):
+        args = build_gs_args("in.pdf", "P", "1-3,5", "actual", "gs")
+        assert args == [
+            "gs",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-dQUIET",
+            "-dSAFER",
+            "-sDEVICE=mswinpr2",
+            "-dNoCancel",
+            "-sOutputFile=%printer%P",
+            "-dFIXEDMEDIA",
+            "-sPageList=1-3,5",
+            "in.pdf",
+        ]
+
+
+class TestPrintPdf:
+    def test_wire_contract_matches_the_dialog(self):
+        # The renderer's buildPrintParams (lib/print-params.ts, pinned by
+        # tests/print-params.test.ts) sends exactly these keys, and the
+        # JSON-RPC layer applies them as **kwargs — the two sides pin the
+        # same literal set because neither language can see the other.
+        import inspect as _inspect
+
+        params = set(_inspect.signature(print_pdf).parameters)
+        assert {"file", "printer", "gs_path", "pages", "copies", "fit"} <= params
+
+    def test_refuses_empty_printer(self, sample_pdf):
+        # An empty name would make mswinpr2 raise its OWN printer dialog —
+        # from a headless subprocess, a hang.
+        with pytest.raises(ValueError, match="printer"):
+            print_pdf(file=sample_pdf, printer="")
+        with pytest.raises(ValueError, match="printer"):
+            print_pdf(file=sample_pdf, printer="   ")
+
+    @pytest.mark.parametrize("bad", [0, -1, 100, 2.5, "2", True])
+    def test_refuses_bad_copies(self, sample_pdf, bad):
+        with pytest.raises(ValueError, match="[Cc]opies"):
+            print_pdf(file=sample_pdf, printer="P", copies=bad)
+
+    def test_refuses_unknown_fit(self, sample_pdf):
+        with pytest.raises(ValueError, match="fit"):
+            print_pdf(file=sample_pdf, printer="P", fit="stretch")
+
+    def test_refuses_range_beyond_document(self, sample_pdf, monkeypatch):
+        import engine.printer as printer_mod
+        monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        with pytest.raises(ValueError, match="beyond the document"):
+            print_pdf(file=sample_pdf, printer="P", pages="6")
+
+    def test_refuses_unknown_printer_without_running_gs(self, sample_pdf, monkeypatch):
+        # THE fail-fast that matters: gs's mswinpr2, handed a name it can't
+        # open, raises its own (invisible) printer dialog and hangs to the
+        # timeout — observed live at exactly 600s in the M-P e2e. The REAL
+        # winspool check must refuse before any subprocess exists.
+        import engine.printer as printer_mod
+
+        def fail_run(args, **kwargs):
+            raise AssertionError("gs must not spawn for an unknown printer")
+
+        monkeypatch.setattr(printer_mod.subprocess, "run", fail_run)
+        with pytest.raises(ValueError, match="Unknown printer"):
+            print_pdf(file=sample_pdf, printer="OPS Test No Such Printer 9c41")
+
+    def test_printer_exists_asks_real_winspool(self):
+        from engine.printer import printer_exists
+
+        assert printer_exists("OPS Test No Such Printer 9c41") is False
+        # Windows ships "Microsoft Print to PDF" as an on-by-default feature;
+        # skip rather than fail on a box where it was removed.
+        if not printer_exists("Microsoft Print to PDF"):
+            pytest.skip("Microsoft Print to PDF not installed")
+
+    def test_one_job_per_copy_with_exact_argv(self, sample_pdf, monkeypatch):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append((args, kwargs))
+
+            class R:
+                returncode = 0
+                stderr = ""
+                stdout = ""
+
+            return R()
+
+        import engine.printer as printer_mod
+        monkeypatch.setattr(printer_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        r = print_pdf(
+            file=sample_pdf, printer="My Printer", gs_path="GS",
+            pages="1-2, 4", copies=3, fit="actual",
+        )
+        assert len(calls) == 3
+        expected = build_gs_args(sample_pdf, "My Printer", "1-2,4", "actual", "GS")
+        for args, kwargs in calls:
+            assert args == expected
+            assert kwargs.get("timeout") == printer_mod.JOB_TIMEOUT_S
+        assert r == {
+            "printer": "My Printer",
+            "copies": 3,
+            "pages": "1-2,4",
+            "fit": "actual",
+            "page_count": 5,
+        }
+
+    def test_gs_failure_raises_with_stderr_detail(self, sample_pdf, monkeypatch):
+        def fake_run(args, **kwargs):
+            class R:
+                returncode = 1
+                stderr = "mswinpr2: failed to open printer"
+                stdout = ""
+
+            return R()
+
+        import engine.printer as printer_mod
+        monkeypatch.setattr(printer_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        with pytest.raises(RuntimeError, match="failed to open printer"):
+            print_pdf(file=sample_pdf, printer="No Such Printer")
+
+    def test_gs_failure_falls_back_to_stdout_detail(self, sample_pdf, monkeypatch):
+        # mswinpr2 reports driver errors on stdout as often as stderr.
+        def fake_run(args, **kwargs):
+            class R:
+                returncode = 1
+                stderr = ""
+                stdout = "Error: printer offline"
+
+            return R()
+
+        import engine.printer as printer_mod
+        monkeypatch.setattr(printer_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        with pytest.raises(RuntimeError, match="printer offline"):
+            print_pdf(file=sample_pdf, printer="P")
+
+    def test_timeout_surfaces_as_a_named_error(self, sample_pdf, monkeypatch):
+        import subprocess as subprocess_mod
+        import engine.printer as printer_mod
+
+        def timeout_run(args, **kwargs):
+            raise subprocess_mod.TimeoutExpired(args, kwargs.get("timeout", 0))
+
+        monkeypatch.setattr(printer_mod.subprocess, "run", timeout_run)
+        monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        with pytest.raises(RuntimeError, match="timed out.*driver did not respond"):
+            print_pdf(file=sample_pdf, printer="P")
+
+    def test_validates_before_spawning(self, tmp_dir, monkeypatch):
+        # A malformed input must be refused by validate_pdf BEFORE any
+        # subprocess runs — same preflight order as compress.
+        bad = os.path.join(tmp_dir, "bad.pdf")
+        with open(bad, "wb") as f:
+            f.write(b"not a pdf at all")
+
+        def fail_run(args, **kwargs):
+            raise AssertionError("subprocess must not run for invalid input")
+
+        import engine.printer as printer_mod
+        monkeypatch.setattr(printer_mod.subprocess, "run", fail_run)
+        with pytest.raises(Exception):
+            print_pdf(file=bad, printer="P")
+
+
+def _ink_bbox_pgm(path):
+    """Bounding box of dark pixels in a P5 (binary PGM) render: (x0, y0, x1,
+    y1, width, height) in pixels. Stdlib parse, same posture as compare's PPM."""
+    with open(path, "rb") as f:
+        data = f.read()
+    assert data[:2] == b"P5", "expected binary PGM"
+    # Header: magic, width, height, maxval — whitespace separated, then raster.
+    fields = []
+    i = 2
+    while len(fields) < 3:
+        while data[i] in b" \t\r\n":
+            i += 1
+        if data[i] in b"#":  # gs writes a "# Image generated by…" comment
+            while data[i] not in b"\r\n":
+                i += 1
+            continue
+        start = i
+        while data[i] not in b" \t\r\n":
+            i += 1
+        fields.append(int(data[start:i]))
+    i += 1  # single whitespace after maxval
+    w, h, _maxval = fields
+    raster = data[i : i + w * h]
+    xs, ys = [], []
+    for y in range(h):
+        row = raster[y * w : (y + 1) * w]
+        for x, px in enumerate(row):
+            if px < 128:
+                xs.append(x)
+                ys.append(y)
+    assert xs, "no ink found in render"
+    return min(xs), min(ys), max(xs), max(ys), w, h
+
+
+class TestPrintFitSemantics:
+    """Prove FIT_SWITCHES does what the dialog claims, against the REAL
+    bundled Ghostscript. mswinpr2 itself can't run headlessly (it needs a
+    printer), so the media/scaling behavior is proven through a raster device
+    with the same switch set and a fixed 612x792 medium: swap the fit/actual
+    switch lists and these fail."""
+
+    def _render(self, gs_path, src, out, mode):
+        import subprocess
+        args = [
+            gs_path, "-dNOPAUSE", "-dBATCH", "-dQUIET", "-dSAFER",
+            "-sDEVICE=pgmraw", "-r72",
+            "-dDEVICEWIDTHPOINTS=612", "-dDEVICEHEIGHTPOINTS=792",
+            *FIT_SWITCHES[mode],
+            f"-sOutputFile={out}", str(src),
+        ]
+        r = subprocess.run(args, capture_output=True, text=True, timeout=120)
+        assert r.returncode == 0, r.stderr or r.stdout
+
+    @pytest.fixture
+    def small_page_pdf(self, tmp_dir):
+        """One 200x200pt page, fully painted black."""
+        src = os.path.join(tmp_dir, "small.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        page.Contents = pdf.make_stream(b"0 g 0 0 200 200 re f")
+        pdf.save(src)
+        return src
+
+    def test_fit_scales_to_the_paper(self, small_page_pdf, tmp_dir, gs_path):
+        out = os.path.join(tmp_dir, "fit.pgm")
+        self._render(gs_path, small_page_pdf, out, "fit")
+        x0, y0, x1, y1, w, h = _ink_bbox_pgm(out)
+        # A 200pt square on 612x792 paper scales up ~3x (aspect preserved).
+        assert (x1 - x0 + 1) >= 550, (x0, x1)
+        assert (y1 - y0 + 1) >= 550, (y0, y1)
+
+    def test_actual_is_one_to_one_on_the_full_paper(self, small_page_pdf, tmp_dir, gs_path):
+        out = os.path.join(tmp_dir, "actual.pgm")
+        self._render(gs_path, small_page_pdf, out, "actual")
+        x0, y0, x1, y1, w, h = _ink_bbox_pgm(out)
+        # FIXEDMEDIA held: the raster is the PAPER (612x792), not the PDF's
+        # 200x200 page — without the switch the media follows the page and
+        # "actual size" becomes indistinguishable from fit.
+        assert (w, h) == (612, 792), (w, h)
+        # 1:1 — the square is still ~200pt, anchored at the origin (PDF
+        # bottom-left = raster bottom-left). Deliberately NOT centered: see
+        # FIT_SWITCHES' comment (-dCenterPages is a silent no-op; this test
+        # is what caught it).
+        assert 185 <= (x1 - x0 + 1) <= 215, (x0, x1)
+        assert 185 <= (y1 - y0 + 1) <= 215, (y0, y1)
+        assert x0 <= 5, x0
+        assert y1 >= h - 6, (y1, h)

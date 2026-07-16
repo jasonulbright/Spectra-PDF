@@ -136,6 +136,8 @@ fn show_help_dialog() {
          openpdfstudio extract-text input.pdf --pages 1,2,3\r\n\
          openpdfstudio delete input.pdf -o out.pdf --pages 3,7\r\n\
          openpdfstudio metadata input.pdf --title \"Title\" -o out.pdf\r\n\
+         openpdfstudio print input.pdf --printer \"Printer Name\" --pages 1-3\r\n\
+         openpdfstudio printers\r\n\
          openpdfstudio batch input_dir/ -o out_dir/ compress --quality ebook\r\n\
          \r\n\
          FLAGS:\r\n\
