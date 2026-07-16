@@ -17,10 +17,12 @@ const TESTID_FOR: Partial<Record<CommandId, string>> = {
   'file.save': 'toolbar-save',
   'edit.undo': 'toolbar-undo',
   'edit.redo': 'toolbar-redo',
+  'tools.hand': 'toolbar-hand',
+  'tools.select': 'toolbar-select',
   'edit.find': 'toolbar-find',
 };
 
-function ToolbarButton({ command, icon }: { command: CommandId; icon: ChromeIconId }): React.ReactElement {
+function ToolbarButton({ command, icon, pressed }: { command: CommandId; icon: ChromeIconId; pressed?: boolean }): React.ReactElement {
   const enabled = isCommandEnabled(command);
   const shortcut = shortcutForCommand(command);
   const title = shortcut ? `${COMMANDS[command].title} (${shortcut})` : COMMANDS[command].title;
@@ -29,10 +31,14 @@ function ToolbarButton({ command, icon }: { command: CommandId; icon: ChromeIcon
       type="button"
       data-testid={TESTID_FOR[command]}
       disabled={!enabled}
+      aria-pressed={pressed}
       onClick={() => invokeCommand(command)}
       title={title}
       aria-label={COMMANDS[command].title}
-      className="w-7 h-7 flex items-center justify-center rounded text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors"
+      className={
+        'w-7 h-7 flex items-center justify-center rounded text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors' +
+        (pressed ? ' bg-neutral-700 text-white' : '')
+      }
     >
       <ChromeIcon icon={icon} />
     </button>
@@ -40,7 +46,16 @@ function ToolbarButton({ command, icon }: { command: CommandId; icon: ChromeIcon
 }
 
 export function MainToolbar(): React.ReactElement {
-  useAppState(); // re-render on state change so enablement stays live
+  const state = useAppState(); // re-render on state change so enablement stays live
+  // The Hand/Select pair are MODES (M6.2) — the armed one reads pressed, the
+  // way Acrobat's own pair does. Select is "pressed" for any non-hand mode
+  // only when nothing more specific is armed: an armed Highlight shows in the
+  // secondary toolbar, not here.
+  const pressedFor = (command: CommandId): boolean | undefined => {
+    if (command === 'tools.hand') return state.ui.tool === 'hand';
+    if (command === 'tools.select') return state.ui.tool === 'select';
+    return undefined;
+  };
   return (
     <div
       data-testid="main-toolbar"
@@ -50,7 +65,7 @@ export function MainToolbar(): React.ReactElement {
         node.kind === 'separator' ? (
           <div key={i} className="w-px h-5 bg-neutral-700 mx-1" />
         ) : (
-          <ToolbarButton key={i} command={node.command} icon={node.icon} />
+          <ToolbarButton key={i} command={node.command} icon={node.icon} pressed={pressedFor(node.command)} />
         ),
       )}
     </div>

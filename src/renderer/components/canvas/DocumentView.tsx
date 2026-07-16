@@ -19,6 +19,7 @@ import type { CanvasTool, StampPreset } from './PageCell';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import { displayWidthAt } from '../../canvas/layout';
 import { isEditable } from '../../commands/keymap';
+import { pushEscapeInterceptor } from '../../commands/context';
 import {
   actualSizeZoom,
   anchorHolds,
@@ -332,6 +333,57 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     return pages[Math.min(pages.length, Math.max(1, currentPageRef.current)) - 1] ?? null;
   }, []);
 
+  // Hand mode's drag-scroll (M6.2). Window-level move/up listeners — the
+  // canvas pattern — with the full usePageDrag session hygiene, all
+  // review-caught: a `blur` teardown (release outside the window otherwise
+  // leaks the listeners), an unmount teardown (Ctrl+Tab mid-drag unmounts
+  // this view with the listeners live), an Escape interceptor (the Escape
+  // chain's first scope is "cancel the in-flight drag"), and a cancel when
+  // the tool stops being hand.
+  const handDragTeardown = useRef<(() => void) | null>(null);
+  useEffect(() => () => handDragTeardown.current?.(), []);
+  useEffect(() => {
+    if (props.tool !== 'hand') handDragTeardown.current?.();
+  }, [props.tool]);
+  const handleHandDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startLeft = el.scrollLeft;
+    const startTop = el.scrollTop;
+    el.style.cursor = 'grabbing';
+    const onMove = (ev: PointerEvent): void => {
+      el.scrollLeft = startLeft - (ev.clientX - startX);
+      el.scrollTop = startTop - (ev.clientY - startY);
+    };
+    const teardown = (): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', teardown);
+      window.removeEventListener('pointercancel', teardown);
+      window.removeEventListener('blur', teardown);
+      popEscape();
+      handDragTeardown.current = null;
+      // Back to the steady-state grab — '' would also clear React's own
+      // inline cursor until the next render (review-caught). The
+      // tool-change effect above tears down BEFORE React re-renders the
+      // style prop away, so 'grab' never outlives hand mode visibly.
+      el.style.cursor = 'grab';
+    };
+    handDragTeardown.current = teardown;
+    const popEscape = pushEscapeInterceptor(() => {
+      teardown();
+      return true;
+    });
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', teardown);
+    window.addEventListener('pointercancel', teardown);
+    window.addEventListener('blur', teardown);
+  }, []);
+
   const actualSize = useCallback(() => {
     const page = currentPage();
     if (!page) return;
@@ -439,6 +491,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       data-testid="document-view"
       tabIndex={0}
       onScroll={onScroll}
+      style={props.tool === 'hand' ? { cursor: 'grab' } : undefined}
+      // Hand (M6.2): drag-scroll the reading pane. CAPTURE phase, so the
+      // press never reaches a page cell — hand must not select, band, or
+      // start an edit; it only holds the paper.
+      onPointerDownCapture={props.tool === 'hand' ? handleHandDown : undefined}
     >
       <div
         className="docview-spacer"

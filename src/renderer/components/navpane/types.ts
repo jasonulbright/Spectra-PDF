@@ -9,7 +9,9 @@ import type { AvailableNavPanel } from '../../commands/navpanels';
 // leaf module so PagesPanel and the registry don't import each other.
 export interface NavPanelComponentProps {
   activeFile: OpenFile | null;
-  onOpenPage: (path: string, pageNumber: number) => void;
+  // READ this page (M6.2): flips to the reading view and jumps. Was the
+  // PageInspector's (path, pageNumber) shape.
+  onOpenPage: (docId: string, pageId: string) => void;
   onExtractText: (path: string, pageNumber: number) => void;
 }
 

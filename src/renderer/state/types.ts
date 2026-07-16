@@ -119,6 +119,10 @@ export interface PageEditSnapshot {
 // its overlay consumers. Generalizes to the 2.0 ToolId at M5.
 export type CanvasTool =
   | 'select'
+  // How you HOLD the page (M6.2): drag-scrolls the reading view, suppresses
+  // page pickup on the board. The second OWNERLESS mode beside 'select' —
+  // hand is not a tool's mode, it's the absence of one with a different grip.
+  | 'hand'
   | 'highlight'
   | 'freetext'
   | 'ink'

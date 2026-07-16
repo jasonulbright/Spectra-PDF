@@ -80,10 +80,12 @@ describe('buildPageContextMenu', () => {
     expect(dispatch).toHaveBeenCalledWith({ type: 'ROTATE_PAGE_REF', docId: doc.id, pageId: 'a.pdf#p1', rotation: 90 });
   });
 
-  it('Open resolves the 1-based workspace page number', () => {
+  it('Open hands over the page identity for the reading jump (M6.2)', () => {
+    // Was (path, 1-based number) for the PageInspector; the reading pane
+    // replaced it, and a jump wants the page's id.
     const onOpen = vi.fn();
     const items = buildPageContextMenu({ ...base, onOpen, selectedPageIds: new Set(), dispatch: vi.fn() });
     items.find((i) => i.label === 'Open')!.onClick();
-    expect(onOpen).toHaveBeenCalledWith('a.pdf', 2); // p1 → page 2
+    expect(onOpen).toHaveBeenCalledWith(base.docId, 'a.pdf#p1');
   });
 });

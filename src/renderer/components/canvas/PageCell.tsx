@@ -411,7 +411,12 @@ function PageCellImpl({
   const displayWidth = textLayer
     ? displayWidthAt(page, pageHeight)
     : displayWidthOf(page) * (pageHeight / BASE_PAGE_HEIGHT);
-  const annotateMode = tool !== 'select';
+  // Hand is the OTHER non-annotating mode (M6.2): it must take the same
+  // let-the-board-have-it branch as select, or a hand drag on the board
+  // preventDefaults the pointerdown (suppressing the derived mouse events d3
+  // pans with) and falls through to the band — painting a HIGHLIGHT instead
+  // of panning (review-caught, CRITICAL).
+  const annotateMode = tool !== 'select' && tool !== 'hand';
   // Rubber band for the annotation tools, in display-normalized coords.
   // Driven by window-level native listeners for the drag's duration — the
   // same pattern as usePageDrag — rather than React synthetic move/up through

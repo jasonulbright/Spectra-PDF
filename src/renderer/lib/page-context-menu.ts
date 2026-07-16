@@ -15,7 +15,10 @@ export interface PageMenuDeps {
   selectedPageIds: ReadonlySet<string>;
   dispatch: (action: AppAction) => void;
   /** Open the page (inspector / document view) — 1-based workspace page. */
-  onOpen: (path: string, pageNumber: number) => void;
+  // "Open" = READ this page (M6.2): the reading pane replaced the
+  // PageInspector as the look-closely surface, and a jump wants the page's
+  // id, not a file+number pair.
+  onOpen: (docId: string, pageId: string) => void;
   /** Jump to Extract Text with the page pre-selected — 1-based workspace page. */
   onExtractText: (path: string, pageNumber: number) => void;
 }
@@ -57,10 +60,7 @@ export function buildPageContextMenu(deps: PageMenuDeps): MenuItem[] {
   return [
     {
       label: 'Open',
-      onClick: () => {
-        const pageNumber = workspacePageNumber(docs, doc, pageId);
-        if (pageNumber != null) onOpen(doc.path, pageNumber);
-      },
+      onClick: () => onOpen(docId, pageId),
     },
     { label: '', onClick: () => {}, separator: true },
     {

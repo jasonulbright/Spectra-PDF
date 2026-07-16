@@ -24,7 +24,9 @@ export type ChromeIconId =
   | 'document'
   | 'pages'
   | 'bookmarks'
-  | 'signatures';
+  | 'signatures'
+  | 'hand'
+  | 'cursor';
 
 const base = {
   fill: 'none',
@@ -70,6 +72,21 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
       <circle cx="11" cy="11" r="7" />
       <path d="M21 21l-4.3-4.3" />
       <path d="M11 8v6M8 11h6" />
+    </>
+  ),
+  // Open palm — the hold-the-paper grip (M6.2).
+  hand: (
+    <>
+      <path d="M8 12V6.5a1.5 1.5 0 013 0V11" />
+      <path d="M11 11V5a1.5 1.5 0 013 0v6" />
+      <path d="M14 11V6.5a1.5 1.5 0 013 0V13" />
+      <path d="M8 12l-1.8-1.8a1.4 1.4 0 00-2 2L9 17.5A6 6 0 0014 20h1a5 5 0 005-5v-2" />
+    </>
+  ),
+  // Pointer arrow — Select.
+  cursor: (
+    <>
+      <path d="M5 3l7 16 2.2-6.2L20 10.5 5 3z" />
     </>
   ),
   // Magnifier with minus.

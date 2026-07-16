@@ -22,6 +22,10 @@ export const MAIN_TOOLBAR: ToolbarNode[] = [
   c('edit.undo', 'undo'),
   c('edit.redo', 'redo'),
   sep,
+  // Hand / Select (M6.2): how you hold vs. touch the page — § 3.1's pair.
+  c('tools.hand', 'hand'),
+  c('tools.select', 'cursor'),
+  sep,
   c('view.zoomOut', 'zoomOut'),
   c('view.fit', 'fit'),
   c('view.zoomIn', 'zoomIn'),

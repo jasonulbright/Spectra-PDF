@@ -26,6 +26,7 @@ interface ZoomBehaviorArgs {
   overlayRef: RefObject<HTMLDivElement | null>;
   userMovedRef: RefObject<boolean>;
   dims: RefObject<Dims>;
+  handModeRef?: RefObject<boolean>;
   onScaleChange?: (scale: number) => void;
   onSettle?: () => void;
 }
@@ -36,6 +37,7 @@ export function useZoomBehavior({
   overlayRef,
   userMovedRef,
   dims,
+  handModeRef,
   onScaleChange,
   onSettle,
 }: ZoomBehaviorArgs): {
@@ -66,6 +68,7 @@ export function useZoomBehavior({
       lastTick,
       onScaleRef,
       onSettleRef,
+      handModeRef,
     });
 
     zoomRef.current = zoomBehavior;

@@ -22,7 +22,7 @@ import { DocumentView } from './DocumentView';
 import { buildOcrApplyPayload } from '../../lib/ocr-apply';
 import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
-import { workspacePageNumber } from '../../lib/workspace-commit';
+
 import { buildMergedPageRefs, pathBlockedFromClose } from '../../lib/merge-docs';
 import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
 import { pruneFormValues, valueShapeMatches } from '../../lib/form-overlay';
@@ -48,10 +48,6 @@ import { CommentSidebar } from './CommentSidebar';
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
   onCloseFile: (path: string) => void;
-  // Open the PageInspector overlay. `pageNumber` is the page's workspace
-  // position within its file (== the file's page order once pending edits
-  // commit, which the opener does first).
-  onInspectPage: (path: string, pageNumber: number) => void;
   // Jump to the extract-text panel with the page pre-selected (same
   // workspace-position numbering; the engine gate commits before reading).
   onExtractText: (path: string, pageNumber: number) => void;
@@ -88,6 +84,10 @@ export type CanvasDropResolver = (clientX: number, clientY: number) => CanvasDro
 
 // Stable empties so the "no pending marks" hot path never breaks the layer
 // components' memoization when unrelated state changes.
+// Hand mode (M6.2): a press on a page must NOT pick it up — and by not
+// stopping propagation, the pointer falls through to the board's d3 pan, so
+// hand drags the whole board from anywhere, page or background.
+const HAND_SUPPRESSES_PICKUP = (): void => {};
 const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
@@ -98,7 +98,7 @@ const NO_FORM_VALUES: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>> =
 export function WorkspaceCanvasView({
   onOpenFiles,
   onCloseFile,
-  onInspectPage,
+
   onExtractText,
   onRedactFile,
   onApplyOcrLayer,
@@ -528,6 +528,7 @@ export function WorkspaceCanvasView({
   findRef.current = find;
   const jumpToPageRef = useRef(jumpToPage);
   jumpToPageRef.current = jumpToPage;
+  const openPageForReadingRef = useRef<(pageId: string) => void>(() => {});
   useEffect(() => {
     registerCanvasServices({
       canvas: () => activeCanvasHandle(),
@@ -535,6 +536,7 @@ export function WorkspaceCanvasView({
       // `canvas().centerOn` — the reading view shows one document, so centring
       // a page in another one silently does nothing.
       jumpToPage: (pageId) => jumpToPageRef.current(pageId),
+      openPageForReading: (pageId) => openPageForReadingRef.current(pageId),
       find: {
         isOpen: () => findRef.current.open,
         open: () => findRef.current.openFind(),
@@ -1248,14 +1250,32 @@ export function WorkspaceCanvasView({
     [dispatch],
   );
 
-  const onOpenPage = useCallback(
-    (docId: string, pageId: string) => {
-      const doc = docs.find((d) => d.id === docId);
-      if (!doc) return;
-      const pageNumber = workspacePageNumber(docs, doc, pageId);
-      if (pageNumber != null) onInspectPage(doc.path, pageNumber);
+  // Double-click a page = READ it (M6.2, the M4.3 plan): the reading pane is
+  // the "look closely" surface, so the PageInspector retired in its favor —
+  // its rotate/delete were commands already.
+  //
+  // NOT `jumpToPage` after the mode dispatch: dispatch is async, so jumpToPage
+  // would read the STALE mode ref, take its synchronous same-view fast path,
+  // center the about-to-unmount BOARD, and the fresh DocumentView would open
+  // at page 1 — on the WRONG document when the page belongs to a non-active
+  // one (review-caught, HIGH). The pending-jump slot exists for exactly this:
+  // park the target, flip the mode (and the owning doc if needed), and the
+  // consuming effect centers once the new view's handle is live.
+  const openPageForReading = useCallback(
+    (pageId: string) => {
+      pendingJumpRef.current = pageId;
+      dispatch({ type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' });
+      const owner = docsRef.current.find((d) => d.pages.some((p) => p.id === pageId));
+      if (owner && owner.id !== focusedDocRef.current?.id) {
+        dispatch({ type: 'UI_FOCUS_DOC', docId: owner.id });
+      }
     },
-    [docs, onInspectPage],
+    [dispatch],
+  );
+  openPageForReadingRef.current = openPageForReading;
+  const onOpenPage = useCallback(
+    (_docId: string, pageId: string) => openPageForReading(pageId),
+    [openPageForReading],
   );
 
   const onPageContextMenu = useCallback(
@@ -1277,10 +1297,10 @@ export function WorkspaceCanvasView({
       pageId: menu.pageId,
       selectedPageIds,
       dispatch,
-      onOpen: onInspectPage,
+      onOpen: onOpenPage,
       onExtractText,
     });
-  }, [menu, docs, selectedPageIds, dispatch, onInspectPage, onExtractText]);
+  }, [menu, docs, selectedPageIds, dispatch, onOpenPage, onExtractText]);
 
   const onMoveDoc = useCallback(
     (docId: string, direction: -1 | 1) => dispatch({ type: 'REORDER_DOCS', docId, direction }),
@@ -1458,6 +1478,7 @@ export function WorkspaceCanvasView({
         contentHeight={layout.contentHeight}
         slotHeight={layout.slotHeight}
         dragging={drag.draggingPage !== null}
+        handMode={tool === 'hand'}
         onSettle={() => setRenderVersion((v) => v + 1)}
         onBackgroundClick={clearSelection}
         overlay={
@@ -1499,7 +1520,7 @@ export function WorkspaceCanvasView({
           onSetNewFieldRect={onSetNewFieldRect}
           onClearNewFieldPlacement={onClearNewFieldPlacement}
           onPageContextMenu={onPageContextMenu}
-          onPagePointerDown={drag.onPagePointerDown}
+          onPagePointerDown={tool === 'hand' ? HAND_SUPPRESSES_PICKUP : drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
           onUpdateAnnotation={onUpdateAnnotation}
           onRecolorAnnotation={onRecolorAnnotation}

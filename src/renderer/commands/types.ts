@@ -98,6 +98,12 @@ export interface CanvasServices {
    * actually lands instead of no-oping.
    */
   jumpToPage(pageId: string): void;
+  /** READ this page (M6.2): switch to the reading view (focusing the owning
+   * document if needed) and land on the page — the PageInspector's
+   * replacement. Uses the pending-jump slot, so it is safe to call from any
+   * view mode; `jumpToPage` after a mode dispatch is NOT (stale-ref fast
+   * path — review-caught). */
+  openPageForReading(pageId: string): void;
   /** The floating Find bar (2m). */
   find: {
     isOpen(): boolean;

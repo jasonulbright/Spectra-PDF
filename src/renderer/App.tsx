@@ -3,7 +3,6 @@ import { AppStateProvider, useAppState, useAppDispatch } from './state/AppStateP
 import { file, app } from './lib/tauri-bridge';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
 import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
-import { PageInspector } from './components/PageInspector';
 import { SplitPanel } from './panels/SplitPanel';
 import { RotatePanel } from './panels/RotatePanel';
 import { DeletePanel } from './panels/DeletePanel';
@@ -63,6 +62,7 @@ import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
 import {
+  getCanvasServices,
   invokeCommand,
   registerAppCommandHandlers,
   setCommandStateSource,
@@ -115,9 +115,6 @@ function AppContent(): React.ReactElement {
   const { items: queue, clear: clearQueue } = useOperationQueue();
   const [extractPage, setExtractPage] = useState<number | null>(null);
   const [appVersion, setAppVersion] = useState('');
-  // PageInspector overlay target (canvas view). `page` is the file's
-  // committed page order — the opener commits pending edits first.
-  const [inspector, setInspector] = useState<{ path: string; page: number } | null>(null);
   const recentFiles = state.ui.recentFiles;
   const { call, openFiles, saveFile } = useEngine();
   useWorkspaceIndexer();
@@ -182,7 +179,6 @@ function AppContent(): React.ReactElement {
   }, [state.ui.navPane]);
 
   const activeFile = state.activeFileId ? state.files.get(state.activeFileId) : null;
-  const inspectorFile = inspector ? state.files.get(inspector.path) : null;
   // Open, tab-bearing files (importOnly sources excluded) — the Tools-tab
   // active-file switcher lists these so a panel can retarget without leaving
   // the tab (a doc-tab click would move focus off Tools and unmount the panel).
@@ -585,16 +581,6 @@ function AppContent(): React.ReactElement {
     [performOperation],
   );
 
-  const handleInspectorRotate = useCallback(async (page: number, angle: number) => {
-    if (!inspector) return;
-    await performOperation(inspector.path, 'rotate', { pages: [page], angle });
-  }, [inspector, performOperation]);
-
-  const handleInspectorDelete = useCallback(async (page: number) => {
-    if (!inspector) return;
-    await performOperation(inspector.path, 'delete', { pages: [page] });
-    setInspector(null);
-  }, [inspector, performOperation]);
 
   const handleUndo = useCallback(async () => {
     if (state.pageUndoStack.length > 0) {
@@ -785,24 +771,12 @@ function AppContent(): React.ReactElement {
   // The ONE window-level shortcut dispatcher (M1).
   useKeymapDispatcher();
 
-  // Open the PageInspector overlay from the canvas. Pending edits commit first.
-  const handleInspectPage = useCallback(async (path: string, page: number) => {
-    if (!(await commitOrAbort())) return;
-    dispatch({ type: 'SET_ACTIVE_FILE', path });
-    setInspector({ path, page });
-  }, [commitOrAbort, dispatch]);
-
   const handleExtractFromCanvas = useCallback((path: string, page: number) => {
     dispatch({ type: 'SET_ACTIVE_FILE', path });
     setExtractPage(page);
     // Leaving the board commits, so the panel reads committed bytes.
     invokeCommand('tools.panel.extract_text');
   }, [dispatch]);
-
-  // The inspector cannot outlive its file.
-  useEffect(() => {
-    if (inspector && !state.files.has(inspector.path)) setInspector(null);
-  }, [inspector, state.files]);
 
   // Keep refs to current state so the close handler always sees latest values
   const filesRef = useRef(state.files);
@@ -1144,14 +1118,20 @@ function AppContent(): React.ReactElement {
               {/* Left navigation pane (M3) — thumbnails etc. for the active doc */}
               <NavPane
                 activeFile={activeFile ?? null}
-                onOpenPage={(path, pageNumber) => void handleInspectPage(path, pageNumber)}
+                onOpenPage={(_docId, pageId) =>
+                  // READ the page (M6.2) — the reading pane replaced the
+                  // PageInspector. One implementation (the canvas's
+                  // pending-jump path); a local mode-dispatch + jumpToPage
+                  // here read a stale view ref and landed on page 1
+                  // (review-caught).
+                  getCanvasServices()?.openPageForReading(pageId)
+                }
                 onExtractText={handleExtractFromCanvas}
               />
               <div className="flex-1 flex flex-col relative overflow-hidden">
                 <WorkspaceCanvasView
                   onOpenFiles={() => void handleOpenFile()}
                   onCloseFile={(path) => void handleCloseFile(path)}
-                  onInspectPage={(path, pageNumber) => void handleInspectPage(path, pageNumber)}
                   onExtractText={handleExtractFromCanvas}
                   onRedactFile={handleRedactFile}
                   onApplyOcrLayer={handleApplyOcrLayer}
@@ -1160,17 +1140,6 @@ function AppContent(): React.ReactElement {
                   onAddFormField={handleAddFormField}
                   dropResolverRef={dropResolverRef}
                 />
-                {inspector && inspectorFile?.buffer && (
-                  <div className="absolute inset-0 z-40 bg-neutral-900">
-                    <PageInspector
-                      buffer={inspectorFile.buffer}
-                      page={inspector.page}
-                      onClose={() => setInspector(null)}
-                      onRotate={handleInspectorRotate}
-                      onDelete={handleInspectorDelete}
-                    />
-                  </div>
-                )}
               </div>
             </div>
           )}

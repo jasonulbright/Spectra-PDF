@@ -9,6 +9,8 @@ interface CanvasProps {
   contentHeight: number;
   slotHeight: number;
   dragging?: boolean;
+  /** Hand mode (M6.2): pages become pannable surface (see the zoom filter). */
+  handMode?: boolean;
   onScaleChange?: (scale: number) => void;
   onSettle?: () => void;
   onBackgroundClick?: () => void;
@@ -22,6 +24,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     contentHeight,
     slotHeight,
     dragging,
+    handMode,
     onScaleChange,
     onSettle,
     onBackgroundClick,
@@ -38,6 +41,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
   dims.current = { contentWidth, contentHeight, slotHeight };
   const draggingRef = useRef(dragging);
   draggingRef.current = dragging;
+  const handModeRef = useRef(handMode ?? false);
+  handModeRef.current = handMode ?? false;
 
   const { zoomRef, fitTransform } = useZoomBehavior({
     viewportRef,
@@ -45,6 +50,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
     overlayRef,
     userMovedRef,
     dims,
+    handModeRef,
     onScaleChange,
     onSettle,
   });
@@ -76,6 +82,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
   return (
     <div
       className="canvas-viewport"
+      style={handMode ? { cursor: 'grab' } : undefined}
       ref={viewportRef}
       onClick={(event) => {
         const target = event.target as Element;

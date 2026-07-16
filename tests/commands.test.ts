@@ -26,7 +26,8 @@ import { KEY_BINDINGS } from '../src/renderer/commands/acrobat-keys';
 import { resetPendingFind } from '../src/renderer/commands/find-intent';
 import type { AppCommandHandlers } from '../src/renderer/commands/types';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
-import type { AppAction, AppState, OpenFile } from '../src/renderer/state/types';
+import { dispatchKeyEvent, dispatchKeyUpEvent, dispatchWindowBlur } from '../src/renderer/commands/keymap';
+import type { AppAction, AppState, CanvasTool, OpenFile, PdfBuffer } from '../src/renderer/state/types';
 
 function makeFile(path: string, extra: Partial<OpenFile> = {}): OpenFile {
   return {
@@ -70,6 +71,9 @@ const noopHandlers = (): AppCommandHandlers => ({
 });
 
 afterEach(() => {
+  // Module-level Space-hold state: a case that arms without releasing must
+  // not leak into the next (blur is the designated force-release).
+  dispatchWindowBlur();
   setCommandStateSource(null);
   registerAppCommandHandlers(null);
   registerCanvasServices(null);
@@ -849,5 +853,85 @@ describe('edit.selectAll selects pages in BOTH views (virtualization)', () => {
     const b = KEY_BINDINGS.find((k) => k.command === 'edit.selectAll' && k.ctrl && k.key === 'a');
     expect(b).toBeDefined();
     expect(b!.preventDefault).toBe('always');
+  });
+});
+
+describe('Space temporary hand (M6.2)', () => {
+  function docTabState(tool: CanvasTool = 'highlight'): AppState {
+    const f = { path: 'x.pdf', workingPath: 'x.pdf.w', name: 'x.pdf', pageCount: 1, buffer: [1] as unknown as PdfBuffer, dirty: false, undoStack: [], redoStack: [] };
+    return stateWith({
+      activeFileId: 'x.pdf',
+      files: new Map([['x.pdf', f as OpenFile]]),
+      ui: { ...initialState.ui, focusedTab: { doc: 'x.pdf' }, tool },
+    });
+  }
+  function key(down: boolean, init: Partial<KeyboardEvent> = {}): KeyboardEvent {
+    return {
+      key: ' ', repeat: false, target: null,
+      ctrlKey: false, metaKey: false, shiftKey: false,
+      defaultPrevented: false,
+      preventDefault() { (this as { defaultPrevented: boolean }).defaultPrevented = true; },
+      ...init,
+    } as unknown as KeyboardEvent;
+  }
+
+  function wireState(state: AppState): { finalState: () => AppState } {
+    let current = state;
+    setCommandStateSource(() => ({
+      state: current,
+      dispatch: (a: AppAction) => { current = appReducer(current, a); },
+    }));
+    return { finalState: () => current };
+  }
+
+  it('hold arms hand; release restores the prior mode', () => {
+    const { finalState } = wireState(docTabState('highlight'));
+    dispatchKeyEvent(key(true));
+    expect(finalState().ui.tool).toBe('hand');
+    dispatchKeyUpEvent(key(false));
+    expect(finalState().ui.tool).toBe('highlight');
+  });
+
+  it('release does NOT resurrect the prior mode over a mid-hold change', () => {
+    // Escape (or any explicit pick) mid-hold wins; keyup must not undo it.
+    const { finalState } = wireState(docTabState('highlight'));
+    dispatchKeyEvent(key(true));
+    expect(finalState().ui.tool).toBe('hand');
+    dispatchKeyEvent({ ...key(true), key: 'Escape' } as KeyboardEvent); // disarms to select
+    expect(finalState().ui.tool).toBe('select');
+    dispatchKeyUpEvent(key(false));
+    expect(finalState().ui.tool).toBe('select');
+  });
+
+  it('auto-repeat keydowns keep suppressing the browser default', () => {
+    // The OS repeats keydown while held; each one must preventDefault or the
+    // native Space scroll fights the pan (review-caught).
+    wireState(docTabState('select'));
+    const first = key(true);
+    dispatchKeyEvent(first);
+    expect(first.defaultPrevented).toBe(true);
+    const repeat = key(true, { repeat: true });
+    dispatchKeyEvent(repeat);
+    expect(repeat.defaultPrevented).toBe(true);
+  });
+
+  it('does not arm from a text field, and window blur releases the hold', () => {
+    const { finalState } = wireState(docTabState('ink'));
+    const inField = key(true, { target: { tagName: 'INPUT' } as unknown as EventTarget });
+    dispatchKeyEvent(inField);
+    expect(finalState().ui.tool).toBe('ink');
+
+    dispatchKeyEvent(key(true));
+    expect(finalState().ui.tool).toBe('hand');
+    dispatchWindowBlur(); // alt-tab eats the keyup; blur is the release
+    expect(finalState().ui.tool).toBe('ink');
+  });
+
+  it('holding Space while ALREADY hand is a no-op hold', () => {
+    const { finalState } = wireState(docTabState('hand'));
+    dispatchKeyEvent(key(true));
+    expect(finalState().ui.tool).toBe('hand');
+    dispatchKeyUpEvent(key(false));
+    expect(finalState().ui.tool).toBe('hand'); // no stale prior to restore
   });
 });

@@ -7,7 +7,7 @@ import { useEffect } from 'react';
 import { KEY_BINDINGS, type KeyBinding } from './acrobat-keys';
 import { COMMANDS, type CommandId } from './registry';
 import { getCommandContext, runEscapeInterceptors } from './context';
-import { isDocTab } from '../state/types';
+import { isDocTab, type CanvasTool } from '../state/types';
 import type { CommandContext } from './types';
 
 /** The single inline-edit guard (formerly duplicated in App.tsx and
@@ -115,11 +115,58 @@ function overlayOpen(): boolean {
   );
 }
 
+// Space = temporary Hand while held (M6.2, Acrobat's own gesture). Module
+// state, one owner: the prior mode to restore on keyup. Deliberately restored
+// by direct dispatch (not a command) so the release always works — even if a
+// dialog opened mid-hold.
+let spaceHandPrior: CanvasTool | null = null;
+
+/** Keyup half of the Space temporary hand. Installed beside the keydown. */
+export function dispatchKeyUpEvent(e: KeyboardEvent): void {
+  if (e.key !== ' ' || spaceHandPrior === null) return;
+  const ctx = getCommandContext();
+  const prior = spaceHandPrior;
+  spaceHandPrior = null;
+  // Restore ONLY if the hold is still what's armed: if something else moved
+  // the tool mid-hold (Escape disarmed to select, a tool was picked), the
+  // release must not resurrect the pre-Space mode over that decision.
+  if (ctx?.state.ui.tool === 'hand') {
+    ctx.dispatch({ type: 'UI_SET_TOOL', tool: prior });
+  }
+}
+
+/** Focus-loss mid-hold (alt-tab) eats the keyup — treat blur as release, so
+ * the window never comes back stuck in a hand the user isn't holding. */
+export function dispatchWindowBlur(): void {
+  if (spaceHandPrior === null) return;
+  const ctx = getCommandContext();
+  const prior = spaceHandPrior;
+  spaceHandPrior = null;
+  if (ctx?.state.ui.tool === 'hand') {
+    ctx.dispatch({ type: 'UI_SET_TOOL', tool: prior });
+  }
+}
+
 /** The one window keydown handler. Exported for tests; installed by the hook. */
 export function dispatchKeyEvent(e: KeyboardEvent): void {
   const ctx = getCommandContext();
   if (!ctx) return;
   if (overlayOpen()) return;
+  // Space temporary hand: hold to pan, release to get your mode back. Guarded
+  // like a text key (Space in a field types a space), doc-tab only. Runs
+  // before the table — Space has no binding. preventDefault is NOT gated on
+  // e.repeat: holding is the whole gesture, and auto-repeat keydowns would
+  // otherwise fall through to the browser's Space (page-down scroll, focused-
+  // button activation) and fight the pan (review-caught). Re-arming is
+  // already impossible — `spaceHandPrior` is set for the whole hold.
+  if (e.key === ' ' && isDocTab(ctx.state.ui.focusedTab) && !isEditable(e.target)) {
+    if (spaceHandPrior === null && ctx.state.ui.tool !== 'hand') {
+      spaceHandPrior = ctx.state.ui.tool;
+      ctx.dispatch({ type: 'UI_SET_TOOL', tool: 'hand' });
+    }
+    e.preventDefault(); // Acrobat's Space doesn't also scroll
+    return;
+  }
   if (e.key === 'Escape') {
     dispatchEscape(ctx, e.target);
     return;
@@ -139,6 +186,12 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
 export function useKeymapDispatcher(): void {
   useEffect(() => {
     window.addEventListener('keydown', dispatchKeyEvent);
-    return () => window.removeEventListener('keydown', dispatchKeyEvent);
+    window.addEventListener('keyup', dispatchKeyUpEvent);
+    window.addEventListener('blur', dispatchWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', dispatchKeyEvent);
+      window.removeEventListener('keyup', dispatchKeyUpEvent);
+      window.removeEventListener('blur', dispatchWindowBlur);
+    };
   }, []);
 }

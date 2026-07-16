@@ -105,13 +105,16 @@ describe('tools registry', () => {
     const dupes = [...owners.entries()].filter(([, ts]) => ts.length > 1);
     expect(dupes.map(([m, ts]) => `${m} -> ${ts.join('+')}`)).toEqual([]);
 
-    // 'select' is the ABSENCE of a tool, so nothing may claim it.
+    // 'select' is the ABSENCE of a tool, and 'hand' (M6.2) is that absence
+    // with a different grip — so nothing may claim either.
     expect(owners.has('select'), "'select' must belong to no tool").toBe(false);
     expect(toolForCanvasTool('select')).toBeUndefined();
+    expect(owners.has('hand'), "'hand' must belong to no tool").toBe(false);
+    expect(toolForCanvasTool('hand')).toBeUndefined();
 
     // Every other mode the canvas has resolves to its tool.
     for (const m of CANVAS_MODES) {
-      if (m === 'select') continue;
+      if (m === 'select' || m === 'hand') continue;
       expect(toolForCanvasTool(m)?.id, `${m} is owned by no tool`).toBeDefined();
     }
   });

@@ -11,10 +11,25 @@ interface ZoomHandlerRefs {
   lastTick: { current: number };
   onScaleRef: { current: ((scale: number) => void) | undefined };
   onSettleRef: { current: (() => void) | undefined };
+  /** Hand mode (M6.2): pages become pannable surface — the filter admits
+   * presses on `.page` (pickup is separately suppressed), while buttons and
+   * inputs stay interactive. */
+  handModeRef?: { current: boolean };
+}
+
+/** May a press on `target` start a pan/zoom gesture? Pure — unit-tested.
+ * Hand (M6.2): a press ON a page pans (pickup is separately suppressed);
+ * controls stay controls. Otherwise pages/headers belong to their own
+ * interactions and only the background pans. */
+export function zoomGestureAllowed(target: Element | null, handMode: boolean): boolean {
+  if (handMode) {
+    return !target?.closest('button, input, textarea, .doc-actions');
+  }
+  return !target?.closest('.page, button, input, textarea, .doc-actions, .doc-header');
 }
 
 export function createZoomBehavior(refs: ZoomHandlerRefs): ZoomBehavior<HTMLDivElement, unknown> {
-  const { vp, worldRef, overlayRef, userMovedRef, idleTimer, lastTick, onScaleRef, onSettleRef } =
+  const { vp, worldRef, overlayRef, userMovedRef, idleTimer, lastTick, onScaleRef, onSettleRef, handModeRef } =
     refs;
   return d3zoom<HTMLDivElement, unknown>()
     .scaleExtent([MIN_SCALE, MAX_SCALE])
@@ -22,8 +37,7 @@ export function createZoomBehavior(refs: ZoomHandlerRefs): ZoomBehavior<HTMLDivE
     .filter((event) => {
       if (event.type === 'wheel') return false;
       if ((event as MouseEvent).button) return false;
-      const target = event.target as Element | null;
-      return !target?.closest('.page, button, input, textarea, .doc-actions, .doc-header');
+      return zoomGestureAllowed(event.target as Element | null, handModeRef?.current ?? false);
     })
     .on('start', () => vp.classList.add('panning'))
     .on('end', () => vp.classList.remove('panning'))
