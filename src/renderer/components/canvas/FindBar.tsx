@@ -90,7 +90,7 @@ export function FindBar({
       </span>
       {matchCount > 0 && (
         <>
-          <span className="text-xs text-neutral-500 whitespace-nowrap">
+          <span data-testid="find-cursor" className="text-xs text-neutral-500 whitespace-nowrap">
             {current >= 0 ? `${current + 1}/${matchCount}` : `${matchCount}`}
           </span>
           <button

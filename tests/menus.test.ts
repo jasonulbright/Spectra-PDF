@@ -93,6 +93,46 @@ describe('dynamic sections', () => {
   });
 });
 
+describe('§ 9.1 completeness (M6.3)', () => {
+  const idsIn = (menuId: string): string[] => {
+    const menu = MENUS.find((m) => m.id === menuId)!;
+    return menuCommandIds(menu.items);
+  };
+
+  it('File exports text and prints', () => {
+    expect(idsIn('file')).toEqual(
+      expect.arrayContaining(['tools.panel.extract_text', 'file.print', 'file.properties']),
+    );
+  });
+
+  it('Edit has Copy and both search entries', () => {
+    expect(idsIn('edit')).toEqual(
+      expect.arrayContaining(['edit.copy', 'edit.find', 'view.navPanel.search']),
+    );
+  });
+
+  it('View has the zoom submenu and all three view-mode items', () => {
+    expect(idsIn('view')).toEqual(
+      expect.arrayContaining([
+        'view.zoomIn', 'view.actualSize', 'view.fitWidth',
+        'view.documentView', 'tools.open.organize', 'view.organizeAll',
+      ]),
+    );
+  });
+
+  it('Document inserts (file + blank, § 9.3), operates in § 9.1 order, and OCRs', () => {
+    const ids = idsIn('document');
+    expect(ids).toEqual(expect.arrayContaining([
+      'document.insertFromFile', 'document.insertBlankPage',
+      'tools.panel.delete', 'tools.panel.rotate', 'tools.panel.split',
+      'tools.panel.extract_text', 'tools.panel.watermark',
+      'document.applyPageEdits', 'tools.open.ocr',
+    ]));
+    // Insert Pages leads the menu (§ 9.1's reading order).
+    expect(ids[0]).toBe('document.insertFromFile');
+  });
+});
+
 describe('shortcutForCommand', () => {
   it('formats the primary binding for a command', () => {
     expect(shortcutForCommand('file.save')).toBe('Ctrl+S');

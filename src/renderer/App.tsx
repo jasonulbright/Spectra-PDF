@@ -50,6 +50,8 @@ import { HomeTab } from './components/HomeTab';
 import { AboutDialog } from './components/AboutDialog';
 import { PropertiesDialog } from './components/PropertiesDialog';
 import { PrintDialog } from './components/PrintDialog';
+import { buildBlankPagePdf } from './lib/blank-page';
+import { insertAnchor } from './state/selectors';
 import { UpdateBar } from './components/UpdateBar';
 import { NavPane } from './components/navpane/NavPane';
 import { ToolsCenter } from './components/ToolsCenter';
@@ -472,6 +474,36 @@ function AppContent(): React.ReactElement {
     [openFiles, importFilesIntoDoc],
   );
 
+  // Document ▸ Insert Pages ▸ … (M6.3). Both land AFTER the page being read
+  // (`insertAnchor`) and both ride the byte-only import machinery — undoable
+  // page-tier work, zero new commit paths (§ 9.3).
+  const insertPagesFromFile = useCallback(async () => {
+    const anchor = insertAnchor(stateRef.current);
+    if (!anchor) return;
+    await handleAddPages(anchor.docId, anchor.index);
+  }, [handleAddPages]);
+
+  const insertBlankPage = useCallback(async () => {
+    const s = stateRef.current;
+    const anchor = insertAnchor(s);
+    if (!anchor) return;
+    const destDoc = s.workspace.documents.find((d) => d.id === anchor.docId);
+    const destFile = destDoc ? s.files.get(destDoc.path) : null;
+    if (!destFile) return;
+    const bytes = await buildBlankPagePdf(
+      anchor.neighbor?.width,
+      anchor.neighbor?.height,
+    );
+    // Written beside the destination's working copy: that directory exists by
+    // construction (create_working_copy made it) and is inside the fs
+    // capability's $TEMP/openpdfstudio scope — no new grants, no mkdir.
+    const dir = destFile.workingPath.replace(/[\\/][^\\/]+$/, '');
+    const sep = destFile.workingPath.includes('\\') ? '\\' : '/';
+    const tempPath = `${dir}${sep}blank-${crypto.randomUUID()}.pdf`;
+    await file.writeBuffer(tempPath, bytes);
+    await importFilesIntoDoc([tempPath], anchor.docId, anchor.index);
+  }, [importFilesIntoDoc]);
+
   // Snapshot + perform operation + reload
   const performOperation = useCallback(async (
     filePath: string,
@@ -710,6 +742,8 @@ function AppContent(): React.ReactElement {
     openPreferences: () => setShowSettings('general'),
     openProperties: () => setShowProperties(true),
     openPrint: () => setShowPrint(true),
+    insertBlankPage,
+    insertPagesFromFile,
     openLicenses: () => setShowSettings('licenses'),
     openAbout: () => setShowAbout(true),
     checkForUpdates: () => setUpdateCheckSignal((n) => n + 1),
@@ -734,6 +768,8 @@ function AppContent(): React.ReactElement {
       openPreferences: () => h.current.openPreferences(),
       openProperties: () => h.current.openProperties(),
       openPrint: () => h.current.openPrint(),
+      insertBlankPage: () => h.current.insertBlankPage(),
+      insertPagesFromFile: () => h.current.insertPagesFromFile(),
       openLicenses: () => h.current.openLicenses(),
       openAbout: () => h.current.openAbout(),
       checkForUpdates: () => h.current.checkForUpdates(),
@@ -857,8 +893,8 @@ function AppContent(): React.ReactElement {
   // Test harness — only compiled in when VITE_E2E=1 was set at build time.
   const harnessListenersRef = useRef<Set<(s: TestStateSnapshot) => void>>(new Set());
   const harnessSnapshotRef = useRef<() => TestStateSnapshot>(() => ({
-    view: 'welcome', focusedTab: 'home', activeOp: 'merge', tool: 'select', activeToolId: null, fileCount: 0,
-    activeFileId: null, activeFile: null,
+    view: 'welcome', focusedTab: 'home', activeOp: 'merge', tool: 'select', activeToolId: null,
+    docViewMode: 'document', currentPageId: null, fileCount: 0, activeFileId: null, activeFile: null,
   }));
   harnessSnapshotRef.current = () => ({
     view: viewOf(focusedTab),
@@ -866,6 +902,8 @@ function AppContent(): React.ReactElement {
     activeOp,
     tool: state.ui.tool,
     activeToolId: state.ui.activeToolId,
+    docViewMode: state.ui.docViewMode,
+    currentPageId: state.ui.currentPageId,
     fileCount: state.files.size,
     activeFileId: state.activeFileId,
     activeFile: activeFile
@@ -939,6 +977,10 @@ function AppContent(): React.ReactElement {
         return () => harnessListenersRef.current.delete(listener);
       },
       getFirstPage: () => harnessFirstPageRef.current(),
+      getActiveDocPages: () =>
+        stateRef.current.workspace.documents
+          .filter((d) => d.path === stateRef.current.activeFileId)
+          .flatMap((d) => d.pages.map((p) => ({ id: p.id, width: p.width, height: p.height }))),
       getFirstPageAnnotation: () => harnessFirstAnnotationRef.current(),
       dispatchAddAnnotation: (docId, pageId, annotation) =>
         dispatch({ type: 'ADD_ANNOTATION', docId, pageId, annotation }),

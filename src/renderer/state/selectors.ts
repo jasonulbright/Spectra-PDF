@@ -1,4 +1,4 @@
-import type { AppState, OpenFile } from './types';
+import type { AppState, OpenFile, PageRef } from './types';
 
 // Questions about the state that more than one layer needs to ask, answered
 // once. A leaf: types only, so anything may import it.
@@ -40,4 +40,41 @@ export function showableFile(state: AppState): OpenFile | null {
 /** The open files that get tabs — byte-only import sources (2n.3) don't. */
 export function tabFiles(state: AppState): OpenFile[] {
   return [...state.files.values()].filter((f) => !f.importOnly);
+}
+
+/**
+ * Where "Insert Pages" (from file / blank — M6, § 9.3) puts new pages:
+ * AFTER the page currently being read, when that page belongs to the active
+ * document; else at the END of the active file's last workspace document.
+ * `neighbor` is the page whose size a blank page copies (§ 9.3 "page size =
+ * insertion neighbor's") — the page before the insertion point, or the
+ * destination's last page when appending; null only for an empty document,
+ * which the zero-page guards make unreachable in practice.
+ *
+ * Answered here, not in App: it is a state question ("where is the user?"),
+ * and the reading-view current page (`ui.currentPageId`, M4.1e) is the only
+ * honest anchor — the ORGANIZE view acts on selections, but insertion is a
+ * position, not a selection, and Acrobat's own dialog defaults to "after
+ * current page".
+ */
+export function insertAnchor(
+  state: AppState,
+): { docId: string; index: number; neighbor: PageRef | null } | null {
+  const path = showableDoc(state);
+  if (!path) return null;
+  const docs = state.workspace.documents.filter((d) => d.path === path);
+  if (docs.length === 0) return null;
+  const currentId = state.ui.currentPageId;
+  if (currentId) {
+    for (const d of docs) {
+      const i = d.pages.findIndex((p) => p.id === currentId);
+      if (i !== -1) return { docId: d.id, index: i + 1, neighbor: d.pages[i] };
+    }
+  }
+  const last = docs[docs.length - 1];
+  return {
+    docId: last.id,
+    index: last.pages.length,
+    neighbor: last.pages[last.pages.length - 1] ?? null,
+  };
 }

@@ -24,6 +24,10 @@ export interface TestStateSnapshot {
   tool: string;
   /** The OPEN tool, if any. */
   activeToolId: string | null;
+  /** Which document pane is showing (M6.3 — the View menu's mode items). */
+  docViewMode: 'organize' | 'document';
+  /** The page being read (M4.1e tracking) — insertion anchors hang off it. */
+  currentPageId: string | null;
   fileCount: number;
   activeFileId: string | null;
   activeFile: {
@@ -362,6 +366,8 @@ export interface TestHarness {
   getSelectedCanvasPageIds: () => string[];
   /** Workspace-flattened page ids in order (the select-all / range basis). */
   getWorkspacePageIds: () => string[];
+  /** The active file's page-tier pages with sizes (M6.3 value assertions). */
+  getActiveDocPages: () => { id: string; width: number; height: number }[];
   /** Delete the current canvas selection via the same batched path Delete runs
    * (DELETE_PAGE_REFS → page tier). Canvas view must be mounted. */
   deleteSelectedCanvasPages: () => void;
@@ -480,6 +486,10 @@ export interface TestHarnessDeps {
   /** First page of the active file's first workspace document, once the
    * async indexer has produced one; null until then. */
   getFirstPage: () => { docId: string; pageId: string } | null;
+  /** The active file's page-tier pages with their sizes, workspace order —
+   * for asserting VALUES about page-level edits (M6.3: the blank page copies
+   * its insertion neighbor's size). */
+  getActiveDocPages: () => { id: string; width: number; height: number }[];
   /** Same page lookup as getFirstPage, plus its first annotation if any. */
   getFirstPageAnnotation: () => {
     docId: string;
@@ -606,6 +616,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     setTool: (tool) => deps.setTool(tool),
     setDocViewMode: (mode) => deps.setDocViewMode(mode),
+    getActiveDocPages: () => deps.getActiveDocPages(),
     getState: () => deps.getStateSnapshot(),
     waitForState: (predicate, timeoutMs = 10_000) =>
       new Promise<TestStateSnapshot>((resolve, reject) => {

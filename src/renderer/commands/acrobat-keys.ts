@@ -48,7 +48,25 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 'p', ctrl: true, shift: false, command: 'file.print', scope: 'global', editableGuard: false, preventDefault: 'always' },
   // Ctrl+D is Acrobat's Document Properties (§ 9.2). whenEnabled, not always:
   // with no document open it must fall through rather than be swallowed.
-  { key: 'd', ctrl: true, command: 'file.properties', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  // shift: false since M6.3 — Ctrl+Shift+D is Delete Pages below, and this
+  // shift-lax binding sat earlier in the table, so it would swallow it.
+  { key: 'd', ctrl: true, shift: false, command: 'file.properties', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  // Document-op chords (§ 9.2 ✓ rows, M6.3). The pane commands mirror their
+  // menu items: enabled from anywhere, they focus the Tools tab.
+  { key: 'd', ctrl: true, shift: true, command: 'tools.panel.delete', scope: 'global', editableGuard: true, preventDefault: 'always' },
+  { key: 'r', ctrl: true, shift: true, command: 'tools.panel.rotate', scope: 'global', editableGuard: true, preventDefault: 'always' },
+  { key: 'i', ctrl: true, shift: true, command: 'document.insertFromFile', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  // Go to page (§ 9.2): focus the reading view's page box.
+  { key: 'n', ctrl: true, shift: true, command: 'view.goToPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  // Find next/prev (§ 9.2): F3 / Shift+F3 with the Ctrl+G aliases. Global
+  // scope + 'always' so the webview's own find UI can never surface off a
+  // doc tab; the commands' `when` (canvas services present) gates behavior.
+  // Guard-exempt like Ctrl+F: F3 pressed INSIDE the find field must step the
+  // match, not type.
+  { key: 'f3', shift: false, command: 'edit.findNext', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  { key: 'f3', shift: true, command: 'edit.findPrev', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  { key: 'g', ctrl: true, shift: false, command: 'edit.findNext', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  { key: 'g', ctrl: true, shift: true, command: 'edit.findPrev', scope: 'global', editableGuard: false, preventDefault: 'always' },
   // Tab cycling (§ 9.2). Ctrl+Tab / Ctrl+Shift+Tab — always available (Home +
   // Tools always present); guard-exempt so it cycles even from a focused field.
   { key: 'tab', ctrl: true, shift: false, command: 'window.nextTab', scope: 'global', editableGuard: false, preventDefault: 'always' },

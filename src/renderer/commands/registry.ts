@@ -5,7 +5,7 @@
 // handler. M1 registers every action that existed before the workbench;
 // M2+ chrome only *references* what is here.
 import { isDocTab } from '../state/types';
-import { showableDoc, tabFiles } from '../state/selectors';
+import { insertAnchor, showableDoc, tabFiles } from '../state/selectors';
 import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
 import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
@@ -131,9 +131,12 @@ export const COMMAND_IDS = [
   'file.closeAll',
   'edit.undo',
   'edit.redo',
+  'edit.copy',
   'edit.selectAll',
   'edit.deselect',
   'edit.find',
+  'edit.findNext',
+  'edit.findPrev',
   'edit.preferences',
   'view.home',
   'view.tools',
@@ -144,6 +147,11 @@ export const COMMAND_IDS = [
   'view.fit',
   'view.actualSize',
   'view.fitWidth',
+  'view.documentView',
+  'view.organizeAll',
+  'view.goToPage',
+  'document.insertBlankPage',
+  'document.insertFromFile',
   'document.deleteSelection',
   'document.rotateSelectionCW',
   'document.rotateSelectionCCW',
@@ -346,6 +354,48 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.canvas !== null,
     run: (ctx) => ctx.canvas!.find.open(),
   },
+  // Copy the reading view's live TEXT selection (§ 9.1 Edit ▸ Copy). Ctrl+C
+  // itself is native (the text layer is real DOM text and stays unbound in
+  // the keymap, § 9.2) — this is the menu's honest twin. `when` reads the DOM
+  // selection because a selection isn't app state; menus resolve enablement
+  // when they open, which is exactly when it's needed.
+  'edit.copy': {
+    title: 'Copy',
+    when: (ctx) =>
+      inCanvas(ctx) &&
+      typeof window !== 'undefined' &&
+      !(window.getSelection()?.isCollapsed ?? true),
+    run: () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return;
+      const text = sel.toString();
+      void navigator.clipboard.writeText(text).catch(() => {
+        // The selection survives the menu click; execCommand copies it even
+        // with focus elsewhere — the fallback for a denied async clipboard.
+        document.execCommand('copy');
+      });
+    },
+  },
+  // F3 / Shift+F3 (+ Ctrl+G aliases): step the Find cursor; when the bar
+  // isn't up, F3 OPENS it (Acrobat's own behavior) instead of doing nothing.
+  'edit.findNext': {
+    title: 'Find Next',
+    when: (ctx) => ctx.canvas !== null,
+    run: (ctx) => {
+      const f = ctx.canvas!.find;
+      if (f.isOpen()) f.next();
+      else f.open();
+    },
+  },
+  'edit.findPrev': {
+    title: 'Find Previous',
+    when: (ctx) => ctx.canvas !== null,
+    run: (ctx) => {
+      const f = ctx.canvas!.find;
+      if (f.isOpen()) f.prev();
+      else f.open();
+    },
+  },
   'edit.preferences': {
     title: 'Preferences…',
     when: (ctx) => ctx.app !== null,
@@ -403,6 +453,39 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Fit Width',
     when: (ctx) => ctx.canvas?.canvas()?.fitWidth != null,
     run: (ctx) => ctx.canvas!.canvas()!.fitWidth!(),
+  },
+  // § 6.1's two modes, § 9.1's View items. "Organize All Documents" IS the
+  // board (it renders every open document — the cross-doc superpower); the
+  // per-doc "Organize View" menu item is the Organize tool (tools.open.organize).
+  'view.documentView': {
+    title: 'Document View',
+    when: inCanvas,
+    run: ({ dispatch }) => dispatch({ type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' }),
+  },
+  'view.organizeAll': {
+    title: 'Organize All Documents',
+    when: inCanvas,
+    run: ({ dispatch }) => dispatch({ type: 'UI_SET_DOC_VIEW_MODE', mode: 'organize' }),
+  },
+  // Ctrl+Shift+N (§ 9.2): land the caret in the reading view's page box.
+  'view.goToPage': {
+    title: 'Go to Page…',
+    when: (ctx) =>
+      inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && ctx.canvas !== null,
+    run: (ctx) => void ctx.canvas!.goToPage(),
+  },
+  // Document ▸ Insert Pages ▸ … (§ 9.1/§ 9.3). Both insert AFTER the page
+  // being read (insertAnchor) and both ride the byte-only import machinery,
+  // so they're page-tier undoable like a drag-in.
+  'document.insertBlankPage': {
+    title: 'Blank Page',
+    when: (ctx) => ctx.app !== null && insertAnchor(ctx.state) !== null,
+    run: (ctx) => void ctx.app!.insertBlankPage(),
+  },
+  'document.insertFromFile': {
+    title: 'From File…',
+    when: (ctx) => ctx.app !== null && insertAnchor(ctx.state) !== null,
+    run: (ctx) => void ctx.app!.insertPagesFromFile(),
   },
   'document.deleteSelection': {
     title: 'Delete Selected Pages',

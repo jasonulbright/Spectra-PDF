@@ -113,6 +113,34 @@ describe('resolveBinding', () => {
     expect(resolveBinding(fakeEvent({ key: 'p', ctrl: true, shift: true }))).toBeNull();
   });
 
+  it('Ctrl+D properties vs Ctrl+Shift+D delete pages (M6.3 shift split)', () => {
+    // The properties binding was shift-lax and sits earlier in the table —
+    // without its shift:false, Ctrl+Shift+D would open Properties instead.
+    expect(resolveBinding(fakeEvent({ key: 'd', ctrl: true }))?.command).toBe('file.properties');
+    expect(resolveBinding(fakeEvent({ key: 'd', ctrl: true, shift: true }))?.command).toBe('tools.panel.delete');
+  });
+
+  it('document-op chords land on their panes (§ 9.2 ✓ rows)', () => {
+    expect(resolveBinding(fakeEvent({ key: 'r', ctrl: true, shift: true }))?.command).toBe('tools.panel.rotate');
+    expect(resolveBinding(fakeEvent({ key: 'i', ctrl: true, shift: true }))?.command).toBe('document.insertFromFile');
+    expect(resolveBinding(fakeEvent({ key: 'n', ctrl: true, shift: true }))?.command).toBe('view.goToPage');
+  });
+
+  it('F3 family steps the Find cursor, guard-exempt like Ctrl+F', () => {
+    const next = resolveBinding(fakeEvent({ key: 'F3' }));
+    expect(next?.command).toBe('edit.findNext');
+    expect(next?.editableGuard).toBe(false); // F3 INSIDE the find field steps
+    expect(resolveBinding(fakeEvent({ key: 'F3', shift: true }))?.command).toBe('edit.findPrev');
+    expect(resolveBinding(fakeEvent({ key: 'g', ctrl: true }))?.command).toBe('edit.findNext');
+    expect(resolveBinding(fakeEvent({ key: 'g', ctrl: true, shift: true }))?.command).toBe('edit.findPrev');
+  });
+
+  it('Ctrl+Shift+T stays reserved until the M6.5 verification pass', () => {
+    // Version-variant in Acrobat (classic: Crop, which we don't ship).
+    // Reserve-don't-remap: unbound beats a guess.
+    expect(resolveBinding(fakeEvent({ key: 't', ctrl: true, shift: true }))).toBeNull();
+  });
+
   it('returns null for unbound keys', () => {
     expect(resolveBinding(fakeEvent({ key: 'z' }))).toBeNull(); // bare z: single-key accelerators are M6, default off
   });

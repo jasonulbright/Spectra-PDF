@@ -171,6 +171,7 @@ export function WorkspaceCanvasView({
   // half-typed number).
   const [currentPage, setCurrentPage] = useState(1);
   const [pageBox, setPageBox] = useState('1');
+  const pageBoxRef = useRef<HTMLInputElement | null>(null);
   const pageBoxFocused = useRef(false);
   // Whether the box was actually EDITED since it gained focus — so a blur after
   // just focusing + wheel-scrolling (no typing) resyncs the readout instead of
@@ -539,6 +540,14 @@ export function WorkspaceCanvasView({
         open: () => findRef.current.openFind(),
         openWith: (q, pageId) => findRef.current.openWith(q, pageId),
         close: () => findRef.current.closeFind(),
+        next: () => findRef.current.next(),
+        prev: () => findRef.current.prev(),
+      },
+      goToPage: () => {
+        const el = pageBoxRef.current;
+        if (!el) return false;
+        el.focus();
+        return true;
       },
     });
     return () => registerCanvasServices(null);
@@ -1618,6 +1627,7 @@ export function WorkspaceCanvasView({
           <div className="flex items-center gap-1 px-3 py-1.5 bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg text-xs text-neutral-300">
             <input
               data-testid="page-nav-box"
+              ref={pageBoxRef}
               value={pageBox}
               onChange={(e) => {
                 setPageBox(e.target.value.replace(/[^0-9]/g, ''));

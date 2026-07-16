@@ -58,6 +58,12 @@ export interface AppCommandHandlers {
   openProperties(): void;
   /** Open the Print dialog (File ▸ Print…, Ctrl+P — M-P, § 3.4). */
   openPrint(): void;
+  /** Insert a blank page after the page being read (§ 9.3, M6.3) — pdf-lib
+   * one-pager sized to the neighbor, through the byte-only import machinery. */
+  insertBlankPage(): Promise<void>;
+  /** Insert another file's pages after the page being read (Ctrl+Shift+I,
+   * § 9.2) — the native picker, then the same import machinery. */
+  insertPagesFromFile(): Promise<void>;
   /** Open the Settings modal at its third-party-licenses section (Help ▸
    * Third-party Licenses). Same surface as preferences until M5 splits it. */
   openLicenses(): void;
@@ -100,7 +106,15 @@ export interface CanvasServices {
      * result click (Phase 4 M3.3). */
     openWith(query: string, pageId?: string): void;
     close(): void;
+    /** Step the match cursor (F3 / Shift+F3, M6.3). Only meaningful while
+     * open — the commands open the bar first when it isn't. */
+    next(): void;
+    prev(): void;
   };
+  /** Focus the reading view's page box (Ctrl+Shift+N, § 9.2). Returns false
+   * when the box isn't on screen (organize view) — the command's `when`
+   * gates on the view mode, this is the belt for the render race. */
+  goToPage(): boolean;
 }
 
 export interface CommandContext {

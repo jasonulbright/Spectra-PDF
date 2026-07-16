@@ -12,6 +12,8 @@ export interface TestStateSnapshot {
   activeOp: string;
   tool: string;
   activeToolId: string | null;
+  docViewMode: 'organize' | 'document';
+  currentPageId: string | null;
   fileCount: number;
   activeFileId: string | null;
   activeFile: {
@@ -301,6 +303,15 @@ export async function closeAllFiles(): Promise<void> {
 }
 
 /** Workspace-flattened page ids in order (2n.1). Canvas must be mounted. */
+/** The active file's page-tier pages with sizes (M6.3 value assertions). */
+export async function getActiveDocPages(): Promise<
+  { id: string; width: number; height: number }[]
+> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.getActiveDocPages();
+  });
+}
+
 export async function getWorkspacePageIds(): Promise<string[]> {
   return await browser.execute<string[], []>(function () {
     return (window as any).__SPECTRA_TEST__.getWorkspacePageIds();

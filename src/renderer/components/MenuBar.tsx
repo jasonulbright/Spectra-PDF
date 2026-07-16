@@ -37,6 +37,13 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
           key={i}
           data-testid={node.testid}
           disabled={!isCommandEnabled(node.command)}
+          // A real mouse press on a menu item would COLLAPSE the document's
+          // text selection before onSelect runs (mousedown outside a selection
+          // clears it) — which made Edit ▸ Copy copy nothing, ever, by mouse
+          // (review-caught, M6.3). Radix's own MenubarTrigger prevents its
+          // pointerdown default for exactly this reason; items don't, so we
+          // do. Keyboard activation never had the problem (synthetic click).
+          onPointerDown={(e) => e.preventDefault()}
           onSelect={() => invokeCommand(node.command)}
           className={itemCls}
         >
@@ -48,7 +55,7 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
     if (node.kind === 'submenu') {
       return (
         <Menubar.Sub key={i}>
-          <Menubar.SubTrigger className={itemCls}>
+          <Menubar.SubTrigger className={itemCls} data-testid={`submenu-${node.id}`}>
             <span>{node.label}</span>
             <span className="text-[11px] text-neutral-500">▸</span>
           </Menubar.SubTrigger>
@@ -70,6 +77,7 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
             key={j}
             data-testid={leaf.testid}
             disabled={leaf.disabled}
+            onPointerDown={(e) => e.preventDefault()}
             onSelect={() => {
               const c = getCommandContext();
               if (c) leaf.run(c);
@@ -87,9 +95,14 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
 export function MenuBar(): React.ReactElement {
   // Subscribe to state so enablement predicates + dynamic sections re-resolve.
   useAppState();
+  // Menus also re-resolve on OPEN (native-menu semantics): an enablement
+  // input that isn't app state — edit.copy reads the live DOM selection —
+  // otherwise stays stale from the last app dispatch (review-caught, M6.3).
+  const [, bumpOnOpen] = React.useReducer((n: number) => n + 1, 0);
   return (
     <Menubar.Root
       data-testid="menubar"
+      onValueChange={bumpOnOpen}
       className="app-shell-bar app-menubar flex items-center gap-0.5 px-1.5 h-8 border-b border-neutral-800 shrink-0 text-[13px]"
     >
       {MENUS.map((menu) => (
