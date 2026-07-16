@@ -8,6 +8,7 @@ import { KEY_BINDINGS, type KeyBinding } from './acrobat-keys';
 import { COMMANDS, type CommandId } from './registry';
 import { getCommandContext, runEscapeInterceptors } from './context';
 import { isDocTab, type CanvasTool } from '../state/types';
+import { getSettings } from '../lib/app-settings';
 import type { CommandContext } from './types';
 
 /** The single inline-edit guard (formerly duplicated in App.tsx and
@@ -28,6 +29,7 @@ interface KeyLike {
   ctrlKey: boolean;
   metaKey: boolean;
   shiftKey: boolean;
+  altKey?: boolean;
 }
 
 function matches(b: KeyBinding, e: KeyLike): boolean {
@@ -35,6 +37,7 @@ function matches(b: KeyBinding, e: KeyLike): boolean {
   const mod = e.ctrlKey || e.metaKey;
   if (b.ctrl !== undefined && b.ctrl !== mod) return false;
   if (b.shift !== undefined && b.shift !== e.shiftKey) return false;
+  if (b.alt !== undefined && b.alt !== e.altKey) return false;
   return true;
 }
 
@@ -58,7 +61,9 @@ function formatKey(key: string): string {
  * unbound. Exported for the menu layer and its integrity test.
  */
 export function shortcutForCommand(command: CommandId): string | null {
-  const b = KEY_BINDINGS.find((x) => x.command === command);
+  // Pref-gated bindings never display — a menu must not advertise a key
+  // that may be dead (the single-key accelerators default OFF).
+  const b = KEY_BINDINGS.find((x) => x.command === command && !x.requiresPref);
   if (!b) return null;
   const parts: string[] = [];
   if (b.ctrl) parts.push('Ctrl');
@@ -173,6 +178,15 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
   }
   const binding = resolveBinding(e);
   if (!binding) return;
+  // Pref-gated bindings (the single-key accelerators, M6.4) are dead until
+  // their Settings switch is on. Checked here, not in resolveBinding — the
+  // resolver stays pure/table-testable, and a dead binding must fall through
+  // to the browser (typing 'h' somewhere non-editable does nothing).
+  // Auto-repeat is also refused for THESE bindings only: they point at
+  // toggle-shaped tool commands, so a held H would flip the mode on/off at
+  // the OS repeat rate and land on parity (review-caught). Held Ctrl+Z /
+  // `]` keep repeating — those commands are meant to.
+  if (binding.requiresPref && (e.repeat || !getSettings()[binding.requiresPref])) return;
   if (binding.scope === 'canvas' && !isDocTab(ctx.state.ui.focusedTab)) return;
   if (binding.editableGuard && isEditable(e.target)) return;
   const cmd = COMMANDS[binding.command];

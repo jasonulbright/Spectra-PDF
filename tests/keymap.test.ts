@@ -3,7 +3,7 @@
 // the Escape chain.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KEY_BINDINGS, type KeyBinding } from '../src/renderer/commands/acrobat-keys';
-import { dispatchKeyEvent, isEditable, resolveBinding } from '../src/renderer/commands/keymap';
+import { dispatchKeyEvent, isEditable, resolveBinding, shortcutForCommand } from '../src/renderer/commands/keymap';
 import { COMMANDS } from '../src/renderer/commands/registry';
 import {
   pushEscapeInterceptor,
@@ -19,6 +19,7 @@ interface FakeEventInit {
   ctrl?: boolean;
   meta?: boolean;
   shift?: boolean;
+  alt?: boolean;
   target?: unknown;
 }
 
@@ -28,6 +29,7 @@ function fakeEvent(init: FakeEventInit): KeyboardEvent & { defaultPrevented: boo
     ctrlKey: init.ctrl ?? false,
     metaKey: init.meta ?? false,
     shiftKey: init.shift ?? false,
+    altKey: init.alt ?? false,
     target: init.target ?? null,
     defaultPrevented: false,
     preventDefault(): void {
@@ -56,6 +58,9 @@ describe('table integrity', () => {
   it('no two bindings can match the same key event', () => {
     // Two bindings conflict when key matches and every constrained modifier
     // is compatible (undefined = don't care, so it overlaps everything).
+    // requiresPref does NOT exempt a pair: resolveBinding returns the FIRST
+    // match regardless, and a pref-gated hit that the dispatcher refuses
+    // would SWALLOW a later live binding on the same event (M6.4).
     const compatible = (a: boolean | undefined, b: boolean | undefined): boolean =>
       a === undefined || b === undefined || a === b;
     const conflicts: string[] = [];
@@ -63,7 +68,12 @@ describe('table integrity', () => {
       for (let j = i + 1; j < KEY_BINDINGS.length; j++) {
         const a = KEY_BINDINGS[i] as KeyBinding;
         const b = KEY_BINDINGS[j] as KeyBinding;
-        if (a.key === b.key && compatible(a.ctrl, b.ctrl) && compatible(a.shift, b.shift)) {
+        if (
+          a.key === b.key &&
+          compatible(a.ctrl, b.ctrl) &&
+          compatible(a.shift, b.shift) &&
+          compatible(a.alt, b.alt)
+        ) {
           conflicts.push(`${a.key}: ${a.command} vs ${b.command}`);
         }
       }
@@ -342,5 +352,40 @@ describe('the Escape chain', () => {
     const { dispatched } = wire(uiState({ focusedTab: 'tools', tool: 'select' }));
     dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
     expect(dispatched).toEqual([]);
+  });
+});
+
+describe('single-key accelerators (M6.4 — pref-gated, default OFF)', () => {
+  it('the letters resolve to their tools at the table level', () => {
+    expect(resolveBinding(fakeEvent({ key: 'h' }))?.command).toBe('tools.hand');
+    expect(resolveBinding(fakeEvent({ key: 'v' }))?.command).toBe('tools.select');
+    expect(resolveBinding(fakeEvent({ key: 'u' }))?.command).toBe('tools.highlight');
+    expect(resolveBinding(fakeEvent({ key: 'x' }))?.command).toBe('tools.freetext');
+    expect(resolveBinding(fakeEvent({ key: 'd' }))?.command).toBe('tools.ink');
+    expect(resolveBinding(fakeEvent({ key: 'k' }))?.command).toBe('tools.stamp');
+    // Every one is pref-gated — the dispatcher refuses them until the
+    // Settings switch is on.
+    for (const k of ['h', 'v', 'u', 'x', 'd', 'k']) {
+      expect(resolveBinding(fakeEvent({ key: k }))?.requiresPref).toBe('singleKeyAccelerators');
+    }
+  });
+
+  it('Alt+letter and Shift+letter are NOT tool picks', () => {
+    // Alt+letter reads as a mnemonic; Shift+letter is reserved surface
+    // (Acrobat cycles variants with Shift — none shipped).
+    expect(resolveBinding(fakeEvent({ key: 'h', alt: true }))).toBeNull();
+    expect(resolveBinding(fakeEvent({ key: 'H', shift: true }))).toBeNull();
+  });
+
+  it('reserved letters stay dead: Z (no zoom device), S, E (unshipped kinds)', () => {
+    expect(resolveBinding(fakeEvent({ key: 'z' }))).toBeNull();
+    expect(resolveBinding(fakeEvent({ key: 's' }))).toBeNull();
+    expect(resolveBinding(fakeEvent({ key: 'e' }))).toBeNull();
+  });
+
+  it('pref-gated bindings never DISPLAY as menu shortcuts', () => {
+    // A menu must not advertise a key that may be dead.
+    expect(shortcutForCommand('tools.hand')).toBeNull();
+    expect(shortcutForCommand('tools.highlight')).toBeNull();
   });
 });

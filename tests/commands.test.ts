@@ -935,3 +935,70 @@ describe('Space temporary hand (M6.2)', () => {
     expect(finalState().ui.tool).toBe('hand'); // no stale prior to restore
   });
 });
+
+describe('single-key accelerators at the DISPATCHER (M6.4)', () => {
+  // resolveBinding is pure and never consults settings; THIS is the gate the
+  // milestone is about, and deleting it passed the whole suite before these
+  // (review-caught). localStorage stub = the workbench-ui.test idiom.
+  function letter(key: string, repeat = false): KeyboardEvent {
+    return {
+      key, repeat, target: null,
+      ctrlKey: false, metaKey: false, shiftKey: false, altKey: false,
+      preventDefault() {},
+    } as unknown as KeyboardEvent;
+  }
+  function docTab(): AppState {
+    const f = { path: 'x.pdf', workingPath: 'x.pdf.w', name: 'x.pdf', pageCount: 1, buffer: [1] as unknown as PdfBuffer, dirty: false, undoStack: [], redoStack: [] };
+    return stateWith({
+      activeFileId: 'x.pdf',
+      files: new Map([['x.pdf', f as OpenFile]]),
+      ui: { ...initialState.ui, focusedTab: { doc: 'x.pdf' } },
+    });
+  }
+  function wireState(state: AppState): { finalState: () => AppState } {
+    let current = state;
+    setCommandStateSource(() => ({
+      state: current,
+      dispatch: (a: AppAction) => { current = appReducer(current, a); },
+    }));
+    return { finalState: () => current };
+  }
+  const stubPref = (on: boolean): void => {
+    vi.stubGlobal('localStorage', {
+      getItem: () => JSON.stringify({ singleKeyAccelerators: on }),
+      setItem: () => {},
+    });
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('the letters are DEAD with the pref off (the default)', () => {
+    stubPref(false);
+    const { finalState } = wireState(docTab());
+    dispatchKeyEvent(letter('h'));
+    expect(finalState().ui.tool).toBe('select');
+  });
+
+  it('the pref brings them alive', () => {
+    stubPref(true);
+    const { finalState } = wireState(docTab());
+    dispatchKeyEvent(letter('h'));
+    expect(finalState().ui.tool).toBe('hand');
+    dispatchKeyEvent(letter('u'));
+    expect(finalState().ui.tool).toBe('highlight');
+    dispatchKeyEvent(letter('v'));
+    expect(finalState().ui.tool).toBe('select');
+  });
+
+  it('a HELD key does not parity-toggle the mode (auto-repeat refused)', () => {
+    // The tool commands are toggles; without the repeat gate a held H flips
+    // hand on/off at the OS repeat rate (review-caught HIGH).
+    stubPref(true);
+    const { finalState } = wireState(docTab());
+    dispatchKeyEvent(letter('h'));
+    expect(finalState().ui.tool).toBe('hand');
+    dispatchKeyEvent(letter('h', true));
+    dispatchKeyEvent(letter('h', true));
+    dispatchKeyEvent(letter('h', true));
+    expect(finalState().ui.tool).toBe('hand');
+  });
+});

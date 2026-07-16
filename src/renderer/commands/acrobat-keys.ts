@@ -15,6 +15,15 @@ export interface KeyBinding {
   ctrl?: boolean;
   /** Required Shift state; undefined = don't care. */
   shift?: boolean;
+  /** Required Alt state; undefined = don't care (the legacy posture). The
+   * single-key accelerators set alt: false — a bare letter must not fire on
+   * Alt+letter, which reads as a mnemonic, not a tool pick. */
+  alt?: boolean;
+  /** Only live while this Settings boolean is on (M6.4: the single-key
+   * accelerators, default OFF — Acrobat's own posture). Pref-gated bindings
+   * are invisible to shortcutForCommand: a menu must not display a key that
+   * may be dead. */
+  requiresPref?: 'singleKeyAccelerators';
   command: CommandId;
   /** 'global' is app-wide; 'canvas' only fires while the canvas view is
    * focused (the legacy listeners were mounted with WorkspaceCanvasView). */
@@ -122,4 +131,18 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   // keys are inert there rather than doing something unexpected.
   { key: '1', ctrl: true, command: 'view.actualSize', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   { key: '2', ctrl: true, command: 'view.fitWidth', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
+  // Single-key accelerators (§ 9.2, M6.4) — pref-gated, DEFAULT OFF like
+  // Acrobat. Bare letters, so: guard-exempt is unthinkable (editableGuard
+  // true), no modifiers at all (ctrl/shift/alt all false — Alt+letter is a
+  // mnemonic shape, not a tool pick), canvas scope, whenEnabled (a disabled
+  // tool command must let the letter fall through). Reserved, deliberately
+  // NOT bound (reserve-don't-remap, § 9.2): Z (zoom mode — no such device
+  // exists yet; a Z that surprises beats a Z that lies), S (sticky note,
+  // no such kind), E (text edits, no content editing).
+  { key: 'h', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.hand', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 'v', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.select', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 'u', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.highlight', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 'x', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.freetext', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 'd', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.ink', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 'k', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.stamp', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
 ];

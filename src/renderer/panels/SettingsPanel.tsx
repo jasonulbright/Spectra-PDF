@@ -3,30 +3,16 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { app, type GsInfo } from '../lib/tauri-bridge';
 import { deriveAccentVars } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
+import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
+// Re-exported for the ~6 existing panel consumers; the implementation is the
+// leaf module (the keymap reads it too — see lib/app-settings.ts).
+export { getSettings } from '../lib/app-settings';
 
-interface Settings {
-  gsPath: string;
-  gsSource: 'builtin' | 'external';
-  defaultOutputDir: string;
-  compressionQuality: string;
-  theme: string;
-  minimizeToTray: boolean;
-  startMinimized: boolean;
-}
 
 function getSystemTheme(): string {
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
-const DEFAULTS: Settings = {
-  gsPath: '',
-  gsSource: 'builtin',
-  defaultOutputDir: '',
-  compressionQuality: 'ebook',
-  theme: 'system',
-  minimizeToTray: false,
-  startMinimized: false,
-};
 
 // Cached GS info for display
 let cachedBundledGs: GsInfo | null = null;
@@ -59,30 +45,8 @@ async function resolveGsPath(): Promise<void> {
 resolveGsPath();
 
 
-function loadSettings(): Settings {
-  try {
-    const stored = localStorage.getItem('spectra-settings');
-    if (!stored) return DEFAULTS;
-    const parsed = JSON.parse(stored);
-    // Fix string-boolean corruption from earlier bug
-    if (typeof parsed.minimizeToTray === 'string') {
-      parsed.minimizeToTray = parsed.minimizeToTray === 'true';
-    }
-    // Default gsSource to builtin when unset.
-    if (!parsed.gsSource) {
-      parsed.gsSource = 'builtin';
-    }
-    return { ...DEFAULTS, ...parsed };
-  } catch { return DEFAULTS; }
-}
 
-function saveSettings(settings: Settings): void {
-  localStorage.setItem('spectra-settings', JSON.stringify(settings));
-}
 
-export function getSettings(): Settings {
-  return loadSettings();
-}
 
 /** Apply the theme to the document root and window title bar. */
 export function applyTheme(theme?: string): void {
@@ -282,6 +246,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       )}
 
       {category === 'general' && (
+      <>
       <div>
         <label className="block text-sm text-neutral-400 mb-1">Default Compression Quality</label>
         <select
@@ -295,6 +260,22 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           <option value="prepress">Prepress (300 dpi, highest)</option>
         </select>
       </div>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          data-testid="pref-single-key"
+          checked={settings.singleKeyAccelerators}
+          onChange={() => update('singleKeyAccelerators', !settings.singleKeyAccelerators)}
+        />
+        <span className="text-sm text-neutral-300">
+          Use single-key accelerators to access tools
+        </span>
+      </label>
+      <p className="text-xs text-neutral-500 -mt-3">
+        H Hand · V Select · U Highlight · X Text · D Draw · K Stamp — off by
+        default, like Acrobat
+      </p>
+      </>
       )}
 
       {category === 'appearance' && (
