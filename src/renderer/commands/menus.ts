@@ -9,6 +9,7 @@ import { tabFiles } from '../state/selectors';
 import type { CommandContext } from './types';
 import type { CommandId } from './registry';
 import { NAV_PANEL_IDS } from './navpanels';
+import { TOOL_DEFS } from './tools';
 
 // A leaf the renderer can draw without further resolution. `command` items are
 // resolved against COMMANDS (title, enablement, shortcut) by the renderer;
@@ -62,38 +63,20 @@ const recentSubmenu: MenuNode = {
   ],
 };
 
-// Tools menu — the 20 panel commands grouped by the sidebar's five groups.
-const toolsGroups: { label: string; ops: CommandId[] }[] = [
-  { label: 'Pages', ops: ['tools.panel.split', 'tools.panel.rotate', 'tools.panel.delete'] },
-  {
-    label: 'Transform',
-    ops: [
-      'tools.panel.compress',
-      'tools.panel.grayscale',
-      'tools.panel.optimize',
-      'tools.panel.pdfa',
-      'tools.panel.pdf_version',
-    ],
-  },
-  { label: 'Repair', ops: ['tools.panel.repair', 'tools.panel.rebuild', 'tools.panel.recover'] },
-  { label: 'Security', ops: ['tools.panel.encrypt', 'tools.panel.decrypt'] },
-  {
-    label: 'Content',
-    ops: [
-      'tools.panel.extract_text',
-      'tools.panel.watermark',
-      'tools.panel.forms',
-      'tools.panel.compare',
-      'tools.panel.signatures',
-      'tools.panel.metadata',
-    ],
-  },
-];
-
-const toolsItems: MenuNode[] = toolsGroups.flatMap((g, i) => [
-  ...(i > 0 ? [sep] : []),
-  ...g.ops.map((op) => cmd(op)),
-]);
+// Tools menu — the twelve TOOLS (§ 9.1), in the Tools Center's own order.
+//
+// It used to list the 19 operations under the RAIL's five groups (Pages /
+// Transform / Repair / Security / Content). The rail was deleted in M5.2 but its
+// taxonomy outlived it here — and that taxonomy is precisely what M5.1 removed:
+// it named what the ENGINE does, not what the user came to do. Generated from
+// TOOL_DEFS, so the menu, the tile grid and the task panes cannot disagree about
+// which tools exist.
+//
+// It is also the doc-tab entry point the floating pill used to be: the pill was
+// the only way to arm Comment or Redact without leaving the document, and it
+// retired into the secondary toolbar, which only appears once a tool is already
+// armed. This is how you arm one.
+const toolsItems: MenuNode[] = TOOL_DEFS.map((t) => cmd(`tools.open.${t.id}`, `menuitem-tool-${t.id}`));
 
 // Window ▸ open-document list — focus that doc's tab. importOnly sources
 // (2n.3) have no tab and are excluded (mirrors registry.tabFiles).

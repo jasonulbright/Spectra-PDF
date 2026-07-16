@@ -1,0 +1,98 @@
+import { resolve } from 'node:path';
+import { expect } from '@wdio/globals';
+import { waitForHarness, openByPaths, getState } from '../support/harness.js';
+
+const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
+
+// Phase 4 M5.4: the floating tool pill is GONE. It listed all eight canvas
+// modes flat and permanently; the secondary toolbar (§ 3.1) shows one TOOL's
+// modes, and appears only while that tool is armed.
+//
+// This exists because the pill's retirement removed the only doc-tab way to arm
+// Comment or Redact, and its replacement — Tools menu → the twelve tools — has
+// to actually work. Every assertion below runs through the real DOM (menus,
+// buttons) rather than the harness: the harness can set `tool` directly, which
+// would prove nothing about whether a user can reach it.
+
+describe('secondary toolbar', () => {
+  it('is absent until a tool is armed', async () => {
+    await waitForHarness();
+    await openByPaths([SAMPLE_PDF]);
+    // A document is open with nothing armed: no tool, so no strip.
+    expect((await getState()).focusedTab).toEqual({ doc: SAMPLE_PDF });
+    await expect($('[data-testid="secondary-toolbar"]')).not.toBeExisting();
+    // ...and the retired pill is not lurking either.
+    await expect($('[data-testid="tool-highlight"]')).not.toBeExisting();
+  });
+
+  it('Tools ▸ Comment arms the tool from the document, and the strip shows ITS modes', async () => {
+    await $('[data-testid="menu-tools"]').click();
+    await $('[data-testid="menuitem-tool-comment"]').waitForDisplayed();
+    await $('[data-testid="menuitem-tool-comment"]').click();
+
+    // Still on the document — a canvas tool must not yank you to the Tools tab.
+    await browser.waitUntil(
+      async () => {
+        const s = await getState();
+        return typeof s.focusedTab === 'object' && s.focusedTab.doc === SAMPLE_PDF;
+      },
+      { timeoutMsg: 'Tools ▸ Comment left the document tab' },
+    );
+
+    const bar = $('[data-testid="secondary-toolbar"]');
+    await bar.waitForDisplayed({ timeoutMsg: 'no secondary toolbar after arming Comment' });
+    expect(await bar.getAttribute('data-tool')).toBe('comment');
+
+    // Comment's four modes are here, and Comment's first is armed.
+    for (const m of ['highlight', 'freetext', 'ink', 'stamp']) {
+      await expect($(`[data-testid="tool-${m}"]`)).toBeDisplayed();
+    }
+    expect(await $('[data-testid="tool-highlight"]').getAttribute('aria-pressed')).toBe('true');
+
+    // Modes belonging to OTHER tools are not here — that's the whole difference
+    // from the pill, which showed all eight regardless of what you picked.
+    await expect($('[data-testid="tool-redact"]')).not.toBeExisting();
+    await expect($('[data-testid="tool-forms"]')).not.toBeExisting();
+  });
+
+  it('picking another of the tool’s modes switches the mode, not the tool', async () => {
+    await $('[data-testid="tool-ink"]').click();
+    await browser.waitUntil(
+      async () => (await $('[data-testid="tool-ink"]').getAttribute('aria-pressed')) === 'true',
+      { timeoutMsg: 'clicking Draw did not arm it' },
+    );
+    expect(await $('[data-testid="tool-highlight"]').getAttribute('aria-pressed')).toBe('false');
+    // Same tool — the strip must not flip to another one.
+    expect(await $('[data-testid="secondary-toolbar"]').getAttribute('data-tool')).toBe('comment');
+  });
+
+  it('a mode option (the stamp presets) rides with its mode', async () => {
+    // Stamp presets used to be a floating satellite. They configure the armed
+    // mode, so they belong to the tool — and only to that mode.
+    await expect($('[data-testid="stamp-preset-approved"]')).not.toBeExisting();
+    await $('[data-testid="tool-stamp"]').click();
+    await $('[data-testid="stamp-preset-approved"]').waitForDisplayed({
+      timeoutMsg: 'stamp presets did not follow the stamp mode into the strip',
+    });
+  });
+
+  it('Close Tool disarms, and the strip goes with it', async () => {
+    await $('[data-testid="secondary-action-tools.close"]').click();
+    await $('[data-testid="secondary-toolbar"]').waitForDisplayed({
+      reverse: true,
+      timeoutMsg: 'the strip outlived the tool it belongs to',
+    });
+  });
+
+  it('Tools ▸ Redact arms a DIFFERENT tool, and the strip follows', async () => {
+    await $('[data-testid="menu-tools"]').click();
+    await $('[data-testid="menuitem-tool-redact"]').waitForDisplayed();
+    await $('[data-testid="menuitem-tool-redact"]').click();
+    const bar = $('[data-testid="secondary-toolbar"]');
+    await bar.waitForDisplayed({ timeoutMsg: 'no secondary toolbar after arming Redact' });
+    expect(await bar.getAttribute('data-tool')).toBe('redact');
+    // Redact owns one mode, so there is no mode row to pick from — the tool IS
+    // the mode. Comment's modes must not be here.
+    await expect($('[data-testid="tool-highlight"]')).not.toBeExisting();
+  });
+});

@@ -9,7 +9,7 @@ import { showableDoc, tabFiles } from '../state/selectors';
 import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
 import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
-import { TOOL_DEFS, TOOL_IDS, armedModeOf } from './tools';
+import { TOOL_DEFS, TOOL_IDS, armedModeOf, type ToolId } from './tools';
 import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
 
@@ -122,6 +122,7 @@ export const CANVAS_MODES: readonly CanvasTool[] = CANVAS_TOOLS;
 export const COMMAND_IDS = [
   'file.open',
   'file.openInPlace',
+  'tools.close',
   'file.save',
   'file.saveAs',
   'file.close',
@@ -195,6 +196,36 @@ function panelCommand(op: Operation): Command {
   };
 }
 
+/**
+ * The extra ACTIONS each tool's secondary toolbar offers, beyond its modes.
+ *
+ * Total over ToolId, so a new tool must say what its strip does — even if the
+ * answer is "nothing" — rather than silently getting an empty one.
+ *
+ * Modes are NOT listed here: they come from `canvasTools`, which already
+ * declares them. Listing them again would be a second copy to keep in step,
+ * and this milestone has spent enough on those.
+ *
+ * Deliberately absent: the pending-state buttons ("Fill 3 fields", "Redact 2
+ * regions"). They aren't tool options — they report queued work, and the canvas
+ * invariant is that pending state is never invisible, so they must not vanish
+ * when a tool closes. They stay in the floating cluster.
+ */
+export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
+  organize: [],
+  comment: ['tools.close'],
+  fillsign: ['tools.close'],
+  prepareform: ['tools.close'],
+  redact: ['tools.close'],
+  ocr: [],
+  compare: [],
+  protect: [],
+  optimize: [],
+  repair: [],
+  watermark: [],
+  export: [],
+};
+
 export const COMMANDS: Record<CommandId, Command> = {
   'file.open': {
     title: 'Open…',
@@ -213,6 +244,15 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Open…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => void ctx.app!.openFilesInPlace(),
+  },
+  // Leave the active tool: disarm its mode, back to plain Select. The secondary
+  // toolbar's own exit. The pill made this implicit — you clicked "Select",
+  // which only reads as "leave the tool" if you already know the eight modes
+  // were grouped into tools, which was the pill's whole problem.
+  'tools.close': {
+    title: 'Close Tool',
+    when: (ctx) => isDocTab(ctx.state.ui.focusedTab) && ctx.state.ui.tool !== 'select',
+    run: ({ dispatch }) => dispatch({ type: 'UI_SET_TOOL', tool: 'select' }),
   },
   'file.save': {
     title: 'Save',
@@ -412,16 +452,22 @@ export const COMMANDS: Record<CommandId, Command> = {
       `tools.open.${tool.id}`,
       {
         title: tool.title,
-        // CONSTRAINT FOR WHOEVER ADDS THE TOOLS MENU (§ 9.1): today the ONLY
-        // caller is the Tools Center tile, and the Tools Center only renders
-        // when `activeToolId === null`. The ops-less branch below relies on
-        // that — it arms a canvas mode without touching `activeToolId`, which
-        // is only coherent because no tool can be open when it runs. A second
-        // entry point (a menu item, a keybinding) invoked while a tool IS open
-        // would leave the Tools tab showing Prepare Form's pane while the canvas
-        // is in Highlight mode — the same "the tool and its mode disagree" class
-        // this slice closed four times. Give the ops-less branch an explicit
-        // `activeToolId` story before adding one; don't just wire it up.
+        // The two-entry-point question M5.1 flagged here, now that the Tools
+        // MENU (§ 9.1) is the second caller and can fire from a doc tab with a
+        // tool already open. The answer is that the two are different questions
+        // with different scopes, not one question with two answers:
+        //
+        //   `activeToolId` = which tool's pane the TOOLS TAB is showing.
+        //   the armed MODE = which tool is live on the DOCUMENT (§ 3.1's own
+        //                    words — the secondary toolbar reads this).
+        //
+        // So the ops-less branch deliberately does NOT touch `activeToolId`:
+        // Comment/Redact/Scan & OCR have no Tools-tab pane, so they have nothing
+        // to open there, and the Tools tab is left exactly as the user left it.
+        // Opening Comment from the tile grid leaves `activeToolId` null, so
+        // returning to the Tools tab still shows the grid — consistent, not
+        // stale. `toolForCanvasTool` is what answers "which tool is armed?", and
+        // it is exact because M5.3 made mode→tool ownership disjoint.
         //
         // A tool whose work happens ON the page needs a page to show. Not just
         // "activeFileId is set": an import-only source is bytes with no tab, and

@@ -13,7 +13,7 @@ import {
 // `CanvasTool` — NOT a hand-listed copy of the union, which is exactly the
 // second source of truth that would silently omit a new mode from the
 // orphan-ownership check below and quietly pass.
-import { CANVAS_MODES } from '../src/renderer/commands/registry';
+import { CANVAS_MODES, COMMAND_IDS, SECONDARY_TOOLBAR_ACTIONS } from '../src/renderer/commands/registry';
 // The TYPE is still needed (the ownership map below is keyed by it) — what this
 // slice removed was the hand-listed copy of its MEMBERS, not the import.
 import type { CanvasTool } from '../src/renderer/state/types';
@@ -138,6 +138,32 @@ describe('tools registry', () => {
     expect(showsFormWidgets('formfields')).toBe(true);
     expect(showsFormWidgets('signature')).toBe(false); // Fill & Sign owns it; widgets stay hidden
     expect(showsFormWidgets('select')).toBe(false);
+  });
+
+  it('every tool declares what its secondary toolbar does', () => {
+    // Record<ToolId, …> makes this total at compile time. The runtime half:
+    // every action is a REGISTERED command, so a strip can't render a button
+    // that invokes nothing.
+    for (const tool of TOOL_DEFS) {
+      const actions = SECONDARY_TOOLBAR_ACTIONS[tool.id];
+      expect(actions, `${tool.id} declares no toolbar`).toBeDefined();
+      for (const id of actions) {
+        expect(COMMAND_IDS, `${tool.id}'s toolbar invokes unregistered ${id}`).toContain(id);
+      }
+    }
+  });
+
+  it('every tool that can be ARMED has a strip to show', () => {
+    // The strip renders for whichever tool owns the armed mode. So a tool that
+    // owns modes must be renderable: a title to name it, and a way out. The
+    // pill's exit was "click Select", which only reads as "leave the tool" if
+    // you already know the modes are grouped into tools — the very thing it
+    // failed to show.
+    for (const tool of TOOL_DEFS) {
+      if (!tool.canvasTools?.length) continue;
+      expect(tool.title.trim().length, tool.id).toBeGreaterThan(0);
+      expect(SECONDARY_TOOLBAR_ACTIONS[tool.id], `${tool.id} has no way out`).toContain('tools.close');
+    }
   });
 
   it('Fill & Sign and Prepare Form own DIFFERENT modes', () => {

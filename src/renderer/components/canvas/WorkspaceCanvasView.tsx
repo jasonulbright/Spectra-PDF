@@ -42,7 +42,7 @@ import { deriveDropGhosts } from './ghost-size';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import type { PageAnnotation, PdfBuffer } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
-import { STAMP_PRESETS, ANNOTATION_PALETTE } from './PageCell';
+import { SecondaryToolbar } from './SecondaryToolbar';
 import { CommentSidebar } from './CommentSidebar';
 
 interface WorkspaceCanvasViewProps {
@@ -1398,6 +1398,15 @@ export function WorkspaceCanvasView({
         (tool === 'forms' ? ' forms-mode' : '')
       }
     >
+      {/* § 3.1: the contextual strip, at the top of the document pane. It shows
+          the tool that owns the armed mode; nothing armed ⇒ nothing here. */}
+      <SecondaryToolbar
+        tool={tool}
+        toolColor={toolColor}
+        onSetToolColor={setToolColor}
+        stampPreset={stampPreset}
+        onSetStampPreset={setStampPreset}
+      />
       {docViewMode === 'document' && focusedDoc ? (
         <DocumentView
           key={focusedDoc.id}
@@ -1515,109 +1524,13 @@ export function WorkspaceCanvasView({
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
 
-      {/* Floating controls: tool toggle + zoom cluster + pending page-edit commit */}
+      {/* Floating controls. The tool pill and its mode OPTIONS (stamp presets,
+          annotation colour) moved to the secondary toolbar — they belong to the
+          tool. What's left is deliberately NOT tool-scoped: the view toggles,
+          and the PENDING-STATE buttons (Fill N / Redact N / Apply changes),
+          which report queued work. The canvas invariant is that pending state is
+          never invisible, so those must not vanish when a tool closes. */}
       <div className="absolute bottom-4 right-4 flex items-center gap-2 z-30">
-        <div className="flex bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg overflow-hidden">
-          <button
-            title="Select and drag pages"
-            onClick={() => invokeCommand('tools.select')}
-            className={`px-3 py-1.5 text-xs font-medium ${tool === 'select' ? 'bg-neutral-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
-          >
-            Select
-          </button>
-          <button
-            data-testid="tool-highlight"
-            title="Drag a box on a page to highlight (Esc to exit)"
-            onClick={() => invokeCommand('tools.highlight')}
-            className={`px-3 py-1.5 text-xs font-medium ${tool === 'highlight' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
-          >
-            Highlight
-          </button>
-          <button
-            data-testid="tool-freetext"
-            title="Drag a box on a page to add text (Esc to exit)"
-            onClick={() => invokeCommand('tools.freetext')}
-            className={`px-3 py-1.5 text-xs font-medium ${tool === 'freetext' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
-          >
-            Text
-          </button>
-          <button
-            data-testid="tool-ink"
-            title="Draw freehand on a page (Esc to exit)"
-            onClick={() => invokeCommand('tools.ink')}
-            className={`px-3 py-1.5 text-xs font-medium ${tool === 'ink' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
-          >
-            Draw
-          </button>
-          <button
-            data-testid="tool-stamp"
-            title="Click a page to place a stamp (Esc to exit)"
-            onClick={() => invokeCommand('tools.stamp')}
-            className={`px-3 py-1.5 text-xs font-medium ${tool === 'stamp' ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
-          >
-            Stamp
-          </button>
-          <button
-            data-testid="tool-redact"
-            title="Drag a box on a page to mark it for redaction (Esc to exit)"
-            onClick={() => invokeCommand('tools.redact')}
-            className={`px-3 py-1.5 text-xs font-medium ${tool === 'redact' ? 'bg-red-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
-          >
-            Redact
-          </button>
-          <button
-            data-testid="tool-signature"
-            title="Drag a box on a page to place a visible signature (Esc to exit)"
-            onClick={() => invokeCommand('tools.signature')}
-            className={`px-3 py-1.5 text-xs font-medium ${tool === 'signature' ? 'bg-violet-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
-          >
-            Sign
-          </button>
-          <button
-            data-testid="tool-forms"
-            title="Fill form fields directly on the page (Esc to exit)"
-            onClick={() => invokeCommand('tools.forms')}
-            className={`px-3 py-1.5 text-xs font-medium ${tool === 'forms' ? 'bg-emerald-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
-          >
-            Fill
-          </button>
-          {/* Authoring is a MODE, not a sub-toggle of Fill: filling and placing
-              fields are different jobs (Fill & Sign vs Prepare Form), and as a
-              boolean riding on top of `forms` it was invisible to the command
-              registry and the keymap, and left `forms` owned by two tools at
-              once. Same testid — it is still "the add-field control". */}
-          <button
-            data-testid="forms-add-field"
-            title="Drag a box on a page to place a new form field (Esc to exit)"
-            onClick={() => invokeCommand('tools.formfields')}
-            className={`px-3 py-1.5 text-xs font-medium ${tool === 'formfields' ? 'bg-emerald-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
-          >
-            + Field
-          </button>
-        </div>
-        {tool === 'stamp' && (
-          <div
-            className="flex items-center gap-1 bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg px-2 py-1"
-            title="Stamp preset"
-          >
-            {STAMP_PRESETS.map((p) => (
-              <button
-                key={p.label}
-                data-testid={`stamp-preset-${p.label.toLowerCase()}`}
-                onClick={() => setStampPreset(stampPreset?.label === p.label ? null : p)}
-                title={p.label}
-                className="px-2 py-0.5 text-[10px] font-bold rounded-full"
-                style={{
-                  color: p.color,
-                  border: `1px solid ${p.color}`,
-                  backgroundColor: stampPreset?.label === p.label ? `${p.color}33` : 'transparent',
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        )}
         <button
           data-testid="toggle-doc-view"
           title={docViewMode === 'document' ? 'Switch to the page organizer' : 'Switch to the reading view'}
@@ -1647,27 +1560,6 @@ export function WorkspaceCanvasView({
         >
           Comments
         </button>
-        {tool !== 'select' && tool !== 'stamp' && (
-          <div
-            className="flex items-center gap-1 bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg px-2 py-1"
-            title="Annotation color"
-          >
-            {ANNOTATION_PALETTE.map((c) => (
-              <button
-                key={c}
-                data-testid={`annot-color-${c.slice(1)}`}
-                onClick={() => setToolColor(toolColor === c ? null : c)}
-                title={c}
-                className="w-4 h-4 rounded-full"
-                style={{
-                  backgroundColor: c,
-                  outline: toolColor === c ? '2px solid white' : '1px solid rgba(255,255,255,0.3)',
-                  outlineOffset: 1,
-                }}
-              />
-            ))}
-          </div>
-        )}
         {pendingFormCount > 0 && (
           <>
             <button
