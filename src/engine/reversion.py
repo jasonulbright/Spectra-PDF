@@ -12,10 +12,14 @@ def get_pdf_version(file: str) -> dict:
         file: Input PDF path.
     """
     with pikepdf.open(file) as pdf:
-        version = f"{pdf.pdf_version[0]}.{pdf.pdf_version[1]}"
+        # `pdf_version` is already a string like "1.7" — NOT a (major, minor)
+        # tuple. Indexing it took the first two CHARACTERS, so this returned
+        # "1.." for every file in existence: '1' + '.' + '.'. Shipped that way,
+        # and visible in the Optimize pane's "Current version" the whole time;
+        # nothing asserted the value, so nothing noticed.
         return {
             "file": file,
-            "version": version,
+            "version": pdf.pdf_version,
             "pages": len(pdf.pages),
         }
 

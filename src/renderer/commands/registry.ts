@@ -122,6 +122,7 @@ export const CANVAS_MODES: readonly CanvasTool[] = CANVAS_TOOLS;
 export const COMMAND_IDS = [
   'file.open',
   'file.openInPlace',
+  'file.properties',
   'tools.close',
   'file.save',
   'file.saveAs',
@@ -262,6 +263,12 @@ export const COMMANDS: Record<CommandId, Command> = {
   // toolbar's own exit. The pill made this implicit — you clicked "Select",
   // which only reads as "leave the tool" if you already know the eight modes
   // were grouped into tools, which was the pill's whole problem.
+  // File ▸ Properties… (Ctrl+D) — § 3.2. Needs a document it can describe.
+  'file.properties': {
+    title: 'Properties…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.openProperties(),
+  },
   'tools.close': {
     title: 'Close Tool',
     // Enabled while a canvas tool is OPEN — not merely while a mode is armed.

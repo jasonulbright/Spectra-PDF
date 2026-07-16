@@ -12,7 +12,6 @@ import { PdfaPanel } from './panels/PdfaPanel';
 import { EncryptPanel } from './panels/EncryptPanel';
 import { DecryptPanel } from './panels/DecryptPanel';
 import { ExtractTextPanel } from './panels/ExtractTextPanel';
-import { MetadataPanel } from './panels/MetadataPanel';
 import { RepairPanel } from './panels/RepairPanel';
 import { RebuildPanel } from './panels/RebuildPanel';
 import { RecoverPanel } from './panels/RecoverPanel';
@@ -49,6 +48,7 @@ import { MainToolbar } from './components/MainToolbar';
 import { TabStrip } from './components/TabStrip';
 import { HomeTab } from './components/HomeTab';
 import { AboutDialog } from './components/AboutDialog';
+import { PropertiesDialog } from './components/PropertiesDialog';
 import { UpdateBar } from './components/UpdateBar';
 import { NavPane } from './components/navpane/NavPane';
 import { ToolsCenter } from './components/ToolsCenter';
@@ -72,7 +72,7 @@ const panels: Record<Operation, React.ComponentType> = {
   compress: CompressPanel, grayscale: GrayscalePanel, optimize: OptimizePanel,
   pdfa: PdfaPanel, pdf_version: PdfVersionPanel,
   encrypt: EncryptPanel, decrypt: DecryptPanel,
-  extract_text: ExtractTextPanel, metadata: MetadataPanel,
+  extract_text: ExtractTextPanel,
   watermark: WatermarkPanel, forms: FormsPanel, compare: ComparePanel,
   signatures: SignaturesPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
@@ -104,6 +104,7 @@ function AppContent(): React.ReactElement {
   // land ON the licences, instead of at the top of a scroll.
   const [showSettings, setShowSettings] = useState<PrefCategory | null>(null);
   const [showAbout, setShowAbout] = useState(false);
+  const [showProperties, setShowProperties] = useState(false);
   // Manual "Check for Updates" (Help menu): bump a signal the UpdateBar
   // watches, so the banner surfaces the available / up-to-date / disabled state.
   const [updateCheckSignal, setUpdateCheckSignal] = useState(0);
@@ -705,6 +706,7 @@ function AppContent(): React.ReactElement {
     redo: handleRedo,
     applyPageEdits: commitAndReport,
     openPreferences: () => setShowSettings('general'),
+    openProperties: () => setShowProperties(true),
     openLicenses: () => setShowSettings('licenses'),
     openAbout: () => setShowAbout(true),
     checkForUpdates: () => setUpdateCheckSignal((n) => n + 1),
@@ -727,6 +729,7 @@ function AppContent(): React.ReactElement {
       redo: () => h.current.redo(),
       applyPageEdits: () => h.current.applyPageEdits(),
       openPreferences: () => h.current.openPreferences(),
+      openProperties: () => h.current.openProperties(),
       openLicenses: () => h.current.openLicenses(),
       openAbout: () => h.current.openAbout(),
       checkForUpdates: () => h.current.checkForUpdates(),
@@ -1145,6 +1148,7 @@ function AppContent(): React.ReactElement {
           </div>
         </div>
       )}
+      {showProperties && <PropertiesDialog onClose={() => setShowProperties(false)} />}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
       <ConfirmDialog
         open={confirmState !== null}

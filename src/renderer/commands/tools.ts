@@ -137,8 +137,11 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'export',
     title: 'Export',
-    description: 'Pull the text out, or edit the document properties.',
-    ops: ['extract_text', 'metadata'],
+    // Properties left here at M5.5b: "what is this document?" is a dialog you
+    // ask about the file in front of you (Ctrl+D), not a job you pick from a
+    // grid of tools.
+    description: 'Pull the text out of a document.',
+    ops: ['extract_text'],
   },
 ] as const;
 

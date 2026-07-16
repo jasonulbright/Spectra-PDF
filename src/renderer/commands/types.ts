@@ -54,6 +54,8 @@ export interface AppCommandHandlers {
   applyPageEdits(): Promise<void>;
   /** Open the Settings modal (Edit ▸ Preferences… at M5). */
   openPreferences(): void;
+  /** Open the Document Properties dialog (File ▸ Properties…, Ctrl+D). */
+  openProperties(): void;
   /** Open the Settings modal at its third-party-licenses section (Help ▸
    * Third-party Licenses). Same surface as preferences until M5 splits it. */
   openLicenses(): void;

@@ -41,6 +41,9 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 'w', ctrl: true, command: 'file.close', scope: 'global', editableGuard: false, preventDefault: 'always' },
   { key: 'q', ctrl: true, command: 'file.exit', scope: 'global', editableGuard: false, preventDefault: 'always' },
   { key: 'k', ctrl: true, command: 'edit.preferences', scope: 'global', editableGuard: false, preventDefault: 'always' },
+  // Ctrl+D is Acrobat's Document Properties (§ 9.2). whenEnabled, not always:
+  // with no document open it must fall through rather than be swallowed.
+  { key: 'd', ctrl: true, command: 'file.properties', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
   // Tab cycling (§ 9.2). Ctrl+Tab / Ctrl+Shift+Tab — always available (Home +
   // Tools always present); guard-exempt so it cycles even from a focused field.
   { key: 'tab', ctrl: true, shift: false, command: 'window.nextTab', scope: 'global', editableGuard: false, preventDefault: 'always' },

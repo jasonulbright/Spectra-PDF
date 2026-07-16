@@ -1,6 +1,7 @@
 """Tests for all 10 SpectraPDF Python engine operations + inspect/validate."""
 
 import os
+import re
 import shutil
 
 import pikepdf
@@ -16,6 +17,7 @@ from engine.encrypt import encrypt, decrypt
 from engine.extract_text import extract_text
 from engine.metadata import get_metadata, set_metadata
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
+from engine.reversion import get_pdf_version, set_pdf_version
 from engine.validate import validate_pdf
 from engine.redact import redact
 from engine.watermark import watermark
@@ -2203,3 +2205,26 @@ class TestGenerateSigner:
         with pytest.raises(ValueError):
             sign_pdf(file=src, output=out, pfx_path=pfx, password="wrongpw")
         assert not os.path.exists(out)
+
+
+# ── PDF version ───────────────────────────────────────────────────────────
+
+
+class TestPdfVersion:
+    """`get_pdf_version` had NO test, and shipped returning "1.." for every
+    file: `pdf_version` is a string like "1.7", and the code indexed it as if
+    it were a (major, minor) tuple, so it took the first two characters —
+    '1' + '.' + '.'. It was on screen in the Optimize pane's "Current version"
+    the whole time. Nothing asserted the value, so nothing noticed."""
+
+    def test_reads_the_real_version(self, sample_pdf):
+        r = get_pdf_version(file=sample_pdf)
+        assert r["version"] == pikepdf.open(sample_pdf).pdf_version
+        # The shape a PDF version actually has — the old formula gave "1..".
+        assert re.fullmatch(r"\d+\.\d+", r["version"]), r["version"]
+        assert r["pages"] == 5
+
+    def test_round_trips_through_set_pdf_version(self, sample_pdf, tmp_dir):
+        out = os.path.join(tmp_dir, "v17.pdf")
+        set_pdf_version(file=sample_pdf, output=out, version="1.7")
+        assert get_pdf_version(file=out)["version"] == "1.7"

@@ -39,11 +39,20 @@ const FRIENDLY_NAMES: Record<string, string> = {
 };
 
 /** Methods that are internal lookups, not user-facing operations. */
+// Reads. They are NOT user-facing operations, so they don't belong in the
+// queue — and, more importantly, `useEngine.call` runs the COMMIT GATE for
+// anything trackable, which would make merely LOOKING at a document flush its
+// pending page edits to disk.
+//
+// `get_pdf_version` was missing from this list (found by M5.5b's Properties
+// e2e): every read of the PDF version — the Optimize pane's, and now the
+// Properties dialog's — was queuing as an operation and gating a commit.
 const INTERNAL_METHODS = new Set([
   'get_page_count',
   'get_page_info',
   'check_encrypted',
   'get_metadata',
+  'get_pdf_version',
   'get_outline',
 ]);
 

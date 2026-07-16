@@ -59,6 +59,8 @@ const recentSubmenu: MenuNode = {
       },
     },
     sep,
+    cmd('file.properties', 'menuitem-file-properties'),
+    sep,
     cmd('file.clearRecent', 'menuitem-file-clear-recent'),
   ],
 };

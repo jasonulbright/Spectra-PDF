@@ -4,6 +4,11 @@
 // to be the rail's items). Tools group them by the JOB the user came to do
 // (`commands/tools.ts`); this module is just the flat set and its names.
 //
+// `metadata` retired at M5.5b: document properties are a DIALOG (Ctrl+D), not a
+// job you pick from a tool — the first op to leave this list, and the type
+// system walked every dependent (the glyph map, the panel map, the owning
+// tool's ops, the command ids) rather than leaving one behind.
+//
 // It exists because the list had drifted into FOUR declarations — the `Operation`
 // union in `components/Sidebar`, a runtime `OPERATIONS` array derived from
 // tool-icons' GLYPHS, `PANEL_OPS` in the registry, and the `panels`/`titles`
@@ -19,7 +24,7 @@ export const OPERATIONS = [
   'compress', 'grayscale', 'optimize', 'pdfa', 'pdf_version',
   'repair', 'rebuild', 'recover',
   'encrypt', 'decrypt',
-  'extract_text', 'watermark', 'forms', 'compare', 'signatures', 'metadata',
+  'extract_text', 'watermark', 'forms', 'compare', 'signatures',
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];
@@ -31,7 +36,7 @@ export const OPERATION_TITLES: Record<Operation, string> = {
   compress: 'Compress', grayscale: 'Convert to Grayscale', optimize: 'Optimize PDF',
   pdfa: 'Convert to PDF/A', pdf_version: 'Set PDF Version',
   encrypt: 'Encrypt PDF', decrypt: 'Decrypt PDF',
-  extract_text: 'Extract Text', metadata: 'Edit Metadata',
+  extract_text: 'Extract Text',
   watermark: 'Watermark', forms: 'Fill Form', compare: 'Compare PDFs',
   signatures: 'Signatures',
   repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',
