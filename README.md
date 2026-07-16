@@ -14,8 +14,12 @@ Version 2.0 is an Acrobat-class workbench: a menu bar, main toolbar, and tabs ov
 - **Navigation pane** (`F4`) — Pages (thumbnails with drag-reorder), Bookmarks (with editing), Search, Signatures
 - **Find & Search** — floating find (`Ctrl+F`, `F3`/`Ctrl+G` stepping) and a workspace-wide Search panel (`Ctrl+Shift+F`); scanned pages become searchable (and selectable) via OCR
 
+![Organize view](docs/images/screenshot_organize.png)
+
 ### The twelve tools
 Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and recoloring on each, plus a comments sidebar; existing PDF annotations import as editable) · Fill & Sign (AcroForm fill on the page, digital signatures: verify, sign with PFX/PEM, visible stamps, sign-into-field) · Prepare Form (draw new fields on the page) · Redact (true content removal) · Scan & OCR · Compare (text + visual diff) · Protect (AES-256 encrypt/decrypt) · Optimize (compress, grayscale, linearize, PDF/A, PDF version) · Repair (three tiers up to per-page salvage) · Watermark · Export (text extraction)
+
+![Tools](docs/images/screenshot_tools.png)
 
 ### Documents & files
 - **Print** (`Ctrl+P`) — printer picker, page range, copies, fit/actual, through the bundled Ghostscript to any Windows printer
