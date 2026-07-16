@@ -471,22 +471,20 @@ export const COMMANDS: Record<CommandId, Command> = {
       `tools.open.${tool.id}`,
       {
         title: tool.title,
-        // The two-entry-point question M5.1 flagged here, now that the Tools
-        // MENU (§ 9.1) is the second caller and can fire from a doc tab with a
-        // tool already open. The answer is that the two are different questions
-        // with different scopes, not one question with two answers:
+        // The two-entry-point question M5.1 flagged here, settled: EVERY tool
+        // sets `activeToolId` when opened, ops-less ones included. It is "the
+        // tool that is open", full stop — one answer, not one per surface.
         //
-        //   `activeToolId` = which tool's pane the TOOLS TAB is showing.
-        //   the armed MODE = which tool is live on the DOCUMENT (§ 3.1's own
-        //                    words — the secondary toolbar reads this).
+        // (An earlier draft of this comment claimed the opposite, and stayed
+        // there for a commit after the code changed underneath it. `activeToolId`
+        // is what the secondary toolbar reads, so Escape can disarm the mode
+        // without closing the tool — which is why the ops-less branch had to
+        // start setting it.)
         //
-        // So the ops-less branch deliberately does NOT touch `activeToolId`:
-        // Comment/Redact/Scan & OCR have no Tools-tab pane, so they have nothing
-        // to open there, and the Tools tab is left exactly as the user left it.
-        // Opening Comment from the tile grid leaves `activeToolId` null, so
-        // returning to the Tools tab still shows the grid — consistent, not
-        // stale. `toolForCanvasTool` is what answers "which tool is armed?", and
-        // it is exact because M5.3 made mode→tool ownership disjoint.
+        // What each surface does with it differs, and that's the actual answer:
+        // the DOC tab's strip shows the tool if it drives the canvas; the TOOLS
+        // tab shows its pane if it has ops, and an honest "this works on the
+        // page" fence if it doesn't.
         //
         // A tool whose work happens ON the page needs a page to show. Not just
         // "activeFileId is set": an import-only source is bytes with no tab, and

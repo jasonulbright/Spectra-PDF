@@ -89,7 +89,14 @@ function AppContent(): React.ReactElement {
   // The tool whose task pane the Tools tab is showing. null = show the Tools
   // Center (the tile grid) instead — "no tool open" is a real state, not an
   // absence to paper over, so the tab always has something to say.
-  const activeTool = state.ui.activeToolId ? toolById(state.ui.activeToolId) : null;
+  // The tool whose pane the Tools tab shows. `activeToolId` outlives the
+  // document it was opened on (deliberately — Escape disarms the mode, not the
+  // tool), so an ops-less tool with nothing to act on has NOTHING to put here:
+  // its pane is a fence saying "this works on the page" plus a button that
+  // `when`-fails with no document open. A dead button is worse than the grid.
+  const openTool = state.ui.activeToolId ? toolById(state.ui.activeToolId) : null;
+  const activeTool =
+    openTool && (openTool.ops.length > 0 || showableDoc(state)) ? openTool : null;
   const setActiveOp = useCallback(
     (op: Operation) => dispatch({ type: 'UI_SET_ACTIVE_OP', op }),
     [dispatch],

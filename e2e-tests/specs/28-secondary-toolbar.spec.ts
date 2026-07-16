@@ -1,6 +1,13 @@
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { waitForHarness, openByPaths, getState } from '../support/harness.js';
+import {
+  waitForHarness,
+  openByPaths,
+  getState,
+  closeAllFiles,
+  focusTab,
+  invokeAppCommand,
+} from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
@@ -139,5 +146,44 @@ describe('secondary toolbar', () => {
     await expect($('[data-testid="tool-redact"]')).toBeDisplayed();
     // Comment's modes belong to Comment.
     await expect($('[data-testid="tool-highlight"]')).not.toBeExisting();
+  });
+
+  it('the Tools tab greys a tool that needs a document, instead of a dead click', async () => {
+    // `invokeCommand` no-ops silently on a failed `when`, so an ungated tile is
+    // a dead click that looks exactly like a live one. The menu bar already
+    // greyed these; the grid invokes the SAME command and must agree.
+    await closeAllFiles();
+    await focusTab('tools');
+    await $('[data-testid="tools-center"]').waitForDisplayed({
+      timeoutMsg: 'no tile grid with nothing open',
+    });
+    // Work-on-the-page tools: disabled. A form tool: still live (its panel
+    // prompts for a file).
+    for (const id of ['comment', 'redact', 'ocr', 'fillsign', 'prepareform']) {
+      await expect($(`[data-testid="tool-tile-${id}"]`)).toBeDisabled();
+    }
+    await expect($('[data-testid="tool-tile-protect"]')).toBeEnabled();
+  });
+
+  it('an ops-less tool left open outlives its document without stranding the Tools tab', async () => {
+    // `activeToolId` deliberately outlives the document (Escape disarms the
+    // mode, not the tool). Comment's Tools-tab pane is a fence saying "this
+    // works on the page" — with no page, its only button is one that cannot
+    // run. Fall back to the grid rather than show a dead end.
+    await openByPaths([SAMPLE_PDF]);
+    // The menu path is proven above; this case is about what the Tools TAB does
+    // with a tool that outlives its document, so drive the command directly.
+    expect(await invokeAppCommand('tools.open.comment')).toBe(true);
+    await browser.waitUntil(async () => (await getState()).activeToolId === 'comment', {
+      timeoutMsg: 'Comment did not open',
+    });
+    await closeAllFiles();
+    await focusTab('tools');
+    // The tool is still open in state...
+    expect((await getState()).activeToolId).toBe('comment');
+    // ...but the tab shows the grid, not a fence with an inert button.
+    await expect($('[data-testid="tools-center"]')).toBeDisplayed();
+    await expect($('[data-testid="tool-on-canvas"]')).not.toBeExisting();
+    await openByPaths([SAMPLE_PDF]);
   });
 });

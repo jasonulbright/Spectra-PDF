@@ -503,6 +503,23 @@ describe('invokeCommand', () => {
     expect(invokeCommand('tools.open.protect')).toBe(true);
   });
 
+  it('a tool that WORKS ON THE PAGE is disabled with no document — including the ones that also have a pane', () => {
+    wire(initialState);
+    // Fill & Sign and Prepare Form have ops AND modes. The old ops-first test
+    // made them reachable with nothing open; they'd land on the Tools tab and
+    // show their panel's "Open a PDF" prompt. They own canvas modes, so their
+    // work is on the page, so they need one — and the tile/menu grey out rather
+    // than pretending. This assertion is the fact; the test edits elsewhere in
+    // this file merely stopped tripping over it.
+    for (const id of ['comment', 'redact', 'ocr', 'fillsign', 'prepareform']) {
+      expect(invokeCommand(`tools.open.${id}` as CommandId), `${id} ran with no document`).toBe(false);
+    }
+    // A tool whose work is a FORM stays reachable — its panel prompts for a file.
+    for (const id of ['protect', 'optimize', 'organize', 'watermark', 'export', 'repair', 'compare']) {
+      expect(invokeCommand(`tools.open.${id}` as CommandId), `${id} was blocked`).toBe(true);
+    }
+  });
+
   it('tools.open.* for a canvas-mode tool refuses a GHOST import-only active file', () => {
     // Closing the last real file can leave a byte-only import source as the
     // active id. focusTab rejects a doc tab for it, so arming the mode anyway

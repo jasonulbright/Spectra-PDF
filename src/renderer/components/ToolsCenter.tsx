@@ -1,5 +1,6 @@
 import React from 'react';
 import { TOOL_DEFS, type ToolId } from '../commands/tools';
+import { isCommandEnabled } from '../commands/context';
 import { ToolIcon } from './tool-icons';
 
 // The Tools tab's landing surface (Phase 4 M5, § 7): a grid of tiles, one per
@@ -21,12 +22,22 @@ export function ToolsCenter({ onOpenTool }: ToolsCenterProps): React.JSX.Element
       <h2 className="tools-center-heading">Tools</h2>
       <p className="tools-center-sub">Choose what you want to do with your document.</p>
       <div className="tools-grid">
-        {TOOL_DEFS.map((tool) => (
+        {TOOL_DEFS.map((tool) => {
+          // Grey what can't run, exactly as the menu bar does for the same
+          // command. `invokeCommand` silently no-ops on a failed `when`, so an
+          // ungated tile is a dead click that looks identical to a live one —
+          // and every tool whose work is on the page is disabled with no
+          // document open. The menu and the grid invoke the SAME command; they
+          // must agree about whether it can run.
+          const enabled = isCommandEnabled(`tools.open.${tool.id}`);
+          return (
           <button
             key={tool.id}
             type="button"
             data-testid={`tool-tile-${tool.id}`}
             className="tool-tile"
+            disabled={!enabled}
+            title={enabled ? undefined : 'Open a PDF first'}
             onClick={() => onOpenTool(tool.id)}
           >
             <span className="tool-tile-icon" aria-hidden="true">
@@ -38,7 +49,8 @@ export function ToolsCenter({ onOpenTool }: ToolsCenterProps): React.JSX.Element
             <span className="tool-tile-title">{tool.title}</span>
             <span className="tool-tile-desc">{tool.description}</span>
           </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
