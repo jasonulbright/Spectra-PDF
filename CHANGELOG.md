@@ -1,5 +1,63 @@
 # Changelog
 
+## 2.0.0 — The Workbench
+
+The whole application becomes an Acrobat-class workbench: a menu bar, a main
+toolbar, tabs, a reading view, and twelve task-oriented tools over the same
+engine — with the Acrobat keymap, verified against Adobe's published table
+and frozen. Everything from 1.0 is still here; it moved into a shape you
+already know how to drive.
+
+### The frame
+- Menu bar (File/Edit/View/Document/Tools/Window/Help), main toolbar, and a
+  tab strip: Home, Tools, and one tab per open document
+- Home tab with recent files (now with an opened-when column) replaces the
+  welcome screen; the Tools tab hosts a tile grid of the twelve tools
+- Windows 11 Mica translucency on the chrome where the OS supports it, with
+  a byte-identical solid fallback on Windows 10
+
+### Reading view
+- A continuous, virtualized reading view is the default way to see a
+  document — smooth with 1,000-page files (measured: first paint ~1/3s,
+  4–6 pages mounted at any scroll depth)
+- Real text selection and copy; zoom presets (Ctrl+0/1/2), a page box
+  (Ctrl+Shift+N), and cross-document Find/Search
+- Rotate View (view-only quarter turns, Ctrl+Shift+Plus/Minus) — the page
+  turns, the file doesn't; every tool keeps working while turned
+- Hand/Select modes with Space as a temporary hand, like Acrobat
+- The Organize view (the 1.0 page-strip board) remains one click away —
+  View ▸ Organize All Documents — for rearranging pages across files
+
+### Navigation pane
+- Pages (thumbnails with drag-reorder), Bookmarks (with editing), Search,
+  and Signatures panels; F4 toggles the pane, Shift+F4 the Tools tab
+
+### Tools, dialogs, print
+- The whole-file operations regrouped into twelve tools by the job:
+  Organize, Comment, Fill & Sign, Prepare Form, Redact, Scan & OCR,
+  Compare, Protect, Optimize, Repair, Watermark, Export
+- Document Properties on Ctrl+D; Preferences as a categorized dialog on
+  Ctrl+K; every dialog closes on Escape and traps focus properly
+- **Print** (Ctrl+P): printer picker, page range, copies, fit/actual —
+  through the bundled Ghostscript to any Windows printer; `print` and
+  `printers` CLI arms ship alongside
+- Insert blank pages (Ctrl+Shift+T) sized to their neighbor, undoable like
+  every page edit
+
+### Keyboard
+- The Acrobat keymap, cross-verified and frozen: standard chords, the
+  document-op set (Ctrl+Shift+D/I/R/T/N), F3/Ctrl+G find stepping, and
+  optional single-key tool accelerators (H/V/U/X/D/K) — off by default,
+  exactly like Acrobat
+- The webview's own keys (reload, browser zoom) can never fire — a
+  disabled shortcut means nothing happens, not something surprising
+
+### Correctness
+- One file is one document no matter how its path is spelled (case,
+  slashes, short names) — paths canonicalize at the OS boundary
+- Printing, properties, and every whole-file operation see pending page
+  edits (the commit gate holds across the new views)
+
 ## 1.0.0 — The Canvas Workspace
 
 Open PDF Studio grows from a batch-operations tool into a visual PDF workspace:

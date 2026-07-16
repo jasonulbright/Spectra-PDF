@@ -43,7 +43,15 @@
 .bg-red-500 { background-color: #D93939; }
 
 /* ── Light theme overrides ────────────────────────────────────────────────
-   Remaps the dark neutral palette to light equivalents.
+   Remaps the dark utility palette to light equivalents. This block IS the
+   panels' light theme, permanently — NOT a legacy shim awaiting deletion.
+   The workbench CHROME themes via semantic vars (--bar-bg etc., § 10.2 of
+   the phase-4 doc); panel BODIES deliberately kept their utility classes at
+   M5 (ported, not restyled), so this remap is their theming mechanism and
+   deleting it would delete the light theme (decision recorded in the
+   phase-4 doc § 10.2 revision note + § 15 M7.2). Audited class-by-class at
+   M7.2; a NEW dark utility class used on a panel must add its light remap
+   here in the same change.
    Selector specificity ([data-theme] .class) beats a bare Tailwind class.
    ──────────────────────────────────────────────────────────────────────── */
 
@@ -99,6 +107,46 @@
 [data-theme="light"] .bg-red-600 { background-color: #D2424E; color: #ffffff; }
 [data-theme="light"] .hover\:bg-red-500:hover { background-color: #e85963; }
 [data-theme="light"] .bg-red-500 { background-color: #D2424E; color: #ffffff; }
+
+/* Status/badge text tints (M7.2 light-theme sweep) — the dark-theme pastel
+   tints (red-400, green-300, amber-200…) sit at or under 3:1 on white,
+   sub-AA for exactly the text that must be readable: errors, warnings,
+   verification results. Remapped to their dark full-strength counterparts;
+   opacity variants inherit via the same class token. */
+[data-theme="light"] .text-red-400   { color: #b91c1c; }
+[data-theme="light"] .text-red-300   { color: #b91c1c; }
+[data-theme="light"] .text-red-200   { color: #991b1b; }
+[data-theme="light"] .text-green-400 { color: #15803d; }
+[data-theme="light"] .text-green-300 { color: #15803d; }
+[data-theme="light"] .text-green-300\/90 { color: #15803d; }
+[data-theme="light"] .text-green-300\/70 { color: #15803db3; }
+[data-theme="light"] .text-green-200 { color: #166534; }
+[data-theme="light"] .text-amber-500\/80 { color: #b45309; }
+[data-theme="light"] .text-amber-400 { color: #b45309; }
+[data-theme="light"] .text-amber-300 { color: #92400e; }
+[data-theme="light"] .text-amber-300\/90 { color: #92400e; }
+[data-theme="light"] .text-amber-200 { color: #92400e; }
+[data-theme="light"] .text-amber-200\/90 { color: #92400e; }
+[data-theme="light"] .text-blue-400  { color: #0c857a; }
+[data-theme="light"] .text-blue-200  { color: #0c857a; }
+/* Hover states — red-100/amber-100 are used ONLY as hover: variants (dark
+   theme brightens on hover; light darkens from the -300 base above), and a
+   bare .text-red-100 rule would never match the hover\: token. blue-200 is
+   used BOTH bare (spans above) and as a hover: variant on blue-400 links —
+   the hover must land on a different value than the base or it's a no-op. */
+[data-theme="light"] .hover\:text-red-100:hover   { color: #7f1d1d; }
+[data-theme="light"] .hover\:text-amber-100:hover { color: #78350f; }
+[data-theme="light"] .hover\:text-blue-200:hover  { color: #115e59; }
+[data-theme="light"] .hover\:text-red-400:hover   { color: #b91c1c; }
+[data-theme="light"] .hover\:bg-red-900\/40:hover { background-color: rgba(210, 66, 78, 0.15); }
+/* Success buttons/badges: emerald-600 under white text is 3.06:1 on its own
+   — darkened for AA in light mode. color pinned like .bg-red-600/.bg-blue-600
+   above: the unscoped light .text-white remap (near-black) would otherwise
+   win on the same element and land ~3.2:1 on this green. */
+[data-theme="light"] .bg-emerald-600 { background-color: #047857; color: #ffffff; }
+[data-theme="light"] .bg-emerald-500 { background-color: #047857; color: #ffffff; }
+[data-theme="light"] .hover\:bg-emerald-500:hover { background-color: #065f46; }
+[data-theme="light"] .focus\:border-emerald-500:focus { border-color: #047857; }
 
 /* Focus ring */
 [data-theme="light"] .focus\:border-blue-500:focus { border-color: #0d9488; }

@@ -19,7 +19,9 @@ export default tseslint.config(
       'react-hooks/exhaustive-deps': 'warn',
       // Advisory style rules — reported as warnings, not build-breaking errors.
       '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      // ignoreRestSiblings exempts ONLY the `{ [k]: _omitted, ...rest }`
+      // destructure-omit idiom, not unused variables in general.
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', ignoreRestSiblings: true }],
     },
   },
 );

@@ -1,115 +1,98 @@
 # Open PDF Studio
 
-Modern, open-source PDF manipulation studio for Windows. Tauri v2 + React, with an embedded Python engine and vendored upstream Ghostscript (AGPL-3.0). No ads, no telemetry, no upsells. WebView2 prerequisite (ships with Windows 10/11).
+A modern, open-source PDF workbench for Windows. Tauri v2 + React, with an embedded Python engine and vendored upstream Ghostscript (AGPL-3.0). No ads, no telemetry, no upsells. WebView2 prerequisite (ships with Windows 10/11).
 
 ![Open PDF Studio](docs/images/screenshot_dark_clean.png)
 
-## Features
+## What it is
 
-| Feature | Engine | Status |
-|---------|--------|--------|
-| Merge PDFs | pikepdf | **Working** |
-| Split by page range | pikepdf | **Working** |
-| Rotate pages | pikepdf | **Working** |
-| Delete pages | pikepdf | **Working** |
-| Compress (presets + custom DPI) | Ghostscript | **Working** |
-| Grayscale conversion | Ghostscript | **Working** |
-| Optimize (linearize, strip, compress) | pikepdf | **Working** |
-| PDF/A conversion | Ghostscript | **Working** |
-| PDF version control | pikepdf | **Working** |
-| Encrypt / decrypt | pikepdf | **Working** |
-| Extract text | pdfminer.six | **Working** |
-| Metadata editing + strip | pikepdf | **Working** |
-| Thumbnail preview | pdf.js | **Working** |
-| Page inspector | pdf.js | **Working** |
-| Merge workspace | @dnd-kit | **Working** |
-| NSIS installer | Tauri bundler | **Working** |
-| Silent install / uninstall | NSIS `/S` | **Working** |
-| File associations | .pdf handler | **Working** |
-| Explorer context menu | Open / Merge with | **Working** |
-| System tray | Minimize to tray, start minimized | **Working** |
-| Start with Windows | HKCU Run key + --minimized | **Working** |
-| Auto-update | tauri-plugin-updater | **Working** |
-| Light/dark mode | CSS + Window.setTheme() | **Working** |
-| GS engine detection | ARP registry + version query | **Working** |
-| CLI / headless mode | clap + JSON-RPC | **Working** |
-| Batch processing | CLI directory iteration | **Working** |
-| WCAG 2.1 AA | All text ≥4.5:1, UI ≥3:1 | **Passing** |
+Version 2.0 is an Acrobat-class workbench: a menu bar, main toolbar, and tabs over a continuous reading view, a navigation pane, and twelve task-oriented tools — with the Acrobat keymap (verified against Adobe's published table) so your muscle memory just works. Every whole-file operation also ships as a CLI subcommand with identical results.
+
+### Reading & navigating
+- **Reading view** — continuous, virtualized scroll; smooth with 1,000-page documents. Real text selection and copy, zoom presets (`Ctrl+0/1/2`), go-to-page (`Ctrl+Shift+N`), Rotate View (`Ctrl+Shift+Plus/Minus` — the page turns, the file doesn't), Hand/Select with Space as a temporary hand
+- **Organize view** — every open file as a strip of live page thumbnails; drag pages within and across documents, multi-select, whole-document merge, drop files to import their pages at that spot. All of it staged in memory, committed atomically, undoable
+- **Navigation pane** (`F4`) — Pages (thumbnails with drag-reorder), Bookmarks (with editing), Search, Signatures
+- **Find & Search** — floating find (`Ctrl+F`, `F3`/`Ctrl+G` stepping) and a workspace-wide Search panel (`Ctrl+Shift+F`); scanned pages become searchable (and selectable) via OCR
+
+### The twelve tools
+Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and recoloring on each, plus a comments sidebar; existing PDF annotations import as editable) · Fill & Sign (AcroForm fill on the page, digital signatures: verify, sign with PFX/PEM, visible stamps, sign-into-field) · Prepare Form (draw new fields on the page) · Redact (true content removal) · Scan & OCR · Compare (text + visual diff) · Protect (AES-256 encrypt/decrypt) · Optimize (compress, grayscale, linearize, PDF/A, PDF version) · Repair (three tiers up to per-page salvage) · Watermark · Export (text extraction)
+
+### Documents & files
+- **Print** (`Ctrl+P`) — printer picker, page range, copies, fit/actual, through the bundled Ghostscript to any Windows printer
+- **Document Properties** (`Ctrl+D`), categorized **Preferences** (`Ctrl+K`)
+- Insert pages from a file (`Ctrl+Shift+I`) or blank (`Ctrl+Shift+T`), delete (`Ctrl+Shift+D`), rotate (`Ctrl+Shift+R`), split, extract
+- The `.pdfx` format: several documents saved as one ordinary, fully-compatible PDF that reopens as separate strips
+- Multi-level undo/redo across staged page edits and applied operations; one file is one document no matter how its path is spelled
+
+### Desktop citizenship
+NSIS installer with silent modes and enterprise policy, file associations, Explorer context menu, system tray, start-with-Windows, auto-update, light/dark/system themes with Windows accent + Mica, WCAG 2.1 AA, full keyboard navigation (single-key tool accelerators available, off by default like Acrobat).
 
 ## Command Line
 
-Use `openpdfstudio.exe /?` to see all subcommands and flags:
-
-![CLI Help](docs/images/cmd_switches.png)
-
-When invoked with a subcommand, Open PDF Studio runs headless — no window, same engine.
+When invoked with a subcommand, Open PDF Studio runs headless — no window, same engine. `openpdfstudio.exe /?` shows the full list.
 
 ```bash
 # Compress
 openpdfstudio compress input.pdf -o compressed.pdf --quality ebook
 
-# Merge
+# Merge / split / rotate / delete
 openpdfstudio merge a.pdf b.pdf c.pdf -o merged.pdf
-
-# Rotate
-openpdfstudio rotate input.pdf -o rotated.pdf --angle 90 --pages 1,3,5
-
-# Split
 openpdfstudio split input.pdf -o output_dir/ --ranges "1-3,5-7"
+openpdfstudio rotate input.pdf -o rotated.pdf --angle 90 --pages 1,3,5
+openpdfstudio delete input.pdf -o trimmed.pdf --pages 3,7
 
-# Encrypt / Decrypt
+# Print — to any installed Windows printer, via the bundled Ghostscript
+openpdfstudio printers                       # list printers (JSON, with the default)
+openpdfstudio print input.pdf --printer "Brother HL-L2400D" --pages 1-3 --copies 2 --fit fit
+
+# Encrypt / decrypt
 openpdfstudio encrypt input.pdf -o encrypted.pdf --password secret
 openpdfstudio decrypt encrypted.pdf -o decrypted.pdf --password secret
 
-# PDF/A
+# PDF/A, optimize, grayscale, version
 openpdfstudio pdfa input.pdf -o archive.pdf --level 2b
-
-# Extract text
-openpdfstudio extract-text input.pdf --pages 1,2,3
-
-# Delete pages
-openpdfstudio delete input.pdf -o trimmed.pdf --pages 3,7
-
-# Metadata (read)
-openpdfstudio metadata input.pdf
-
-# Metadata (write)
-openpdfstudio metadata input.pdf -o updated.pdf --title "New Title" --author "Name"
-
-# Metadata (strip all)
-openpdfstudio metadata input.pdf --strip -o stripped.pdf
-
-# Grayscale
-openpdfstudio grayscale input.pdf -o grayscale.pdf
-
-# Optimize (linearize + strip metadata + compress streams)
 openpdfstudio optimize input.pdf -o optimized.pdf --linearize --strip-metadata --compress-streams
-
-# PDF version
+openpdfstudio grayscale input.pdf -o grayscale.pdf
 openpdfstudio pdf-version input.pdf -o out.pdf --version 1.7
 
-# Compress with custom DPI
-openpdfstudio compress input.pdf -o compressed.pdf --dpi 200
+# Text, metadata
+openpdfstudio extract-text input.pdf --pages 1,2,3
+openpdfstudio metadata input.pdf --title "New Title" -o updated.pdf
+openpdfstudio metadata input.pdf --strip -o stripped.pdf
+
+# Forms — list fields (JSON), or fill (± flatten)
+openpdfstudio forms input.pdf
+openpdfstudio forms input.pdf -o filled.pdf --set name=Ada --set subscribe=true --flatten
+
+# Bookmarks — read (JSON) or replace
+openpdfstudio outline input.pdf
+openpdfstudio outline input.pdf -o out.pdf --from-json bookmarks.json
+
+# Signatures
+openpdfstudio verify-signatures signed.pdf
+openpdfstudio sign input.pdf -o signed.pdf --pfx signer.pfx --password pass
+openpdfstudio generate-signer -o me.pfx --cn "My Name" --password pass
+
+# Compare, redact, watermark, repair tiers
+openpdfstudio compare a.pdf b.pdf
+openpdfstudio redact input.pdf -o redacted.pdf --page 1 --rect 100,100,300,150
+openpdfstudio watermark input.pdf -o marked.pdf --text "CONFIDENTIAL"
+openpdfstudio repair broken.pdf -o repaired.pdf
+openpdfstudio rebuild broken.pdf -o rebuilt.pdf
+openpdfstudio recover broken.pdf -o recovered.pdf
+openpdfstudio check input.pdf
 
 # Batch — process every PDF in a directory
 openpdfstudio batch C:\pdfs\ -o C:\out\ compress --quality ebook
-openpdfstudio batch C:\pdfs\ -o C:\out\ rotate --angle 90
-openpdfstudio batch C:\pdfs\ -o C:\out\ pdfa --level 2b
-openpdfstudio batch C:\pdfs\ -o C:\out\ grayscale
-openpdfstudio batch C:\pdfs\ -o C:\out\ optimize --strip-metadata
 ```
 
 Results are JSON on stdout. Progress and errors go to stderr. Exit codes: 0 = success, 1 = operation error, 2 = bad args.
 
 ## Enterprise Deployment
 
-Use `Setup.exe /?` to see all installer switches:
-
-![Installer Switches](docs/images/silent.png)
-
 ```bash
 # Silent install (per-machine, auto-update disabled)
-"Open PDF Studio_1.0.0_x64-setup.exe" /S
+"Open PDF Studio_2.0.0_x64-setup.exe" /S
 
 # Silent uninstall (keeps user data for redeployment)
 "C:\Program Files\Open PDF Studio\uninstall.exe" /S
@@ -117,6 +100,11 @@ Use `Setup.exe /?` to see all installer switches:
 # Silent uninstall (removes all user data)
 "C:\Program Files\Open PDF Studio\uninstall.exe" /S /removeuserdata
 ```
+
+Auto-update can be disabled machine-wide via `HKLM\SOFTWARE\Open PDF Studio\DisableAutoUpdate = 1` (set automatically by the silent installer). Ghostscript and the Python runtime are bundled — nothing else to deploy. The installer's own `/?` dialog documents all switches:
+
+<img src="docs/images/silent.png" width="376" alt="Installer switches dialog">
+
 
 ## Requirements
 
@@ -154,7 +142,7 @@ npm run dev
 npm run package
 ```
 
-This runs `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs pikepdf/pdfminer), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it into `resources/`), then `cargo tauri build` (compiles Rust, bundles WebView2 frontend, produces the NSIS installer).
+This runs `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it into `resources/`), then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, produces the NSIS installer).
 
 Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio_X.Y.Z_x64-setup.exe`
 
@@ -177,17 +165,17 @@ Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio_X.Y.Z_x64-setup.ex
         |                                        |                                         |
         v                                        v                                         v
   WebView2 (Edge)                          Tauri commands                           Embedded Python 3.14
-  - Welcome screen                         - File dialogs                           - 10 operation handlers
-  - Thumbnail grid                         - File operations                        - pikepdf (structural)
-  - Page inspector                         - Sidecar management                     - pdfminer.six (text)
-  - Merge workspace                        - System tray                            - Ghostscript (upstream)
-  - Collapsible sidebar                    - Single instance                          (compress, PDF/A)
-  - Settings modal                         - Auto-updater
-  - Undo/save/dirty tracking               - Registry policy check
+  - Menu bar / toolbar / tabs              - File dialogs + path canon              - 30+ operation handlers
+  - Reading view (virtualized)             - Printer enumeration                    - pikepdf (structural)
+  - Organize board (page strips)           - Sidecar management                     - pdfminer.six (text)
+  - Navigation pane                        - System tray                            - pyHanko (signatures)
+  - Twelve task panes                      - Single instance                        - Ghostscript (upstream:
+  - Command registry + keymap              - Auto-updater                             compress, PDF/A, print)
+  - pdf.js render + text layer             - Registry policy check
 ```
 
-**Frontend**: Tauri v2 (WebView2), React 19, TailwindCSS, pdf.js, @dnd-kit
-**Backend**: Rust (Tauri commands) + Python 3.14 (embedded), pikepdf, pdfminer.six, Ghostscript (upstream, AGPL-3.0)
+**Frontend**: Tauri v2 (WebView2), React 19, TailwindCSS, pdf.js, pdf-lib, tesseract.js
+**Backend**: Rust (Tauri commands) + Python 3.14 (embedded), pikepdf, pdfminer.six, pyHanko, Ghostscript (upstream, AGPL-3.0)
 **IPC**: Tauri `invoke()` (JS→Rust), JSON-RPC 2.0 over stdin/stdout (Rust→Python)
 
 ## Project Structure
@@ -198,35 +186,28 @@ openpdfstudio/
 │   ├── src/
 │   │   ├── lib.rs             # App setup, tray, single-instance, events
 │   │   ├── cli.rs             # CLI arg parsing, headless engine, batch mode
-│   │   ├── commands.rs        # 16 IPC command handlers
+│   │   ├── commands.rs        # IPC command handlers (dialogs, paths, printers…)
+│   │   ├── printers.rs        # winspool printer enumeration
 │   │   └── engine.rs          # Python sidecar lifecycle
 │   ├── tauri.conf.json        # Tauri config, NSIS, resources, plugins
-│   ├── Cargo.toml             # Rust dependencies
 │   └── nsis-hooks.nsh         # Context menu, registry, enterprise policy
 ├── src/
 │   ├── renderer/              # React frontend (rendered by WebView2)
-│   │   ├── App.tsx            # Root — views, state, file ops
-│   │   ├── state/             # AppState context + reducer
-│   │   ├── hooks/             # useEngine, useActiveFile
-│   │   ├── lib/               # tauri-bridge, pdfRenderer
-│   │   ├── components/        # Sidebar, ThumbnailGrid, PageInspector, etc.
-│   │   └── panels/            # One panel per operation
-│   ├── engine/                # Python PDF engine
-│   │   ├── __main__.py        # JSON-RPC server, handler registration
-│   │   ├── __startup__.py     # Embedded Python launcher
-│   │   ├── ipc.py             # JSON-RPC protocol
-│   │   └── *.py               # One file per operation
-│   └── shared/
-│       └── types.ts           # IPC type definitions
-├── resources/
-│   ├── python/                # Embedded Python 3.14 (gitignored, built by script)
-│   └── ghostscript/           # Vendored upstream GS (gitignored, built by script)
-├── scripts/
-│   ├── setup-python-embed.ps1 # Downloads + configures embedded Python
-│   └── bundle-ghostscript.ps1 # Downloads + vendors upstream GS
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
+│   │   ├── App.tsx            # Root — dialogs, funnels, state wiring
+│   │   ├── commands/          # Command registry, menus, keymap, tools model
+│   │   ├── state/             # AppState reducer, selectors, types
+│   │   ├── components/        # Chrome (MenuBar/MainToolbar/TabStrip…),
+│   │   │   ├── canvas/        #   the reading view + organize board
+│   │   │   └── navpane/       #   the navigation pane panels
+│   │   ├── panels/            # One task pane per operation
+│   │   ├── search/, ocr/      # Find/Search engine, tesseract.js OCR
+│   │   ├── hooks/, lib/       # Engine bridge, commit gate, pdf builders
+│   │   └── testHarness.ts     # e2e hooks (compiled in only with VITE_E2E)
+│   └── engine/                # Python PDF engine (one file per operation)
+├── e2e-tests/                 # WDIO specs against the built binary
+├── tests/                     # vitest (renderer) + pytest (engine)
+├── resources/                 # Embedded Python + vendored GS (built by scripts)
+└── scripts/                   # setup-python-embed.ps1, bundle-ghostscript.ps1
 ```
 
 ## License
