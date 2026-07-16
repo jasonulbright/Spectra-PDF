@@ -1,7 +1,7 @@
 import React from 'react';
 import { invokeCommand } from '../../commands/context';
 import { COMMANDS, SECONDARY_TOOLBAR_ACTIONS, TOOL_TITLES } from '../../commands/registry';
-import { toolForCanvasTool } from '../../commands/tools';
+import { toolById } from '../../commands/tools';
 import type { CanvasTool } from '../../state/types';
 import { ANNOTATION_PALETTE, STAMP_PRESETS } from './PageCell';
 import type { StampPreset } from './PageCell';
@@ -27,7 +27,10 @@ import type { StampPreset } from './PageCell';
 // them the moment you pressed Escape.
 
 export interface SecondaryToolbarProps {
+  /** The armed mode — which of the tool's buttons reads as active. */
   tool: CanvasTool;
+  /** The OPEN tool (ui.activeToolId). Null = none. */
+  activeToolId: string | null;
   /** Colour for NEW annotations; null = the kind's default. */
   toolColor: string | null;
   onSetToolColor: (color: string | null) => void;
@@ -38,15 +41,21 @@ export interface SecondaryToolbarProps {
 
 export function SecondaryToolbar({
   tool,
+  activeToolId,
   toolColor,
   onSetToolColor,
   stampPreset,
   onSetStampPreset,
 }: SecondaryToolbarProps): React.JSX.Element | null {
-  const owner = toolForCanvasTool(tool);
-  if (!owner) return null; // Select: no tool is active, so there is nothing to show.
+  // The strip belongs to the OPEN TOOL, not to the armed mode: Escape means
+  // "stop drawing", not "close Comment", and with the pill gone a strip that
+  // vanished on Escape would leave no way to re-arm short of the Tools menu.
+  // Only a tool that drives the canvas has one — Optimize has nothing to say
+  // about a page.
+  const owner = activeToolId ? toolById(activeToolId) : undefined;
+  if (!owner?.canvasTools?.length) return null;
 
-  const modes = owner.canvasTools ?? [];
+  const modes = owner.canvasTools;
   const actions = SECONDARY_TOOLBAR_ACTIONS[owner.id];
   // Only the ANNOTATION modes carry a colour; a stamp carries its preset's.
   const colored = modes.includes(tool) && tool !== 'stamp' && owner.id === 'comment';
@@ -57,8 +66,10 @@ export function SecondaryToolbar({
 
       {/* The tool's modes. One button per mode it owns — the pill's job, minus
           the seven modes belonging to tools you didn't pick. */}
-      {modes.length > 1 && (
-        <div className="secondary-toolbar-modes" role="group" aria-label={`${owner.title} tools`}>
+      {/* Every mode it owns gets a button, INCLUDING a lone one: Prepare Form
+          owns only `formfields`, and § 3.2 calls for its "+ Add Field" control
+          by name — gating on >1 silently deleted it, and Redact's too. */}
+      <div className="secondary-toolbar-modes" role="group" aria-label={`${owner.title} tools`}>
           {modes.map((m) => (
             <button
               key={m}
@@ -71,8 +82,7 @@ export function SecondaryToolbar({
               {TOOL_TITLES[m]}
             </button>
           ))}
-        </div>
-      )}
+      </div>
 
       {actions.length > 0 && (
         <div className="secondary-toolbar-actions">

@@ -438,18 +438,16 @@ export function WorkspaceCanvasView({
         setNfName('');
         setNfOptions('');
         setNfMultiline(false);
-        // Land in Fill, exactly where the old add-field boolean left you (it
-        // cleared itself and left `forms` armed). Not 'select': the popup
-        // promises "fillable right away", and a widget renders nothing outside
-        // the form modes — disarming here made the field the user had just
-        // placed VANISH, which is the opposite of the promise.
+        // Stay in Prepare Form's own mode, ready to place the next field.
         //
-        // Wrinkle for M5.4: under the ownership model this means creating a
-        // field in Prepare Form leaves Fill & Sign as the armed tool. Kept as-is
-        // because it is the shipped behaviour and the promise the UI makes;
-        // revisit when the secondary toolbar makes the active tool visible and
-        // the flip is something the user can actually see.
-        dispatch({ type: 'UI_SET_TOOL', tool: 'forms' });
+        // NOT 'select' (the widget renders nothing outside a form mode, so the
+        // field the user just placed would VANISH — the popup promises it is
+        // "fillable right away"), and NOT 'forms': that is Fill & Sign's mode,
+        // so the secondary toolbar's title would flip to another tool mid-task
+        // and the rubber band would die — `formfields` is what draws it, so the
+        // next field couldn't be placed at all, with nothing on screen saying
+        // why. `showsFormWidgets` covers both modes, so the promise holds here.
+        dispatch({ type: 'UI_SET_TOOL', tool: 'formfields' });
       } catch (err) {
         setNfError(err instanceof Error ? err.message : String(err));
         throw err;
@@ -1402,6 +1400,7 @@ export function WorkspaceCanvasView({
           the tool that owns the armed mode; nothing armed ⇒ nothing here. */}
       <SecondaryToolbar
         tool={tool}
+        activeToolId={state.ui.activeToolId}
         toolColor={toolColor}
         onSetToolColor={setToolColor}
         stampPreset={stampPreset}

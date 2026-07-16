@@ -9,7 +9,7 @@ import { showableDoc, tabFiles } from '../state/selectors';
 import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
 import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
-import { TOOL_DEFS, TOOL_IDS, armedModeOf, type ToolId } from './tools';
+import { TOOL_DEFS, TOOL_IDS, toolById, toolForCanvasTool, worksOnPage, type ToolId } from './tools';
 import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
 
@@ -174,8 +174,21 @@ function toolCommand(tool: CanvasTool): Command {
     title: TOOL_TITLES[tool],
     when: inCanvas,
     run: ({ state, dispatch }) => {
-      // Pill toggle semantics: re-picking the active tool exits to Select.
+      // Toggle semantics: re-picking the armed mode exits to Select.
       const next = tool !== 'select' && state.ui.tool === tool ? 'select' : tool;
+      // Arming a mode OPENS its owning tool, so `activeToolId` can never be
+      // behind what the canvas is actually doing — the secondary toolbar reads
+      // it, and a mode armed by a keybinding while no tool was open would
+      // otherwise leave the strip absent with the canvas live.
+      //
+      // Only when ARMING. Disarming (toggle-off, Escape) leaves the tool open:
+      // Escape means "stop drawing", not "close Comment" — Acrobat keeps the
+      // toolbar up, and closing it would make Escape unrecoverable now that the
+      // pill isn't there to re-arm from. `tools.close` is the way out.
+      if (next !== 'select') {
+        const owner = toolForCanvasTool(next);
+        if (owner) dispatch({ type: 'UI_OPEN_TOOL', toolId: owner.id });
+      }
       dispatch({ type: 'UI_SET_TOOL', tool: next });
     },
   };
@@ -251,8 +264,14 @@ export const COMMANDS: Record<CommandId, Command> = {
   // were grouped into tools, which was the pill's whole problem.
   'tools.close': {
     title: 'Close Tool',
-    when: (ctx) => isDocTab(ctx.state.ui.focusedTab) && ctx.state.ui.tool !== 'select',
-    run: ({ dispatch }) => dispatch({ type: 'UI_SET_TOOL', tool: 'select' }),
+    // Enabled while a canvas tool is OPEN — not merely while a mode is armed.
+    // Escape disarms the mode and leaves the tool up; this is what puts it away.
+    when: (ctx) =>
+      isDocTab(ctx.state.ui.focusedTab) &&
+      (toolById(ctx.state.ui.activeToolId ?? '')?.canvasTools?.length ?? 0) > 0,
+    // openTool(null) clears activeToolId AND disarms, in the one place that owns
+    // that pairing (CLAUDE.md § Design invariants).
+    run: ({ dispatch }) => dispatch({ type: 'UI_OPEN_TOOL', toolId: null }),
   },
   'file.save': {
     title: 'Save',
@@ -474,48 +493,44 @@ export const COMMANDS: Record<CommandId, Command> = {
         // `focusTab` rejects it — leaving us to arm a mode on a document the
         // user can't see. (CLOSE_FILE can leave a ghost import-only file as the
         // active one, so this is reachable, not theoretical.)
-        when: (ctx) => tool.ops.length > 0 || showableDoc(ctx.state) !== null,
+        when: (ctx) => !worksOnPage(tool) || showableDoc(ctx.state) !== null,
         run: (ctx) => {
           const { state, dispatch } = ctx;
-          if (tool.ops.length === 0) {
-            // Canvas-mode tool (Comment, Redact, Scan & OCR): there is no form to
-            // fill — the work IS the document. So open the document and arm the
-            // mode, rather than parking the user on a Tools tab that would have
-            // nothing to show. Acrobat does the same: picking Comment puts you on
-            // the page with the markup tools live.
-            const path = showableDoc(state);
-            if (!path) return; // unreachable: `when` above requires one.
+          const path = showableDoc(state);
+          // OPENING A TOOL GOES WHERE ITS WORK IS. One rule, and it is the whole
+          // of the destination logic:
+          //
+          //   owns canvas modes, or has no ops  ⇒  the DOCUMENT
+          //   otherwise (a form to fill in)     ⇒  the TOOLS tab
+          //
+          // Fill & Sign and Prepare Form have BOTH ops and modes, and the old
+          // ops-first test sent them to the Tools tab — so picking either from a
+          // document yanked you off the page before arming, and you had to click
+          // back to use the mode it had just armed. The pill hid that, because
+          // its Fill/Sign/+Field buttons were always there to re-arm with; the
+          // pill is gone, so the detour became the only path. Their work is on
+          // the page (their panes are still one Tools-tab click away).
+          if (worksOnPage(tool)) {
+            if (!path) return; // unreachable: `when` requires one.
             dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
-            // § 7: activating a tool arms its mode. These tools have no op, so
-            // the reducer's `openTool` never sees them — this is their own arm.
-            //
-            // CONDITIONAL here, where the Tools-tab tools disarm unconditionally,
-            // and the difference is real rather than an oversight: a Tools-tab
-            // tool REPLACES what you were doing (and you had to leave the
-            // document to reach it, which resets the mode anyway), whereas these
-            // land you ON the page. Scan & OCR is the case that forces the
-            // distinction — it has no mode because it isn't one; it just opens
-            // Find. Disarming the user's Highlight to open a search box would be
-            // gratuitous, so a tool that doesn't take over the canvas leaves it
-            // alone. Ordering isn't load-bearing (the target is always a DOC tab
-            // and `focusTab` only resets when LEAVING doc land, so this focus
-            // can't stomp the arm either way round).
-            const mode = armedModeOf(tool);
-            if (mode) dispatch({ type: 'UI_SET_TOOL', tool: mode });
-            // Scan & OCR's whole surface is Find's "Make searchable" (2m), so the
-            // tool opens Find rather than inventing a second entry point for it.
-            // Deferred, not called on ctx.canvas: the tab focus above has only
-            // been SCHEDULED, so the canvas is still unmounted right now.
-            if (tool.id === 'ocr') openFindWhenCanvasReady(ctx.canvas, path);
-            return;
+          } else {
+            dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
           }
-          dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
-          // Land on the tool's first operation — opening a tool should show its
-          // work, not an empty shell. UI_SET_ACTIVE_OP derives BOTH activeToolId
-          // and the canvas mode from the op, so this one dispatch opens `tool`
-          // and arms it; doing it here as well would just be a second, stompable
-          // copy of a rule the reducer already owns.
-          dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
+          // Focus FIRST, then open: leaving doc land resets the mode, so an arm
+          // before the focus would be stomped by its own command.
+          //
+          // One dispatch either way, because the reducer's `openTool` owns the
+          // rule — a tool with ops goes through UI_SET_ACTIVE_OP (which lands
+          // the pane on its first op AND re-homes activeToolId AND arms the
+          // mode); a tool without goes direct. Doing any of it here too would be
+          // a second, stompable copy.
+          if (tool.ops.length > 0) dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
+          else dispatch({ type: 'UI_OPEN_TOOL', toolId: tool.id });
+          // Scan & OCR's whole surface is Find's "Make searchable" (2m), so the
+          // tool opens Find rather than inventing a second entry point for it.
+          // Deferred, not called on ctx.canvas: the focus above has only been
+          // SCHEDULED, so the canvas is still unmounted right now.
+          if (tool.id === 'ocr' && path) openFindWhenCanvasReady(ctx.canvas, path);
         },
       } satisfies Command,
     ]),

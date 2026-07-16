@@ -20,6 +20,10 @@ export interface TestStateSnapshot {
   view: 'welcome' | 'operations' | 'canvas';
   focusedTab: FocusedTab;
   activeOp: string;
+  /** The armed canvas mode (M5.3/M5.4 — the secondary toolbar reads it). */
+  tool: string;
+  /** The OPEN tool, if any. */
+  activeToolId: string | null;
   fileCount: number;
   activeFileId: string | null;
   activeFile: {

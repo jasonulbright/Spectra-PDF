@@ -179,6 +179,23 @@ export function armedModeOf(tool: ToolDef): CanvasTool | undefined {
 }
 
 /**
+ * Is this tool's work ON the document, rather than in a form on the Tools tab?
+ *
+ * True if it owns a canvas mode (Comment, Redact, Fill & Sign, Prepare Form) or
+ * has no operations at all (Scan & OCR — not a mode, but its surface is Find,
+ * which lives on the page). This is where opening the tool takes you.
+ *
+ * Note Fill & Sign and Prepare Form have BOTH: ops (their panes) and modes.
+ * Testing ops first sent them to the Tools tab, i.e. away from the page they had
+ * just armed a mode on — which the floating pill masked, because its
+ * always-present Fill/Sign/+Field buttons could re-arm from the canvas. The pill
+ * is gone; owning a mode is what decides.
+ */
+export function worksOnPage(tool: ToolDef): boolean {
+  return (tool.canvasTools?.length ?? 0) > 0 || tool.ops.length === 0;
+}
+
+/**
  * The modes in which a page shows its form widgets.
  *
  * `PageCell` renders a widget ONLY in one of these (FormWidgetView returns null

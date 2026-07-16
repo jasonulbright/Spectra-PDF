@@ -1,8 +1,8 @@
-import { AppState, AppAction, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_DEFAULT_WIDTH } from './types';
+import { AppState, AppAction, CanvasTool, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_DEFAULT_WIDTH } from './types';
 import { carriesManifest } from '../lib/doc-names';
 // Safe from the reducer: commands/tools has type-only imports, so it carries no
 // runtime dependency back into the state or component layers.
-import { toolById, toolForOp, armedModeOf } from '../commands/tools';
+import { toolById, toolForOp, armedModeOf, type ToolDef } from '../commands/tools';
 
 // Re-project a display-normalized annotation rect when its page's display
 // rotates by `delta` quarter-turns clockwise: annotation coords always live
@@ -263,9 +263,27 @@ function applyFileUpdate(
  */
 function openTool(ui: UiState, toolId: string | null): UiState {
   const owner = toolId ? toolById(toolId) : undefined;
-  const tool = (owner ? armedModeOf(owner) : undefined) ?? 'select';
+  const tool = canvasModeAfterOpening(ui, owner);
   if (toolId === ui.activeToolId && tool === ui.tool) return ui;
   return { ...ui, activeToolId: toolId, tool };
+}
+
+/** What `ui.tool` becomes when `owner` is opened (undefined owner = closed). */
+function canvasModeAfterOpening(ui: UiState, owner: ToolDef | undefined): CanvasTool {
+  // No tool open at all (the tile grid) — nothing may be armed.
+  if (!owner) return 'select';
+  // It drives the canvas: arm the first mode it owns.
+  const mode = armedModeOf(owner);
+  if (mode) return mode;
+  // It has a form to fill on the TOOLS TAB and no canvas mode, so it replaces
+  // whatever you were doing — and you left the document to reach it anyway.
+  if (owner.ops.length > 0) return 'select';
+  // Neither: it lives on the document but isn't a mode (Scan & OCR — it just
+  // opens Find). It has no opinion about the canvas, so it doesn't get one:
+  // taking away the user's Highlight to show them a search box would be
+  // gratuitous. Left alone deliberately; this is the third distinct answer and
+  // the reason this isn't a one-liner.
+  return ui.tool;
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {

@@ -842,13 +842,15 @@ function AppContent(): React.ReactElement {
   // Test harness — only compiled in when VITE_E2E=1 was set at build time.
   const harnessListenersRef = useRef<Set<(s: TestStateSnapshot) => void>>(new Set());
   const harnessSnapshotRef = useRef<() => TestStateSnapshot>(() => ({
-    view: 'welcome', focusedTab: 'home', activeOp: 'merge', fileCount: 0,
+    view: 'welcome', focusedTab: 'home', activeOp: 'merge', tool: 'select', activeToolId: null, fileCount: 0,
     activeFileId: null, activeFile: null,
   }));
   harnessSnapshotRef.current = () => ({
     view: viewOf(focusedTab),
     focusedTab,
     activeOp,
+    tool: state.ui.tool,
+    activeToolId: state.ui.activeToolId,
     fileCount: state.files.size,
     activeFileId: state.activeFileId,
     activeFile: activeFile
@@ -943,7 +945,7 @@ function AppContent(): React.ReactElement {
     if (!TEST_HARNESS_ENABLED) return;
     const snap = harnessSnapshotRef.current();
     harnessListenersRef.current.forEach((l) => l(snap));
-  }, [focusedTab, activeOp, state.files, state.activeFileId, activeFile?.dirty, activeFile?.pageCount]);
+  }, [focusedTab, activeOp, state.ui.tool, state.ui.activeToolId, state.files, state.activeFileId, activeFile?.dirty, activeFile?.pageCount]);
 
   const Panel = panels[activeOp];
 
@@ -1055,7 +1057,24 @@ function AppContent(): React.ReactElement {
                 </div>
               )}
               <div className="flex-1 min-h-0">
-                {activeOp === 'extract_text' ? (
+                {activeTool.ops.length === 0 ? (
+                  // The tool's work is on the PAGE — it has no form here. Say
+                  // that, and offer the way back. Rendering `panels[activeOp]`
+                  // would put some unrelated operation's form under this tool's
+                  // name, which is § 3.3's absence fence exactly: an empty or
+                  // borrowed shell instead of an honest statement.
+                  <div className="tool-on-canvas" data-testid="tool-on-canvas">
+                    <p>{activeTool.title} works directly on the page.</p>
+                    <button
+                      type="button"
+                      data-testid="tool-on-canvas-go"
+                      className="tool-op"
+                      onClick={() => invokeCommand(`tools.open.${activeTool.id}`)}
+                    >
+                      Go to the document
+                    </button>
+                  </div>
+                ) : activeOp === 'extract_text' ? (
                   <ExtractTextPanel initialPage={extractPage} onConsumeInitialPage={() => setExtractPage(null)} />
                 ) : (
                   <Panel />

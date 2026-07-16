@@ -10,6 +10,8 @@ export interface TestStateSnapshot {
   view: 'welcome' | 'operations' | 'canvas';
   focusedTab: FocusedTab;
   activeOp: string;
+  tool: string;
+  activeToolId: string | null;
   fileCount: number;
   activeFileId: string | null;
   activeFile: {

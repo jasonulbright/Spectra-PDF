@@ -1813,3 +1813,16 @@
 [data-theme="light"] .secondary-tool { color: #4b5563; }
 [data-theme="light"] .secondary-tool:hover { background: #f3f4f6; color: #111827; }
 [data-theme="light"] .secondary-tool.active { background: #0078d4; color: #ffffff; }
+
+/* An ops-less tool's Tools-tab pane: it has no form here, so it says so rather
+   than borrowing another operation's (§ 3.3, the absence fence). */
+.tool-on-canvas {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: #a3a3a3;
+}
+[data-theme="light"] .tool-on-canvas { color: #4b5563; }

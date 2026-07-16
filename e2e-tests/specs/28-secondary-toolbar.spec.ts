@@ -84,6 +84,51 @@ describe('secondary toolbar', () => {
     });
   });
 
+  it('Escape disarms the MODE but keeps the tool open', async () => {
+    // Escape means "stop drawing", not "close Comment". With the pill gone, a
+    // strip that vanished on Escape would leave no way to re-arm short of the
+    // Tools menu — so the strip belongs to the open TOOL, not the armed mode.
+    await $('[data-testid="menu-tools"]').click();
+    await $('[data-testid="menuitem-tool-comment"]').click();
+    await $('[data-testid="secondary-toolbar"]').waitForDisplayed();
+    await browser.keys(['Escape']);
+    await browser.waitUntil(
+      async () => (await getState()).tool === 'select',
+      { timeoutMsg: 'Escape did not disarm the mode' },
+    );
+    // The tool is still open, and its modes are still one click away.
+    await expect($('[data-testid="secondary-toolbar"]')).toBeDisplayed();
+    expect(await $('[data-testid="tool-highlight"]').getAttribute('aria-pressed')).toBe('false');
+    await $('[data-testid="tool-highlight"]').click();
+    await browser.waitUntil(
+      async () => (await getState()).tool === 'highlight',
+      { timeoutMsg: 'could not re-arm from the strip after Escape' },
+    );
+    await $('[data-testid="secondary-action-tools.close"]').click();
+  });
+
+  it('Prepare Form arms ON the document and shows its single mode button', async () => {
+    // It owns exactly one mode, and § 3.2 names its "+ Add Field" control. It
+    // also has ops — which used to send it to the Tools tab, i.e. away from the
+    // page it had just armed a mode on.
+    await $('[data-testid="menu-tools"]').click();
+    await $('[data-testid="menuitem-tool-prepareform"]').click();
+    await browser.waitUntil(
+      async () => {
+        const s = await getState();
+        return typeof s.focusedTab === 'object' && s.focusedTab.doc === SAMPLE_PDF;
+      },
+      { timeoutMsg: 'Prepare Form left the document tab' },
+    );
+    const bar = $('[data-testid="secondary-toolbar"]');
+    await bar.waitForDisplayed();
+    expect(await bar.getAttribute('data-tool')).toBe('prepareform');
+    // The lone mode has a button — gating the row on >1 deleted it.
+    await expect($('[data-testid="tool-formfields"]')).toBeDisplayed();
+    expect(await $('[data-testid="tool-formfields"]').getAttribute('aria-pressed')).toBe('true');
+    await $('[data-testid="secondary-action-tools.close"]').click();
+  });
+
   it('Tools ▸ Redact arms a DIFFERENT tool, and the strip follows', async () => {
     await $('[data-testid="menu-tools"]').click();
     await $('[data-testid="menuitem-tool-redact"]').waitForDisplayed();
@@ -91,8 +136,8 @@ describe('secondary toolbar', () => {
     const bar = $('[data-testid="secondary-toolbar"]');
     await bar.waitForDisplayed({ timeoutMsg: 'no secondary toolbar after arming Redact' });
     expect(await bar.getAttribute('data-tool')).toBe('redact');
-    // Redact owns one mode, so there is no mode row to pick from — the tool IS
-    // the mode. Comment's modes must not be here.
+    await expect($('[data-testid="tool-redact"]')).toBeDisplayed();
+    // Comment's modes belong to Comment.
     await expect($('[data-testid="tool-highlight"]')).not.toBeExisting();
   });
 });

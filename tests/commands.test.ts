@@ -447,12 +447,16 @@ describe('invokeCommand', () => {
   it('opening a tool with no canvas mode DISARMS the last tool’s mode', () => {
     // Nothing else clears `ui.tool`: focusTab only resets it when LEAVING a doc
     // tab, so Tools→Tools never qualifies. Without a disarm, Prepare Form →
-    // back → Protect leaves Forms mode live on the canvas under a tool that
-    // never asked for it (PageCell branches on ui.tool, so it changes clicks).
-    const { finalState } = wire(initialState);
+    // Protect leaves the form mode live on the canvas under a tool that never
+    // asked for it (PageCell branches on ui.tool, so it changes clicks).
+    const { finalState } = wire(stateWith({
+        files: new Map([['a.pdf', makeFile('a.pdf')]]),
+        activeFileId: 'a.pdf',
+        ui: { ...initialState.ui, focusedTab: { doc: 'a.pdf' } },
+      }));
     invokeCommand('tools.open.prepareform');
     expect(finalState().ui.tool).toBe('formfields');
-    invokeCommand('tools.open.protect'); // no canvasTool of its own
+    invokeCommand('tools.open.protect'); // no mode of its own
     expect(finalState().ui.tool).toBe('select');
   });
 
@@ -602,9 +606,16 @@ describe('invokeCommand', () => {
     // Prepare Form hosts the `forms` panel AND wants widget mode live (§ 7:
     // activating a tool arms its interaction mode — for every tool that names
     // one, not only the ops-less ones).
-    const { finalState } = wire(initialState);
+    const { finalState } = wire(stateWith({
+        files: new Map([['a.pdf', makeFile('a.pdf')]]),
+        activeFileId: 'a.pdf',
+        ui: { ...initialState.ui, focusedTab: { doc: 'a.pdf' } },
+      }));
     expect(invokeCommand('tools.open.prepareform')).toBe(true);
     expect(finalState().ui.tool).toBe('formfields');
+    // ...and it stays ON the document: its work is there, and the pill that
+    // used to let you re-arm from the canvas is gone.
+    expect(finalState().ui.focusedTab).toEqual({ doc: 'a.pdf' });
   });
 
   it('the ‹ Tools back button disarms the closed tool’s mode', () => {
@@ -643,10 +654,14 @@ describe('invokeCommand', () => {
     // Tools→Tools focus doesn't trip focusTab's reset. So Prepare Form → rail ▸
     // Encrypt left `forms` armed under a pane headed "Encrypt PDF", live on the
     // canvas the moment the user went back to a document.
-    const { finalState } = wire(initialState);
+    const { finalState } = wire(stateWith({
+        files: new Map([['a.pdf', makeFile('a.pdf')]]),
+        activeFileId: 'a.pdf',
+        ui: { ...initialState.ui, focusedTab: { doc: 'a.pdf' } },
+      }));
     invokeCommand('tools.open.prepareform');
     expect(finalState().ui.tool).toBe('formfields');
-    invokeCommand('tools.panel.encrypt'); // the rail / Tools menu path
+    invokeCommand('tools.panel.encrypt'); // the Tools menu / op-switcher path
     expect(finalState().ui.activeToolId).toBe('protect');
     expect(finalState().ui.tool).toBe('select');
   });
