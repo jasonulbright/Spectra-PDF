@@ -164,68 +164,27 @@ jobs:
           echo "$cargoBin" >> $env:GITHUB_PATH
         shell: pwsh
 
-      # Ground-truth probe for the 20260714-image session failures (--disable-gpu
-      # did NOT cure them; crash-event + profile-dir diagnostics came back EMPTY,
-      # so the webview isn't even crashing — it's not starting, or not starting
-      # where the driver looks). Two experiments, both informational-only:
-      #   A. Launch the app BARE (no driver) with an explicit user-data folder
-      #      and Chromium verbose logging → does WebView2 come up at all on this
-      #      image? chrome_debug.log says what happens if not.
-      #   B. Drive msedgedriver DIRECTLY (--verbose) with a raw session POST →
-      #      the verbose log states WHY DevToolsActivePort never appears
-      #      (browser exit code, path denials, arg rejections).
-      # A-works/B-fails → the driver↔webview handshake; A-fails → the image.
-      - name: WebView2 ground-truth probe (informational)
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 6
-        shell: pwsh
-        run: |
-          $app = Resolve-Path "src-tauri\target\debug\openpdfstudio.exe"
-          $udf = "$env:RUNNER_TEMP\wv2probe"
-          New-Item -ItemType Directory -Force $udf | Out-Null
-          Write-Host "=== probe A: bare app launch ==="
-          $env:OPENPDFSTUDIO_E2E = "1"
-          $env:WEBVIEW2_USER_DATA_FOLDER = $udf
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--enable-logging --v=1"
-          $p = Start-Process -FilePath $app -PassThru
-          Start-Sleep -Seconds 25
-          Write-Host "app alive after 25s: $(-not $p.HasExited); exitCode: $($p.ExitCode)"
-          taskkill /F /T /PID $p.Id 2>$null | Out-Null
-          Start-Sleep -Seconds 3
-          Write-Host "--- user-data folder contents ---"
-          try { Get-ChildItem -Recurse -Depth 2 $udf -ErrorAction Stop | Select-Object -First 25 -ExpandProperty FullName } catch { Write-Host "EMPTY: webview never initialized a profile" }
-          Write-Host "--- chrome_debug.log (first 60 lines of each) ---"
-          Get-ChildItem -Recurse $udf -Filter chrome_debug.log -ErrorAction SilentlyContinue | ForEach-Object { Write-Host ">> $($_.FullName)"; Get-Content $_.FullName -TotalCount 60 }
-          Remove-Item Env:\WEBVIEW2_USER_DATA_FOLDER
-          Write-Host "=== probe B: raw msedgedriver session ==="
-          $driver = "$env:USERPROFILE\.cargo\bin\msedgedriver.exe"
-          $dlog = "$env:RUNNER_TEMP\msedgedriver-verbose.log"
-          $dp = Start-Process -FilePath $driver -ArgumentList "--port=9515","--verbose","--log-path=$dlog" -PassThru
-          Start-Sleep -Seconds 3
-          $body = @{ capabilities = @{ alwaysMatch = @{ browserName = "webview2"; "ms:edgeOptions" = @{ binary = "$app"; webviewOptions = @{} } } } } | ConvertTo-Json -Depth 6
-          try {
-            $r = Invoke-RestMethod -Uri "http://127.0.0.1:9515/session" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 90
-            Write-Host "SESSION CREATED: $($r.value.sessionId)"
-          } catch { Write-Host "SESSION FAILED: $($_.Exception.Message)" }
-          taskkill /F /T /PID $dp.Id 2>$null | Out-Null
-          taskkill /F /IM openpdfstudio.exe 2>$null | Out-Null
-          Write-Host "--- msedgedriver verbose log (DevTools/launch lines) ---"
-          try { Get-Content $dlog -ErrorAction Stop | Select-String -Pattern "DevTools|launch|binary|exit|error|denied|user-data" -CaseSensitive:$false | Select-Object -First 50 } catch { Write-Host "no driver log" }
-
+      # The suite runs DE-ELEVATED (Medium integrity, via a -RunLevel Limited
+      # scheduled task — see e2e-tests/ci/run-deelevated.ps1). CI runners are
+      # elevated, and WebView2's DevTools endpoint is gated for elevated hosts
+      # on current runtimes (the v150 trusted-origin check, upstream
+      # MicrosoftEdge/WebView2Feedback#5640) — every WebDriver session fails
+      # `DevToolsActivePort file doesn't exist` from an elevated chain, while
+      # the app itself runs fine (proven by an on-runner probe: bare launch
+      # healthy, raw msedgedriver session fails identically without
+      # tauri-driver in the loop). De-elevating is version-agnostic, keeps
+      # working after Microsoft's fix, respects the no-runtime-pins rule (the
+      # only upstream-suggested workaround is a Fixed Version 149 pin), and
+      # matches how end users actually run the app.
       - name: Session pre-flight (fail fast on runner-image drift)
-        timeout-minutes: 8
-        run: npx wdio run wdio.conf.ts --spec specs/01-boot.spec.ts
-        working-directory: e2e-tests
-        env:
-          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--disable-gpu"
+        timeout-minutes: 12
+        shell: pwsh
+        run: ./e2e-tests/ci/run-deelevated.ps1 -WorkingDirectory e2e-tests -TimeoutMinutes 10 -Command 'npx wdio run wdio.conf.ts --spec specs/01-boot.spec.ts'
 
       - name: Run WebdriverIO suite
         timeout-minutes: 40
-        run: npm test
-        working-directory: e2e-tests
-        env:
-          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--disable-gpu"
+        shell: pwsh
+        run: ./e2e-tests/ci/run-deelevated.ps1 -WorkingDirectory e2e-tests -TimeoutMinutes 38 -Command 'npm test'
 
       - name: Dump WebView2 crash diagnostics
         if: failure()
