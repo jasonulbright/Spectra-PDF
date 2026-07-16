@@ -5,7 +5,7 @@
 // handler. M1 registers every action that existed before the workbench;
 // M2+ chrome only *references* what is here.
 import { isDocTab } from '../state/types';
-import { showableDoc, tabFiles as tabFileEntries } from '../state/selectors';
+import { showableDoc, tabFiles } from '../state/selectors';
 import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
 import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
@@ -68,14 +68,16 @@ export function hasSelection(state: AppState): boolean {
   return state.ui.selectedPageIds.size > 0;
 }
 
-/** Open files that get doc tabs — byte-only import sources (2n.3) don't. */
-export function tabFiles(state: AppState): string[] {
-  return tabFileEntries(state).map((f) => f.path);
+/** The tab-bearing files' PATHS. Named apart from the selector's `tabFiles`
+ * (which returns the files themselves) on purpose: two exported functions with
+ * the same name and different shapes is how an importer picks the wrong one. */
+export function tabFilePaths(state: AppState): string[] {
+  return tabFiles(state).map((f) => f.path);
 }
 
 /** The visible tab order: Home | Tools | one tab per open document. */
 export function tabOrder(state: AppState): FocusedTab[] {
-  return ['home', 'tools', ...tabFiles(state).map((doc) => ({ doc }))];
+  return ['home', 'tools', ...tabFilePaths(state).map((doc) => ({ doc }))];
 }
 
 /** Cycle the visible strip by ±1 from the focused tab (wraps). */
@@ -103,6 +105,7 @@ const TOOL_TITLES: Record<CanvasTool, string> = {
 
 export const COMMAND_IDS = [
   'file.open',
+  'file.openInPlace',
   'file.save',
   'file.saveAs',
   'file.close',
@@ -181,6 +184,19 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Open…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => void ctx.app!.openFiles(),
+  },
+  // Not in any menu — this is the panels' "Open a PDF to …" button. The same
+  // open as file.open (decryption, recents, the ghost upgrade and its commit
+  // gate), minus the tab jump: it hands the PANEL a file rather than asking to
+  // go and read it. A command rather than a hook-local implementation because
+  // that is the one entry point every caller shares — the hook-local copy this
+  // replaces diverged from the real open FOUR times, and the last divergence
+  // meant a password-protected PDF could not be opened from a panel at all
+  // (including, absurdly, the Decrypt panel).
+  'file.openInPlace': {
+    title: 'Open…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => void ctx.app!.openFilesInPlace(),
   },
   'file.save': {
     title: 'Save',

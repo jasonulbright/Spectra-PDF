@@ -48,6 +48,7 @@ function stateWith(partial: Partial<AppState>): AppState {
 
 const noopHandlers = (): AppCommandHandlers => ({
   openFiles: vi.fn(async () => true),
+  openFilesInPlace: vi.fn(async () => {}),
   openPath: vi.fn(async () => {}),
   save: vi.fn(async () => {}),
   saveAs: vi.fn(async () => {}),
@@ -390,6 +391,17 @@ describe('invokeCommand', () => {
     const { handlers } = wire(initialState);
     expect(invokeCommand('file.open')).toBe(true);
     expect(handlers.openFiles).toHaveBeenCalledOnce();
+  });
+
+  it('file.openInPlace is a DIFFERENT handler to file.open, not a copy of it', () => {
+    // The panels' "Open a PDF" button routes here rather than re-implementing
+    // "open some files" — the hand-rolled copy it replaces diverged four times,
+    // the last leaving password-protected PDFs unopenable from any panel.
+    // Both must reach App's one openByPaths; they differ only in the tab jump.
+    const { handlers } = wire(initialState);
+    expect(invokeCommand('file.openInPlace')).toBe(true);
+    expect(handlers.openFilesInPlace).toHaveBeenCalledOnce();
+    expect(handlers.openFiles).not.toHaveBeenCalled();
   });
 
   it('refuses a command whose predicate fails (save with nothing dirty)', () => {

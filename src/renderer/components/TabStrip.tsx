@@ -4,7 +4,7 @@ import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { isDocTab } from '../state/types';
 import type { FocusedTab } from '../state/types';
 import { invokeCommand } from '../commands/context';
-import { tabFiles } from '../commands/registry';
+import { tabFilePaths } from '../commands/registry';
 import { ChromeIcon } from './chrome-icons';
 
 // The tab strip (Phase 4 M2, § 3.1): Home | Tools | one tab per open
@@ -26,7 +26,7 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const focused = state.ui.focusedTab;
-  const docPaths = tabFiles(state);
+  const docPaths = tabFilePaths(state);
 
   const isFileDirty = useCallback(
     (path: string): boolean => {

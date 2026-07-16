@@ -30,6 +30,11 @@ export type CommandNamespace =
 export interface AppCommandHandlers {
   /** Native open dialog → openByPaths. Resolves true if files were opened. */
   openFiles(): Promise<boolean>;
+  /** Native open dialog → openByPaths, WITHOUT focusing the opened doc's tab.
+   * The panels' "Open a PDF to …" button: it hands the panel a file, it isn't a
+   * request to go and read it. Same code path as openFiles otherwise —
+   * decryption, recents, the ghost upgrade and its commit gate all included. */
+  openFilesInPlace(): Promise<void>;
   /** Open specific path(s) and focus the (last) opened document's tab — the
    * File ▸ Open Recent and Home-tab recent/open flows. */
   openPath(path: string): Promise<void>;

@@ -289,7 +289,14 @@ function AppContent(): React.ReactElement {
   // an explicit request to view it — § M2 tab model). Already-open files are
   // re-activated. Recent list accumulates once so a multi-open batch doesn't
   // clobber itself.
-  const openByPaths = useCallback(async (paths: string[]) => {
+  // `focus: false` opens without moving the user: a panel's "Open a PDF"
+  // button is a way to give the PANEL a file, not a request to go read it.
+  // That difference used to justify a whole second implementation of "open some
+  // files" (useActiveFile.openNewFiles), which then diverged from this one FOUR
+  // times — including losing encryption support entirely, so a panel's Open
+  // button could not open a password-protected PDF at all. One implementation,
+  // one flag.
+  const openByPaths = useCallback(async (paths: string[], opts?: { focus?: boolean }) => {
     let recent = stateRef.current.ui.recentFiles;
     let lastOpened: string | null = null;
     let changed = false;
@@ -361,7 +368,7 @@ function AppContent(): React.ReactElement {
       // Flush whatever succeeded even if a later file threw (a malformed PDF
       // mid-batch would otherwise strand the opened tabs unfocused + unrecorded).
       if (changed) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
-      if (lastOpened) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: lastOpened } });
+      if (lastOpened && opts?.focus !== false) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: lastOpened } });
     }
   }, [dispatch, prepareFileBytes]);
 
@@ -676,6 +683,11 @@ function AppContent(): React.ReactElement {
   // --- Command layer (Phase 4 M1/M2) ------------------------------------
   const commandHandlers: AppCommandHandlers = {
     openFiles: handleOpenFile,
+    // The same open, minus the tab jump — the panels' "Open a PDF" button.
+    openFilesInPlace: async () => {
+      const paths = await openFiles();
+      if (paths.length > 0) await openByPaths(paths, { focus: false });
+    },
     openPath: (path) => openByPaths([path]),
     save: handleSave,
     saveAs: handleSaveAs,
@@ -697,6 +709,7 @@ function AppContent(): React.ReactElement {
     const h = commandHandlersRef;
     registerAppCommandHandlers({
       openFiles: () => h.current.openFiles(),
+      openFilesInPlace: () => h.current.openFilesInPlace(),
       openPath: (path) => h.current.openPath(path),
       save: () => h.current.save(),
       saveAs: () => h.current.saveAs(),
@@ -803,7 +816,7 @@ function AppContent(): React.ReactElement {
 
   // Focus a document's tab (tray/shell flows), or Home when nothing is open.
   const focusBoardOrHome = useCallback(() => {
-    const firstDoc = Array.from(filesRef.current.values()).find((f) => !f.importOnly);
+    const firstDoc = tabFiles(stateRef.current)[0];
     dispatch({ type: 'UI_FOCUS_TAB', tab: firstDoc ? { doc: firstDoc.path } : 'home' });
   }, [dispatch]);
 

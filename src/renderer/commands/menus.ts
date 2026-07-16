@@ -5,6 +5,7 @@
 // every referenced id is registered and that displayed shortcuts come from
 // the keymap table (so a menu label can never drift from its binding).
 import { isDocTab } from '../state/types';
+import { tabFiles } from '../state/selectors';
 import type { CommandContext } from './types';
 import type { CommandId } from './registry';
 import { NAV_PANEL_IDS } from './navpanels';
@@ -100,7 +101,7 @@ const windowDocList: MenuNode = {
   kind: 'dynamic',
   id: 'window-docs',
   build: (ctx) => {
-    const docs = [...ctx.state.files.values()].filter((f) => !f.importOnly);
+    const docs = tabFiles(ctx.state);
     if (docs.length === 0) return [{ label: 'No Open Documents', disabled: true, run: () => {} }];
     return docs.map((f, i) => ({
       label: `${i + 1}  ${f.name}`,
