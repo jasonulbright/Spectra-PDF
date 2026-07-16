@@ -438,9 +438,18 @@ export function WorkspaceCanvasView({
         setNfName('');
         setNfOptions('');
         setNfMultiline(false);
-        // Placing is done — disarm, exactly as the old add-field boolean did
-        // (it left `forms` armed with no band, which for authoring is inert).
-        dispatch({ type: 'UI_SET_TOOL', tool: 'select' });
+        // Land in Fill, exactly where the old add-field boolean left you (it
+        // cleared itself and left `forms` armed). Not 'select': the popup
+        // promises "fillable right away", and a widget renders nothing outside
+        // the form modes — disarming here made the field the user had just
+        // placed VANISH, which is the opposite of the promise.
+        //
+        // Wrinkle for M5.4: under the ownership model this means creating a
+        // field in Prepare Form leaves Fill & Sign as the armed tool. Kept as-is
+        // because it is the shipped behaviour and the promise the UI makes;
+        // revisit when the secondary toolbar makes the active tool visible and
+        // the flip is something the user can actually see.
+        dispatch({ type: 'UI_SET_TOOL', tool: 'forms' });
       } catch (err) {
         setNfError(err instanceof Error ? err.message : String(err));
         throw err;

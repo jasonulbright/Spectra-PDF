@@ -6,17 +6,14 @@ import {
   toolById,
   toolForCanvasTool,
   toolForOp,
+  showsFormWidgets,
   type ToolId,
 } from '../src/renderer/commands/tools';
-import type { CanvasTool } from '../src/renderer/state/types';
-
-// Every mode the canvas has. Hand-listed on purpose: this is the test's own
-// statement of the union, so a mode added to CanvasTool without an owning tool
-// fails here rather than silently having no secondary toolbar.
-const CANVAS_MODES: CanvasTool[] = [
-  'select', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature',
-  'forms', 'formfields',
-];
+// Every mode the canvas has, derived from a record tsc forces to be total over
+// `CanvasTool` — NOT a hand-listed copy of the union, which is exactly the
+// second source of truth that would silently omit a new mode from the
+// orphan-ownership check below and quietly pass.
+import { CANVAS_MODES } from '../src/renderer/commands/registry';
 import { OPERATIONS, OPERATION_TITLES } from '../src/renderer/commands/operations';
 
 // The tools registry (M5, § 7) regroups the 19 engine operations into 12 tools
@@ -122,6 +119,22 @@ describe('tools registry', () => {
     expect(armedModeOf(toolById('prepareform')!)).toBe('formfields');
     // A tool that drives no canvas mode says so, rather than defaulting.
     expect(armedModeOf(toolById('protect')!)).toBeUndefined();
+  });
+
+  it('both form modes show widgets — a field is never invisible while form work is armed', () => {
+    // PageCell renders a widget only in a FORM mode (FormWidgetView returns
+    // null otherwise), so this set is literally "when can you see the fields".
+    // It must cover authoring as well as filling, or you place new fields blind
+    // over the existing ones — and, worse, the field you just created vanishes
+    // the moment the mode changes, against the popup's own promise that it is
+    // "fillable right away". Splitting authoring out of `forms` shrank this set
+    // by accident; the split must not cost visibility.
+    expect(CANVAS_MODES.filter(showsFormWidgets).sort()).toEqual(['formfields', 'forms']);
+    // ...and PageCell asks THIS, so the assertion is about the real thing.
+    expect(showsFormWidgets('forms')).toBe(true);
+    expect(showsFormWidgets('formfields')).toBe(true);
+    expect(showsFormWidgets('signature')).toBe(false); // Fill & Sign owns it; widgets stay hidden
+    expect(showsFormWidgets('select')).toBe(false);
   });
 
   it('Fill & Sign and Prepare Form own DIFFERENT modes', () => {

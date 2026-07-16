@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
+import { showsFormWidgets } from '../../commands/tools';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthAt, displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/layout';
@@ -812,7 +813,9 @@ function PageCellImpl({
           key={`fwid-${w.fieldName}-${i}`}
           widget={w}
           rotation={page.rotation}
-          formsMode={tool === 'forms'}
+          // FormWidgetView renders NOTHING without this — see showsFormWidgets
+          // for which modes qualify and why authoring is one of them.
+          formsMode={showsFormWidgets(tool)}
           pending={formValues?.get(w.fieldName)}
           fontPx={freetextFontPx * (10 / 12)}
           onSetFormValue={onSetFormValue}

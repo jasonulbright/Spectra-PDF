@@ -99,11 +99,25 @@ const CANVAS_TOOLS = [
   'formfields',
 ] as const;
 
-const TOOL_TITLES: Record<CanvasTool, string> = {
+export const TOOL_TITLES: Record<CanvasTool, string> = {
   select: 'Select', highlight: 'Highlight', freetext: 'Text', ink: 'Draw',
   stamp: 'Stamp', redact: 'Redact', signature: 'Sign', forms: 'Fill Fields',
   formfields: 'Add Field',
 };
+
+// CANVAS_TOOLS must be a literal tuple (COMMAND_IDS builds `tools.${t}` from
+// it), so it can't be derived from the union — which means it CAN fall behind
+// it. This makes that a compile error instead of a mode with no command: a
+// `CanvasTool` missing from the tuple resolves the type to itself, and `true`
+// isn't assignable to it, so tsc names the missing mode.
+type ModeWithoutACommand = Exclude<CanvasTool, (typeof CANVAS_TOOLS)[number]>;
+const _EVERY_MODE_HAS_A_COMMAND: [ModeWithoutACommand] extends [never] ? true : ModeWithoutACommand = true;
+void _EVERY_MODE_HAS_A_COMMAND;
+
+/** Every canvas mode, at runtime — the same tuple, widened. One list: a second
+ * copy (from TOOL_TITLES' keys, say) would be a second thing to keep in step,
+ * which is how `Operation` ended up declared in four places. */
+export const CANVAS_MODES: readonly CanvasTool[] = CANVAS_TOOLS;
 
 export const COMMAND_IDS = [
   'file.open',

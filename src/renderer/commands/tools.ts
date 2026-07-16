@@ -177,3 +177,24 @@ export function toolForCanvasTool(mode: CanvasTool): ToolDef | undefined {
 export function armedModeOf(tool: ToolDef): CanvasTool | undefined {
   return tool.canvasTools?.[0];
 }
+
+/**
+ * The modes in which a page shows its form widgets.
+ *
+ * `PageCell` renders a widget ONLY in one of these (FormWidgetView returns null
+ * otherwise), so this set is literally "when can you see the fields". It covers
+ * authoring as well as filling: placing a new field over the ones already there
+ * has to be something you can aim, and the field you just created must not
+ * vanish the instant the mode changes — the create popup promises it is
+ * "fillable right away".
+ *
+ * NOT derivable from `canvasTools` ownership: Fill & Sign also owns `signature`,
+ * and widgets stay hidden there (as they always have). It's a real list, so it
+ * lives here — named, used by PageCell, and tested — rather than as an inline
+ * `tool === 'forms' || tool === 'formfields'` that the next mode silently misses.
+ */
+export const FORM_WIDGET_MODES: readonly CanvasTool[] = ['forms', 'formfields'];
+
+export function showsFormWidgets(mode: CanvasTool): boolean {
+  return FORM_WIDGET_MODES.includes(mode);
+}
