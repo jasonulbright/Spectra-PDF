@@ -96,6 +96,21 @@ jobs:
 
   e2e:
     name: E2E (WebdriverIO + tauri-driver)
+    # DISABLED (owner call, 2026-07-16) until the WebView2 v150 elevated-
+    # DevTools regression (MicrosoftEdge/WebView2Feedback#5640) is fixed and
+    # reaches the runner image. Hosted runners execute jobs elevated and the
+    # image runs UAC-disabled — a -RunLevel Limited scheduled task AND a
+    # SAFER restricted token BOTH still ran at High IL (proven by in-child
+    # TOKEN-IL banners), so no de-elevation primitive exists there and every
+    # WebDriver session fails at creation. Do NOT pin a Fixed Version 149
+    # runtime instead: users are evergreen on 150 (where the app works —
+    # the regression only gates elevated debugger attach), so a pinned CI
+    # runtime tests what nobody runs and rots (see CLAUDE.md's never-pin
+    # rule, written after the last stale-pin e2e breakage).
+    # The full 39-spec suite remains the release gate, run locally on the
+    # rebuilt binary; its green is recorded per milestone in the punchlist.
+    # Re-enable by deleting the `if:` line below once #5640's fix ships.
+    if: false
     runs-on: windows-latest
     # The job cap is a backstop, not the failure detector — the pre-flight
     # step below is what catches "no session can be created at all" (runner
