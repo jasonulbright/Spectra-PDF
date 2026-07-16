@@ -39,13 +39,26 @@ export interface ToolDef {
   description: string;
   /** The operations this tool hosts, in the order the pane lists them. May be
    * empty for a tool whose whole surface is on the canvas (its work is a mode,
-   * not a form) — those still get a tile, because the tile is how you find it. */
+   * not a form) — those still get a tile, because the tile is how you find it.
+   *
+   * Also THE test for where a tool lives: ops ⇒ its home is the Tools tab; no
+   * ops ⇒ its home is the document. `openTool` reads it that way. */
   ops: Operation[];
-  /** The canvas tool this arms when opened, if any (§ 7: activating a tool arms
-   * its interaction mode). Deliberately the state slice's own CanvasTool, not a
-   * copy of its members — a re-spelled union here would let a tool name a mode
-   * the canvas doesn't have and still typecheck. */
-  canvasTool?: CanvasTool;
+  /**
+   * The canvas interaction modes this tool OWNS, in secondary-toolbar order.
+   *
+   * Ownership, not just "what to arm": it answers both "which mode does opening
+   * this tool arm?" (the first) and, on a document tab, "which tool is armed?"
+   * (`toolForCanvasTool`) — the question the secondary toolbar exists to answer
+   * and the reason a flat pill cluster of eight modes couldn't. Comment owns
+   * four; that IS the tool, in Acrobat's model and now in ours.
+   *
+   * Deliberately the state slice's own `CanvasTool`, not a copy of its members:
+   * a re-spelled union here would let a tool name a mode the canvas doesn't
+   * have and still typecheck (it did, once — `'sign'` vs `'signature'`).
+   * `'select'` belongs to no tool; it is the absence of one.
+   */
+  canvasTools?: CanvasTool[];
 }
 
 export const TOOL_DEFS: readonly ToolDef[] = [
@@ -60,28 +73,30 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Comment',
     description: 'Highlight, add notes, draw and stamp.',
     ops: [],
-    canvasTool: 'highlight',
+    // Four modes, one tool — the pill listed them flat and made the user infer
+    // the grouping; Acrobat's Comment toolbar states it.
+    canvasTools: ['highlight', 'freetext', 'ink', 'stamp'],
   },
   {
     id: 'fillsign',
     title: 'Fill & Sign',
     description: 'Fill in a form and sign it, or verify a signature.',
     ops: ['signatures'],
-    canvasTool: 'forms',
+    canvasTools: ['forms', 'signature'],
   },
   {
     id: 'prepareform',
     title: 'Prepare Form',
     description: 'Add and edit form fields, then flatten them.',
     ops: ['forms'],
-    canvasTool: 'forms',
+    canvasTools: ['formfields'],
   },
   {
     id: 'redact',
     title: 'Redact',
     description: 'Permanently remove text and images from the file.',
     ops: [],
-    canvasTool: 'redact',
+    canvasTools: ['redact'],
   },
   {
     id: 'ocr',
@@ -142,4 +157,23 @@ export function toolById(id: string): ToolDef | undefined {
  * `string`, and the reducer must be able to ask this about any of them. */
 export function toolForOp(op: string): ToolDef | undefined {
   return TOOL_DEFS.find((t) => (t.ops as readonly string[]).includes(op));
+}
+
+/**
+ * The tool that owns a canvas mode — i.e. which tool is active on a DOCUMENT
+ * tab. `'select'` returns undefined: it is the absence of a tool, not one.
+ *
+ * This is how the secondary toolbar knows what to show. `activeToolId` can't
+ * answer it: that names the tool whose pane the TOOLS TAB is showing, which is
+ * a different question with a different answer (a tool can be open there while
+ * the canvas has nothing armed, and vice versa).
+ */
+export function toolForCanvasTool(mode: CanvasTool): ToolDef | undefined {
+  if (mode === 'select') return undefined;
+  return TOOL_DEFS.find((t) => t.canvasTools?.includes(mode));
+}
+
+/** The mode opening this tool arms, if it drives the canvas at all. */
+export function armedModeOf(tool: ToolDef): CanvasTool | undefined {
+  return tool.canvasTools?.[0];
 }

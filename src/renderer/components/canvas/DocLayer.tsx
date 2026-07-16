@@ -38,7 +38,6 @@ interface DocLayerProps {
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onSignFieldRequest: (path: string, fieldName: string) => void;
   // Add-field placement (2n.4c).
-  formsAddMode: boolean;
   newFieldPlacement: SignaturePlacement | null;
   onSetNewFieldRect: (
     docId: string,
@@ -112,7 +111,6 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               formValuesByPath={props.formValuesByPath}
               onSetFormValue={props.onSetFormValue}
               onSignFieldRequest={props.onSignFieldRequest}
-              formsAddMode={props.formsAddMode}
               newFieldPlacement={props.newFieldPlacement}
               onSetNewFieldRect={props.onSetNewFieldRect}
               onClearNewFieldPlacement={props.onClearNewFieldPlacement}

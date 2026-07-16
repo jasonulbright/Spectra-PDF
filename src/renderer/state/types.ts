@@ -125,7 +125,16 @@ export type CanvasTool =
   | 'stamp'
   | 'redact'
   | 'signature'
-  | 'forms';
+  // Filling a form: widgets are live inputs. Fill & Sign's mode.
+  | 'forms'
+  // AUTHORING a form: drag to place a new field. Prepare Form's mode.
+  //
+  // Was a `formsAddMode` boolean in WorkspaceCanvasView, threaded as a prop
+  // through DocLayer/DocumentRow/DocumentView into PageCell — a mode in all but
+  // name, invisible to the command registry and the keymap, and (being a second
+  // axis on top of `tool`) the reason 'forms' had two owning tools at once and
+  // "which tool is armed?" had no answer. It's a mode; it says so now.
+  | 'formfields';
 
 // The tab-strip model (Phase 4 M2, § 3.1): Home | Tools | one tab per open
 // document. A doc tab focuses that file and shows the document pane (at M2:

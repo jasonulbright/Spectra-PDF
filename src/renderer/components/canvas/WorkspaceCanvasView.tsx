@@ -363,7 +363,6 @@ export function WorkspaceCanvasView({
   // band. The placement itself is transient view state with the
   // signature-placement lifecycle: single (drawing again replaces), dies on
   // buffer-identity change or when its page leaves the workspace.
-  const [formsAddMode, setFormsAddMode] = useState(false);
   const [newFieldPlacement, setNewFieldPlacement] = useState<SignaturePlacement | null>(null);
   const [nfName, setNfName] = useState('');
   const [nfType, setNfType] = useState<NewFieldType>('text');
@@ -371,11 +370,6 @@ export function WorkspaceCanvasView({
   const [nfMultiline, setNfMultiline] = useState(false);
   const [creatingField, setCreatingField] = useState(false);
   const [nfError, setNfError] = useState<string | null>(null);
-  // Leaving the forms tool disarms add-field so re-entering starts inert.
-  useEffect(() => {
-    if (tool !== 'forms') setFormsAddMode(false);
-  }, [tool]);
-
   const onSetNewFieldRect = useCallback(
     (
       docId: string,
@@ -444,7 +438,9 @@ export function WorkspaceCanvasView({
         setNfName('');
         setNfOptions('');
         setNfMultiline(false);
-        setFormsAddMode(false);
+        // Placing is done — disarm, exactly as the old add-field boolean did
+        // (it left `forms` armed with no band, which for authoring is inert).
+        dispatch({ type: 'UI_SET_TOOL', tool: 'select' });
       } catch (err) {
         setNfError(err instanceof Error ? err.message : String(err));
         throw err;
@@ -453,7 +449,7 @@ export function WorkspaceCanvasView({
         setCreatingField(false);
       }
     },
-    [liveNewFieldPlacement, docs, state.files, onAddFormField],
+    [liveNewFieldPlacement, docs, state.files, onAddFormField, dispatch],
   );
   const createPlacedField = useCallback(async (): Promise<void> => {
     const options =
@@ -1416,7 +1412,6 @@ export function WorkspaceCanvasView({
           formValuesByPath={pendingFormValues}
           onSetFormValue={onSetFormValue}
           onSignFieldRequest={onSignFieldRequest}
-          formsAddMode={formsAddMode}
           newFieldPlacement={liveNewFieldPlacement}
           onSetNewFieldRect={onSetNewFieldRect}
           onClearNewFieldPlacement={onClearNewFieldPlacement}
@@ -1473,7 +1468,6 @@ export function WorkspaceCanvasView({
           formValuesByPath={pendingFormValues}
           onSetFormValue={onSetFormValue}
           onSignFieldRequest={onSignFieldRequest}
-          formsAddMode={formsAddMode}
           newFieldPlacement={liveNewFieldPlacement}
           onSetNewFieldRect={onSetNewFieldRect}
           onClearNewFieldPlacement={onClearNewFieldPlacement}
@@ -1576,23 +1570,22 @@ export function WorkspaceCanvasView({
             onClick={() => invokeCommand('tools.forms')}
             className={`px-3 py-1.5 text-xs font-medium ${tool === 'forms' ? 'bg-emerald-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
-            Forms
+            Fill
           </button>
-        </div>
-        {tool === 'forms' && (
+          {/* Authoring is a MODE, not a sub-toggle of Fill: filling and placing
+              fields are different jobs (Fill & Sign vs Prepare Form), and as a
+              boolean riding on top of `forms` it was invisible to the command
+              registry and the keymap, and left `forms` owned by two tools at
+              once. Same testid — it is still "the add-field control". */}
           <button
             data-testid="forms-add-field"
-            title="Drag a box on a page to place a new form field"
-            onClick={() => setFormsAddMode((v) => !v)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-full shadow-lg border ${
-              formsAddMode
-                ? 'bg-emerald-600 text-white border-emerald-600'
-                : 'bg-neutral-800/90 text-neutral-300 border-neutral-700 hover:bg-neutral-700'
-            }`}
+            title="Drag a box on a page to place a new form field (Esc to exit)"
+            onClick={() => invokeCommand('tools.formfields')}
+            className={`px-3 py-1.5 text-xs font-medium ${tool === 'formfields' ? 'bg-emerald-600 text-white' : 'text-neutral-300 hover:bg-neutral-700'}`}
           >
-            + Add field
+            + Field
           </button>
-        )}
+        </div>
         {tool === 'stamp' && (
           <div
             className="flex items-center gap-1 bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg px-2 py-1"

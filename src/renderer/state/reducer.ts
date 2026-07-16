@@ -2,7 +2,7 @@ import { AppState, AppAction, FocusedTab, OpenDocument, OpenFile, PageAnnotation
 import { carriesManifest } from '../lib/doc-names';
 // Safe from the reducer: commands/tools has type-only imports, so it carries no
 // runtime dependency back into the state or component layers.
-import { toolById, toolForOp } from '../commands/tools';
+import { toolById, toolForOp, armedModeOf } from '../commands/tools';
 
 // Re-project a display-normalized annotation rect when its page's display
 // rotates by `delta` quarter-turns clockwise: annotation coords always live
@@ -262,7 +262,8 @@ function applyFileUpdate(
  * next author remembers it.
  */
 function openTool(ui: UiState, toolId: string | null): UiState {
-  const tool = (toolId ? toolById(toolId)?.canvasTool : undefined) ?? 'select';
+  const owner = toolId ? toolById(toolId) : undefined;
+  const tool = (owner ? armedModeOf(owner) : undefined) ?? 'select';
   if (toolId === ui.activeToolId && tool === ui.tool) return ui;
   return { ...ui, activeToolId: toolId, tool };
 }

@@ -43,7 +43,6 @@ interface DocumentRowProps {
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onSignFieldRequest: (path: string, fieldName: string) => void;
   // Add-field placement (2n.4c).
-  formsAddMode: boolean;
   newFieldPlacement: SignaturePlacement | null;
   onSetNewFieldRect: (
     docId: string,
@@ -95,7 +94,6 @@ function DocumentRowImpl({
   formValuesByPath,
   onSetFormValue,
   onSignFieldRequest,
-  formsAddMode,
   newFieldPlacement,
   onSetNewFieldRect,
   onClearNewFieldPlacement,
@@ -147,7 +145,6 @@ function DocumentRowImpl({
         formValues={formValuesByPath.get(page.sourceDocId)}
         onSetFormValue={onSetFormValue}
         onSignFieldRequest={onSignFieldRequest}
-        formsAddMode={formsAddMode}
         newFieldPlacement={newFieldPlacement?.pageId === page.id ? newFieldPlacement : null}
         onSetNewFieldRect={onSetNewFieldRect}
         onClearNewFieldPlacement={onClearNewFieldPlacement}

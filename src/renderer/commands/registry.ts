@@ -9,7 +9,7 @@ import { showableDoc, tabFiles } from '../state/selectors';
 import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
 import type { Command, CommandContext, CommandNamespace } from './types';
 import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
-import { TOOL_DEFS, TOOL_IDS } from './tools';
+import { TOOL_DEFS, TOOL_IDS, armedModeOf } from './tools';
 import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
 
@@ -92,15 +92,17 @@ export function cycledTab(state: AppState, delta: 1 | -1): FocusedTab {
 
 // --- Command definitions ---------------------------------------------------
 
-// Canvas interaction tools (the floating pill set). Activation toggles like
-// the pills: picking the active tool returns to Select.
+// Canvas interaction modes. Activation toggles: picking the active one returns
+// to Select. Which TOOL owns each is `commands/tools.ts`'s `canvasTools`.
 const CANVAS_TOOLS = [
   'select', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
+  'formfields',
 ] as const;
 
 const TOOL_TITLES: Record<CanvasTool, string> = {
   select: 'Select', highlight: 'Highlight', freetext: 'Text', ink: 'Draw',
-  stamp: 'Stamp', redact: 'Redact', signature: 'Sign', forms: 'Forms',
+  stamp: 'Stamp', redact: 'Redact', signature: 'Sign', forms: 'Fill Fields',
+  formfields: 'Add Field',
 };
 
 export const COMMAND_IDS = [
@@ -438,7 +440,8 @@ export const COMMANDS: Record<CommandId, Command> = {
             // alone. Ordering isn't load-bearing (the target is always a DOC tab
             // and `focusTab` only resets when LEAVING doc land, so this focus
             // can't stomp the arm either way round).
-            if (tool.canvasTool) dispatch({ type: 'UI_SET_TOOL', tool: tool.canvasTool });
+            const mode = armedModeOf(tool);
+            if (mode) dispatch({ type: 'UI_SET_TOOL', tool: mode });
             // Scan & OCR's whole surface is Find's "Make searchable" (2m), so the
             // tool opens Find rather than inventing a second entry point for it.
             // Deferred, not called on ctx.canvas: the tab focus above has only

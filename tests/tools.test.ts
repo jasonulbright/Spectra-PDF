@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { TOOL_DEFS, TOOL_IDS, toolById, toolForOp, type ToolId } from '../src/renderer/commands/tools';
+import {
+  TOOL_DEFS,
+  TOOL_IDS,
+  armedModeOf,
+  toolById,
+  toolForCanvasTool,
+  toolForOp,
+  type ToolId,
+} from '../src/renderer/commands/tools';
+import type { CanvasTool } from '../src/renderer/state/types';
+
+// Every mode the canvas has. Hand-listed on purpose: this is the test's own
+// statement of the union, so a mode added to CanvasTool without an owning tool
+// fails here rather than silently having no secondary toolbar.
+const CANVAS_MODES: CanvasTool[] = [
+  'select', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature',
+  'forms', 'formfields',
+];
 import { OPERATIONS, OPERATION_TITLES } from '../src/renderer/commands/operations';
 
 // The tools registry (M5, § 7) regroups the 19 engine operations into 12 tools
@@ -69,10 +86,49 @@ describe('tools registry', () => {
 
   // A tool with no ops is deliberate (its work is a canvas MODE, not a form) —
   // but then it must arm something, or the tile would do nothing at all.
-  it('every tool either hosts operations or arms a canvas tool', () => {
+  it('every tool either hosts operations or owns a canvas mode', () => {
     for (const tool of TOOL_DEFS) {
-      const usable = tool.ops.length > 0 || tool.canvasTool !== undefined || tool.id === 'ocr';
+      const usable = tool.ops.length > 0 || (tool.canvasTools?.length ?? 0) > 0 || tool.id === 'ocr';
       expect(usable, `${tool.id} has neither ops nor a canvas mode`).toBe(true);
     }
+  });
+
+  it('every canvas mode is owned by exactly one tool — except select', () => {
+    // The property the secondary toolbar rests on: on a document tab, the
+    // armed MODE must name the active TOOL, unambiguously. It didn't before
+    // this slice — Fill & Sign and Prepare Form both wanted 'forms', because
+    // authoring was a boolean riding on the fill mode rather than a mode.
+    const owners = new Map<CanvasTool, ToolId[]>();
+    for (const tool of TOOL_DEFS) {
+      for (const m of tool.canvasTools ?? []) owners.set(m, [...(owners.get(m) ?? []), tool.id]);
+    }
+    const dupes = [...owners.entries()].filter(([, ts]) => ts.length > 1);
+    expect(dupes.map(([m, ts]) => `${m} -> ${ts.join('+')}`)).toEqual([]);
+
+    // 'select' is the ABSENCE of a tool, so nothing may claim it.
+    expect(owners.has('select'), "'select' must belong to no tool").toBe(false);
+    expect(toolForCanvasTool('select')).toBeUndefined();
+
+    // Every other mode the canvas has resolves to its tool.
+    for (const m of CANVAS_MODES) {
+      if (m === 'select') continue;
+      expect(toolForCanvasTool(m)?.id, `${m} is owned by no tool`).toBeDefined();
+    }
+  });
+
+  it('opening a tool arms the FIRST mode it owns', () => {
+    expect(armedModeOf(toolById('comment')!)).toBe('highlight');
+    expect(armedModeOf(toolById('redact')!)).toBe('redact');
+    expect(armedModeOf(toolById('prepareform')!)).toBe('formfields');
+    // A tool that drives no canvas mode says so, rather than defaulting.
+    expect(armedModeOf(toolById('protect')!)).toBeUndefined();
+  });
+
+  it('Fill & Sign and Prepare Form own DIFFERENT modes', () => {
+    // The split this slice exists for: filling a form and authoring one are
+    // different jobs, so they cannot share one mode — that ambiguity is what
+    // made "which tool is armed?" unanswerable.
+    expect(toolForCanvasTool('forms')?.id).toBe('fillsign');
+    expect(toolForCanvasTool('formfields')?.id).toBe('prepareform');
   });
 });

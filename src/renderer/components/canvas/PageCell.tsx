@@ -294,9 +294,7 @@ interface PageCellProps {
   // Clicking an empty signature widget in forms mode targets it for signing
   // (2n.4d — the sign card opens in fill-this-field mode).
   onSignFieldRequest: (path: string, fieldName: string) => void;
-  // Add-field sub-mode (2n.4c): while armed, forms mode draws a placement
   // band instead of being inert on empty page area.
-  formsAddMode?: boolean;
   // Pending new-field placement, when it sits on THIS page (transient view
   // state with the signature-placement lifecycle).
   newFieldPlacement?: SignaturePlacement | null;
@@ -352,7 +350,6 @@ function PageCellImpl({
   formValues,
   onSetFormValue,
   onSignFieldRequest,
-  formsAddMode,
   newFieldPlacement,
   onSetNewFieldRect,
   onClearNewFieldPlacement,
@@ -460,11 +457,12 @@ function PageCellImpl({
       return;
     }
     if (e.button !== 0 || bandActive.current || editing) return;
-    // Forms mode has no rubber band UNLESS the add-field sub-mode is armed
-    // (2n.4c) — widgets handle their own pointer events (with
-    // stopPropagation), and a press on empty page area must not start a drag
-    // or a highlight band under an input.
-    if (tool === 'forms' && !formsAddMode) return;
+    // Fill mode has no rubber band — widgets handle their own pointer events
+    // (with stopPropagation), and a press on empty page area must not start a
+    // drag or a highlight band under an input. AUTHORING (formfields) is the
+    // mode that bands, which is why the two are separate modes rather than one
+    // mode and a boolean (2n.4c).
+    if (tool === 'forms') return;
     e.preventDefault();
     e.stopPropagation();
     if (tool === 'ink') {
@@ -525,7 +523,7 @@ function PageCellImpl({
         } else if (tool === 'signature') {
           // Single pending placement — drawing again (anywhere) replaces it.
           onSetSignaturePlacement(docId, page.id, latest, page.rotation);
-        } else if (tool === 'forms') {
+        } else if (tool === 'formfields') {
           // Add-field placement (2n.4c) — single, drawing again replaces it.
           onSetNewFieldRect(docId, page.id, latest, page.rotation);
         } else {
@@ -868,7 +866,7 @@ function PageCellImpl({
               }}
             >
               <span className="page-form-new-label">NEW FIELD</span>
-              {(tool === 'select' || tool === 'forms') && (
+              {(tool === 'select' || tool === 'forms' || tool === 'formfields') && (
                 <button
                   className="page-annot-x"
                   title="Remove field placement"
@@ -893,7 +891,7 @@ function PageCellImpl({
               ? ' band-redact'
               : tool === 'signature'
                 ? ' band-signature'
-                : tool === 'forms'
+                : tool === 'formfields'
                   ? ' band-formfield'
                   : '')
           }

@@ -451,7 +451,7 @@ describe('invokeCommand', () => {
     // never asked for it (PageCell branches on ui.tool, so it changes clicks).
     const { finalState } = wire(initialState);
     invokeCommand('tools.open.prepareform');
-    expect(finalState().ui.tool).toBe('forms');
+    expect(finalState().ui.tool).toBe('formfields');
     invokeCommand('tools.open.protect'); // no canvasTool of its own
     expect(finalState().ui.tool).toBe('select');
   });
@@ -604,7 +604,7 @@ describe('invokeCommand', () => {
     // one, not only the ops-less ones).
     const { finalState } = wire(initialState);
     expect(invokeCommand('tools.open.prepareform')).toBe(true);
-    expect(finalState().ui.tool).toBe('forms');
+    expect(finalState().ui.tool).toBe('formfields');
   });
 
   it('the ‹ Tools back button disarms the closed tool’s mode', () => {
@@ -616,7 +616,7 @@ describe('invokeCommand', () => {
       stateWith({ files: new Map([['a.pdf', makeFile('a.pdf')]]), activeFileId: 'a.pdf' }),
     );
     invokeCommand('tools.open.prepareform');
-    expect(finalState().ui.tool).toBe('forms');
+    expect(finalState().ui.tool).toBe('formfields');
     dispatchRaw({ type: 'UI_OPEN_TOOL', toolId: null }); // the ‹ Tools button
     expect(finalState().ui.activeToolId).toBeNull();
     expect(finalState().ui.tool).toBe('select');
@@ -645,7 +645,7 @@ describe('invokeCommand', () => {
     // canvas the moment the user went back to a document.
     const { finalState } = wire(initialState);
     invokeCommand('tools.open.prepareform');
-    expect(finalState().ui.tool).toBe('forms');
+    expect(finalState().ui.tool).toBe('formfields');
     invokeCommand('tools.panel.encrypt'); // the rail / Tools menu path
     expect(finalState().ui.activeToolId).toBe('protect');
     expect(finalState().ui.tool).toBe('select');
