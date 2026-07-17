@@ -6,7 +6,7 @@ A modern, open-source PDF workbench for Windows. Tauri v2 + React, with an embed
 
 ## What it is
 
-Version 2.0 is an Acrobat-class workbench: a menu bar, main toolbar, and tabs over a continuous reading view, a navigation pane, and twelve task-oriented tools — with the Acrobat keymap (verified against Adobe's published table) so your muscle memory just works. Every whole-file operation also ships as a CLI subcommand with identical results.
+Version 2.0 is a full-featured PDF workbench with a familiar user interface: a menu bar, main toolbar, and tabs over a continuous reading view, a navigation pane, and twelve task-oriented tools — with a keymap verified against the industry-standard editor's published shortcut table, so your muscle memory just works. Every whole-file operation also ships as a CLI subcommand with identical results.
 
 ### Reading & navigating
 - **Reading view** — continuous, virtualized scroll; smooth with 1,000-page documents. Real text selection and copy, zoom presets (`Ctrl+0/1/2`), go-to-page (`Ctrl+Shift+N`), Rotate View (`Ctrl+Shift+Plus/Minus` — the page turns, the file doesn't), Hand/Select with Space as a temporary hand
@@ -25,11 +25,11 @@ Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and rec
 - **Print** (`Ctrl+P`) — printer picker, page range, copies, fit/actual, through the bundled Ghostscript to any Windows printer
 - **Document Properties** (`Ctrl+D`), categorized **Preferences** (`Ctrl+K`)
 - Insert pages from a file (`Ctrl+Shift+I`) or blank (`Ctrl+Shift+T`), delete (`Ctrl+Shift+D`), rotate (`Ctrl+Shift+R`), split, extract
-- The `.pdfx` format: several documents saved as one ordinary, fully-compatible PDF that reopens as separate strips
+- `.pdfx` support — [Alexandros Gounis's open format](https://github.com/AlexandrosGounis/pdfx): several documents saved as one ordinary, fully-compatible PDF that reopens as separate strips
 - Multi-level undo/redo across staged page edits and applied operations; one file is one document no matter how its path is spelled
 
 ### Desktop citizenship
-NSIS installer with silent modes and enterprise policy, file associations, Explorer context menu, system tray, start-with-Windows, auto-update, light/dark/system themes with Windows accent + Mica, WCAG 2.1 AA, full keyboard navigation (single-key tool accelerators available, off by default like Acrobat).
+NSIS installer with silent modes and enterprise policy, file associations, Explorer context menu, system tray, start-with-Windows, auto-update, light/dark/system themes with Windows accent + Mica, WCAG 2.1 AA, full keyboard navigation (single-key tool accelerators available, off by default).
 
 ## Command Line
 

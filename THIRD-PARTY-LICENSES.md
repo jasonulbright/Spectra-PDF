@@ -43,3 +43,41 @@ React (MIT), pdf.js (Apache-2.0), @dnd-kit (MIT), Radix UI (MIT), Tailwind CSS (
 
 Rust crates compiled into the backend are listed in `src-tauri/Cargo.toml` /
 `Cargo.lock`; Tauri and its plugins are MIT / Apache-2.0.
+
+## PDFx
+
+- **Author:** Alex (Alexandros) Gounis
+- **License:** MIT
+- **Source:** <https://github.com/AlexandrosGounis/pdfx>
+- **Role:** Open PDF Studio's multi-document canvas plumbing (layout,
+  drag controllers, zoom, lazy rendering), OCR worker integration, search
+  engine, and the `.pdfx` single-file/multi-document format originated as
+  ports from PDFx and have been adapted and extended throughout. The
+  `.pdfx` format itself is his design: several documents stored as one
+  ordinary, fully compatible PDF.
+
+Per the MIT license's terms, its copyright and permission notice:
+
+```
+MIT License
+
+Copyright (c) 2026 Alex Gounis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

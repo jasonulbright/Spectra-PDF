@@ -2,11 +2,11 @@
 
 ## 2.0.0 — The Workbench
 
-The whole application becomes an Acrobat-class workbench: a menu bar, a main
+The whole application becomes a full-featured workbench: a menu bar, a main
 toolbar, tabs, a reading view, and twelve task-oriented tools over the same
-engine — with the Acrobat keymap, verified against Adobe's published table
-and frozen. Everything from 1.0 is still here; it moved into a shape you
-already know how to drive.
+engine — with a keymap verified against the industry-standard editor's
+published shortcut table and frozen. Everything from 1.0 is still here; it
+moved into a shape you already know how to drive.
 
 ### The frame
 - Menu bar (File/Edit/View/Document/Tools/Window/Help), main toolbar, and a
@@ -24,7 +24,7 @@ already know how to drive.
   (Ctrl+Shift+N), and cross-document Find/Search
 - Rotate View (view-only quarter turns, Ctrl+Shift+Plus/Minus) — the page
   turns, the file doesn't; every tool keeps working while turned
-- Hand/Select modes with Space as a temporary hand, like Acrobat
+- Hand/Select modes with Space as a temporary hand
 - The Organize view (the 1.0 page-strip board) remains one click away —
   View ▸ Organize All Documents — for rearranging pages across files
 
@@ -45,10 +45,10 @@ already know how to drive.
   every page edit
 
 ### Keyboard
-- The Acrobat keymap, cross-verified and frozen: standard chords, the
-  document-op set (Ctrl+Shift+D/I/R/T/N), F3/Ctrl+G find stepping, and
-  optional single-key tool accelerators (H/V/U/X/D/K) — off by default,
-  exactly like Acrobat
+- The keymap, cross-verified against the industry-standard editor's
+  published table and frozen: standard chords, the document-op set
+  (Ctrl+Shift+D/I/R/T/N), F3/Ctrl+G find stepping, and optional single-key
+  tool accelerators (H/V/U/X/D/K) — off by default
 - The webview's own keys (reload, browser zoom) can never fire — a
   disabled shortcut means nothing happens, not something surprising
 
@@ -77,8 +77,9 @@ full parity for every whole-file transform.
 - Staged edits: rotations, deletions, moves, imports, and annotations stay
   in memory until "Apply changes" commits every touched file atomically;
   multi-level undo/redo spans staged edits and applied operations
-- The `.pdfx` format: several documents saved as one ordinary,
-  fully-compatible PDF that reopens as separate strips
+- The `.pdfx` format ([Alexandros Gounis's open format](https://github.com/AlexandrosGounis/pdfx)):
+  several documents saved as one ordinary, fully-compatible PDF that
+  reopens as separate strips
 - Keyboard shortcuts throughout (Ctrl+Z/Y, Ctrl+A, Delete, `[`/`]` rotate,
   Ctrl+F find, Ctrl+=/−/0 zoom)
 

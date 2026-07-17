@@ -298,7 +298,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       </label>
       <p className="text-xs text-neutral-500 -mt-3">
         H Hand · V Select · U Highlight · X Text · D Draw · K Stamp — off by
-        default, like Acrobat
+        default
       </p>
       </>
       )}
