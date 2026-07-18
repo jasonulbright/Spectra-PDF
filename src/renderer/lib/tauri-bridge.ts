@@ -57,6 +57,44 @@ export const dialog = {
   /** Pick a PKCS#12 (.pfx/.p12) signer file. Returns null if cancelled. */
   pickCertificate: () => invoke<string | null>('pick_certificate_file'),
   pickPemFile: () => invoke<string | null>('pick_pem_file'),
+  /** Pick a folder (Batch OCR source/destination). Returns null if cancelled. */
+  pickFolder: (title?: string) => invoke<string | null>('pick_folder_dialog', { title }),
+};
+
+// ── Batch OCR (Phase 6) ───────────────────────────────────────────────────
+//
+// Batch operates on paths OUTSIDE the workspace (never OPEN_FILE'd, never in
+// $TEMP), so its file IO goes through plain Rust commands, not the
+// capability-scoped plugin-fs used for working copies.
+
+export interface BatchPdfEntry {
+  abs: string;
+  rel: string;
+}
+
+export interface BatchPdfListing {
+  files: BatchPdfEntry[];
+  skippedDirs: string[];
+}
+
+export const batch = {
+  /** Every *.pdf under root (recursive; cycle-safe; unreadable subdirs reported). */
+  listPdfsRecursive: (root: string) => invoke<BatchPdfListing>('list_pdfs_recursive', { root }),
+  /** Byte copy creating destination parents — the mirror's pass-through.
+   * Refuses same-physical-file overwrites; clears a read-only dest first. */
+  copyFile: (src: string, dest: string) => invoke<void>('copy_file_creating_dirs', { src, dest }),
+  /** Pre-create a mirror output's parents (apply_ocr_layer saves to the exact
+   * path it is given and does not create directories). */
+  ensureParentDirs: (path: string) => invoke<void>('ensure_parent_dirs', { path }),
+  /** TRUE file identity (volume serial + file index): canonical STRINGS can
+   * disagree about one physical folder (UNC vs mapped letter), so the
+   * dest-conflict guard asks the filesystem, not the spelling. */
+  pathsSameFile: (a: string, b: string) => invoke<boolean>('paths_same_file', { a, b }),
+  /** Read arbitrary-path bytes (batch sources live outside the plugin-fs
+   * scope). Raw binary IPC — the serde number[] form balloons a long
+   * unattended run over large scanned PDFs. */
+  readFileBuffer: async (path: string) =>
+    new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath: path })),
 };
 
 // ── File operations ───────────────────────────────────────────────────────

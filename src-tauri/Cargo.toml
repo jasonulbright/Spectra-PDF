@@ -34,4 +34,11 @@ tempfile = "3"
 # identity is the raw path STRING app-wide, so every path must enter the
 # renderer in ONE canonical spelling (M7 — the path-identity gate).
 dunce = "1"
+# TRUE file identity (volume serial + file index), for the batch-mirror
+# same-file refusals: canonical STRINGS can disagree about one physical file
+# (UNC vs mapped drive letter, hardlinks — Windows' VOLUME_NAME_DOS behavior
+# is version-inconsistent for network mounts), and a string-only guard there
+# risks overwriting a user's originals. Hand-rolled GetFileInformationByHandle
+# rejected: more unsafe code to get wrong than this zero-frills crate.
+same-file = "1"
 clap = { version = "4", features = ["derive"] }

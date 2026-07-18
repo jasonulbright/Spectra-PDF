@@ -25,7 +25,9 @@ text); output written only after every page succeeds; in-place via
 temp+rename.
 """
 
+import os
 import shutil
+import stat
 import tempfile
 from pathlib import Path
 
@@ -108,7 +110,15 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
     """
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    # TRUE identity, not just string identity: resolve() sees through subst
+    # drives (verified live), but Windows spells one physical file several
+    # unresolvable ways (UNC vs mapped letter, hardlinks). os.path.samefile
+    # compares volume serial + file index, so an aliased output==input still
+    # takes the safe temp+rename branch instead of a direct overwrite of a
+    # file pikepdf has open (batch-mirror review finding).
+    same_file = input_path.resolve() == output_path.resolve() or (
+        output_path.exists() and os.path.samefile(input_path, output_path)
+    )
 
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
@@ -189,6 +199,13 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
                 tmp_path = tmp.name
             pdf.save(tmp_path)
         else:
+            # Overwriting an existing mirror output: clear a read-only
+            # attribute first — fs-level copies propagate attributes, so a
+            # read-only SOURCE produces a read-only mirror file whose
+            # promised refresh on the next run would otherwise fail with a
+            # bare access-denied (batch-mirror review finding).
+            if output_path.exists() and not os.access(output_path, os.W_OK):
+                os.chmod(output_path, stat.S_IWRITE)
             pdf.save(output_path)
 
     if same_file:

@@ -118,6 +118,34 @@ export function registerCanvasOcr(handlers: CanvasOcrHandlers | null): void {
 }
 
 /**
+ * Batch OCR (Phase 6): the dialog's folder pickers are native and not
+ * WebDriver-drivable, so the dialog registers path injectors that run the
+ * SAME selectSource/setDest/start flow the buttons run. A spec opens the
+ * dialog (`tools.batchOcr`), injects fixture folders, starts, then polls
+ * `snapshot()` until phase === 'done' and asserts on the report.
+ */
+export interface BatchOcrHandlers {
+  setSource: (path: string) => Promise<void>;
+  setDest: (path: string) => void;
+  start: () => Promise<void>;
+  snapshot: () => {
+    phase: 'setup' | 'running' | 'done';
+    fileCount: number | null;
+    report: {
+      cancelled: boolean;
+      results: { rel: string; status: string; pagesOcrd?: number; reason?: string }[];
+      skippedDirs: string[];
+    } | null;
+  };
+}
+
+let batchOcr: BatchOcrHandlers | null = null;
+
+export function registerBatchOcr(handlers: BatchOcrHandlers | null): void {
+  batchOcr = handlers;
+}
+
+/**
  * Multi-select (2n.1) is local canvas view state, and both modifier-click
  * selection and the pointer-capture group drag are not reliably
  * WebDriver-drivable. The canvas registers selection setters/readers plus the
@@ -472,6 +500,10 @@ export interface TestHarness {
     intact: boolean;
     covers_whole_document: boolean;
   }>;
+  /** Batch OCR dialog injectors (dialog must be open — `tools.batchOcr`). */
+  batchOcrSetFolders: (source: string, dest: string) => Promise<void>;
+  batchOcrStart: () => Promise<void>;
+  batchOcrSnapshot: () => ReturnType<BatchOcrHandlers['snapshot']> | null;
 }
 
 export interface TestHarnessDeps {
@@ -880,6 +912,34 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
+    batchOcrSetFolders: async (source, dest) => {
+      if (!batchOcr) {
+        const msg = 'batchOcrSetFolders: Batch OCR dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await batchOcr.setSource(source);
+        batchOcr.setDest(dest);
+      } catch (err) {
+        captureError('batchOcrSetFolders', err);
+        throw err;
+      }
+    },
+    batchOcrStart: async () => {
+      if (!batchOcr) {
+        const msg = 'batchOcrStart: Batch OCR dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await batchOcr.start();
+      } catch (err) {
+        captureError('batchOcrStart', err);
+        throw err;
+      }
+    },
+    batchOcrSnapshot: () => batchOcr?.snapshot() ?? null,
   };
 
   window.__SPECTRA_TEST__ = harness;

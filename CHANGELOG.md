@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Batch OCR (folder mirror)
+- New Tools ▸ **Batch OCR Folder…** — pick a source folder and a destination,
+  and every PDF under the source is mirrored into the destination with its
+  scanned pages made searchable (invisible text layer, same recognition as
+  the in-app OCR — offline, bundled). Already-searchable files copy through
+  byte-identical; encrypted or damaged files are skipped and reported;
+  the source tree is never modified
+- The run shows per-file, per-page progress and can be stopped; the report
+  is honest to the page: files where some scanned pages had no recognizable
+  text say so, and unreadable subfolders are listed rather than silently
+  missing from the mirror
+- Works with no document open; language selectable (English, German,
+  French, Spanish)
+- Safety: destination inside the source is refused — including when the
+  same folder is reached by two different path spellings — and overwrite
+  collisions with the originals are refused at the file level as well
+
 ## 2.0.0 — The Workbench
 
 The whole application becomes a full-featured workbench: a menu bar, a main

@@ -76,7 +76,14 @@ const recentSubmenu: MenuNode = {
 // the only way to arm Comment or Redact without leaving the document, and it
 // retired into the secondary toolbar, which only appears once a tool is already
 // armed. This is how you arm one.
-const toolsItems: MenuNode[] = TOOL_DEFS.map((t) => cmd(`tools.open.${t.id}`, `menuitem-tool-${t.id}`));
+const toolsItems: MenuNode[] = [
+  ...TOOL_DEFS.map((t): MenuNode => cmd(`tools.open.${t.id}`, `menuitem-tool-${t.id}`)),
+  // Phase 6 — the one Tools entry that is NOT a tool tile: it needs no open
+  // document (the tiles are disabled without one), so it lives here where it
+  // stays reachable from an empty workspace.
+  sep,
+  cmd('tools.batchOcr', 'menuitem-tools-batch-ocr'),
+];
 
 // Window ▸ open-document list — focus that doc's tab. importOnly sources
 // (2n.3) have no tab and are excluded (mirrors registry.tabFiles).

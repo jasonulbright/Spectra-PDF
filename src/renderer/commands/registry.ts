@@ -167,6 +167,7 @@ export const COMMAND_IDS = [
   'help.checkUpdates',
   'file.exit',
   'file.clearRecent',
+  'tools.batchOcr',
   ...CANVAS_TOOLS.map((t) => `tools.${t}` as const),
   ...OPERATIONS.map((op) => `tools.panel.${op}` as const),
   ...TOOL_IDS.map((id) => `tools.open.${id}` as const),
@@ -403,6 +404,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Preferences…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openPreferences(),
+  },
+  // Phase 6 — needs NO document (operates on a picked folder tree, outside
+  // the workspace entirely), so its only gate is App being mounted.
+  'tools.batchOcr': {
+    title: 'Batch OCR Folder…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openBatchOcr(),
   },
   'view.home': {
     title: 'Home',

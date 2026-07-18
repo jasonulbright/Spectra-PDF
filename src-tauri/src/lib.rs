@@ -78,6 +78,12 @@ pub fn run() {
             commands::save_file_dialog,
             commands::pick_certificate_file,
             commands::pick_pem_file,
+            commands::pick_folder_dialog,
+            commands::list_pdfs_recursive,
+            commands::copy_file_creating_dirs,
+            commands::ensure_parent_dirs,
+            commands::paths_same_file,
+            commands::read_file_binary,
 
             commands::read_file_buffer,
             commands::create_working_copy,

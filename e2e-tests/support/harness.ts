@@ -669,6 +669,52 @@ export async function mergeNoticeText(): Promise<string | null> {
   });
 }
 
+// --- Batch OCR (Phase 6) ----------------------------------------------------
+
+export interface BatchOcrSnapshot {
+  phase: 'setup' | 'running' | 'done';
+  fileCount: number | null;
+  report: {
+    cancelled: boolean;
+    results: { rel: string; status: string; pagesOcrd?: number; reason?: string }[];
+    skippedDirs: string[];
+  } | null;
+}
+
+/** Inject source+destination into the open Batch OCR dialog (native folder
+ * pickers are not WebDriver-drivable) — runs the dialog's REAL
+ * selectSource/setDest flow, including enumeration. */
+export async function batchOcrSetFolders(source: string, dest: string): Promise<void> {
+  const result = await browser.executeAsync<string | null, [string, string]>(
+    function (s, d, done) {
+      (window as any).__SPECTRA_TEST__.batchOcrSetFolders(s, d)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    source,
+    dest,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`batchOcrSetFolders failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+/** Start the batch run WITHOUT awaiting completion — real in-webview
+ * recognition can far outlive the WebDriver script timeout. Poll
+ * `batchOcrSnapshot()` for phase === 'done' instead (the ocrReadyCount
+ * idiom). */
+export async function batchOcrStart(): Promise<void> {
+  await browser.execute(function () {
+    void (window as any).__SPECTRA_TEST__.batchOcrStart();
+  });
+}
+
+export async function batchOcrSnapshot(): Promise<BatchOcrSnapshot | null> {
+  return await browser.execute<BatchOcrSnapshot | null, []>(function () {
+    return (window as any).__SPECTRA_TEST__.batchOcrSnapshot();
+  });
+}
+
 /**
  * Choose the document pane's view (absolute set, no pill toggle).
  *

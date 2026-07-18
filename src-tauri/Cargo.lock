@@ -2525,6 +2525,7 @@ version = "2.0.0"
 dependencies = [
  "clap",
  "dunce",
+ "same-file",
  "serde",
  "serde_json",
  "tauri",

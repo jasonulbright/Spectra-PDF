@@ -13,6 +13,7 @@ Version 2.0 is a full-featured PDF workbench with a familiar user interface: a m
 - **Organize view** — every open file as a strip of live page thumbnails; drag pages within and across documents, multi-select, whole-document merge, drop files to import their pages at that spot. All of it staged in memory, committed atomically, undoable
 - **Navigation pane** (`F4`) — Pages (thumbnails with drag-reorder), Bookmarks (with editing), Search, Signatures
 - **Find & Search** — floating find (`Ctrl+F`, `F3`/`Ctrl+G` stepping) and a workspace-wide Search panel (`Ctrl+Shift+F`); scanned pages become searchable (and selectable) via OCR
+- **Batch OCR** (Tools ▸ Batch OCR Folder…) — point it at a folder and get a mirrored copy of the whole tree with every scanned PDF made searchable; already-searchable files copy through unchanged, problem files are reported, and the originals are never touched. Fully offline, like all OCR here
 
 ![Organize view](docs/images/screenshot_organize.png)
 

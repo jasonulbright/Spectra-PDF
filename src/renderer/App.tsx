@@ -49,6 +49,7 @@ import { HomeTab } from './components/HomeTab';
 import { AboutDialog } from './components/AboutDialog';
 import { PropertiesDialog } from './components/PropertiesDialog';
 import { PrintDialog } from './components/PrintDialog';
+import { BatchOcrDialog } from './components/BatchOcrDialog';
 import { buildBlankPagePdf } from './lib/blank-page';
 import { insertAnchor } from './state/selectors';
 import { UpdateBar } from './components/UpdateBar';
@@ -143,6 +144,7 @@ function AppContent(): React.ReactElement {
   const [showAbout, setShowAbout] = useState(false);
   const [showProperties, setShowProperties] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
+  const [showBatchOcr, setShowBatchOcr] = useState(false);
   // Manual "Check for Updates" (Help menu): bump a signal the UpdateBar
   // watches, so the banner surfaces the available / up-to-date / disabled state.
   const [updateCheckSignal, setUpdateCheckSignal] = useState(0);
@@ -773,6 +775,7 @@ function AppContent(): React.ReactElement {
     openPreferences: () => setShowSettings('general'),
     openProperties: () => setShowProperties(true),
     openPrint: () => setShowPrint(true),
+    openBatchOcr: () => setShowBatchOcr(true),
     insertBlankPage,
     insertPagesFromFile,
     openLicenses: () => setShowSettings('licenses'),
@@ -799,6 +802,7 @@ function AppContent(): React.ReactElement {
       openPreferences: () => h.current.openPreferences(),
       openProperties: () => h.current.openProperties(),
       openPrint: () => h.current.openPrint(),
+      openBatchOcr: () => h.current.openBatchOcr(),
       insertBlankPage: () => h.current.insertBlankPage(),
       insertPagesFromFile: () => h.current.insertPagesFromFile(),
       openLicenses: () => h.current.openLicenses(),
@@ -1200,6 +1204,7 @@ function AppContent(): React.ReactElement {
       )}
       {showProperties && <PropertiesDialog onClose={() => setShowProperties(false)} />}
       {showPrint && <PrintDialog onClose={() => setShowPrint(false)} />}
+      {showBatchOcr && <BatchOcrDialog onClose={() => setShowBatchOcr(false)} />}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
       <ConfirmDialog
         open={confirmState !== null}

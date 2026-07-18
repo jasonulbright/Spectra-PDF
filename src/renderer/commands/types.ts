@@ -58,6 +58,10 @@ export interface AppCommandHandlers {
   openProperties(): void;
   /** Open the Print dialog (File ▸ Print…, Ctrl+P — M-P, § 3.4). */
   openPrint(): void;
+  /** Open the Batch OCR dialog (Tools ▸ Batch OCR Folder… — Phase 6).
+   * Needs no open document: the dialog operates on a picked folder tree,
+   * entirely outside the workspace. */
+  openBatchOcr(): void;
   /** Insert a blank page after the page being read (§ 9.3, M6.3) — pdf-lib
    * one-pager sized to the neighbor, through the byte-only import machinery. */
   insertBlankPage(): Promise<void>;

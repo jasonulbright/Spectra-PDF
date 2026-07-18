@@ -135,6 +135,205 @@ pub async fn pick_pem_file(
     }
 }
 
+/// Pick a folder — Batch OCR's source/destination pickers (Phase 6).
+/// Canonicalized like every other Rust path producer (the M7 path rule).
+#[tauri::command]
+pub async fn pick_folder_dialog(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    title: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut builder = app.dialog().file().set_parent(&window);
+    if let Some(ref t) = title {
+        builder = builder.set_title(t);
+    }
+    match builder.blocking_pick_folder() {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(canonical_path(&pb.to_string_lossy()))),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct PdfEntry {
+    /// Canonical absolute path (engine/copy input).
+    pub abs: String,
+    /// Path relative to the picked root (the mirror key) — NOT canonicalized,
+    /// it's a tree position, not a file identity.
+    pub rel: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfListing {
+    pub files: Vec<PdfEntry>,
+    /// Directories the walk could not read (permissions). Surfaced so the
+    /// batch report never has silent holes.
+    pub skipped_dirs: Vec<String>,
+}
+
+/// Recursively list every `*.pdf` under `root` (Batch OCR enumeration).
+/// Junction/symlink cycles are broken with a canonical-path visited set; a
+/// defensive depth cap bounds pathological trees. Unreadable SUBdirectories
+/// are reported, not fatal; an unreadable root is an error.
+#[tauri::command]
+pub async fn list_pdfs_recursive(root: String) -> Result<PdfListing, String> {
+    let root_c = canonical_path(&root);
+    let root_path = Path::new(&root_c).to_path_buf();
+    if !root_path.is_dir() {
+        return Err(format!("Not a folder: {}", root_c));
+    }
+    // The walk is sync fs work — keep it off the async runtime's main thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        // An unreadable ROOT is an error (the user picked it); unreadable
+        // subdirectories are reported in skipped_dirs instead.
+        fs::read_dir(&root_path).map_err(|e| format!("Cannot read folder {}: {}", root_path.display(), e))?;
+        let mut listing = PdfListing { files: Vec::new(), skipped_dirs: Vec::new() };
+        let mut visited = std::collections::HashSet::new();
+        walk_pdfs(&root_path, &root_path, &mut listing, &mut visited, 0);
+        // Deterministic order for progress display and tests.
+        listing.files.sort_by(|a, b| a.rel.to_lowercase().cmp(&b.rel.to_lowercase()));
+        Ok(listing)
+    })
+    .await
+    .map_err(|e| format!("Folder walk failed: {}", e))?
+}
+
+fn walk_pdfs(
+    root: &Path,
+    dir: &Path,
+    listing: &mut PdfListing,
+    visited: &mut std::collections::HashSet<String>,
+    depth: u32,
+) {
+    const MAX_DEPTH: u32 = 64;
+    if depth > MAX_DEPTH {
+        listing.skipped_dirs.push(dir.to_string_lossy().to_string());
+        return;
+    }
+    // Revisit guard: canonical identity of the DIRECTORY (case-folded —
+    // Windows). A hit is either a junction/symlink CYCLE or an ALIAS of a
+    // subtree already walked (two junctions to one physical folder) — in
+    // both cases this occurrence goes unmirrored, so it is REPORTED, not
+    // silently dropped ("never has silent holes" is the contract).
+    let canon = dunce::canonicalize(dir)
+        .map(|p| p.to_string_lossy().to_lowercase())
+        .unwrap_or_else(|_| dir.to_string_lossy().to_lowercase());
+    if !visited.insert(canon) {
+        if depth > 0 {
+            listing
+                .skipped_dirs
+                .push(format!("{} (already visited via another path)", dir.to_string_lossy()));
+        }
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => {
+            listing.skipped_dirs.push(dir.to_string_lossy().to_string());
+            return;
+        }
+    };
+    for entry in entries {
+        // A per-entry error (permission-denied item, delete race) names no
+        // file; report it against the parent so the hole is visible.
+        let entry = match entry {
+            Ok(e) => e,
+            Err(err) => {
+                listing
+                    .skipped_dirs
+                    .push(format!("{} (an entry was unreadable: {})", dir.to_string_lossy(), err));
+                continue;
+            }
+        };
+        let path = entry.path();
+        if path.is_dir() {
+            walk_pdfs(root, &path, listing, visited, depth + 1);
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+        {
+            let rel = path
+                .strip_prefix(root)
+                .map(|r| r.to_string_lossy().to_string())
+                .unwrap_or_else(|_| path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+            listing.files.push(PdfEntry {
+                abs: canonical_path(&path.to_string_lossy()),
+                rel,
+            });
+        }
+    }
+}
+
+/// True when both paths exist and are the SAME physical file/directory
+/// (volume serial + file index — not string comparison). Canonical strings
+/// can disagree about one physical file (UNC vs mapped letter, hardlinks);
+/// this is the identity truth the batch same-file refusals rest on.
+#[tauri::command]
+pub async fn paths_same_file(a: String, b: String) -> Result<bool, String> {
+    Ok(same_file::is_same_file(&a, &b).unwrap_or(false))
+}
+
+/// Copy `src` to `dest`, creating `dest`'s parent directories — the batch
+/// mirror's pass-through for already-searchable PDFs. Plain fs::copy: no PDF
+/// logic in Rust. Two guards:
+/// - REFUSES when dest already exists and IS src (true file identity — a
+///   string-alias geometry the dialog's root check couldn't see would
+///   otherwise truncate the user's original: CopyFileExW opens dest for
+///   write while reading the identical file).
+/// - Clears a read-only attribute on an existing dest before overwriting
+///   (fs::copy propagates attributes, so a read-only SOURCE makes a
+///   read-only mirror file on run 1 that would fail run 2's promised
+///   overwrite with a bare access-denied).
+#[tauri::command]
+pub async fn copy_file_creating_dirs(src: String, dest: String) -> Result<(), String> {
+    let dest_path = Path::new(&dest);
+    if let Some(parent) = dest_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create {}: {}", parent.display(), e))?;
+    }
+    if dest_path.exists() {
+        if same_file::is_same_file(&src, &dest).unwrap_or(false) {
+            return Err("source and destination are the same file".to_string());
+        }
+        let meta = fs::metadata(dest_path)
+            .map_err(|e| format!("Cannot inspect {}: {}", dest, e))?;
+        let mut perms = meta.permissions();
+        if perms.readonly() {
+            perms.set_readonly(false);
+            fs::set_permissions(dest_path, perms)
+                .map_err(|e| format!("Destination is read-only and could not be made writable: {}", e))?;
+        }
+    }
+    fs::copy(&src, &dest).map_err(|e| format!("Copy failed {} -> {}: {}", src, dest, e))?;
+    Ok(())
+}
+
+/// Arbitrary-path binary read for the batch driver. The serde `Vec<u8>` form
+/// (`read_file_buffer`) JSON-encodes every byte as a number — fine for one
+/// open, hostile to a long unattended run over large scanned PDFs. A raw
+/// `Response` body crosses the IPC as binary.
+#[tauri::command]
+pub async fn read_file_binary(file_path: String) -> Result<tauri::ipc::Response, String> {
+    let bytes =
+        fs::read(&file_path).map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Create the parent directories of `path` — run before the engine writes a
+/// mirror output (`apply_ocr_layer` saves to the exact path it's given and
+/// does not create directories; the contract stays engine-unchanged).
+#[tauri::command]
+pub async fn ensure_parent_dirs(path: String) -> Result<(), String> {
+    if let Some(parent) = Path::new(&path).parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create {}: {}", parent.display(), e))?;
+    }
+    Ok(())
+}
+
 // ── File operations ───────────────────────────────────────────────────────
 
 #[tauri::command]

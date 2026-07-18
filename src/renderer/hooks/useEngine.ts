@@ -110,5 +110,13 @@ export function useEngine() {
   const saveFile = useCallback((defaultPath?: string) =>
     dialog.saveFile({ defaultPath }), []);
 
-  return { call, openFiles, saveFile, ready };
+  // `callRaw` skips the commit gate and the operation queue — for engine work
+  // on files OUTSIDE the workspace only (Batch OCR mirror outputs). A
+  // workspace file op must use `call`: the gate is what guarantees the engine
+  // reads bytes matching what the user sees, and skipping it for an open
+  // file's working copy would reintroduce the exact stale-read class the gate
+  // exists to prevent. Batch reads ORIGINAL paths (not working copies), so
+  // neither concern applies — and gating there would side-effect-commit the
+  // user's unrelated pending page edits mid-batch.
+  return { call, callRaw: rawCall, openFiles, saveFile, ready };
 }
