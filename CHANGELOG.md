@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.3.0 — Combine Files, findability, and a steadier workspace
+
+### Find the features (launch-thread feedback)
+- **Document ▸ Combine Files…** — merging PDFs now has a named menu
+  path: pick files and their pages are appended to the current document,
+  undoable like every page edit. (Dragging documents together on the
+  Organize board works exactly as before — this is the same power, now
+  findable by name.)
+- Tool tiles say what they actually do: Organize Pages names **merge**
+  and **delete**, Comment names **text boxes**, and Edit now describes
+  its full surface — **text, whole paragraphs, and images**
+- Nothing moved and nothing changed behavior — these are the same
+  features, now discoverable
+
+### Your place survives your edits
+- Selecting pages, reading a specific section, or jumping to a bookmark
+  no longer gets forgotten every time an edit is saved: **selection,
+  reading position, and document focus now survive page-edit commits** —
+  including edits saved in a different open file, which previously reset
+  everything everywhere
+- Moved pages keep their thumbnails steady across a save (no more
+  flicker as they re-render)
+- Under the hood this is real cross-commit page identity, engineered so
+  a stale reference can never point at the wrong page — positions still
+  reset only when a file's content is rebuilt outside the editor (an
+  engine operation, undo of a save, or an external change), where
+  holding a position would be a guess
+
 ## 2.2.0 — Edit Text & Paragraph Reflow
 
 ### Edit Paragraphs — reflow inside the box
