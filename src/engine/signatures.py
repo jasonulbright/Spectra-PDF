@@ -1,18 +1,27 @@
-"""Digital-signature VERIFICATION (read-only).
+"""Digital signatures: verification AND signing.
 
-Reports, per embedded signature: whether it's cryptographically valid, whether
-the bytes it covers are intact, whether the document was modified after signing
-(coverage level), the signer's certificate identity, and the claimed signing
-time.
+Verification (``verify_signatures``) reports, per embedded signature: whether
+it's cryptographically valid, whether the bytes it covers are intact, whether
+the document was modified after signing (coverage level), the signer's
+certificate identity, and the claimed signing time.
 
-Scope — deliberately "single-cert" verification (roadmap § C, first slice):
-we validate the signature's cryptography and the document's integrity, but do
-NOT validate the signer's certificate against any trust store, nor check
+Verification scope — deliberately "single-cert" (roadmap § C): we validate
+the signature's cryptography and the document's integrity, but do NOT
+validate the signer's certificate against any trust store, nor check
 revocation, nor timestamp/LTV. So ``trusted`` is reported but is
 DETERMINISTICALLY False — the UI must present a valid result as
 "cryptographically valid, signer identity NOT verified against a trusted
-authority", never as fully trusted. Signing (applying signatures) is a
-separate deferred slice. See docs/architecture/10-phase2h-signatures.md.
+authority", never as fully trusted. PAdES/LTV/TSA remain owner-locked out of
+v1 (arm's-length AGPL subprocess is the documented future path). See
+docs/architecture/10-phase2h-signatures.md.
+
+Signing (``sign_pdf``) is shipped — Phase 2h signing + Phase 2k completeness:
+signer sources are a .pfx/.p12 (``_load_signer_from_pfx``) or a PEM key +
+certificate pair with key-match validation (``_load_signer_from_pem``);
+placement is invisible, a visible stamp rect, or an existing empty signature
+field (``--existing-field`` / sign-into-field); ``generate_signer`` creates
+an in-app self-signed identity. See docs/architecture/11-phase2h-signing.md
+and 13-phase2k-signature-completeness.md.
 
 CRITICAL — trust context: we pass an EXPLICIT EMPTY trust context
 (``ValidationContext(trust_roots=[])``), NOT ``signer_validation_context=None``.
