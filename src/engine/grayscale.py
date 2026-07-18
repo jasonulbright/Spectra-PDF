@@ -34,11 +34,11 @@ def grayscale(
         "-dQUIET",
         "-dBATCH",
         "-dSAFER",
-        f"-sOutputFile={output_path}",
+        f"-sOutputFile={str(output_path).replace('%', '%%')}",  # % is a gs filename template char (distill review)
         str(input_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)  # stdin isolation: gs must never inherit the RPC pipe (distill review)
     if result.returncode != 0:
         raise RuntimeError(f"Ghostscript grayscale conversion failed: {result.stderr}")
 

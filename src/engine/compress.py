@@ -63,9 +63,9 @@ def compress(
         preset = QUALITY_PRESETS.get(quality, "/ebook")
         cmd.append(f"-dPDFSETTINGS={preset}")
 
-    cmd.extend([f"-sOutputFile={output_path}", str(input_path)])
+    cmd.extend([f"-sOutputFile={str(output_path).replace('%', '%%')}", str(input_path)])  # % = gs template char (distill review)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)  # stdin isolation: gs must never inherit the RPC pipe (distill review)
     if result.returncode != 0:
         raise RuntimeError(f"Ghostscript failed: {result.stderr}")
 

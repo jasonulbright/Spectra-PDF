@@ -176,7 +176,13 @@ def print_pdf(
     for _ in range(copies):
         try:
             result = subprocess.run(
-                args, capture_output=True, text=True, timeout=JOB_TIMEOUT_S
+                args,
+                capture_output=True,
+                text=True,
+                timeout=JOB_TIMEOUT_S,
+                # stdin isolation: gs must never inherit the RPC pipe
+                # (distill review; -dSAFER does not sandbox std streams).
+                stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
