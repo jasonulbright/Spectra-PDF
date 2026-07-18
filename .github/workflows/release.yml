@@ -47,6 +47,10 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1
         shell: pwsh
 
+      - name: Vendor edit fonts (Liberation Sans, sha256-pinned)
+        run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
+        shell: pwsh
+
       - name: Build, sign, and publish release
         uses: tauri-apps/tauri-action@v0
         env:

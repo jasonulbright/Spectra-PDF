@@ -43,6 +43,7 @@ jobs:
         run: |
           mkdir -p resources/python
           mkdir -p resources/ghostscript
+          mkdir -p resources/fonts
         shell: bash
 
       - name: Check Rust compilation
