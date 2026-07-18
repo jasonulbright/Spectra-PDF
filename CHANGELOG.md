@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 — Edit Text & Paragraph Reflow
 
 ### Edit Paragraphs — reflow inside the box
 - Text that reads as a paragraph now **selects as one box**: double-click
