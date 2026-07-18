@@ -24,6 +24,7 @@ Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and rec
 
 ### Documents & files
 - **Print** (`Ctrl+P`) — printer picker, page range, copies, fit/actual, through the bundled Ghostscript to any Windows printer
+- **Create PDF from PostScript** — convert `.ps`/`.eps` to PDF with quality presets (Smallest / eBook / Print / Press), the classic distilling job, done by the bundled Ghostscript
 - **Document Properties** (`Ctrl+D`), categorized **Preferences** (`Ctrl+K`)
 - Insert pages from a file (`Ctrl+Shift+I`) or blank (`Ctrl+Shift+T`), delete (`Ctrl+Shift+D`), rotate (`Ctrl+Shift+R`), split, extract
 - `.pdfx` support — [Alexandros Gounis's open format](https://github.com/AlexandrosGounis/pdfx): several documents saved as one ordinary, fully-compatible PDF that reopens as separate strips
@@ -49,6 +50,9 @@ openpdfstudio delete input.pdf -o trimmed.pdf --pages 3,7
 # Print — to any installed Windows printer, via the bundled Ghostscript
 openpdfstudio printers                       # list printers (JSON, with the default)
 openpdfstudio print input.pdf --printer "Brother HL-L2400D" --pages 1-3 --copies 2 --fit fit
+
+# Create PDF from PostScript/EPS (distill)
+openpdfstudio distill input.ps -o output.pdf --preset printer
 
 # Encrypt / decrypt
 openpdfstudio encrypt input.pdf -o encrypted.pdf --password secret
@@ -174,14 +178,33 @@ Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio_X.Y.Z_x64-setup.ex
   - Reading view (virtualized)             - Printer enumeration                    - pikepdf (structural)
   - Organize board (page strips)           - Sidecar management                     - pdfminer.six (text)
   - Navigation pane                        - System tray                            - pyHanko (signatures)
-  - Twelve task panes                      - Single instance                        - Ghostscript (upstream:
-  - Command registry + keymap              - Auto-updater                             compress, PDF/A, print)
-  - pdf.js render + text layer             - Registry policy check
+  - Thirteen task tools                    - Single instance                        - Ghostscript (upstream:
+  - Command registry + keymap              - Auto-updater                             compress, PDF/A, print,
+  - pdf.js render + text layer             - Registry policy check                    distill)
 ```
 
 **Frontend**: Tauri v2 (WebView2), React 19, TailwindCSS, pdf.js, pdf-lib, tesseract.js
 **Backend**: Rust (Tauri commands) + Python 3.14 (embedded), pikepdf, pdfminer.six, pyHanko, Ghostscript (upstream, AGPL-3.0)
 **IPC**: Tauri `invoke()` (JS→Rust), JSON-RPC 2.0 over stdin/stdout (Rust→Python)
+
+### What powers each feature
+
+Every capability is built on open source, each component doing the job it
+is best known for. AGPL tools stay at arm's length — separate processes,
+never linked — so the app's own code remains MIT. Full texts and exact
+versions: [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
+
+| Feature | Powered by | License |
+|---------|------------|---------|
+| Page rendering, selectable text, search display | pdf.js | Apache-2.0 |
+| Page assembly & `.pdfx`, annotation authoring, form fill & field creation | pdf-lib | MIT |
+| Structural operations (merge, split, rotate, delete), redaction, in-place text & paragraph editing, watermarks, encryption, repair tiers 1/3 | pikepdf / QPDF | MPL-2.0 / Apache-2.0 |
+| Text extraction, font metrics & encodings for the text editor | pdfminer.six | MIT |
+| Digital signatures — signing and verification | pyHanko + cryptography | MIT / Apache-2.0+BSD |
+| OCR — single documents and batch folder mirroring | Tesseract via tesseract.js | Apache-2.0 |
+| Compress, grayscale, PDF/A, print rasterization, repair tier 2, **Create PDF from PostScript (distilling)** | Ghostscript (vendored upstream, separate process) | AGPL-3.0 |
+| Compatible-font fallback for text editing | Liberation Sans + fontTools | SIL OFL 1.1 / MIT |
+| Window shell, native dialogs, IPC, updater | Tauri v2 + Rust crates | MIT / Apache-2.0 |
 
 ## Project Structure
 

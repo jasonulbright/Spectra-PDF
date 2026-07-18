@@ -1,6 +1,6 @@
 [package]
 name = "openpdfstudio"
-version = "2.3.0"
+version = "2.4.0"
 description = "Modern PDF manipulation studio"
 authors = ["Jason Ulbright"]
 license = "MIT"

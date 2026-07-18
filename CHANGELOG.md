@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.4.0 — Create PDF from PostScript
+
+### The distilling job, without the extra app
+- **File ▸ Create PDF from PostScript…** — convert `.ps` and `.eps`
+  files to PDF with the classic quality presets (Smallest Size, eBook,
+  Print Quality, Press Quality), then open the result in one click.
+  Powered by the Ghostscript already bundled for compression and PDF/A —
+  the tool that has always been this job's reference implementation,
+  finally doing it here
+- EPS files convert with their bounding box as the page — figures stay
+  figures, not letter-size pages with a drawing in the corner
+- Honest inputs: a non-PostScript file is refused with the reason named,
+  and feeding a PDF points you at Repair's rebuild tier instead of
+  silently re-rendering your document
+- Full command-line parity: `openpdfstudio distill input.ps -o out.pdf
+  --preset printer`
+- The README now carries a **feature sourcing table** — every capability
+  mapped to the open-source component that powers it, license by license
+
 ## 2.3.0 — Combine Files, findability, and a steadier workspace
 
 ### Find the features (launch-thread feedback)
