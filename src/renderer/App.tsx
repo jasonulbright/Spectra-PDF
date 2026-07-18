@@ -58,6 +58,7 @@ import { AboutDialog } from './components/AboutDialog';
 import { PropertiesDialog } from './components/PropertiesDialog';
 import { PrintDialog } from './components/PrintDialog';
 import { BatchOcrDialog } from './components/BatchOcrDialog';
+import { CreatePdfDialog } from './components/CreatePdfDialog';
 import { buildBlankPagePdf } from './lib/blank-page';
 import { insertAnchor } from './state/selectors';
 import { UpdateBar } from './components/UpdateBar';
@@ -153,6 +154,7 @@ function AppContent(): React.ReactElement {
   const [showProperties, setShowProperties] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
   const [showBatchOcr, setShowBatchOcr] = useState(false);
+  const [showCreatePdf, setShowCreatePdf] = useState(false);
   // Manual "Check for Updates" (Help menu): bump a signal the UpdateBar
   // watches, so the banner surfaces the available / up-to-date / disabled state.
   const [updateCheckSignal, setUpdateCheckSignal] = useState(0);
@@ -1014,6 +1016,7 @@ function AppContent(): React.ReactElement {
     openProperties: () => setShowProperties(true),
     openPrint: () => setShowPrint(true),
     openBatchOcr: () => setShowBatchOcr(true),
+    openCreatePdf: () => setShowCreatePdf(true),
     insertBlankPage,
     insertPagesFromFile,
     combineFiles,
@@ -1042,6 +1045,7 @@ function AppContent(): React.ReactElement {
       openProperties: () => h.current.openProperties(),
       openPrint: () => h.current.openPrint(),
       openBatchOcr: () => h.current.openBatchOcr(),
+      openCreatePdf: () => h.current.openCreatePdf(),
       insertBlankPage: () => h.current.insertBlankPage(),
       insertPagesFromFile: () => h.current.insertPagesFromFile(),
       combineFiles: () => h.current.combineFiles(),
@@ -1448,6 +1452,12 @@ function AppContent(): React.ReactElement {
       {showProperties && <PropertiesDialog onClose={() => setShowProperties(false)} />}
       {showPrint && <PrintDialog onClose={() => setShowPrint(false)} />}
       {showBatchOcr && <BatchOcrDialog onClose={() => setShowBatchOcr(false)} />}
+      {showCreatePdf && (
+        <CreatePdfDialog
+          onClose={() => setShowCreatePdf(false)}
+          onOpenResult={(path) => openByPaths([path])}
+        />
+      )}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
       <ConfirmDialog
         open={confirmState !== null}

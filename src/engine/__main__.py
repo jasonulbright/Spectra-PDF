@@ -51,6 +51,7 @@ from engine.page_images import (
     list_page_images,
     replace_page_image,
 )
+from engine.distill import distill
 from engine.text_paragraphs import list_text_paragraphs, replace_paragraph_text
 from engine.text_runs import convert_text_run, list_text_runs, replace_text_run
 from engine.printer import print_pdf
@@ -106,6 +107,7 @@ def main() -> None:
     server.register("convert_text_run", convert_text_run)
     server.register("list_text_paragraphs", list_text_paragraphs)
     server.register("replace_paragraph_text", replace_paragraph_text)
+    server.register("distill", distill)
     server.register("print", print_pdf)
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)

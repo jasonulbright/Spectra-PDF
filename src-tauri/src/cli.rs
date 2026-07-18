@@ -77,6 +77,8 @@ pub enum CliCommand {
     Repair(RepairArgs),
     /// Rebuild a PDF (Tier 2: Ghostscript round-trip — re-render every page)
     Rebuild(RebuildArgs),
+    /// Convert a PostScript/EPS file to PDF (the Distiller job, via Ghostscript)
+    Distill(DistillArgs),
     /// Recover pages from a damaged PDF (Tier 3: per-page salvage extraction)
     Recover(RecoverArgs),
     /// Validate PDF structure without modifying (JSON report)
@@ -414,6 +416,18 @@ pub struct GrayscaleArgs {
     /// Output PDF file
     #[arg(short, long)]
     pub output: PathBuf,
+}
+
+#[derive(Args)]
+pub struct DistillArgs {
+    /// Input PostScript (.ps) or EPS (.eps) file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Quality preset: screen | ebook | printer | prepress | default
+    #[arg(long, default_value = "printer")]
+    pub preset: String,
 }
 
 #[derive(Args)]
@@ -1212,6 +1226,19 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 json!({
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
+                    "gs_path": gs.to_string_lossy(),
+                }),
+            )
+        }
+
+        CliCommand::Distill(args) => {
+            let gs = resolve_gs();
+            engine.call(
+                "distill",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "preset": args.preset,
                     "gs_path": gs.to_string_lossy(),
                 }),
             )

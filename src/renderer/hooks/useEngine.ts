@@ -51,8 +51,17 @@ export interface EngineResult {
   summary: { errors: number; warnings: number };
 }
 
+// MODULE-scoped id counter, deliberately: per-mount counters restarted at
+// 1, so a call abandoned by an unmount (its listener gone, the engine
+// still running it — the engine is strictly serial FIFO) could complete
+// and satisfy a LATER mount's pending entry that reused the same id —
+// resolving conversion B's promise with conversion A's result
+// (review-caught CRITICAL via the Create PDF dialog, but the class was
+// app-wide). Globally-unique ids make a stale response land on no map
+// and drop, which is the correct fate for an abandoned call's result.
+let nextEngineRequestId = 1;
+
 export function useEngine() {
-  const nextId = useRef(1);
   const pending = useRef<Map<number, PendingRequest>>(new Map());
   const [ready, setReady] = useState(false);
   const { track } = useOperationQueue();
@@ -82,7 +91,7 @@ export function useEngine() {
   }, []);
 
   const rawCall = useCallback(async (method: string, params: Record<string, unknown> = {}): Promise<EngineResult> => {
-    const id = nextId.current++;
+    const id = nextEngineRequestId++;
     const request = { jsonrpc: '2.0', method, params, id };
 
     return new Promise<EngineResult>((resolve, reject) => {

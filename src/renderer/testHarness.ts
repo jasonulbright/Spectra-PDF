@@ -146,6 +146,20 @@ export function registerBatchOcr(handlers: BatchOcrHandlers | null): void {
 }
 
 /**
+ * Create PDF from PostScript (Phase 8): the source/output pickers are
+ * native dialogs — e2e injects paths and runs the REAL conversion path.
+ */
+export interface CreatePdfHandlers {
+  run: (source: string, output: string, preset?: string) => Promise<boolean>;
+}
+
+let createPdf: CreatePdfHandlers | null = null;
+
+export function registerCreatePdf(handlers: CreatePdfHandlers | null): void {
+  createPdf = handlers;
+}
+
+/**
  * Edit ▸ Images (7.1): placements live in transformed canvas space and the
  * Replace/Extract actions pop NATIVE dialogs — both undrivable by WebDriver.
  * The canvas registers its real selection + action paths; `act`'s opts
@@ -555,6 +569,8 @@ export interface TestHarness {
     pageId: string,
   ) => { index: number; text: string; lineCount: number; alignment: string }[];
   editParagraphOpen: (pageId: string, index: number) => void;
+  /** Create PDF from PostScript (Phase 8; dialog must be open). */
+  createPdfRun: (source: string, output: string, preset?: string) => Promise<boolean>;
   editImagePageIds: () => string[];
   editImagePlacements: (pageId: string) => { index: number; nested: boolean }[];
   editImageSelect: (pageId: string, index: number) => void;
@@ -1006,6 +1022,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     editTextOpen: (pageId, index) => canvasEditImages?.openTextEditor(pageId, index),
     editParagraphs: (pageId) => canvasEditImages?.paragraphs(pageId) ?? [],
     editParagraphOpen: (pageId, index) => canvasEditImages?.openParagraphEditor(pageId, index),
+    createPdfRun: async (source, output, preset) => {
+      if (!createPdf) {
+        const msg = 'createPdfRun: dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return createPdf.run(source, output, preset);
+    },
     editImagePageIds: () => canvasEditImages?.pageIds() ?? [],
     editImagePlacements: (pageId) => canvasEditImages?.placements(pageId) ?? [],
     editImageSelect: (pageId, index) => canvasEditImages?.select(pageId, index),

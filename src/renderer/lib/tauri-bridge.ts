@@ -34,6 +34,7 @@ export const engine = {
 // dialog instead of stacking another.
 let openDialogInflight: Promise<string[]> | null = null;
 let saveDialogInflight: Promise<string | null> | null = null;
+let psDialogInflight: Promise<string | null> | null = null;
 
 export const dialog = {
   openFiles: () => {
@@ -56,6 +57,19 @@ export const dialog = {
   },
   /** Pick a PKCS#12 (.pfx/.p12) signer file. Returns null if cancelled. */
   pickCertificate: () => invoke<string | null>('pick_certificate_file'),
+  /** Pick a PostScript/EPS source for distilling (Phase 8). Serialized
+   * like openFiles/saveFile — modality lands a beat after the click, so a
+   * rapid second click must join the open dialog, not stack another
+   * (review-caught: this one was added without the guard the comment
+   * above exists to explain). */
+  pickPostScript: () => {
+    if (!psDialogInflight) {
+      psDialogInflight = invoke<string | null>('pick_postscript_file').finally(() => {
+        psDialogInflight = null;
+      });
+    }
+    return psDialogInflight;
+  },
   pickPemFile: () => invoke<string | null>('pick_pem_file'),
   /** Pick a folder (Batch OCR source/destination). Returns null if cancelled. */
   pickFolder: (title?: string) => invoke<string | null>('pick_folder_dialog', { title }),

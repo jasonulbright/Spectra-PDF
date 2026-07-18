@@ -89,6 +89,28 @@ pub async fn save_file_dialog(
     }
 }
 
+/// Pick a PostScript/EPS source for distilling (Phase 8). Separate from
+/// the PDF picker (different filter); window-parented for modality.
+#[tauri::command]
+pub async fn pick_postscript_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("PostScript Files", &["ps", "eps"])
+        .blocking_pick_file();
+    match result {
+        Some(path) => match path.into_path() {
+            Ok(pb) => Ok(Some(canonical_path(&pb.to_string_lossy()))),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
 /// Pick a PKCS#12 signer file (.pfx/.p12) for signing. Separate from the PDF
 /// picker (different filter); window-parented for the same modality reason.
 #[tauri::command]

@@ -72,6 +72,8 @@ export interface AppCommandHandlers {
    * the active document — the menu-named path to what board drag-merging
    * does (same import machinery, page-tier undoable). */
   combineFiles(): Promise<void>;
+  /** Create PDF from PostScript (Phase 8): open the distill dialog. */
+  openCreatePdf(): void;
   /** Open the Settings modal at its third-party-licenses section (Help ▸
    * Third-party Licenses). Same surface as preferences until M5 splits it. */
   openLicenses(): void;

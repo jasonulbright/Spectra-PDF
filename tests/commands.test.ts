@@ -64,6 +64,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   openProperties: vi.fn(),
   openPrint: vi.fn(),
   openBatchOcr: vi.fn(),
+  openCreatePdf: vi.fn(),
   insertBlankPage: vi.fn(async () => {}),
   insertPagesFromFile: vi.fn(async () => {}),
   combineFiles: vi.fn(async () => {}),

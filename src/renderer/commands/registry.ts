@@ -169,6 +169,7 @@ export const COMMAND_IDS = [
   'file.exit',
   'file.clearRecent',
   'tools.batchOcr',
+  'file.createPdfFromPostScript',
   ...CANVAS_TOOLS.map((t) => `tools.${t}` as const),
   ...OPERATIONS.map((op) => `tools.panel.${op}` as const),
   ...TOOL_IDS.map((id) => `tools.open.${id}` as const),
@@ -413,6 +414,12 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Batch OCR Folder…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openBatchOcr(),
+  },
+  // Phase 8 — same no-document shape: distills a PICKED PostScript file.
+  'file.createPdfFromPostScript': {
+    title: 'Create PDF from PostScript…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openCreatePdf(),
   },
   'view.home': {
     title: 'Home',

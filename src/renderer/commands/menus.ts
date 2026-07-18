@@ -110,6 +110,8 @@ export const MENUS: MenuDef[] = [
       cmd('file.open', 'menuitem-file-open'),
       recentSubmenu,
       sep,
+      cmd('file.createPdfFromPostScript', 'menuitem-file-create-pdf'),
+      sep,
       cmd('file.save', 'menuitem-file-save'),
       cmd('file.saveAs', 'menuitem-file-save-as'),
       cmd('file.close', 'menuitem-file-close'),
