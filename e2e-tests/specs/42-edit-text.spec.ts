@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { PDFDocument, StandardFonts, degrees } from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
@@ -15,6 +15,12 @@ import {
 // listings, open the REAL inline editor via the harness (double-click on
 // transformed canvas is unreliable), type through the REAL input (validated
 // live), Enter commits → engine replace_text_run → undo restores.
+//
+// Since 7.5 the paragraph layer is the PRIMARY text surface and covered
+// runs leave the run-box layer — so this spec's fixture is ROTATED text,
+// which never groups (the documented boundary) and therefore still lands
+// on the run editor. That is exactly where the product still offers this
+// surface; the paragraph flow is 43-edit-paragraph.
 
 async function editTextPageIds(): Promise<string[]> {
   return await browser.execute<string[], []>(function () {
@@ -53,7 +59,14 @@ describe('edit text (Phase 7.2+7.3)', () => {
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const page = doc.addPage([400, 300]);
-    page.drawText('Original words here', { x: 60, y: 200, size: 14, font });
+    // Rotated: stays on the run-box surface under the 7.5 paragraph layer.
+    page.drawText('Original words here', {
+      x: 60,
+      y: 40,
+      size: 14,
+      font,
+      rotate: degrees(90),
+    });
     writeFileSync(pdfPath, await doc.save());
   });
 

@@ -707,6 +707,45 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
+  const handleEditParagraph = useCallback(
+    async (
+      path: string,
+      page: number,
+      para: { index: number; runs: number[]; text: string },
+      newText: string,
+      spans: { start: number; end: number; run: number }[],
+      opts?: { convert?: boolean },
+    ): Promise<string | void> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      // The fingerprint (member runs + logical text) makes the engine
+      // re-derive its grouping and REFUSE if the page changed underneath —
+      // a heuristic must never silently retarget.
+      const params: Record<string, unknown> = {
+        page,
+        paragraph_index: para.index,
+        new_text: newText,
+        spans,
+        expected_runs: para.runs,
+        expected_text: para.text,
+      };
+      if (opts?.convert) {
+        // 7.4's fallback at span granularity: only the characters the
+        // mapped fonts cannot express render in the bundled font.
+        const fontPath = await app.getEditFontPath();
+        await performOperation(path, 'replace_paragraph_text', {
+          ...params,
+          convert: true,
+          font_path: fontPath,
+        });
+        return;
+      }
+      await performOperation(path, 'replace_paragraph_text', params);
+    },
+    [state.files, performOperation, confirmEditOfSignedDoc],
+  );
+
   const handleEditImage = useCallback(
     async (
       kind: 'delete' | 'replace' | 'extract',
@@ -1373,6 +1412,7 @@ function AppContent(): React.ReactElement {
                   onApplyOcrLayer={handleApplyOcrLayer}
                   onEditImage={handleEditImage}
                   onEditText={handleEditText}
+                  onEditParagraph={handleEditParagraph}
                   onAddPages={handleAddPages}
                   onFillFormValues={handleFillFormValues}
                   onAddFormField={handleAddFormField}

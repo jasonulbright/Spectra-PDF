@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Edit Paragraphs — reflow inside the box
+- Text that reads as a paragraph now **selects as one box**: double-click
+  it (or choose Edit Paragraph…) and edit the whole passage in a
+  multi-line editor — words **rewrap inside the paragraph's own box**,
+  with its alignment (left, centered, right, or justified), line spacing,
+  and first-line indent preserved, and the box growing downward when the
+  text does
+- Styles survive the edit: mixed fonts and sizes, colored spans (links),
+  superscripts, condensed text, and OCR's invisible text layer all keep
+  their look — typed text takes on the style at the point you typed it
+- Everything OUTSIDE the box stays put, exactly: columns beside the
+  paragraph, text below it, graphics — nothing else on the page moves or
+  changes appearance
+- The same per-keystroke font honesty as single-line editing, span by
+  span — and the one-click compatible-font fallback now converts only
+  the characters that need it
+- Wraps no-space scripts (CJK) correctly; hyphens are treated as document
+  text (never invented or removed); right-to-left passages and rotated
+  text stay on the single-line editor, with the reason stated
+- Paragraph detection is honest about its limits: text that doesn't
+  group cleanly simply remains individually editable line by line
+
 ### Edit Text — in-place text editing
 - The Edit tool now selects **lines of text** as well as images:
   double-click a run (or select it and choose Edit Text…) and rewrite it

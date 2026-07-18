@@ -1219,9 +1219,44 @@
   border-color: rgba(200, 160, 120, 0.45);
 }
 
+/* Paragraph boxes (7.5) — the primary edit-mode text surface. A calmer
+   dash than run boxes so a page of paragraphs reads as regions, not
+   clutter; selection matches the shared accent. */
+.page-editpara {
+  position: absolute;
+  background: transparent;
+  border: 1px dashed rgba(140, 190, 235, 0.45);
+  border-radius: 2px;
+  padding: 0;
+  cursor: text;
+}
+.page-editpara:hover {
+  border-color: rgba(140, 190, 235, 0.95);
+  background: rgba(140, 190, 235, 0.07);
+}
+.page-editpara.selected {
+  border: 1.5px solid var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.08);
+}
+
 .page-edittext-editor {
   position: absolute;
   z-index: 5;
+}
+.page-editpara-editor textarea {
+  display: block;
+  width: 100%;
+  min-width: 120px;
+  padding: 1px 3px;
+  border: 1.5px solid var(--accent, #3b82f6);
+  border-radius: 2px;
+  background: #fff;
+  color: #111;
+  font-family: Helvetica, Arial, sans-serif;
+  resize: both;
+}
+.page-editpara-editor textarea.invalid {
+  border-color: #dc2626;
 }
 .page-edittext-editor input {
   width: 100%;

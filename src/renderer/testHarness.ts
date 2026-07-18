@@ -156,7 +156,7 @@ export interface CanvasEditImagesHandlers {
   pageIds: () => string[];
   placements: (pageId: string) => { index: number; nested: boolean }[];
   select: (pageId: string, index: number) => void;
-  selection: () => { kind: 'image' | 'text'; pageId: string; index: number } | null;
+  selection: () => { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
   /** Text runs (7.2): listing + opening the REAL inline editor (the input
    * itself is then driven through the DOM — data-testid edit-text-input). */
   textRuns: (
@@ -164,6 +164,11 @@ export interface CanvasEditImagesHandlers {
   ) => { index: number; text: string; editable: boolean; reason: string | null }[];
   textPageIds: () => string[];
   openTextEditor: (pageId: string, index: number) => void;
+  /** Paragraph layer (7.5). */
+  paragraphs: (
+    pageId: string,
+  ) => { index: number; text: string; lineCount: number; alignment: string }[];
+  openParagraphEditor: (pageId: string, index: number) => void;
   act: (
     kind: 'delete' | 'replace' | 'extract',
     opts?: {
@@ -544,6 +549,12 @@ export interface TestHarness {
     pageId: string,
   ) => { index: number; text: string; editable: boolean; reason: string | null }[];
   editTextOpen: (pageId: string, index: number) => void;
+  /** Edit ▸ Paragraphs (7.5): the paragraph layer's listing + opening the
+   * REAL paragraph editor (then driven via data-testid edit-para-input). */
+  editParagraphs: (
+    pageId: string,
+  ) => { index: number; text: string; lineCount: number; alignment: string }[];
+  editParagraphOpen: (pageId: string, index: number) => void;
   editImagePageIds: () => string[];
   editImagePlacements: (pageId: string) => { index: number; nested: boolean }[];
   editImageSelect: (pageId: string, index: number) => void;
@@ -993,6 +1004,8 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     editTextPageIds: () => canvasEditImages?.textPageIds() ?? [],
     editTextRuns: (pageId) => canvasEditImages?.textRuns(pageId) ?? [],
     editTextOpen: (pageId, index) => canvasEditImages?.openTextEditor(pageId, index),
+    editParagraphs: (pageId) => canvasEditImages?.paragraphs(pageId) ?? [],
+    editParagraphOpen: (pageId, index) => canvasEditImages?.openParagraphEditor(pageId, index),
     editImagePageIds: () => canvasEditImages?.pageIds() ?? [],
     editImagePlacements: (pageId) => canvasEditImages?.placements(pageId) ?? [],
     editImageSelect: (pageId, index) => canvasEditImages?.select(pageId, index),

@@ -98,6 +98,12 @@ class FontCapability:
         validation set."""
         return "".join(sorted(self._uni2code.keys()))
 
+    def can_encode(self, ch: str) -> bool:
+        """True when the font can express `ch` (7.5 uses this to decide
+        real-space-glyph vs kern-gap emission — char_width's default is a
+        width, not an existence claim)."""
+        return ch in self._uni2code
+
     # -- widths ------------------------------------------------------------
     def char_width(self, ch: str) -> float:
         code = self._uni2code.get(ch)

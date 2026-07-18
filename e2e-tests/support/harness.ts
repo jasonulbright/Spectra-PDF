@@ -518,11 +518,15 @@ export async function setReactInputValue(selector: string, value: string): Promi
   await el.waitForDisplayed({ timeout: 10_000 });
   await browser.execute(
     function (element, v) {
-      const input = element as unknown as HTMLInputElement;
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value',
-      )!.set!;
+      const input = element as unknown as HTMLInputElement | HTMLTextAreaElement;
+      // The native value setter lives on the CONCRETE prototype — calling
+      // the input setter with a textarea `this` is an illegal invocation
+      // (7.5's paragraph editor is a textarea).
+      const proto =
+        input.tagName === 'TEXTAREA'
+          ? window.HTMLTextAreaElement.prototype
+          : window.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
       setter.call(input, v);
       input.dispatchEvent(new Event('input', { bubbles: true }));
     },

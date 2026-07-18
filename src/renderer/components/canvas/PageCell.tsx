@@ -9,6 +9,12 @@ import type { OcrWord } from '../../ocr/types';
 import type { EditImagePlacement } from '../../lib/edit-images';
 import type { EditTextRun } from '../../lib/edit-text';
 import { unencodableChars } from '../../lib/edit-text';
+import type { EditParagraph } from '../../lib/edit-paragraphs';
+import {
+  computeEditSpans,
+  paragraphUnencodable,
+  sanitizeParagraphInput,
+} from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
@@ -311,7 +317,9 @@ interface PageCellProps {
   editImages?: EditImagePlacement[];
   editSelectedIndex?: number | null;
   onSelectEditImage?: (pageId: string, index: number) => void;
-  /** Edit-mode text runs (7.2+7.3), same projection rules as images. */
+  /** Edit-mode text runs (7.2+7.3), same projection rules as images.
+   * Since 7.5 these are only the runs NOT covered by an editable
+   * paragraph (refused paragraphs decompose back to run boxes). */
   editTextRuns?: EditTextRun[];
   editTextSelectedIndex?: number | null;
   /** The run whose inline editor is OPEN on this page (input state is
@@ -326,6 +334,19 @@ interface PageCellProps {
     opts?: { convert?: boolean },
   ) => void;
   onCancelTextEdit?: () => void;
+  /** Edit-mode paragraph boxes (7.5) — the PRIMARY text surface. */
+  editParagraphs?: EditParagraph[];
+  editParaSelectedIndex?: number | null;
+  editingParaIndex?: number | null;
+  onSelectEditParagraph?: (pageId: string, index: number) => void;
+  onOpenParagraphEditor?: (pageId: string, index: number) => void;
+  onCommitParagraphEdit?: (
+    pageId: string,
+    index: number,
+    newText: string,
+    opts?: { convert?: boolean },
+  ) => void;
+  onCancelParagraphEdit?: () => void;
   // Pending visible-signature placement, when it sits on THIS page (transient
   // view state with mark lifecycle — see lib/signature-placement.ts).
   signaturePlacement?: SignaturePlacement | null;
@@ -405,6 +426,13 @@ function PageCellImpl({
   onOpenTextEditor,
   onCommitTextEdit,
   onCancelTextEdit,
+  editParagraphs,
+  editParaSelectedIndex,
+  editingParaIndex,
+  onSelectEditParagraph,
+  onOpenParagraphEditor,
+  onCommitParagraphEdit,
+  onCancelParagraphEdit,
   signaturePlacement,
   findMatch,
   findWords,
@@ -919,6 +947,54 @@ function PageCellImpl({
         );
       })}
       {tool === 'edit' &&
+        (editParagraphs ?? []).map((para) => {
+          const r = rotateNormalizedRect(para.rect, page.rotation);
+          const selected = editParaSelectedIndex === para.index;
+          if (editingParaIndex === para.index) {
+            // Line thickness along the flow normal, rotation-proof: at a
+            // quarter-turn the box's w/h swap (the 7.2 sizing rule, per
+            // line here).
+            const extent = page.rotation % 180 === 0 ? r.h : r.w;
+            return (
+              <ParagraphEditor
+                key={`ep-${para.index}`}
+                para={para}
+                rect={r}
+                lineHeightPx={(extent * pageHeight) / Math.max(para.lineCount, 1)}
+                onCommit={(value, opts) =>
+                  onCommitParagraphEdit?.(page.id, para.index, value, opts)
+                }
+                onCancel={() => onCancelParagraphEdit?.()}
+              />
+            );
+          }
+          return (
+            <button
+              key={`ep-${para.index}`}
+              type="button"
+              data-testid={`edit-para-${para.index}`}
+              className={'page-editpara' + (selected ? ' selected' : '')}
+              title="Paragraph — double-click to edit"
+              aria-pressed={selected}
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectEditParagraph?.(page.id, para.index);
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                onOpenParagraphEditor?.(page.id, para.index);
+              }}
+            />
+          );
+        })}
+      {tool === 'edit' &&
         (editTextRuns ?? []).map((run) => {
           const r = rotateNormalizedRect(run.rect, page.rotation);
           const selected = editTextSelectedIndex === run.index;
@@ -1130,6 +1206,112 @@ function PageCellImpl({
   );
 }
 
+/** The paragraph editor (7.5): a textarea at the box rect seeded with the
+ * paragraph's logical text; per keystroke it re-derives the span mapping
+ * (prefix/suffix diff, caret inheritance) and validates each range against
+ * its style-source font — the 7.2 live-refusal discipline at paragraph
+ * scale. Enter COMMITS (paragraphs are one flowing block; splitting is a
+ * stated non-goal, pasted newlines become spaces); Escape cancels; blur
+ * commits-if-valid-and-changed, else cancels. */
+function ParagraphEditor({
+  para,
+  rect,
+  lineHeightPx,
+  onCommit,
+  onCancel,
+}: {
+  para: EditParagraph;
+  rect: { x: number; y: number; w: number; h: number };
+  lineHeightPx: number;
+  onCommit: (value: string, opts?: { convert?: boolean }) => void;
+  onCancel: () => void;
+}): React.JSX.Element {
+  const [value, setValue] = useState(para.text);
+  const areaRef = useRef<HTMLTextAreaElement>(null);
+  // ONE outcome per editor instance: Enter-commit, Escape-cancel, blur,
+  // and the convert button all race through here — whichever fires first
+  // wins and any refire is a no-op. React's removal of the focused
+  // element fires a stray blur (observed live in this codebase twice),
+  // and without this an Escape-CANCEL was converted into a COMMIT by the
+  // refired blur reading the still-valid closure (review-caught HIGH;
+  // committingTextRef only guards the commit→commit refire).
+  const settledRef = useRef(false);
+  const settle = (fn: () => void): void => {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    fn();
+  };
+  useEffect(() => {
+    areaRef.current?.focus();
+    areaRef.current?.select();
+  }, []);
+  const spans = computeEditSpans(para.text, value, para.spans, para.runs[0]);
+  const missing = paragraphUnencodable(value, spans, para.encodableByRun);
+  const valid = missing.length === 0;
+  const changed = value !== para.text;
+  const finish = (): void => {
+    if (valid && changed) settle(() => onCommit(value));
+    else settle(onCancel);
+  };
+  const fontPx = Math.min(48, Math.max(8, lineHeightPx * 0.8));
+  return (
+    <div
+      className="page-edittext-editor page-editpara-editor"
+      style={{
+        left: `${rect.x * 100}%`,
+        top: `${rect.y * 100}%`,
+        minWidth: `${rect.w * 100}%`,
+      }}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        // The 7.2 rule: a press on the editor's own chrome (the error
+        // line) must not blur the input — blur means commit-or-cancel.
+        if (e.target !== areaRef.current) e.preventDefault();
+      }}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <textarea
+        ref={areaRef}
+        data-testid="edit-para-input"
+        className={valid ? '' : 'invalid'}
+        value={value}
+        rows={Math.min(12, para.lineCount + 1)}
+        style={{ fontSize: `${fontPx}px`, lineHeight: 1.25 }}
+        onChange={(e) => setValue(sanitizeParagraphInput(e.target.value))}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            // Invalid + changed: HOLD the editor open (not settled) with
+            // the error named — Enter never silently discards, and never
+            // commits the inexpressible.
+            if (valid && changed) settle(() => onCommit(value));
+            else if (!changed) settle(onCancel);
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            settle(onCancel);
+          }
+        }}
+        onBlur={finish}
+      />
+      {!valid && (
+        <div className="page-edittext-error" data-testid="edit-para-error" aria-live="polite">
+          This document's font does not contain {missing.map((c) => `'${c}'`).join(' ')}
+          <button
+            type="button"
+            data-testid="edit-para-convert"
+            className="page-edittext-convert"
+            onClick={() => settle(() => onCommit(value, { convert: true }))}
+          >
+            Use a compatible font
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The inline text-run editor (7.2+7.3): an input at the run's display
  * rect, seeded with the decoded text, validated LIVE against the run's
  * finite encodable inventory — apply disables with the offending character
@@ -1151,6 +1333,15 @@ function TextRunEditor({
 }): React.JSX.Element {
   const [value, setValue] = useState(run.text);
   const inputRef = useRef<HTMLInputElement>(null);
+  // The same one-outcome rule as ParagraphEditor (see its comment): the
+  // unmount-blur refire must never convert an Escape-cancel into a
+  // commit. Inherited fix — the shape was identical here.
+  const settledRef = useRef(false);
+  const settle = (fn: () => void): void => {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    fn();
+  };
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
@@ -1159,8 +1350,8 @@ function TextRunEditor({
   const valid = missing.length === 0;
   const changed = value !== run.text;
   const finish = (): void => {
-    if (valid && changed) onCommit(value);
-    else onCancel();
+    if (valid && changed) settle(() => onCommit(value));
+    else settle(onCancel);
   };
   return (
     <div
@@ -1197,12 +1388,12 @@ function TextRunEditor({
             // Invalid + changed: HOLD the editor open with the error named —
             // Enter never silently discards, and never commits the
             // inexpressible. Unchanged: Enter is a close.
-            if (valid && changed) onCommit(value);
-            else if (!changed) onCancel();
+            if (valid && changed) settle(() => onCommit(value));
+            else if (!changed) settle(onCancel);
           } else if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
-            onCancel();
+            settle(onCancel);
           }
         }}
         onBlur={finish}
@@ -1217,7 +1408,7 @@ function TextRunEditor({
             type="button"
             data-testid="edit-text-convert"
             className="page-edittext-convert"
-            onClick={() => onCommit(value, { convert: true })}
+            onClick={() => settle(() => onCommit(value, { convert: true }))}
           >
             Use a compatible font
           </button>

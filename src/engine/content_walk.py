@@ -83,6 +83,42 @@ class TextStateSnapshot(NamedTuple):
     font_name: Optional[str]
 
 
+# One captured color-setting instruction, normalized for comparison and
+# replay: (operator, (operand, ...)) with numeric operands as floats and
+# anything else (pattern/colorspace names) as strings.
+ColorOp = tuple[str, tuple]
+# A color state: (space-selecting op | None, value-setting op | None).
+# g/rg/k select their device space implicitly, so they stand alone with no
+# cs/CS prefix; (None, None) is the stream default (device-gray black).
+ColorState = tuple[Optional[ColorOp], Optional[ColorOp]]
+
+DEFAULT_COLOR: ColorState = (None, None)
+
+
+def color_equal(a: ColorState, b: ColorState, stroke: bool) -> bool:
+    """Captured-color equality with ONE semantic identity: the untouched
+    default ≡ an explicit device-gray black (`0 g` / `0 G`) — the op a
+    rewriter injects to RESTORE the default. Without this, a restored
+    default reads as a different state forever."""
+
+    def norm(c: ColorState) -> ColorState:
+        if c == (None, None):
+            return (None, ("G" if stroke else "g", (0.0,)))
+        return c
+
+    return norm(a) == norm(b)
+
+
+def _color_operands(operands: list) -> tuple:
+    out = []
+    for el in operands:
+        try:
+            out.append(float(el))
+        except (TypeError, ValueError):
+            out.append(str(el))
+    return tuple(out)
+
+
 class GraphicsTextState:
     """Track CTM + text state across one instruction stream.
 
@@ -117,6 +153,16 @@ class GraphicsTextState:
         # REAL width math (7.2); redaction's estimate never needed them.
         self.char_spacing = 0.0
         self.word_spacing = 0.0
+        # 7.5 additions, all q/Q-stacked like the rest: render mode (Tr —
+        # OCR's invisible text is Tr 3 and MUST survive re-emission), rise
+        # (Ts — superscripts), and fill/stroke color as OPAQUE captures of
+        # the most recent color-setting instruction(s). Colors are replayed,
+        # never interpreted — link-blue spans survive without a color-space
+        # model. sc/scn keep their cs/CS prefix; g/rg/k stand alone.
+        self.render_mode = 0
+        self.rise = 0.0
+        self.fill_color: ColorState = DEFAULT_COLOR
+        self.stroke_color: ColorState = DEFAULT_COLOR
         self._stack: list = []
 
     def snapshot(self) -> TextStateSnapshot:
@@ -142,6 +188,10 @@ class GraphicsTextState:
                     self.font_name,
                     self.char_spacing,
                     self.word_spacing,
+                    self.render_mode,
+                    self.rise,
+                    self.fill_color,
+                    self.stroke_color,
                 )
             )
             return True
@@ -155,7 +205,43 @@ class GraphicsTextState:
                     self.font_name,
                     self.char_spacing,
                     self.word_spacing,
+                    self.render_mode,
+                    self.rise,
+                    self.fill_color,
+                    self.stroke_color,
                 ) = self._stack.pop()
+            return True
+        if operator == "Tr":
+            try:
+                self.render_mode = int(float(operands[0]))
+            except (TypeError, ValueError, IndexError):
+                pass
+            return True
+        if operator == "Ts":
+            try:
+                self.rise = float(operands[0])
+            except (TypeError, ValueError, IndexError):
+                pass
+            return True
+        if operator in ("g", "rg", "k"):
+            self.fill_color = (None, (operator, _color_operands(operands)))
+            return True
+        if operator in ("G", "RG", "K"):
+            self.stroke_color = (None, (operator, _color_operands(operands)))
+            return True
+        if operator == "cs":
+            # Selecting a space resets the value to that space's initial —
+            # a later sc/scn fills the second slot.
+            self.fill_color = ((operator, _color_operands(operands)), None)
+            return True
+        if operator == "CS":
+            self.stroke_color = ((operator, _color_operands(operands)), None)
+            return True
+        if operator in ("sc", "scn"):
+            self.fill_color = (self.fill_color[0], (operator, _color_operands(operands)))
+            return True
+        if operator in ("SC", "SCN"):
+            self.stroke_color = (self.stroke_color[0], (operator, _color_operands(operands)))
             return True
         if operator == "Tc":
             try:

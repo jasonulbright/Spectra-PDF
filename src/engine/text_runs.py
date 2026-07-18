@@ -170,8 +170,9 @@ def _run_metrics(
 
 def _child_state(base_ctm, parent: GraphicsTextState | None) -> GraphicsTextState:
     """A form's stream starts with the INVOKING stream's text parameters —
-    font, size, leading, Tz, Tc/Tw are graphics state a form inherits at
-    its Do (the _redact_form rule); tm/tlm reset per stream."""
+    font, size, leading, Tz, Tc/Tw (and 7.5's Tr/Ts/colors) are graphics
+    state a form inherits at its Do (the _redact_form rule); tm/tlm reset
+    per stream."""
     if parent is None:
         return GraphicsTextState(base_ctm)
     child = GraphicsTextState(
@@ -179,11 +180,44 @@ def _child_state(base_ctm, parent: GraphicsTextState | None) -> GraphicsTextStat
     )
     child.char_spacing = parent.char_spacing
     child.word_spacing = parent.word_spacing
+    child.render_mode = parent.render_mode
+    child.rise = parent.rise
+    child.fill_color = parent.fill_color
+    child.stroke_color = parent.stroke_color
     return child
 
 
-def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None):
+def _style_of(state: GraphicsTextState) -> dict:
+    """The re-emittable text state at a show op (7.5's span style)."""
+    return {
+        "font_name": state.font_name,
+        "size": state.font_size,
+        "h_scale": state.h_scale,
+        "char_spacing": state.char_spacing,
+        "word_spacing": state.word_spacing,
+        "render_mode": state.render_mode,
+        "rise": state.rise,
+        "fill_color": state.fill_color,
+        "stroke_color": state.stroke_color,
+    }
+
+
+def _plain_segments(operator: str, operands: list) -> list:
+    """_show_segments detached from pikepdf (bytes/float only) so 7.5's
+    analysis can outlive the walk."""
+    out: list = []
+    for seg in _show_segments(operator, operands):
+        out.append(seg if isinstance(seg, float) else bytes(seg))
+    return out
+
+
+def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None, detail=None, stream_path=()):
     state = _child_state(base_ctm, parent_state)
+    # Stream identity for 7.5: the path of LOCAL form ordinals (the nth
+    # qualifying Do within its parent stream) from the page down. Local —
+    # not a global DFS id — so a rewriter can NAVIGATE to one stream and
+    # leave every other form untouched and unvisited.
+    local_form_ordinal = 0
     for instruction in instructions:
         operator = str(instruction.operator)
         operands = list(instruction.operands)
@@ -225,6 +259,23 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     "encodable": cap.encodable() if (cap and cap.editable) else "",
                 }
             )
+            if detail is not None:
+                # 7.5's rich channel — SAME walk, so run index agreement
+                # is by construction, not by parallel implementation.
+                detail.append(
+                    {
+                        "stream": stream_path,
+                        "operator": operator,
+                        "segments": _plain_segments(operator, operands),
+                        "cap": cap,
+                        "style": _style_of(state),
+                        "tm": state.tm,
+                        "ctm": state.ctm,
+                        "combined": combined,
+                        "raw_width": raw_width,
+                        "rect": (x0, y0, x1, y1),
+                    }
+                )
             state.advance_after_show(raw_width)
         elif operator == "Do":
             name = str(operands[0]) if operands else None
@@ -233,6 +284,8 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
             if xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
                 form_matrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
                 form_res = xobj.get("/Resources")
+                child_path = stream_path + (local_form_ordinal,)
+                local_form_ordinal += 1
                 _walk_runs(
                     pdf,
                     pikepdf.parse_content_stream(xobj),
@@ -244,6 +297,8 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     True,
                     fonts,
                     parent_state=state,
+                    detail=detail,
+                    stream_path=child_path,
                 )
     return out
 

@@ -6,7 +6,7 @@ import type { DocPlacement } from '../../canvas/layout';
 import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { EditImagePlacement } from '../../lib/edit-images';
-import type { EditTextRun } from '../../lib/edit-text';
+import type { EditTextListing } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -32,14 +32,18 @@ interface DocLayerProps {
   stampPreset?: StampPreset | null;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
-  editTextByPage: ReadonlyMap<string, EditTextRun[]>;
-  editSelection: { kind: 'image' | 'text'; pageId: string; index: number } | null;
-  editingText: { pageId: string; index: number } | null;
+  editTextByPage: ReadonlyMap<string, EditTextListing>;
+  editSelection: { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
+  editingText: { kind: 'text' | 'para'; pageId: string; index: number } | null;
   onSelectEditImage: (pageId: string, index: number) => void;
   onSelectEditText: (pageId: string, index: number) => void;
   onOpenTextEditor: (pageId: string, index: number) => void;
   onCommitTextEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
   onCancelTextEdit: () => void;
+  onSelectEditParagraph: (pageId: string, index: number) => void;
+  onOpenParagraphEditor: (pageId: string, index: number) => void;
+  onCommitParagraphEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
+  onCancelParagraphEdit: () => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -124,6 +128,10 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onOpenTextEditor={props.onOpenTextEditor}
               onCommitTextEdit={props.onCommitTextEdit}
               onCancelTextEdit={props.onCancelTextEdit}
+              onSelectEditParagraph={props.onSelectEditParagraph}
+              onOpenParagraphEditor={props.onOpenParagraphEditor}
+              onCommitParagraphEdit={props.onCommitParagraphEdit}
+              onCancelParagraphEdit={props.onCancelParagraphEdit}
               signaturePlacement={props.signaturePlacement}
               findMatchPageIds={props.findMatchPageIds}
               findWordsByPage={props.findWordsByPage}

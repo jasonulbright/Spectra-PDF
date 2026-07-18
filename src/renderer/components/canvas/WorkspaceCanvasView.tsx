@@ -24,8 +24,9 @@ import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
 import { fetchEditPlacements } from '../../lib/edit-images';
 import type { EditImagePlacement } from '../../lib/edit-images';
-import { fetchTextRuns, EDIT_DECLINED } from '../../lib/edit-text';
-import type { EditTextRun } from '../../lib/edit-text';
+import { EDIT_DECLINED } from '../../lib/edit-text';
+import { computeEditSpans, fetchEditTextListing } from '../../lib/edit-paragraphs';
+import type { EditTextListing } from '../../lib/edit-paragraphs';
 import { workspacePageNumber } from '../../lib/workspace-commit';
 import { runCommitGate } from '../../lib/commit-gate';
 
@@ -86,6 +87,19 @@ interface WorkspaceCanvasViewProps {
     newText: string,
     opts?: { convert?: boolean },
   ) => Promise<string | void>;
+  // Edit ▸ Paragraphs (7.5): replace a paragraph's text and re-lay-out
+  // inside its box — same one-snapshot, undoable App routing (engine
+  // replace_paragraph_text), same EDIT_DECLINED contract. The canvas
+  // supplies the fingerprint (member runs + logical text) and the
+  // renderer-computed span mapping.
+  onEditParagraph: (
+    path: string,
+    page: number,
+    para: { index: number; runs: number[]; text: string },
+    newText: string,
+    spans: { start: number; end: number; run: number }[],
+    opts?: { convert?: boolean },
+  ) => Promise<string | void>;
   // Add-page ghost (2n.3): pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
   onAddPages: (docId: string, toIndex: number) => void;
@@ -119,7 +133,7 @@ const HAND_SUPPRESSES_PICKUP = (): void => {};
 const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
 const NO_EDIT_IMAGES: ReadonlyMap<string, EditImagePlacement[]> = new Map();
-const NO_EDIT_TEXT: ReadonlyMap<string, EditTextRun[]> = new Map();
+const NO_EDIT_TEXT: ReadonlyMap<string, EditTextListing> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
 const NO_WORDS_BY_PAGE: ReadonlyMap<string, OcrWord[]> = new Map();
 const NO_WIDGETS_BY_PAGE: ReadonlyMap<string, OverlayWidget[]> = new Map();
@@ -134,6 +148,7 @@ export function WorkspaceCanvasView({
   onApplyOcrLayer,
   onEditImage,
   onEditText,
+  onEditParagraph,
   onAddPages,
   onFillFormValues,
   onAddFormField,
@@ -841,17 +856,22 @@ export function WorkspaceCanvasView({
   const [editImagesByPage, setEditImagesByPage] =
     useState<ReadonlyMap<string, EditImagePlacement[]>>(NO_EDIT_IMAGES);
   const [editTextByPage, setEditTextByPage] =
-    useState<ReadonlyMap<string, EditTextRun[]>>(NO_EDIT_TEXT);
-  // ONE selection across both edit-object kinds — the secondary toolbar's
-  // actions key off the kind.
+    useState<ReadonlyMap<string, EditTextListing>>(NO_EDIT_TEXT);
+  // ONE selection across all edit-object kinds — the secondary toolbar's
+  // actions key off the kind. 'para' (7.5) is the primary text surface;
+  // 'text' survives for runs outside any editable paragraph.
   const [editSel, setEditSel] = useState<{
-    kind: 'image' | 'text';
+    kind: 'image' | 'text' | 'para';
     pageId: string;
     index: number;
   } | null>(null);
-  // The inline text editor's target; the input itself lives in PageCell
-  // (local value state, validated live against the run's encodable set).
-  const [editingText, setEditingText] = useState<{ pageId: string; index: number } | null>(null);
+  // The ONE open inline editor — a run's or a paragraph's; the input
+  // itself lives in PageCell (local value state, validated live).
+  const [editingText, setEditingText] = useState<{
+    kind: 'text' | 'para';
+    pageId: string;
+    index: number;
+  } | null>(null);
   const editFetchTokenRef = useRef(0);
   const editBuffer = focusedDoc ? state.files.get(focusedDoc.path)?.buffer : undefined;
   // The DESTRUCTIVE clears (selection + the open editor with the user's
@@ -894,8 +914,29 @@ export function WorkspaceCanvasView({
       const f = state.files.get(doc.path);
       if (!f?.buffer) return;
       const proxy = await getDocumentProxy(doc.path, f.buffer);
-      const nextImages = new Map<string, EditImagePlacement[]>();
-      const nextText = new Map<string, EditTextRun[]>();
+      // Seed from the CURRENT listings when the context did NOT change:
+      // rebuilding from empty published a gap window per page (two engine
+      // round-trips each), during which an OPEN editor's page had no
+      // listing — React unmounted the editor and re-seeded it from
+      // pre-edit text, silently discarding the user's typing
+      // (review-caught CRITICAL; the ctxChanged guard alone only stopped
+      // the explicit clears). Stale-by-a-pass entries are safe here
+      // precisely because ctxChanged=false means these bytes didn't
+      // change; a REAL context change still starts empty (the 7.1
+      // stale-index discipline). Per-page deletes below prune pages
+      // whose fresh listing came back empty.
+      const validIds = new Set(doc.pages.map((p) => p.id));
+      const seed = <V,>(current: ReadonlyMap<string, V>): Map<string, V> => {
+        const m = new Map<string, V>();
+        for (const [k, v] of current) if (validIds.has(k)) m.set(k, v);
+        return m;
+      };
+      const nextImages = ctxChanged
+        ? new Map<string, EditImagePlacement[]>()
+        : seed(editImagesRef.current);
+      const nextText = ctxChanged
+        ? new Map<string, EditTextListing>()
+        : seed(editTextRef.current);
       for (const page of doc.pages) {
         if (editFetchTokenRef.current !== token) return;
         const pageNumber = workspacePageNumber(docs, doc, page.id);
@@ -911,16 +952,17 @@ export function WorkspaceCanvasView({
             engineCall(m, params);
           const placements = await fetchEditPlacements(call, f.workingPath, pageNumber, geometry);
           if (editFetchTokenRef.current !== token) return;
-          const runs = await fetchTextRuns(call, f.workingPath, pageNumber, geometry);
+          const listing = await fetchEditTextListing(call, f.workingPath, pageNumber, geometry);
           if (editFetchTokenRef.current !== token) return;
-          if (placements.length > 0) {
-            nextImages.set(page.id, placements);
-            setEditImagesByPage(new Map(nextImages)); // incremental fill
+          if (placements.length > 0) nextImages.set(page.id, placements);
+          else nextImages.delete(page.id);
+          setEditImagesByPage(new Map(nextImages)); // incremental fill
+          if (listing.runBoxes.length > 0 || listing.paragraphs.length > 0) {
+            nextText.set(page.id, listing);
+          } else {
+            nextText.delete(page.id);
           }
-          if (runs.length > 0) {
-            nextText.set(page.id, runs);
-            setEditTextByPage(new Map(nextText));
-          }
+          setEditTextByPage(new Map(nextText));
         } catch {
           // One page's listing failing (odd stream) must not kill the mode —
           // that page simply offers no outlines.
@@ -939,6 +981,12 @@ export function WorkspaceCanvasView({
   // queue, this covers the rest (review-caught).
   const [editNotice, setEditNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [editBusy, setEditBusy] = useState(false);
+  // Ref, not state: two commits in one tick (the unmount-blur refire when
+  // React removes the focused input) both read a STALE editBusy closure —
+  // the applyingRef/signingRef rule this file already follows everywhere
+  // else (review-caught). Declared here because the OPEN handlers gate on
+  // it too (no new editor while a commit is in flight).
+  const committingTextRef = useRef(false);
 
   const handleSelectEditImage = useCallback((pageId: string, index: number) => {
     setEditNotice(null);
@@ -962,7 +1010,9 @@ export function WorkspaceCanvasView({
 
   const handleOpenTextEditor = useCallback(
     (pageId: string, index: number) => {
-      const run = editTextByPage.get(pageId)?.find((r) => r.index === index);
+      // Same busy gate as the paragraph editor (see its comment).
+      if (editBusy || committingTextRef.current) return;
+      const run = editTextByPage.get(pageId)?.runBoxes.find((r) => r.index === index);
       if (!run) return;
       if (!run.editable) {
         // The refusal SELECTS the run too — the toolbar must reflect what
@@ -973,18 +1023,38 @@ export function WorkspaceCanvasView({
       }
       setEditNotice(null);
       setEditSel({ kind: 'text', pageId, index });
-      setEditingText({ pageId, index });
+      setEditingText({ kind: 'text', pageId, index });
     },
-    [editTextByPage],
+    [editTextByPage, editBusy],
+  );
+
+  const handleSelectEditParagraph = useCallback((pageId: string, index: number) => {
+    setEditNotice(null);
+    setEditingText(null);
+    setEditSel((prev) =>
+      prev?.kind === 'para' && prev.pageId === pageId && prev.index === index
+        ? null
+        : { kind: 'para', pageId, index },
+    );
+  }, []);
+
+  const handleOpenParagraphEditor = useCallback(
+    (pageId: string, index: number) => {
+      // While a commit is in flight a NEW editor's Enter would be
+      // silently swallowed by committingTextRef — refuse to open one
+      // instead (review-caught; the busy hint is already visible).
+      if (editBusy || committingTextRef.current) return;
+      const para = editTextByPage.get(pageId)?.paragraphs.find((p) => p.index === index);
+      if (!para) return; // only editable paragraphs are listed
+      setEditNotice(null);
+      setEditSel({ kind: 'para', pageId, index });
+      setEditingText({ kind: 'para', pageId, index });
+    },
+    [editTextByPage, editBusy],
   );
 
   const handleCancelTextEdit = useCallback(() => setEditingText(null), []);
 
-  // Ref, not state: two commits in one tick (the unmount-blur refire when
-  // React removes the focused input) both read a STALE editBusy closure —
-  // the applyingRef/signingRef rule this file already follows everywhere
-  // else (review-caught).
-  const committingTextRef = useRef(false);
   const handleCommitTextEdit = useCallback(
     async (
       pageId: string,
@@ -1005,7 +1075,7 @@ export function WorkspaceCanvasView({
       // the old value so a DECLINED signed-doc warning (no buffer change,
       // no refetch) can put it back instead of leaving the run invisibly
       // gone (review-caught: indistinguishable from success).
-      const previousRuns = editTextByPage.get(pageId);
+      const previousListing = editTextByPage.get(pageId);
       setEditTextByPage((prev) => {
         const next = new Map(prev);
         next.delete(pageId);
@@ -1014,20 +1084,20 @@ export function WorkspaceCanvasView({
       try {
         const result = await onEditText(focusedDoc.path, pageNumber, index, newText, opts);
         if (result === EDIT_DECLINED) {
-          if (previousRuns) {
+          if (previousListing) {
             setEditTextByPage((prev) => {
               const next = new Map(prev);
-              next.set(pageId, previousRuns);
+              next.set(pageId, previousListing);
               return next;
             });
           }
           setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
         }
       } catch (err) {
-        if (previousRuns) {
+        if (previousListing) {
           setEditTextByPage((prev) => {
             const next = new Map(prev);
-            next.set(pageId, previousRuns);
+            next.set(pageId, previousListing);
             return next;
           });
         }
@@ -1041,6 +1111,69 @@ export function WorkspaceCanvasView({
       }
     },
     [focusedDoc, docs, editTextByPage, onEditText],
+  );
+
+  const handleCommitParagraphEdit = useCallback(
+    async (
+      pageId: string,
+      index: number,
+      newText: string,
+      opts?: { convert?: boolean },
+    ): Promise<void> => {
+      if (!focusedDoc || committingTextRef.current) return;
+      const para = editTextByPage.get(pageId)?.paragraphs.find((p) => p.index === index);
+      if (!para) return;
+      const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
+      if (pageNumber == null) return;
+      committingTextRef.current = true;
+      setEditingText(null);
+      setEditSel(null);
+      setEditBusy(true);
+      setEditNotice(null);
+      const spans = computeEditSpans(para.text, newText, para.spans);
+      const previousListing = editTextByPage.get(pageId);
+      setEditTextByPage((prev) => {
+        const next = new Map(prev);
+        next.delete(pageId);
+        return next;
+      });
+      try {
+        const result = await onEditParagraph(
+          focusedDoc.path,
+          pageNumber,
+          { index: para.index, runs: para.runs, text: para.text },
+          newText,
+          spans,
+          opts,
+        );
+        if (result === EDIT_DECLINED) {
+          if (previousListing) {
+            setEditTextByPage((prev) => {
+              const next = new Map(prev);
+              next.set(pageId, previousListing);
+              return next;
+            });
+          }
+          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+        }
+      } catch (err) {
+        if (previousListing) {
+          setEditTextByPage((prev) => {
+            const next = new Map(prev);
+            next.set(pageId, previousListing);
+            return next;
+          });
+        }
+        setEditNotice({
+          text: err instanceof Error ? err.message : String(err),
+          error: true,
+        });
+      } finally {
+        committingTextRef.current = false;
+        setEditBusy(false);
+      }
+    },
+    [focusedDoc, docs, editTextByPage, onEditParagraph],
   );
 
   const runEditAction = useCallback(
@@ -1108,6 +1241,8 @@ export function WorkspaceCanvasView({
   runEditActionRef.current = runEditAction;
   const openTextEditorRef = useRef(handleOpenTextEditor);
   openTextEditorRef.current = handleOpenTextEditor;
+  const openParagraphEditorRef = useRef(handleOpenParagraphEditor);
+  openParagraphEditorRef.current = handleOpenParagraphEditor;
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasEditImages({
@@ -1121,13 +1256,21 @@ export function WorkspaceCanvasView({
       selection: () => editSelRef.current,
       textPageIds: () => [...editTextRef.current.keys()],
       textRuns: (pageId) =>
-        (editTextRef.current.get(pageId) ?? []).map((r) => ({
+        (editTextRef.current.get(pageId)?.runBoxes ?? []).map((r) => ({
           index: r.index,
           text: r.text,
           editable: r.editable,
           reason: r.reason,
         })),
       openTextEditor: (pageId, index) => openTextEditorRef.current(pageId, index),
+      paragraphs: (pageId) =>
+        (editTextRef.current.get(pageId)?.paragraphs ?? []).map((p) => ({
+          index: p.index,
+          text: p.text,
+          lineCount: p.lineCount,
+          alignment: p.alignment,
+        })),
+      openParagraphEditor: (pageId, index) => openParagraphEditorRef.current(pageId, index),
       act: (kind, opts) => runEditActionRef.current(kind, opts),
     });
     return () => registerCanvasEditImages(null);
@@ -1773,14 +1916,16 @@ export function WorkspaceCanvasView({
         editSelectionKind={editSel?.kind ?? null}
         editTextEditable={
           editSel?.kind === 'text'
-            ? (editTextByPage.get(editSel.pageId)?.find((r) => r.index === editSel.index)
-                ?.editable ?? false)
-            : false
+            ? (editTextByPage
+                .get(editSel.pageId)
+                ?.runBoxes.find((r) => r.index === editSel.index)?.editable ?? false)
+            : editSel?.kind === 'para' // only editable paragraphs are listed
         }
         editTextReason={
           editSel?.kind === 'text'
-            ? (editTextByPage.get(editSel.pageId)?.find((r) => r.index === editSel.index)
-                ?.reason ?? null)
+            ? (editTextByPage
+                .get(editSel.pageId)
+                ?.runBoxes.find((r) => r.index === editSel.index)?.reason ?? null)
             : null
         }
         editBusy={editBusy}
@@ -1788,6 +1933,8 @@ export function WorkspaceCanvasView({
         onEditAction={(kind) => void runEditAction(kind)}
         onEditTextOpen={() => {
           if (editSel?.kind === 'text') handleOpenTextEditor(editSel.pageId, editSel.index);
+          else if (editSel?.kind === 'para')
+            handleOpenParagraphEditor(editSel.pageId, editSel.index);
         }}
       />
       {docViewMode === 'document' && focusedDoc ? (
@@ -1818,6 +1965,12 @@ export function WorkspaceCanvasView({
             void handleCommitTextEdit(pageId, index, text, opts)
           }
           onCancelTextEdit={handleCancelTextEdit}
+          onSelectEditParagraph={handleSelectEditParagraph}
+          onOpenParagraphEditor={handleOpenParagraphEditor}
+          onCommitParagraphEdit={(pageId, index, text, opts) =>
+            void handleCommitParagraphEdit(pageId, index, text, opts)
+          }
+          onCancelParagraphEdit={handleCancelTextEdit}
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}
@@ -1886,6 +2039,12 @@ export function WorkspaceCanvasView({
             void handleCommitTextEdit(pageId, index, text, opts)
           }
           onCancelTextEdit={handleCancelTextEdit}
+          onSelectEditParagraph={handleSelectEditParagraph}
+          onOpenParagraphEditor={handleOpenParagraphEditor}
+          onCommitParagraphEdit={(pageId, index, text, opts) =>
+            void handleCommitParagraphEdit(pageId, index, text, opts)
+          }
+          onCancelParagraphEdit={handleCancelTextEdit}
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}

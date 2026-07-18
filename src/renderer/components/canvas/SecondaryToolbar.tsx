@@ -41,9 +41,11 @@ export interface SecondaryToolbarProps {
    * options in the stamp-preset sense (props+callbacks, not commands: they
    * act on transient canvas selection the registry can't see). */
   editHasSelection: boolean;
-  /** Which kind of edit object is selected (7.2 adds text runs). */
-  editSelectionKind: 'image' | 'text' | null;
-  /** Selected text run's editability + refusal reason (null = n/a). */
+  /** Which kind of edit object is selected (7.2 adds text runs; 7.5 adds
+   * paragraph boxes — the primary text surface). */
+  editSelectionKind: 'image' | 'text' | 'para' | null;
+  /** Selected text run's/paragraph's editability + refusal reason
+   * (paragraph boxes list only when editable, so 'para' is always true). */
   editTextEditable: boolean;
   editTextReason: string | null;
   /** An action is in flight — buttons disable so a stale-index click can't
@@ -132,7 +134,7 @@ export function SecondaryToolbar({
         <div className="secondary-toolbar-opts" role="group" aria-label="Image actions">
           {!editHasSelection && !editBusy && !editNotice && (
             <span className="secondary-toolbar-hint" data-testid="edit-hint">
-              Click an image or a line of text on the page
+              Click an image, a paragraph, or a line of text on the page
             </span>
           )}
           {editSelectionKind === 'text' && !editBusy && !editTextEditable && editTextReason && (
@@ -140,7 +142,7 @@ export function SecondaryToolbar({
               {editTextReason}
             </span>
           )}
-          {editSelectionKind === 'text' && (
+          {(editSelectionKind === 'text' || editSelectionKind === 'para') && (
             <button
               type="button"
               data-testid="edit-action-text"
@@ -148,7 +150,7 @@ export function SecondaryToolbar({
               disabled={!editTextEditable || editBusy}
               onClick={onEditTextOpen}
             >
-              Edit Text…
+              {editSelectionKind === 'para' ? 'Edit Paragraph…' : 'Edit Text…'}
             </button>
           )}
           {editBusy && (

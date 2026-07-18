@@ -3,7 +3,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { EditImagePlacement } from '../../lib/edit-images';
-import type { EditTextRun } from '../../lib/edit-text';
+import type { EditTextListing } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -37,14 +37,19 @@ interface DocumentRowProps {
   // survives unrelated re-renders.
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
-  editTextByPage: ReadonlyMap<string, EditTextRun[]>;
-  editSelection: { kind: 'image' | 'text'; pageId: string; index: number } | null;
-  editingText: { pageId: string; index: number } | null;
+  editTextByPage: ReadonlyMap<string, EditTextListing>;
+  editSelection: { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
+  /** The ONE open inline editor — a run's (kind 'text') or a paragraph's. */
+  editingText: { kind: 'text' | 'para'; pageId: string; index: number } | null;
   onSelectEditImage: (pageId: string, index: number) => void;
   onSelectEditText: (pageId: string, index: number) => void;
   onOpenTextEditor: (pageId: string, index: number) => void;
   onCommitTextEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
   onCancelTextEdit: () => void;
+  onSelectEditParagraph: (pageId: string, index: number) => void;
+  onOpenParagraphEditor: (pageId: string, index: number) => void;
+  onCommitParagraphEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
+  onCancelParagraphEdit: () => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -107,6 +112,10 @@ function DocumentRowImpl({
   onOpenTextEditor,
   onCommitTextEdit,
   onCancelTextEdit,
+  onSelectEditParagraph,
+  onOpenParagraphEditor,
+  onCommitParagraphEdit,
+  onCancelParagraphEdit,
   signaturePlacement,
   findMatchPageIds,
   findWordsByPage,
@@ -159,7 +168,8 @@ function DocumentRowImpl({
         stampPreset={stampPreset}
         redactionMarks={redactionMarksByPage.get(page.id)}
         editImages={editImagesByPage.get(page.id)}
-        editTextRuns={editTextByPage.get(page.id)}
+        editTextRuns={editTextByPage.get(page.id)?.runBoxes}
+        editParagraphs={editTextByPage.get(page.id)?.paragraphs}
         editSelectedIndex={
           editSelection?.kind === 'image' && editSelection.pageId === page.id
             ? editSelection.index
@@ -170,12 +180,30 @@ function DocumentRowImpl({
             ? editSelection.index
             : null
         }
-        editingTextIndex={editingText?.pageId === page.id ? editingText.index : null}
+        editParaSelectedIndex={
+          editSelection?.kind === 'para' && editSelection.pageId === page.id
+            ? editSelection.index
+            : null
+        }
+        editingTextIndex={
+          editingText?.kind === 'text' && editingText.pageId === page.id
+            ? editingText.index
+            : null
+        }
+        editingParaIndex={
+          editingText?.kind === 'para' && editingText.pageId === page.id
+            ? editingText.index
+            : null
+        }
         onSelectEditImage={onSelectEditImage}
         onSelectEditText={onSelectEditText}
         onOpenTextEditor={onOpenTextEditor}
         onCommitTextEdit={onCommitTextEdit}
         onCancelTextEdit={onCancelTextEdit}
+        onSelectEditParagraph={onSelectEditParagraph}
+        onOpenParagraphEditor={onOpenParagraphEditor}
+        onCommitParagraphEdit={onCommitParagraphEdit}
+        onCancelParagraphEdit={onCancelParagraphEdit}
         signaturePlacement={signaturePlacement?.pageId === page.id ? signaturePlacement : null}
         findMatch={findMatchPageIds.has(page.id)}
         findWords={findWordsByPage.get(page.id)}
