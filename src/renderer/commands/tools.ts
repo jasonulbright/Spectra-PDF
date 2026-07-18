@@ -66,13 +66,16 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'organize',
     title: 'Organize Pages',
-    description: 'Reorder, rotate, delete, split and extract pages.',
+    // Discoverability copy (owner directive, 2026-07-18, from launch-thread
+    // feedback): name the verbs users search for — "merge" especially,
+    // whose only surface is the board's direct manipulation.
+    description: 'Reorder, rotate, delete, split, extract — and merge pages between open files.',
     ops: ['rotate', 'delete', 'split'],
   },
   {
     id: 'comment',
     title: 'Comment',
-    description: 'Highlight, add notes, draw and stamp.',
+    description: 'Highlight, add text boxes, draw, stamp — with notes on each.',
     ops: [],
     // Four modes, one tool — the pill listed them flat and made the user infer
     // the grouping; Acrobat's Comment toolbar states it.
@@ -81,11 +84,10 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'edit',
     title: 'Edit',
-    description: 'Select an image on the page — replace, extract or delete it.',
+    // The full 7.1–7.5 surface (stale "images only" copy caught in the
+    // 2026-07-18 discoverability pass).
+    description: 'Edit text, whole paragraphs, and images right on the page.',
     ops: [],
-    // Phase 7.1: images only. Text editing arrives as later slices of the
-    // same tool (21-phase7-content-editing.md) — the tile name is already
-    // the destination, not the current ceiling.
     canvasTools: ['edit'],
   },
   {

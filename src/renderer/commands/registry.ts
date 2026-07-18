@@ -155,6 +155,7 @@ export const COMMAND_IDS = [
   'view.toolsPane',
   'document.insertBlankPage',
   'document.insertFromFile',
+  'document.combineFiles',
   'document.deleteSelection',
   'document.rotateSelectionCW',
   'document.rotateSelectionCCW',
@@ -530,6 +531,16 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'From File…',
     when: (ctx) => ctx.app !== null && insertAnchor(ctx.state) !== null,
     run: (ctx) => void ctx.app!.insertPagesFromFile(),
+  },
+  // Discoverability alias for the launch-thread's "merge pages" ask
+  // (2026-07-18): the SAME byte-only import machinery as Insert Pages,
+  // targeted at the END of the active document — the name users actually
+  // search the menus for. Direct-manipulation merging on the board is
+  // unchanged; this is the menu path to the same outcome.
+  'document.combineFiles': {
+    title: 'Combine Files…',
+    when: (ctx) => ctx.app !== null && insertAnchor(ctx.state) !== null,
+    run: (ctx) => void ctx.app!.combineFiles(),
   },
   'document.deleteSelection': {
     title: 'Delete Selected Pages',

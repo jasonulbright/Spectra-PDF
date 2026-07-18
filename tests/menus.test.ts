@@ -6,6 +6,7 @@ import { MENUS, menuCommandIds, type MenuNode } from '../src/renderer/commands/m
 import { toolbarCommandIds } from '../src/renderer/commands/toolbars';
 import { COMMANDS, type CommandId } from '../src/renderer/commands/registry';
 import { shortcutForCommand } from '../src/renderer/commands/keymap';
+import { TOOL_DEFS } from '../src/renderer/commands/tools';
 import { initialState } from '../src/renderer/state/reducer';
 import type { AppState, OpenFile } from '../src/renderer/state/types';
 import type { CommandContext } from '../src/renderer/commands/types';
@@ -148,5 +149,32 @@ describe('shortcutForCommand', () => {
   it('returns null for an unbound command', () => {
     expect(shortcutForCommand('help.about')).toBeNull();
     expect(shortcutForCommand('tools.panel.compress' as CommandId)).toBeNull();
+  });
+});
+
+describe('discoverability copy (2026-07-18, launch-thread feedback)', () => {
+  // A user could not FIND merge / text boxes / text editing even though all
+  // existed — the tile copy under-named the verbs people search for. Pin the
+  // load-bearing words so a future copy edit cannot silently regress the fix.
+  const desc = (id: string): string => TOOL_DEFS.find((t) => t.id === id)!.description;
+
+  it('Organize names merging (its only other surface is board direct-manipulation)', () => {
+    expect(desc('organize')).toMatch(/merge/i);
+    expect(desc('organize')).toMatch(/delete/i);
+  });
+
+  it('Comment names text boxes', () => {
+    expect(desc('comment')).toMatch(/text box/i);
+  });
+
+  it('Edit names text AND paragraphs AND images (the full 7.1–7.5 surface)', () => {
+    expect(desc('edit')).toMatch(/text/i);
+    expect(desc('edit')).toMatch(/paragraph/i);
+    expect(desc('edit')).toMatch(/image/i);
+  });
+
+  it('Combine Files sits in the Document menu as the named merge path', () => {
+    const ids = menuCommandIds(MENUS.find((m) => m.id === 'document')!.items);
+    expect(ids).toContain('document.combineFiles');
   });
 });

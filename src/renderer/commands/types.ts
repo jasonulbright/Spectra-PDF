@@ -68,6 +68,10 @@ export interface AppCommandHandlers {
   /** Insert another file's pages after the page being read (Ctrl+Shift+I,
    * § 9.2) — the native picker, then the same import machinery. */
   insertPagesFromFile(): Promise<void>;
+  /** Combine Files (2026-07-18): append picked PDFs' pages to the END of
+   * the active document — the menu-named path to what board drag-merging
+   * does (same import machinery, page-tier undoable). */
+  combineFiles(): Promise<void>;
   /** Open the Settings modal at its third-party-licenses section (Help ▸
    * Third-party Licenses). Same surface as preferences until M5 splits it. */
   openLicenses(): void;

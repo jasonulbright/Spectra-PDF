@@ -544,6 +544,18 @@ function AppContent(): React.ReactElement {
     await handleAddPages(anchor.docId, anchor.index);
   }, [handleAddPages]);
 
+  // Combine Files (discoverability, 2026-07-18): same import machinery as
+  // Insert Pages, targeted at the END of the active document's last
+  // partition — "merge these PDFs into this one" as a named menu action.
+  const combineFiles = useCallback(async () => {
+    const s = stateRef.current;
+    if (!s.activeFileId) return;
+    const docs = s.workspace.documents.filter((d) => d.path === s.activeFileId);
+    const last = docs[docs.length - 1];
+    if (!last) return;
+    await handleAddPages(last.id, last.pages.length);
+  }, [handleAddPages]);
+
   const insertBlankPage = useCallback(async () => {
     const s = stateRef.current;
     const anchor = insertAnchor(s);
@@ -1004,6 +1016,7 @@ function AppContent(): React.ReactElement {
     openBatchOcr: () => setShowBatchOcr(true),
     insertBlankPage,
     insertPagesFromFile,
+    combineFiles,
     openLicenses: () => setShowSettings('licenses'),
     openAbout: () => setShowAbout(true),
     checkForUpdates: () => setUpdateCheckSignal((n) => n + 1),
@@ -1031,6 +1044,7 @@ function AppContent(): React.ReactElement {
       openBatchOcr: () => h.current.openBatchOcr(),
       insertBlankPage: () => h.current.insertBlankPage(),
       insertPagesFromFile: () => h.current.insertPagesFromFile(),
+      combineFiles: () => h.current.combineFiles(),
       openLicenses: () => h.current.openLicenses(),
       openAbout: () => h.current.openAbout(),
       checkForUpdates: () => h.current.checkForUpdates(),

@@ -209,6 +209,8 @@ export const MENUS: MenuDef[] = [
           cmd('document.insertBlankPage', 'menuitem-document-insert-blank'),
         ],
       },
+      cmd('document.combineFiles', 'menuitem-document-combine'),
+      sep,
       cmd('tools.panel.delete', 'menuitem-document-delete'),
       cmd('tools.panel.rotate', 'menuitem-document-rotate'),
       cmd('tools.panel.split', 'menuitem-document-split'),
