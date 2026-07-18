@@ -522,7 +522,10 @@ describe('selection invalidation on buffer-identity changes', () => {
     })],
     ['COMMIT_PAGE_EDITS', () => ({
       type: 'COMMIT_PAGE_EDITS',
-      updates: [{ path: 'a.pdf', pageCount: 3, buffer: [9], snapshotPath: 'snap' }],
+      updates: [{
+        path: 'a.pdf', pageCount: 3, buffer: [9], snapshotPath: 'snap',
+        authored: { pages: ['x#p0', 'x#p1', 'x#p2'], documents: [{ id: 'x#0', name: 'a' }] },
+      }],
     })],
     ['CLOSE_FILE', () => ({ type: 'CLOSE_FILE', path: 'a.pdf' })],
   ];

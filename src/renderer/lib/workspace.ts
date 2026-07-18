@@ -1,6 +1,12 @@
 import { getDocumentProxy } from './pdfDocCache';
 import { readManifest, partitionPages, stripExtension } from './pdfx-format';
 import { importPageAnnotations } from './annotation-import';
+import {
+  adoptAuthoredIdentity,
+  nextGeneration,
+  positionalDocId,
+  positionalPageId,
+} from './durable-identity';
 import type { OpenDocument, OpenFile, PageAnnotation, PageRef } from '../state/types';
 
 // Derives the workspace's page-level view of an open file: reads the .pdfx
@@ -8,6 +14,13 @@ import type { OpenDocument, OpenFile, PageAnnotation, PageRef } from '../state/t
 // dimensions for the canvas layout. A plain PDF yields a single document
 // covering all pages. Runs off the open/update critical path — see
 // useWorkspaceIndexer.
+//
+// Identity (Phase 5, § F — architecture/22): positional ids are minted
+// under a fresh per-path GENERATION each index, so an id from before any
+// rebuild can never re-bind to the wrong physical page; when the buffer
+// is the one the page-tier commit just authored, the commit's published
+// ids are ADOPTED over the positional ones (ids only — dims, rotation,
+// and annotations always come from freshly reading the baked bytes).
 export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
   if (!file.buffer) return [];
   // The proxy is shared with the canvas renderers via pdfDocCache — it stays
@@ -23,14 +36,15 @@ export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
     dims.push({ width, height });
     annotations.push(await importPageAnnotations(page));
   }
-  return partitions.map((partition, docIndex) => ({
+  const generation = nextGeneration(file.path);
+  const positional = partitions.map((partition, docIndex) => ({
     ...file,
-    id: `${file.path}#${docIndex}`,
+    id: positionalDocId(file.path, generation, docIndex),
     name: partition.name,
     pageCount: partition.indices.length,
     pages: partition.indices.map(
       (pageIndex): PageRef => ({
-        id: `${file.path}#p${pageIndex}`,
+        id: positionalPageId(file.path, generation, pageIndex),
         sourceDocId: file.path,
         sourcePageIndex: pageIndex,
         rotation: 0,
@@ -40,4 +54,5 @@ export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
       }),
     ),
   }));
+  return adoptAuthoredIdentity(positional, file.authoredIdentity, file.buffer);
 }

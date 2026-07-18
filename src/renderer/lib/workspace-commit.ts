@@ -40,6 +40,12 @@ export interface CommitFilePlan {
   useManifest: boolean;
   documents: CommitDocumentPlan[];
   pageCount: number;
+  // The identity channel (Phase 5, § F): the old ids IN THE ORDER the new
+  // file's pages/partitions are written — this plan IS the old→new
+  // mapping, published instead of discarded. Adopted by the post-commit
+  // reindex (lib/durable-identity.ts).
+  authoredPageIds: string[];
+  authoredDocuments: { id: string; name: string }[];
 }
 
 function toBytes(buffer: PdfBuffer): Uint8Array {
@@ -119,6 +125,8 @@ export function planCommit(
       useManifest: carriesManifest(f.name, docs.length),
       documents,
       pageCount,
+      authoredPageIds: docs.flatMap((d) => d.pages.map((p) => p.id)),
+      authoredDocuments: docs.map((d) => ({ id: d.id, name: d.name })),
     });
   }
   return plans;
@@ -186,8 +194,13 @@ export async function commitPageEdits({
 
     const runTag = `.commit-tmp-${++commitSeq}`;
     const staged: string[] = [];
-    const updates: { path: string; pageCount: number; buffer: PdfBuffer; snapshotPath: string }[] =
-      [];
+    const updates: {
+      path: string;
+      pageCount: number;
+      buffer: PdfBuffer;
+      snapshotPath: string;
+      authored: { pages: string[]; documents: { id: string; name: string }[] };
+    }[] = [];
     try {
       for (let i = 0; i < plans.length; i++) {
         const tmp = plans[i].workingPath + runTag;
@@ -202,6 +215,10 @@ export async function commitPageEdits({
           pageCount: plans[i].pageCount,
           buffer: built[i],
           snapshotPath,
+          authored: {
+            pages: plans[i].authoredPageIds,
+            documents: plans[i].authoredDocuments,
+          },
         });
       }
     } catch (err) {

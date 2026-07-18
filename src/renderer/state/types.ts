@@ -18,6 +18,12 @@ export interface OpenFile {
   // for pages imported into another document; evicted once no page references
   // them and the page tier is empty. See 2n.3 in the phase doc.
   importOnly?: boolean;
+  // Phase 5 (§ F) identity channel: the ids the LAST page-tier commit
+  // authored for this file's pages/partitions, valid only while `buffer`
+  // IS the record's buffer object (adoption checks identity — any later
+  // buffer change makes the record inert with no cleanup choreography).
+  // Set by COMMIT_PAGE_EDITS; consumed by the workspace indexer.
+  authoredIdentity?: import('../lib/durable-identity').AuthoredIdentity;
 }
 
 // A fingerprint of a pre-existing PDF annotation object as read at import
@@ -270,7 +276,17 @@ export type AppAction =
   // Atomic variant dispatched by the commit bridge after all files are
   // rebuilt on disk: applies every file update and clears the page-edit tier
   // in one step, so no intermediate state is observable.
-  | { type: 'COMMIT_PAGE_EDITS'; updates: { path: string; pageCount: number; buffer: PdfBuffer; snapshotPath: string }[] }
+  | {
+      type: 'COMMIT_PAGE_EDITS';
+      updates: {
+        path: string;
+        pageCount: number;
+        buffer: PdfBuffer;
+        snapshotPath: string;
+        // The § F identity channel — old ids in authored (new-file) order.
+        authored: { pages: string[]; documents: { id: string; name: string }[] };
+      }[];
+    }
   // Snapshot-tier history. UNDO carries a snapshot of the pre-restore state
   // so REDO can return to it; the caller performs the disk restore and then
   // refreshes the buffer via REFRESH_BUFFER (which must not touch history —

@@ -288,11 +288,13 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const jumpTo = useCallback(
     (page: number | null) => {
       if (page == null || !activeFile) return;
-      // jumpToPage, not canvas().centerOn: a bookmark addresses a page of the
-      // FILE, which may sit in a `.pdfx` partition the reading view isn't
-      // showing — centring there was a silent, zero-feedback no-op
-      // (review-caught).
-      getCanvasServices()?.jumpToPage(`${activeFile.path}#p${page - 1}`);
+      // jumpToFilePage, not canvas().centerOn: a bookmark addresses a page
+      // of the FILE, which may sit in a `.pdfx` partition the reading view
+      // isn't showing — centring there was a silent, zero-feedback no-op
+      // (review-caught). The service resolves page number → id from live
+      // workspace state (§ F: ids are opaque — generation-tagged or
+      // adopted — so string-building `path#p{n}` is no longer valid).
+      getCanvasServices()?.jumpToFilePage(activeFile.path, page);
     },
     [activeFile],
   );

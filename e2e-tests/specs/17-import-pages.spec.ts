@@ -73,8 +73,14 @@ describe('import pages into a document (2n.3)', () => {
     });
   });
 
-  // A plain PDF's single document id is `${path}#0` and its page ids are
-  // `${path}#p${n}` — derive the doc id from the first page id.
+  // Phase 5 (§ F): ids are OPAQUE — generation-tagged positional or
+  // adopted-authored — so the spec never predicts an id string. Doc ids
+  // come from the pages' ids only via the shared suffix rule (a page id is
+  // `<docid-prefix>#p<n>` in the positional world), and page assertions
+  // use IDENTITY (the ids read from state before the action) plus
+  // provenance prefixes (tmp paths contain no '#', so prefix matching is
+  // sound in this controlled fixture even though product code must never
+  // do it).
   const docIdOf = (pageId: string): string => pageId.replace(/#p\d+$/, '#0');
 
   it('imports a source file byte-only (no strip), commits it into the target, and evicts the source', async () => {
@@ -89,14 +95,13 @@ describe('import pages into a document (2n.3)', () => {
     const merged = await waitForWorkspacePages(10);
 
     // The imported pages land at index 2 — and there is exactly ONE document
-    // (10 pages total, not 15): the source got NO strip of its own.
-    const aId = (n: number) => `${targetA}#p${n}`;
-    const bId = (n: number) => `${sourceB}#p${n}`;
-    expect(merged).toEqual([
-      aId(0), aId(1),
-      bId(0), bId(1), bId(2), bId(3), bId(4),
-      aId(2), aId(3), aId(4),
-    ]);
+    // (10 pages total, not 15): the source got NO strip of its own. Page-tier
+    // splices preserve PageRef IDENTITY, so target-a's pages are the exact
+    // ids read before the import, in order, around the b-provenance block.
+    expect(merged.slice(0, 2)).toEqual([aPages[0], aPages[1]]);
+    expect(merged.slice(2, 7).every((id) => id.startsWith(sourceB))).toBe(true);
+    expect(new Set(merged.slice(2, 7)).size).toBe(5);
+    expect(merged.slice(7)).toEqual([aPages[2], aPages[3], aPages[4]]);
     // Source is registered byte-only (present in files, but no strip above).
     expect((await getState()).fileCount).toBe(2);
 

@@ -223,7 +223,13 @@ function resetEmptiedPaths(
 
 function applyFileUpdate(
   files: Map<string, OpenFile>,
-  update: { path: string; pageCount: number; buffer: PdfBuffer; snapshotPath: string },
+  update: {
+    path: string;
+    pageCount: number;
+    buffer: PdfBuffer;
+    snapshotPath: string;
+    authored?: { pages: string[]; documents: { id: string; name: string }[] };
+  },
 ): Map<string, OpenFile> {
   const existing = files.get(update.path);
   if (!existing) return files;
@@ -235,6 +241,13 @@ function applyFileUpdate(
     dirty: true,
     undoStack: [...existing.undoStack, update.snapshotPath],
     redoStack: [], // new action clears redo
+    // The § F identity channel: an authored update (page-tier commit)
+    // records the ids the reindex should adopt, keyed to THIS buffer
+    // object; a non-authored update leaves any stale record inert (the
+    // buffer-identity check fails) — but drop it anyway for hygiene.
+    authoredIdentity: update.authored
+      ? { buffer: update.buffer, ...update.authored }
+      : undefined,
   });
   return next;
 }

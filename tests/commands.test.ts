@@ -558,6 +558,7 @@ describe('invokeCommand', () => {
     registerCanvasServices({
       canvas: () => null,
       jumpToPage: vi.fn(),
+      jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
@@ -572,6 +573,7 @@ describe('invokeCommand', () => {
     const services = {
       canvas: () => null,
       jumpToPage: vi.fn(),
+      jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
@@ -605,6 +607,7 @@ describe('invokeCommand', () => {
     registerCanvasServices({
       canvas: () => null,
       jumpToPage: vi.fn(),
+      jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
@@ -618,6 +621,7 @@ describe('invokeCommand', () => {
     registerCanvasServices({
       canvas: () => null,
       jumpToPage: vi.fn(),
+      jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
@@ -755,6 +759,7 @@ describe('invokeCommand', () => {
         centerOn: vi.fn(),
       }),
       jumpToPage: vi.fn(),
+      jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open: vi.fn(), openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
@@ -769,6 +774,7 @@ describe('invokeCommand', () => {
     registerCanvasServices({
       canvas: () => null,
       jumpToPage: vi.fn(),
+      jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },

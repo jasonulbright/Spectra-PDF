@@ -102,6 +102,12 @@ export interface CanvasServices {
    * actually lands instead of no-oping.
    */
   jumpToPage(pageId: string): void;
+  /** Jump to the Nth page (1-based) of a FILE, resolving the page id from
+   * live workspace state. Phase 5 (§ F): ids are opaque — generation-
+   * tagged when positional, historic when adopted — so callers that know
+   * only a page NUMBER (bookmarks) must resolve here, never string-build
+   * an id. */
+  jumpToFilePage(path: string, pageNumber: number): void;
   /** READ this page (M6.2): switch to the reading view (focusing the owning
    * document if needed) and land on the page — the PageInspector's
    * replacement. Uses the pending-jump slot, so it is safe to call from any

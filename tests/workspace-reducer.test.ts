@@ -547,12 +547,28 @@ describe('COMMIT_PAGE_EDITS', () => {
     const next = appReducer(edited, {
       type: 'COMMIT_PAGE_EDITS',
       updates: [
-        { path: 'a.pdf', pageCount: 2, buffer: [1], snapshotPath: 'snapA' },
-        { path: 'b.pdf', pageCount: 3, buffer: [2], snapshotPath: 'snapB' },
+        {
+          path: 'a.pdf', pageCount: 2, buffer: [1], snapshotPath: 'snapA',
+          authored: { pages: ['a#pA', 'a#pB'], documents: [{ id: 'a#0', name: 'a' }] },
+        },
+        {
+          path: 'b.pdf', pageCount: 3, buffer: [2], snapshotPath: 'snapB',
+          authored: { pages: ['b#p0', 'b#p1', 'a#p1'], documents: [{ id: 'b#0', name: 'b' }] },
+        },
       ],
     });
     expect(next.files.get('a.pdf')).toMatchObject({ pageCount: 2, dirty: true, undoStack: ['snapA'] });
     expect(next.files.get('b.pdf')).toMatchObject({ pageCount: 3, dirty: true, undoStack: ['snapB'] });
+    // § F identity channel: the record lands keyed to THE committed buffer
+    // object (adoption checks identity, not equality).
+    const recA = next.files.get('a.pdf')!.authoredIdentity!;
+    expect(recA.pages).toEqual(['a#pA', 'a#pB']);
+    expect(recA.buffer).toBe(next.files.get('a.pdf')!.buffer);
+    // A later NON-authored update (engine op) drops the record.
+    const afterOp = appReducer(next, {
+      type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 2, buffer: [7], snapshotPath: 'snapC',
+    });
+    expect(afterOp.files.get('a.pdf')!.authoredIdentity).toBeUndefined();
     expect(next.pageUndoStack).toEqual([]);
     expect(next.pageRedoStack).toEqual([]);
     expect(next.pageDirtyPaths).toEqual([]);
