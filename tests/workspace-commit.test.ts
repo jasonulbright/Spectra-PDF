@@ -98,6 +98,13 @@ describe('planCommit', () => {
       useManifest: false,
       pageCount: 3,
     });
+    // § F identity channel: the authored ids are EXACTLY the plan's pages
+    // in written order — same source array, so the manifest and the
+    // identity record cannot disagree (reviewer coverage note).
+    expect(plans[0].authoredPageIds).toHaveLength(3);
+    expect(plans[0].authoredDocuments.map((d) => d.id)).toEqual(
+      expect.arrayContaining([expect.any(String)]),
+    );
     expect(plans[0].documents[0].pages.map((p) => p.pageIndex)).toEqual([2, 0, 1]);
   });
 

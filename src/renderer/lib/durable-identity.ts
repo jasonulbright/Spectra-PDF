@@ -82,20 +82,25 @@ export function adoptAuthoredIdentity(
   }));
 }
 
-/** Resolve the PageRef.id at a 1-based page number within a path's
- * committed order (the inverse of workspacePageNumber). Replaces the one
- * historic site that STRING-BUILT `${path}#p${n-1}` — under generations
- * and adoption, ids are opaque and must be resolved from state. */
-export function pageIdAtNumber(
+/** Resolve the PageRef whose SOURCE identity is (path, 1-based on-disk
+ * page number) — wherever that page currently sits, including mid a
+ * pending reorder or a cross-file move. This is what a PDF bookmark's
+ * page number MEANS (it addresses the file's own committed order), and
+ * it is exactly the semantics the historic string-built
+ * `${path}#p${n-1}` had by accident: mint-time source index, invariant
+ * to in-memory rearrangement. Counting the live array order instead
+ * resolved a bookmark to the WRONG page while a reorder was pending
+ * (review-caught HIGH, both lenses independently). */
+export function pageIdAtSourceIndex(
   docs: OpenDocument[],
   path: string,
   pageNumber: number,
 ): string | null {
-  let remaining = pageNumber;
+  const sourceIndex = pageNumber - 1;
   for (const d of docs) {
-    if (d.path !== path) continue;
-    if (remaining <= d.pages.length) return d.pages[remaining - 1]?.id ?? null;
-    remaining -= d.pages.length;
+    for (const p of d.pages) {
+      if (p.sourceDocId === path && p.sourcePageIndex === sourceIndex) return p.id;
+    }
   }
   return null;
 }

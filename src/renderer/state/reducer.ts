@@ -125,6 +125,51 @@ function clearSelection(state: AppState): AppState {
   return { ...state, ui: { ...state.ui, selectedPageIds: NO_SELECTION, selectionAnchor: null } };
 }
 
+/** Phase 5 (§ F): drop ONLY the selection ids this action's workspace
+ * effect actually removes, keeping cross-file selection intact — an
+ * operation on one file must not nuke a selection in another. The doomed
+ * set is per-site:
+ *   - CONTAINMENT (docs whose `path` matches): the path's documents are
+ *     dropped/re-derived, taking every page INSIDE them — including
+ *     pages moved in from other files.
+ *   - `includeSourced` adds pages elsewhere whose `sourceDocId` matches:
+ *     CLOSE_FILE also strips those from OTHER documents, so their ids
+ *     leave the workspace too. Without this a cross-file-moved page's id
+ *     became a PHANTOM after closing its source — never prunable again
+ *     (generations!) and silently poisoning every batched rotate's
+ *     all-or-nothing guard (review-caught HIGH, reducer-level repro).
+ * Multiple paths at once serve the gate-bypass defensive branches, whose
+ * invalidation spans every dirty path. */
+function pruneSelectionForPaths(
+  state: AppState,
+  paths: readonly string[],
+  includeSourced: boolean,
+): AppState {
+  const { selectedPageIds, selectionAnchor } = state.ui;
+  if (selectedPageIds.size === 0 && selectionAnchor === null) return state;
+  const pathSet = new Set(paths);
+  const owned = new Set<string>();
+  for (const d of state.workspace.documents) {
+    for (const p of d.pages) {
+      if (pathSet.has(d.path) || (includeSourced && pathSet.has(p.sourceDocId))) {
+        owned.add(p.id);
+      }
+    }
+  }
+  if (owned.size === 0) return state;
+  const kept = new Set([...selectedPageIds].filter((id) => !owned.has(id)));
+  const anchorOwned = !!selectionAnchor && owned.has(selectionAnchor);
+  if (kept.size === selectedPageIds.size && !anchorOwned) return state;
+  return {
+    ...state,
+    ui: {
+      ...state.ui,
+      selectedPageIds: kept.size > 0 ? kept : NO_SELECTION,
+      selectionAnchor: anchorOwned ? null : selectionAnchor,
+    },
+  };
+}
+
 // Workspace-flattened page order (doc order, then page order) — the basis
 // for shift-range selection and select-all.
 function flatPageOrder(state: AppState): string[] {
@@ -303,9 +348,12 @@ function canvasModeAfterOpening(ui: UiState, owner: ToolDef | undefined): Canvas
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'OPEN_FILE': {
-      // A REOPEN replaces the path's buffer — stale positional selection ids
-      // must not survive it (a fresh open leaves the selection alone).
-      const base = state.files.has(action.path) ? clearSelection(state) : state;
+      // A REOPEN replaces the path's buffer — ITS selection ids die (fresh
+      // generation on reindex); other files' selection survives (§ F). A
+      // fresh open leaves the selection alone entirely.
+      const base = state.files.has(action.path)
+        ? pruneSelectionForPaths(state, [action.path], false)
+        : state;
       const files = new Map(state.files);
       files.set(action.path, {
         path: action.path,
@@ -365,8 +413,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, files };
     }
     case 'CLOSE_FILE': {
-      // A later reopen reuses the same positional page ids — clear selection.
-      const base = clearSelection(state);
+      // Closing a file drops ITS selected pages; selection in other files
+      // survives (§ F — and a later reopen can no longer collide anyway:
+      // reindex mints a fresh generation). includeSourced: CLOSE also
+      // strips this path's SOURCED pages out of other documents below, so
+      // their ids leave the workspace with it (review-caught phantom).
+      const base = pruneSelectionForPaths(state, [action.path], true);
       const files = new Map(state.files);
       files.delete(action.path);
       // Fall back to the next file the user can actually SEE — never a
@@ -473,11 +525,19 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UPDATE_FILE': {
       const files = applyFileUpdate(state.files, action);
       if (files === state.files) return state;
-      const base = clearSelection(state); // buffer replaced — positional selection ids are stale
       const tierEmpty =
         state.pageUndoStack.length === 0 &&
         state.pageRedoStack.length === 0 &&
         state.pageDirtyPaths.length === 0;
+      // Buffer replaced (engine op) — this path's ids die at its reindex
+      // (fresh generation); other files' selection survives (§ F). The
+      // defensive gate-bypass branch below invalidates EVERY dirty path's
+      // docs, so its prune spans the same set (review-caught).
+      const base = pruneSelectionForPaths(
+        state,
+        tierEmpty ? [action.path] : [action.path, ...state.pageDirtyPaths],
+        false,
+      );
       if (tierEmpty) return { ...base, files };
       // Defense-in-depth: the file's bytes were replaced while page edits
       // were pending — a caller bypassed the commit gate. In-memory history
@@ -502,14 +562,21 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // snapshot undo chain and the page-edit tier resets in one step. The
       // workspace is left alone — the indexer re-derives each updated path
       // from its new buffer.
+      //
+      // Phase 5 (§ F): selection is NOT cleared here anymore. This is the
+      // AUTHORED path — the update carries the identity record, the
+      // reindex ADOPTS the selected pages' ids, and the survive-or-prune
+      // pass at SET_WORKSPACE_DOCUMENTS keeps exactly the pages that
+      // still exist. (Non-authored buffer changes — UPDATE_FILE,
+      // REFRESH_BUFFER — still clear eagerly: their reindex mints a
+      // fresh generation, nothing could survive the prune, and clearing
+      // early keeps the async window inert.)
       let files = state.files;
       for (const update of action.updates) {
         files = applyFileUpdate(files, update);
       }
-      // Buffers replaced — stale positional selection ids must not survive.
-      const base = files === state.files ? state : clearSelection(state);
       return {
-        ...base,
+        ...state,
         files,
         pageUndoStack: [],
         pageRedoStack: [],
@@ -546,13 +613,18 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // one ever doesn't, invalidate it like UPDATE_FILE does.
       const existing = state.files.get(action.path);
       if (!existing) return state;
-      const base = clearSelection(state); // buffer replaced — positional selection ids are stale
       const files = new Map(state.files);
       files.set(action.path, { ...existing, pageCount: action.pageCount, buffer: action.buffer });
       const tierEmpty =
         state.pageUndoStack.length === 0 &&
         state.pageRedoStack.length === 0 &&
         state.pageDirtyPaths.length === 0;
+      // Same § F rule as UPDATE_FILE (incl. the defensive multi-path span).
+      const base = pruneSelectionForPaths(
+        state,
+        tierEmpty ? [action.path] : [action.path, ...state.pageDirtyPaths],
+        false,
+      );
       if (tierEmpty) return { ...base, files };
       const invalidated = new Set([...state.pageDirtyPaths, action.path]);
       return {
@@ -593,61 +665,57 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         state.pageUndoStack,
         state.pageRedoStack,
       );
-      // A per-doc focus into THIS path is stale the moment its documents are
-      // re-derived: `OpenDocument.id` is positional (`path#docIndex`), so the
-      // same id string can come back naming a DIFFERENT partition — reorder two
-      // `.pdfx` strips, commit, and `book.pdfx#1` means the other one, which the
-      // reading view would show with no signal (the positional-id re-binding
-      // class CLAUDE.md records for redaction marks). Dropping to null
-      // re-resolves to the active file's first document.
-      //
-      // DO NOT "optimise" this into a check for whether the content actually
-      // moved — that was tried and is UNSOUND (review-caught). Page ids are
-      // `path#p{ABSOLUTE page index}` (`partitionPages` walks a cumulative
-      // cursor), so they encode a partition's POSITION, not its identity:
-      // swapping two partitions of EQUAL page count re-derives a bit-identical
-      // page-id array for each slot while the content is completely different,
-      // so a comparison sees "unchanged" and keeps a focus that now names the
-      // wrong partition. Partition NAMES aren't a sound key either (nothing
-      // guarantees a manifest's names are unique — `uniqueDocName` is applied at
-      // rename time, not to arbitrary/older manifests). As with the reading
-      // view's jump anchor, there is no identity across a rebuild, so this fails
-      // SAFE and pays for it. Be honest about the size of that bill: this fires
-      // on ANY buffer-identity change for the path, which is more than "engine
-      // whole-file ops" — committing ANY page-tier edit (an annotation counts),
-      // file-level Undo/Redo (`REFRESH_BUFFER`), and — because the commit gate
-      // flushes EVERY dirty path atomically — an engine op run on a COMPLETELY
-      // DIFFERENT file will reindex this one too. Each of those resets a `.pdfx`
-      // reader to the file's first partition. Always safe, never wrong content,
-      // and re-navigable; preserving the position needs real cross-commit
-      // identity (see `canvas/reading-page.ts`'s JumpAnchor note).
-      //
-      // Ownership is tested against the real documents, NOT a string prefix:
-      // paths may contain '#' (raw OS paths from the file dialog), so
-      // `id.startsWith(path + '#')` would let "a.pdf" match a doc of the
-      // distinct open file "a.pdf#draft.pdf" and clear its focus (review-caught;
-      // over-clear only, but it is not what the code claims to do). The second
-      // clause covers a focus whose doc has since left `prev` (its file was
-      // closed) while the incoming set re-claims that id — it must not silently
-      // re-bind to whatever now holds it.
+      // SURVIVE-OR-PRUNE (Phase 5 § F, architecture/22 — this block used
+      // to hard-clear, and its old essay explained why: positional ids
+      // were REUSED, so a surviving focus/selection could silently
+      // re-bind to different content, and comparing content was proven
+      // UNSOUND (equal-count partition swaps re-derive bit-identical id
+      // arrays — review-caught). Both hazards are now structurally dead:
+      // positional ids are GENERATION-TAGGED (a rebuild mints ids no
+      // stale holder can match), and an id that DOES come back is the
+      // authored-adoption case, where the same id IS the same logical
+      // page/partition by construction. So the correct rule became
+      // "keep exactly what the incoming documents still contain":
+      //  - authored commit → adopted ids survive → focus/selection/
+      //    reading position hold across the rebuild;
+      //  - engine op / undo / external bytes → fresh generation →
+      //    everything owned by this path prunes to nothing — the OLD
+      //    behavior, now enforced by id impossibility instead of by
+      //    every consumer remembering to clear.
+      // Ownership is still tested against the real documents, never a
+      // string prefix (paths may contain '#' — review-caught).
+      const incomingDocIds = new Set(action.documents.map((d) => d.id));
+      const incomingPageIds = new Set(
+        action.documents.flatMap((d) => d.pages.map((p) => p.id)),
+      );
       const focusedId = state.ui.focusedDocId;
-      const ownedByThisPath =
+      const dropFocus =
         !!focusedId &&
-        (prev.some((d) => d.id === focusedId && d.path === action.path) ||
-          action.documents.some((d) => d.id === focusedId));
-      // The reading position is positional too, and re-derived ids are REUSED —
-      // so a surviving `currentPageId` could highlight a different physical page
-      // in the Pages panel. Same trigger, same reasoning (roadmap § F).
-      const currentOfThisPath =
-        !!state.ui.currentPageId &&
-        (prev.some((d) => d.path === action.path && d.pages.some((p) => p.id === state.ui.currentPageId)) ||
-          action.documents.some((d) => d.pages.some((p) => p.id === state.ui.currentPageId)));
+        prev.some((d) => d.id === focusedId && d.path === action.path) &&
+        !incomingDocIds.has(focusedId);
+      const currentId = state.ui.currentPageId;
+      const dropCurrent =
+        !!currentId &&
+        prev.some((d) => d.path === action.path && d.pages.some((p) => p.id === currentId)) &&
+        !incomingPageIds.has(currentId);
+      const ownedPage = (id: string): boolean =>
+        prev.some((d) => d.path === action.path && d.pages.some((p) => p.id === id));
+      const prunedSelection = new Set(
+        [...state.ui.selectedPageIds].filter((id) => !ownedPage(id) || incomingPageIds.has(id)),
+      );
+      const selectionChanged = prunedSelection.size !== state.ui.selectedPageIds.size;
+      const anchorPruned =
+        !!state.ui.selectionAnchor &&
+        ownedPage(state.ui.selectionAnchor) &&
+        !incomingPageIds.has(state.ui.selectionAnchor);
       const ui =
-        ownedByThisPath || currentOfThisPath
+        dropFocus || dropCurrent || selectionChanged || anchorPruned
           ? {
               ...state.ui,
-              focusedDocId: ownedByThisPath ? null : state.ui.focusedDocId,
-              currentPageId: currentOfThisPath ? null : state.ui.currentPageId,
+              focusedDocId: dropFocus ? null : state.ui.focusedDocId,
+              currentPageId: dropCurrent ? null : state.ui.currentPageId,
+              selectedPageIds: selectionChanged ? prunedSelection : state.ui.selectedPageIds,
+              selectionAnchor: anchorPruned ? null : state.ui.selectionAnchor,
             }
           : state.ui;
       return { ...state, files, ui, workspace: { documents } };

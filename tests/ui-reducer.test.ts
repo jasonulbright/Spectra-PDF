@@ -104,19 +104,21 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(home.ui.focusedDocId).toBeNull();
   });
 
-  // `OpenDocument.id` is POSITIONAL (`path#docIndex`), reassigned from scratch on
-  // every reindex — so the same id string can come back meaning a DIFFERENT
-  // partition. Same invalidation every other buffer-replacing case applies to
-  // positional selection ids.
-  it('drops a per-doc focus into a path whose documents are re-indexed', () => {
+  // Phase 5 (§ F) FLIPPED this suite's oldest rule. Positional ids are now
+  // GENERATION-TAGGED — a positional reindex can never re-serve an old id —
+  // so an id that IS present in the incoming documents can only be the
+  // authored-adoption case, where the same id means the same logical
+  // partition by construction. The old hazard ("same id string, different
+  // content") is structurally impossible, and the correct behavior is to
+  // KEEP a focus whose id survives.
+  it('KEEPS a per-doc focus whose id survives the reindex (adoption)', () => {
     const a = makeFile('book.pdfx', 5);
     const focused = appReducer(
       { ...partitionedState(), activeFileId: 'book.pdfx' },
       { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
     );
     expect(focused.ui.focusedDocId).toBe('book.pdfx#1');
-    // The two partitions are reordered and committed; the reindex hands back
-    // the SAME id strings now naming swapped content.
+    // An authored commit reindexed; adoption carried the doc ids through.
     const reindexed = appReducer(focused, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'book.pdfx',
@@ -125,17 +127,16 @@ describe('ui per-document focus (M4.1c)', () => {
         makeDoc(a, 'book.pdfx#1', makePages('book.pdfx', 3)),
       ],
     });
-    // Without this the view silently showed the OTHER partition under the same id.
-    expect(reindexed.ui.focusedDocId).toBeNull();
+    expect(reindexed.ui.focusedDocId).toBe('book.pdfx#1');
   });
 
-  // THE case that makes a "did the content actually move?" check unsound, and
-  // why this clears unconditionally. Two partitions of EQUAL page count swap:
-  // page ids are `path#p{ABSOLUTE index}`, so slot #1's id array is bit-identical
-  // before and after (both ['#p2','#p3']) while it now names the OTHER partition.
-  // Any comparison of ids/lengths sees "unchanged" and keeps a focus pointing at
-  // the wrong content.
-  it('drops the focus when equal-size partitions swap (identical ids, different content)', () => {
+  // The historic equal-swap trap, inverted: under adoption the id FOLLOWS
+  // its partition to the new slot, so keeping the focus keeps the SAME
+  // content (the reading view tracks the partition the user was reading —
+  // the § F payoff). Under the old positional world this exact shape was
+  // the proof that survival was unsound; the generation tag is what
+  // retired it.
+  it('keeps the focus on a partition that moved slots (its adopted id moved with it)', () => {
     const a = makeFile('book.pdfx', 4);
     const alpha = makePages('book.pdfx', 2); // #p0 #p1
     const beta = makePages('book.pdfx', 2, 2); // #p2 #p3
@@ -147,17 +148,17 @@ describe('ui per-document focus (M4.1c)', () => {
       { ...start, activeFileId: 'book.pdfx' },
       { type: 'UI_FOCUS_DOC', docId: 'book.pdfx#1' },
     );
-    // Beta moved up and the commit reindexed: slot #1 is now Alpha, but its
-    // derived ids are the SAME strings Beta's slot had.
+    // Beta moved up; the authored reindex adopts: slot 0 now CARRIES beta's
+    // id. The focus keeps naming beta — which is what the user was reading.
     const reindexed = appReducer(focused, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'book.pdfx',
       documents: [
-        makeDoc(a, 'book.pdfx#0', makePages('book.pdfx', 2)),
         makeDoc(a, 'book.pdfx#1', makePages('book.pdfx', 2, 2)),
+        makeDoc(a, 'book.pdfx#0', makePages('book.pdfx', 2)),
       ],
     });
-    expect(reindexed.ui.focusedDocId).toBeNull();
+    expect(reindexed.ui.focusedDocId).toBe('book.pdfx#1');
   });
 
   it('drops a per-doc focus when the focused id vanishes (partitions collapse to one)', () => {
@@ -246,34 +247,77 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(appReducer(s, { type: 'SET_ACTIVE_FILE', path: 'a.pdf' }).ui.currentPageId).toBeNull();
   });
 
-  it('clears the current page when its own file re-indexes (ids are REUSED)', () => {
+  // § F flip: a current page whose id SURVIVES the reindex is the adoption
+  // case — same id, same logical page — so the reading position holds. One
+  // whose id vanishes (fresh generation) still clears.
+  it('keeps the current page when its id survives the reindex; clears when it vanishes', () => {
     const a = makeFile('a.pdf', 3);
     const s = appReducer(twoDocState(), { type: 'UI_SET_CURRENT_PAGE', pageId: 'a.pdf#p2' });
-    const reindexed = appReducer(s, {
+    const adopted = appReducer(s, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'a.pdf',
-      documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))],
+      documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))], // contains a.pdf#p2
     });
-    expect(reindexed.ui.currentPageId).toBeNull();
+    expect(adopted.ui.currentPageId).toBe('a.pdf#p2');
+    const regenerated = appReducer(s, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [makeDoc(a, 'a.pdf#g2#0', [
+        { id: 'a.pdf#g2#p0', sourceDocId: 'a.pdf', sourcePageIndex: 0, rotation: 0, width: 100, height: 100 },
+        { id: 'a.pdf#g2#p1', sourceDocId: 'a.pdf', sourcePageIndex: 1, rotation: 0, width: 100, height: 100 },
+        { id: 'a.pdf#g2#p2', sourceDocId: 'a.pdf', sourcePageIndex: 2, rotation: 0, width: 100, height: 100 },
+      ])],
+    });
+    expect(regenerated.ui.currentPageId).toBeNull();
   });
 
-  // Clause 2 of the ownership test (`action.documents.some(...)`) exists for a
-  // close-then-reopen: the id is gone from `prev` but the incoming set RE-CLAIMS
-  // it, and it must not silently re-bind to whatever now holds that slot. Both
-  // other tests have the id in `prev` too, so clause 1 alone would pass them —
-  // this one fails without clause 2.
-  it('clears an id absent from prev but RE-CLAIMED by the incoming documents', () => {
+  // The old "clause 2 / re-claim" test asserted the OPPOSITE of this: an id
+  // absent from prev but present in the incoming set had to clear, because a
+  // positional reindex could re-serve an old string over different content.
+  // Generation tagging killed that producer — an incoming match can only be
+  // adoption now, and adoption means the binding is CORRECT. Kept as the
+  // regression pin for the flip.
+  it('keeps an id absent from prev that the incoming (adopted) documents carry', () => {
     const a = makeFile('a.pdf', 3);
-    // a.pdf is open but has no indexed documents yet (just closed/reopened).
+    // a.pdf is open but has no indexed documents yet.
     const s0 = stateWith([a], []);
     const s = appReducer(s0, { type: 'UI_SET_CURRENT_PAGE', pageId: 'a.pdf#p1' });
     expect(s.ui.currentPageId).toBe('a.pdf#p1');
     const reindexed = appReducer(s, {
       type: 'SET_WORKSPACE_DOCUMENTS',
       path: 'a.pdf',
-      documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))], // re-claims a.pdf#p1
+      documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))], // carries a.pdf#p1
     });
-    expect(reindexed.ui.currentPageId).toBeNull();
+    expect(reindexed.ui.currentPageId).toBe('a.pdf#p1');
+  });
+
+  // Selection joins the same survive-or-prune pass (§ F).
+  it('prunes the selection to ids the incoming documents still carry', () => {
+    const a = makeFile('a.pdf', 3);
+    let s = select(twoDocState(), ['a.pdf#p0', 'a.pdf#p2', 'b.pdf#p0'], 'a.pdf#p2');
+    s = appReducer(s, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      // The commit deleted p0; adoption carried p1/p2 through.
+      documents: [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2, 1))], // #p1 #p2
+    });
+    expect(selected(s)).toEqual(['a.pdf#p2', 'b.pdf#p0']);
+    expect(s.ui.selectionAnchor).toBe('a.pdf#p2');
+  });
+
+  it("a fresh-generation reindex prunes ALL of the path's selection but keeps other files", () => {
+    const a = makeFile('a.pdf', 2);
+    let s = select(twoDocState(), ['a.pdf#p0', 'b.pdf#p0'], 'a.pdf#p0');
+    s = appReducer(s, {
+      type: 'SET_WORKSPACE_DOCUMENTS',
+      path: 'a.pdf',
+      documents: [makeDoc(a, 'a.pdf#g5#0', [
+        { id: 'a.pdf#g5#p0', sourceDocId: 'a.pdf', sourcePageIndex: 0, rotation: 0, width: 100, height: 100 },
+        { id: 'a.pdf#g5#p1', sourceDocId: 'a.pdf', sourcePageIndex: 1, rotation: 0, width: 100, height: 100 },
+      ])],
+    });
+    expect(selected(s)).toEqual(['b.pdf#p0']);
+    expect(s.ui.selectionAnchor).toBeNull(); // the anchor was a.pdf-owned
   });
 
   it('is a no-op for the same current page (the scroll-driven dispatch must not churn)', () => {
@@ -509,10 +553,12 @@ describe('UI_SELECT_ALL_PAGES / UI_CLEAR_SELECTION', () => {
   });
 });
 
-describe('selection invalidation on buffer-identity changes', () => {
-  // Positional PageRef ids re-bind after any reindex — every action that
-  // replaces a file's bytes (or closes a file) must clear the selection
-  // (formerly the canvas's buffer-watching effect).
+describe('selection invalidation on buffer-identity changes (§ F: per-path prune)', () => {
+  // Phase 5: non-authored buffer changes prune ONLY the touched path's
+  // selection ids (their reindex mints a fresh generation — nothing could
+  // survive) and LEAVE other files' selection intact; the authored commit
+  // defers entirely to the SET_WORKSPACE_DOCUMENTS survive-or-prune pass
+  // (adoption lets its ids live).
   const cases: [string, (s: AppState) => AppAction][] = [
     ['UPDATE_FILE', () => ({
       type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 3, buffer: [9], snapshotPath: 'snap',
@@ -520,34 +566,93 @@ describe('selection invalidation on buffer-identity changes', () => {
     ['REFRESH_BUFFER', () => ({
       type: 'REFRESH_BUFFER', path: 'a.pdf', pageCount: 3, buffer: [9],
     })],
-    ['COMMIT_PAGE_EDITS', () => ({
-      type: 'COMMIT_PAGE_EDITS',
-      updates: [{
-        path: 'a.pdf', pageCount: 3, buffer: [9], snapshotPath: 'snap',
-        authored: { pages: ['x#p0', 'x#p1', 'x#p2'], documents: [{ id: 'x#0', name: 'a' }] },
-      }],
-    })],
     ['CLOSE_FILE', () => ({ type: 'CLOSE_FILE', path: 'a.pdf' })],
   ];
   for (const [name, make] of cases) {
-    it(`${name} clears the selection`, () => {
-      const s = select(twoDocState(), ['b.pdf#p0'], 'b.pdf#p0');
+    it(`${name} on a.pdf prunes a.pdf's selected pages`, () => {
+      const s = select(twoDocState(), ['a.pdf#p0', 'a.pdf#p1'], 'a.pdf#p0');
       const next = appReducer(s, make(s));
       expect(next.ui.selectedPageIds.size).toBe(0);
       expect(next.ui.selectionAnchor).toBeNull();
     });
+    it(`${name} on a.pdf KEEPS b.pdf's selection (§ F cross-file survival)`, () => {
+      const s = select(twoDocState(), ['b.pdf#p0'], 'b.pdf#p0');
+      const next = appReducer(s, make(s));
+      expect([...next.ui.selectedPageIds]).toEqual(['b.pdf#p0']);
+      expect(next.ui.selectionAnchor).toBe('b.pdf#p0');
+    });
   }
 
-  it('a REOPEN (OPEN_FILE on an open path) clears; a fresh OPEN_FILE does not', () => {
-    const s = select(twoDocState(), ['b.pdf#p0'], 'b.pdf#p0');
+  // The phantom-id class (review-caught HIGH, both lenses): CLOSE_FILE
+  // removes pages by CONTAINMENT (the path's documents, wholesale) AND by
+  // SOURCE (its pages stripped out of other documents) — the prune must
+  // cover the same union, or a dead id survives in the selection forever
+  // (no future generation can match it) and silently poisons every
+  // batched rotate's all-or-nothing guard.
+  it('CLOSE_FILE prunes a selected page that had been MOVED INTO another file (source direction)', () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 2);
+    const moved = { ...makePages('a.pdf', 1)[0] }; // sourceDocId a.pdf
+    const start = stateWith(
+      [a, b],
+      [
+        makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2, 1)),
+        makeDoc(b, 'b.pdf#0', [moved, ...makePages('b.pdf', 2)]),
+      ],
+    );
+    let s = appReducer(start, {
+      type: 'UI_SET_SELECTION', pageIds: [moved.id, 'b.pdf#p0'], anchor: 'b.pdf#p0',
+    });
+    s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    expect(selected(s)).toEqual(['b.pdf#p0']);
+    // The surviving selection still drives batched ops (no phantom veto).
+    const rotated = appReducer(s, { type: 'ROTATE_PAGE_REFS', pageIds: [...s.ui.selectedPageIds], delta: 90 });
+    expect(rotated).not.toBe(s);
+  });
+
+  it('CLOSE_FILE prunes a selected FOREIGN-sourced page living in the closed file (containment direction)', () => {
+    const a = makeFile('a.pdf', 2);
+    const b = makeFile('b.pdf', 2);
+    const borrowed = { ...makePages('b.pdf', 1, 1)[0] }; // b-sourced, living in a's doc
+    const start = stateWith(
+      [a, b],
+      [
+        makeDoc(a, 'a.pdf#0', [...makePages('a.pdf', 2), borrowed]),
+        makeDoc(b, 'b.pdf#0', makePages('b.pdf', 1)),
+      ],
+    );
+    let s = appReducer(start, {
+      type: 'UI_SET_SELECTION', pageIds: [borrowed.id, 'b.pdf#p0'], anchor: 'b.pdf#p0',
+    });
+    s = appReducer(s, { type: 'CLOSE_FILE', path: 'a.pdf' });
+    // The borrowed page died WITH a.pdf's document — its id must not linger.
+    expect(selected(s)).toEqual(['b.pdf#p0']);
+  });
+
+  it('COMMIT_PAGE_EDITS keeps the whole selection (adoption decides at reindex)', () => {
+    const s = select(twoDocState(), ['a.pdf#p0', 'b.pdf#p0'], 'a.pdf#p0');
+    const next = appReducer(s, {
+      type: 'COMMIT_PAGE_EDITS',
+      updates: [{
+        path: 'a.pdf', pageCount: 3, buffer: [9], snapshotPath: 'snap',
+        authored: { pages: ['a.pdf#p0', 'a.pdf#p1', 'a.pdf#p2'], documents: [{ id: 'a#0', name: 'a' }] },
+      }],
+    });
+    expect(next.ui.selectedPageIds.size).toBe(2);
+    expect(next.ui.selectionAnchor).toBe('a.pdf#p0');
+  });
+
+  it('a REOPEN (OPEN_FILE on an open path) prunes its own path only; a fresh OPEN_FILE does not touch selection', () => {
+    const s = select(twoDocState(), ['a.pdf#p0', 'b.pdf#p0'], 'b.pdf#p0');
     const reopened = appReducer(s, {
       type: 'OPEN_FILE', path: 'a.pdf', workingPath: 'w', name: 'a.pdf', pageCount: 3, buffer: [9],
     });
-    expect(reopened.ui.selectedPageIds.size).toBe(0);
+    expect([...reopened.ui.selectedPageIds]).toEqual(['b.pdf#p0']);
+    expect(reopened.ui.selectionAnchor).toBe('b.pdf#p0');
     const fresh = appReducer(s, {
       type: 'OPEN_FILE', path: 'c.pdf', workingPath: 'w', name: 'c.pdf', pageCount: 1, buffer: [9],
     });
-    expect(selected(fresh)).toEqual(['b.pdf#p0']);
+    expect(selected(fresh)).toEqual(['a.pdf#p0', 'b.pdf#p0']);
   });
 
   it('REGISTER_IMPORT_SOURCE leaves the selection alone', () => {

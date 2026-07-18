@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   adoptAuthoredIdentity,
   nextGeneration,
-  pageIdAtNumber,
+  pageIdAtSourceIndex,
   positionalDocId,
   positionalPageId,
   resetGenerations,
@@ -134,17 +134,32 @@ describe('adoptAuthoredIdentity', () => {
   });
 });
 
-describe('pageIdAtNumber', () => {
-  it("resolves 1-based numbers across a path's partitions in workspace order", () => {
+describe('pageIdAtSourceIndex', () => {
+  it('resolves by SOURCE identity across partitions, ignoring array position', () => {
     const docs = [
       doc('x#0', 'One', [page('p-a', 0), page('p-b', 1)]),
       { ...doc('other', 'Other', [page('other-p', 0)]), path: 'other.pdf' },
       doc('x#1', 'Two', [page('p-c', 2)]),
     ];
-    expect(pageIdAtNumber(docs, 'a.pdf', 1)).toBe('p-a');
-    expect(pageIdAtNumber(docs, 'a.pdf', 2)).toBe('p-b');
-    expect(pageIdAtNumber(docs, 'a.pdf', 3)).toBe('p-c');
-    expect(pageIdAtNumber(docs, 'a.pdf', 4)).toBeNull();
-    expect(pageIdAtNumber(docs, 'missing.pdf', 1)).toBeNull();
+    expect(pageIdAtSourceIndex(docs, 'a.pdf', 1)).toBe('p-a');
+    expect(pageIdAtSourceIndex(docs, 'a.pdf', 3)).toBe('p-c');
+    expect(pageIdAtSourceIndex(docs, 'a.pdf', 4)).toBeNull();
+    expect(pageIdAtSourceIndex(docs, 'missing.pdf', 1)).toBeNull();
+  });
+
+  it('a PENDING reorder does not retarget a bookmark (review-caught HIGH)', () => {
+    // Bookmark says "page 2" = on-disk index 1. The array is reordered
+    // in memory (uncommitted): array-order counting would hand back the
+    // page now SITTING second (p-a) — the wrong physical page.
+    const reordered = [doc('x#0', 'One', [page('p-b', 1), page('p-a', 0)])];
+    expect(pageIdAtSourceIndex(reordered, 'a.pdf', 2)).toBe('p-b');
+  });
+
+  it('finds a page moved into ANOTHER file by its source identity', () => {
+    const docs = [
+      { ...doc('b#0', 'B', [page('a-page-in-b', 3)]), path: 'b.pdf' },
+    ];
+    docs[0].pages[0] = { ...docs[0].pages[0], sourceDocId: 'a.pdf' };
+    expect(pageIdAtSourceIndex(docs, 'a.pdf', 4)).toBe('a-page-in-b');
   });
 });

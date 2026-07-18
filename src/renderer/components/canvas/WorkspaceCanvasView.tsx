@@ -25,7 +25,7 @@ import type { OcrWord } from '../../ocr/types';
 import { fetchEditPlacements } from '../../lib/edit-images';
 import type { EditImagePlacement } from '../../lib/edit-images';
 import { EDIT_DECLINED } from '../../lib/edit-text';
-import { pageIdAtNumber } from '../../lib/durable-identity';
+import { pageIdAtSourceIndex } from '../../lib/durable-identity';
 import { computeEditSpans, fetchEditTextListing } from '../../lib/edit-paragraphs';
 import type { EditTextListing } from '../../lib/edit-paragraphs';
 import { workspacePageNumber } from '../../lib/workspace-commit';
@@ -586,10 +586,14 @@ export function WorkspaceCanvasView({
       // `canvas().centerOn` — the reading view shows one document, so centring
       // a page in another one silently does nothing.
       jumpToPage: (pageId) => jumpToPageRef.current(pageId),
-      // Number → id resolution lives HERE, against live docs (§ F: ids are
-      // opaque; only workspace state knows which id sits at page N).
+      // Number → id resolution lives HERE, against live docs (§ F: ids
+      // are opaque; only workspace state knows the page). Resolution is
+      // by SOURCE identity — a bookmark's number addresses the file's
+      // on-disk order, so the jump lands on that physical page even
+      // while a reorder is pending (review-caught: array-order counting
+      // silently jumped to the wrong page).
       jumpToFilePage: (path, pageNumber) => {
-        const id = pageIdAtNumber(docsForJumpRef.current, path, pageNumber);
+        const id = pageIdAtSourceIndex(docsForJumpRef.current, path, pageNumber);
         if (id) jumpToPageRef.current(id);
       },
       openPageForReading: (pageId) => openPageForReadingRef.current(pageId),

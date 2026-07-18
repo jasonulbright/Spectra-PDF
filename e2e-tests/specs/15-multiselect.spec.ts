@@ -170,12 +170,15 @@ describe('multi-select page ops (2n.1)', () => {
     await pdf.loadingTask.destroy();
   });
 
-  it('clears the selection when the buffer is reindexed, so a stale positional id cannot re-bind to a different page', async () => {
-    // Regression for the review-caught HIGH: selection holds positional
-    // PageRef ids (`path#pN`) that the indexer rebuilds after any buffer change
-    // (commit / whole-file op / undo). If the selection survived the reindex, a
-    // following Delete/rotate could hit a DIFFERENT physical page. The
-    // buffer-identity effect must drop the selection — same as redaction marks.
+  it('the selection SURVIVES an authored commit — its ids are adopted by the reindex (Phase 5 § F)', async () => {
+    // FLIPPED from the historic clear-on-reindex pin. That pin guarded the
+    // review-caught HIGH where surviving positional ids could re-bind to a
+    // DIFFERENT physical page after the rebuild. Phase 5 killed the hazard
+    // structurally: positional ids are generation-tagged (a rebuild can
+    // never re-serve an old id) and the AUTHORED commit publishes its
+    // old→new mapping, which the reindex adopts — so a surviving id is
+    // the SAME logical page by construction, and the selection holding on
+    // is the feature (spec 44 covers the non-authored prune).
     await openByPaths([sampleD]);
     await setView('canvas');
     const total = (await getState()).activeFile!.pageCount;
@@ -186,15 +189,26 @@ describe('multi-select page ops (2n.1)', () => {
       timeout: 5_000,
       timeoutMsg: 'selection never reached 2 pages',
     });
-    // Rotate dirties the file but keeps the selection (rotate is non-destructive
-    // to identity)...
     await rotateSelectedCanvasPages(90);
-    // ...committing reindexes the workspace from the new buffer — the selection
-    // must be cleared by the buffer-invalidation effect.
+    // Committing reindexes from the new buffer; adoption carries the
+    // selected ids through — same ids, same pages, selection intact.
     await commitPendingEdits();
-    await browser.waitUntil(async () => (await getSelectedCanvasPageIds()).length === 0, {
-      timeout: 5_000,
-      timeoutMsg: 'selection was not cleared after the reindex (stale positional ids)',
-    });
+    await browser.waitUntil(
+      async () => {
+        const workspace = await getWorkspacePageIds();
+        const sel = await getSelectedCanvasPageIds();
+        return (
+          workspace.includes(ids[0]) &&
+          workspace.includes(ids[1]) &&
+          sel.length === 2 &&
+          sel.includes(ids[0]) &&
+          sel.includes(ids[1])
+        );
+      },
+      {
+        timeout: 5_000,
+        timeoutMsg: 'the adopted ids (and selection) did not survive the authored reindex',
+      },
+    );
   });
 });
