@@ -55,6 +55,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
+from engine.content_walk import GraphicsTextState
 from engine.redact import (
     IDENTITY,
     MAX_FORM_DEPTH,
@@ -71,27 +72,21 @@ from engine.redact import (
 
 
 def _walk_placements(pdf, instructions, resources, base_ctm, depth, fallback_resources, out, nested):
-    """Append one dict per image `Do` to `out`, in encounter order."""
-    ctm = base_ctm
-    gstack = []
+    """Append one dict per image `Do` to `out`, in encounter order. State
+    tracking is the shared GraphicsTextState (7.2 consolidation) — the same
+    machine the rewriter's DFS order agreement is proven against."""
+    state = GraphicsTextState(base_ctm)
     for instruction in instructions:
         operator = str(instruction.operator)
         operands = list(instruction.operands)
-        if operator == "q":
-            gstack.append(ctm)
-        elif operator == "Q":
-            if gstack:
-                ctm = gstack.pop()
-        elif operator == "cm":
-            m = _as_matrix(operands)
-            if m is not None:
-                ctm = _mat_mult(m, ctm)
-        elif operator == "Do":
+        if state.feed(operator, operands):
+            continue
+        if operator == "Do":
             name = str(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback_resources)
             subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
             if xobj is not None and subtype == "/Image":
-                x0, y0, x1, y1 = _bbox_of_rect_under_matrix(ctm, 1.0, 1.0)
+                x0, y0, x1, y1 = _bbox_of_rect_under_matrix(state.ctm, 1.0, 1.0)
                 out.append(
                     {
                         "index": len(out),
@@ -109,7 +104,7 @@ def _walk_placements(pdf, instructions, resources, base_ctm, depth, fallback_res
                     pdf,
                     pikepdf.parse_content_stream(xobj),
                     form_res if form_res is not None else resources,
-                    _mat_mult(form_matrix, ctm),
+                    _mat_mult(form_matrix, state.ctm),
                     depth + 1,
                     resources,
                     out,

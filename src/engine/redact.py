@@ -54,11 +54,17 @@ import pikepdf
 from pikepdf import Name
 
 from engine.pdf_tree import walk_inheritable
-
-Matrix = tuple[float, float, float, float, float, float]
-Rect = tuple[float, float, float, float]  # x0, y0, x1, y1, x0<x1, y0<y1
-
-IDENTITY: Matrix = (1, 0, 0, 1, 0, 0)
+from engine.content_walk import (
+    IDENTITY,
+    GraphicsTextState,
+    Matrix,
+    Rect,
+    as_matrix,
+    bbox_of_corners_under_matrix,
+    bbox_of_rect_under_matrix,
+    mat_mult,
+    transform_point,
+)
 
 # Rough Helvetica-ish average glyph advance, matching the heuristic already
 # used for wrapping freetext/stamp appearance text in the frontend builder.
@@ -68,41 +74,14 @@ AVG_CHAR_ADVANCE_EM = 0.5
 # cyclic forms; real documents never approach it.
 MAX_FORM_DEPTH = 16
 
-
-def _mat_mult(m1: Matrix, m2: Matrix) -> Matrix:
-    """Compose two matrices for the convention p' = p * M: applying m1 then
-    m2 to a point is equivalent to applying `_mat_mult(m1, m2)` once."""
-    a1, b1, c1, d1, e1, f1 = m1
-    a2, b2, c2, d2, e2, f2 = m2
-    return (
-        a1 * a2 + b1 * c2,
-        a1 * b2 + b1 * d2,
-        c1 * a2 + d1 * c2,
-        c1 * b2 + d1 * d2,
-        e1 * a2 + f1 * c2 + e2,
-        e1 * b2 + f1 * d2 + f2,
-    )
-
-
-def _transform_point(m: Matrix, x: float, y: float) -> tuple[float, float]:
-    a, b, c, d, e, f = m
-    return (a * x + c * y + e, b * x + d * y + f)
-
-
-def _bbox_of_rect_under_matrix(m: Matrix, w: float, h: float) -> Rect:
-    corners = [_transform_point(m, x, y) for x, y in ((0, 0), (w, 0), (w, h), (0, h))]
-    xs = [c[0] for c in corners]
-    ys = [c[1] for c in corners]
-    return (min(xs), min(ys), max(xs), max(ys))
-
-
-def _bbox_of_corners_under_matrix(m: Matrix, x0: float, y0: float, x1: float, y1: float) -> Rect:
-    """Device bbox of an arbitrary rect (origin not assumed at 0) under m —
-    needed for a Form /BBox whose corners are not [0 0 w h]."""
-    corners = [_transform_point(m, x, y) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
-    xs = [c[0] for c in corners]
-    ys = [c[1] for c in corners]
-    return (min(xs), min(ys), max(xs), max(ys))
+# Matrix/bbox helpers moved to content_walk.py at 7.2 (the one-interpreter
+# consolidation) — these aliases keep this module's established names (and
+# page_images.py's imports) stable.
+_mat_mult = mat_mult
+_transform_point = transform_point
+_bbox_of_rect_under_matrix = bbox_of_rect_under_matrix
+_bbox_of_corners_under_matrix = bbox_of_corners_under_matrix
+_as_matrix = as_matrix
 
 
 def _normalize_rect(rect: list[float]) -> Rect:
@@ -116,16 +95,6 @@ def _intersects(a: Rect, b: Rect) -> bool:
 
 def _intersects_any(bbox: Rect, regions: list[Rect]) -> bool:
     return any(_intersects(bbox, r) for r in regions)
-
-
-def _as_matrix(arr) -> Optional[Matrix]:
-    if arr is None:
-        return None
-    try:
-        vals = [float(v) for v in arr]
-    except (TypeError, ValueError):
-        return None
-    return tuple(vals) if len(vals) == 6 else None  # type: ignore[return-value]
 
 
 def _text_show_strings(operator: str, operands: list) -> list[str]:
@@ -225,18 +194,13 @@ def _walk(
     form inherits). `fallback_resources` are the invoker's resources, consulted
     for an XObject name a form's own /Resources omits (a lenient per-name
     fallback)."""
-    ctm: Matrix = base_ctm
-    # The graphics-state stack (q/Q) saves/restores the CTM AND text-state
-    # parameters (font size, leading, horizontal scaling) — all elements of the
-    # graphics state per the PDF spec. Restoring only the CTM would leave a
-    # stale font size after a `q .. Tf .. Q`, under-sizing a later bbox → an
-    # under-redaction leak.
-    gstate_stack: list = []
-    tm: Matrix = IDENTITY
-    tlm: Matrix = IDENTITY
-    font_size = base_font_size
-    leading = base_leading
-    h_scale = base_h_scale  # Th = Tz/100; horizontal text scaling
+    # The state machine moved to content_walk.GraphicsTextState at 7.2 (the
+    # one-interpreter consolidation): q/Q save/restore CTM AND text-state
+    # parameters — all elements of the graphics state per the PDF spec;
+    # restoring only the CTM left a stale font size after `q .. Tf .. Q`,
+    # under-sizing a later bbox → an under-redaction leak (that comment and
+    # its fix now live in the shared machine).
+    state = GraphicsTextState(base_ctm, base_font_size, base_leading, base_h_scale)
 
     kept: list = []
     text_runs_removed = 0
@@ -248,83 +212,26 @@ def _walk(
     forms_dropped_at_cap = 0
     taken_names = _existing_xobject_names(resources)
 
-    def next_line():
-        nonlocal tm, tlm
-        tlm = _mat_mult((1, 0, 0, 1, 0, -leading), tlm)
-        tm = tlm
-
     for instruction in instructions:
         operator = str(instruction.operator)
         operands = list(instruction.operands)
 
-        if operator == "q":
-            gstate_stack.append((ctm, font_size, leading, h_scale))
-            kept.append(instruction)
-        elif operator == "Q":
-            if gstate_stack:
-                ctm, font_size, leading, h_scale = gstate_stack.pop()
-            kept.append(instruction)
-        elif operator == "cm":
-            m = _as_matrix(operands)
-            if m is not None:
-                ctm = _mat_mult(m, ctm)
-            kept.append(instruction)
-        elif operator == "Tf":
-            try:
-                font_size = float(operands[-1])
-            except (TypeError, ValueError, IndexError):
-                pass
-            kept.append(instruction)
-        elif operator == "TL":
-            try:
-                leading = float(operands[0])
-            except (TypeError, ValueError, IndexError):
-                pass
-            kept.append(instruction)
-        elif operator == "Tz":
-            try:
-                h_scale = float(operands[0]) / 100.0
-            except (TypeError, ValueError, IndexError):
-                pass
-            kept.append(instruction)
-        elif operator == "BT":
-            tm = IDENTITY
-            tlm = IDENTITY
-            kept.append(instruction)
-        elif operator in ("Td", "TD"):
-            try:
-                tx, ty = float(operands[0]), float(operands[1])
-            except (TypeError, ValueError, IndexError):
-                kept.append(instruction)
-            else:
-                if operator == "TD":
-                    leading = -ty
-                tlm = _mat_mult((1, 0, 0, 1, tx, ty), tlm)
-                tm = tlm
-                kept.append(instruction)
-        elif operator == "Tm":
-            m = _as_matrix(operands)
-            if m is not None:
-                tm = m
-                tlm = m
-            kept.append(instruction)
-        elif operator == "T*":
-            next_line()
+        if state.feed(operator, operands):
             kept.append(instruction)
         elif operator in ("Tj", "'", '"', "TJ"):
             # ' and " implicitly advance to the next line BEFORE showing.
             if operator in ("'", '"'):
-                next_line()
+                state.next_line()
             strings = _text_show_strings(operator, operands)
-            raw_width = sum(len(s) for s in strings) * font_size * AVG_CHAR_ADVANCE_EM
+            raw_width = sum(len(s) for s in strings) * state.font_size * AVG_CHAR_ADVANCE_EM
             # Tz>100 (expanded text) makes the real rendered width WIDER than the
             # flat 0.5em estimate — fold it into the bbox so we still err wide
             # (Tz<100 only shrinks real glyphs, which the estimate already
             # over-covers, so never scale the bbox DOWN). The tm advance uses
             # the actual scale so subsequent runs stay positioned correctly.
-            bbox_width = raw_width * max(h_scale, 1.0)
-            combined = _mat_mult(tm, ctm)
-            bbox = _bbox_of_rect_under_matrix(combined, max(bbox_width, 0.01), max(font_size, 0.01))
+            bbox_width = raw_width * max(state.h_scale, 1.0)
+            combined = _mat_mult(state.tm, state.ctm)
+            bbox = _bbox_of_rect_under_matrix(combined, max(bbox_width, 0.01), max(state.font_size, 0.01))
             if _intersects_any(bbox, regions):
                 text_runs_removed += 1
             else:
@@ -332,14 +239,14 @@ def _walk(
             # Advance the text matrix so subsequent same-line Tj/TJ calls
             # (common when a generator emits one call per word/run) don't
             # all collapse onto the same origin point.
-            tm = _mat_mult((1, 0, 0, 1, raw_width * h_scale, 0), tm)
+            state.advance_after_show(raw_width)
         elif operator == "Do":
             name = str(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback_resources)
             subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
 
             if xobj is not None and subtype == "/Image":
-                bbox = _bbox_of_rect_under_matrix(ctm, 1.0, 1.0)
+                bbox = _bbox_of_rect_under_matrix(state.ctm, 1.0, 1.0)
                 if _intersects_any(bbox, regions):
                     images_removed += 1
                     if name:
@@ -350,7 +257,7 @@ def _walk(
                     kept.append(instruction)
             elif xobj is not None and subtype == "/Form":
                 form_matrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
-                form_ctm = _mat_mult(form_matrix, ctm)
+                form_ctm = _mat_mult(form_matrix, state.ctm)
                 bbox_arr = xobj.get("/BBox")
                 placed = None
                 if bbox_arr is not None:
@@ -377,7 +284,8 @@ def _walk(
                         replaced_form_names.add(name)
                 else:
                     copy, sub = _redact_form(
-                        pdf, xobj, resources, regions, form_ctm, depth + 1, name_counter, font_size, leading, h_scale
+                        pdf, xobj, resources, regions, form_ctm, depth + 1, name_counter,
+                        state.font_size, state.leading, state.h_scale,
                     )
                     if copy is not None:
                         new_name = _new_form_name(name_counter, taken_names)
