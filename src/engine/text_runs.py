@@ -34,11 +34,16 @@ same-line anchors back).
 from pathlib import Path
 
 import pikepdf
-from pikepdf import Name
+from pikepdf import Dictionary, Name
 
 from engine.content_walk import GraphicsTextState
 from engine.pdf_fonts import FontCapability, font_capability
-from engine.page_images import _fresh_name, _register_xobject, _save
+from engine.page_images import (
+    _finalize_page_rewrite,
+    _fresh_name,
+    _register_xobject,
+    _save,
+)
 from engine.redact import (
     IDENTITY,
     MAX_FORM_DEPTH,
@@ -269,17 +274,50 @@ def list_text_runs(file: str, page: int) -> dict:
 
 
 class _TextEditState:
-    def __init__(self, target: int, new_text: str):
+    def __init__(self, target: int, new_text: str, builder=None):
         self.target = target
         self.new_text = new_text
+        # Optional replacement renderer (7.4): (pdf, resources, gts, text)
+        # -> (instructions, new_raw_width). None = re-encode in the run's
+        # own font (7.2's path).
+        self.builder = builder
         self.seen = 0
         self.done = False
         # Set at the edit site; consumed by the same-line anchor pass.
         self.delta_scaled = 0.0  # Δ advance in text-space units incl. Tz
+        # (name, font_dict) a 7.4 builder produced — registered by the
+        # rewriter into the CORRECT resources (page, or the form COPY).
+        self.pending_font: tuple[str, object] | None = None
+        # Original form names superseded by edit copies — _finalize_page_
+        # rewrite drops them when unreferenced (review-measured: without
+        # this every nested edit left the prior copy fully embedded, and a
+        # convert stranded a whole font subset per orphan).
+        self.superseded_forms: set = set()
 
 
 def _instruction(operands: list, operator: str):
     return pikepdf.ContentStreamInstruction(operands, pikepdf.Operator(operator))
+
+
+def _fresh_font_name(resources, counter: list, reserved: set) -> str:
+    taken = set(reserved)
+    fonts = resources.get("/Font") if resources is not None else None
+    if fonts is not None:
+        taken |= {str(k) for k in fonts.keys()}
+    while True:
+        name = f"/EditFb{counter[0]}"
+        counter[0] += 1
+        if name not in taken:
+            reserved.add(name)
+            return name
+
+
+def _register_font(pdf, resources, name: str, font_dict) -> None:
+    fonts = resources.get("/Font")
+    if fonts is None:
+        fonts = Dictionary()
+        resources["/Font"] = fonts
+    fonts[Name(name)] = font_dict
 
 
 def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, counter, reserved, base_ctm=IDENTITY, parent_state=None):
@@ -294,6 +332,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
     gts = _child_state(base_ctm, parent_state)
     kept: list = []
     changed = False
+    new_forms: dict = {}  # copies made at THIS level, for the caller (staging rule)
     adjusting = False  # True after the edit, until a line boundary
     for instruction in instructions:
         operator = str(instruction.operator)
@@ -344,21 +383,35 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     kept.append(_instruction([], "T*"))
 
                 cap = fonts.capability(resources, fallback, gts.font_name)
+                # BOTH paths fail closed on an unusable run font — the
+                # builder path previously skipped the guard, so a direct
+                # convert_text_run call on a refused-font run mixed an
+                # ESTIMATED old width into Δ and misplaced followers
+                # (review-caught; the UI never reaches it, the contract
+                # must hold anyway).
                 if cap is None:
                     raise ValueError("no font is active for this text run")
                 if not cap.editable:
                     raise ValueError(cap.reason or "this text is not editable")
-                encoded = cap.encode(edit.new_text)
-
                 _old_text, old_raw = _run_metrics(operator, operands, cap, gts)
-                new_raw = (
-                    cap.decoded_width(encoded) / 1000.0 * gts.font_size
-                    + gts.char_spacing
-                    * (len(encoded) if cap._code_bytes == 1 else len(encoded) // 2)
-                    + gts.word_spacing * _spaces_in(encoded, cap)
-                )
+                if edit.builder is not None:
+                    # 7.4 fallback path: the builder renders the replacement
+                    # its own way (new embedded font + restore Tf); it owns
+                    # registration against THIS stream's resources.
+                    new_instructions, new_raw = edit.builder(
+                        pdf, resources, gts, edit.new_text
+                    )
+                    kept.extend(new_instructions)
+                else:
+                    encoded = cap.encode(edit.new_text)
+                    new_raw = (
+                        cap.decoded_width(encoded) / 1000.0 * gts.font_size
+                        + gts.char_spacing
+                        * (len(encoded) if cap._code_bytes == 1 else len(encoded) // 2)
+                        + gts.word_spacing * _spaces_in(encoded, cap)
+                    )
+                    kept.append(_instruction([pikepdf.String(encoded)], "Tj"))
                 edit.delta_scaled = (new_raw - old_raw) * gts.h_scale
-                kept.append(_instruction([pikepdf.String(encoded)], "Tj"))
                 gts.advance_after_show(new_raw)
                 adjusting = True
                 edit.seen += 1
@@ -387,7 +440,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                 form_res = xobj.get("/Resources")
                 read_res = form_res if form_res is not None else resources
                 form_matrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
-                inner_kept, inner_changed = _rewrite_runs(
+                inner_kept, inner_changed, inner_new_forms = _rewrite_runs(
                     pdf,
                     pikepdf.parse_content_stream(xobj),
                     read_res,
@@ -407,17 +460,38 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                         if key in ("/Length", "/Filter", "/DecodeParms", "/Resources"):
                             continue
                         copy[key] = xobj[key]
-                    copy["/Resources"] = _copy_resources_for_write(pdf, read_res)
+                    copy_res = _copy_resources_for_write(pdf, read_res)
+                    for nm, st in inner_new_forms.items():
+                        copy_res["/XObject"][Name(nm)] = pdf.make_indirect(st)
+                    if edit.pending_font is not None:
+                        # The fallback font registers against the form
+                        # COPY's resources — and /Font must be DEEP-copied
+                        # first: _copy_resources_for_write only deep-copies
+                        # /XObject (redaction never wrote fonts) and shares
+                        # everything else BY REFERENCE, so registering into
+                        # the shared dict mutated the ORIGINAL form every
+                        # other draw still uses (test-caught live).
+                        src_fonts = copy_res.get("/Font")
+                        fresh_fonts = Dictionary()
+                        if src_fonts is not None:
+                            for k in src_fonts.keys():
+                                fresh_fonts[k] = src_fonts[k]
+                        copy_res["/Font"] = fresh_fonts
+                        fname, fdict = edit.pending_font
+                        _register_font(pdf, copy_res, fname, fdict)
+                    copy["/Resources"] = copy_res
                     new_name = _fresh_name(resources, counter, reserved)
-                    _register_xobject(pdf, resources, new_name, copy)
+                    new_forms[new_name] = copy
                     kept.append(_instruction([Name(new_name)], "Do"))
+                    if name:
+                        edit.superseded_forms.add(name)
                     continue
             kept.append(instruction)
             continue
 
         gts.feed(operator, operands)
         kept.append(instruction)
-    return kept, changed
+    return kept, changed, new_forms
 
 
 def replace_text_run(file: str, output: str, page: int, index: int, new_text: str) -> dict:
@@ -440,7 +514,7 @@ def replace_text_run(file: str, output: str, page: int, index: int, new_text: st
             raise ValueError(f"text run index {index} is out of range (page has {count})")
 
         edit = _TextEditState(int(index), str(new_text))
-        kept, changed = _rewrite_runs(
+        kept, changed, new_forms = _rewrite_runs(
             pdf,
             pikepdf.parse_content_stream(p),
             resources,
@@ -453,7 +527,101 @@ def replace_text_run(file: str, output: str, page: int, index: int, new_text: st
         )
         if not changed:
             raise ValueError("edit did not apply (run not found)")
+        for nm, st in new_forms.items():
+            _register_xobject(pdf, resources, nm, st)
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        _finalize_page_rewrite(p, kept, edit.superseded_forms)
+        _save(pdf, input_path, output_path)
+        return {"output": str(output_path), "page": int(page), "index": int(index)}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def convert_text_run(
+    file: str, output: str, page: int, index: int, new_text: str, font_path: str
+) -> dict:
+    """Replace one run's text RENDERED IN THE BUNDLED FALLBACK FONT (7.4) —
+    the path the UI offers when the run's own font cannot express the typed
+    characters. Same targeting, Δ math, anchors, and form copy-on-edit as
+    `replace_text_run`; only the replacement renderer differs (a subsetted
+    Type0/Identity-H embed + a Tf restoring the original font after)."""
+    from engine.font_fallback import build_fallback_font
+
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        resources = _resolve_resources(p)
+        fonts = _FontCache()
+        count = len(
+            _walk_runs(
+                pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False, fonts
+            )
+        )
+        if not (0 <= int(index) < count):
+            raise ValueError(f"text run index {index} is out of range (page has {count})")
+
+        counter = [0]
+        reserved: set = set()
+        holder: dict = {}
+
+        def builder(pdf_, stream_resources, gts, text):
+            font_dict, encode, width_1000 = build_fallback_font(pdf_, font_path, text)
+            fname = _fresh_font_name(stream_resources, counter, reserved)
+            holder["edit"].pending_font = (fname, font_dict)
+            encoded = encode(text)
+            # CID font: Tw never applies (no single-byte space); Tc applies
+            # per code (2-byte codes).
+            new_raw = (
+                width_1000(text) / 1000.0 * gts.font_size
+                + gts.char_spacing * (len(encoded) // 2)
+            )
+            instructions = [
+                _instruction([Name(fname), gts.font_size], "Tf"),
+                _instruction([pikepdf.String(encoded)], "Tj"),
+            ]
+            if gts.font_name:
+                # Restore the run's original font — subsequent runs must be
+                # byte-untouched by the fallback.
+                instructions.append(_instruction([Name(gts.font_name), gts.font_size], "Tf"))
+            return instructions, new_raw
+
+        edit = _TextEditState(int(index), str(new_text), builder=builder)
+        holder["edit"] = edit
+        kept, changed, new_forms = _rewrite_runs(
+            pdf,
+            pikepdf.parse_content_stream(p),
+            resources,
+            0,
+            None,
+            edit,
+            fonts,
+            counter,
+            reserved,
+        )
+        if not changed:
+            raise ValueError("edit did not apply (run not found)")
+        for nm, st in new_forms.items():
+            _register_xobject(pdf, resources, nm, st)
+        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        _finalize_page_rewrite(p, kept, edit.superseded_forms)
+        # A TOP-LEVEL target's font registers against the page resources —
+        # the nested case already registered into the form COPY. Detect by
+        # the Tf name appearing in the page-level instructions.
+        if edit.pending_font is not None:
+            fname, fdict = edit.pending_font
+            if any(
+                str(i.operator) == "Tf" and i.operands and str(i.operands[0]) == fname
+                for i in kept
+            ):
+                _register_font(pdf, resources, fname, fdict)
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(index)}
     finally:

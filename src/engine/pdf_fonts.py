@@ -124,8 +124,12 @@ class FontCapability:
         return total
 
 
-def _refused(reason: str) -> FontCapability:
-    return FontCapability(False, reason, {}, {}, {}, DEFAULT_WIDTH, 1)
+def _refused(reason: str, code_bytes: int = 1) -> FontCapability:
+    """A non-editable capability. `code_bytes` must still be RIGHT (2 for
+    composite fonts): the run LISTER measures refused runs' widths for
+    their locked overlays, and 1-byte iteration over 2-byte CIDs doubled
+    every refused-Type0 rect (review-measured)."""
+    return FontCapability(False, reason, {}, {}, {}, DEFAULT_WIDTH, code_bytes)
 
 
 def _reverse(code2uni: dict[int, str]) -> dict[str, int]:
@@ -271,16 +275,18 @@ def font_capability(font_obj) -> FontCapability:
     if subtype == "Type0":
         enc = str(font_obj.get("/Encoding", "")).lstrip("/")
         if enc not in ("Identity-H",):
-            return _refused(f"unsupported composite-font encoding ({enc or 'embedded CMap'})")
+            return _refused(
+                f"unsupported composite-font encoding ({enc or 'embedded CMap'})", code_bytes=2
+            )
         tou = font_obj.get("/ToUnicode")
         if tou is None:
-            return _refused("no ToUnicode map — this text cannot be re-entered")
+            return _refused("no ToUnicode map — this text cannot be re-entered", code_bytes=2)
         try:
             code2uni = _parse_tounicode(tou.read_bytes())
         except Exception:
-            return _refused("unreadable ToUnicode map")
+            return _refused("unreadable ToUnicode map", code_bytes=2)
         if not code2uni:
-            return _refused("empty ToUnicode map")
+            return _refused("empty ToUnicode map", code_bytes=2)
         desc_fonts = font_obj.get("/DescendantFonts")
         widths: dict[int, float] = {}
         default = 1000.0

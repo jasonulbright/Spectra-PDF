@@ -157,11 +157,19 @@ class _EditState:
 
 
 def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, name_counter, reserved):
-    """Return (kept_instructions, changed). Recurses into forms; when the
-    target draw lies inside one, the form is COPIED (fresh name, rewritten
-    stream) and only this draw's Do is renamed to the copy."""
+    """Return (kept_instructions, changed, new_forms). Recurses into forms;
+    when the target draw lies inside one, the form is COPIED (fresh name,
+    rewritten stream) and only this draw's Do is renamed to the copy.
+
+    `new_forms` ({name: stream}) are copies created AT THIS LEVEL, for the
+    CALLER to register into its own fresh resources — the redact.py
+    new_forms pattern. Registering into the passed-in `resources` directly
+    mutated the ENCLOSING form's ORIGINAL, shared resources for 2-level
+    nesting (review-caught by object-identity trace: a letterhead form
+    reused across pages gained stray edit-copy references)."""
     kept = []
     changed = False
+    new_forms: dict = {}
     for instruction in instructions:
         operator = str(instruction.operator)
         operands = list(instruction.operands)
@@ -186,7 +194,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
         elif xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
             form_res = xobj.get("/Resources")
             read_res = form_res if form_res is not None else resources
-            inner_kept, inner_changed = _rewrite(
+            inner_kept, inner_changed, inner_new_forms = _rewrite(
                 pdf,
                 pikepdf.parse_content_stream(xobj),
                 read_res,
@@ -206,6 +214,10 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                         continue
                     copy[key] = xobj[key]
                 copy_res = _copy_resources_for_write(pdf, read_res)
+                # Deeper-level copies register into THIS copy's resources —
+                # never into the original's (the staging rule above).
+                for nm, st in inner_new_forms.items():
+                    copy_res["/XObject"][Name(nm)] = pdf.make_indirect(st)
                 if state.action == "replace" and state.replacement_name:
                     # The renamed Do resolves against the COPY's resources.
                     copy_res["/XObject"][Name(state.replacement_name)] = pdf.make_indirect(
@@ -213,7 +225,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     )
                 copy["/Resources"] = copy_res
                 new_name = _fresh_name(resources, name_counter, reserved)
-                _register_xobject(pdf, resources, new_name, copy)
+                new_forms[new_name] = copy
                 kept.append(_do_instruction(new_name))
                 if name:
                     state.superseded_forms.add(name)
@@ -221,7 +233,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                 kept.append(instruction)
         else:
             kept.append(instruction)
-    return kept, changed
+    return kept, changed, new_forms
 
 
 def _fresh_name(resources, name_counter, reserved: set) -> str:
@@ -315,11 +327,13 @@ def delete_page_image(file: str, output: str, page: int, index: int) -> dict:
             raise ValueError(f"image index {index} is out of range (page has {count})")
 
         state = _EditState(int(index), "delete", None)
-        kept, changed = _rewrite(
+        kept, changed, new_forms = _rewrite(
             pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
         )
         if not changed:
             raise ValueError("edit did not apply (placement not found)")
+        for nm, st in new_forms.items():
+            _register_xobject(pdf, resources, nm, st)
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         _finalize_page_rewrite(p, kept, state.superseded_forms)
         _save(pdf, input_path, output_path)
@@ -460,11 +474,13 @@ def replace_page_image(file: str, output: str, page: int, index: int, source: di
         state = _EditState(
             int(index), "replace", _fresh_name(resources, name_counter, reserved), image_obj
         )
-        kept, changed = _rewrite(
+        kept, changed, new_forms = _rewrite(
             pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, name_counter, reserved
         )
         if not changed:
             raise ValueError("edit did not apply (placement not found)")
+        for nm, st in new_forms.items():
+            _register_xobject(pdf, resources, nm, st)
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         if state.replacement_name in _names_drawn(kept):
             _register_xobject(pdf, resources, state.replacement_name, image_obj)

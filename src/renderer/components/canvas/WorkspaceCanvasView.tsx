@@ -79,7 +79,13 @@ interface WorkspaceCanvasViewProps {
   // undoable App routing (engine replace_text_run). Resolves EDIT_DECLINED
   // when the signed-doc warning was refused (the canvas restores its
   // listing and says so).
-  onEditText: (path: string, page: number, index: number, newText: string) => Promise<string | void>;
+  onEditText: (
+    path: string,
+    page: number,
+    index: number,
+    newText: string,
+    opts?: { convert?: boolean },
+  ) => Promise<string | void>;
   // Add-page ghost (2n.3): pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
   onAddPages: (docId: string, toIndex: number) => void;
@@ -980,7 +986,12 @@ export function WorkspaceCanvasView({
   // else (review-caught).
   const committingTextRef = useRef(false);
   const handleCommitTextEdit = useCallback(
-    async (pageId: string, index: number, newText: string): Promise<void> => {
+    async (
+      pageId: string,
+      index: number,
+      newText: string,
+      opts?: { convert?: boolean },
+    ): Promise<void> => {
       if (!focusedDoc || committingTextRef.current) return;
       const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
       if (pageNumber == null) return;
@@ -1001,7 +1012,7 @@ export function WorkspaceCanvasView({
         return next;
       });
       try {
-        const result = await onEditText(focusedDoc.path, pageNumber, index, newText);
+        const result = await onEditText(focusedDoc.path, pageNumber, index, newText, opts);
         if (result === EDIT_DECLINED) {
           if (previousRuns) {
             setEditTextByPage((prev) => {
@@ -1803,7 +1814,9 @@ export function WorkspaceCanvasView({
           onSelectEditImage={handleSelectEditImage}
           onSelectEditText={handleSelectEditText}
           onOpenTextEditor={handleOpenTextEditor}
-          onCommitTextEdit={(pageId, index, text) => void handleCommitTextEdit(pageId, index, text)}
+          onCommitTextEdit={(pageId, index, text, opts) =>
+            void handleCommitTextEdit(pageId, index, text, opts)
+          }
           onCancelTextEdit={handleCancelTextEdit}
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
@@ -1869,7 +1882,9 @@ export function WorkspaceCanvasView({
           onSelectEditImage={handleSelectEditImage}
           onSelectEditText={handleSelectEditText}
           onOpenTextEditor={handleOpenTextEditor}
-          onCommitTextEdit={(pageId, index, text) => void handleCommitTextEdit(pageId, index, text)}
+          onCommitTextEdit={(pageId, index, text, opts) =>
+            void handleCommitTextEdit(pageId, index, text, opts)
+          }
           onCancelTextEdit={handleCancelTextEdit}
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}

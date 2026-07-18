@@ -151,6 +151,8 @@ export interface PrinterList {
 
 export const app = {
   getGsPath: () => invoke<string>('get_gs_path'),
+  /** The bundled Edit-tool fallback font (7.4; resources/fonts). */
+  getEditFontPath: () => invoke<string>('get_edit_font_path'),
   /** Installed Windows printers + the default (the Print dialog's picker). */
   listPrinters: () => invoke<PrinterList>('list_printers'),
   /** The path-identity gate (M7): file identity is the raw path string

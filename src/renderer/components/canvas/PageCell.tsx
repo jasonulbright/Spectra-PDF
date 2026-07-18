@@ -319,7 +319,12 @@ interface PageCellProps {
   editingTextIndex?: number | null;
   onSelectEditText?: (pageId: string, index: number) => void;
   onOpenTextEditor?: (pageId: string, index: number) => void;
-  onCommitTextEdit?: (pageId: string, index: number, newText: string) => void;
+  onCommitTextEdit?: (
+    pageId: string,
+    index: number,
+    newText: string,
+    opts?: { convert?: boolean },
+  ) => void;
   onCancelTextEdit?: () => void;
   // Pending visible-signature placement, when it sits on THIS page (transient
   // view state with mark lifecycle — see lib/signature-placement.ts).
@@ -929,7 +934,7 @@ function PageCellImpl({
                 // under any quarter-turn; the editor renders horizontal
                 // (not counter-rotated) at a readable size — the v1 call.
                 heightPx={Math.min(r.h, r.w) * pageHeight}
-                onCommit={(value) => onCommitTextEdit?.(page.id, run.index, value)}
+                onCommit={(value, opts) => onCommitTextEdit?.(page.id, run.index, value, opts)}
                 onCancel={() => onCancelTextEdit?.()}
               />
             );
@@ -1141,7 +1146,7 @@ function TextRunEditor({
   run: EditTextRun;
   rect: { x: number; y: number; w: number; h: number };
   heightPx: number;
-  onCommit: (value: string) => void;
+  onCommit: (value: string, opts?: { convert?: boolean }) => void;
   onCancel: () => void;
 }): React.JSX.Element {
   const [value, setValue] = useState(run.text);
@@ -1205,6 +1210,17 @@ function TextRunEditor({
       {!valid && (
         <div className="page-edittext-error" data-testid="edit-text-error" aria-live="polite">
           This document's font does not contain {missing.map((c) => `'${c}'`).join(' ')}
+          {/* 7.4: the coverage-refusal escape hatch — re-render the run in
+              the bundled fallback font. The wrapper's pointerdown
+              preventDefault keeps the input focused; click still fires. */}
+          <button
+            type="button"
+            data-testid="edit-text-convert"
+            className="page-edittext-convert"
+            onClick={() => onCommit(value, { convert: true })}
+          >
+            Use a compatible font
+          </button>
         </div>
       )}
     </div>

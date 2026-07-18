@@ -454,6 +454,11 @@ pub async fn get_gs_path(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub async fn get_edit_font_path(app: AppHandle) -> Result<String, String> {
+    Ok(engine::get_edit_font_path(&app))
+}
+
+#[tauri::command]
 pub async fn get_app_version() -> Result<String, String> {
     Ok(env!("CARGO_PKG_VERSION").to_string())
 }

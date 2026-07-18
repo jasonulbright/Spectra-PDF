@@ -43,7 +43,7 @@ interface DocumentRowProps {
   onSelectEditImage: (pageId: string, index: number) => void;
   onSelectEditText: (pageId: string, index: number) => void;
   onOpenTextEditor: (pageId: string, index: number) => void;
-  onCommitTextEdit: (pageId: string, index: number, newText: string) => void;
+  onCommitTextEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
   onCancelTextEdit: () => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;

@@ -18,6 +18,9 @@
   graphics all measured to the point
 - Editing a signed document warns first, and cancelling really cancels —
   the file is left byte-untouched
+- When the document's font can't express what you typed, one click
+  re-renders the edit in a bundled compatible font (Liberation Sans, SIL
+  OFL) — subsetted, embedded, and still fully searchable
 
 ## 2.1.0 — Edit Images & Batch OCR
 

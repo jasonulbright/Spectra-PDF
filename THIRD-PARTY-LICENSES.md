@@ -36,6 +36,15 @@ Bundled Python packages (installed into the embedded runtime):
 | lxml | BSD-3-Clause | <https://github.com/lxml/lxml> |
 | pycparser | BSD-3-Clause | <https://github.com/eliben/pycparser> |
 
+## Fonts
+
+**Liberation Sans** (Regular) — © Red Hat / the Liberation Fonts project,
+licensed under the **SIL Open Font License 1.1**. Bundled (vendored by
+`scripts/sync-edit-fonts.ps1` into the app's `fonts` resources) as the
+Edit tool's replacement font: when a document's own font cannot express a
+typed character, the edited run is re-rendered in a subset of this font.
+License text: https://github.com/liberationfonts/liberation-fonts/blob/main/LICENSE
+
 ## Frontend / runtime libraries
 
 Bundled into the WebView2 renderer (see `package.json` for exact versions):

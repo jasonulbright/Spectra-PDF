@@ -679,10 +679,29 @@ function AppContent(): React.ReactElement {
   );
 
   const handleEditText = useCallback(
-    async (path: string, page: number, index: number, newText: string): Promise<string | void> => {
+    async (
+      path: string,
+      page: number,
+      index: number,
+      newText: string,
+      opts?: { convert?: boolean },
+    ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (opts?.convert) {
+        // 7.4: render the replacement in the bundled fallback font — the
+        // path the editor offers when the run's own font can't express the
+        // typed characters.
+        const fontPath = await app.getEditFontPath();
+        await performOperation(path, 'convert_text_run', {
+          page,
+          index,
+          new_text: newText,
+          font_path: fontPath,
+        });
+        return;
+      }
       await performOperation(path, 'replace_text_run', { page, index, new_text: newText });
     },
     [state.files, performOperation, confirmEditOfSignedDoc],

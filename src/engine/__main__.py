@@ -51,7 +51,7 @@ from engine.page_images import (
     list_page_images,
     replace_page_image,
 )
-from engine.text_runs import list_text_runs, replace_text_run
+from engine.text_runs import convert_text_run, list_text_runs, replace_text_run
 from engine.printer import print_pdf
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
 
@@ -102,6 +102,7 @@ def main() -> None:
     server.register("extract_page_image", extract_page_image)
     server.register("list_text_runs", list_text_runs)
     server.register("replace_text_run", replace_text_run)
+    server.register("convert_text_run", convert_text_run)
     server.register("print", print_pdf)
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)

@@ -38,6 +38,7 @@ Desktop.ini
 # Embedded runtimes (downloaded/copied during build, not committed)
 resources/python/
 resources/ghostscript/
+resources/fonts/
 
 # Test
 coverage/

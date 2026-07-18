@@ -26,6 +26,7 @@
     "resources": {
       "../resources/python": "python",
       "../resources/ghostscript": "ghostscript",
+      "../resources/fonts": "fonts",
       "../src/engine": "engine"
     },
     "windows": {

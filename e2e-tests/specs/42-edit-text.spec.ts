@@ -127,6 +127,30 @@ describe('edit text (Phase 7.2+7.3)', () => {
     // must NOT commit (the editor stays open with the invalid value).
     await setReactInputValue('[data-testid="edit-text-input"]', 'bad → char');
     await $('[data-testid="edit-text-error"]').waitForDisplayed({ timeout: 5_000 });
-    await browser.keys(['Escape']); // leave cleanly
+
+    // 7.4: the coverage-refusal escape hatch — convert re-renders the run
+    // in the bundled fallback font, and the result is extractable (the
+    // engine's ToUnicode round-trips through the listing refetch).
+    await $('[data-testid="edit-text-convert"]').click();
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        const rs = await editTextRuns(ids[0]);
+        return rs.some((r) => r.text.includes('bad → char'));
+      },
+      { timeout: 30_000, timeoutMsg: 'converted text never appeared in the listings' },
+    );
+    // Undo restores the pre-convert run.
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        const rs = await editTextRuns(ids[0]);
+        return !rs.some((r) => r.text.includes('bad → char'));
+      },
+      { timeout: 30_000, timeoutMsg: 'undo did not revert the conversion' },
+    );
   });
 });

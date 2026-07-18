@@ -32,6 +32,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   delete_page_image: 'Delete Image',
   replace_page_image: 'Replace Image',
   replace_text_run: 'Edit Text',
+  convert_text_run: 'Edit Text',
   print: 'Print',
   verify_signatures: 'Verify Signatures',
   // NB: the default getFriendlyName path uses only params.file — the signing

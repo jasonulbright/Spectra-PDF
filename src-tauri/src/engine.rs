@@ -56,6 +56,21 @@ pub fn get_gs_path(app: &AppHandle) -> String {
         .to_string()
 }
 
+/// The bundled fallback font for Edit ▸ Text's convert-to-compatible-font
+/// path (7.4): Liberation Sans (OFL) — vendored by scripts/sync-edit-fonts
+/// into resources/fonts, same class as the gs/python runtimes.
+pub fn get_edit_font_path(app: &AppHandle) -> String {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .expect("failed to resolve resource dir");
+    resource_dir
+        .join("fonts")
+        .join("LiberationSans-Regular.ttf")
+        .to_string_lossy()
+        .to_string()
+}
+
 /// Starts the Python engine sidecar and wires stdout to the webview.
 /// Idempotent — if the engine is already running, returns immediately.
 pub async fn start(app: &AppHandle) -> Result<(), String> {
