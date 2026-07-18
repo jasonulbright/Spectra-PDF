@@ -1195,6 +1195,65 @@
   color: #f87171;
 }
 
+/* Edit ▸ Text (7.2): run outlines — quieter than image boxes at rest (text
+   pages are dense); locked runs show a subdued outline whose title carries
+   the refusal reason. */
+.page-edittext {
+  position: absolute;
+  background: transparent;
+  border: 1px dotted rgba(160, 220, 160, 0.4);
+  border-radius: 1px;
+  padding: 0;
+  cursor: text;
+}
+.page-edittext:hover {
+  border-color: rgba(160, 220, 160, 0.95);
+  background: rgba(160, 220, 160, 0.08);
+}
+.page-edittext.selected {
+  border: 1.5px solid var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.1);
+}
+.page-edittext.locked {
+  cursor: not-allowed;
+  border-color: rgba(200, 160, 120, 0.45);
+}
+
+.page-edittext-editor {
+  position: absolute;
+  z-index: 5;
+}
+.page-edittext-editor input {
+  width: 100%;
+  min-width: 60px;
+  padding: 0 2px;
+  border: 1.5px solid var(--accent, #3b82f6);
+  border-radius: 2px;
+  background: #fff;
+  color: #111;
+  font-family: Helvetica, Arial, sans-serif;
+}
+.page-edittext-editor input.invalid {
+  border-color: #dc2626;
+}
+.page-edittext-error {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  padding: 2px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: #fff;
+  background: #b91c1c;
+  border-radius: 3px;
+  /* NOT pointer-events:none — the element sits outside the wrapper's box,
+     so a pass-through click would land on the PAGE beneath and blur the
+     input anyway. The wrapper's onPointerDown preventDefault is the fix:
+     events on this element bubble through the wrapper (DOM child), focus
+     stays in the input, the edit survives reading the error. */
+}
+
 .page-redact-label {
   display: inline-block;
   max-width: 100%;

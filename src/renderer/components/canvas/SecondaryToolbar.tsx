@@ -41,6 +41,11 @@ export interface SecondaryToolbarProps {
    * options in the stamp-preset sense (props+callbacks, not commands: they
    * act on transient canvas selection the registry can't see). */
   editHasSelection: boolean;
+  /** Which kind of edit object is selected (7.2 adds text runs). */
+  editSelectionKind: 'image' | 'text' | null;
+  /** Selected text run's editability + refusal reason (null = n/a). */
+  editTextEditable: boolean;
+  editTextReason: string | null;
   /** An action is in flight — buttons disable so a stale-index click can't
    * queue behind a mutation. */
   editBusy: boolean;
@@ -48,6 +53,8 @@ export interface SecondaryToolbarProps {
    * failure (decode/IO) that would otherwise vanish silently. */
   editNotice: { text: string; error: boolean } | null;
   onEditAction: (kind: 'delete' | 'replace' | 'extract') => void;
+  /** Open the inline editor for the selected text run. */
+  onEditTextOpen: () => void;
 }
 
 export function SecondaryToolbar({
@@ -58,9 +65,13 @@ export function SecondaryToolbar({
   stampPreset,
   onSetStampPreset,
   editHasSelection,
+  editSelectionKind,
+  editTextEditable,
+  editTextReason,
   editBusy,
   editNotice,
   onEditAction,
+  onEditTextOpen,
 }: SecondaryToolbarProps): React.JSX.Element | null {
   // The strip belongs to the OPEN TOOL, not to the armed mode: Escape means
   // "stop drawing", not "close Comment", and with the pill gone a strip that
@@ -121,8 +132,24 @@ export function SecondaryToolbar({
         <div className="secondary-toolbar-opts" role="group" aria-label="Image actions">
           {!editHasSelection && !editBusy && !editNotice && (
             <span className="secondary-toolbar-hint" data-testid="edit-hint">
-              Click an image on the page
+              Click an image or a line of text on the page
             </span>
+          )}
+          {editSelectionKind === 'text' && !editBusy && !editTextEditable && editTextReason && (
+            <span className="secondary-toolbar-hint error" data-testid="edit-text-reason">
+              {editTextReason}
+            </span>
+          )}
+          {editSelectionKind === 'text' && (
+            <button
+              type="button"
+              data-testid="edit-action-text"
+              className="secondary-tool"
+              disabled={!editTextEditable || editBusy}
+              onClick={onEditTextOpen}
+            >
+              Edit Text…
+            </button>
           )}
           {editBusy && (
             <span className="secondary-toolbar-hint" data-testid="edit-busy" aria-live="polite">
@@ -142,7 +169,7 @@ export function SecondaryToolbar({
             type="button"
             data-testid="edit-action-replace"
             className="secondary-tool"
-            disabled={!editHasSelection || editBusy}
+            disabled={editSelectionKind !== 'image' || editBusy}
             onClick={() => onEditAction('replace')}
           >
             Replace…
@@ -151,7 +178,7 @@ export function SecondaryToolbar({
             type="button"
             data-testid="edit-action-extract"
             className="secondary-tool"
-            disabled={!editHasSelection || editBusy}
+            disabled={editSelectionKind !== 'image' || editBusy}
             onClick={() => onEditAction('extract')}
           >
             Extract…
@@ -160,7 +187,7 @@ export function SecondaryToolbar({
             type="button"
             data-testid="edit-action-delete"
             className="secondary-tool"
-            disabled={!editHasSelection || editBusy}
+            disabled={editSelectionKind !== 'image' || editBusy}
             onClick={() => onEditAction('delete')}
           >
             Delete

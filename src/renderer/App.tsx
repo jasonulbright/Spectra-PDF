@@ -8,6 +8,7 @@ import {
   jpegExifOrientation,
   type ReplacementSource,
 } from './lib/image-replace';
+import { EDIT_DECLINED } from './lib/edit-text';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
 import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
 import { SplitPanel } from './panels/SplitPanel';
@@ -651,6 +652,42 @@ function AppContent(): React.ReactElement {
   // that writes a NEW image file where the user chose. `opts` lets the e2e
   // harness inject what the native dialogs would collect.
   const editWarnedPathsRef = useRef<Set<string>>(new Set());
+  // Content edits invalidate embedded signatures — warn BEFORE the first
+  // mutation (the sign-into-field honesty precedent; Acrobat warns here
+  // too). The verify itself always runs (cheap, and a file UNSIGNED at the
+  // last check may have been signed in-session since); only the dialog is
+  // remembered, and only after the user said Continue for a file that
+  // actually had signatures (review-caught: caching the bare "checked
+  // once" skipped the warning after an in-session sign). Shared by image
+  // AND text edits — one warning per file, whichever comes first.
+  const confirmEditOfSignedDoc = useCallback(
+    async (path: string, workingPath: string): Promise<boolean> => {
+      if (editWarnedPathsRef.current.has(path)) return true;
+      const sig = await call('verify_signatures', { file: workingPath });
+      const count = (sig as unknown as { signatures?: unknown[] }).signatures?.length ?? 0;
+      if (count > 0) {
+        const proceed = await showProceedConfirm(
+          'Document is signed',
+          'Editing this document will invalidate its digital signatures. Continue?',
+        );
+        if (!proceed) return false;
+        editWarnedPathsRef.current.add(path);
+      }
+      return true;
+    },
+    [call, showProceedConfirm],
+  );
+
+  const handleEditText = useCallback(
+    async (path: string, page: number, index: number, newText: string): Promise<string | void> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      await performOperation(path, 'replace_text_run', { page, index, new_text: newText });
+    },
+    [state.files, performOperation, confirmEditOfSignedDoc],
+  );
+
   const handleEditImage = useCallback(
     async (
       kind: 'delete' | 'replace' | 'extract',
@@ -662,24 +699,8 @@ function AppContent(): React.ReactElement {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
 
-      // Content edits invalidate embedded signatures — warn BEFORE the first
-      // mutation (the sign-into-field honesty precedent; Acrobat warns here
-      // too). The verify itself always runs (cheap, and a file UNSIGNED at
-      // the last check may have been signed in-session since); only the
-      // dialog is remembered, and only after the user said Continue for a
-      // file that actually had signatures (review-caught: caching the bare
-      // "checked once" skipped the warning after an in-session sign).
-      if (kind !== 'extract' && !editWarnedPathsRef.current.has(path)) {
-        const sig = await call('verify_signatures', { file: f.workingPath });
-        const count = (sig as unknown as { signatures?: unknown[] }).signatures?.length ?? 0;
-        if (count > 0) {
-          const proceed = await showProceedConfirm(
-            'Document is signed',
-            'Editing this document will invalidate its digital signatures. Continue?',
-          );
-          if (!proceed) return;
-          editWarnedPathsRef.current.add(path);
-        }
+      if (kind !== 'extract' && !(await confirmEditOfSignedDoc(path, f.workingPath))) {
+        return EDIT_DECLINED;
       }
 
       if (kind === 'delete') {
@@ -772,7 +793,7 @@ function AppContent(): React.ReactElement {
         return out ? `Saved ${out.split(/[\\/]/).pop()}` : undefined;
       }
     },
-    [state.files, call, performOperation, reloadFile, dispatch, showProceedConfirm],
+    [state.files, call, performOperation, reloadFile, dispatch, confirmEditOfSignedDoc],
   );
 
 
@@ -1332,6 +1353,7 @@ function AppContent(): React.ReactElement {
                   onRedactFile={handleRedactFile}
                   onApplyOcrLayer={handleApplyOcrLayer}
                   onEditImage={handleEditImage}
+                  onEditText={handleEditText}
                   onAddPages={handleAddPages}
                   onFillFormValues={handleFillFormValues}
                   onAddFormField={handleAddFormField}

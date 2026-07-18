@@ -6,6 +6,7 @@ import type { DocPlacement } from '../../canvas/layout';
 import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { EditImagePlacement } from '../../lib/edit-images';
+import type { EditTextRun } from '../../lib/edit-text';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -31,8 +32,14 @@ interface DocLayerProps {
   stampPreset?: StampPreset | null;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
-  editSelection: { pageId: string; index: number } | null;
+  editTextByPage: ReadonlyMap<string, EditTextRun[]>;
+  editSelection: { kind: 'image' | 'text'; pageId: string; index: number } | null;
+  editingText: { pageId: string; index: number } | null;
   onSelectEditImage: (pageId: string, index: number) => void;
+  onSelectEditText: (pageId: string, index: number) => void;
+  onOpenTextEditor: (pageId: string, index: number) => void;
+  onCommitTextEdit: (pageId: string, index: number, newText: string) => void;
+  onCancelTextEdit: () => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -109,8 +116,14 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               stampPreset={props.stampPreset}
               redactionMarksByPage={props.redactionMarksByPage}
               editImagesByPage={props.editImagesByPage}
+              editTextByPage={props.editTextByPage}
               editSelection={props.editSelection}
+              editingText={props.editingText}
               onSelectEditImage={props.onSelectEditImage}
+              onSelectEditText={props.onSelectEditText}
+              onOpenTextEditor={props.onOpenTextEditor}
+              onCommitTextEdit={props.onCommitTextEdit}
+              onCancelTextEdit={props.onCancelTextEdit}
               signaturePlacement={props.signaturePlacement}
               findMatchPageIds={props.findMatchPageIds}
               findWordsByPage={props.findWordsByPage}

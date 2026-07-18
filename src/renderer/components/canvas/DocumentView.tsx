@@ -12,6 +12,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation, PageRef } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { EditImagePlacement } from '../../lib/edit-images';
+import type { EditTextRun } from '../../lib/edit-text';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -76,8 +77,14 @@ export interface DocumentViewProps {
   stampPreset?: StampPreset | null;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
-  editSelection: { pageId: string; index: number } | null;
+  editTextByPage: ReadonlyMap<string, EditTextRun[]>;
+  editSelection: { kind: 'image' | 'text'; pageId: string; index: number } | null;
+  editingText: { pageId: string; index: number } | null;
   onSelectEditImage: (pageId: string, index: number) => void;
+  onSelectEditText: (pageId: string, index: number) => void;
+  onOpenTextEditor: (pageId: string, index: number) => void;
+  onCommitTextEdit: (pageId: string, index: number, newText: string) => void;
+  onCancelTextEdit: () => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -463,10 +470,25 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           stampPreset={props.stampPreset}
           redactionMarks={props.redactionMarksByPage.get(page.id)}
           editImages={props.editImagesByPage.get(page.id)}
+          editTextRuns={props.editTextByPage.get(page.id)}
           editSelectedIndex={
-            props.editSelection?.pageId === page.id ? props.editSelection.index : null
+            props.editSelection?.kind === 'image' && props.editSelection.pageId === page.id
+              ? props.editSelection.index
+              : null
+          }
+          editTextSelectedIndex={
+            props.editSelection?.kind === 'text' && props.editSelection.pageId === page.id
+              ? props.editSelection.index
+              : null
+          }
+          editingTextIndex={
+            props.editingText?.pageId === page.id ? props.editingText.index : null
           }
           onSelectEditImage={props.onSelectEditImage}
+          onSelectEditText={props.onSelectEditText}
+          onOpenTextEditor={props.onOpenTextEditor}
+          onCommitTextEdit={props.onCommitTextEdit}
+          onCancelTextEdit={props.onCancelTextEdit}
           signaturePlacement={props.signaturePlacement?.pageId === page.id ? props.signaturePlacement : null}
           findMatch={props.findMatchPageIds.has(page.id)}
           findWords={props.findWordsByPage.get(page.id)}

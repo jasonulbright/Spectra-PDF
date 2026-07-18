@@ -107,6 +107,25 @@ class TestReplaceTextRun:
         delta = HI_W - HELLO_W
         assert _char_x0(out, "W") == pytest.approx(112 + delta, abs=0.05)
 
+    def test_delta_applies_once_and_propagates_through_the_td_chain(self, tmp_dir):
+        """Td anchors are RELATIVE: one Δ on the first same-line anchor
+        carries through the whole chain. Adjusting every Td compounded the
+        shift (End moved 2Δ) — proven live pre-fix; pinned here."""
+        src = os.path.join(tmp_dir, "t.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            b"BT /F1 12 Tf 72 700 Td (Hello) Tj 40 0 Td (Mid) Tj 40 0 Td (End) Tj ET",
+            {"/F1": _helv(pdf)},
+        )
+        pdf.save(src)
+        pdf.close()
+        replace_text_run(src, out, 1, 0, "Hi")
+        delta = HI_W - HELLO_W
+        assert _char_x0(out, "M") == pytest.approx(112 + delta, abs=0.05)
+        assert _char_x0(out, "E") == pytest.approx(152 + delta, abs=0.05)  # ONE delta
+
     def test_line_change_stops_the_adjustment(self, tmp_dir):
         src = os.path.join(tmp_dir, "t.pdf")
         out = os.path.join(tmp_dir, "o.pdf")
@@ -215,6 +234,159 @@ class TestReplaceTextRun:
         # First draw's geometry untouched.
         assert r2["runs"][0]["rect"][1] == pytest.approx(700, abs=0.05)
         assert r2["runs"][1]["rect"][1] == pytest.approx(100, abs=0.05)
+
+    def test_direct_font_dicts_never_serve_a_stale_capability(self, tmp_dir):
+        """DIRECT (non-indirect) /Font entries: the capability cache keyed
+        transient wrapper id()s and served the WRONG font's tables —
+        review-measured at 22.6% wrong lookups, and a replace would write
+        the wrong font's bytes into the file. Alternating direct fonts
+        across many runs pins the stable-key fix."""
+        src = os.path.join(tmp_dir, "t.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        plain = Dictionary(
+            Type=Name("/Font"), Subtype=Name("/Type1"),
+            BaseFont=Name("/Helvetica"), Encoding=Name("/WinAnsiEncoding"),
+        )
+        remapped = Dictionary(
+            Type=Name("/Font"), Subtype=Name("/Type1"),
+            BaseFont=Name("/Helvetica"),
+            Encoding=Dictionary(
+                BaseEncoding=Name("/WinAnsiEncoding"),
+                Differences=Array([65, Name("/Euro")]),  # 'A' code shows €
+            ),
+        )
+        # DIRECT dicts, deliberately not make_indirect.
+        page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=plain, F2=remapped))
+        parts = [b"BT "]
+        for i in range(30):
+            font = b"/F1" if i % 2 == 0 else b"/F2"
+            parts.append(font + b" 12 Tf 10 %d Td (A) Tj " % (700 - i * 20))
+        parts.append(b"ET")
+        page.Contents = pdf.make_stream(b"".join(parts))
+        pdf.save(src)
+        pdf.close()
+        runs = list_text_runs(src, 1)["runs"]
+        assert len(runs) == 30
+        for i, run in enumerate(runs):
+            expected = "A" if i % 2 == 0 else "€"
+            assert run["text"] == expected, f"run {i} decoded {run['text']!r}"
+
+    def test_subset_widths_range_gates_encoding(self, tmp_dir):
+        """A subset-embedded simple font (narrow /Widths range) must REFUSE
+        characters outside the declared range — encode() succeeding for a
+        never-subsetted glyph writes .notdef boxes silently (review-caught;
+        the phase doc's own glyph-availability promise)."""
+        from engine.pdf_fonts import font_capability
+
+        pdf = pikepdf.new()
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"), Subtype=Name("/TrueType"),
+                BaseFont=Name("/ABCDEF+Helvetica"),
+                Encoding=Name("/WinAnsiEncoding"),
+                FirstChar=72,  # 'H'..'I' only
+                Widths=Array([722, 222]),
+            )
+        )
+        cap = font_capability(font)
+        assert cap.encode("HI") == b"HI"
+        with pytest.raises(ValueError, match="cannot encode"):
+            cap.encode("z")
+        assert "z" not in cap.encodable()
+        assert "H" in cap.encodable()
+
+    def test_doublequote_operator_as_edit_target(self, tmp_dir):
+        """The \" operator's aw/ac (word/char spacing) must persist through
+        the expansion and into the Δ math."""
+        src = os.path.join(tmp_dir, "t.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            b'BT /F1 12 Tf 14 TL 72 700 Td (One) Tj 1 0.5 (Two) " ET',
+            {"/F1": _helv(pdf)},
+        )
+        pdf.save(src)
+        pdf.close()
+        replace_text_run(src, out, 1, 1, "Six")
+        text = extract_text(out)["text"]
+        assert "Six" in text and "Two" not in text
+        with pikepdf.open(out) as p2:
+            content = pikepdf.unparse_content_stream(
+                pikepdf.parse_content_stream(p2.pages[0])
+            )
+            assert b"Tw" in content and b"Tc" in content and b"T*" in content
+        r2 = list_text_runs(out, 1)
+        assert r2["runs"][1]["rect"][1] == pytest.approx(700 - 14, abs=0.05)
+
+    def test_tj_as_edit_target_delta_includes_original_kern(self, tmp_dir):
+        """Replacing a KERNED TJ run: Δ must be computed from the TJ's real
+        old width (glyphs + kern), so the follower lands exactly."""
+        src = os.path.join(tmp_dir, "t.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            b"BT /F1 12 Tf 72 700 Td [(He) -50 (llo)] TJ 40 0 Td (World) Tj ET",
+            {"/F1": _helv(pdf)},
+        )
+        pdf.save(src)
+        pdf.close()
+        replace_text_run(src, out, 1, 0, "Hi")
+        # Old width = HELLO_W + 50/1000*12 (negative kern WIDENS: -(-50)).
+        old_w = HELLO_W + 0.6
+        delta = HI_W - old_w
+        assert _char_x0(out, "W") == pytest.approx(72 + old_w + 40 + delta - old_w, abs=0.05)
+
+    def test_scaled_form_matrix_replace_shifts_in_device_scale(self, tmp_dir):
+        """A form with /Matrix [2 0 0 2 ...]: a Δ inside the form lands 2×
+        in device space — the follower's listed rect proves it."""
+        src = os.path.join(tmp_dir, "t.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        helv = _helv(pdf)
+        form = pdf.make_stream(
+            b"BT /F1 12 Tf 0 0 Td (Hello) Tj 40 0 Td (World) Tj ET"
+        )
+        form["/Type"] = Name("/XObject")
+        form["/Subtype"] = Name("/Form")
+        form["/BBox"] = Array([0, 0, 300, 20])
+        form["/Matrix"] = Array([2, 0, 0, 2, 0, 0])
+        form["/Resources"] = Dictionary(Font=Dictionary(F1=helv))
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            XObject=Dictionary(Fm=pdf.make_indirect(form))
+        )
+        page.Contents = pdf.make_stream(b"q 1 0 0 1 50 500 cm /Fm Do Q")
+        pdf.save(src)
+        pdf.close()
+
+        before = list_text_runs(src, 1)["runs"]
+        assert before[1]["rect"][0] == pytest.approx(50 + 2 * (40), abs=0.05)
+        replace_text_run(src, out, 1, 0, "Hi")
+        after = list_text_runs(out, 1)["runs"]
+        delta_device = 2 * (HI_W - HELLO_W)
+        assert after[1]["rect"][0] == pytest.approx(before[1]["rect"][0] + delta_device, abs=0.1)
+
+    def test_tounicode_encoding_merge_reverse_prefers_lowest_code(self, tmp_dir):
+        """The same char reachable via the baseline encoding AND a ToUnicode
+        entry at a higher code: encode uses the LOWEST (deterministic)."""
+        from engine.pdf_fonts import font_capability
+        from tests.test_pdf_fonts import _tounicode_stream
+
+        pdf = pikepdf.new()
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"), Subtype=Name("/Type1"),
+                BaseFont=Name("/Helvetica"),
+                Encoding=Name("/WinAnsiEncoding"),
+            )
+        )
+        font["/ToUnicode"] = _tounicode_stream(pdf, {200: "A"})
+        cap = font_capability(font)
+        assert cap.encode("A") == b"A"  # 65 wins over 200
+        assert cap.decode(bytes([200])) == "A"  # ...but 200 still decodes
 
     def test_index_out_of_range_fails_closed(self, tmp_dir):
         src = os.path.join(tmp_dir, "t.pdf")

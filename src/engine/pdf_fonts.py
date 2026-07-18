@@ -310,4 +310,24 @@ def font_capability(font_obj) -> FontCapability:
         merged.update(tou_map)
         code2uni = merged
     widths, default = _simple_widths(font_obj, code2uni)
-    return FontCapability(True, None, code2uni, _reverse(code2uni), widths, default, 1)
+    # Subset-coverage guard (review-caught; the phase doc's stated design):
+    # /Encoding is a fixed 256-slot table that says nothing about which
+    # glyphs an EMBEDDED SUBSET actually contains — encode() succeeding for
+    # a never-subsetted character writes .notdef boxes into the output with
+    # no warning anywhere. When the font declares an explicit /Widths range
+    # (the subset-generator norm), restrict the ENCODE direction to codes
+    # inside [FirstChar, FirstChar+len-1]; decoding stays broad (bytes
+    # already in the document decode by the full table). Not airtight (a
+    # generator may emit a full-range /Widths for a true subset — 7.4's
+    # fontTools pass can read the real charset), but it closes the common
+    # real-world shape at zero new dependencies.
+    encode_map = code2uni
+    w = font_obj.get("/Widths")
+    if w is not None and len(widths) > 0:
+        try:
+            first = int(font_obj.get("/FirstChar", 0))
+            last = first + len(w) - 1
+            encode_map = {c: u for c, u in code2uni.items() if first <= c <= last}
+        except (TypeError, ValueError):
+            pass
+    return FontCapability(True, None, code2uni, _reverse(encode_map), widths, default, 1)

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Edit Text — in-place text editing
+- The Edit tool now selects **lines of text** as well as images:
+  double-click a run (or select it and choose Edit Text…) and rewrite it
+  in place, in the document's own font — undoable like everything else
+- Honest to the font: the editor validates **every keystroke** against
+  what the document's embedded font can actually express and names the
+  character it can't ("this document's font does not contain '→'") —
+  including characters a subsetted font never included. Text in the rare
+  fonts that can't round-trip (Type3, missing ToUnicode) says why instead
+  of failing
+- The layout holds: replacement text keeps the original position, and
+  words later on the same line slide over by exactly the width difference
+  — kerned text, stretched text (Tz), and text inside reused form
+  graphics all measured to the point
+- Editing a signed document warns first, and cancelling really cancels —
+  the file is left byte-untouched
+
 ## 2.1.0 — Edit Images & Batch OCR
 
 ### Edit Images — the first Edit tool

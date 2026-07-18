@@ -24,6 +24,8 @@ import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
 import { fetchEditPlacements } from '../../lib/edit-images';
 import type { EditImagePlacement } from '../../lib/edit-images';
+import { fetchTextRuns, EDIT_DECLINED } from '../../lib/edit-text';
+import type { EditTextRun } from '../../lib/edit-text';
 import { workspacePageNumber } from '../../lib/workspace-commit';
 import { runCommitGate } from '../../lib/commit-gate';
 
@@ -73,6 +75,11 @@ interface WorkspaceCanvasViewProps {
     index: number,
     opts?: { source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 }; outputPrefix?: string },
   ) => Promise<string | void>;
+  // Edit ▸ Text (7.2+7.3): replace one run's text — same one-snapshot,
+  // undoable App routing (engine replace_text_run). Resolves EDIT_DECLINED
+  // when the signed-doc warning was refused (the canvas restores its
+  // listing and says so).
+  onEditText: (path: string, page: number, index: number, newText: string) => Promise<string | void>;
   // Add-page ghost (2n.3): pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
   onAddPages: (docId: string, toIndex: number) => void;
@@ -106,6 +113,7 @@ const HAND_SUPPRESSES_PICKUP = (): void => {};
 const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
 const NO_EDIT_IMAGES: ReadonlyMap<string, EditImagePlacement[]> = new Map();
+const NO_EDIT_TEXT: ReadonlyMap<string, EditTextRun[]> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
 const NO_WORDS_BY_PAGE: ReadonlyMap<string, OcrWord[]> = new Map();
 const NO_WIDGETS_BY_PAGE: ReadonlyMap<string, OverlayWidget[]> = new Map();
@@ -119,6 +127,7 @@ export function WorkspaceCanvasView({
   onRedactFile,
   onApplyOcrLayer,
   onEditImage,
+  onEditText,
   onAddPages,
   onFillFormValues,
   onAddFormField,
@@ -825,15 +834,47 @@ export function WorkspaceCanvasView({
   // the start. Buffer identity in the deps refetches after every edit/undo.
   const [editImagesByPage, setEditImagesByPage] =
     useState<ReadonlyMap<string, EditImagePlacement[]>>(NO_EDIT_IMAGES);
-  const [editSel, setEditSel] = useState<{ pageId: string; index: number } | null>(null);
+  const [editTextByPage, setEditTextByPage] =
+    useState<ReadonlyMap<string, EditTextRun[]>>(NO_EDIT_TEXT);
+  // ONE selection across both edit-object kinds — the secondary toolbar's
+  // actions key off the kind.
+  const [editSel, setEditSel] = useState<{
+    kind: 'image' | 'text';
+    pageId: string;
+    index: number;
+  } | null>(null);
+  // The inline text editor's target; the input itself lives in PageCell
+  // (local value state, validated live against the run's encodable set).
+  const [editingText, setEditingText] = useState<{ pageId: string; index: number } | null>(null);
   const editFetchTokenRef = useRef(0);
   const editBuffer = focusedDoc ? state.files.get(focusedDoc.path)?.buffer : undefined;
+  // The DESTRUCTIVE clears (selection + the open editor with the user's
+  // typed text) fire only when the edit context truly changed — tool,
+  // focused document, or ITS buffer. `docs`/`state.files` are whole-
+  // workspace identities that churn when ANY open file reindexes or
+  // reloads; an unconditional clear on every rerun silently destroyed an
+  // in-progress edit because of an unrelated file's op (review-caught
+  // CRITICAL). Those reruns still refetch listings (ordering can shift);
+  // they just stop closing the editor.
+  const prevEditCtxRef = useRef<{ tool: unknown; docId: unknown; buffer: unknown }>({
+    tool: null,
+    docId: null,
+    buffer: null,
+  });
   useEffect(() => {
     const token = ++editFetchTokenRef.current;
-    setEditSel(null);
+    const prev = prevEditCtxRef.current;
+    const ctxChanged =
+      prev.tool !== tool || prev.docId !== (focusedDoc?.id ?? null) || prev.buffer !== editBuffer;
+    prevEditCtxRef.current = { tool, docId: focusedDoc?.id ?? null, buffer: editBuffer };
+    if (ctxChanged) {
+      setEditSel(null);
+      setEditingText(null);
+    }
     if (tool !== 'edit' || !focusedDoc || !editBuffer) {
       setEditImagesByPage(NO_EDIT_IMAGES);
-      setEditNotice(null);
+      setEditTextByPage(NO_EDIT_TEXT);
+      if (ctxChanged) setEditNotice(null);
       return;
     }
     const doc = focusedDoc;
@@ -847,7 +888,8 @@ export function WorkspaceCanvasView({
       const f = state.files.get(doc.path);
       if (!f?.buffer) return;
       const proxy = await getDocumentProxy(doc.path, f.buffer);
-      const next = new Map<string, EditImagePlacement[]>();
+      const nextImages = new Map<string, EditImagePlacement[]>();
+      const nextText = new Map<string, EditTextRun[]>();
       for (const page of doc.pages) {
         if (editFetchTokenRef.current !== token) return;
         const pageNumber = workspacePageNumber(docs, doc, page.id);
@@ -855,23 +897,33 @@ export function WorkspaceCanvasView({
         try {
           const p = await proxy.getPage(page.sourcePageIndex + 1);
           const [vx0, vy0, vx1, vy1] = p.view;
-          const placements = await fetchEditPlacements(
-            (m, params) => engineCall(m, params),
-            f.workingPath,
-            pageNumber,
-            { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate },
-          );
+          const geometry = {
+            box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+            bakedRotate: p.rotate,
+          };
+          const call = (m: string, params: Record<string, unknown>): Promise<unknown> =>
+            engineCall(m, params);
+          const placements = await fetchEditPlacements(call, f.workingPath, pageNumber, geometry);
+          if (editFetchTokenRef.current !== token) return;
+          const runs = await fetchTextRuns(call, f.workingPath, pageNumber, geometry);
           if (editFetchTokenRef.current !== token) return;
           if (placements.length > 0) {
-            next.set(page.id, placements);
-            setEditImagesByPage(new Map(next)); // incremental fill
+            nextImages.set(page.id, placements);
+            setEditImagesByPage(new Map(nextImages)); // incremental fill
+          }
+          if (runs.length > 0) {
+            nextText.set(page.id, runs);
+            setEditTextByPage(new Map(nextText));
           }
         } catch {
           // One page's listing failing (odd stream) must not kill the mode —
           // that page simply offers no outlines.
         }
       }
-      if (editFetchTokenRef.current === token) setEditImagesByPage(new Map(next));
+      if (editFetchTokenRef.current === token) {
+        setEditImagesByPage(new Map(nextImages));
+        setEditTextByPage(new Map(nextText));
+      }
     })();
   }, [tool, focusedDoc, editBuffer, docs, state.files, engineCall]);
 
@@ -884,22 +936,114 @@ export function WorkspaceCanvasView({
 
   const handleSelectEditImage = useCallback((pageId: string, index: number) => {
     setEditNotice(null);
+    setEditingText(null);
     setEditSel((prev) =>
-      prev?.pageId === pageId && prev.index === index ? null : { pageId, index },
+      prev?.kind === 'image' && prev.pageId === pageId && prev.index === index
+        ? null
+        : { kind: 'image', pageId, index },
     );
   }, []);
+
+  const handleSelectEditText = useCallback((pageId: string, index: number) => {
+    setEditNotice(null);
+    setEditingText(null);
+    setEditSel((prev) =>
+      prev?.kind === 'text' && prev.pageId === pageId && prev.index === index
+        ? null
+        : { kind: 'text', pageId, index },
+    );
+  }, []);
+
+  const handleOpenTextEditor = useCallback(
+    (pageId: string, index: number) => {
+      const run = editTextByPage.get(pageId)?.find((r) => r.index === index);
+      if (!run) return;
+      if (!run.editable) {
+        // The refusal SELECTS the run too — the toolbar must reflect what
+        // was just clicked, not a previous image selection (review-caught).
+        setEditSel({ kind: 'text', pageId, index });
+        setEditNotice({ text: run.reason ?? 'This text is not editable.', error: true });
+        return;
+      }
+      setEditNotice(null);
+      setEditSel({ kind: 'text', pageId, index });
+      setEditingText({ pageId, index });
+    },
+    [editTextByPage],
+  );
+
+  const handleCancelTextEdit = useCallback(() => setEditingText(null), []);
+
+  // Ref, not state: two commits in one tick (the unmount-blur refire when
+  // React removes the focused input) both read a STALE editBusy closure —
+  // the applyingRef/signingRef rule this file already follows everywhere
+  // else (review-caught).
+  const committingTextRef = useRef(false);
+  const handleCommitTextEdit = useCallback(
+    async (pageId: string, index: number, newText: string): Promise<void> => {
+      if (!focusedDoc || committingTextRef.current) return;
+      const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
+      if (pageNumber == null) return;
+      committingTextRef.current = true;
+      setEditingText(null);
+      setEditSel(null);
+      setEditBusy(true);
+      setEditNotice(null);
+      // Same stale-window discipline as image mutations: this page's runs
+      // are about to change identity — drop them synchronously, but keep
+      // the old value so a DECLINED signed-doc warning (no buffer change,
+      // no refetch) can put it back instead of leaving the run invisibly
+      // gone (review-caught: indistinguishable from success).
+      const previousRuns = editTextByPage.get(pageId);
+      setEditTextByPage((prev) => {
+        const next = new Map(prev);
+        next.delete(pageId);
+        return next;
+      });
+      try {
+        const result = await onEditText(focusedDoc.path, pageNumber, index, newText);
+        if (result === EDIT_DECLINED) {
+          if (previousRuns) {
+            setEditTextByPage((prev) => {
+              const next = new Map(prev);
+              next.set(pageId, previousRuns);
+              return next;
+            });
+          }
+          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+        }
+      } catch (err) {
+        if (previousRuns) {
+          setEditTextByPage((prev) => {
+            const next = new Map(prev);
+            next.set(pageId, previousRuns);
+            return next;
+          });
+        }
+        setEditNotice({
+          text: err instanceof Error ? err.message : String(err),
+          error: true,
+        });
+      } finally {
+        committingTextRef.current = false;
+        setEditBusy(false);
+      }
+    },
+    [focusedDoc, docs, editTextByPage, onEditText],
+  );
 
   const runEditAction = useCallback(
     async (
       kind: 'delete' | 'replace' | 'extract',
       opts?: Parameters<typeof onEditImage>[4],
     ): Promise<void> => {
-      if (!editSel || !focusedDoc || editBusy) return;
+      if (!editSel || editSel.kind !== 'image' || !focusedDoc || editBusy) return;
       const pageNumber = workspacePageNumber(docs, focusedDoc, editSel.pageId);
       if (pageNumber == null) return;
       const target = editSel;
       setEditBusy(true);
       setEditNotice(null);
+      const previousPlacements = editImagesByPage.get(target.pageId);
       if (kind !== 'extract') {
         // Indexes shift under a delete; the refetch is a per-page engine
         // round-trip away. Drop this page's stale boxes SYNCHRONOUSLY so a
@@ -915,7 +1059,21 @@ export function WorkspaceCanvasView({
       }
       try {
         const notice = await onEditImage(kind, focusedDoc.path, pageNumber, target.index, opts);
-        if (typeof notice === 'string') setEditNotice({ text: notice, error: false });
+        if (notice === EDIT_DECLINED) {
+          // Declined signed-doc warning: no buffer change, no refetch —
+          // restore the synchronously-dropped placements and say so
+          // (review-caught: silence read as success).
+          if (kind !== 'extract' && previousPlacements) {
+            setEditImagesByPage((prev) => {
+              const next = new Map(prev);
+              next.set(target.pageId, previousPlacements);
+              return next;
+            });
+          }
+          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+        } else if (typeof notice === 'string') {
+          setEditNotice({ text: notice, error: false });
+        }
       } catch (err) {
         setEditNotice({
           text: err instanceof Error ? err.message : String(err),
@@ -925,16 +1083,20 @@ export function WorkspaceCanvasView({
         setEditBusy(false);
       }
     },
-    [editSel, focusedDoc, docs, onEditImage, editBusy],
+    [editSel, focusedDoc, docs, onEditImage, editBusy, editImagesByPage],
   );
 
-  // Harness bridge for Edit ▸ Images (7.1) — same refs pattern as forms.
+  // Harness bridge for Edit ▸ Images + Text (7.1/7.2) — refs pattern.
   const editImagesRef = useRef(editImagesByPage);
   editImagesRef.current = editImagesByPage;
+  const editTextRef = useRef(editTextByPage);
+  editTextRef.current = editTextByPage;
   const editSelRef = useRef(editSel);
   editSelRef.current = editSel;
   const runEditActionRef = useRef(runEditAction);
   runEditActionRef.current = runEditAction;
+  const openTextEditorRef = useRef(handleOpenTextEditor);
+  openTextEditorRef.current = handleOpenTextEditor;
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasEditImages({
@@ -944,8 +1106,17 @@ export function WorkspaceCanvasView({
           index: p.index,
           nested: p.nested,
         })),
-      select: (pageId, index) => setEditSel({ pageId, index }),
+      select: (pageId, index) => setEditSel({ kind: 'image', pageId, index }),
       selection: () => editSelRef.current,
+      textPageIds: () => [...editTextRef.current.keys()],
+      textRuns: (pageId) =>
+        (editTextRef.current.get(pageId) ?? []).map((r) => ({
+          index: r.index,
+          text: r.text,
+          editable: r.editable,
+          reason: r.reason,
+        })),
+      openTextEditor: (pageId, index) => openTextEditorRef.current(pageId, index),
       act: (kind, opts) => runEditActionRef.current(kind, opts),
     });
     return () => registerCanvasEditImages(null);
@@ -1588,9 +1759,25 @@ export function WorkspaceCanvasView({
         stampPreset={stampPreset}
         onSetStampPreset={setStampPreset}
         editHasSelection={editSel !== null}
+        editSelectionKind={editSel?.kind ?? null}
+        editTextEditable={
+          editSel?.kind === 'text'
+            ? (editTextByPage.get(editSel.pageId)?.find((r) => r.index === editSel.index)
+                ?.editable ?? false)
+            : false
+        }
+        editTextReason={
+          editSel?.kind === 'text'
+            ? (editTextByPage.get(editSel.pageId)?.find((r) => r.index === editSel.index)
+                ?.reason ?? null)
+            : null
+        }
         editBusy={editBusy}
         editNotice={editNotice}
         onEditAction={(kind) => void runEditAction(kind)}
+        onEditTextOpen={() => {
+          if (editSel?.kind === 'text') handleOpenTextEditor(editSel.pageId, editSel.index);
+        }}
       />
       {docViewMode === 'document' && focusedDoc ? (
         <DocumentView
@@ -1610,8 +1797,14 @@ export function WorkspaceCanvasView({
           stampPreset={stampPreset}
           redactionMarksByPage={redactionMarksByPage}
           editImagesByPage={editImagesByPage}
+          editTextByPage={editTextByPage}
           editSelection={editSel}
+          editingText={editingText}
           onSelectEditImage={handleSelectEditImage}
+          onSelectEditText={handleSelectEditText}
+          onOpenTextEditor={handleOpenTextEditor}
+          onCommitTextEdit={(pageId, index, text) => void handleCommitTextEdit(pageId, index, text)}
+          onCancelTextEdit={handleCancelTextEdit}
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}
@@ -1670,8 +1863,14 @@ export function WorkspaceCanvasView({
           stampPreset={stampPreset}
           redactionMarksByPage={redactionMarksByPage}
           editImagesByPage={editImagesByPage}
+          editTextByPage={editTextByPage}
           editSelection={editSel}
+          editingText={editingText}
           onSelectEditImage={handleSelectEditImage}
+          onSelectEditText={handleSelectEditText}
+          onOpenTextEditor={handleOpenTextEditor}
+          onCommitTextEdit={(pageId, index, text) => void handleCommitTextEdit(pageId, index, text)}
+          onCancelTextEdit={handleCancelTextEdit}
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}

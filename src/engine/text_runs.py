@@ -66,10 +66,23 @@ class _FontCache:
         font_obj = _lookup_font(name, resources, fallback_resources)
         if font_obj is None:
             return None
+        # Key on stable identity ONLY. `objgen` is value-based for indirect
+        # fonts; a DIRECT font dict's wrapper is a fresh pikepdf object per
+        # access, so id(font_obj) recycles across GC and served a STALE
+        # OTHER FONT's capability — review-measured at 22.6% wrong lookups
+        # in an alternating-font walk, and on replace it would encode the
+        # user's text with the wrong font's table into the saved file. The
+        # resources dicts are stable Python references for the whole walk
+        # scope, so (resources ids + name) is a sound direct-font key.
         try:
-            key = font_obj.objgen if font_obj.is_indirect else id(font_obj)
+            is_indirect = bool(font_obj.is_indirect)
         except AttributeError:
-            key = id(font_obj)
+            is_indirect = False
+        key = (
+            ("obj", font_obj.objgen)
+            if is_indirect
+            else ("direct", id(resources), id(fallback_resources), str(name))
+        )
         if key not in self._by_key:
             try:
                 self._by_key[key] = font_capability(font_obj)
@@ -269,13 +282,16 @@ def _instruction(operands: list, operator: str):
     return pikepdf.ContentStreamInstruction(operands, pikepdf.Operator(operator))
 
 
-def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, counter, reserved, parent_state=None):
+def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, counter, reserved, base_ctm=IDENTITY, parent_state=None):
     """(kept, changed). Mirrors _walk_runs's counting exactly (its OWN
     per-stream state machine, inheriting like the lister — a shared or
     global state across recursion levels would corrupt both the width math
     and the count agreement); applies the edit at the target and Δ-adjusts
-    subsequent same-line Td/TD anchors within this stream."""
-    gts = _child_state(IDENTITY if parent_state is None else parent_state.ctm, parent_state)
+    subsequent same-line Td/TD anchors within this stream. `base_ctm` is
+    form-matrix-composed like the lister's — nothing here READS ctm today
+    (all Δ math is text-space; review-verified inert), but a divergent ctm
+    is exactly the latent trap the next rewriter feature would fall into."""
+    gts = _child_state(base_ctm, parent_state)
     kept: list = []
     changed = False
     adjusting = False  # True after the edit, until a line boundary
@@ -293,10 +309,18 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     adjusting = False
                 else:
                     if ty == 0.0:
+                        # Δ is applied to the FIRST same-line anchor ONLY:
+                        # Td translations are RELATIVE to the previous line
+                        # matrix, so the one adjustment propagates through
+                        # the rest of the chain automatically — adjusting
+                        # every subsequent Td compounded the shift (word 3
+                        # moved 2Δ, word 4 moved 3Δ — proven live with a
+                        # three-word probe before the fix).
                         gts.feed(operator, operands)
                         kept.append(
                             _instruction([tx + edit.delta_scaled, ty], operator)
                         )
+                        adjusting = False
                         continue
                     adjusting = False
 
@@ -362,6 +386,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
             if xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
                 form_res = xobj.get("/Resources")
                 read_res = form_res if form_res is not None else resources
+                form_matrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
                 inner_kept, inner_changed = _rewrite_runs(
                     pdf,
                     pikepdf.parse_content_stream(xobj),
@@ -372,6 +397,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     fonts,
                     counter,
                     reserved,
+                    base_ctm=_mat_mult(form_matrix, gts.ctm),
                     parent_state=gts,
                 )
                 if inner_changed:

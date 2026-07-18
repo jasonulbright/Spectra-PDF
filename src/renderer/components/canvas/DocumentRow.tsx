@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { EditImagePlacement } from '../../lib/edit-images';
+import type { EditTextRun } from '../../lib/edit-text';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -36,8 +37,14 @@ interface DocumentRowProps {
   // survives unrelated re-renders.
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
-  editSelection: { pageId: string; index: number } | null;
+  editTextByPage: ReadonlyMap<string, EditTextRun[]>;
+  editSelection: { kind: 'image' | 'text'; pageId: string; index: number } | null;
+  editingText: { pageId: string; index: number } | null;
   onSelectEditImage: (pageId: string, index: number) => void;
+  onSelectEditText: (pageId: string, index: number) => void;
+  onOpenTextEditor: (pageId: string, index: number) => void;
+  onCommitTextEdit: (pageId: string, index: number, newText: string) => void;
+  onCancelTextEdit: () => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -92,8 +99,14 @@ function DocumentRowImpl({
   stampPreset,
   redactionMarksByPage,
   editImagesByPage,
+  editTextByPage,
   editSelection,
+  editingText,
   onSelectEditImage,
+  onSelectEditText,
+  onOpenTextEditor,
+  onCommitTextEdit,
+  onCancelTextEdit,
   signaturePlacement,
   findMatchPageIds,
   findWordsByPage,
@@ -146,8 +159,23 @@ function DocumentRowImpl({
         stampPreset={stampPreset}
         redactionMarks={redactionMarksByPage.get(page.id)}
         editImages={editImagesByPage.get(page.id)}
-        editSelectedIndex={editSelection?.pageId === page.id ? editSelection.index : null}
+        editTextRuns={editTextByPage.get(page.id)}
+        editSelectedIndex={
+          editSelection?.kind === 'image' && editSelection.pageId === page.id
+            ? editSelection.index
+            : null
+        }
+        editTextSelectedIndex={
+          editSelection?.kind === 'text' && editSelection.pageId === page.id
+            ? editSelection.index
+            : null
+        }
+        editingTextIndex={editingText?.pageId === page.id ? editingText.index : null}
         onSelectEditImage={onSelectEditImage}
+        onSelectEditText={onSelectEditText}
+        onOpenTextEditor={onOpenTextEditor}
+        onCommitTextEdit={onCommitTextEdit}
+        onCancelTextEdit={onCancelTextEdit}
         signaturePlacement={signaturePlacement?.pageId === page.id ? signaturePlacement : null}
         findMatch={findMatchPageIds.has(page.id)}
         findWords={findWordsByPage.get(page.id)}

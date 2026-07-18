@@ -7,6 +7,8 @@ import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '.
 import type { RedactionMark } from '../../lib/redaction';
 import type { OcrWord } from '../../ocr/types';
 import type { EditImagePlacement } from '../../lib/edit-images';
+import type { EditTextRun } from '../../lib/edit-text';
+import { unencodableChars } from '../../lib/edit-text';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
@@ -309,6 +311,16 @@ interface PageCellProps {
   editImages?: EditImagePlacement[];
   editSelectedIndex?: number | null;
   onSelectEditImage?: (pageId: string, index: number) => void;
+  /** Edit-mode text runs (7.2+7.3), same projection rules as images. */
+  editTextRuns?: EditTextRun[];
+  editTextSelectedIndex?: number | null;
+  /** The run whose inline editor is OPEN on this page (input state is
+   * local to the editor; commit/cancel report up). */
+  editingTextIndex?: number | null;
+  onSelectEditText?: (pageId: string, index: number) => void;
+  onOpenTextEditor?: (pageId: string, index: number) => void;
+  onCommitTextEdit?: (pageId: string, index: number, newText: string) => void;
+  onCancelTextEdit?: () => void;
   // Pending visible-signature placement, when it sits on THIS page (transient
   // view state with mark lifecycle — see lib/signature-placement.ts).
   signaturePlacement?: SignaturePlacement | null;
@@ -381,6 +393,13 @@ function PageCellImpl({
   editImages,
   editSelectedIndex,
   onSelectEditImage,
+  editTextRuns,
+  editTextSelectedIndex,
+  editingTextIndex,
+  onSelectEditText,
+  onOpenTextEditor,
+  onCommitTextEdit,
+  onCancelTextEdit,
   signaturePlacement,
   findMatch,
   findWords,
@@ -895,6 +914,57 @@ function PageCellImpl({
         );
       })}
       {tool === 'edit' &&
+        (editTextRuns ?? []).map((run) => {
+          const r = rotateNormalizedRect(run.rect, page.rotation);
+          const selected = editTextSelectedIndex === run.index;
+          if (editingTextIndex === run.index) {
+            return (
+              <TextRunEditor
+                key={`et-${run.index}`}
+                run={run}
+                rect={r}
+                // The line's THICKNESS, rotation-proof: a 90°-turned page
+                // swaps w/h, and sizing off the swapped h produced a ~300px
+                // font (review-caught). min(w,h) is the line thickness
+                // under any quarter-turn; the editor renders horizontal
+                // (not counter-rotated) at a readable size — the v1 call.
+                heightPx={Math.min(r.h, r.w) * pageHeight}
+                onCommit={(value) => onCommitTextEdit?.(page.id, run.index, value)}
+                onCancel={() => onCancelTextEdit?.()}
+              />
+            );
+          }
+          return (
+            <button
+              key={`et-${run.index}`}
+              type="button"
+              data-testid={`edit-text-${run.index}`}
+              className={
+                'page-edittext' +
+                (selected ? ' selected' : '') +
+                (run.editable ? '' : ' locked')
+              }
+              title={run.editable ? 'Text — double-click to edit' : run.reason ?? 'Not editable'}
+              aria-pressed={selected}
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectEditText?.(page.id, run.index);
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                onOpenTextEditor?.(page.id, run.index);
+              }}
+            />
+          );
+        })}
+      {tool === 'edit' &&
         (editImages ?? []).map((img) => {
           // Placements are display-normalized at the BAKED orientation; a
           // pending in-memory rotation just changes the projection (the
@@ -1051,6 +1121,92 @@ function PageCellImpl({
         </svg>
       )}
       <span className="page-number">{visibleNumber}</span>
+    </div>
+  );
+}
+
+/** The inline text-run editor (7.2+7.3): an input at the run's display
+ * rect, seeded with the decoded text, validated LIVE against the run's
+ * finite encodable inventory — apply disables with the offending character
+ * named, never a save-time surprise. Enter commits (when valid+changed);
+ * Escape cancels; blur commits-if-valid-and-changed, else cancels. Input
+ * value is local state — the canvas only hears commit/cancel. */
+function TextRunEditor({
+  run,
+  rect,
+  heightPx,
+  onCommit,
+  onCancel,
+}: {
+  run: EditTextRun;
+  rect: { x: number; y: number; w: number; h: number };
+  heightPx: number;
+  onCommit: (value: string) => void;
+  onCancel: () => void;
+}): React.JSX.Element {
+  const [value, setValue] = useState(run.text);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+  const missing = unencodableChars(value, run.encodable);
+  const valid = missing.length === 0;
+  const changed = value !== run.text;
+  const finish = (): void => {
+    if (valid && changed) onCommit(value);
+    else onCancel();
+  };
+  return (
+    <div
+      className="page-edittext-editor"
+      style={{
+        left: `${rect.x * 100}%`,
+        top: `${rect.y * 100}%`,
+        minWidth: `${rect.w * 100}%`,
+      }}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        // A press on the editor's own chrome (the error line under the
+        // input) must not blur the input — blur means commit-or-cancel,
+        // and clicking the error to READ it discarded the edit
+        // (review-caught).
+        if (e.target !== inputRef.current) e.preventDefault();
+      }}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <input
+        ref={inputRef}
+        data-testid="edit-text-input"
+        className={valid ? '' : 'invalid'}
+        value={value}
+        style={{
+          fontSize: `${Math.min(48, Math.max(8, heightPx * 0.8))}px`,
+          height: `${Math.min(64, Math.max(12, heightPx * 1.15))}px`,
+        }}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            // Invalid + changed: HOLD the editor open with the error named —
+            // Enter never silently discards, and never commits the
+            // inexpressible. Unchanged: Enter is a close.
+            if (valid && changed) onCommit(value);
+            else if (!changed) onCancel();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            onCancel();
+          }
+        }}
+        onBlur={finish}
+      />
+      {!valid && (
+        <div className="page-edittext-error" data-testid="edit-text-error" aria-live="polite">
+          This document's font does not contain {missing.map((c) => `'${c}'`).join(' ')}
+        </div>
+      )}
     </div>
   );
 }
