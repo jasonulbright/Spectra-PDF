@@ -6,6 +6,7 @@ import { displayWidthAt, displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/l
 import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '../../lib/redaction';
 import type { RedactionMark } from '../../lib/redaction';
 import type { OcrWord } from '../../ocr/types';
+import type { EditImagePlacement } from '../../lib/edit-images';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
@@ -303,6 +304,11 @@ interface PageCellProps {
   // Pending redaction marks on this page (transient view state — see
   // lib/redaction.ts); undefined when none.
   redactionMarks?: RedactionMark[];
+  /** Edit-mode image placements (7.1), display-normalized at baked
+   * orientation — pending rotation is applied at render like marks. */
+  editImages?: EditImagePlacement[];
+  editSelectedIndex?: number | null;
+  onSelectEditImage?: (pageId: string, index: number) => void;
   // Pending visible-signature placement, when it sits on THIS page (transient
   // view state with mark lifecycle — see lib/signature-placement.ts).
   signaturePlacement?: SignaturePlacement | null;
@@ -372,6 +378,9 @@ function PageCellImpl({
   annotationColor,
   stampPreset,
   redactionMarks,
+  editImages,
+  editSelectedIndex,
+  onSelectEditImage,
   signaturePlacement,
   findMatch,
   findWords,
@@ -511,8 +520,11 @@ function PageCellImpl({
     // (with stopPropagation), and a press on empty page area must not start a
     // drag or a highlight band under an input. AUTHORING (formfields) is the
     // mode that bands, which is why the two are separate modes rather than one
-    // mode and a boolean (2n.4c).
-    if (tool === 'forms') return;
+    // mode and a boolean (2n.4c). Edit (7.1) is click-to-select the same way
+    // — without this, a drag on empty page area fell through to the generic
+    // band and silently created a HIGHLIGHT annotation (review-caught, the
+    // same class as the 'hand' fix above).
+    if (tool === 'forms' || tool === 'edit') return;
     e.preventDefault();
     e.stopPropagation();
     if (tool === 'ink') {
@@ -882,6 +894,35 @@ function PageCellImpl({
           </div>
         );
       })}
+      {tool === 'edit' &&
+        (editImages ?? []).map((img) => {
+          // Placements are display-normalized at the BAKED orientation; a
+          // pending in-memory rotation just changes the projection (the
+          // redaction-mark rule — user space is unmoved by /Rotate).
+          const r = rotateNormalizedRect(img.rect, page.rotation);
+          const selected = editSelectedIndex === img.index;
+          return (
+            <button
+              key={`ei-${img.index}`}
+              type="button"
+              data-testid={`edit-image-${img.index}`}
+              className={'page-editimg' + (selected ? ' selected' : '')}
+              title={img.nested ? 'Image (inside a form)' : 'Image'}
+              aria-pressed={selected}
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectEditImage?.(page.id, img.index);
+              }}
+            />
+          );
+        })}
       {(findWords ?? []).map((word, i) => {
         const r = rotateNormalizedRect(word, page.rotation);
         return (

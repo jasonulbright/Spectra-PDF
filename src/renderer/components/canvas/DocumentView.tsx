@@ -11,6 +11,7 @@ import {
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation, PageRef } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { EditImagePlacement } from '../../lib/edit-images';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -74,6 +75,9 @@ export interface DocumentViewProps {
   annotationColor?: string;
   stampPreset?: StampPreset | null;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
+  editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
+  editSelection: { pageId: string; index: number } | null;
+  onSelectEditImage: (pageId: string, index: number) => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -458,6 +462,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           annotationColor={props.annotationColor}
           stampPreset={props.stampPreset}
           redactionMarks={props.redactionMarksByPage.get(page.id)}
+          editImages={props.editImagesByPage.get(page.id)}
+          editSelectedIndex={
+            props.editSelection?.pageId === page.id ? props.editSelection.index : null
+          }
+          onSelectEditImage={props.onSelectEditImage}
           signaturePlacement={props.signaturePlacement?.pageId === page.id ? props.signaturePlacement : null}
           findMatch={props.findMatchPageIds.has(page.id)}
           findWords={props.findWordsByPage.get(page.id)}

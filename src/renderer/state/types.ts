@@ -138,7 +138,10 @@ export type CanvasTool =
   // name, invisible to the command registry and the keymap, and (being a second
   // axis on top of `tool`) the reason 'forms' had two owning tools at once and
   // "which tool is armed?" had no answer. It's a mode; it says so now.
-  | 'formfields';
+  | 'formfields'
+  // Selecting page IMAGES to replace/extract/delete (Phase 7.1). The Edit
+  // tool's mode; placements come from the engine's list_page_images.
+  | 'edit';
 
 // The tab-strip model (Phase 4 M2, § 3.1): Home | Tools | one tab per open
 // document. A doc tab focuses that file and shows the document pane (at M2:

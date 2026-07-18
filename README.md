@@ -6,7 +6,7 @@ A modern, open-source PDF workbench for Windows. Tauri v2 + React, with an embed
 
 ## What it is
 
-Version 2.0 is a full-featured PDF workbench with a familiar user interface: a menu bar, main toolbar, and tabs over a continuous reading view, a navigation pane, and twelve task-oriented tools — with a keymap verified against the industry-standard editor's published shortcut table, so your muscle memory just works. Every whole-file operation also ships as a CLI subcommand with identical results.
+A full-featured PDF workbench with a familiar user interface: a menu bar, main toolbar, and tabs over a continuous reading view, a navigation pane, and thirteen task-oriented tools — with a keymap verified against the industry-standard editor's published shortcut table, so your muscle memory just works. Every whole-file operation also ships as a CLI subcommand with identical results.
 
 ### Reading & navigating
 - **Reading view** — continuous, virtualized scroll; smooth with 1,000-page documents. Real text selection and copy, zoom presets (`Ctrl+0/1/2`), go-to-page (`Ctrl+Shift+N`), Rotate View (`Ctrl+Shift+Plus/Minus` — the page turns, the file doesn't), Hand/Select with Space as a temporary hand
@@ -17,8 +17,8 @@ Version 2.0 is a full-featured PDF workbench with a familiar user interface: a m
 
 ![Organize view](docs/images/screenshot_organize.png)
 
-### The twelve tools
-Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and recoloring on each, plus a comments sidebar; existing PDF annotations import as editable) · Fill & Sign (AcroForm fill on the page, digital signatures: verify, sign with PFX/PEM, visible stamps, sign-into-field) · Prepare Form (draw new fields on the page) · Redact (true content removal) · Scan & OCR · Compare (text + visual diff) · Protect (AES-256 encrypt/decrypt) · Optimize (compress, grayscale, linearize, PDF/A, PDF version) · Repair (three tiers up to per-page salvage) · Watermark · Export (text extraction)
+### The thirteen tools
+Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and recoloring on each, plus a comments sidebar; existing PDF annotations import as editable) · Edit (select an image on the page — replace it, extract it, or delete it) · Fill & Sign (AcroForm fill on the page, digital signatures: verify, sign with PFX/PEM, visible stamps, sign-into-field) · Prepare Form (draw new fields on the page) · Redact (true content removal) · Scan & OCR · Compare (text + visual diff) · Protect (AES-256 encrypt/decrypt) · Optimize (compress, grayscale, linearize, PDF/A, PDF version) · Repair (three tiers up to per-page salvage) · Watermark · Export (text extraction)
 
 ![Tools](docs/images/screenshot_tools.png)
 

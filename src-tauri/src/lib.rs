@@ -84,6 +84,8 @@ pub fn run() {
             commands::ensure_parent_dirs,
             commands::paths_same_file,
             commands::read_file_binary,
+            commands::pick_image_file,
+            commands::save_image_file_dialog,
 
             commands::read_file_buffer,
             commands::create_working_copy,

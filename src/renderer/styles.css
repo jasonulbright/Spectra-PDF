@@ -1165,6 +1165,36 @@
   pointer-events: none;
 }
 
+/* Edit ▸ Images (7.1): clickable placement outlines. Quiet at rest, obvious
+   on hover, accent when selected — the selection is what the secondary
+   toolbar's actions operate on. */
+.page-editimg {
+  position: absolute;
+  background: transparent;
+  border: 1.5px dashed rgba(120, 170, 255, 0.55);
+  border-radius: 2px;
+  padding: 0;
+  cursor: pointer;
+}
+.page-editimg:hover {
+  border-color: rgba(120, 170, 255, 0.95);
+  background: rgba(120, 170, 255, 0.08);
+}
+.page-editimg.selected {
+  border: 2px solid var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.secondary-toolbar-hint {
+  font-size: 11px;
+  color: var(--text-dim, #8a8a92);
+  align-self: center;
+  padding: 0 4px;
+}
+.secondary-toolbar-hint.error {
+  color: #f87171;
+}
+
 .page-redact-label {
   display: inline-block;
   max-width: 100%;

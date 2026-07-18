@@ -19,6 +19,7 @@ import type { CanvasTool } from '../state/types';
 export type ToolId =
   | 'organize'
   | 'comment'
+  | 'edit'
   | 'fillsign'
   | 'prepareform'
   | 'redact'
@@ -76,6 +77,16 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // Four modes, one tool — the pill listed them flat and made the user infer
     // the grouping; Acrobat's Comment toolbar states it.
     canvasTools: ['highlight', 'freetext', 'ink', 'stamp'],
+  },
+  {
+    id: 'edit',
+    title: 'Edit',
+    description: 'Select an image on the page — replace, extract or delete it.',
+    ops: [],
+    // Phase 7.1: images only. Text editing arrives as later slices of the
+    // same tool (21-phase7-content-editing.md) — the tile name is already
+    // the destination, not the current ceiling.
+    canvasTools: ['edit'],
   },
   {
     id: 'fillsign',

@@ -59,6 +59,12 @@ export const dialog = {
   pickPemFile: () => invoke<string | null>('pick_pem_file'),
   /** Pick a folder (Batch OCR source/destination). Returns null if cancelled. */
   pickFolder: (title?: string) => invoke<string | null>('pick_folder_dialog', { title }),
+  /** Pick a replacement image (Edit ▸ Replace Image). Null if cancelled. */
+  pickImageFile: () => invoke<string | null>('pick_image_file'),
+  /** Save location for an extracted image (base name; engine adds the real
+   * extension). Null if cancelled. */
+  saveImageFile: (defaultName?: string) =>
+    invoke<string | null>('save_image_file_dialog', { defaultName }),
 };
 
 // ── Batch OCR (Phase 6) ───────────────────────────────────────────────────

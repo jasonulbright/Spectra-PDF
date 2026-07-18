@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 2.1.0 — Edit Images & Batch OCR
+
+### Edit Images — the first Edit tool
+- New **Edit** tool: click any image on the page and **replace** it (the
+  new picture drops into the exact same spot), **extract** it to a file,
+  or **delete** it — all undoable like every other operation
+- Precise by placement: an image used in several places changes only where
+  you clicked, including images inside reused form graphics
+- Replacing keeps JPEG quality untouched (the original file's bytes are
+  embedded as-is); other formats are converted losslessly, transparency
+  preserved
+- Editing a digitally-signed document warns first — edits invalidate
+  signatures
+- Text editing is on the way as the next slices of the same tool
 
 ### Batch OCR (folder mirror)
 - New Tools ▸ **Batch OCR Folder…** — pick a source folder and a destination,

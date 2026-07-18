@@ -22,6 +22,10 @@ import { DocumentView } from './DocumentView';
 import { buildOcrApplyPayload } from '../../lib/ocr-apply';
 import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
+import { fetchEditPlacements } from '../../lib/edit-images';
+import type { EditImagePlacement } from '../../lib/edit-images';
+import { workspacePageNumber } from '../../lib/workspace-commit';
+import { runCommitGate } from '../../lib/commit-gate';
 
 import { buildMergedPageRefs, pathBlockedFromClose } from '../../lib/merge-docs';
 import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
@@ -29,7 +33,7 @@ import { pruneFormValues, valueShapeMatches } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
-import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge } from '../../testHarness';
+import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
 import { invokeCommand, registerCanvasServices } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { ContextMenu } from '../ContextMenu';
@@ -58,6 +62,17 @@ interface WorkspaceCanvasViewProps {
   // Persist OCR text layers into one file — same performOperation routing as
   // onRedactFile (gate flush -> snapshot -> engine apply_ocr_layer -> reload).
   onApplyOcrLayer: (path: string, pages: OcrApplyPage[]) => Promise<void>;
+  // Edit ▸ Images (7.1): one handler, three actions, all App-routed (delete/
+  // replace via the snapshot→engine→reload shape — undoable; extract = gated
+  // read + save, resolving to a user-facing notice naming the real output).
+  // `opts` is the harness's dialog bypass.
+  onEditImage: (
+    kind: 'delete' | 'replace' | 'extract',
+    path: string,
+    page: number,
+    index: number,
+    opts?: { source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 }; outputPrefix?: string },
+  ) => Promise<string | void>;
   // Add-page ghost (2n.3): pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
   onAddPages: (docId: string, toIndex: number) => void;
@@ -90,6 +105,7 @@ export type CanvasDropResolver = (clientX: number, clientY: number) => CanvasDro
 const HAND_SUPPRESSES_PICKUP = (): void => {};
 const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
+const NO_EDIT_IMAGES: ReadonlyMap<string, EditImagePlacement[]> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
 const NO_WORDS_BY_PAGE: ReadonlyMap<string, OcrWord[]> = new Map();
 const NO_WIDGETS_BY_PAGE: ReadonlyMap<string, OverlayWidget[]> = new Map();
@@ -102,6 +118,7 @@ export function WorkspaceCanvasView({
   onExtractText,
   onRedactFile,
   onApplyOcrLayer,
+  onEditImage,
   onAddPages,
   onFillFormValues,
   onAddFormField,
@@ -798,6 +815,142 @@ export function WorkspaceCanvasView({
     }
   }, [docs, state.files, searchIndex, onApplyOcrLayer]);
 
+  // --- Edit ▸ Images (7.1): placements + selection --------------------------
+  // Placements come from the engine per page of the FOCUSED document (the
+  // reading view's document; the board shows its outlines too — the
+  // documented 7.1 scope). The mode's entry flushes pending page edits so the
+  // engine's committed order matches what's displayed, then listings load
+  // incrementally (one cheap engine call per page) under a token that drops
+  // stale batches — the batch-OCR selectSource race lesson, applied here from
+  // the start. Buffer identity in the deps refetches after every edit/undo.
+  const [editImagesByPage, setEditImagesByPage] =
+    useState<ReadonlyMap<string, EditImagePlacement[]>>(NO_EDIT_IMAGES);
+  const [editSel, setEditSel] = useState<{ pageId: string; index: number } | null>(null);
+  const editFetchTokenRef = useRef(0);
+  const editBuffer = focusedDoc ? state.files.get(focusedDoc.path)?.buffer : undefined;
+  useEffect(() => {
+    const token = ++editFetchTokenRef.current;
+    setEditSel(null);
+    if (tool !== 'edit' || !focusedDoc || !editBuffer) {
+      setEditImagesByPage(NO_EDIT_IMAGES);
+      setEditNotice(null);
+      return;
+    }
+    const doc = focusedDoc;
+    void (async () => {
+      try {
+        await runCommitGate();
+      } catch {
+        return; // gate failure surfaces on the commit banner; no overlays
+      }
+      if (editFetchTokenRef.current !== token) return;
+      const f = state.files.get(doc.path);
+      if (!f?.buffer) return;
+      const proxy = await getDocumentProxy(doc.path, f.buffer);
+      const next = new Map<string, EditImagePlacement[]>();
+      for (const page of doc.pages) {
+        if (editFetchTokenRef.current !== token) return;
+        const pageNumber = workspacePageNumber(docs, doc, page.id);
+        if (pageNumber == null) continue;
+        try {
+          const p = await proxy.getPage(page.sourcePageIndex + 1);
+          const [vx0, vy0, vx1, vy1] = p.view;
+          const placements = await fetchEditPlacements(
+            (m, params) => engineCall(m, params),
+            f.workingPath,
+            pageNumber,
+            { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate },
+          );
+          if (editFetchTokenRef.current !== token) return;
+          if (placements.length > 0) {
+            next.set(page.id, placements);
+            setEditImagesByPage(new Map(next)); // incremental fill
+          }
+        } catch {
+          // One page's listing failing (odd stream) must not kill the mode —
+          // that page simply offers no outlines.
+        }
+      }
+      if (editFetchTokenRef.current === token) setEditImagesByPage(new Map(next));
+    })();
+  }, [tool, focusedDoc, editBuffer, docs, state.files, engineCall]);
+
+  // A mutation's status line (neutral notice or red error) + in-flight flag.
+  // Renderer-side failures (decode, IO) would otherwise vanish as unhandled
+  // rejections with zero UI — engine failures already surface via the op
+  // queue, this covers the rest (review-caught).
+  const [editNotice, setEditNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+
+  const handleSelectEditImage = useCallback((pageId: string, index: number) => {
+    setEditNotice(null);
+    setEditSel((prev) =>
+      prev?.pageId === pageId && prev.index === index ? null : { pageId, index },
+    );
+  }, []);
+
+  const runEditAction = useCallback(
+    async (
+      kind: 'delete' | 'replace' | 'extract',
+      opts?: Parameters<typeof onEditImage>[4],
+    ): Promise<void> => {
+      if (!editSel || !focusedDoc || editBusy) return;
+      const pageNumber = workspacePageNumber(docs, focusedDoc, editSel.pageId);
+      if (pageNumber == null) return;
+      const target = editSel;
+      setEditBusy(true);
+      setEditNotice(null);
+      if (kind !== 'extract') {
+        // Indexes shift under a delete; the refetch is a per-page engine
+        // round-trip away. Drop this page's stale boxes SYNCHRONOUSLY so a
+        // click in the window can't target the wrong image (review-caught:
+        // delete index 0 of three, click the still-drawn old box for what
+        // is now a different placement).
+        setEditSel(null);
+        setEditImagesByPage((prev) => {
+          const next = new Map(prev);
+          next.delete(target.pageId);
+          return next;
+        });
+      }
+      try {
+        const notice = await onEditImage(kind, focusedDoc.path, pageNumber, target.index, opts);
+        if (typeof notice === 'string') setEditNotice({ text: notice, error: false });
+      } catch (err) {
+        setEditNotice({
+          text: err instanceof Error ? err.message : String(err),
+          error: true,
+        });
+      } finally {
+        setEditBusy(false);
+      }
+    },
+    [editSel, focusedDoc, docs, onEditImage, editBusy],
+  );
+
+  // Harness bridge for Edit ▸ Images (7.1) — same refs pattern as forms.
+  const editImagesRef = useRef(editImagesByPage);
+  editImagesRef.current = editImagesByPage;
+  const editSelRef = useRef(editSel);
+  editSelRef.current = editSel;
+  const runEditActionRef = useRef(runEditAction);
+  runEditActionRef.current = runEditAction;
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerCanvasEditImages({
+      pageIds: () => [...editImagesRef.current.keys()],
+      placements: (pageId) =>
+        (editImagesRef.current.get(pageId) ?? []).map((p) => ({
+          index: p.index,
+          nested: p.nested,
+        })),
+      select: (pageId, index) => setEditSel({ pageId, index }),
+      selection: () => editSelRef.current,
+      act: (kind, opts) => runEditActionRef.current(kind, opts),
+    });
+    return () => registerCanvasEditImages(null);
+  }, []);
+
   // Harness bridge for on-canvas forms (2n.4b): the overlay inputs live
   // inside transformed canvas space (flaky to drive via WebDriver), so the
   // canvas registers value-setting + apply against the REAL pending-map and
@@ -1434,6 +1587,10 @@ export function WorkspaceCanvasView({
         onSetToolColor={setToolColor}
         stampPreset={stampPreset}
         onSetStampPreset={setStampPreset}
+        editHasSelection={editSel !== null}
+        editBusy={editBusy}
+        editNotice={editNotice}
+        onEditAction={(kind) => void runEditAction(kind)}
       />
       {docViewMode === 'document' && focusedDoc ? (
         <DocumentView
@@ -1452,6 +1609,9 @@ export function WorkspaceCanvasView({
           annotationColor={toolColor ?? undefined}
           stampPreset={stampPreset}
           redactionMarksByPage={redactionMarksByPage}
+          editImagesByPage={editImagesByPage}
+          editSelection={editSel}
+          onSelectEditImage={handleSelectEditImage}
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}
@@ -1509,6 +1669,9 @@ export function WorkspaceCanvasView({
           annotationColor={toolColor ?? undefined}
           stampPreset={stampPreset}
           redactionMarksByPage={redactionMarksByPage}
+          editImagesByPage={editImagesByPage}
+          editSelection={editSel}
+          onSelectEditImage={handleSelectEditImage}
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}

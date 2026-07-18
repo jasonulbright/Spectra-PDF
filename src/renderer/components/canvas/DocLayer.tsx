@@ -5,6 +5,7 @@ import { DocumentRow } from './DocumentRow';
 import type { DocPlacement } from '../../canvas/layout';
 import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { EditImagePlacement } from '../../lib/edit-images';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -29,6 +30,9 @@ interface DocLayerProps {
   annotationColor?: string;
   stampPreset?: StampPreset | null;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
+  editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
+  editSelection: { pageId: string; index: number } | null;
+  onSelectEditImage: (pageId: string, index: number) => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -104,6 +108,9 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               annotationColor={props.annotationColor}
               stampPreset={props.stampPreset}
               redactionMarksByPage={props.redactionMarksByPage}
+              editImagesByPage={props.editImagesByPage}
+              editSelection={props.editSelection}
+              onSelectEditImage={props.onSelectEditImage}
               signaturePlacement={props.signaturePlacement}
               findMatchPageIds={props.findMatchPageIds}
               findWordsByPage={props.findWordsByPage}

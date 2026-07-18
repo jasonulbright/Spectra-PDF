@@ -45,6 +45,12 @@ from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
 from engine.forms import read_form_fields, fill_form_fields
 from engine.ocr_layer import apply_ocr_layer
+from engine.page_images import (
+    delete_page_image,
+    extract_page_image,
+    list_page_images,
+    replace_page_image,
+)
 from engine.printer import print_pdf
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
 
@@ -89,6 +95,10 @@ def main() -> None:
     server.register("read_form_fields", read_form_fields)
     server.register("fill_form_fields", fill_form_fields)
     server.register("apply_ocr_layer", apply_ocr_layer)
+    server.register("list_page_images", list_page_images)
+    server.register("delete_page_image", delete_page_image)
+    server.register("replace_page_image", replace_page_image)
+    server.register("extract_page_image", extract_page_image)
     server.register("print", print_pdf)
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)

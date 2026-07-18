@@ -61,6 +61,7 @@ export function ToolsCenter({ onOpenTool }: ToolsCenterProps): React.JSX.Element
 const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = {
   organize: 'rotate',
   comment: 'watermark',
+  edit: 'watermark',
   fillsign: 'signatures',
   prepareform: 'forms',
   redact: 'delete',

@@ -29,6 +29,8 @@ const FRIENDLY_NAMES: Record<string, string> = {
   compare_text: 'Compare',
   compare_visual: 'Compare (visual)',
   apply_ocr_layer: 'Apply OCR Text',
+  delete_page_image: 'Delete Image',
+  replace_page_image: 'Replace Image',
   print: 'Print',
   verify_signatures: 'Verify Signatures',
   // NB: the default getFriendlyName path uses only params.file — the signing

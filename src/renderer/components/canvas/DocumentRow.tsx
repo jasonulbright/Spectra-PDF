@@ -2,6 +2,7 @@ import { memo } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { EditImagePlacement } from '../../lib/edit-images';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -34,6 +35,9 @@ interface DocumentRowProps {
   // per marks change (WorkspaceCanvasView useMemo), so PageCell memoization
   // survives unrelated re-renders.
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
+  editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
+  editSelection: { pageId: string; index: number } | null;
+  onSelectEditImage: (pageId: string, index: number) => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -87,6 +91,9 @@ function DocumentRowImpl({
   annotationColor,
   stampPreset,
   redactionMarksByPage,
+  editImagesByPage,
+  editSelection,
+  onSelectEditImage,
   signaturePlacement,
   findMatchPageIds,
   findWordsByPage,
@@ -138,6 +145,9 @@ function DocumentRowImpl({
         annotationColor={annotationColor}
         stampPreset={stampPreset}
         redactionMarks={redactionMarksByPage.get(page.id)}
+        editImages={editImagesByPage.get(page.id)}
+        editSelectedIndex={editSelection?.pageId === page.id ? editSelection.index : null}
+        onSelectEditImage={onSelectEditImage}
         signaturePlacement={signaturePlacement?.pageId === page.id ? signaturePlacement : null}
         findMatch={findMatchPageIds.has(page.id)}
         findWords={findWordsByPage.get(page.id)}

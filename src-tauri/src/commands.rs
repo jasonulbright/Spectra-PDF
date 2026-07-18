@@ -267,6 +267,54 @@ fn walk_pdfs(
     }
 }
 
+/// Pick a replacement image (Edit ▸ Replace Image). Not canonicalized into
+/// an identity — it's a media source, read once.
+#[tauri::command]
+pub async fn pick_image_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "gif", "webp"])
+        .blocking_pick_file();
+    match result {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
+/// Save-location picker for an EXTRACTED image. The engine appends the
+/// format's real extension to the prefix, so the dialog collects a base
+/// name; an extension the user typed is stripped renderer-side.
+#[tauri::command]
+pub async fn save_image_file_dialog(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    default_name: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut builder = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("Images", &["png", "jpg", "jpeg", "tif", "tiff", "bmp"]);
+    if let Some(ref name) = default_name {
+        builder = builder.set_file_name(name);
+    }
+    match builder.blocking_save_file() {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
 /// True when both paths exist and are the SAME physical file/directory
 /// (volume serial + file index — not string comparison). Canonical strings
 /// can disagree about one physical file (UNC vs mapped letter, hardlinks);

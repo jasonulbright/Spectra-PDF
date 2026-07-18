@@ -1,6 +1,13 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { AppStateProvider, useAppState, useAppDispatch } from './state/AppStateProvider';
-import { file, app } from './lib/tauri-bridge';
+import { file, app, dialog, batch } from './lib/tauri-bridge';
+import {
+  decodeToRawSource,
+  engineWantsRawFallback,
+  isJpegPath,
+  jpegExifOrientation,
+  type ReplacementSource,
+} from './lib/image-replace';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
 import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
 import { SplitPanel } from './panels/SplitPanel';
@@ -155,9 +162,12 @@ function AppContent(): React.ReactElement {
   const { call, openFiles, saveFile } = useEngine();
   useWorkspaceIndexer();
 
-  // 3-choice confirm dialog state (Save / Don't Save / Cancel)
+  // Confirm dialog state — 3-choice unsaved (Save / Don't Save / Cancel) or
+  // 2-choice proceed (Continue / Cancel), one dialog, one result type.
   const [confirmState, setConfirmState] = useState<{
     message: string;
+    kind?: 'unsaved' | 'proceed';
+    title?: string;
     resolve: (result: ConfirmResult) => void;
   } | null>(null);
 
@@ -184,6 +194,13 @@ function AppContent(): React.ReactElement {
   const showConfirm = useCallback((message: string): Promise<ConfirmResult> => {
     return new Promise((resolve) => {
       setConfirmState({ message, resolve });
+    });
+  }, []);
+
+  /** Two-choice Continue/Cancel confirmation; resolves true on Continue. */
+  const showProceedConfirm = useCallback((title: string, message: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setConfirmState({ message, kind: 'proceed', title, resolve: (r) => resolve(r === 'save') });
     });
   }, []);
 
@@ -626,6 +643,136 @@ function AppContent(): React.ReactElement {
       await performOperation(path, 'apply_ocr_layer', { pages });
     },
     [performOperation],
+  );
+
+  // --- Edit ▸ Images (Phase 7.1) ----------------------------------------
+  // One handler, three actions. Mutations route through performOperation
+  // (gate → snapshot → engine → reload → undoable); extract is a gated read
+  // that writes a NEW image file where the user chose. `opts` lets the e2e
+  // harness inject what the native dialogs would collect.
+  const editWarnedPathsRef = useRef<Set<string>>(new Set());
+  const handleEditImage = useCallback(
+    async (
+      kind: 'delete' | 'replace' | 'extract',
+      path: string,
+      page: number,
+      index: number,
+      opts?: { source?: ReplacementSource; outputPrefix?: string },
+    ) => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+
+      // Content edits invalidate embedded signatures — warn BEFORE the first
+      // mutation (the sign-into-field honesty precedent; Acrobat warns here
+      // too). The verify itself always runs (cheap, and a file UNSIGNED at
+      // the last check may have been signed in-session since); only the
+      // dialog is remembered, and only after the user said Continue for a
+      // file that actually had signatures (review-caught: caching the bare
+      // "checked once" skipped the warning after an in-session sign).
+      if (kind !== 'extract' && !editWarnedPathsRef.current.has(path)) {
+        const sig = await call('verify_signatures', { file: f.workingPath });
+        const count = (sig as unknown as { signatures?: unknown[] }).signatures?.length ?? 0;
+        if (count > 0) {
+          const proceed = await showProceedConfirm(
+            'Document is signed',
+            'Editing this document will invalidate its digital signatures. Continue?',
+          );
+          if (!proceed) return;
+          editWarnedPathsRef.current.add(path);
+        }
+      }
+
+      if (kind === 'delete') {
+        await performOperation(path, 'delete_page_image', { page, index });
+        return;
+      }
+
+      if (kind === 'replace') {
+        let source = opts?.source ?? null;
+        let pickedPath: string | null = null;
+        if (!source) {
+          pickedPath = await dialog.pickImageFile();
+          if (!pickedPath) return;
+          if (isJpegPath(pickedPath)) {
+            // EXIF-rotated photos must NOT passthrough: PDF viewers render
+            // the sensor pixel grid and ignore EXIF, so a portrait phone
+            // photo would land sideways. Route those to the decode path,
+            // where the webview applies the rotation (review-caught).
+            const head = await batch.readFileBuffer(pickedPath);
+            if (jpegExifOrientation(head) === 1) source = { jpeg_path: pickedPath };
+          }
+        }
+        // ONE snapshot for the whole attempt — the passthrough-then-raw
+        // retry lives INSIDE it. Two performOperation calls would snapshot
+        // twice and leak the first copy on every CMYK fallback
+        // (review-caught); this is performOperation's exact shape with the
+        // retry between snapshot and reload.
+        const tempFiles: string[] = [];
+        const writeTemp = async (data: Uint8Array): Promise<string> => {
+          const dir = f.workingPath.replace(/[\\/][^\\/]+$/, '');
+          const sep = f.workingPath.includes('\\') ? '\\' : '/';
+          const p = `${dir}${sep}replace-${crypto.randomUUID()}.raw`;
+          await file.writeBuffer(p, data);
+          tempFiles.push(p);
+          return p;
+        };
+        try {
+          const snapshotPath = await file.snapshot(f.workingPath);
+          const params = { file: f.workingPath, output: f.workingPath, page, index };
+          if (source) {
+            try {
+              await call('replace_page_image', { ...params, source });
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!(pickedPath && engineWantsRawFallback(msg))) throw err;
+              source = null; // passthrough refused — decode below
+            }
+          }
+          if (!source) {
+            const bytes = await batch.readFileBuffer(pickedPath!);
+            const raw = await decodeToRawSource(bytes, writeTemp);
+            await call('replace_page_image', { ...params, source: raw });
+          }
+          const result = await reloadFile(path);
+          if (result) {
+            dispatch({
+              type: 'UPDATE_FILE',
+              path,
+              pageCount: result.pageCount,
+              buffer: result.buffer,
+              snapshotPath,
+            });
+          }
+        } finally {
+          for (const p of tempFiles) void file.remove(p).catch(() => {});
+        }
+        return;
+      }
+
+      if (kind === 'extract') {
+        // The listing indexes must describe COMMITTED bytes (extract is not
+        // a trackable op, so gate explicitly — the PrintDialog rule).
+        await runCommitGate();
+        let prefix = opts?.outputPrefix ?? null;
+        if (!prefix) {
+          const dest = await dialog.saveImageFile('image');
+          if (!dest) return;
+          prefix = dest.replace(/\.(png|jpe?g|tiff?|bmp)$/i, '');
+        }
+        const r = await call('extract_page_image', {
+          file: f.workingPath,
+          page,
+          index,
+          output_prefix: prefix,
+        });
+        // The engine appends the encoding's REAL extension — surface the
+        // actual filename so "photo.png" quietly becoming photo.jpg is
+        // seen, not suffered (review-caught).
+        const out = (r as unknown as { output?: string }).output;
+        return out ? `Saved ${out.split(/[\\/]/).pop()}` : undefined;
+      }
+    },
+    [state.files, call, performOperation, reloadFile, dispatch, showProceedConfirm],
   );
 
 
@@ -1184,6 +1331,7 @@ function AppContent(): React.ReactElement {
                   onExtractText={handleExtractFromCanvas}
                   onRedactFile={handleRedactFile}
                   onApplyOcrLayer={handleApplyOcrLayer}
+                  onEditImage={handleEditImage}
                   onAddPages={handleAddPages}
                   onFillFormValues={handleFillFormValues}
                   onAddFormField={handleAddFormField}
@@ -1209,6 +1357,8 @@ function AppContent(): React.ReactElement {
       <ConfirmDialog
         open={confirmState !== null}
         message={confirmState?.message ?? ''}
+        kind={confirmState?.kind}
+        title={confirmState?.title}
         onResult={handleConfirmResult}
       />
       <PasswordDialog

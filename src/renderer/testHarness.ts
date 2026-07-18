@@ -146,6 +146,33 @@ export function registerBatchOcr(handlers: BatchOcrHandlers | null): void {
 }
 
 /**
+ * Edit ▸ Images (7.1): placements live in transformed canvas space and the
+ * Replace/Extract actions pop NATIVE dialogs — both undrivable by WebDriver.
+ * The canvas registers its real selection + action paths; `act`'s opts
+ * inject what the dialogs would have collected (the signing precedent).
+ */
+export interface CanvasEditImagesHandlers {
+  /** Page ids that currently have listed placements (edit mode armed). */
+  pageIds: () => string[];
+  placements: (pageId: string) => { index: number; nested: boolean }[];
+  select: (pageId: string, index: number) => void;
+  selection: () => { pageId: string; index: number } | null;
+  act: (
+    kind: 'delete' | 'replace' | 'extract',
+    opts?: {
+      source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 };
+      outputPrefix?: string;
+    },
+  ) => Promise<void>;
+}
+
+let canvasEditImages: CanvasEditImagesHandlers | null = null;
+
+export function registerCanvasEditImages(handlers: CanvasEditImagesHandlers | null): void {
+  canvasEditImages = handlers;
+}
+
+/**
  * Multi-select (2n.1) is local canvas view state, and both modifier-click
  * selection and the pointer-capture group drag are not reliably
  * WebDriver-drivable. The canvas registers selection setters/readers plus the
@@ -504,6 +531,17 @@ export interface TestHarness {
   batchOcrSetFolders: (source: string, dest: string) => Promise<void>;
   batchOcrStart: () => Promise<void>;
   batchOcrSnapshot: () => ReturnType<BatchOcrHandlers['snapshot']> | null;
+  /** Edit ▸ Images (7.1; canvas must be mounted with the edit mode armed). */
+  editImagePageIds: () => string[];
+  editImagePlacements: (pageId: string) => { index: number; nested: boolean }[];
+  editImageSelect: (pageId: string, index: number) => void;
+  editImageAct: (
+    kind: 'delete' | 'replace' | 'extract',
+    opts?: {
+      source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 };
+      outputPrefix?: string;
+    },
+  ) => Promise<void>;
 }
 
 export interface TestHarnessDeps {
@@ -940,6 +978,22 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     batchOcrSnapshot: () => batchOcr?.snapshot() ?? null,
+    editImagePageIds: () => canvasEditImages?.pageIds() ?? [],
+    editImagePlacements: (pageId) => canvasEditImages?.placements(pageId) ?? [],
+    editImageSelect: (pageId, index) => canvasEditImages?.select(pageId, index),
+    editImageAct: async (kind, opts) => {
+      if (!canvasEditImages) {
+        const msg = 'editImageAct: canvas edit mode not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await canvasEditImages.act(kind, opts);
+      } catch (err) {
+        captureError('editImageAct', err);
+        throw err;
+      }
+    },
   };
 
   window.__SPECTRA_TEST__ = harness;

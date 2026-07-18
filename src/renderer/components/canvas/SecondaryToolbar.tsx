@@ -37,6 +37,17 @@ export interface SecondaryToolbarProps {
   /** Stamp text preset; null = the default stamp. */
   stampPreset: StampPreset | null;
   onSetStampPreset: (preset: StampPreset | null) => void;
+  /** Edit tool (7.1): whether an image is selected, and its actions — mode
+   * options in the stamp-preset sense (props+callbacks, not commands: they
+   * act on transient canvas selection the registry can't see). */
+  editHasSelection: boolean;
+  /** An action is in flight — buttons disable so a stale-index click can't
+   * queue behind a mutation. */
+  editBusy: boolean;
+  /** Post-action status: extract's real output name, or a renderer-side
+   * failure (decode/IO) that would otherwise vanish silently. */
+  editNotice: { text: string; error: boolean } | null;
+  onEditAction: (kind: 'delete' | 'replace' | 'extract') => void;
 }
 
 export function SecondaryToolbar({
@@ -46,6 +57,10 @@ export function SecondaryToolbar({
   onSetToolColor,
   stampPreset,
   onSetStampPreset,
+  editHasSelection,
+  editBusy,
+  editNotice,
+  onEditAction,
 }: SecondaryToolbarProps): React.JSX.Element | null {
   // The strip belongs to the OPEN TOOL, not to the armed mode: Escape means
   // "stop drawing", not "close Comment", and with the pill gone a strip that
@@ -102,6 +117,56 @@ export function SecondaryToolbar({
 
       {/* Mode OPTIONS — they configure the armed mode, so they belong to the
           tool and move here from the floating cluster. */}
+      {owner.id === 'edit' && (
+        <div className="secondary-toolbar-opts" role="group" aria-label="Image actions">
+          {!editHasSelection && !editBusy && !editNotice && (
+            <span className="secondary-toolbar-hint" data-testid="edit-hint">
+              Click an image on the page
+            </span>
+          )}
+          {editBusy && (
+            <span className="secondary-toolbar-hint" data-testid="edit-busy" aria-live="polite">
+              Working…
+            </span>
+          )}
+          {editNotice && !editBusy && (
+            <span
+              className={'secondary-toolbar-hint' + (editNotice.error ? ' error' : '')}
+              data-testid="edit-notice"
+              aria-live="polite"
+            >
+              {editNotice.text}
+            </span>
+          )}
+          <button
+            type="button"
+            data-testid="edit-action-replace"
+            className="secondary-tool"
+            disabled={!editHasSelection || editBusy}
+            onClick={() => onEditAction('replace')}
+          >
+            Replace…
+          </button>
+          <button
+            type="button"
+            data-testid="edit-action-extract"
+            className="secondary-tool"
+            disabled={!editHasSelection || editBusy}
+            onClick={() => onEditAction('extract')}
+          >
+            Extract…
+          </button>
+          <button
+            type="button"
+            data-testid="edit-action-delete"
+            className="secondary-tool"
+            disabled={!editHasSelection || editBusy}
+            onClick={() => onEditAction('delete')}
+          >
+            Delete
+          </button>
+        </div>
+      )}
       {tool === 'stamp' && (
         <div className="secondary-toolbar-opts" role="group" aria-label="Stamp preset">
           {STAMP_PRESETS.map((p) => (

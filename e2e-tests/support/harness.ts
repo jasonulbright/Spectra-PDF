@@ -715,6 +715,58 @@ export async function batchOcrSnapshot(): Promise<BatchOcrSnapshot | null> {
   });
 }
 
+// --- Edit ▸ Images (Phase 7.1) ---------------------------------------------
+
+export async function editImagePageIds(): Promise<string[]> {
+  return await browser.execute<string[], []>(function () {
+    return (window as any).__SPECTRA_TEST__.editImagePageIds();
+  });
+}
+
+export async function editImagePlacements(
+  pageId: string,
+): Promise<{ index: number; nested: boolean }[]> {
+  return await browser.execute<{ index: number; nested: boolean }[], [string]>(
+    function (p) {
+      return (window as any).__SPECTRA_TEST__.editImagePlacements(p);
+    },
+    pageId,
+  );
+}
+
+export async function editImageSelect(pageId: string, index: number): Promise<void> {
+  await browser.execute<void, [string, number]>(
+    function (p, i) {
+      (window as any).__SPECTRA_TEST__.editImageSelect(p, i);
+    },
+    pageId,
+    index,
+  );
+}
+
+/** Run an edit action through the canvas's REAL handler; opts inject what
+ * the native dialogs would collect (replace source / extract prefix). */
+export async function editImageAct(
+  kind: 'delete' | 'replace' | 'extract',
+  opts?: {
+    source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 };
+    outputPrefix?: string;
+  },
+): Promise<void> {
+  const result = await browser.executeAsync<string | null, [string, unknown]>(
+    function (k, o, done) {
+      (window as any).__SPECTRA_TEST__.editImageAct(k, o)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    kind,
+    opts ?? null,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`editImageAct failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
 /**
  * Choose the document pane's view (absolute set, no pill toggle).
  *
