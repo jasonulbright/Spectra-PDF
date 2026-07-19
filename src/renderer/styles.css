@@ -1185,6 +1185,53 @@
   background: rgba(59, 130, 246, 0.12);
 }
 
+/* C1 image transform overlay (9.C1): outline quad + handles on the selected
+   image. The root spans the page (coordinate reference); only the polygon and
+   handle dots take pointer events. */
+.page-imgtx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.page-imgtx-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.page-imgtx-quad {
+  fill: rgba(59, 130, 246, 0.1);
+  stroke: var(--accent, #3b82f6);
+  stroke-width: 1.5;
+  pointer-events: fill;
+  cursor: move;
+}
+.page-imgtx-arm {
+  stroke: var(--accent, #3b82f6);
+  stroke-width: 1.5;
+  fill: none;
+}
+.page-imgtx-handle,
+.page-imgtx-rotate {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  background: #fff;
+  border: 1.5px solid var(--accent, #3b82f6);
+  pointer-events: auto;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.page-imgtx-handle {
+  border-radius: 2px;
+}
+.page-imgtx-rotate {
+  border-radius: 50%;
+  cursor: grab;
+}
+
 .secondary-toolbar-hint {
   font-size: 11px;
   color: var(--text-dim, #8a8a92);

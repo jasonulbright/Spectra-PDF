@@ -779,13 +779,35 @@ export async function editImagePageIds(): Promise<string[]> {
 
 export async function editImagePlacements(
   pageId: string,
-): Promise<{ index: number; nested: boolean }[]> {
-  return await browser.execute<{ index: number; nested: boolean }[], [string]>(
+): Promise<{ index: number; nested: boolean; matrix: number[] }[]> {
+  return await browser.execute<{ index: number; nested: boolean; matrix: number[] }[], [string]>(
     function (p) {
       return (window as any).__SPECTRA_TEST__.editImagePlacements(p);
     },
     pageId,
   );
+}
+
+/** Transform (9.C1) an image placement to an absolute user-space matrix,
+ * through the canvas's REAL commit path (the drag handles are undrivable). */
+export async function editImageTransform(
+  pageId: string,
+  index: number,
+  matrix: number[],
+): Promise<void> {
+  const result = await browser.executeAsync<string | null, [string, number, number[]]>(
+    function (p, i, m, done) {
+      (window as any).__SPECTRA_TEST__.editImageTransform(p, i, m)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    pageId,
+    index,
+    matrix,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`editImageTransform failed: ${result.replace(ERROR_TAG, '')}`);
+  }
 }
 
 export async function editImageSelect(pageId: string, index: number): Promise<void> {

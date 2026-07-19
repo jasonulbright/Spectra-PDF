@@ -798,11 +798,11 @@ function AppContent(): React.ReactElement {
 
   const handleEditImage = useCallback(
     async (
-      kind: 'delete' | 'replace' | 'extract',
+      kind: 'delete' | 'replace' | 'extract' | 'transform',
       path: string,
       page: number,
       index: number,
-      opts?: { source?: ReplacementSource; outputPrefix?: string },
+      opts?: { source?: ReplacementSource; outputPrefix?: string; matrix?: number[] },
     ) => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
@@ -813,6 +813,15 @@ function AppContent(): React.ReactElement {
 
       if (kind === 'delete') {
         await performOperation(path, 'delete_page_image', { page, index });
+        return;
+      }
+
+      if (kind === 'transform') {
+        // 9.C1: rewrite the placement's CTM to the gesture's target matrix.
+        // User-space M' is invariant to /Rotate, so no rotation re-projection
+        // is needed here (unlike signature placement).
+        if (!opts?.matrix) throw new Error('transform requires a target matrix');
+        await performOperation(path, 'transform_page_image', { page, index, matrix: opts.matrix });
         return;
       }
 

@@ -91,6 +91,10 @@ def _walk_placements(pdf, instructions, resources, base_ctm, depth, fallback_res
                     {
                         "index": len(out),
                         "rect": [x0, y0, x1, y1],
+                        # The FULL device CTM at this Do (the unit square [0,1]²
+                        # maps to the page through it). C1's transform op needs
+                        # it to build the delta cm; `rect` is just its bbox.
+                        "matrix": list(state.ctm),
                         "name": name,
                         "nested": nested,
                         "native_width": int(xobj.get("/Width", 0)),
@@ -136,15 +140,42 @@ def _do_instruction(name: str):
     return pikepdf.ContentStreamInstruction([Name(name)], pikepdf.Operator("Do"))
 
 
+def _op(operands, name: str):
+    return pikepdf.ContentStreamInstruction(operands, pikepdf.Operator(name))
+
+
+def _invert_matrix(m):
+    """Inverse of a PDF affine matrix (a,b,c,d,e,f). Raises on a degenerate
+    (det≈0) matrix — a placement collapsed to a line/point can't be inverted
+    (and can't have been a real image draw)."""
+    a, b, c, d, e, f = (float(v) for v in m)
+    det = a * d - b * c
+    if abs(det) < 1e-9:
+        raise ValueError("image placement matrix is degenerate (not invertible)")
+    return (
+        d / det,
+        -b / det,
+        -c / det,
+        a / det,
+        (c * f - d * e) / det,
+        (b * e - a * f) / det,
+    )
+
+
 class _EditState:
     """Mutable cursor shared across the recursive rewrite: counts image
     draws in the SAME order as the lister; applies the action at `target`."""
 
-    def __init__(self, target: int, action: str, replacement_name: str | None, pending_image=None):
+    def __init__(
+        self, target: int, action: str, replacement_name: str | None, pending_image=None, delta=None
+    ):
         self.target = target
-        self.action = action  # 'delete' | 'replace'
+        self.action = action  # 'delete' | 'replace' | 'transform'
         self.replacement_name = replacement_name
         self.pending_image = pending_image
+        # 'transform' only: the delta matrix D injected as `q D cm Do Q` at the
+        # target draw so the placement's effective CTM becomes the caller's M'.
+        self.delta = delta
         self.seen = 0
         self.done = False
         self.deleted_name: str | None = None
@@ -186,6 +217,16 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                 if state.action == "delete":
                     state.deleted_name = name
                     # drop the instruction
+                elif state.action == "transform":
+                    # Wrap the ORIGINAL draw in q/Q with the delta cm. The
+                    # accumulated CTM at this point is exactly M_cur, so the
+                    # pre-concatenated D makes the effective transform D·M_cur =
+                    # M' at any nesting depth; the q/Q keeps the cm from leaking
+                    # to later draws.
+                    kept.append(_op([], "q"))
+                    kept.append(_op([round(float(v), 6) for v in state.delta], "cm"))
+                    kept.append(instruction)
+                    kept.append(_op([], "Q"))
                 else:
                     kept.append(_do_instruction(state.replacement_name))
             else:
@@ -327,6 +368,59 @@ def delete_page_image(file: str, output: str, page: int, index: int) -> dict:
             raise ValueError(f"image index {index} is out of range (page has {count})")
 
         state = _EditState(int(index), "delete", None)
+        kept, changed, new_forms = _rewrite(
+            pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
+        )
+        if not changed:
+            raise ValueError("edit did not apply (placement not found)")
+        for nm, st in new_forms.items():
+            _register_xobject(pdf, resources, nm, st)
+        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        _finalize_page_rewrite(p, kept, state.superseded_forms)
+        _save(pdf, input_path, output_path)
+        return {"output": str(output_path), "page": int(page), "index": int(index)}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def transform_page_image(file: str, output: str, page: int, index: int, matrix: list) -> dict:
+    """Move/resize/rotate ONE image placement by rewriting the CTM at its Do
+    (Phase 9.C1) — the image bytes are never touched.
+
+    `matrix` is the DESIRED absolute placement matrix M' [a,b,c,d,e,f] in page
+    user space — what `list_page_images` reports as `matrix` for this
+    placement, after the canvas gesture. The op finds the placement's CURRENT
+    device CTM M_cur (the same DFS walk the lister uses), computes the delta
+    D = M'·M_cur⁻¹, and wraps the draw as `q D cm Do Q`, so the effective
+    transform D·M_cur becomes M'. Per-placement like delete/replace: a shared
+    XObject drawn elsewhere is untouched; a placement inside a form is
+    transformed on a COPY of that form."""
+    m_target = _as_matrix(matrix)
+    if m_target is None:
+        raise ValueError("matrix must be [a, b, c, d, e, f]")
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        resources = _resolve_resources(p)
+        placements = _walk_placements(
+            pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
+        )
+        if not (0 <= int(index) < len(placements)):
+            raise ValueError(
+                f"image index {index} is out of range (page has {len(placements)})"
+            )
+        m_cur = tuple(placements[int(index)]["matrix"])
+        delta = _mat_mult(m_target, _invert_matrix(m_cur))
+
+        state = _EditState(int(index), "transform", None, delta=delta)
         kept, changed, new_forms = _rewrite(
             pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
         )

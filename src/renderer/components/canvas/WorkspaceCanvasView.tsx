@@ -6,7 +6,7 @@ import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
 import { getDocumentProxy } from '../../lib/pdfDocCache';
 import { buildRedactionRegions } from '../../lib/redaction';
-import type { RedactionMark, RedactionRegion } from '../../lib/redaction';
+import type { PageGeometry, RedactionMark, RedactionRegion } from '../../lib/redaction';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import { useEngine } from '../../hooks/useEngine';
@@ -71,11 +71,11 @@ interface WorkspaceCanvasViewProps {
   // read + save, resolving to a user-facing notice naming the real output).
   // `opts` is the harness's dialog bypass.
   onEditImage: (
-    kind: 'delete' | 'replace' | 'extract',
+    kind: 'delete' | 'replace' | 'extract' | 'transform',
     path: string,
     page: number,
     index: number,
-    opts?: { source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 }; outputPrefix?: string },
+    opts?: { source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 }; outputPrefix?: string; matrix?: number[] },
   ) => Promise<string | void>;
   // Edit ▸ Text (7.2+7.3): replace one run's text — same one-snapshot,
   // undoable App routing (engine replace_text_run). Resolves EDIT_DECLINED
@@ -145,6 +145,7 @@ const HAND_SUPPRESSES_PICKUP = (): void => {};
 const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
 const NO_EDIT_IMAGES: ReadonlyMap<string, EditImagePlacement[]> = new Map();
+const NO_EDIT_GEOM: ReadonlyMap<string, PageGeometry> = new Map();
 const NO_EDIT_TEXT: ReadonlyMap<string, EditTextListing> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
 const NO_WORDS_BY_PAGE: ReadonlyMap<string, OcrWord[]> = new Map();
@@ -1000,6 +1001,10 @@ export function WorkspaceCanvasView({
   // the start. Buffer identity in the deps refetches after every edit/undo.
   const [editImagesByPage, setEditImagesByPage] =
     useState<ReadonlyMap<string, EditImagePlacement[]>>(NO_EDIT_IMAGES);
+  // Per-page {box, bakedRotate} for the image pages — the C1 transform gesture
+  // needs it to convert pointer↔user space; filled alongside editImagesByPage.
+  const [editGeomByPage, setEditGeomByPage] =
+    useState<ReadonlyMap<string, PageGeometry>>(NO_EDIT_GEOM);
   const [editTextByPage, setEditTextByPage] =
     useState<ReadonlyMap<string, EditTextListing>>(NO_EDIT_TEXT);
   // ONE selection across all edit-object kinds — the secondary toolbar's
@@ -1044,6 +1049,7 @@ export function WorkspaceCanvasView({
     }
     if (tool !== 'edit' || !focusedDoc || !editBuffer) {
       setEditImagesByPage(NO_EDIT_IMAGES);
+      setEditGeomByPage(NO_EDIT_GEOM);
       setEditTextByPage(NO_EDIT_TEXT);
       if (ctxChanged) setEditNotice(null);
       return;
@@ -1082,6 +1088,9 @@ export function WorkspaceCanvasView({
       const nextText = ctxChanged
         ? new Map<string, EditTextListing>()
         : seed(editTextRef.current);
+      // Geometry is derived (not user state), so it's rebuilt fresh each pass —
+      // no seeding needed; a page's entry lands the moment its placements do.
+      const nextGeom = new Map<string, PageGeometry>();
       for (const page of doc.pages) {
         if (editFetchTokenRef.current !== token) return;
         const pageNumber = workspacePageNumber(docs, doc, page.id);
@@ -1099,9 +1108,15 @@ export function WorkspaceCanvasView({
           if (editFetchTokenRef.current !== token) return;
           const listing = await fetchEditTextListing(call, f.workingPath, pageNumber, geometry);
           if (editFetchTokenRef.current !== token) return;
-          if (placements.length > 0) nextImages.set(page.id, placements);
-          else nextImages.delete(page.id);
+          if (placements.length > 0) {
+            nextImages.set(page.id, placements);
+            nextGeom.set(page.id, geometry);
+          } else {
+            nextImages.delete(page.id);
+            nextGeom.delete(page.id);
+          }
           setEditImagesByPage(new Map(nextImages)); // incremental fill
+          setEditGeomByPage(new Map(nextGeom));
           if (listing.runBoxes.length > 0 || listing.paragraphs.length > 0) {
             nextText.set(page.id, listing);
           } else {
@@ -1115,6 +1130,7 @@ export function WorkspaceCanvasView({
       }
       if (editFetchTokenRef.current === token) {
         setEditImagesByPage(new Map(nextImages));
+        setEditGeomByPage(new Map(nextGeom));
         setEditTextByPage(new Map(nextText));
       }
     })();
@@ -1375,6 +1391,58 @@ export function WorkspaceCanvasView({
     [editSel, focusedDoc, docs, onEditImage, editBusy, editImagesByPage],
   );
 
+  // The selected image's transform context (9.C1): its user-space matrix + the
+  // page geometry the gesture needs to convert pointer↔user space. Null unless
+  // an image is selected AND its page geometry is loaded.
+  const editImageTransform = useMemo(() => {
+    if (!editSel || editSel.kind !== 'image') return null;
+    const placement = editImagesByPage
+      .get(editSel.pageId)
+      ?.find((pl) => pl.index === editSel.index);
+    const geom = editGeomByPage.get(editSel.pageId);
+    if (!placement || !geom) return null;
+    return {
+      pageId: editSel.pageId,
+      index: editSel.index,
+      matrix: placement.matrix,
+      box: geom.box,
+      bakedRotate: geom.bakedRotate,
+      busy: editBusy,
+    };
+  }, [editSel, editImagesByPage, editGeomByPage, editBusy]);
+
+  // Commit a transform gesture (9.C1). M' is user-space and /Rotate-invariant
+  // (the redaction-mark rule), so the commit gate baking a pending page
+  // rotation can't invalidate it — no re-projection needed, unlike A2's
+  // signature placement. The whole-file op rebuilds the page (positional ids
+  // regenerate), so the buffer-change refetch clears the selection and the
+  // overlay just like delete/replace — a second nudge means re-selecting the
+  // image (v1; keeping selection across the rebuild is a C-tail).
+  const commitImageTransform = useCallback(
+    async (pageId: string, index: number, matrix: number[]): Promise<void> => {
+      if (!focusedDoc || editBusy) return;
+      const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
+      if (pageNumber == null) return;
+      setEditBusy(true);
+      setEditNotice(null);
+      try {
+        const notice = await onEditImage('transform', focusedDoc.path, pageNumber, index, {
+          matrix,
+        });
+        if (notice === EDIT_DECLINED) {
+          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+        } else if (typeof notice === 'string') {
+          setEditNotice({ text: notice, error: false });
+        }
+      } catch (err) {
+        setEditNotice({ text: err instanceof Error ? err.message : String(err), error: true });
+      } finally {
+        setEditBusy(false);
+      }
+    },
+    [focusedDoc, docs, onEditImage, editBusy],
+  );
+
   // Harness bridge for Edit ▸ Images + Text (7.1/7.2) — refs pattern.
   const editImagesRef = useRef(editImagesByPage);
   editImagesRef.current = editImagesByPage;
@@ -1390,6 +1458,8 @@ export function WorkspaceCanvasView({
   openParagraphEditorRef.current = handleOpenParagraphEditor;
   const commitAddTextRef = useRef(commitAddText);
   commitAddTextRef.current = commitAddText;
+  const commitImageTransformRef = useRef(commitImageTransform);
+  commitImageTransformRef.current = commitImageTransform;
   // Place an Add-Text box on the active file's first page (the band lives in
   // transformed canvas space, undrivable by WebDriver — the new-field harness
   // precedent).
@@ -1417,7 +1487,10 @@ export function WorkspaceCanvasView({
         (editImagesRef.current.get(pageId) ?? []).map((p) => ({
           index: p.index,
           nested: p.nested,
+          matrix: [...p.matrix],
         })),
+      transformImage: (pageId, index, matrix) =>
+        commitImageTransformRef.current(pageId, index, matrix),
       select: (pageId, index) => setEditSel({ kind: 'image', pageId, index }),
       selection: () => editSelRef.current,
       textPageIds: () => [...editTextRef.current.keys()],
@@ -2123,6 +2196,8 @@ export function WorkspaceCanvasView({
           stampPreset={stampPreset}
           redactionMarksByPage={redactionMarksByPage}
           editImagesByPage={editImagesByPage}
+          editImageTransform={editImageTransform}
+          onCommitImageTransform={commitImageTransform}
           editTextByPage={editTextByPage}
           editSelection={editSel}
           editingText={editingText}
@@ -2200,6 +2275,8 @@ export function WorkspaceCanvasView({
           stampPreset={stampPreset}
           redactionMarksByPage={redactionMarksByPage}
           editImagesByPage={editImagesByPage}
+          editImageTransform={editImageTransform}
+          onCommitImageTransform={commitImageTransform}
           editTextByPage={editTextByPage}
           editSelection={editSel}
           editingText={editingText}

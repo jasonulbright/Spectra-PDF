@@ -11,7 +11,7 @@ import {
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation, PageRef } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
-import type { EditImagePlacement } from '../../lib/edit-images';
+import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
@@ -77,6 +77,8 @@ export interface DocumentViewProps {
   stampPreset?: StampPreset | null;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
+  editImageTransform: EditImageTransformCtx | null;
+  onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
   editTextByPage: ReadonlyMap<string, EditTextListing>;
   editSelection: { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
   editingText: { kind: 'text' | 'para'; pageId: string; index: number } | null;
@@ -483,6 +485,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           stampPreset={props.stampPreset}
           redactionMarks={props.redactionMarksByPage.get(page.id)}
           editImages={props.editImagesByPage.get(page.id)}
+          editImageTransform={
+            props.editImageTransform?.pageId === page.id ? props.editImageTransform : null
+          }
+          onCommitImageTransform={props.onCommitImageTransform}
           editTextRuns={props.editTextByPage.get(page.id)?.runBoxes}
           editParagraphs={props.editTextByPage.get(page.id)?.paragraphs}
           editSelectedIndex={

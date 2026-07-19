@@ -168,8 +168,12 @@ export function registerCreatePdf(handlers: CreatePdfHandlers | null): void {
 export interface CanvasEditImagesHandlers {
   /** Page ids that currently have listed placements (edit mode armed). */
   pageIds: () => string[];
-  placements: (pageId: string) => { index: number; nested: boolean }[];
+  placements: (
+    pageId: string,
+  ) => { index: number; nested: boolean; matrix: number[] }[];
   select: (pageId: string, index: number) => void;
+  /** Transform (9.C1) the selected image via the real commit path. */
+  transformImage: (pageId: string, index: number, matrix: number[]) => Promise<void>;
   selection: () => { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
   /** Text runs (7.2): listing + opening the REAL inline editor (the input
    * itself is then driven through the DOM — data-testid edit-text-input). */
@@ -582,8 +586,12 @@ export interface TestHarness {
   /** Create PDF from PostScript (Phase 8; dialog must be open). */
   createPdfRun: (source: string, output: string, preset?: string) => Promise<boolean>;
   editImagePageIds: () => string[];
-  editImagePlacements: (pageId: string) => { index: number; nested: boolean }[];
+  editImagePlacements: (
+    pageId: string,
+  ) => { index: number; nested: boolean; matrix: number[] }[];
   editImageSelect: (pageId: string, index: number) => void;
+  /** Transform (9.C1) an image placement to an absolute user-space matrix. */
+  editImageTransform: (pageId: string, index: number, matrix: number[]) => Promise<void>;
   editImageAct: (
     kind: 'delete' | 'replace' | 'extract',
     opts?: {
@@ -1061,6 +1069,19 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         await canvasEditImages.act(kind, opts);
       } catch (err) {
         captureError('editImageAct', err);
+        throw err;
+      }
+    },
+    editImageTransform: async (pageId, index, matrix) => {
+      if (!canvasEditImages) {
+        const msg = 'editImageTransform: canvas edit mode not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await canvasEditImages.transformImage(pageId, index, matrix);
+      } catch (err) {
+        captureError('editImageTransform', err);
         throw err;
       }
     },

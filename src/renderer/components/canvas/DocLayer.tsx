@@ -5,7 +5,7 @@ import { DocumentRow } from './DocumentRow';
 import type { DocPlacement } from '../../canvas/layout';
 import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
-import type { EditImagePlacement } from '../../lib/edit-images';
+import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
@@ -32,6 +32,8 @@ interface DocLayerProps {
   stampPreset?: StampPreset | null;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
+  editImageTransform: EditImageTransformCtx | null;
+  onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
   editTextByPage: ReadonlyMap<string, EditTextListing>;
   editSelection: { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
   editingText: { kind: 'text' | 'para'; pageId: string; index: number } | null;
@@ -129,6 +131,8 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               stampPreset={props.stampPreset}
               redactionMarksByPage={props.redactionMarksByPage}
               editImagesByPage={props.editImagesByPage}
+              editImageTransform={props.editImageTransform}
+              onCommitImageTransform={props.onCommitImageTransform}
               editTextByPage={props.editTextByPage}
               editSelection={props.editSelection}
               editingText={props.editingText}

@@ -6,7 +6,8 @@ import { displayWidthAt, displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/l
 import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '../../lib/redaction';
 import type { RedactionMark } from '../../lib/redaction';
 import type { OcrWord } from '../../ocr/types';
-import type { EditImagePlacement } from '../../lib/edit-images';
+import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
+import ImageTransformOverlay from './ImageTransformOverlay';
 import type { EditTextRun } from '../../lib/edit-text';
 import { unencodableChars } from '../../lib/edit-text';
 import type { EditParagraph, ParagraphEditOpts } from '../../lib/edit-paragraphs';
@@ -318,6 +319,10 @@ interface PageCellProps {
   editImages?: EditImagePlacement[];
   editSelectedIndex?: number | null;
   onSelectEditImage?: (pageId: string, index: number) => void;
+  /** Transform context for THIS page's selected image (9.C1), pre-filtered by
+   * pageId upstream — non-null only on the page whose image is selected. */
+  editImageTransform?: EditImageTransformCtx | null;
+  onCommitImageTransform?: (pageId: string, index: number, matrix: number[]) => void;
   /** Edit-mode text runs (7.2+7.3), same projection rules as images.
    * Since 7.5 these are only the runs NOT covered by an editable
    * paragraph (refused paragraphs decompose back to run boxes). */
@@ -429,6 +434,8 @@ function PageCellImpl({
   redactionMarks,
   editImages,
   editSelectedIndex,
+  editImageTransform,
+  onCommitImageTransform,
   onSelectEditImage,
   editTextRuns,
   editTextSelectedIndex,
@@ -1091,6 +1098,13 @@ function PageCellImpl({
             />
           );
         })}
+      {tool === 'edit' && editImageTransform && onCommitImageTransform && (
+        <ImageTransformOverlay
+          ctx={editImageTransform}
+          pendingRotate={page.rotation}
+          onCommit={(matrix) => onCommitImageTransform(page.id, editImageTransform.index, matrix)}
+        />
+      )}
       {(findWords ?? []).map((word, i) => {
         const r = rotateNormalizedRect(word, page.rotation);
         return (

@@ -50,6 +50,7 @@ from engine.page_images import (
     extract_page_image,
     list_page_images,
     replace_page_image,
+    transform_page_image,
 )
 from engine.distill import distill
 from engine.text_authoring import add_text_box
@@ -103,6 +104,7 @@ def main() -> None:
     server.register("delete_page_image", delete_page_image)
     server.register("replace_page_image", replace_page_image)
     server.register("extract_page_image", extract_page_image)
+    server.register("transform_page_image", transform_page_image)
     server.register("list_text_runs", list_text_runs)
     server.register("replace_text_run", replace_text_run)
     server.register("convert_text_run", convert_text_run)

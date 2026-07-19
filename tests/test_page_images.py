@@ -12,6 +12,7 @@ from engine.page_images import (
     extract_page_image,
     list_page_images,
     replace_page_image,
+    transform_page_image,
 )
 
 
@@ -465,3 +466,97 @@ class TestInlineImages:
                 pikepdf.parse_content_stream(pdf2.pages[0])
             )
             assert b"BI" in content and b"EI" in content  # inline survived
+
+
+def _matrix_of(path, index):
+    return list_page_images(path, 1)["images"][index]["matrix"]
+
+
+def _page_with_degenerate_image(path):
+    """One draw whose CTM collapses the image to zero area — malformed, but
+    the transform op must fail closed rather than divide by a zero det."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    im = _rgb_image(pdf, 255, 0, 0)
+    page.obj["/Resources"] = Dictionary(XObject=Dictionary(ImA=im))
+    page.Contents = pdf.make_stream(b"q 0 0 0 0 50 600 cm /ImA Do Q")
+    pdf.save(path)
+    pdf.close()
+
+
+class TestTransformPageImage:
+    def test_lists_the_placement_matrix(self, tmp_dir):
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        # The CTM from the fixture's `100 0 0 80 50 600 cm`.
+        assert _matrix_of(src, 0) == pytest.approx([100, 0, 0, 80, 50, 600])
+        assert _matrix_of(src, 2) == pytest.approx([200, 0, 0, 150, 50, 300])
+
+    def test_move_translates_only_the_target(self, tmp_dir):
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # ImA placement 0 → shifted +100 x, +50 y (same size).
+        transform_page_image(src, out, 1, 0, [100, 0, 0, 80, 150, 650])
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["matrix"] == pytest.approx([100, 0, 0, 80, 150, 650])
+        assert imgs[0]["rect"] == pytest.approx([150, 650, 250, 730])
+        # The OTHER ImA placement (shared XObject) is untouched.
+        assert imgs[1]["matrix"] == pytest.approx([100, 0, 0, 80, 300, 600])
+        assert imgs[2]["matrix"] == pytest.approx([200, 0, 0, 150, 50, 300])
+
+    def test_resize_scales_the_placement(self, tmp_dir):
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        transform_page_image(src, out, 1, 2, [400, 0, 0, 300, 50, 300])  # ImB, doubled
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[2]["matrix"] == pytest.approx([400, 0, 0, 300, 50, 300])
+        assert imgs[2]["rect"] == pytest.approx([50, 300, 450, 600])
+
+    def test_rotate_reorients_the_placement(self, tmp_dir):
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # A rotation/scale with non-zero off-diagonals (b, c). Unit square →
+        # corners (150,600),(150,700),(70,600),(70,700): bbox [70,600,150,700].
+        target = [0, 100, -80, 0, 150, 600]
+        transform_page_image(src, out, 1, 0, target)
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["matrix"] == pytest.approx(target)
+        assert imgs[0]["rect"] == pytest.approx([70, 600, 150, 700])
+
+    def test_form_nested_transform_copies_the_form(self, tmp_dir):
+        src = os.path.join(tmp_dir, "form.pdf")
+        _page_with_form_image(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # Nested placement 0 (inside Fm1, drawn twice) → moved. Only that one.
+        transform_page_image(src, out, 1, 0, [100, 0, 0, 100, 200, 500])
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["matrix"] == pytest.approx([100, 0, 0, 100, 200, 500])
+        assert imgs[1]["matrix"] == pytest.approx([100, 0, 0, 100, 300, 200])
+        # The form was COPIED, not mutated: the page draws two DIFFERENT form
+        # names now (the edited copy + the original).
+        names = [n for n in _names_in_page_stream(out)]
+        assert len(set(names)) == 2
+
+    def test_degenerate_current_matrix_refuses(self, tmp_dir):
+        src = os.path.join(tmp_dir, "deg.pdf")
+        _page_with_degenerate_image(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="degenerate"):
+            transform_page_image(src, out, 1, 0, [100, 0, 0, 80, 50, 600])
+
+    def test_index_out_of_range_refuses(self, tmp_dir):
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="out of range"):
+            transform_page_image(src, out, 1, 9, [1, 0, 0, 1, 0, 0])
+
+    def test_bad_matrix_refuses(self, tmp_dir):
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="matrix"):
+            transform_page_image(src, out, 1, 0, [1, 0, 0, 1])

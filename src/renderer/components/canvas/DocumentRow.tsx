@@ -2,7 +2,7 @@ import { memo } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
-import type { EditImagePlacement } from '../../lib/edit-images';
+import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
@@ -37,6 +37,8 @@ interface DocumentRowProps {
   // survives unrelated re-renders.
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
+  editImageTransform: EditImageTransformCtx | null;
+  onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
   editTextByPage: ReadonlyMap<string, EditTextListing>;
   editSelection: { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
   /** The ONE open inline editor — a run's (kind 'text') or a paragraph's. */
@@ -113,6 +115,8 @@ function DocumentRowImpl({
   stampPreset,
   redactionMarksByPage,
   editImagesByPage,
+  editImageTransform,
+  onCommitImageTransform,
   editTextByPage,
   editSelection,
   editingText,
@@ -180,6 +184,8 @@ function DocumentRowImpl({
         stampPreset={stampPreset}
         redactionMarks={redactionMarksByPage.get(page.id)}
         editImages={editImagesByPage.get(page.id)}
+        editImageTransform={editImageTransform?.pageId === page.id ? editImageTransform : null}
+        onCommitImageTransform={onCommitImageTransform}
         editTextRuns={editTextByPage.get(page.id)?.runBoxes}
         editParagraphs={editTextByPage.get(page.id)?.paragraphs}
         editSelectedIndex={
