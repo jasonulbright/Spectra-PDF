@@ -1,5 +1,44 @@
 # Changelog
 
+## 2.6.0 — Author, arrange, and restyle: the editor grows up
+
+### Put NEW things on the page
+- **Add Text** — draw a box, type, pick size/colour/font family, and the
+  text lands as a real, searchable, re-editable text object
+- **Add Image** — draw a box and place a picture (JPEG passes through
+  losslessly; everything else is embedded pixel-perfect)
+
+### Move what's already there
+- **Images are now directly manipulable**: drag to move, corner handles
+  to resize, a rotate handle for free angles — plus one-click 90° turns
+- **Crop and opacity** — trim an image to a region (non-destructively;
+  the picture data is kept) and dim it with a live opacity slider
+- **Split and merge paragraphs** — press Enter inside a paragraph to
+  split it in two; Backspace at the start of one joins it to the
+  paragraph above, reflowing through the same layout engine as every
+  other edit
+
+### Restyle with real typefaces
+- The paragraph editor's **font family menu** substitutes a whole
+  paragraph into bundled Liberation Sans, Serif, or Mono — labelled
+  honestly as the face you get
+- **Bold and italic** buttons substitute the matching bundled variant
+  (twelve faces now ship, all metric-compatible with the common
+  Windows core fonts)
+
+### Edit more documents
+- **Symbolic fonts** (icon and custom-encoded fonts with an embedded
+  font program) are now editable where the program itself provides a
+  usable character map — previously refused outright
+
+### Reliability
+- Fixed a race where a form field created on canvas could silently
+  fail to appear (and a follow-up signature into it would fail) under
+  heavy system load; field creation now either succeeds visibly or
+  says exactly why it needs a redraw
+- Fixed image edits on pages sharing resources leaking entries into
+  sibling pages
+
 ## 2.5.0 — A bigger text editor: CJK, real fonts, and restyling
 
 ### Edit far more documents
