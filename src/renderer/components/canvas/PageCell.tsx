@@ -1312,6 +1312,11 @@ function ParagraphEditor({
   // ACTUAL substitute faces (Liberation …): the swap is an honest
   // substitution, not a style toggle on the foundry font.
   const [family, setFamily] = useState<'' | 'serif' | 'sans' | 'mono'>('');
+  // A3b style toggles, seeded from the paragraph's own weight/slant.
+  // Toggling substitutes the whole paragraph into the styled Liberation
+  // face (same honesty as the family swap).
+  const [bold, setBold] = useState(para.bold);
+  const [italic, setItalic] = useState(para.italic);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   // ONE outcome per editor instance: Enter-commit, Escape-cancel, blur,
@@ -1330,20 +1335,25 @@ function ParagraphEditor({
   }, []);
   const spans = computeEditSpans(para.text, value, para.spans, para.runs[0]);
   const familyChanged = family !== '';
-  // With a family swap EVERY character re-renders in the chosen Liberation
-  // face, so the members' own coverage no longer applies — the live
-  // run-inventory check would wrongly block (e.g. a char the original
-  // subset lacks but Liberation has). Coverage the LIBERATION face lacks
-  // (CJK, astral) refuses engine-side with a stated reason, surfaced as
-  // the standard edit notice — the same honest boundary as convert.
-  const missing = familyChanged ? [] : paragraphUnencodable(value, spans, para.encodableByRun);
+  const styleChanged = bold !== para.bold || italic !== para.italic;
+  // A substitution (family picked or a style toggle changed) re-renders
+  // EVERY character in a bundled Liberation face, so the members' own
+  // coverage no longer applies — the live run-inventory check would
+  // wrongly block (e.g. a char the original subset lacks but Liberation
+  // has). Coverage the LIBERATION face lacks (CJK, astral) refuses
+  // engine-side with a stated reason, surfaced as the standard edit
+  // notice — the same honest boundary as convert.
+  const substituting = familyChanged || styleChanged;
+  const missing = substituting ? [] : paragraphUnencodable(value, spans, para.encodableByRun);
   const valid = missing.length === 0;
   const sizeChanged = Math.abs(size - para.fontSize) > 0.01;
   const colorChanged = color.toLowerCase() !== para.color.toLowerCase();
-  const changed = value !== para.text || sizeChanged || colorChanged || familyChanged;
+  const changed = value !== para.text || sizeChanged || colorChanged || substituting;
   // The restyle overrides sent with a commit — only fields the user
-  // actually changed from the seed (unchanged size/colour/family stay the
-  // paragraph's own, engine-side).
+  // actually changed from the seed (unchanged size/colour/face stay the
+  // paragraph's own, engine-side). On a substitution the style pair rides
+  // along ABSOLUTE (a family-only swap of a visually-bold paragraph keeps
+  // its weight).
   const restyleOpts = (extra?: ParagraphEditOpts): ParagraphEditOpts => {
     const o: ParagraphEditOpts = { ...extra };
     if (sizeChanged && size > 0) o.size = size;
@@ -1351,7 +1361,11 @@ function ParagraphEditor({
       const rgb = hexToRgb(color);
       if (rgb) o.color = rgb;
     }
-    if (familyChanged) o.family = family;
+    if (substituting) {
+      if (familyChanged) o.family = family;
+      o.bold = bold;
+      o.italic = italic;
+    }
     return o;
   };
   const finish = (): void => {
@@ -1444,6 +1458,26 @@ function ParagraphEditor({
             <option value="mono">Liberation Mono</option>
           </select>
         </label>
+        <button
+          type="button"
+          data-testid="edit-para-bold"
+          className={`page-editpara-style${bold ? ' pressed' : ''}`}
+          aria-pressed={bold}
+          title="Bold — substitutes the bundled bold face"
+          onClick={() => setBold((b) => !b)}
+        >
+          B
+        </button>
+        <button
+          type="button"
+          data-testid="edit-para-italic"
+          className={`page-editpara-style page-editpara-style-i${italic ? ' pressed' : ''}`}
+          aria-pressed={italic}
+          title="Italic — substitutes the bundled italic face"
+          onClick={() => setItalic((i) => !i)}
+        >
+          I
+        </button>
       </div>
       <textarea
         ref={areaRef}

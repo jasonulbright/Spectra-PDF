@@ -35,41 +35,56 @@ from fontTools.ttLib import TTFont
 
 # The vendored fallback family (scripts/sync-edit-fonts.ps1); the engine
 # picks the face matching the run's own font so a serif document's
-# converted text stays serif (Phase 9.B1). All three are metric-compatible
-# with the Microsoft cores.
+# converted text stays serif (Phase 9.B1), and — since 9.A3b — the face
+# VARIANT matching the requested style, so a bold restyle lands on the
+# real Bold face. All twelve are metric-compatible with the Microsoft
+# cores.
 _FACE_FILES = {
-    "serif": "LiberationSerif-Regular.ttf",
-    "sans": "LiberationSans-Regular.ttf",
-    "mono": "LiberationMono-Regular.ttf",
+    "serif": {
+        "regular": "LiberationSerif-Regular.ttf",
+        "bold": "LiberationSerif-Bold.ttf",
+        "italic": "LiberationSerif-Italic.ttf",
+        "bolditalic": "LiberationSerif-BoldItalic.ttf",
+    },
+    "sans": {
+        "regular": "LiberationSans-Regular.ttf",
+        "bold": "LiberationSans-Bold.ttf",
+        "italic": "LiberationSans-Italic.ttf",
+        "bolditalic": "LiberationSans-BoldItalic.ttf",
+    },
+    "mono": {
+        "regular": "LiberationMono-Regular.ttf",
+        "bold": "LiberationMono-Bold.ttf",
+        "italic": "LiberationMono-Italic.ttf",
+        "bolditalic": "LiberationMono-BoldItalic.ttf",
+    },
 }
 
 # PDF FontDescriptor /Flags bits (PDF spec Table 121, 1-based in the spec).
 _FLAG_FIXED_PITCH = 1 << 0
 _FLAG_SERIF = 1 << 1
+_FLAG_ITALIC = 1 << 6  # "Italic" (bit 7 in the spec's 1-based numbering)
+_FLAG_FORCE_BOLD = 1 << 18  # "ForceBold" (bit 19)
 
 _SERIF_HINTS = ("times", "serif", "georgia", "garamond", "minion", "roman", "mincho", "song")
 _MONO_HINTS = ("courier", "mono", "consol", "console", "typewriter", "code")
+_BOLD_HINTS = ("bold", "black", "heavy", "semibold", "demibold")
+_ITALIC_HINTS = ("italic", "oblique")
 
 
-def classify_font_family(font_dict) -> str:
-    """serif | sans | mono for a pikepdf font dict — from the
-    FontDescriptor /Flags first (authoritative when present), then a
-    BaseFont-name heuristic. Defaults to 'sans' (the common body case).
-
-    For a Type0 font the descriptor lives on the descendant CIDFont, so
-    look there too."""
-    flags = 0
+def _descriptors_of(font_dict) -> list:
+    """The font's descriptor(s): its own, plus each descendant CIDFont's
+    (Type0 keeps the descriptor there). Malformed /DescendantFonts (a
+    plain dict, or an array holding an int/Null) makes `.get` raise on a
+    non-dict element — a damaged/hand-built PDF this app's repair engines
+    exist for. Degrade to whatever was collectable, never abort the edit
+    with a raw error (review-caught in 9.B1)."""
     descriptors = []
     desc = font_dict.get("/FontDescriptor")
     if desc is not None:
         descriptors.append(desc)
     desc_fonts = font_dict.get("/DescendantFonts")
     if desc_fonts is not None:
-        # AttributeError too: a malformed /DescendantFonts (a plain dict,
-        # or an array holding an int/Null) makes `.get` raise on a
-        # non-dict element — a damaged/hand-built PDF this app's repair
-        # engines exist for. Degrade to the name heuristic, never abort
-        # the edit with a raw error (review-caught).
         try:
             for d in desc_fonts:
                 dd = d.get("/FontDescriptor")
@@ -77,7 +92,15 @@ def classify_font_family(font_dict) -> str:
                     descriptors.append(dd)
         except (TypeError, ValueError, AttributeError):
             pass
-    for d in descriptors:
+    return descriptors
+
+
+def classify_font_family(font_dict) -> str:
+    """serif | sans | mono for a pikepdf font dict — from the
+    FontDescriptor /Flags first (authoritative when present), then a
+    BaseFont-name heuristic. Defaults to 'sans' (the common body case)."""
+    flags = 0
+    for d in _descriptors_of(font_dict):
         try:
             flags |= int(d.get("/Flags", 0))
         except (TypeError, ValueError, AttributeError):
@@ -93,6 +116,47 @@ def classify_font_family(font_dict) -> str:
     if any(h in name for h in _SERIF_HINTS):
         return "serif"
     return "sans"
+
+
+def classify_font_style(font_dict) -> tuple[bool, bool]:
+    """(bold, italic) for a pikepdf font dict — descriptor evidence
+    (ForceBold flag, Italic flag, ItalicAngle) plus BaseFont-name hints
+    (the workhorse in practice: real-world bold is signalled by the name,
+    ForceBold is a Type1 hinting flag most producers never set). Seeds
+    the 9.A3b style toggles; never authoritative for rendering."""
+    bold = False
+    italic = False
+    for d in _descriptors_of(font_dict):
+        try:
+            flags = int(d.get("/Flags", 0))
+        except (TypeError, ValueError, AttributeError):
+            flags = 0
+        if flags & _FLAG_FORCE_BOLD:
+            bold = True
+        if flags & _FLAG_ITALIC:
+            italic = True
+        try:
+            if abs(float(d.get("/ItalicAngle", 0) or 0)) > 0.1:
+                italic = True
+        except (TypeError, ValueError, AttributeError):
+            pass
+    name = str(font_dict.get("/BaseFont", "")).lstrip("/").lower()
+    if any(h in name for h in _BOLD_HINTS):
+        bold = True
+    if any(h in name for h in _ITALIC_HINTS):
+        italic = True
+    return bold, italic
+
+
+def style_key(bold: bool, italic: bool) -> str:
+    """The _FACE_FILES style key for an absolute (bold, italic) pair."""
+    if bold and italic:
+        return "bolditalic"
+    if bold:
+        return "bold"
+    if italic:
+        return "italic"
+    return "regular"
 
 
 def synthetic_family_font(family: str):
@@ -116,22 +180,26 @@ def synthetic_family_font(family: str):
     )
 
 
-def resolve_fallback_font(font_path: str, original_font=None) -> str:
+def resolve_fallback_font(font_path: str, original_font=None, style: str = "regular") -> str:
     """Resolve the concrete fallback .ttf to embed. `font_path` may be a
     DIRECTORY (the vendored `resources/fonts` — the real app passes this,
     and the family matching the original font is chosen) or a FILE (a
-    specific face — the test/back-compat path, used verbatim). Falls back
-    to Sans, then to whatever single .ttf is present, so a partially
-    provisioned bundle degrades instead of crashing."""
+    specific face — the test/back-compat path, used verbatim). `style`
+    (9.A3b: regular/bold/italic/bolditalic) picks the face variant.
+    Degrade ladder: exact family+style → the family's Regular → Sans
+    Regular → whatever single .ttf is present — face identity beats
+    weight (a missing Bold lands on the family's Regular, never another
+    family's Bold), and a partially provisioned bundle degrades instead
+    of crashing."""
     if not os.path.isdir(font_path):
         return font_path
     family = classify_font_family(original_font) if original_font is not None else "sans"
-    candidate = os.path.join(font_path, _FACE_FILES[family])
-    if os.path.isfile(candidate):
-        return candidate
-    sans = os.path.join(font_path, _FACE_FILES["sans"])
-    if os.path.isfile(sans):
-        return sans
+    faces = _FACE_FILES[family]
+    st = style if style in faces else "regular"
+    for candidate_name in (faces[st], faces["regular"], _FACE_FILES["sans"]["regular"]):
+        candidate = os.path.join(font_path, candidate_name)
+        if os.path.isfile(candidate):
+            return candidate
     for name in sorted(os.listdir(font_path)):
         if name.lower().endswith(".ttf"):
             return os.path.join(font_path, name)

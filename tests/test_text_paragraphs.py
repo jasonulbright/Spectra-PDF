@@ -1067,15 +1067,16 @@ class TestStyleControls:
         assert para["font_size"] == pytest.approx(12, abs=0.01)  # the body, not the 6pt marker
 
     def test_no_override_is_byte_identical_to_plain_edit(self, tmp_dir):
-        # size=None/color=None/family=None must not perturb the shipped
-        # 7.5 path (family joined the guard at 9.A3a).
+        # size=None/color=None/family=None/bold=None/italic=None must not
+        # perturb the shipped 7.5 path (family joined the guard at 9.A3a,
+        # the style axis at 9.A3b).
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Grow this paragraph text) Tj ET")
         out_a = os.path.join(tmp_dir, "a.pdf")
         out_b = os.path.join(tmp_dir, "b.pdf")
         para = _paras(src)[0]
         new = para["text"] + " with more"
         _apply(src, out_a, para, new)
-        _apply(src, out_b, para, new, size=None, color=None, family=None)
+        _apply(src, out_b, para, new, size=None, color=None, family=None, bold=None, italic=None)
         with pikepdf.open(out_a) as pa, pikepdf.open(out_b) as pb:
             assert pa.pages[0].Contents.read_bytes() == pb.pages[0].Contents.read_bytes()
 
@@ -1102,12 +1103,20 @@ def _page_base_fonts(path: str) -> list[str]:
 
 
 FONTS_DIR = os.path.dirname(FALLBACK_FONT)
-SERIF_FONT = os.path.join(FONTS_DIR, "LiberationSerif-Regular.ttf")
-MONO_FONT = os.path.join(FONTS_DIR, "LiberationMono-Regular.ttf")
+
+# The COMPLETE vendored bundle (sync-edit-fonts.ps1's $Faces): the guard
+# must cover every face any test here embeds, or a stale local cache
+# (pre-A3b: Regulars only) runs the style tests against the degrade
+# ladder and FAILS them instead of skipping (review-caught, repro'd).
+_ALL_FACES = [
+    f"Liberation{fam}-{style}.ttf"
+    for fam in ("Sans", "Serif", "Mono")
+    for style in ("Regular", "Bold", "Italic", "BoldItalic")
+]
 
 _needs_faces = pytest.mark.skipif(
-    not (os.path.isfile(FALLBACK_FONT) and os.path.isfile(SERIF_FONT) and os.path.isfile(MONO_FONT)),
-    reason="bundled fallback faces not provisioned",
+    not all(os.path.isfile(os.path.join(FONTS_DIR, n)) for n in _ALL_FACES),
+    reason="bundled fallback faces not provisioned (run scripts/sync-edit-fonts.ps1)",
 )
 
 
@@ -1237,6 +1246,153 @@ class TestFamilySwap:
         para = _paras(src)[0]
         _apply(src, out, para, para["text"] + " grown")
         assert not any("Liberation" in b for b in _page_base_fonts(out))
+
+
+def _helv_bold(pdf) -> pikepdf.Object:
+    """Bold-named simple font (the common real-world bold signal)."""
+    return pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type1"),
+            BaseFont=Name("/Helvetica-Bold"),
+            Encoding=Name("/WinAnsiEncoding"),
+        )
+    )
+
+
+class TestStyleAxis:
+    """Phase 9.A3b — bold/italic substitution (the vendored variant faces).
+
+    A present bold/italic is ABSOLUTE: the substituted face is
+    styles[bold][italic]; family still classifies from the paragraph's own
+    font when not explicit. All-None stays the shipped byte-identical
+    path (guarded in test_no_override_is_byte_identical…)."""
+
+    @_needs_faces
+    def test_bold_swap_embeds_bold_face(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Make this paragraph bold) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], bold=True, font_path=FONTS_DIR)
+        assert any("LiberationSans-Bold" in b for b in _page_base_fonts(out))
+        relisted = _paras(out)
+        assert relisted[0]["editable"] is True
+        assert relisted[0]["text"] == para["text"]
+        # The re-listing seeds the toggle from the embedded bold face.
+        assert relisted[0]["bold"] is True
+        assert relisted[0]["italic"] is False
+
+    @_needs_faces
+    def test_italic_and_bolditalic(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Slant this text now) Tj ET")
+        out_i = os.path.join(tmp_dir, "i.pdf")
+        para = _paras(src)[0]
+        _apply(src, out_i, para, para["text"], italic=True, font_path=FONTS_DIR)
+        assert any("LiberationSans-Italic" in b for b in _page_base_fonts(out_i))
+        out_bi = os.path.join(tmp_dir, "bi.pdf")
+        _apply(src, out_bi, para, para["text"], bold=True, italic=True, font_path=FONTS_DIR)
+        assert any("LiberationSans-BoldItalic" in b for b in _page_base_fonts(out_bi))
+
+    @_needs_faces
+    def test_bold_on_serif_paragraph_classifies_serif(self, tmp_dir):
+        # Style-only: family comes from the member's own font (B1), so a
+        # serif paragraph's bold lands on LiberationSerif-Bold.
+        srcpdf = pikepdf.new()
+        _page(
+            srcpdf,
+            b"BT /F1 12 Tf 72 700 Td (Serif body to embolden) Tj ET",
+            {"/F1": _times(srcpdf)},
+        )
+        src = os.path.join(tmp_dir, "serif.pdf")
+        srcpdf.save(src)
+        srcpdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], bold=True, font_path=FONTS_DIR)
+        base = _page_base_fonts(out)
+        assert any("LiberationSerif-Bold" in b for b in base)
+
+    @_needs_faces
+    def test_style_composes_with_family(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Bold mono please) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], family="mono", bold=True, font_path=FONTS_DIR)
+        assert any("LiberationMono-Bold" in b for b in _page_base_fonts(out))
+
+    @_needs_faces
+    def test_style_degrades_to_regular_when_variant_missing(self, tmp_dir):
+        # A sparse bundle (Regular only): the bold request degrades to the
+        # family's Regular — face identity beats weight, never a crash.
+        import shutil
+
+        sparse = os.path.join(tmp_dir, "sparse-fonts")
+        os.makedirs(sparse)
+        shutil.copy(FALLBACK_FONT, os.path.join(sparse, "LiberationSans-Regular.ttf"))
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Degrade with grace) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], bold=True, font_path=sparse)
+        base = _page_base_fonts(out)
+        assert any("LiberationSans" in b for b in base)
+        assert not any("Bold" in b for b in base)
+
+    @_needs_faces
+    def test_explicit_false_pair_unbolds(self, tmp_dir):
+        # The unbold flow: a bold-fonted paragraph, toggles sent as
+        # (False, False) — an absolute statement — re-embeds the REGULAR
+        # face.
+        srcpdf = pikepdf.new()
+        _page(
+            srcpdf,
+            b"BT /F1 12 Tf 72 700 Td (Already bold body text) Tj ET",
+            {"/F1": _helv_bold(srcpdf)},
+        )
+        src = os.path.join(tmp_dir, "bold.pdf")
+        srcpdf.save(src)
+        srcpdf.close()
+        para = _paras(src)[0]
+        # The listing seeds the toggle ON from the bold name.
+        assert para["bold"] is True
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, para["text"], bold=False, italic=False, font_path=FONTS_DIR)
+        base = _page_base_fonts(out)
+        assert any("LiberationSans" in b for b in base)
+        assert not any("LiberationSans-Bold" in b for b in base)
+
+    def test_listing_seeds_default_false(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Plain and upright) Tj ET")
+        para = _paras(src)[0]
+        assert para["bold"] is False
+        assert para["italic"] is False
+
+    def test_listing_seeds_italic_from_descriptor_angle(self, tmp_dir):
+        srcpdf = pikepdf.new()
+        slanted = srcpdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type1"),
+                BaseFont=Name("/Helvetica-Oblique"),
+                Encoding=Name("/WinAnsiEncoding"),
+                FontDescriptor=srcpdf.make_indirect(
+                    Dictionary(Type=Name("/FontDescriptor"), ItalicAngle=-12)
+                ),
+            )
+        )
+        _page(
+            srcpdf,
+            b"BT /F1 12 Tf 72 700 Td (Slanted source text) Tj ET",
+            {"/F1": slanted},
+        )
+        src = os.path.join(tmp_dir, "it.pdf")
+        srcpdf.save(src)
+        srcpdf.close()
+        para = _paras(src)[0]
+        assert para["italic"] is True
+        assert para["bold"] is False
 
 
 class TestAlignmentDetection:

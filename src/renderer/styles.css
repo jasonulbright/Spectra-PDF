@@ -1348,6 +1348,29 @@
   color: #111;
   font-size: 11px;
 }
+/* A3b style toggles: B / I substitution buttons. */
+.page-editpara-style {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid rgba(120, 120, 120, 0.5);
+  border-radius: 2px;
+  background: #fff;
+  color: #111;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+.page-editpara-style-i {
+  font-weight: 400;
+  font-style: italic;
+}
+.page-editpara-style.pressed {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: #fff;
+}
 .page-edittext-editor input {
   width: 100%;
   min-width: 60px;

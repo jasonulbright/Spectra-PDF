@@ -642,12 +642,26 @@ export async function placeNewField(rect: { x: number; y: number; w: number; h: 
   }
 }
 
-export async function createPlacedField(params: {
-  name: string;
-  type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'optionlist' | 'signature';
-  options?: string[];
-  multiline?: boolean;
-}): Promise<void> {
+export async function createPlacedField(
+  params: {
+    name: string;
+    type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'optionlist' | 'signature';
+    options?: string[];
+    multiline?: boolean;
+  },
+  /** Field-create → read-back hardening (the 18-canvas-forms flake's
+   * strike-3 rule, mirroring the setReactInputValue precedent): when
+   * given, wait until the created widgets are VISIBLE in the renderer's
+   * own forms read (formWidgetCount) before returning — the app's
+   * create chain awaits its writes, but the post-UPDATE_FILE forms
+   * refetch is async, and an immediately-following name-keyed action
+   * (sign-into-field) raced it under load. `widgetDelta` = how many
+   * widgets the create adds (1 for every type this suite creates; a
+   * radio group would add its option count). Omit for creates expected
+   * to THROW (the duplicate-name refusal). */
+  readBack?: { path: string; widgetDelta?: number },
+): Promise<void> {
+  const before = readBack ? await formWidgetCount(readBack.path) : 0;
   const result = await browser.executeAsync<string | null, [typeof params]>(
     function (p, done) {
       (window as any).__SPECTRA_TEST__.createPlacedField(p)
@@ -658,6 +672,17 @@ export async function createPlacedField(params: {
   );
   if (typeof result === 'string') {
     throw new Error(`createPlacedField failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  if (readBack) {
+    const want = before + (readBack.widgetDelta ?? 1);
+    // 30s: the forms hook retries a transiently-failing read (destroyed
+    // proxy during the reload) with backoff — under heavy machine load
+    // the heal can take well over 10s; the wait must outlast it.
+    await browser.waitUntil(async () => (await formWidgetCount(readBack.path)) >= want, {
+      timeout: 30_000,
+      interval: 150,
+      timeoutMsg: `createPlacedField: "${params.name}" never appeared in the forms read-back (${want} widgets expected)`,
+    });
   }
 }
 

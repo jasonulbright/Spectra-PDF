@@ -531,7 +531,7 @@ def _fill_color_hex(color) -> str:
     return "#000000"
 
 
-def _listing(paragraphs: list[_Paragraph]) -> list[dict]:
+def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
     out = []
     for i, p in enumerate(paragraphs):
         # The DOMINANT member: the widest on the first line — the SAME rule
@@ -540,6 +540,10 @@ def _listing(paragraphs: list[_Paragraph]) -> list[dict]:
         # index lead-in marker otherwise seeded a mismatched number —
         # review-caught).
         first = _widest(p.lines[0].members)
+        # A3b seeds: the dominant member's own weight/slant, classified by
+        # the caller (needs the pdf's font dicts — `style_of(member)` →
+        # (bold, italic); None = unclassified, seeds regular).
+        b, it = style_of(first) if style_of is not None else (False, False)
         out.append(
             {
                 "index": i,
@@ -555,6 +559,8 @@ def _listing(paragraphs: list[_Paragraph]) -> list[dict]:
                 # size + fill colour.
                 "font_size": round(first.style["size"], 2),
                 "color": _fill_color_hex(first.style["fill_color"]),
+                "bold": b,
+                "italic": it,
             }
         )
     return out
@@ -583,7 +589,27 @@ def list_text_paragraphs(file: str, page: int) -> dict:
             detail=detail,
         )
         paragraphs = _group(runs, detail)
-        return {"page": int(page), "runs": runs, "paragraphs": _listing(paragraphs)}
+
+        # A3b: seed the style toggles from each paragraph's dominant
+        # member's OWN font (stream-scoped resources — the B1 discipline).
+        from engine.font_fallback import classify_font_style
+        from engine.text_runs import _lookup_font
+
+        def style_of(member: _Member) -> tuple[bool, bool]:
+            try:
+                fd = _lookup_font(
+                    member.style["font_name"], member.resources or resources, resources
+                )
+            except Exception:
+                fd = None
+            if fd is None:
+                return (False, False)
+            try:
+                return classify_font_style(fd)
+            except Exception:
+                return (False, False)
+
+        return {"page": int(page), "runs": runs, "paragraphs": _listing(paragraphs, style_of)}
 
 
 # ═══════════════════════════ rewrite half ═════════════════════════════════
@@ -1435,6 +1461,8 @@ def replace_paragraph_text(
     size: float | None = None,
     color: list | None = None,
     family: str | None = None,
+    bold: bool | None = None,
+    italic: bool | None = None,
 ) -> dict:
     """Replace a paragraph's text and re-lay-out inside its box (7.5).
 
@@ -1450,13 +1478,17 @@ def replace_paragraph_text(
     [r, g, b] triple (0-1) applied as a uniform fill colour. Either None
     keeps the paragraph's own.
 
-    A3a restyle: `family` ("serif" | "sans" | "mono") substitutes the
-    WHOLE paragraph into the bundled Liberation face of that family —
-    every character re-embeds via the fallback machinery (`font_path`
+    A3a/A3b restyle: `family` ("serif" | "sans" | "mono") and/or
+    `bold`/`italic` (absolute booleans — a present value states the
+    substituted face's weight/slant outright) substitute the WHOLE
+    paragraph into the matching bundled Liberation face — every
+    character re-embeds via the fallback machinery (`font_path`
     required), an honest substitution of the original foundry font.
-    Characters the Liberation face lacks refuse with a stated reason.
-    None keeps the paragraph's own fonts (the shipped 7.5/A1 path,
-    byte-identical)."""
+    Family defaults to the first member's own classification (B1) when
+    only a style is given, so bold-only on a serif paragraph lands
+    LiberationSerif-Bold. Characters the Liberation face lacks refuse
+    with a stated reason. All three None keeps the paragraph's own
+    fonts (the shipped 7.5/A1 path, byte-identical)."""
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -1520,43 +1552,56 @@ def replace_paragraph_text(
             if fam not in ("serif", "sans", "mono"):
                 raise ValueError("family must be serif, sans, or mono")
             family_override = fam
+        # A3b style axis: a PRESENT bold/italic is the substituted face's
+        # absolute weight/slant; both None = no style substitution.
+        style_override = None
+        if bold is not None or italic is not None:
+            style_override = (bool(bold), bool(italic))
+        substituting = family_override is not None or style_override is not None
 
         members_by_index = {m.index: m for m in para.members}
         styled, fb_chars = _styled_chars(
             str(new_text), list(spans), members_by_index, bool(convert),
             size_override=size_override, color_override=color_override,
-            force_fallback=family_override is not None,
+            force_fallback=substituting,
         )
         fallback = None
         if fb_chars:
             from engine.font_fallback import (
                 build_fallback_font,
                 resolve_fallback_font,
+                style_key,
                 synthetic_family_font,
             )
             from engine.text_runs import _lookup_font
 
             if not font_path:
                 raise ValueError("fallback font path is required to convert")
+            want_style = style_key(*style_override) if style_override is not None else "regular"
             if family_override is not None:
                 # A3a: the user picked the family — classification is
                 # bypassed via a synthetic /Flags dict (the A2 trick), so
                 # the substitution lands on exactly that face.
-                face = resolve_fallback_font(str(font_path), synthetic_family_font(family_override))
+                face = resolve_fallback_font(
+                    str(font_path), synthetic_family_font(family_override), style=want_style
+                )
             else:
                 # Phase 9.B1: one fallback face for the paragraph, its family
                 # matched to the paragraph's first member run (a serif body
-                # converts in serif). Per-span fallback families (a mono code
-                # span inside a serif paragraph) is a documented tail — one
-                # face here, chosen from the dominant member. The font is
-                # looked up in the member's OWN stream resources (form-scoped
-                # when nested), page resources as fallback — a form's `F1` can
-                # differ from the page's (review-caught).
+                # converts in serif) — which also serves the A3b style-only
+                # swap: bold on a serif paragraph lands LiberationSerif-Bold
+                # (want_style is "regular" on the plain convert path, so the
+                # resolve is unchanged there). Per-span fallback families (a
+                # mono code span inside a serif paragraph) is a documented
+                # tail — one face here, chosen from the dominant member. The
+                # font is looked up in the member's OWN stream resources
+                # (form-scoped when nested), page resources as fallback — a
+                # form's `F1` can differ from the page's (review-caught).
                 first = min(para.members, key=lambda m: m.index)
                 original = _lookup_font(
                     first.style["font_name"], first.resources or resources, resources
                 )
-                face = resolve_fallback_font(str(font_path), original)
+                face = resolve_fallback_font(str(font_path), original, style=want_style)
             font_dict, encode, width_1000 = build_fallback_font(pdf, face, fb_chars)
             fallback = _Fallback(None, font_dict, encode, width_1000)
 

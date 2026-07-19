@@ -39,6 +39,10 @@ export interface EditParagraph {
    * changes these from the seed. */
   fontSize: number;
   color: string;
+  /** A3b style seeds: the dominant member's own weight/slant (engine
+   * classification — descriptor flags/angle + name hints). */
+  bold: boolean;
+  italic: boolean;
 }
 
 /** A1/A3 restyle overrides carried on a paragraph commit. */
@@ -50,9 +54,14 @@ export interface ParagraphEditOpts {
   color?: [number, number, number];
   /** A3a: substitute the WHOLE paragraph into this bundled Liberation
    * family (an honest face replacement; undefined = keep the original
-   * fonts). With a family set the members' own coverage is irrelevant —
-   * every character re-renders in the chosen face. */
+   * fonts). With any substitution the members' own coverage is
+   * irrelevant — every character re-renders in the chosen face. */
   family?: 'serif' | 'sans' | 'mono';
+  /** A3b: absolute weight/slant of the substituted face. Sent as a PAIR
+   * whenever a substitution happens (family picked or a toggle changed
+   * from its seed); undefined = no style substitution. */
+  bold?: boolean;
+  italic?: boolean;
 }
 
 export interface EditTextListing {
@@ -84,6 +93,8 @@ interface EngineParagraphListing {
     reason: string | null;
     font_size: number;
     color: string;
+    bold: boolean;
+    italic: boolean;
   }[];
 }
 
@@ -131,6 +142,8 @@ export async function fetchEditTextListing(
       encodableByRun: new Map(p.runs.map((r) => [r, rawRuns[r]?.encodable ?? ''])),
       fontSize: p.font_size ?? 12,
       color: p.color ?? '#000000',
+      bold: Boolean(p.bold),
+      italic: Boolean(p.italic),
     });
   }
   return { runBoxes: runs.filter((r) => !covered.has(r.index)), paragraphs };

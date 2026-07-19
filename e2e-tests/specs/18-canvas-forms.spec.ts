@@ -144,7 +144,9 @@ describe('on-canvas form filling (2n.4b)', () => {
     // The prior test left the page committed at /Rotate 90, so this also
     // exercises placement conversion on a baked-rotated page.
     await placeNewField({ x: 0.1, y: 0.55, w: 0.4, h: 0.06 });
-    await createPlacedField({ name: 'created_on_canvas', type: 'text' });
+    // Read-back hardened (strike-3 rule): don't proceed until the created
+    // field is visible in the renderer's own forms read.
+    await createPlacedField({ name: 'created_on_canvas', type: 'text' }, { path: source });
 
     expect(await setCanvasFormValue(source, 'created_on_canvas', 'born on canvas')).toBe(true);
     await applyCanvasFormValues();
@@ -168,7 +170,10 @@ describe('on-canvas form filling (2n.4b)', () => {
 
   it('creates an empty signature field, then signs INTO it (2n.4c + 2n.4d)', async () => {
     await placeNewField({ x: 0.55, y: 0.75, w: 0.35, h: 0.1 });
-    await createPlacedField({ name: 'approval', type: 'signature' });
+    // Read-back hardened (strike-3 rule): the sign-into-field below is
+    // name-keyed and raced the post-create forms refetch under load —
+    // wait for the field to be visible before signing.
+    await createPlacedField({ name: 'approval', type: 'signature' }, { path: source });
 
     const signedOut = resolve(tmp, 'field-signed.pdf');
     const summary = await signCanvasField({
