@@ -810,6 +810,28 @@ export async function editImageTransform(
   }
 }
 
+/** Add Image (9.C2): embed a source at a user-space rect through the REAL
+ * commit path (the native picker is undrivable — inject the source). */
+export async function editImageAdd(
+  page: number,
+  rect: [number, number, number, number],
+  source: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
+): Promise<void> {
+  const result = await browser.executeAsync<string | null, [number, number[], unknown]>(
+    function (pg, r, s, done) {
+      (window as any).__SPECTRA_TEST__.editImageAdd(pg, r, s)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    page,
+    rect,
+    source,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`editImageAdd failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
 export async function editImageSelect(pageId: string, index: number): Promise<void> {
   await browser.execute<void, [string, number]>(
     function (p, i) {

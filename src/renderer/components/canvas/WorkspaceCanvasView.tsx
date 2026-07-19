@@ -112,6 +112,16 @@ interface WorkspaceCanvasViewProps {
     text: string,
     opts?: { size?: number; color?: [number, number, number]; family?: 'serif' | 'sans' | 'mono' },
   ) => Promise<string | void>;
+  // Embed a NEW image (9.C2) at a user-space rect. `source` is optional — the
+  // App handler PICKS the file when it's absent; the harness injects it (the
+  // native picker is undrivable). Undoable; EDIT_DECLINED on a signed-doc
+  // refusal.
+  onAddImage: (
+    path: string,
+    page: number,
+    rect: [number, number, number, number],
+    source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
+  ) => Promise<string | void>;
   // Add-page ghost (2n.3): pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
   onAddPages: (docId: string, toIndex: number) => void;
@@ -163,6 +173,7 @@ export function WorkspaceCanvasView({
   onEditText,
   onEditParagraph,
   onAddText,
+  onAddImage,
   onAddPages,
   onFillFormValues,
   onAddFormField,
@@ -1443,6 +1454,60 @@ export function WorkspaceCanvasView({
     [focusedDoc, docs, onEditImage, editBusy],
   );
 
+  // 9.C2 Add Image: the band draws the box; convert display→user space
+  // (buildSignatureAppearance, verbatim from A2) and hand it to App's
+  // onAddImage, which picks the file and embeds. No card — the native picker
+  // is the second step. Reentrancy-guarded (a modal pick blocks other edits
+  // meanwhile; a cancelled pick just resets it).
+  const addImageRef = useRef(false);
+  const onAddImageRect = useCallback(
+    async (
+      docId: string,
+      pageId: string,
+      rect: { x: number; y: number; w: number; h: number },
+      rotationAtDraw: 0 | 90 | 180 | 270,
+    ): Promise<void> => {
+      const doc = docs.find((d) => d.id === docId);
+      if (!doc || addImageRef.current || editBusy) return;
+      addImageRef.current = true;
+      setEditBusy(true);
+      setEditNotice(null);
+      try {
+        const placement: SignaturePlacement = {
+          id: crypto.randomUUID(),
+          path: doc.path,
+          pageId,
+          rect,
+          rotationAtDraw,
+        };
+        const built = await buildSignatureAppearance(docs, placement, async (page) => {
+          const f = state.files.get(page.sourceDocId);
+          if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+          const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+          const p = await proxy.getPage(page.sourcePageIndex + 1);
+          const [vx0, vy0, vx1, vy1] = p.view;
+          return {
+            box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+            bakedRotate: p.rotate,
+          };
+        });
+        if (!built) throw new Error('The page this image was placed on no longer exists.');
+        const notice = await onAddImage(built.path, built.appearance.page, built.appearance.rect);
+        if (notice === EDIT_DECLINED) {
+          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+        } else if (typeof notice === 'string') {
+          setEditNotice({ text: notice, error: false });
+        }
+      } catch (err) {
+        setEditNotice({ text: err instanceof Error ? err.message : String(err), error: true });
+      } finally {
+        addImageRef.current = false;
+        setEditBusy(false);
+      }
+    },
+    [docs, state.files, onAddImage, editBusy],
+  );
+
   // Harness bridge for Edit ▸ Images + Text (7.1/7.2) — refs pattern.
   const editImagesRef = useRef(editImagesByPage);
   editImagesRef.current = editImagesByPage;
@@ -1460,6 +1525,10 @@ export function WorkspaceCanvasView({
   commitAddTextRef.current = commitAddText;
   const commitImageTransformRef = useRef(commitImageTransform);
   commitImageTransformRef.current = commitImageTransform;
+  const onAddImageRef = useRef(onAddImage);
+  onAddImageRef.current = onAddImage;
+  const focusedDocPathRef = useRef<string | null>(focusedDoc?.path ?? null);
+  focusedDocPathRef.current = focusedDoc?.path ?? null;
   // Place an Add-Text box on the active file's first page (the band lives in
   // transformed canvas space, undrivable by WebDriver — the new-field harness
   // precedent).
@@ -1491,6 +1560,11 @@ export function WorkspaceCanvasView({
         })),
       transformImage: (pageId, index, matrix) =>
         commitImageTransformRef.current(pageId, index, matrix),
+      addImage: async (page, rect, source) => {
+        const path = focusedDocPathRef.current;
+        if (!path) throw new Error('addImage: no active document');
+        await onAddImageRef.current(path, page, rect, source);
+      },
       select: (pageId, index) => setEditSel({ kind: 'image', pageId, index }),
       selection: () => editSelRef.current,
       textPageIds: () => [...editTextRef.current.keys()],
@@ -2226,6 +2300,7 @@ export function WorkspaceCanvasView({
           onClearNewFieldPlacement={onClearNewFieldPlacement}
           addTextPlacement={liveAddTextPlacement}
           onSetAddTextRect={onSetAddTextRect}
+          onAddImageRect={onAddImageRect}
           onClearAddTextPlacement={onClearAddTextPlacement}
           onAddAnnotation={onAddAnnotation}
           onUpdateAnnotation={onUpdateAnnotation}
@@ -2305,6 +2380,7 @@ export function WorkspaceCanvasView({
           onClearNewFieldPlacement={onClearNewFieldPlacement}
           addTextPlacement={liveAddTextPlacement}
           onSetAddTextRect={onSetAddTextRect}
+          onAddImageRect={onAddImageRect}
           onClearAddTextPlacement={onClearAddTextPlacement}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={tool === 'hand' ? HAND_SUPPRESSES_PICKUP : drag.onPagePointerDown}

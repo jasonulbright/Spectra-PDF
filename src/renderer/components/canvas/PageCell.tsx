@@ -393,6 +393,13 @@ interface PageCellProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearAddTextPlacement: () => void;
+  // Add-Image band release (9.C2): converts + hands off to App's picker+embed.
+  onAddImageRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   onSelectPage: (docId: string, pageId: string, e?: React.MouseEvent) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
@@ -463,6 +470,7 @@ function PageCellImpl({
   addTextPlacement,
   onSetAddTextRect,
   onClearAddTextPlacement,
+  onAddImageRect,
   onClearNewFieldPlacement,
   onSelectPage,
   onOpenPage,
@@ -669,6 +677,9 @@ function PageCellImpl({
         } else if (tool === 'addtext') {
           // Add-text placement (9.A2) — single, drawing again replaces it.
           onSetAddTextRect(docId, page.id, latest, page.rotation);
+        } else if (tool === 'addimage') {
+          // Add-image (9.C2) — the box; App picks the file + embeds.
+          onAddImageRect(docId, page.id, latest, page.rotation);
         } else {
           const annotation: PageAnnotation = {
             id: crypto.randomUUID(),
@@ -1242,7 +1253,9 @@ function PageCellImpl({
                   ? ' band-formfield'
                   : tool === 'addtext'
                     ? ' band-addtext'
-                    : '')
+                    : tool === 'addimage'
+                      ? ' band-addimage'
+                      : '')
           }
           style={{
             left: `${band.x * 100}%`,

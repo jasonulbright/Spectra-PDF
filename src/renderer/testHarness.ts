@@ -174,6 +174,13 @@ export interface CanvasEditImagesHandlers {
   select: (pageId: string, index: number) => void;
   /** Transform (9.C1) the selected image via the real commit path. */
   transformImage: (pageId: string, index: number, matrix: number[]) => Promise<void>;
+  /** Add Image (9.C2): embed a source at a user-space rect via the real
+   * commit path (the native file picker is undrivable — inject the source). */
+  addImage: (
+    page: number,
+    rect: [number, number, number, number],
+    source: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
+  ) => Promise<void>;
   selection: () => { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
   /** Text runs (7.2): listing + opening the REAL inline editor (the input
    * itself is then driven through the DOM — data-testid edit-text-input). */
@@ -598,6 +605,12 @@ export interface TestHarness {
       source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 };
       outputPrefix?: string;
     },
+  ) => Promise<void>;
+  /** Add Image (9.C2): embed a source at a user-space rect. */
+  editImageAdd: (
+    page: number,
+    rect: [number, number, number, number],
+    source: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
   ) => Promise<void>;
   /** Add Text (9.A2): place then author. */
   addTextPlace: (rect: { x: number; y: number; w: number; h: number }, timeoutMs?: number) => Promise<void>;
@@ -1082,6 +1095,19 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         await canvasEditImages.transformImage(pageId, index, matrix);
       } catch (err) {
         captureError('editImageTransform', err);
+        throw err;
+      }
+    },
+    editImageAdd: async (page, rect, source) => {
+      if (!canvasEditImages) {
+        const msg = 'editImageAdd: canvas edit mode not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await canvasEditImages.addImage(page, rect, source);
+      } catch (err) {
+        captureError('editImageAdd', err);
         throw err;
       }
     },

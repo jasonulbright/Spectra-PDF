@@ -88,10 +88,10 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // 2026-07-18 discoverability pass), plus 9.A2 Add Text authoring.
     description: 'Edit text, whole paragraphs, and images — or add new text — right on the page.',
     ops: [],
-    // Two modes: 'edit' (click existing content to edit) and 'addtext' (drag a
-    // box to author new text). Opening the tool arms the first; the secondary
-    // toolbar switches between them.
-    canvasTools: ['edit', 'addtext'],
+    // Three modes: 'edit' (click existing content to edit), 'addtext' (drag a
+    // box to author new text), 'addimage' (drag a box, pick a raster). Opening
+    // the tool arms the first; the secondary toolbar switches between them.
+    canvasTools: ['edit', 'addtext', 'addimage'],
   },
   {
     id: 'fillsign',

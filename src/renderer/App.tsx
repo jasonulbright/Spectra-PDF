@@ -913,6 +913,76 @@ function AppContent(): React.ReactElement {
     [state.files, call, performOperation, reloadFile, dispatch, confirmEditOfSignedDoc],
   );
 
+  // 9.C2 Add Image: embed a NEW raster at `rect` (PDF user-space points). Picks
+  // the file with the SAME EXIF-aware JPEG-passthrough / raw-decode routing as
+  // 7.1 replace (one snapshot for the whole attempt, incl. the CMYK raw
+  // fallback). `injected` lets the harness supply a source (the native picker
+  // is undrivable). Undoable; refuses on a signed doc. The added image is an
+  // ordinary placement afterward (movable/resizable via C1).
+  const handleAddImage = useCallback(
+    async (
+      path: string,
+      page: number,
+      rect: [number, number, number, number],
+      injected?: ReplacementSource,
+    ): Promise<string | void> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+
+      let source: ReplacementSource | null = injected ?? null;
+      let pickedPath: string | null = null;
+      if (!source) {
+        pickedPath = await dialog.pickImageFile();
+        if (!pickedPath) return; // cancelled — no-op
+        if (isJpegPath(pickedPath)) {
+          const head = await batch.readFileBuffer(pickedPath);
+          if (jpegExifOrientation(head) === 1) source = { jpeg_path: pickedPath };
+        }
+      }
+      const tempFiles: string[] = [];
+      const writeTemp = async (data: Uint8Array): Promise<string> => {
+        const dir = f.workingPath.replace(/[\\/][^\\/]+$/, '');
+        const sep = f.workingPath.includes('\\') ? '\\' : '/';
+        const p = `${dir}${sep}addimg-${crypto.randomUUID()}.raw`;
+        await file.writeBuffer(p, data);
+        tempFiles.push(p);
+        return p;
+      };
+      try {
+        const snapshotPath = await file.snapshot(f.workingPath);
+        const params = { file: f.workingPath, output: f.workingPath, page, rect };
+        if (source) {
+          try {
+            await call('add_page_image', { ...params, source });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (!(pickedPath && engineWantsRawFallback(msg))) throw err;
+            source = null; // passthrough refused — decode below
+          }
+        }
+        if (!source) {
+          const bytes = await batch.readFileBuffer(pickedPath!);
+          const raw = await decodeToRawSource(bytes, writeTemp);
+          await call('add_page_image', { ...params, source: raw });
+        }
+        const result = await reloadFile(path);
+        if (result) {
+          dispatch({
+            type: 'UPDATE_FILE',
+            path,
+            pageCount: result.pageCount,
+            buffer: result.buffer,
+            snapshotPath,
+          });
+        }
+      } finally {
+        for (const p of tempFiles) void file.remove(p).catch(() => {});
+      }
+    },
+    [state.files, call, reloadFile, dispatch, confirmEditOfSignedDoc],
+  );
+
 
   const handleUndo = useCallback(async () => {
     if (state.pageUndoStack.length > 0) {
@@ -1477,6 +1547,7 @@ function AppContent(): React.ReactElement {
                   onEditText={handleEditText}
                   onEditParagraph={handleEditParagraph}
                   onAddText={handleAddText}
+                  onAddImage={handleAddImage}
                   onAddPages={handleAddPages}
                   onFillFormValues={handleFillFormValues}
                   onAddFormField={handleAddFormField}

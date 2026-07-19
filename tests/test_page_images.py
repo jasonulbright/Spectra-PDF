@@ -8,6 +8,7 @@ from pikepdf import Dictionary, Name
 import pytest
 
 from engine.page_images import (
+    add_page_image,
     delete_page_image,
     extract_page_image,
     list_page_images,
@@ -560,3 +561,105 @@ class TestTransformPageImage:
         out = os.path.join(tmp_dir, "o.pdf")
         with pytest.raises(ValueError, match="matrix"):
             transform_page_image(src, out, 1, 0, [1, 0, 0, 1])
+
+
+def _blank_page_pdf(path, size=(612, 792)):
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=size)
+    pdf.save(path)
+    pdf.close()
+
+
+def _raw_source(tmp_dir):
+    path = os.path.join(tmp_dir, "add.raw")
+    with open(path, "wb") as f:
+        f.write(bytes([200, 60, 60]) * 4)  # 2x2 RGB
+    return {"raw_path": path, "width": 2, "height": 2, "channels": 3}
+
+
+class TestAddPageImage:
+    def test_adds_an_image_at_the_box(self, tmp_dir):
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)  # a blank page has no image resources yet
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_page_image(src, out, 1, [100, 500, 300, 650], _raw_source(tmp_dir))
+        imgs = list_page_images(out, 1)["images"]
+        assert len(imgs) == 1
+        assert imgs[0]["rect"] == pytest.approx([100, 500, 300, 650])
+        # cm = [w, 0, 0, h, x0, y0] maps the unit image square onto the box.
+        assert imgs[0]["matrix"] == pytest.approx([200, 0, 0, 150, 100, 500])
+        assert imgs[0]["native_width"] == 2
+
+    def test_added_image_is_an_ordinary_placement(self, tmp_dir):
+        # Add, then TRANSFORM it (C1) — proves the added image is a normal
+        # placement the rest of the pipeline sees with no special case.
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        mid = os.path.join(tmp_dir, "mid.pdf")
+        add_page_image(src, mid, 1, [100, 500, 200, 600], _raw_source(tmp_dir))
+        out = os.path.join(tmp_dir, "o.pdf")
+        transform_page_image(mid, out, 1, 0, [120, 0, 0, 120, 300, 300])
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["matrix"] == pytest.approx([120, 0, 0, 120, 300, 300])
+
+    def test_does_not_disturb_existing_images(self, tmp_dir):
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)  # three existing placements
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_page_image(src, out, 1, [420, 400, 520, 500], _raw_source(tmp_dir))
+        imgs = list_page_images(out, 1)["images"]
+        assert len(imgs) == 4
+        # Appended AFTER the existing draws (last in DFS order).
+        assert imgs[3]["rect"] == pytest.approx([420, 400, 520, 500])
+        # The originals are untouched.
+        assert imgs[0]["rect"] == [50, 600, 150, 680]
+
+    def test_jpeg_source(self, tmp_dir):
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        jpath = os.path.join(tmp_dir, "t.jpg")
+        with open(jpath, "wb") as f:
+            f.write(_tiny_jpeg())
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_page_image(src, out, 1, [100, 500, 200, 600], {"jpeg_path": jpath})
+        assert len(list_page_images(out, 1)["images"]) == 1
+
+    def test_degenerate_box_refuses(self, tmp_dir):
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="too small"):
+            add_page_image(src, out, 1, [100, 500, 100, 500], _raw_source(tmp_dir))
+
+    def test_bad_rect_refuses(self, tmp_dir):
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="rect"):
+            add_page_image(src, out, 1, [1, 2, 3], _raw_source(tmp_dir))
+
+    def test_does_not_leak_into_a_sibling_sharing_resources(self, tmp_dir):
+        # Two pages share ONE /Resources object (a generator that hoisted a
+        # single /Resources — the shape qpdf flattens onto each page BY
+        # REFERENCE). Adding an image to page 1 must NOT leak the entry into
+        # page 2's /XObject (review-caught: registering on the shared dict).
+        src = os.path.join(tmp_dir, "shared.pdf")
+        pdf = pikepdf.new()
+        im = _rgb_image(pdf, 10, 20, 30)
+        shared_res = pdf.make_indirect(Dictionary(XObject=Dictionary(Im0=im)))
+        p1 = pdf.add_blank_page(page_size=(400, 400))
+        p2 = pdf.add_blank_page(page_size=(400, 400))
+        p1.obj["/Resources"] = shared_res
+        p2.obj["/Resources"] = shared_res
+        p1.Contents = pdf.make_stream(b"q 50 0 0 50 10 10 cm /Im0 Do Q")
+        p2.Contents = pdf.make_stream(b"q 50 0 0 50 10 10 cm /Im0 Do Q")
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_page_image(src, out, 1, [100, 100, 200, 200], _raw_source(tmp_dir))
+        with pikepdf.open(out) as opdf:
+            p1_names = {str(k) for k in opdf.pages[0].obj["/Resources"]["/XObject"].keys()}
+            p2_names = {str(k) for k in opdf.pages[1].obj["/Resources"]["/XObject"].keys()}
+        assert any(n.startswith("/EditIm") for n in p1_names)  # page 1 got it
+        assert not any(n.startswith("/EditIm") for n in p2_names)  # page 2 did NOT
+        assert "/Im0" in p1_names and "/Im0" in p2_names  # both keep the original

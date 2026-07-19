@@ -115,6 +115,12 @@ export interface DocumentViewProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearAddTextPlacement: () => void;
+  onAddImageRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
@@ -537,6 +543,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onClearNewFieldPlacement={props.onClearNewFieldPlacement}
           addTextPlacement={props.addTextPlacement?.pageId === page.id ? props.addTextPlacement : null}
           onSetAddTextRect={props.onSetAddTextRect}
+          onAddImageRect={props.onAddImageRect}
           onClearAddTextPlacement={props.onClearAddTextPlacement}
           onPageContextMenu={props.onPageContextMenu}
           onPagePointerDown={NO_PAGE_POINTER}

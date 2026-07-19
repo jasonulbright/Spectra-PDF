@@ -591,6 +591,74 @@ def replace_page_image(file: str, output: str, page: int, index: int, source: di
             pass
 
 
+def add_page_image(file: str, output: str, page: int, rect: list, source: dict) -> dict:
+    """Embed a NEW image at `rect` (Phase 9.C2) — pure authoring, no rewrite of
+    existing content.
+
+    `rect` is [x0, y0, x1, y1] in USER-space points (the drawn box). `source`
+    is the SAME shape 7.1 replace takes ({jpeg_path} passthrough |
+    {raw_path,width,height,channels} decoded), embedded by the SAME
+    `_image_from_source`. The image is appended as `q <cm> /Name Do Q` with
+    `cm` mapping the unit image square onto the box (stretch-to-box, replace's
+    v1 rule), so the added image is an ORDINARY placement afterward —
+    list/delete/replace/transform (C1) all see it with no special case."""
+    try:
+        x0, y0, x1, y1 = (float(v) for v in rect)
+    except (TypeError, ValueError):
+        raise ValueError("rect must be [x0, y0, x1, y1]") from None
+    left, right = min(x0, x1), max(x0, x1)
+    bottom, top = min(y0, y1), max(y0, y1)
+    w, h = right - left, top - bottom
+    if w < 1e-3 or h < 1e-3:
+        raise ValueError("image box is too small")
+
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        image_obj = _image_from_source(pdf, source)
+    except Exception:
+        pdf.close()
+        raise
+    try:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+
+        # Register the XObject on a page-LOCAL /Resources so the draw lands on
+        # THIS page only. QPDF flattens inherited /Resources onto every page's
+        # OWN dict BY REFERENCE, so a page's "own" /Resources + /XObject is
+        # frequently the SAME object shared with siblings (the shared-/Pages-
+        # /Resources shape this targets, and review-confirmed even for pages
+        # that already have an own dict). Registering directly would leak the
+        # entry into every sibling — so copy-on-write a fresh /Resources with a
+        # NEW /XObject (redact.py's `_copy_resources_for_write`, the module's
+        # established guard); existing content still resolves against the
+        # copied (shared-by-ref) entries, and `_fresh_name` avoids them all.
+        res = _copy_resources_for_write(pdf, _resolve_resources(p))
+        p.obj["/Resources"] = res
+        name = _fresh_name(res, [0], set())
+        _register_xobject(pdf, res, name, image_obj)
+
+        cm = [round(w, 4), 0, 0, round(h, 4), round(left, 4), round(bottom, 4)]
+        content = pikepdf.unparse_content_stream(
+            [_op([], "q"), _op(cm, "cm"), _do_instruction(name), _op([], "Q")]
+        )
+        # Shield the EXISTING content in its own q/Q (the A2 lesson): a dangling
+        # `cm` in prior content must not transform our appended draw.
+        p.contents_add(b"q\n", prepend=True)
+        p.contents_add(b"\nQ\n" + content, prepend=False)
+
+        _save(pdf, input_path, output_path)
+        return {"output": str(output_path), "page": int(page)}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
 def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> dict:
     """Save one placement's image bytes out (placement-independent — the
     XObject's own encoded data; pikepdf picks the natural format)."""

@@ -78,6 +78,12 @@ interface DocumentRowProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearAddTextPlacement: () => void;
+  onAddImageRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -142,6 +148,7 @@ function DocumentRowImpl({
   addTextPlacement,
   onSetAddTextRect,
   onClearAddTextPlacement,
+  onAddImageRect,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
@@ -234,6 +241,7 @@ function DocumentRowImpl({
         onClearNewFieldPlacement={onClearNewFieldPlacement}
         addTextPlacement={addTextPlacement?.pageId === page.id ? addTextPlacement : null}
         onSetAddTextRect={onSetAddTextRect}
+        onAddImageRect={onAddImageRect}
         onClearAddTextPlacement={onClearAddTextPlacement}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}

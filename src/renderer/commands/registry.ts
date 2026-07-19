@@ -96,13 +96,14 @@ export function cycledTab(state: AppState, delta: 1 | -1): FocusedTab {
 // to Select. Which TOOL owns each is `commands/tools.ts`'s `canvasTools`.
 const CANVAS_TOOLS = [
   'select', 'hand', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
-  'formfields', 'edit', 'addtext',
+  'formfields', 'edit', 'addtext', 'addimage',
 ] as const;
 
 export const TOOL_TITLES: Record<CanvasTool, string> = {
   select: 'Select', hand: 'Hand', highlight: 'Highlight', freetext: 'Text', ink: 'Draw',
   stamp: 'Stamp', redact: 'Redact', signature: 'Sign', forms: 'Fill Fields',
   formfields: 'Add Field', edit: 'Select Image', addtext: 'Add Text',
+  addimage: 'Add Image',
 };
 
 // CANVAS_TOOLS must be a literal tuple (COMMAND_IDS builds `tools.${t}` from

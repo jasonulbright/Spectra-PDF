@@ -152,7 +152,12 @@ export type CanvasTool =
   // tool's SECOND mode — a sibling of 'edit', not a replacement (Comment owns
   // four the same way). Bands like 'formfields'/'signature'; commits a fresh
   // Type0 text object via the engine's add_text_box, undoable.
-  | 'addtext';
+  | 'addtext'
+  // AUTHORING a new image: drag a box, then pick a raster (Phase 9.C2). The
+  // Edit tool's THIRD mode. Bands like 'addtext'; the picked image is embedded
+  // at the box via the engine's add_page_image, undoable — an ordinary
+  // placement afterward (movable/resizable via C1).
+  | 'addimage';
 
 // The tab-strip model (Phase 4 M2, § 3.1): Home | Tools | one tab per open
 // document. A doc tab focuses that file and shows the document pane (at M2:

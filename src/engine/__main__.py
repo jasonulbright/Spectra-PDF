@@ -46,6 +46,7 @@ from engine.compare import compare_text, compare_visual
 from engine.forms import read_form_fields, fill_form_fields
 from engine.ocr_layer import apply_ocr_layer
 from engine.page_images import (
+    add_page_image,
     delete_page_image,
     extract_page_image,
     list_page_images,
@@ -105,6 +106,7 @@ def main() -> None:
     server.register("replace_page_image", replace_page_image)
     server.register("extract_page_image", extract_page_image)
     server.register("transform_page_image", transform_page_image)
+    server.register("add_page_image", add_page_image)
     server.register("list_text_runs", list_text_runs)
     server.register("replace_text_run", replace_text_run)
     server.register("convert_text_run", convert_text_run)

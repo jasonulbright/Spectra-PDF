@@ -1579,6 +1579,12 @@
   border-color: #38bdf8;
 }
 
+/* Add-Image band (9.C2): violet, distinct from Add-Text's sky. */
+.page-annot-band.band-addimage {
+  background: rgba(167, 139, 250, 0.18);
+  border-color: #a78bfa;
+}
+
 /* Pending new-field placement (2n.4c): emerald frame, same pointer contract
    as .page-signature — only the × takes events. */
 .page-form-new {
