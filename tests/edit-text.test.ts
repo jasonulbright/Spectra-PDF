@@ -49,3 +49,29 @@ describe('fetchTextRuns projection', () => {
     expect(runs[1].reason).toMatch(/Type3/);
   });
 });
+
+describe('ligature-aware validation (9.B5)', () => {
+  it('accepts a char reachable only through a sequence (engine-order mirror)', () => {
+    // 'i' is NOT single-encodable; "fi" is a listed sequence. A
+    // singles-first walk would false-refuse — sequences match first.
+    expect(unencodableChars('fit', 'ft', ['fi'])).toEqual([]);
+    expect(unencodableChars('it', 'ft', ['fi'])).toEqual(['i']);
+  });
+
+  it('matches longest-first on overlapping sequences', () => {
+    // "ffi" beats "ff"; the trailing char then stands alone.
+    expect(unencodableChars('ffix', 'x', ['ff', 'ffi'])).toEqual([]);
+    expect(unencodableChars('ffx', 'x', ['ff', 'ffi'])).toEqual([]);
+    expect(unencodableChars('ffiy', 'x', ['ff', 'ffi'])).toEqual(['y']);
+  });
+
+  it('is greedy like the engine (no backtracking)', () => {
+    // "ab" matches at 0, leaving 'c' unreachable — the engine fails the
+    // same way, so validation and belt agree.
+    expect(unencodableChars('abc', 'ab', ['ab', 'bc'])).toEqual(['c']);
+  });
+
+  it('empty sequence list preserves the shipped single-char behavior', () => {
+    expect(unencodableChars('abc', 'ab')).toEqual(['c']);
+  });
+});

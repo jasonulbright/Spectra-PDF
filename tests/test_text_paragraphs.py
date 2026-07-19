@@ -1647,6 +1647,139 @@ class TestSplitMerge:
         assert not os.path.exists(out)
 
 
+class TestLigatureParagraphs:
+    """9.B5 paragraph path: atomic ligature entries — the commit accepts
+    what the run editor and the live validation accept, at agreeing
+    widths (the sub-flagged accept/refuse mismatch + width drift)."""
+
+    def _lig_font(self, pdf):
+        # Simple TrueType: 'a','b','f' singles + code 0x4C → "fi" (the
+        # ligature); 'i' is reachable ONLY through the sequence.
+        entries = {0x61: "a", 0x62: "b", 0x66: "f", 0x4C: "fi"}
+        lines = "\n".join(
+            f"<{c:02x}> <{''.join(f'{ord(u):04x}' for u in t)}>" for c, t in entries.items()
+        )
+        tou = (
+            "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
+            "1 begincodespacerange <00> <ff> endcodespacerange\n"
+            f"{len(entries)} beginbfchar\n{lines}\nendbfchar\n"
+            "endcmap end end\n"
+        ).encode("ascii")
+        return pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/TrueType"),
+                BaseFont=Name("/LigPara"),
+                FontDescriptor=pdf.make_indirect(
+                    Dictionary(Type=Name("/FontDescriptor"), Flags=4)
+                ),
+                ToUnicode=pdf.make_stream(tou),
+            )
+        )
+
+    def _build_lig(self, tmp_dir, content):
+        src = os.path.join(tmp_dir, "lig.pdf")
+        pdf = pikepdf.new()
+        _page(pdf, content, {"/F1": self._lig_font(pdf)})
+        pdf.save(src)
+        pdf.close()
+        return src
+
+    def test_paragraph_edit_round_trips_a_ligature_only_char(self, tmp_dir):
+        # The document shows "afib" via the lig code; the paragraph edit
+        # re-types it — 'i' is sequence-only, so pre-fix this REFUSED
+        # while the run editor accepted (the mismatch).
+        src = self._build_lig(tmp_dir, b"BT /F1 12 Tf 72 700 Td (aLb) Tj ET")
+        para = _paras(src)[0]
+        assert para["text"] == "afib"
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, "afib ba")
+        relisted = _paras(out)
+        assert relisted[0]["text"] == "afib ba"
+        # The emitted bytes carry the LIGATURE code, not f+i singles
+        # (which don't exist for 'i' — encode round-trips the sequence).
+        with pikepdf.open(out) as pdf2:
+            raw = pikepdf.unparse_content_stream(pikepdf.parse_content_stream(pdf2.pages[0]))
+        assert b"L" in raw
+
+    def test_ligature_edit_keeps_siblings_unmoved(self, tmp_dir):
+        # Width agreement end to end: the resync property under ligature
+        # emission (the sub-flagged drift would move the sibling).
+        src = self._build_lig(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (aLb) Tj 0 -60 Td (ab ba) Tj ET",
+        )
+        paras = _paras(src)
+        target = next(p for p in paras if "fi" in p["text"])
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, target, target["text"] + " ab")
+        _assert_non_members_unmoved(src, out, target["runs"])
+
+    def test_noncoalesced_same_run_spans_never_form_a_cross_entry_ligature(self, tmp_dir):
+        # Review-caught HIGH (round 26): the joined-buffer re-encode could
+        # ligature-match ACROSS styled-entry boundaries — 'f','i' arriving
+        # as separate single entries (adjacent same-run spans, widths
+        # summed as singles) emitted as the LIG code (4.2pt drift repro,
+        # success result). The shipped renderer coalesces such spans, but
+        # the ENGINE must hold for any caller: per-entry encode keeps
+        # bytes ≡ widths. Font: 'f','i' singles AND a "fi" ligature.
+        src = os.path.join(tmp_dir, "lig2.pdf")
+        pdf = pikepdf.new()
+        entries = {0x66: "f", 0x69: "i", 0x4C: "fi", 0x61: "a"}
+        lines = "\n".join(
+            f"<{c:02x}> <{''.join(f'{ord(u):04x}' for u in t)}>" for c, t in entries.items()
+        )
+        tou = (
+            "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
+            "1 begincodespacerange <00> <ff> endcodespacerange\n"
+            f"{len(entries)} beginbfchar\n{lines}\nendbfchar\n"
+            "endcmap end end\n"
+        ).encode("ascii")
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/TrueType"),
+                BaseFont=Name("/LigBoth"),
+                FontDescriptor=pdf.make_indirect(
+                    Dictionary(Type=Name("/FontDescriptor"), Flags=4)
+                ),
+                ToUnicode=pdf.make_stream(tou),
+            )
+        )
+        _page(pdf, b"BT /F1 12 Tf 72 700 Td (fa) Tj ET", {"/F1": font})
+        pdf.save(src)
+        pdf.close()
+        para = _paras(src)[0]
+        assert para["text"] == "fa"
+        out = os.path.join(tmp_dir, "o.pdf")
+        run = para["runs"][0]
+        # Hand-split spans: 'f' and 'i' as SEPARATE same-run spans — the
+        # non-conforming caller shape (the renderer coalesces these).
+        spans = [
+            {"start": 0, "end": 1, "run": run},
+            {"start": 1, "end": 2, "run": run},
+            {"start": 2, "end": 3, "run": run},
+        ]
+        _apply(src, out, para, "fia", spans=spans)
+        with pikepdf.open(out) as pdf2:
+            raw = pikepdf.unparse_content_stream(pikepdf.parse_content_stream(pdf2.pages[0]))
+        # Bytes must be the TWO SINGLES (f i) + a — matching the summed
+        # widths — NEVER the cross-boundary lig code 0x4C.
+        assert b"fia" in raw
+        assert b"\x4c" not in raw.replace(b"/LigBoth", b"")
+
+    def test_family_swap_of_ligature_text_uses_liberation_singles(self, tmp_dir):
+        # force_fallback ignores sequences: Liberation encodes f and i as
+        # separate glyphs — the substitution path stays sequence-free.
+        if not (os.path.isfile(FALLBACK_FONT)):
+            pytest.skip("fallback faces not provisioned")
+        src = self._build_lig(tmp_dir, b"BT /F1 12 Tf 72 700 Td (aLb) Tj ET")
+        para = _paras(src)[0]
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, para["text"], family="sans", font_path=FONTS_DIR)
+        assert _paras(out)[0]["text"] == "afib"
+
+
 class TestAlignmentDetection:
     def test_center(self, tmp_dir):
         # Centers share x=150; Hello=27.34pt wide, Hi=11.33pt.

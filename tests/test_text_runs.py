@@ -460,3 +460,85 @@ class TestPredefinedCjkEditing:
         with pikepdf.open(out) as opened:
             content = opened.pages[0].Contents.read_bytes()
         assert b"7f168f91" in content.replace(b" ", b"").lower()
+
+
+class TestLigatureSequencesListing:
+    """Phase 9.B5 — the run listing's additive `sequences` field, and the
+    replacement path encoding through a ligature code end to end."""
+
+    def _lig_font(self, pdf, mapping, w_array=None):
+        from tests.test_pdf_fonts import _tounicode_stream
+
+        desc = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name("/LigFace"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+            DW=500,
+        )
+        if w_array is not None:
+            desc["/W"] = w_array
+        return pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/LigFace"),
+                Encoding=Name("/Identity-H"),
+                DescendantFonts=Array([pdf.make_indirect(desc)]),
+                ToUnicode=_tounicode_stream(pdf, mapping),
+            )
+        )
+
+    def test_listing_reports_sequences_and_empty_lists_elsewhere(self, tmp_dir):
+        src = os.path.join(tmp_dir, "t.pdf")
+        pdf = pikepdf.new()
+        lig = self._lig_font(pdf, {1: "a", 7: "fi"})
+        # A refused font (Type0 without ToUnicode) pins the else-branch [].
+        refused = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/NoTou"),
+                Encoding=Name("/Identity-H"),
+            )
+        )
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            Font=Dictionary(F1=_helv(pdf), F2=lig, F3=refused)
+        )
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 72 700 Td (Hello) Tj"
+            b" /F2 12 Tf 72 650 Td <0007> Tj"
+            b" /F3 12 Tf 72 600 Td <0001> Tj ET"
+        )
+        pdf.save(src)
+        pdf.close()
+        runs = list_text_runs(src, 1)["runs"]
+        assert runs[0]["text"] == "Hello"
+        assert runs[0]["sequences"] == []  # plain font: additive field, empty
+        assert runs[1]["text"] == "fi"
+        assert runs[1]["sequences"] == ["fi"]
+        # The single-char floor is what `encodable` still reports.
+        assert "a" in runs[1]["encodable"] and "f" not in runs[1]["encodable"]
+        assert runs[2]["editable"] is False
+        assert runs[2]["sequences"] == []
+
+    def test_replace_encodes_through_the_ligature_code(self, tmp_dir):
+        src = os.path.join(tmp_dir, "t.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        lig = self._lig_font(pdf, {1: "a", 7: "fi"})
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=lig))
+        page.Contents = pdf.make_stream(b"BT /F1 12 Tf 72 700 Td <0001> Tj ET")
+        pdf.save(src)
+        pdf.close()
+        # 'f' and 'i' are reachable ONLY via the ligature — pre-9.B5 this
+        # replacement refused outright.
+        replace_text_run(src, out, 1, 0, "afi")
+        relisted = list_text_runs(out, 1)["runs"]
+        assert relisted[0]["text"] == "afi"
+        # The written bytes are a-code + LIGATURE code (hex serialized).
+        with pikepdf.open(out) as opened:
+            content = opened.pages[0].Contents.read_bytes()
+        assert b"00010007" in content.replace(b" ", b"").lower()

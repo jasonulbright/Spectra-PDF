@@ -746,17 +746,34 @@ def _styled_chars(
 
     for span in spans:
         member = members_by_index[int(span["run"])]
-        for ch in new_text[span["start"] : span["end"]]:
+        seg_text = new_text[span["start"] : span["end"]]
+        i = 0
+        while i < len(seg_text):
+            ch = seg_text[i]
             if force_fallback:
                 fallback_chars.add(ch)
                 styled.append((ch, ref(member, True)))
-            elif ch == " " or member.cap.can_encode(ch):
+                i += 1
+                continue
+            # 9.B5: an unambiguous ligature sequence becomes ONE atomic
+            # styled entry — matched BEFORE the single map (the encode
+            # order), so the width math and the emitted bytes agree by
+            # construction (text_width and encode share the matcher).
+            # Sequences never cross spans: the per-span slice enforces
+            # what the per-segment encode does anyway.
+            seq = member.cap._sequence_at(seg_text, i)
+            if seq is not None:
+                styled.append((seq, ref(member, False)))
+                i += len(seq)
+                continue
+            if ch == " " or member.cap.can_encode(ch):
                 styled.append((ch, ref(member, False)))
             elif convert:
                 fallback_chars.add(ch)
                 styled.append((ch, ref(member, True)))
             else:
                 raise ValueError(f"font cannot encode {ch!r}")
+            i += 1
     return styled, "".join(sorted(fallback_chars))
 
 
@@ -780,7 +797,10 @@ def _char_width_user(ch: str, st: _StyleRef, fb: _Fallback | None, median_gap_10
         # Synthetic gap — emitted as a TJ kern, so no Tc/Tw applies.
         w = median_gap_1000 / 1000.0 * s["size"]
     else:
-        w = m.cap.char_width(ch) / 1000.0 * s["size"] + s["char_spacing"]
+        # 9.B5: text_width longest-matches — a single char measures as
+        # char_width; an atomic ligature entry measures as its ONE code's
+        # width with ONE char_spacing (one rendered glyph).
+        w = m.cap.text_width(ch) / 1000.0 * s["size"] + s["char_spacing"]
         if ch == " " and m.cap._code_bytes == 1:
             try:
                 if m.cap.encode(" ") == b" ":
@@ -816,7 +836,9 @@ def _tokenize(
         elif (
             current.chars
             and ch not in NO_LINE_START
-            and (_cjk(current.chars[-1][0]) or _cjk(ch))
+            # 9.B5: entries can be atomic multi-char ligatures — classify
+            # the break by the boundary-adjacent code points.
+            and (_cjk(current.chars[-1][0][-1]) or _cjk(ch[0]))
         ):
             close()  # break after (and before) CJK — no-space scripts wrap
         current.chars.append((ch, st))
@@ -1130,8 +1152,20 @@ class _Emission:
             nonlocal raw
             if not buf:
                 return
-            text = "".join(buf)
-            encoded = self.fb.encode(text) if st.fallback else m.cap.encode(text)
+            # 9.B5 (review-caught HIGH): encode PER ENTRY, never a joined
+            # buffer — cap.encode's greedy matcher on the join could form
+            # a ligature ACROSS entry boundaries (two same-run singles
+            # from adjacent spans), emitting the lig code where the width
+            # math summed singles (repro'd: 4.2pt drift at 12pt). Each
+            # styled entry already carries its identity: an atomic
+            # sequence entry longest-matches to exactly its lig code; a
+            # single entry to its single code. Per-entry encode makes
+            # bytes and widths agree by construction for ANY caller-
+            # supplied span shape.
+            if st.fallback:
+                encoded = b"".join(self.fb.encode(t) for t in buf)
+            else:
+                encoded = b"".join(m.cap.encode(t) for t in buf)
             items.append(encoded)
             buf.clear()
 

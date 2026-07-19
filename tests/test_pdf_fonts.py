@@ -235,15 +235,21 @@ class TestType0Fonts:
         # Unlisted CID falls to /DW.
         assert cap.decoded_width(b"\x00\x63") == 750
 
-    def test_ligature_values_decode_but_do_not_encode(self):
+    def test_ligature_values_keep_single_char_floor_but_round_trip(self):
+        # Pre-9.B5 this pinned an encode REFUSAL for "fi"; B5 lifts exactly
+        # that (the unambiguous inverse rides the ligature table) while the
+        # single-char floor stays byte-identical.
         pdf = pikepdf.new()
         font = self._identity_font(pdf, {7: "fi", 8: "f"})
         cap = font_capability(font)
         assert cap.decode(b"\x00\x07") == "fi"
-        # Reverse map is single-char only: 'i' is unreachable.
+        # Reverse map is single-char only: 'i' ALONE is still unreachable.
         assert "i" not in cap.encodable()
         with pytest.raises(ValueError):
-            cap.encode("fi")
+            cap.encode("i")
+        # ...but the pair round-trips through the ligature code (9.B5).
+        assert cap.encode("fi") == b"\x00\x07"
+        assert cap.encodable_sequences() == ["fi"]
 
     def test_refusals(self):
         pdf = pikepdf.new()
@@ -507,4 +513,149 @@ class TestWidthsGuardHardening:
         assert cap.decoded_width(b"A") == pytest.approx(601.0)  # declared wins
         assert cap.decoded_width(b"B") == pytest.approx(650.0)  # hmtx kept
         assert cap.decoded_width(b"C") == pytest.approx(700.0)
+
+
+class TestLigatureRoundTrip:
+    """Phase 9.B5 — multi-char ligature mappings round-trip through encode
+    where the inverse is unambiguous; ambiguity and the /Widths subset
+    guard keep the refusal; the single-char floor never widens."""
+
+    def _identity_font(self, pdf, mapping, w_array=None, dw=None):
+        desc = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name("/AAAAAA+LigFace"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+        )
+        if w_array is not None:
+            desc["/W"] = w_array
+        if dw is not None:
+            desc["/DW"] = dw
+        return pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/AAAAAA+LigFace"),
+                Encoding=Name("/Identity-H"),
+                DescendantFonts=Array([pdf.make_indirect(desc)]),
+                ToUnicode=_tounicode_stream(pdf, mapping),
+            )
+        )
+
+    def test_tounicode_ligature_round_trips_at_the_ligature_width(self):
+        pdf = pikepdf.new()
+        font = self._identity_font(
+            pdf,
+            {1: "a", 2: "b", 7: "fi"},
+            w_array=Array([1, Array([400]), 2, Array([450]), 7, Array([800])]),
+        )
+        cap = font_capability(font)
+        assert cap.decode(b"\x00\x07") == "fi"
+        assert cap.encode("fi") == b"\x00\x07"
+        # Mixed text: singles + the sequence, matched mid-string.
+        assert cap.encode("afib") == b"\x00\x01\x00\x07\x00\x02"
+        # The pair consumes the LIGATURE code's width, not two defaults.
+        assert cap.text_width("fi") == 800
+        assert cap.text_width("afib") == 400 + 800 + 450
+        # Inventory: the single-char floor is untouched; sequences are the
+        # additive layer.
+        assert set(cap.encodable()) == {"a", "b"}
+        assert not cap.can_encode("f")
+        assert cap.encodable_sequences() == ["fi"]
+
+    def test_simple_font_tounicode_ligature_round_trips(self):
+        # The SIMPLE-font construction site (ToUnicode-named symbolic) gets
+        # the same table — both _reverse sites carry ligatures.
+        pdf = pikepdf.new()
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/TrueType"),
+                BaseFont=Name("/LigSym"),
+                FontDescriptor=Dictionary(Flags=4),
+                ToUnicode=_tounicode_stream(pdf, {0x41: "A", 0x4C: "ffl"}),
+            )
+        )
+        cap = font_capability(font)
+        assert cap.decode(b"\x4c") == "ffl"
+        assert cap.encode("Affl") == b"\x41\x4c"
+        assert cap.encodable_sequences() == ["ffl"]
+
+    def test_ambiguous_double_mapping_refuses_the_sequence(self):
+        pdf = pikepdf.new()
+        font = self._identity_font(pdf, {1: "a", 7: "fi", 9: "fi"})
+        cap = font_capability(font)
+        # Both codes still DECODE...
+        assert cap.decode(b"\x00\x07") == "fi"
+        assert cap.decode(b"\x00\x09") == "fi"
+        # ...but the inverse is ambiguous — never guess which code.
+        assert cap.encodable_sequences() == []
+        with pytest.raises(ValueError, match="cannot encode"):
+            cap.encode("fi")
+        # Unrelated singles are untouched by the exclusion.
+        assert cap.encode("a") == b"\x00\x01"
+
+    def test_widths_subset_guard_excludes_out_of_range_ligature(self):
+        # Codes 65..66 declared by /Widths; the ligature lives at 200 —
+        # outside the declared subset, so it must NOT encode. Decode stays
+        # broad: bytes already in the document still read back.
+        pdf = pikepdf.new()
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/TrueType"),
+                BaseFont=Name("/ABCDEF+LigSub"),
+                FontDescriptor=Dictionary(Flags=4),
+                FirstChar=65,
+                Widths=Array([600, 650]),
+                ToUnicode=_tounicode_stream(pdf, {65: "A", 66: "B", 200: "fi"}),
+            )
+        )
+        cap = font_capability(font)
+        assert cap.decode(bytes([200])) == "fi"
+        assert cap.encodable_sequences() == []
+        with pytest.raises(ValueError, match="cannot encode"):
+            cap.encode("fi")
+        assert cap.encode("AB") == b"AB"
+
+    def test_longest_match_precedence_ff_vs_ffi(self):
+        pdf = pikepdf.new()
+        font = self._identity_font(
+            pdf,
+            {1: "f", 2: "ff", 3: "ffi", 4: "x"},
+            w_array=Array(
+                [1, Array([300]), 2, Array([550]), 3, Array([760]), 4, Array([500])]
+            ),
+        )
+        cap = font_capability(font)
+        assert set(cap.encodable_sequences()) == {"ff", "ffi"}
+        # "ffi" wins over "ff" (+ anything) at the same position.
+        assert cap.encode("ffix") == b"\x00\x03\x00\x04"
+        # Without the 'i', the next-longest listed sequence matches.
+        assert cap.encode("ffx") == b"\x00\x02\x00\x04"
+        # Greedy tail: "fff" = "ff" + single 'f'.
+        assert cap.encode("fff") == b"\x00\x02\x00\x01"
+        assert cap.text_width("ffix") == 760 + 500
+        assert cap.text_width("ffx") == 550 + 500
+
+    def test_program_derived_agl_ligature_feeds_the_table(self):
+        # 9.B3 × 9.B5: the program-derived decode map feeds the SAME
+        # construction site, so an AGL component name (f_i → "fi") lands in
+        # the ligature table like any ToUnicode multi-char string. Pinned:
+        # the B5 table DOES apply to the B3 path.
+        pdf = pikepdf.new()
+        data = _program_ttf(
+            [(3, 0, {0xF041: "f", 0xF042: "i", 0xF043: "f_i"})],
+            {"f": 300, "i": 250, "f_i": 500},
+        )
+        cap = font_capability(_symbolic_program_font(pdf, data))
+        assert cap.editable
+        assert cap.decode(b"\x43") == "fi"
+        assert cap.encodable_sequences() == ["fi"]
+        # Longest-first: the ligature code beats the two singles...
+        assert cap.encode("fi") == b"\x43"
+        # ...which stay independently reachable outside the sequence.
+        assert cap.encode("if") == b"\x42\x41"
+        assert cap.text_width("fi") == 500  # the ligature code's hmtx advance
+        assert cap.text_width("if") == 250 + 300
 

@@ -11,6 +11,7 @@
 import { pdfRectToDisplay } from './pdfx-build';
 import type { PageGeometry } from './redaction';
 import type { EditTextRun } from './edit-text';
+import { walkMissing } from './edit-text';
 
 export interface EditSpan {
   start: number;
@@ -34,6 +35,8 @@ export interface EditParagraph {
   lineCount: number;
   /** run index → its encodable inventory (live validation). */
   encodableByRun: Map<number, string>;
+  /** 9.B5: run index → its ligature sequences (longest-match validation). */
+  sequencesByRun: Map<number, string[]>;
   /** A1 restyle seeds: the paragraph's dominant size (points) + fill
    * colour (#rrggbb). The editor sends an override only when the user
    * changes these from the seed. */
@@ -89,6 +92,7 @@ interface EngineParagraphListing {
     editable: boolean;
     reason: string | null;
     encodable: string;
+    sequences?: string[];
   }[];
   paragraphs: {
     index: number;
@@ -133,6 +137,7 @@ export async function fetchEditTextListing(
     editable: Boolean(run.editable),
     reason: run.reason ?? null,
     encodable: run.encodable ?? '',
+    sequences: Array.isArray(run.sequences) ? run.sequences : [],
     rect: pdfRectToDisplay(run.rect, geometry.box, geometry.bakedRotate),
   }));
   const covered = new Set<number>();
@@ -149,6 +154,9 @@ export async function fetchEditTextListing(
       lineCount: p.line_count,
       rect: pdfRectToDisplay(p.box, geometry.box, geometry.bakedRotate),
       encodableByRun: new Map(p.runs.map((r) => [r, rawRuns[r]?.encodable ?? ''])),
+      sequencesByRun: new Map(
+        p.runs.map((r) => [r, (rawRuns[r] as { sequences?: string[] })?.sequences ?? []]),
+      ),
       fontSize: p.font_size ?? 12,
       color: p.color ?? '#000000',
       bold: Boolean(p.bold),
@@ -223,6 +231,7 @@ export function paragraphUnencodable(
   newText: string,
   spans: EditSpan[],
   encodableByRun: Map<number, string>,
+  sequencesByRun?: Map<number, string[]>,
 ): string[] {
   const newA = Array.from(newText);
   const missing: string[] = [];
@@ -233,10 +242,12 @@ export function paragraphUnencodable(
       inv = new Set(encodableByRun.get(sp.run) ?? '');
       cache.set(sp.run, inv);
     }
-    for (let i = sp.start; i < sp.end && i < newA.length; i++) {
-      const ch = newA[i];
-      if (ch === ' ') continue;
-      if (!inv.has(ch) && !missing.includes(ch)) missing.push(ch);
+    // 9.B5: per-span longest-match — a ligature sequence never crosses a
+    // span boundary (spans are style-source boundaries, and the engine's
+    // encode operates per styled segment the same way).
+    const slice = newA.slice(sp.start, Math.min(sp.end, newA.length));
+    for (const ch of walkMissing(slice, inv, sequencesByRun?.get(sp.run) ?? [], true)) {
+      if (!missing.includes(ch)) missing.push(ch);
     }
   }
   return missing;

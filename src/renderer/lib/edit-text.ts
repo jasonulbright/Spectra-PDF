@@ -24,6 +24,9 @@ export interface EditTextRun {
   reason: string | null;
   /** The finite character inventory the run's font can encode. */
   encodable: string;
+  /** 9.B5: ligature sequences the font round-trips (unambiguous
+   * multi-char inverses) — validation matches them longest-first. */
+  sequences: string[];
 }
 
 interface EngineRunListing {
@@ -35,6 +38,7 @@ interface EngineRunListing {
     editable: boolean;
     reason: string | null;
     encodable: string;
+    sequences?: string[];
   }[];
 }
 
@@ -55,17 +59,57 @@ export async function fetchTextRuns(
     editable: Boolean(run.editable),
     reason: run.reason ?? null,
     encodable: run.encodable ?? '',
+    sequences: Array.isArray(run.sequences) ? run.sequences : [],
     rect: pdfRectToDisplay(run.rect, geometry.box, geometry.bakedRotate),
   }));
 }
 
 /** Characters of `value` the font cannot encode, deduplicated in order —
  * empty means the value is fully expressible. */
-export function unencodableChars(value: string, encodable: string): string[] {
-  const inventory = new Set(encodable);
+/** The longest-match walk shared by run and paragraph validation (9.B5).
+ * MIRRORS the engine's encode order exactly — sequences (longest first)
+ * BEFORE the single map — because a char can be unreachable singly yet
+ * encodable inside a ligature sequence; a singles-first walk would
+ * false-refuse text the engine accepts. Greedy like the engine (no
+ * backtracking): where greedy fails, the engine fails identically, so
+ * validation and belt agree. */
+export function walkMissing(
+  chars: readonly string[],
+  singles: ReadonlySet<string>,
+  sequences: readonly string[],
+  skipSpaces: boolean,
+): string[] {
+  const seqs = [...sequences].filter((q) => q.length > 1).sort((a, b) => b.length - a.length);
   const missing: string[] = [];
-  for (const ch of value) {
-    if (!inventory.has(ch) && !missing.includes(ch)) missing.push(ch);
+  let i = 0;
+  while (i < chars.length) {
+    const ch = chars[i];
+    if (skipSpaces && ch === ' ') {
+      i += 1;
+      continue;
+    }
+    let matched = 0;
+    for (const seq of seqs) {
+      const sa = Array.from(seq);
+      if (i + sa.length <= chars.length && sa.every((c, k) => chars[i + k] === c)) {
+        matched = sa.length;
+        break;
+      }
+    }
+    if (matched > 0) {
+      i += matched;
+      continue;
+    }
+    if (!singles.has(ch) && !missing.includes(ch)) missing.push(ch);
+    i += 1;
   }
   return missing;
+}
+
+export function unencodableChars(
+  value: string,
+  encodable: string,
+  sequences: readonly string[] = [],
+): string[] {
+  return walkMissing(Array.from(value), new Set(encodable), sequences, false);
 }

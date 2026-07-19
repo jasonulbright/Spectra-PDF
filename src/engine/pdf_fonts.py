@@ -2,9 +2,11 @@
 
 For a pikepdf font dictionary, answers the four questions editing needs:
 decode (bytes → unicode), encode (unicode → bytes, refusing characters the
-font cannot express), the finite ENCODABLE character inventory (the live
-edit-box validation set), and per-character advance widths (1000/em) for
-the Δwidth anchor math.
+font cannot express; 9.B5 — multi-char ligature sequences with an
+unambiguous inverse round-trip longest-match-first), the finite ENCODABLE
+character inventory (the live edit-box validation set; sequences are the
+additive `encodable_sequences()` layer on top of that single-char floor),
+and per-character advance widths (1000/em) for the Δwidth anchor math.
 
 Leverages pdfminer.six's own tables and parsers (it is already the bundled
 extraction engine) rather than re-deriving them — the recon-verified,
@@ -62,6 +64,7 @@ class FontCapability:
         widths: dict[int, float],
         default_width: float,
         code_bytes: int,
+        sequences: Optional[dict[str, int]] = None,
     ):
         self.editable = editable
         self.reason = reason
@@ -70,6 +73,11 @@ class FontCapability:
         self._widths = widths
         self._default_width = default_width
         self._code_bytes = code_bytes  # 1 (simple) or 2 (Identity-H CID)
+        # 9.B5: multi-char sequence → its single ligature code (len 2..4,
+        # unambiguous inverse, encode-guard-filtered — see _ligatures).
+        # encode()/text_width() match these longest-first; encodable()/
+        # can_encode stay the single-char conservative floor.
+        self._sequences = sequences or {}
 
     # -- decode ------------------------------------------------------------
     def decode(self, data: bytes) -> str:
@@ -84,12 +92,33 @@ class FontCapability:
         return "".join(out)
 
     # -- encode ------------------------------------------------------------
+    def _sequence_at(self, text: str, i: int) -> Optional[str]:
+        # 9.B5: the longest listed ligature sequence starting at i (4→3→2),
+        # else None — the ONE matcher encode() and text_width() share, so
+        # emitted bytes and measured widths can never tokenize differently.
+        for n in (4, 3, 2):
+            seq = text[i : i + n]
+            if len(seq) == n and seq in self._sequences:
+                return seq
+        return None
+
     def encode(self, text: str) -> bytes:
+        """unicode → bytes, longest-match-first (9.B5): a listed ligature
+        sequence consumes its single code before the single-char map; a
+        char reachable neither way refuses, naming it."""
         out = bytearray()
-        for ch in text:
-            code = self._uni2code.get(ch)
-            if code is None:
-                raise ValueError(f"font cannot encode {ch!r}")
+        i = 0
+        while i < len(text):
+            seq = self._sequence_at(text, i)
+            if seq is not None:
+                code = self._sequences[seq]
+                i += len(seq)
+            else:
+                ch = text[i]
+                code = self._uni2code.get(ch)
+                if code is None:
+                    raise ValueError(f"font cannot encode {ch!r}")
+                i += 1
             if self._code_bytes == 1:
                 out.append(code)
             else:
@@ -98,8 +127,14 @@ class FontCapability:
 
     def encodable(self) -> str:
         """The finite character inventory, sorted — the edit box's local
-        validation set."""
+        validation set. SINGLE-CHAR only (the conservative floor, 9.B5:
+        sequences are the additive encodable_sequences() layer)."""
         return "".join(sorted(self._uni2code.keys()))
+
+    def encodable_sequences(self) -> list[str]:
+        """The multi-char sequences encode() round-trips via one unambiguous
+        ligature code (9.B5), sorted — the run listing's `sequences` field."""
+        return sorted(self._sequences.keys())
 
     def can_encode(self, ch: str) -> bool:
         """True when the font can express `ch` (7.5 uses this to decide
@@ -116,8 +151,20 @@ class FontCapability:
 
     def text_width(self, text: str) -> float:
         """Sum of glyph advances in 1000/em units (no size/Tz/Tc applied —
-        the walker composes those)."""
-        return sum(self.char_width(ch) for ch in text)
+        the walker composes those). Longest-match like encode() (9.B5): a
+        matched sequence consumes its LIGATURE code's width, not the sum
+        of its chars' widths."""
+        total = 0.0
+        i = 0
+        while i < len(text):
+            seq = self._sequence_at(text, i)
+            if seq is not None:
+                total += self._widths.get(self._sequences[seq], self._default_width)
+                i += len(seq)
+            else:
+                total += self.char_width(text[i])
+                i += 1
+        return total
 
     def decoded_width(self, data: bytes) -> float:
         """Advance of already-encoded bytes — by CODE, so it works even for
@@ -142,15 +189,35 @@ def _refused(reason: str, code_bytes: int = 1) -> FontCapability:
 
 
 def _reverse(code2uni: dict[int, str]) -> dict[str, int]:
-    """unicode → code; single-char values only (a char reachable only via a
-    multi-char ligature mapping is refused — honest and rare); collisions
-    keep the LOWEST code (deterministic)."""
+    """unicode → code; single-char values only (multi-char decode strings
+    ride the 9.B5 ligature table instead — this floor stays byte-identical);
+    collisions keep the LOWEST code (deterministic)."""
     uni2code: dict[str, int] = {}
     for code in sorted(code2uni.keys()):
         u = code2uni[code]
         if len(u) == 1 and u not in uni2code:
             uni2code[u] = code
     return uni2code
+
+
+def _ligatures(code2uni: dict[int, str], encode_map: dict[int, str]) -> dict[str, int]:
+    """sequence → code (9.B5): multi-char decode strings (len 2..4) whose
+    inverse is UNAMBIGUOUS — exactly one code in the full DECODE map
+    produces the string; two codes = excluded, never guess — and whose code
+    survives the same subset-/Widths encode guard as single chars
+    (`encode_map` is the guarded map; an out-of-range ligature code must
+    not encode, though its bytes still decode). Round-trip only, never
+    synthesis: text encodes via a ligature exactly when the document's own
+    font already encodes that sequence as one code."""
+    by_seq: dict[str, list[int]] = {}
+    for code, u in code2uni.items():
+        if 2 <= len(u) <= 4:
+            by_seq.setdefault(u, []).append(code)
+    return {
+        u: codes[0]
+        for u, codes in by_seq.items()
+        if len(codes) == 1 and codes[0] in encode_map
+    }
 
 
 def _parse_tounicode(raw: bytes) -> dict[int, str]:
@@ -460,7 +527,18 @@ def font_capability(font_obj) -> FontCapability:
             # emitted CODE bytes, which are what encode() produces, so the
             # widths dict must be code-keyed to stay honest.
             widths = _cmap_code_widths(named_cmap, code2uni.keys(), cid_widths)
-        return FontCapability(True, None, code2uni, _reverse(code2uni), widths, default, 2)
+        # 9.B5: no /Widths subset guard on the composite path, so the
+        # ligature table's encode filter is the decode map itself.
+        return FontCapability(
+            True,
+            None,
+            code2uni,
+            _reverse(code2uni),
+            widths,
+            default,
+            2,
+            sequences=_ligatures(code2uni, code2uni),
+        )
 
     # Simple fonts (Type1, MMType1, TrueType).
     code2uni = _simple_encoding_map(font_obj)
@@ -527,4 +605,18 @@ def font_capability(font_obj) -> FontCapability:
             encode_map = {c: u for c, u in code2uni.items() if first <= c <= last}
         except (TypeError, ValueError):
             pass
-    return FontCapability(True, None, code2uni, _reverse(encode_map), widths, default, 1)
+    # 9.B5: the ligature table takes the SAME guarded encode_map as the
+    # single-char reverse — an out-of-range ligature code must not encode.
+    # This covers every simple-font decode source alike (encoding map,
+    # ToUnicode merge, and 9.B3's program derivation, whose AGL names like
+    # f_i decode multi-char).
+    return FontCapability(
+        True,
+        None,
+        code2uni,
+        _reverse(encode_map),
+        widths,
+        default,
+        1,
+        sequences=_ligatures(code2uni, encode_map),
+    )

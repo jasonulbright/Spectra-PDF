@@ -257,6 +257,10 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     "editable": editable,
                     "reason": reason,
                     "encodable": cap.encodable() if (cap and cap.editable) else "",
+                    # 9.B5, additive: the ligature sequences encode() will
+                    # round-trip — the renderer's longest-match validation
+                    # reads these next to `encodable`. [] when none/refused.
+                    "sequences": cap.encodable_sequences() if (cap and cap.editable) else [],
                 }
             )
             if detail is not None:

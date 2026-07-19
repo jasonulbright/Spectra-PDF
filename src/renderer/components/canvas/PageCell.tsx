@@ -1366,7 +1366,9 @@ function ParagraphEditor({
   // engine-side with a stated reason, surfaced as the standard edit
   // notice — the same honest boundary as convert.
   const substituting = familyChanged || styleChanged;
-  const missing = substituting ? [] : paragraphUnencodable(value, spans, para.encodableByRun);
+  const missing = substituting
+    ? []
+    : paragraphUnencodable(value, spans, para.encodableByRun, para.sequencesByRun);
   const valid = missing.length === 0;
   const sizeChanged = Math.abs(size - para.fontSize) > 0.01;
   const colorChanged = color.toLowerCase() !== para.color.toLowerCase();
@@ -1595,7 +1597,7 @@ function TextRunEditor({
     inputRef.current?.focus();
     inputRef.current?.select();
   }, []);
-  const missing = unencodableChars(value, run.encodable);
+  const missing = unencodableChars(value, run.encodable, run.sequences);
   const valid = missing.length === 0;
   const changed = value !== run.text;
   const finish = (): void => {
