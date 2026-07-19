@@ -147,7 +147,12 @@ export type CanvasTool =
   | 'formfields'
   // Selecting page IMAGES to replace/extract/delete (Phase 7.1). The Edit
   // tool's mode; placements come from the engine's list_page_images.
-  | 'edit';
+  | 'edit'
+  // AUTHORING new text: drag to place a box, then type (Phase 9.A2). The Edit
+  // tool's SECOND mode — a sibling of 'edit', not a replacement (Comment owns
+  // four the same way). Bands like 'formfields'/'signature'; commits a fresh
+  // Type0 text object via the engine's add_text_box, undoable.
+  | 'addtext';
 
 // The tab-strip model (Phase 4 M2, § 3.1): Home | Tools | one tab per open
 // document. A doc tab focuses that file and shows the document pane (at M2:

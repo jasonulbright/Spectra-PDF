@@ -1526,6 +1526,12 @@
   border-color: #10b981;
 }
 
+/* Add-Text band (9.A2): sky, to read as authoring rather than a form field. */
+.page-annot-band.band-addtext {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: #38bdf8;
+}
+
 /* Pending new-field placement (2n.4c): emerald frame, same pointer contract
    as .page-signature — only the × takes events. */
 .page-form-new {
@@ -1547,6 +1553,17 @@
   letter-spacing: 0.06em;
   white-space: nowrap;
   color: rgba(110, 231, 183, 0.95);
+}
+
+/* Pending Add-Text placement (9.A2): sky frame, distinct from the emerald
+   new-field box; same base + pointer contract as .page-form-new. */
+.page-form-new.page-addtext-new {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: #38bdf8;
+}
+
+.page-addtext-new .page-form-new-label {
+  color: rgba(125, 211, 252, 0.95);
 }
 
 /* Annotation tool active: crosshair over pages signals draw-a-box mode.

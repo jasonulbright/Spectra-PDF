@@ -85,10 +85,13 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     id: 'edit',
     title: 'Edit',
     // The full 7.1–7.5 surface (stale "images only" copy caught in the
-    // 2026-07-18 discoverability pass).
-    description: 'Edit text, whole paragraphs, and images right on the page.',
+    // 2026-07-18 discoverability pass), plus 9.A2 Add Text authoring.
+    description: 'Edit text, whole paragraphs, and images — or add new text — right on the page.',
     ops: [],
-    canvasTools: ['edit'],
+    // Two modes: 'edit' (click existing content to edit) and 'addtext' (drag a
+    // box to author new text). Opening the tool arms the first; the secondary
+    // toolbar switches between them.
+    canvasTools: ['edit', 'addtext'],
   },
   {
     id: 'fillsign',

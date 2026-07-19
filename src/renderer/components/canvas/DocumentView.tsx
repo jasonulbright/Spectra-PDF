@@ -104,6 +104,15 @@ export interface DocumentViewProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearNewFieldPlacement: () => void;
+  // Add-text placement (9.A2).
+  addTextPlacement: SignaturePlacement | null;
+  onSetAddTextRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onClearAddTextPlacement: () => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
@@ -520,6 +529,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           newFieldPlacement={props.newFieldPlacement?.pageId === page.id ? props.newFieldPlacement : null}
           onSetNewFieldRect={props.onSetNewFieldRect}
           onClearNewFieldPlacement={props.onClearNewFieldPlacement}
+          addTextPlacement={props.addTextPlacement?.pageId === page.id ? props.addTextPlacement : null}
+          onSetAddTextRect={props.onSetAddTextRect}
+          onClearAddTextPlacement={props.onClearAddTextPlacement}
           onPageContextMenu={props.onPageContextMenu}
           onPagePointerDown={NO_PAGE_POINTER}
           textLayer

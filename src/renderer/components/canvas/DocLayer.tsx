@@ -61,6 +61,15 @@ interface DocLayerProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearNewFieldPlacement: () => void;
+  // Add-text placement (9.A2).
+  addTextPlacement: SignaturePlacement | null;
+  onSetAddTextRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onClearAddTextPlacement: () => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -142,6 +151,9 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               newFieldPlacement={props.newFieldPlacement}
               onSetNewFieldRect={props.onSetNewFieldRect}
               onClearNewFieldPlacement={props.onClearNewFieldPlacement}
+              addTextPlacement={props.addTextPlacement}
+              onSetAddTextRect={props.onSetAddTextRect}
+              onClearAddTextPlacement={props.onClearAddTextPlacement}
               onPageContextMenu={props.onPageContextMenu}
               onPagePointerDown={props.onPagePointerDown}
               onAddAnnotation={props.onAddAnnotation}

@@ -26,7 +26,7 @@ import { fetchEditPlacements } from '../../lib/edit-images';
 import type { EditImagePlacement } from '../../lib/edit-images';
 import { EDIT_DECLINED } from '../../lib/edit-text';
 import { pageIdAtSourceIndex } from '../../lib/durable-identity';
-import { computeEditSpans, fetchEditTextListing } from '../../lib/edit-paragraphs';
+import { computeEditSpans, fetchEditTextListing, hexToRgb } from '../../lib/edit-paragraphs';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import { workspacePageNumber } from '../../lib/workspace-commit';
 import { runCommitGate } from '../../lib/commit-gate';
@@ -101,6 +101,17 @@ interface WorkspaceCanvasViewProps {
     spans: { start: number; end: number; run: number }[],
     opts?: ParagraphEditOpts,
   ) => Promise<string | void>;
+  // Author a NEW text object (9.A2): a rubber-band box + entered text become a
+  // fresh Type0 run via the engine's add_text_box. `rect` is PDF user-space
+  // points; the return mirrors onEditParagraph (EDIT_DECLINED on a signed-doc
+  // refusal). Undoable.
+  onAddText: (
+    path: string,
+    page: number,
+    rect: [number, number, number, number],
+    text: string,
+    opts?: { size?: number; color?: [number, number, number]; family?: 'serif' | 'sans' | 'mono' },
+  ) => Promise<string | void>;
   // Add-page ghost (2n.3): pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
   onAddPages: (docId: string, toIndex: number) => void;
@@ -150,6 +161,7 @@ export function WorkspaceCanvasView({
   onEditImage,
   onEditText,
   onEditParagraph,
+  onAddText,
   onAddPages,
   onFillFormValues,
   onAddFormField,
@@ -430,6 +442,7 @@ export function WorkspaceCanvasView({
       if (!doc) return;
       setNewFieldPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
       setSigPlacement(null); // one placement card at a time (see onSetSignaturePlacement)
+      setAddTextPlacement(null); // …including the Add-Text card (9.A2)
       setNfError(null);
     },
     [docs],
@@ -519,6 +532,113 @@ export function WorkspaceCanvasView({
       multiline: nfMultiline,
     }).catch(() => undefined); // surfaced via nfError; the card stays open
   }, [createFieldFromPlacement, nfName, nfType, nfOptions, nfMultiline]);
+
+  // --- 9.A2 Add Text ------------------------------------------------------
+  // Same placement lifecycle as the new-field card (single, transient, dies
+  // when its page leaves). The band draws the box; this card collects the
+  // text/size/colour/family; commit runs the display→PDF rect conversion
+  // (buildSignatureAppearance, verbatim) and routes onAddText.
+  const [addTextPlacement, setAddTextPlacement] = useState<SignaturePlacement | null>(null);
+  const [atText, setAtText] = useState('');
+  const [atSize, setAtSize] = useState(12);
+  const [atColor, setAtColor] = useState('#000000');
+  const [atFamily, setAtFamily] = useState<'sans' | 'serif' | 'mono'>('sans');
+  const [atError, setAtError] = useState<string | null>(null);
+  const [creatingText, setCreatingText] = useState(false);
+  const onSetAddTextRect = useCallback(
+    (
+      docId: string,
+      pageId: string,
+      rect: { x: number; y: number; w: number; h: number },
+      rotationAtDraw: 0 | 90 | 180 | 270,
+    ) => {
+      const doc = docs.find((d) => d.id === docId);
+      if (!doc) return;
+      setAddTextPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
+      setSigPlacement(null); // one placement card at a time…
+      setNewFieldPlacement(null);
+      setSigFieldTarget(null); // …including the sign-into-field card (renders on sigFieldTarget)
+      setAtText('');
+      setAtError(null);
+    },
+    [docs],
+  );
+  const onClearAddTextPlacement = useCallback(() => {
+    setAddTextPlacement(null);
+    setAtError(null);
+  }, []);
+
+  // Placement whose page still exists (mirrors liveNewFieldPlacement).
+  const liveAddTextPlacement = useMemo(() => {
+    if (!addTextPlacement) return null;
+    return docs.some((d) => d.pages.some((p) => p.id === addTextPlacement.pageId))
+      ? addTextPlacement
+      : null;
+  }, [addTextPlacement, docs]);
+
+  // Author the placed text via App's engine op. Display→PDF is
+  // buildSignatureAppearance verbatim; explicit params so the harness can
+  // drive the same path without racing React batching.
+  const creatingTextRef = useRef(false);
+  const commitAddText = useCallback(
+    async (params: {
+      text: string;
+      size?: number;
+      color?: [number, number, number];
+      family?: 'sans' | 'serif' | 'mono';
+    }): Promise<void> => {
+      const placement = liveAddTextPlacement;
+      if (!placement || creatingTextRef.current) return;
+      if (!params.text.trim()) {
+        setAtError('Enter some text to add.');
+        return;
+      }
+      creatingTextRef.current = true;
+      setCreatingText(true);
+      setAtError(null);
+      try {
+        const built = await buildSignatureAppearance(docs, placement, async (page) => {
+          const f = state.files.get(page.sourceDocId);
+          if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+          const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+          const p = await proxy.getPage(page.sourcePageIndex + 1);
+          const [vx0, vy0, vx1, vy1] = p.view;
+          return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
+        });
+        if (!built) throw new Error('The page this text was placed on no longer exists.');
+        const result = await onAddText(
+          built.path,
+          built.appearance.page,
+          built.appearance.rect,
+          params.text,
+          {
+            ...(params.size !== undefined ? { size: params.size } : {}),
+            ...(params.color !== undefined ? { color: params.color } : {}),
+            ...(params.family !== undefined ? { family: params.family } : {}),
+          },
+        );
+        // Signed-doc refusal — keep the card open (the user can cancel).
+        if (result === EDIT_DECLINED) return;
+        setAddTextPlacement(null);
+        setAtText('');
+      } catch (err) {
+        setAtError(err instanceof Error ? err.message : String(err));
+        throw err;
+      } finally {
+        creatingTextRef.current = false;
+        setCreatingText(false);
+      }
+    },
+    [liveAddTextPlacement, docs, state.files, onAddText],
+  );
+  const createPlacedText = useCallback(async (): Promise<void> => {
+    await commitAddText({
+      text: atText,
+      size: atSize,
+      color: hexToRgb(atColor) ?? [0, 0, 0],
+      family: atFamily,
+    }).catch(() => undefined); // surfaced via atError; the card stays open
+  }, [commitAddText, atText, atSize, atColor, atFamily]);
 
   // Bake pending values file by file through App's fill op. Reentrancy-ref'd
   // like applyMarks (two clicks in one tick both read a stale busy flag).
@@ -719,6 +839,7 @@ export function WorkspaceCanvasView({
       if (!doc) return;
       setSigPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
       setNewFieldPlacement(null);
+      setAddTextPlacement(null); // one placement card at a time (9.A2)
       setSigFieldTarget(null);
       setSignDone(null);
       setSignError(null);
@@ -734,6 +855,7 @@ export function WorkspaceCanvasView({
       setSigFieldTarget({ path, fieldName });
       setSigPlacement(null);
       setNewFieldPlacement(null);
+      setAddTextPlacement(null); // one card at a time — incl. the Add-Text card (9.A2)
       setSignDone(null);
       setSignError(
         state.pageDirtyPaths.includes(path)
@@ -778,6 +900,16 @@ export function WorkspaceCanvasView({
       // A buffer change can rename/remove fields — a name-keyed sign target
       // must not survive it (the user re-clicks the widget, which re-reads).
       setSigFieldTarget((prev) => (prev && invalidated.has(prev.path) ? null : prev));
+      // Add-Text placement (9.A2): the SAME `bakedRotate + rotationAtDraw`
+      // hazard the sig/new-field placements are cleared for. rotationAtDraw is
+      // frozen at draw; bakedRotate is re-fetched fresh at commit. A page-tier
+      // rotate that gets baked into /Rotate by a commit changes bakedRotate
+      // underneath a placement whose rotationAtDraw is stale — so the authored
+      // text would land at the wrong orientation. Durable identity keeps the
+      // pageId alive across the authored commit (so `liveAddTextPlacement`'s
+      // existence check does NOT drop it — this is the one placement that
+      // survives), which is exactly why it must be force-cleared here.
+      setAddTextPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
       // (Selection shares the positional-id hazard; it lives in the ui slice
       // now and the reducer clears it wherever buffers change.)
     }
@@ -1256,6 +1388,27 @@ export function WorkspaceCanvasView({
   openTextEditorRef.current = handleOpenTextEditor;
   const openParagraphEditorRef = useRef(handleOpenParagraphEditor);
   openParagraphEditorRef.current = handleOpenParagraphEditor;
+  const commitAddTextRef = useRef(commitAddText);
+  commitAddTextRef.current = commitAddText;
+  // Place an Add-Text box on the active file's first page (the band lives in
+  // transformed canvas space, undrivable by WebDriver — the new-field harness
+  // precedent).
+  const harnessPlaceAddTextRef = useRef<
+    (rect: { x: number; y: number; w: number; h: number }) => boolean
+  >(() => false);
+  harnessPlaceAddTextRef.current = (rect) => {
+    const doc = docs.find((d) => d.path === state.activeFileId);
+    const page = doc?.pages[0];
+    if (!doc || !page) return false;
+    setAddTextPlacement({
+      id: crypto.randomUUID(),
+      path: doc.path,
+      pageId: page.id,
+      rect,
+      rotationAtDraw: page.rotation,
+    });
+    return true;
+  };
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasEditImages({
@@ -1285,6 +1438,8 @@ export function WorkspaceCanvasView({
         })),
       openParagraphEditor: (pageId, index) => openParagraphEditorRef.current(pageId, index),
       act: (kind, opts) => runEditActionRef.current(kind, opts),
+      placeAddText: (rect) => harnessPlaceAddTextRef.current(rect),
+      commitAddText: (params) => commitAddTextRef.current(params),
     });
     return () => registerCanvasEditImages(null);
   }, []);
@@ -1994,6 +2149,9 @@ export function WorkspaceCanvasView({
           newFieldPlacement={liveNewFieldPlacement}
           onSetNewFieldRect={onSetNewFieldRect}
           onClearNewFieldPlacement={onClearNewFieldPlacement}
+          addTextPlacement={liveAddTextPlacement}
+          onSetAddTextRect={onSetAddTextRect}
+          onClearAddTextPlacement={onClearAddTextPlacement}
           onAddAnnotation={onAddAnnotation}
           onUpdateAnnotation={onUpdateAnnotation}
           onRecolorAnnotation={onRecolorAnnotation}
@@ -2068,6 +2226,9 @@ export function WorkspaceCanvasView({
           newFieldPlacement={liveNewFieldPlacement}
           onSetNewFieldRect={onSetNewFieldRect}
           onClearNewFieldPlacement={onClearNewFieldPlacement}
+          addTextPlacement={liveAddTextPlacement}
+          onSetAddTextRect={onSetAddTextRect}
+          onClearAddTextPlacement={onClearAddTextPlacement}
           onPageContextMenu={onPageContextMenu}
           onPagePointerDown={tool === 'hand' ? HAND_SUPPRESSES_PICKUP : drag.onPagePointerDown}
           onAddAnnotation={onAddAnnotation}
@@ -2463,6 +2624,90 @@ export function WorkspaceCanvasView({
               className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded font-medium"
             >
               {creatingField ? 'Creating…' : 'Create field'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {liveAddTextPlacement && (
+        <div
+          data-testid="add-text-form"
+          className="absolute bottom-4 left-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
+        >
+          <div className="text-sm text-neutral-200 font-medium">Add text</div>
+          <p className="text-[11px] text-neutral-500 -mt-1.5">
+            Text fills the box you drew and wraps to its width. It stays searchable and editable.
+          </p>
+          <textarea
+            data-testid="add-text-input"
+            value={atText}
+            rows={3}
+            autoFocus
+            placeholder="Type the text to add…"
+            onChange={(e) => setAtText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                onClearAddTextPlacement();
+              }
+            }}
+            className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500 resize-y"
+          />
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-16 shrink-0">Font</span>
+            <select
+              data-testid="add-text-family"
+              value={atFamily}
+              onChange={(e) => setAtFamily(e.target.value as 'sans' | 'serif' | 'mono')}
+              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
+            >
+              <option value="sans">Sans-serif</option>
+              <option value="serif">Serif</option>
+              <option value="mono">Monospace</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-16 shrink-0">Size</span>
+            <input
+              data-testid="add-text-size"
+              type="number"
+              min={1}
+              max={1638}
+              step={1}
+              // parseFloat + skip-on-NaN (NOT Number(), where '' → 0 → clamps
+              // to 1 and fights a clear-and-retype: "125" instead of "25").
+              // Mirrors ParagraphEditor's size input — the review-caught fix.
+              value={Number.isFinite(atSize) ? Math.round(atSize) : ''}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                if (Number.isFinite(v)) setAtSize(Math.max(1, Math.min(1638, v)));
+              }}
+              className="w-20 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
+            />
+            <span className="text-xs text-neutral-400 flex-1 text-right shrink-0">Colour</span>
+            <input
+              data-testid="add-text-color"
+              type="color"
+              value={atColor}
+              onChange={(e) => setAtColor(e.target.value)}
+              className="h-6 w-8 bg-neutral-800 border border-neutral-700 rounded"
+            />
+          </div>
+          {atError && <div data-testid="add-text-error" className="text-xs text-red-400">{atError}</div>}
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => onClearAddTextPlacement()}
+              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              data-testid="add-text-create"
+              onClick={() => void createPlacedText()}
+              disabled={creatingText}
+              className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded font-medium"
+            >
+              {creatingText ? 'Adding…' : 'Add text'}
             </button>
           </div>
         </div>

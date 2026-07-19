@@ -766,6 +766,36 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
+  // 9.A2 Add Text: author a NEW text object at `rect` (PDF user-space points,
+  // bottom-up — buildSignatureAppearance's output). Engine `add_text_box`
+  // subset-embeds a bundled face (7.4), so the result is searchable and
+  // re-editable by 7.2/7.5 with no special case. Undoable via performOperation;
+  // refuses on a signed doc like every other content edit.
+  const handleAddText = useCallback(
+    async (
+      path: string,
+      page: number,
+      rect: [number, number, number, number],
+      text: string,
+      opts?: { size?: number; color?: [number, number, number]; family?: 'serif' | 'sans' | 'mono' },
+    ): Promise<string | void> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      const params: Record<string, unknown> = {
+        page,
+        rect,
+        text,
+        font_path: await app.getEditFontPath(),
+      };
+      if (opts?.size !== undefined) params.size = opts.size;
+      if (opts?.color !== undefined) params.color = opts.color;
+      if (opts?.family !== undefined) params.family = opts.family;
+      await performOperation(path, 'add_text_box', params);
+    },
+    [state.files, performOperation, confirmEditOfSignedDoc],
+  );
+
   const handleEditImage = useCallback(
     async (
       kind: 'delete' | 'replace' | 'extract',
@@ -1437,6 +1467,7 @@ function AppContent(): React.ReactElement {
                   onEditImage={handleEditImage}
                   onEditText={handleEditText}
                   onEditParagraph={handleEditParagraph}
+                  onAddText={handleAddText}
                   onAddPages={handleAddPages}
                   onFillFormValues={handleFillFormValues}
                   onAddFormField={handleAddFormField}

@@ -67,6 +67,15 @@ interface DocumentRowProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearNewFieldPlacement: () => void;
+  // Add-text placement (9.A2).
+  addTextPlacement: SignaturePlacement | null;
+  onSetAddTextRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onClearAddTextPlacement: () => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
@@ -126,6 +135,9 @@ function DocumentRowImpl({
   newFieldPlacement,
   onSetNewFieldRect,
   onClearNewFieldPlacement,
+  addTextPlacement,
+  onSetAddTextRect,
+  onClearAddTextPlacement,
   onPageContextMenu,
   onPagePointerDown,
   onAddAnnotation,
@@ -214,6 +226,9 @@ function DocumentRowImpl({
         newFieldPlacement={newFieldPlacement?.pageId === page.id ? newFieldPlacement : null}
         onSetNewFieldRect={onSetNewFieldRect}
         onClearNewFieldPlacement={onClearNewFieldPlacement}
+        addTextPlacement={addTextPlacement?.pageId === page.id ? addTextPlacement : null}
+        onSetAddTextRect={onSetAddTextRect}
+        onClearAddTextPlacement={onClearAddTextPlacement}
         onPageContextMenu={onPageContextMenu}
         onPagePointerDown={onPagePointerDown}
         onAddAnnotation={onAddAnnotation}

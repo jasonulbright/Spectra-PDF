@@ -631,6 +631,39 @@ export async function createPlacedField(params: {
   }
 }
 
+export async function placeAddText(rect: { x: number; y: number; w: number; h: number }): Promise<void> {
+  const result = await browser.executeAsync<string | null, [{ x: number; y: number; w: number; h: number }]>(
+    function (r, done) {
+      (window as any).__SPECTRA_TEST__.addTextPlace(r)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    rect,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`placeAddText failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+export async function commitAddText(params: {
+  text: string;
+  size?: number;
+  color?: [number, number, number];
+  family?: 'sans' | 'serif' | 'mono';
+}): Promise<void> {
+  const result = await browser.executeAsync<string | null, [typeof params]>(
+    function (p, done) {
+      (window as any).__SPECTRA_TEST__.addTextCommit(p)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    params,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`commitAddText failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
 export async function signCanvasField(params: {
   fieldName: string;
   pfxPath?: string;

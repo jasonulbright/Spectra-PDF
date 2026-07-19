@@ -378,6 +378,16 @@ interface PageCellProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearNewFieldPlacement: () => void;
+  // Pending Add-Text placement (9.A2), same lifecycle as newFieldPlacement:
+  // single, transient view state, dies on buffer-identity change.
+  addTextPlacement?: SignaturePlacement | null;
+  onSetAddTextRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  onClearAddTextPlacement: () => void;
   onSelectPage: (docId: string, pageId: string, e?: React.MouseEvent) => void;
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
@@ -443,6 +453,9 @@ function PageCellImpl({
   onSignFieldRequest,
   newFieldPlacement,
   onSetNewFieldRect,
+  addTextPlacement,
+  onSetAddTextRect,
+  onClearAddTextPlacement,
   onClearNewFieldPlacement,
   onSelectPage,
   onOpenPage,
@@ -646,6 +659,9 @@ function PageCellImpl({
         } else if (tool === 'formfields') {
           // Add-field placement (2n.4c) — single, drawing again replaces it.
           onSetNewFieldRect(docId, page.id, latest, page.rotation);
+        } else if (tool === 'addtext') {
+          // Add-text placement (9.A2) — single, drawing again replaces it.
+          onSetAddTextRect(docId, page.id, latest, page.rotation);
         } else {
           const annotation: PageAnnotation = {
             id: crypto.randomUUID(),
@@ -1168,6 +1184,38 @@ function PageCellImpl({
           );
         })()
       )}
+      {addTextPlacement && (
+        (() => {
+          const r = projectMarkRect(addTextPlacement, page.rotation);
+          return (
+            <div
+              data-testid="add-text-placement"
+              className="page-form-new page-addtext-new"
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+            >
+              <span className="page-form-new-label">NEW TEXT</span>
+              {(tool === 'select' || tool === 'edit' || tool === 'addtext') && (
+                <button
+                  className="page-annot-x"
+                  title="Remove text placement"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClearAddTextPlacement();
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          );
+        })()
+      )}
       {band && (
         <div
           className={
@@ -1178,7 +1226,9 @@ function PageCellImpl({
                 ? ' band-signature'
                 : tool === 'formfields'
                   ? ' band-formfield'
-                  : '')
+                  : tool === 'addtext'
+                    ? ' band-addtext'
+                    : '')
           }
           style={{
             left: `${band.x * 100}%`,

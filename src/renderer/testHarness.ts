@@ -190,6 +190,16 @@ export interface CanvasEditImagesHandlers {
       outputPrefix?: string;
     },
   ) => Promise<void>;
+  /** Add Text (9.A2): place a box on the active file's first page (the band
+   * lives in transformed canvas space — undrivable), then author via the REAL
+   * display→PDF + engine-op path. */
+  placeAddText: (rect: { x: number; y: number; w: number; h: number }) => boolean;
+  commitAddText: (params: {
+    text: string;
+    size?: number;
+    color?: [number, number, number];
+    family?: 'sans' | 'serif' | 'mono';
+  }) => Promise<void>;
 }
 
 let canvasEditImages: CanvasEditImagesHandlers | null = null;
@@ -581,6 +591,14 @@ export interface TestHarness {
       outputPrefix?: string;
     },
   ) => Promise<void>;
+  /** Add Text (9.A2): place then author. */
+  addTextPlace: (rect: { x: number; y: number; w: number; h: number }, timeoutMs?: number) => Promise<void>;
+  addTextCommit: (params: {
+    text: string;
+    size?: number;
+    color?: [number, number, number];
+    family?: 'sans' | 'serif' | 'mono';
+  }) => Promise<void>;
 }
 
 export interface TestHarnessDeps {
@@ -1043,6 +1061,32 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         await canvasEditImages.act(kind, opts);
       } catch (err) {
         captureError('editImageAct', err);
+        throw err;
+      }
+    },
+    addTextPlace: async (rect, timeoutMs = 10_000) => {
+      const deadline = Date.now() + timeoutMs;
+      let placed = canvasEditImages?.placeAddText(rect) ?? false;
+      while (!placed && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        placed = canvasEditImages?.placeAddText(rect) ?? false;
+      }
+      if (!placed) {
+        const msg = `addTextPlace: no canvas page appeared within ${timeoutMs}ms`;
+        lastError = msg;
+        throw new Error(msg);
+      }
+    },
+    addTextCommit: async (params) => {
+      if (!canvasEditImages) {
+        const msg = 'addTextCommit: canvas edit mode not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await canvasEditImages.commitAddText(params);
+      } catch (err) {
+        captureError('addTextCommit', err);
         throw err;
       }
     },
