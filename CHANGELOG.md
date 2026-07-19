@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.5.0 — A bigger text editor: CJK, real fonts, and restyling
+
+### Edit far more documents
+- **Chinese, Japanese, and Korean text is now editable** — documents
+  whose fonts use the standard Unicode CJK encodings (the `Uni…-UCS2`
+  family) open for editing instead of being refused
+- When a typed character needs a substitute font, the replacement now
+  **matches the original's style** — a serif document's text converts in
+  a serif face, monospaced in monospaced, instead of everything becoming
+  sans-serif
+
+### Restyle, not just retype
+- The paragraph editor gained **size and colour controls**: change a
+  paragraph's font size (it rewraps and re-spaces to fit) or recolour it,
+  right in the editor — the first step from "fix a typo" toward real
+  editing
+- Outline (stroked) text recolours correctly, and an out-of-range size is
+  clamped so text can't fly off the page
+
 ## 2.4.0 — Create PDF from PostScript
 
 ### The distilling job, without the extra app
