@@ -34,7 +34,7 @@ import { runCommitGate } from '../../lib/commit-gate';
 
 import { buildMergedPageRefs, pathBlockedFromClose } from '../../lib/merge-docs';
 import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
-import { pruneFormValues, valueShapeMatches } from '../../lib/form-overlay';
+import { placementDocsCurrent, pruneFormValues, valueShapeMatches } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
@@ -108,6 +108,14 @@ interface WorkspaceCanvasViewProps {
     spans: { start: number; end: number; run: number }[],
     opts?: ParagraphEditOpts,
   ) => Promise<string | void>;
+  // A4 merge: the engine validates BOTH fingerprints and refuses stale
+  // views / cross-stream pairs; EDIT_DECLINED on the signed-doc refusal.
+  onMergeParagraph: (
+    path: string,
+    page: number,
+    prev: { index: number; runs: number[]; text: string },
+    cur: { index: number; runs: number[]; text: string },
+  ) => Promise<string | void>;
   // Author a NEW text object (9.A2): a rubber-band box + entered text become a
   // fresh Type0 run via the engine's add_text_box. `rect` is PDF user-space
   // points; the return mirrors onEditParagraph (EDIT_DECLINED on a signed-doc
@@ -179,6 +187,7 @@ export function WorkspaceCanvasView({
   onEditImage,
   onEditText,
   onEditParagraph,
+  onMergeParagraph,
   onAddText,
   onAddImage,
   onAddPages,
@@ -397,7 +406,7 @@ export function WorkspaceCanvasView({
   // name survives page edits and commits, so half-typed values survive an
   // Apply-changes; they are PRUNED against every settled re-read instead
   // (name gone / no longer editable / shape mismatch / file closed).
-  const workspaceForms = useWorkspaceForms(state.files, proxies);
+  const workspaceForms = useWorkspaceForms(state.files);
   const [pendingFormValues, setPendingFormValues] =
     useState<ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>>(NO_FORM_VALUES);
   const [fillingForms, setFillingForms] = useState(false);
@@ -459,12 +468,17 @@ export function WorkspaceCanvasView({
     ) => {
       const doc = docs.find((d) => d.id === docId);
       if (!doc) return;
+      // Anchor only to CURRENT ids (2n.4c / Phase 9): docs indexed from a
+      // superseded buffer are about to be re-identified (fresh generation),
+      // so a placement drawn against them is stillborn — refuse it rather
+      // than arm a box that dies at SET_WORKSPACE_DOCUMENTS moments later.
+      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
       setNewFieldPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
       setSigPlacement(null); // one placement card at a time (see onSetSignaturePlacement)
       setAddTextPlacement(null); // …including the Add-Text card (9.A2)
       setNfError(null);
     },
-    [docs],
+    [docs, state.files],
   );
   const onClearNewFieldPlacement = useCallback(() => setNewFieldPlacement(null), []);
 
@@ -490,8 +504,20 @@ export function WorkspaceCanvasView({
       options?: string[];
       multiline?: boolean;
     }): Promise<void> => {
+      if (creatingFieldRef.current) return; // re-entry: the button is disabled while creating
       const placement = liveNewFieldPlacement;
-      if (!placement || creatingFieldRef.current) return;
+      // The placement is transient view state that dies with its page id; a
+      // buffer change between place and create kills it, and while that
+      // change's reindex is still in flight the surviving ids are about to
+      // rotate — converting sourcePageIndex against the new bytes could land
+      // the field on the wrong page. Silently resolving here made a skipped
+      // create indistinguishable from a done one (the 18-canvas-forms load
+      // flake: a 30s wait for a field that was never created) — reject.
+      if (!placement || !placementDocsCurrent(state.files, docs, placement.path)) {
+        const msg = 'The page this field was placed on changed — draw the box again.';
+        setNfError(msg);
+        throw new Error(msg);
+      }
       creatingFieldRef.current = true;
       setCreatingField(true);
       setNfError(null);
@@ -1355,6 +1381,66 @@ export function WorkspaceCanvasView({
     [focusedDoc, docs, editTextByPage, onEditParagraph],
   );
 
+  // A4: merge the edited paragraph into the one above (fires only from an
+  // unchanged editor at caret 0 — the editor enforces that). Same commit
+  // shape as handleCommitParagraphEdit: close editor, drop the page's stale
+  // listing synchronously, restore on decline/error.
+  const handleMergeParagraphPrev = useCallback(
+    async (pageId: string, index: number): Promise<void> => {
+      if (!focusedDoc || committingTextRef.current) return;
+      const listing = editTextByPage.get(pageId);
+      const cur = listing?.paragraphs.find((p) => p.index === index);
+      const prevPara = listing?.paragraphs.find((p) => p.index === index - 1);
+      if (!cur || !prevPara) return;
+      const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
+      if (pageNumber == null) return;
+      committingTextRef.current = true;
+      setEditingText(null);
+      setEditSel(null);
+      setEditBusy(true);
+      setEditNotice(null);
+      const previousListing = editTextByPage.get(pageId);
+      setEditTextByPage((prevMap) => {
+        const next = new Map(prevMap);
+        next.delete(pageId);
+        return next;
+      });
+      try {
+        const result = await onMergeParagraph(
+          focusedDoc.path,
+          pageNumber,
+          { index: prevPara.index, runs: prevPara.runs, text: prevPara.text },
+          { index: cur.index, runs: cur.runs, text: cur.text },
+        );
+        if (result === EDIT_DECLINED) {
+          if (previousListing) {
+            setEditTextByPage((prevMap) => {
+              const next = new Map(prevMap);
+              next.set(pageId, previousListing);
+              return next;
+            });
+          }
+          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+        } else if (typeof result === 'string') {
+          setEditNotice({ text: result, error: false });
+        }
+      } catch (err) {
+        if (previousListing) {
+          setEditTextByPage((prevMap) => {
+            const next = new Map(prevMap);
+            next.set(pageId, previousListing);
+            return next;
+          });
+        }
+        setEditNotice({ text: err instanceof Error ? err.message : String(err), error: true });
+      } finally {
+        committingTextRef.current = false;
+        setEditBusy(false);
+      }
+    },
+    [focusedDoc, docs, editTextByPage, onMergeParagraph],
+  );
+
   const runEditAction = useCallback(
     async (
       kind: 'delete' | 'replace' | 'extract' | 'crop' | 'opacity',
@@ -1671,6 +1757,10 @@ export function WorkspaceCanvasView({
     const doc = docs.find((d) => d.path === state.activeFileId);
     const page = doc?.pages[0];
     if (!doc || !page) return false;
+    // Same currency rule as onSetNewFieldRect — the harness polls this, so
+    // refusing while a reindex is in flight makes place→create atomic
+    // against the id rotation instead of arming a doomed placement.
+    if (!placementDocsCurrent(state.files, docs, doc.path)) return false;
     setNewFieldPlacement({
       id: crypto.randomUUID(),
       path: doc.path,
@@ -2354,6 +2444,7 @@ export function WorkspaceCanvasView({
             void handleCommitParagraphEdit(pageId, index, text, opts)
           }
           onCancelParagraphEdit={handleCancelTextEdit}
+          onMergeParagraphPrev={(pageId, index) => void handleMergeParagraphPrev(pageId, index)}
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}
@@ -2436,6 +2527,7 @@ export function WorkspaceCanvasView({
             void handleCommitParagraphEdit(pageId, index, text, opts)
           }
           onCancelParagraphEdit={handleCancelTextEdit}
+          onMergeParagraphPrev={(pageId, index) => void handleMergeParagraphPrev(pageId, index)}
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}

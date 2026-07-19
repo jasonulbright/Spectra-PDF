@@ -755,6 +755,8 @@ function AppContent(): React.ReactElement {
       if (opts?.family !== undefined) params.family = opts.family;
       if (opts?.bold !== undefined) params.bold = opts.bold;
       if (opts?.italic !== undefined) params.italic = opts.italic;
+      // A4 split: a code-point offset — the engine lays out two blocks.
+      if (opts?.split_at !== undefined) params.split_at = opts.split_at;
       if (opts?.convert) params.convert = true;
       const substituting =
         opts?.family !== undefined || opts?.bold !== undefined || opts?.italic !== undefined;
@@ -766,6 +768,30 @@ function AppContent(): React.ReactElement {
         params.font_path = await app.getEditFontPath();
       }
       await performOperation(path, 'replace_paragraph_text', params);
+    },
+    [state.files, performOperation, confirmEditOfSignedDoc],
+  );
+
+  // 9.A4 merge: one engine op, one undo step; both fingerprints ride so the
+  // engine refuses a stale view. Signed-doc-guarded like every content edit.
+  const handleMergeParagraph = useCallback(
+    async (
+      path: string,
+      page: number,
+      prev: { index: number; runs: number[]; text: string },
+      cur: { index: number; runs: number[]; text: string },
+    ): Promise<string | void> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      await performOperation(path, 'merge_paragraph_with_previous', {
+        page,
+        paragraph_index: cur.index,
+        expected_prev_runs: prev.runs,
+        expected_prev_text: prev.text,
+        expected_runs: cur.runs,
+        expected_text: cur.text,
+      });
     },
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
@@ -1576,6 +1602,7 @@ function AppContent(): React.ReactElement {
                   onEditImage={handleEditImage}
                   onEditText={handleEditText}
                   onEditParagraph={handleEditParagraph}
+                  onMergeParagraph={handleMergeParagraph}
                   onAddText={handleAddText}
                   onAddImage={handleAddImage}
                   onAddPages={handleAddPages}

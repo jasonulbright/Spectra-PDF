@@ -62,6 +62,15 @@ export interface ParagraphEditOpts {
    * from its seed); undefined = no style substitution. */
   bold?: boolean;
   italic?: boolean;
+  /** A4: split the paragraph at this CODE-POINT offset (strictly inside
+   * the text) — the engine lays the halves out as two paragraphs. */
+  split_at?: number;
+}
+
+/** UTF-16 index (textarea selectionStart) → code-point index (the engine's
+ * span domain — the Array.from rule; an astral char is ONE unit there). */
+export function utf16ToCodePointIndex(text: string, utf16Index: number): number {
+  return Array.from(text.slice(0, utf16Index)).length;
 }
 
 export interface EditTextListing {

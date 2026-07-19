@@ -5,6 +5,7 @@ import {
   hexToRgb,
   paragraphUnencodable,
   sanitizeParagraphInput,
+  utf16ToCodePointIndex,
 } from '../src/renderer/lib/edit-paragraphs';
 
 describe('computeEditSpans (7.5 caret inheritance)', () => {
@@ -192,5 +193,21 @@ describe('fetchEditTextListing projection', () => {
     );
     expect(out.paragraphs).toHaveLength(0);
     expect(out.runBoxes.map((r) => r.index)).toEqual([0, 1]);
+  });
+});
+
+describe('utf16ToCodePointIndex (A4 split caret domain)', () => {
+  it('is identity for BMP-only text', () => {
+    expect(utf16ToCodePointIndex('hello world', 6)).toBe(6);
+    expect(utf16ToCodePointIndex('hello', 0)).toBe(0);
+    expect(utf16ToCodePointIndex('hello', 5)).toBe(5);
+  });
+
+  it('counts an astral char as ONE code point past it', () => {
+    // '𝄞' is two UTF-16 units; a caret after it is utf16 index 2, cp 1.
+    const text = '𝄞ab';
+    expect(utf16ToCodePointIndex(text, 2)).toBe(1);
+    expect(utf16ToCodePointIndex(text, 3)).toBe(2);
+    expect(utf16ToCodePointIndex(text, 4)).toBe(3);
   });
 });

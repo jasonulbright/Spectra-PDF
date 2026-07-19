@@ -22,6 +22,12 @@ export function getDocumentProxy(path: string, buffer: PdfBuffer): Promise<PDFDo
   if (existing && existing.buffer === buffer) return existing.promise;
   if (existing) destroyEntry(existing);
   const entry: CacheEntry = { buffer, promise: loadDocument(buffer) };
+  // A rejected load must not stay cached: retriers (the indexer re-running
+  // on state changes, useWorkspaceForms' bounded retry) would replay the
+  // same cached rejection forever instead of re-attempting the load.
+  void entry.promise.catch(() => {
+    if (cache.get(path) === entry) cache.delete(path);
+  });
   cache.set(path, entry);
   return entry.promise;
 }

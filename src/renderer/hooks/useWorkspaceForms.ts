@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { readFormFields } from '../lib/forms';
 import type { FormField } from '../lib/forms';
 import { projectFieldWidgets } from '../lib/form-overlay';
 import type { OverlayWidget, PageBox } from '../lib/form-overlay';
+import { getDocumentProxy } from '../lib/pdfDocCache';
 import type { OpenFile, PdfBuffer } from '../state/types';
 
 export interface FileFormInfo {
@@ -15,7 +15,6 @@ export interface FileFormInfo {
 
 interface CacheEntry {
   buffer: PdfBuffer;
-  proxy: PDFDocumentProxy;
   info: FileFormInfo;
 }
 
@@ -27,19 +26,26 @@ interface CacheEntry {
 // and wipes values typed before an unrelated commit. Byte-only import
 // sources are excluded: their fields join the TARGET file's /AcroForm at
 // commit (2n.4a's multi-source carry) and become fillable there.
-export function useWorkspaceForms(
-  files: Map<string, OpenFile>,
-  proxies: Map<string, PDFDocumentProxy>,
-): ReadonlyMap<string, FileFormInfo> {
+//
+// Geometry is resolved from pdfDocCache BY (path, buffer) — never from a
+// proxies map keyed by path alone (Phase 9). A map entry can belong to a
+// superseded buffer, and a getPage whose proxy is destroyed mid-flight can
+// PEND FOREVER (no rejection — instrumented live under CPU load: such reads
+// neither resolved nor rejected for 30s+), which silently disabled this
+// hook's whole catch/retry path. Resolved by buffer, a hang can only happen
+// when a NEWER buffer destroyed the entry — and that buffer's files dispatch
+// refires this effect, so a hung run is always superseded, never
+// load-bearing. It also pins fields and page boxes to the SAME bytes: a
+// post-commit read must not project new widgets through old geometry.
+export function useWorkspaceForms(files: Map<string, OpenFile>): ReadonlyMap<string, FileFormInfo> {
   const [published, setPublished] = useState<ReadonlyMap<string, FileFormInfo>>(new Map());
   const cacheRef = useRef(new Map<string, CacheEntry>());
   const genRef = useRef(0);
   // Transient-failure retries, keyed per (path, buffer identity): a read
-  // can fail for reasons that heal on their own (the canonical one: the
-  // reload that CHANGED the buffer destroys the old pdf.js proxy while a
-  // read against it is mid-flight → getPage rejects). Bounded so a
-  // genuinely unreadable form stops churning; the count resets when the
-  // buffer changes again.
+  // can fail for reasons that heal on their own (e.g. a proxy load rejected
+  // under resource pressure — pdfDocCache drops a rejected load, so each
+  // retry genuinely re-attempts it). Bounded so a genuinely unreadable form
+  // stops churning; the count resets when the buffer changes again.
   const failsRef = useRef(new Map<string, { buffer: PdfBuffer; count: number }>());
 
   useEffect(() => {
@@ -50,16 +56,14 @@ export function useWorkspaceForms(
       const cache = cacheRef.current;
       for (const path of [...cache.keys()]) {
         const f = files.get(path);
-        if (!f || f.importOnly || !f.buffer || !proxies.has(path)) cache.delete(path);
+        if (!f || f.importOnly || !f.buffer) cache.delete(path);
       }
       let transientFailure = false;
       const work: Promise<void>[] = [];
       for (const [path, f] of files) {
         if (f.importOnly || !f.buffer) continue;
-        const proxy = proxies.get(path);
-        if (!proxy) continue; // not renderable yet — no geometry source
         const cached = cache.get(path);
-        if (cached && cached.buffer === f.buffer && cached.proxy === proxy) continue;
+        if (cached && cached.buffer === f.buffer) continue;
         const buffer = f.buffer;
         work.push(
           (async () => {
@@ -71,14 +75,28 @@ export function useWorkspaceForms(
                 for (const w of field.widgets) pageIndexes.add(w.pageIndex);
               }
               const geo = new Map<number, { box: PageBox; bakedRotate: number }>();
-              for (const i of pageIndexes) {
-                if (i < 0 || i >= proxy.numPages) continue;
-                const page = await proxy.getPage(i + 1);
-                const [vx0, vy0, vx1, vy1] = page.view;
-                geo.set(i, {
-                  box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
-                  bakedRotate: page.rotate,
-                });
+              if (pageIndexes.size > 0) {
+                // SUPERSEDED runs must not touch the proxy cache: the
+                // buffer captured above went stale during the (slow)
+                // readFormFields await, and getDocumentProxy for a stale
+                // buffer would DESTROY the canvas's live newer proxy —
+                // re-creating the mid-flight-destroy hang on the current
+                // generation (review-caught HIGH, repro'd against the
+                // real cache). The newer generation's own run covers the
+                // fresh buffer; just stop.
+                if (gen !== genRef.current) return;
+                // The shared canvas proxy for THESE bytes; form-less files
+                // never wait on (or fail with) the pdf.js load at all.
+                const proxy = await getDocumentProxy(path, buffer);
+                for (const i of pageIndexes) {
+                  if (i < 0 || i >= proxy.numPages) continue;
+                  const page = await proxy.getPage(i + 1);
+                  const [vx0, vy0, vx1, vy1] = page.view;
+                  geo.set(i, {
+                    box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+                    bakedRotate: page.rotate,
+                  });
+                }
               }
               const widgetsByPage = new Map<number, OverlayWidget[]>();
               for (const field of fields) {
@@ -102,9 +120,7 @@ export function useWorkspaceForms(
               // pre-edit state FOREVER (a field created during the failure
               // window never appeared — live-caught by the e2e read-back
               // under CPU load). Leave the old cache entry in place (the
-              // publish below keeps it visible) and retry: transient
-              // causes (a proxy destroyed by the very reload that changed
-              // the buffer) heal on the next pass against the fresh proxy.
+              // publish below keeps it visible) and retry.
               const fails = failsRef.current.get(path);
               const count = fails && fails.buffer === buffer ? fails.count + 1 : 1;
               failsRef.current.set(path, { buffer, count });
@@ -115,7 +131,7 @@ export function useWorkspaceForms(
               return;
             }
             if (!alive || gen !== genRef.current) return; // superseded run
-            cache.set(path, { buffer, proxy, info });
+            cache.set(path, { buffer, info });
           })(),
         );
       }
@@ -135,7 +151,7 @@ export function useWorkspaceForms(
       alive = false;
       if (retryTimer !== null) clearTimeout(retryTimer);
     };
-  }, [files, proxies]);
+  }, [files]);
 
   return published;
 }

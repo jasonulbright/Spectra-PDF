@@ -57,7 +57,11 @@ from engine.page_images import (
 )
 from engine.distill import distill
 from engine.text_authoring import add_text_box
-from engine.text_paragraphs import list_text_paragraphs, replace_paragraph_text
+from engine.text_paragraphs import (
+    list_text_paragraphs,
+    merge_paragraph_with_previous,
+    replace_paragraph_text,
+)
 from engine.text_runs import convert_text_run, list_text_runs, replace_text_run
 from engine.printer import print_pdf
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
@@ -116,6 +120,7 @@ def main() -> None:
     server.register("convert_text_run", convert_text_run)
     server.register("list_text_paragraphs", list_text_paragraphs)
     server.register("replace_paragraph_text", replace_paragraph_text)
+    server.register("merge_paragraph_with_previous", merge_paragraph_with_previous)
     server.register("distill", distill)
     server.register("add_text_box", add_text_box)
     server.register("print", print_pdf)

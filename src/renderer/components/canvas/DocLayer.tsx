@@ -49,6 +49,7 @@ interface DocLayerProps {
   onOpenParagraphEditor: (pageId: string, index: number) => void;
   onCommitParagraphEdit: (pageId: string, index: number, newText: string, opts?: ParagraphEditOpts) => void;
   onCancelParagraphEdit: () => void;
+  onMergeParagraphPrev: (pageId: string, index: number) => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -156,6 +157,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onOpenParagraphEditor={props.onOpenParagraphEditor}
               onCommitParagraphEdit={props.onCommitParagraphEdit}
               onCancelParagraphEdit={props.onCancelParagraphEdit}
+              onMergeParagraphPrev={props.onMergeParagraphPrev}
               signaturePlacement={props.signaturePlacement}
               findMatchPageIds={props.findMatchPageIds}
               findWordsByPage={props.findWordsByPage}

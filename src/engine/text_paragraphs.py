@@ -861,8 +861,13 @@ def _position_lines(
     first_left: float,
     body_left: float,
     leading: float,
+    y0: float | None = None,
 ) -> None:
-    y0 = para.lines[0].y
+    # y0 overrides the anchor for a block that does NOT start at the
+    # paragraph's own first baseline (A4 split: the second block starts
+    # 2×leading below the first block's last line).
+    if y0 is None:
+        y0 = para.lines[0].y
     for i, line in enumerate(lines):
         line.y = y0 - i * leading
         if para.alignment == "center":
@@ -946,7 +951,7 @@ class _Emission:
 
     def __init__(
         self, para: _Paragraph, styled, fb: _Fallback | None, page_x0: float, page_x1: float,
-        size_override=None,
+        size_override=None, split_at=None,
     ):
         self.para = para
         self.styled = styled
@@ -958,6 +963,11 @@ class _Emission:
         # text doesn't waste space) — the ratio to the paragraph's
         # dominant original size.
         self.size_override = size_override
+        # A4: a styled-index split point — the second block lays out as its
+        # own paragraph 2×leading below the first (a gap the re-listing
+        # grouping can never join across, so the output relists as TWO
+        # paragraphs through the shipped heuristics).
+        self.split_at = split_at
 
     def build(self, ctm) -> list[tuple]:
         """[(kind, instruction, raw_width|None)]; kind ∈ {'op','show'} —
@@ -965,9 +975,6 @@ class _Emission:
         after shows."""
         para = self.para
         if not self.styled:
-            return []
-        words = _tokenize(self.styled, self.fb, para.median_gap_1000)
-        if not words:
             return []
         body_lefts = [l.x0 for l in para.lines[1:]]
         first_left = para.lines[0].x0
@@ -992,8 +999,43 @@ class _Emission:
             right_limit = max(self.page_x1 - margin, para.right)
         first_measure = right_limit - first_left
         body_measure = right_limit - body_left
-        lines = _fill_lines(words, first_measure, body_measure)
-        _position_lines(lines, para, first_left, body_left, leading)
+        # A4 split: each block is its OWN paragraph (fresh first-line
+        # indent, own justify-final-line), the second anchored below the
+        # first by a gap the re-listing grouping can NEVER join across.
+        # 2×leading alone was NOT that gap (review-caught HIGH, repro'd at
+        # leading ≤ 0.8×eff): a single-line first block has no measured
+        # deltas, so the join test uses the 1.6-em cap — condensed leading
+        # made 2×leading clear the drift test but not the cap, and the
+        # blocks re-joined GARBLED. The floor of 2×eff beats the cap
+        # (1.6×eff) with margin; max() keeps ≥2×leading for airy layouts
+        # (which beats the ±25% drift window for any leading < 1.6×eff).
+        # Split-edge spaces are trimmed (the caret split must not leave an
+        # invisible leading/trailing gap word).
+        if self.split_at is not None and 0 < self.split_at < len(self.styled):
+            part_a = list(self.styled[: self.split_at])
+            part_b = list(self.styled[self.split_at :])
+            while part_a and part_a[-1][0] == " ":
+                part_a.pop()
+            while part_b and part_b[0][0] == " ":
+                part_b.pop(0)
+            parts = [p for p in (part_a, part_b) if p]
+        else:
+            parts = [self.styled]
+        dom_eff = _widest(para.lines[0].members).eff * size_scale
+        split_gap = max(2.0 * leading, 2.0 * dom_eff)
+        lines: list[_LayoutLine] = []
+        y_next: float | None = None
+        for part in parts:
+            words = _tokenize(part, self.fb, para.median_gap_1000)
+            if not words:
+                continue
+            block = _fill_lines(words, first_measure, body_measure)
+            _position_lines(block, para, first_left, body_left, leading, y0=y_next)
+            if block:
+                y_next = block[-1].y - split_gap
+            lines.extend(block)
+        if not lines:
+            return []
 
         ctm_inv = _invert(ctm)
         base = _widest(para.lines[0].members)
@@ -1463,6 +1505,7 @@ def replace_paragraph_text(
     family: str | None = None,
     bold: bool | None = None,
     italic: bool | None = None,
+    split_at: int | None = None,
 ) -> dict:
     """Replace a paragraph's text and re-lay-out inside its box (7.5).
 
@@ -1488,7 +1531,13 @@ def replace_paragraph_text(
     only a style is given, so bold-only on a serif paragraph lands
     LiberationSerif-Bold. Characters the Liberation face lacks refuse
     with a stated reason. All three None keeps the paragraph's own
-    fonts (the shipped 7.5/A1 path, byte-identical)."""
+    fonts (the shipped 7.5/A1 path, byte-identical).
+
+    A4 split: `split_at` (a code-point offset strictly inside
+    `new_text`) lays the text out as TWO blocks, the second starting
+    2×leading below the first — a gap the re-listing grouping can never
+    join across, so the result lists as two paragraphs. None = the
+    shipped single-block layout (byte-identical)."""
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -1558,6 +1607,19 @@ def replace_paragraph_text(
         if bold is not None or italic is not None:
             style_override = (bool(bold), bool(italic))
         substituting = family_override is not None or style_override is not None
+        # A4 split: an explicit selector — a caret offset outside the open
+        # interval refuses (a "split" that splits nothing would be a
+        # success that lied). Code points: Python strings index them
+        # natively; the renderer converts from UTF-16 before sending.
+        split_point = None
+        if split_at is not None:
+            try:
+                sp = int(split_at)
+            except (TypeError, ValueError):
+                raise ValueError("split position must be a number") from None
+            if not (0 < sp < len(str(new_text))):
+                raise ValueError("split position must be inside the text")
+            split_point = sp
 
         members_by_index = {m.index: m for m in para.members}
         styled, fb_chars = _styled_chars(
@@ -1622,7 +1684,10 @@ def replace_paragraph_text(
             para.stream,
             set(ordinal_of.values()),
             ordinal_of[min(member_set)],
-            _Emission(para, styled, fallback, page_x0, page_x1, size_override=size_override),
+            _Emission(
+                para, styled, fallback, page_x0, page_x1,
+                size_override=size_override, split_at=split_point,
+            ),
             fallback,
         )
         kept, changed, new_forms = _rewrite_paragraph_stream(
@@ -1648,6 +1713,136 @@ def replace_paragraph_text(
             _register_font(pdf, resources, fname, fdict)
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(paragraph_index)}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def merge_paragraph_with_previous(
+    file: str,
+    output: str,
+    page: int,
+    paragraph_index: int,
+    expected_prev_runs: list,
+    expected_prev_text: str,
+    expected_runs: list,
+    expected_text: str,
+) -> dict:
+    """Merge a paragraph into the one above it in the listing (A4): the
+    joined text (space-joined; no space across a CJK-CJK boundary — the
+    line-join rule) re-lays-out in the PREVIOUS paragraph's box, both
+    originals' show ops removed — one op, one undo step. Fingerprints for
+    BOTH paragraphs refuse a stale view; different content streams refuse
+    (a cross-column merge is nonsense); unencodable characters refuse
+    named (a decoded char without a single-char reverse — the B5
+    boundary — cannot re-emit)."""
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        resources = _resolve_resources(p)
+        fonts = _FontCache()
+        runs: list[dict] = []
+        detail: list[dict] = []
+        _walk_runs(
+            pdf,
+            pikepdf.parse_content_stream(p),
+            resources,
+            IDENTITY,
+            0,
+            None,
+            runs,
+            False,
+            fonts,
+            detail=detail,
+        )
+        paragraphs = _group(runs, detail)
+        idx = int(paragraph_index)
+        if not (1 <= idx < len(paragraphs)):
+            raise ValueError("no previous paragraph to merge with")
+        prev, cur = paragraphs[idx - 1], paragraphs[idx]
+        for para_, label in ((prev, "previous"), (cur, "selected")):
+            if not para_.editable:
+                raise ValueError(para_.reason or f"the {label} paragraph is not editable")
+        if prev.stream != cur.stream:
+            raise ValueError("the paragraphs are in different content streams and cannot merge")
+        if prev.lkey != cur.lkey:
+            # Different linear parts (CTM scale) — the emission would lay
+            # cur's text out at PREV's scale, silently resizing it
+            # (review-caught, repro'd: 2×-scaled text shrank to 1× with a
+            # success result). The same signal that kept these runs in
+            # separate paragraphs at grouping time refuses the merge.
+            raise ValueError("the paragraphs have different formatting and cannot merge")
+        if [int(r) for r in expected_prev_runs] != prev.run_indexes or str(expected_prev_text) != prev.text:
+            raise ValueError("the page's text changed underneath this edit — reopen the editor")
+        if [int(r) for r in expected_runs] != cur.run_indexes or str(expected_text) != cur.text:
+            raise ValueError("the page's text changed underneath this edit — reopen the editor")
+
+        joiner = "" if (prev.text and cur.text and _cjk(prev.text[-1]) and _cjk(cur.text[0])) else " "
+        new_text = prev.text + joiner + cur.text
+        # Spans stay contiguous: the joiner rides the PREVIOUS paragraph's
+        # last span (the line-join rule); cur's spans shift up.
+        shift = len(prev.text) + len(joiner)
+        spans = [dict(s) for s in prev.spans]
+        if joiner and spans:
+            spans[-1]["end"] += len(joiner)
+        spans += [
+            {"start": s["start"] + shift, "end": s["end"] + shift, "run": s["run"]}
+            for s in cur.spans
+        ]
+
+        members_by_index = {m.index: m for m in prev.members}
+        members_by_index.update({m.index: m for m in cur.members})
+        # convert=False: a merge re-encodes existing characters in their own
+        # fonts; the belt refusal names any that cannot round-trip.
+        styled, _fb = _styled_chars(new_text, spans, members_by_index, False)
+
+        member_set = set(prev.run_indexes) | set(cur.run_indexes)
+        per_stream_counts: dict[tuple, int] = defaultdict(int)
+        ordinal_of: dict[int, int] = {}
+        for i, det in enumerate(detail):
+            o = per_stream_counts[det["stream"]]
+            per_stream_counts[det["stream"]] = o + 1
+            if i in member_set:
+                ordinal_of[i] = o
+        try:
+            box = [float(v) for v in p.mediabox]
+            page_x0, page_x1 = min(box[0], box[2]), max(box[0], box[2])
+        except (TypeError, ValueError):
+            page_x0, page_x1 = 0.0, 612.0
+        edit = _ParaEditState(
+            prev.stream,
+            set(ordinal_of.values()),
+            ordinal_of[min(member_set)],
+            _Emission(prev, styled, None, page_x0, page_x1),
+            None,
+        )
+        kept, changed, new_forms = _rewrite_paragraph_stream(
+            pdf,
+            pikepdf.parse_content_stream(p),
+            resources,
+            None,
+            0,
+            edit,
+            fonts,
+            [0],
+            set(),
+            (),
+        )
+        if not (changed and edit.changed):
+            raise ValueError("edit did not apply (paragraph not found)")
+        for nm, st in new_forms.items():
+            _register_xobject(pdf, resources, nm, st)
+        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        _finalize_page_rewrite(p, kept, edit.superseded_forms)
+        _save(pdf, input_path, output_path)
+        return {"output": str(output_path), "page": int(page), "index": idx - 1}
     finally:
         try:
             pdf.close()

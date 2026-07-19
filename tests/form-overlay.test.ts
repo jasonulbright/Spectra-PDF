@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 import {
+  placementDocsCurrent,
   projectFieldWidgets,
   pruneFormValues,
   resolveFillTargets,
@@ -272,5 +273,45 @@ describe('pruneFormValues', () => {
     const forms = new Map([['a.pdf', fields([])]]);
     const out = pruneFormValues(pending, forms);
     expect(out.size).toBe(0);
+  });
+});
+
+describe('placementDocsCurrent', () => {
+  // Buffer IDENTITY is the staleness signal (the workspace indexer's own
+  // rule): equal contents in a different object still means a reindex is in
+  // flight and the page ids are about to rotate.
+  const bufA = [1, 2, 3];
+  const bufB = [1, 2, 3];
+
+  it('is current when the indexed doc carries the files buffer', () => {
+    const files = new Map([['a.pdf', { buffer: bufA }]]);
+    expect(placementDocsCurrent(files, [{ path: 'a.pdf', buffer: bufA }], 'a.pdf')).toBe(true);
+  });
+
+  it('is stale when the files buffer is newer than the indexed one', () => {
+    const files = new Map([['a.pdf', { buffer: bufB }]]);
+    expect(placementDocsCurrent(files, [{ path: 'a.pdf', buffer: bufA }], 'a.pdf')).toBe(false);
+  });
+
+  it('refuses a path with no loaded buffer or no indexed docs yet', () => {
+    const files = new Map([['a.pdf', { buffer: null }]]);
+    expect(placementDocsCurrent(files, [{ path: 'a.pdf', buffer: bufA }], 'a.pdf')).toBe(false);
+    expect(
+      placementDocsCurrent(new Map([['a.pdf', { buffer: bufA }]]), [], 'a.pdf'),
+    ).toBe(false);
+    expect(placementDocsCurrent(new Map(), [{ path: 'a.pdf', buffer: bufA }], 'a.pdf')).toBe(false);
+  });
+
+  it('judges only the named path (other docs do not vouch)', () => {
+    const files = new Map([
+      ['a.pdf', { buffer: bufA }],
+      ['b.pdf', { buffer: bufB }],
+    ]);
+    const docs = [
+      { path: 'b.pdf', buffer: bufB },
+      { path: 'a.pdf', buffer: bufA },
+    ];
+    expect(placementDocsCurrent(files, docs, 'a.pdf')).toBe(true);
+    expect(placementDocsCurrent(files, [{ path: 'b.pdf', buffer: bufB }], 'a.pdf')).toBe(false);
   });
 });

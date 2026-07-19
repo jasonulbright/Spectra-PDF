@@ -55,6 +55,7 @@ interface DocumentRowProps {
   onOpenParagraphEditor: (pageId: string, index: number) => void;
   onCommitParagraphEdit: (pageId: string, index: number, newText: string, opts?: ParagraphEditOpts) => void;
   onCancelParagraphEdit: () => void;
+  onMergeParagraphPrev: (pageId: string, index: number) => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -140,6 +141,7 @@ function DocumentRowImpl({
   onOpenParagraphEditor,
   onCommitParagraphEdit,
   onCancelParagraphEdit,
+  onMergeParagraphPrev,
   signaturePlacement,
   findMatchPageIds,
   findWordsByPage,
@@ -236,6 +238,7 @@ function DocumentRowImpl({
         onOpenParagraphEditor={onOpenParagraphEditor}
         onCommitParagraphEdit={onCommitParagraphEdit}
         onCancelParagraphEdit={onCancelParagraphEdit}
+        onMergeParagraphPrev={onMergeParagraphPrev}
         signaturePlacement={signaturePlacement?.pageId === page.id ? signaturePlacement : null}
         findMatch={findMatchPageIds.has(page.id)}
         findWords={findWordsByPage.get(page.id)}

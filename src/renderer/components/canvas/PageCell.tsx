@@ -16,6 +16,7 @@ import {
   hexToRgb,
   paragraphUnencodable,
   sanitizeParagraphInput,
+  utf16ToCodePointIndex,
 } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -357,6 +358,9 @@ interface PageCellProps {
     opts?: ParagraphEditOpts,
   ) => void;
   onCancelParagraphEdit?: () => void;
+  /** A4: merge the paragraph being edited into the one above it (fires
+   * only from an unchanged editor with the caret at position 0). */
+  onMergeParagraphPrev?: (pageId: string, index: number) => void;
   // Pending visible-signature placement, when it sits on THIS page (transient
   // view state with mark lifecycle — see lib/signature-placement.ts).
   signaturePlacement?: SignaturePlacement | null;
@@ -464,6 +468,7 @@ function PageCellImpl({
   onOpenParagraphEditor,
   onCommitParagraphEdit,
   onCancelParagraphEdit,
+  onMergeParagraphPrev,
   signaturePlacement,
   findMatch,
   findWords,
@@ -1006,6 +1011,11 @@ function PageCellImpl({
                   onCommitParagraphEdit?.(page.id, para.index, value, opts)
                 }
                 onCancel={() => onCancelParagraphEdit?.()}
+                onMergePrev={
+                  para.index > 0 && onMergeParagraphPrev
+                    ? () => onMergeParagraphPrev(page.id, para.index)
+                    : undefined
+                }
               />
             );
           }
@@ -1305,12 +1315,16 @@ function ParagraphEditor({
   lineHeightPx,
   onCommit,
   onCancel,
+  onMergePrev,
 }: {
   para: EditParagraph;
   rect: { x: number; y: number; w: number; h: number };
   lineHeightPx: number;
   onCommit: (value: string, opts?: ParagraphEditOpts) => void;
   onCancel: () => void;
+  /** A4: merge into the previous paragraph — provided only when one
+   * exists; fires only from an unchanged editor at caret 0. */
+  onMergePrev?: () => void;
 }): React.JSX.Element {
   const [value, setValue] = useState(para.text);
   // A1 restyle controls, seeded from the paragraph's own size/colour.
@@ -1407,8 +1421,39 @@ function ParagraphEditor({
         // that Escape did nothing while a control had focus).
         if (e.key === 'Enter') {
           e.preventDefault(); // also stops a newline in the textarea
+          // A4 split: Enter with the caret strictly INSIDE the textarea's
+          // text splits there (code-point domain — the Array.from rule).
+          // Caret at the end (the committed shape every prior spec uses)
+          // falls through to the shipped commit.
+          const ta = areaRef.current;
+          if (
+            e.target === ta &&
+            ta &&
+            ta.selectionStart === ta.selectionEnd &&
+            ta.selectionStart > 0 &&
+            ta.selectionStart < value.length
+          ) {
+            if (valid) {
+              const cp = utf16ToCodePointIndex(value, ta.selectionStart);
+              settle(() => onCommit(value, restyleOpts({ split_at: cp })));
+            }
+            return;
+          }
           if (valid && changed) settle(() => onCommit(value, restyleOpts()));
           else if (!changed) settle(onCancel);
+        } else if (
+          e.key === 'Backspace' &&
+          onMergePrev &&
+          e.target === areaRef.current &&
+          areaRef.current?.selectionStart === 0 &&
+          areaRef.current?.selectionEnd === 0 &&
+          value === para.text
+        ) {
+          // A4 merge: backspace at the very start of an UNCHANGED editor
+          // joins into the previous paragraph (edits-then-merge would
+          // silently drop the edits, so a dirty editor just no-ops here).
+          e.preventDefault();
+          settle(onMergePrev);
         } else if (e.key === 'Escape') {
           e.preventDefault();
           e.stopPropagation();

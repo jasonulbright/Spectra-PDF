@@ -105,6 +105,26 @@ export function valueShapeMatches(type: FormFieldType, value: FormFieldValue): b
   }
 }
 
+// Whether a canvas placement can anchor to (or still trusts) the workspace's
+// page ids for a path (2n.4c). Workspace documents carry the buffer they were
+// indexed from; when the files map holds a NEWER buffer, a non-authored
+// reindex is in flight and will mint a fresh id generation — a placement
+// anchored to the current ids dies at SET_WORKSPACE_DOCUMENTS, and a create
+// converting sourcePageIndex against the new bytes could land the field on
+// the wrong page. Under CPU load that window is wide enough for a whole
+// place→create pair to fall into (the 18-canvas-forms load flake), so both
+// ends check: placement is refused while stale, create rejects if it became
+// stale. Structural shapes so this stays a pure, directly-testable rule.
+export function placementDocsCurrent(
+  files: ReadonlyMap<string, { buffer: unknown }>,
+  documents: readonly { path: string; buffer: unknown }[],
+  path: string,
+): boolean {
+  const buffer = files.get(path)?.buffer;
+  if (!buffer) return false;
+  return documents.some((d) => d.path === path && d.buffer === buffer);
+}
+
 // ---- fill-target resolution across the gate commit ------------------------
 // (review-caught HIGH) The fill's snapshot runs the commit gate, which can
 // bake a PENDING IMPORT into the file — and the 2n.4(a) carry resolves

@@ -1395,6 +1395,258 @@ class TestStyleAxis:
         assert para["bold"] is False
 
 
+def _merge(src, out, paragraphs, idx, **kw):
+    """Merge listing paragraph idx into idx-1, fingerprints from the listing."""
+    from engine.text_paragraphs import merge_paragraph_with_previous
+
+    prev, cur = paragraphs[idx - 1], paragraphs[idx]
+    return merge_paragraph_with_previous(
+        src, out, 1, idx,
+        prev["runs"], prev["text"], cur["runs"], cur["text"], **kw,
+    )
+
+
+class TestSplitMerge:
+    """Phase 9.A4 — split (split_at on replace) and merge (new op)."""
+
+    def test_split_relists_as_two_paragraphs(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj "
+            b"0 -14 Td (epsilon zeta eta theta) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        cut = para["text"].index("epsilon")
+        _apply(src, out, para, para["text"], split_at=cut)
+        relisted = _paras(out)
+        assert len(relisted) == 2
+        assert relisted[0]["text"] == "Alpha beta gamma delta"
+        assert relisted[1]["text"] == "epsilon zeta eta theta"
+        # The gap between the blocks is ~2×leading (14 → 28): each half
+        # fits one line here, so the two run tops sit exactly one doubled
+        # leading apart.
+        runs_out = list_text_paragraphs(out, 1)["runs"]
+        tops = sorted({round(r["rect"][3], 1) for r in runs_out}, reverse=True)
+        assert len(tops) == 2
+        assert (tops[0] - tops[1]) == pytest.approx(28.0, abs=1.5)
+
+    def test_split_single_line_paragraph(self, tmp_dir):
+        # leading=None path: gap = 2 × (1.2 × eff) > the 1.6-em join cap.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (One two three four) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        cut = para["text"].index("three")
+        _apply(src, out, para, para["text"], split_at=cut)
+        relisted = _paras(out)
+        assert [p["text"] for p in relisted] == ["One two", "three four"]
+
+    def test_split_composes_with_size(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Grow and split this text) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        cut = para["text"].index("split")
+        _apply(src, out, para, para["text"], split_at=cut, size=18)
+        relisted = _paras(out)
+        assert len(relisted) == 2
+        out_runs = list_text_paragraphs(out, 1)["runs"]
+        assert any(abs(r["font_size"] - 18) < 0.01 for r in out_runs)
+
+    def test_split_keeps_non_members_unmoved(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Split target words here) Tj "
+            b"0 -60 Td (Bystander paragraph stays) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        target = next(p for p in paras if "Split target" in p["text"])
+        cut = target["text"].index("words")
+        _apply(src, out, target, target["text"], split_at=cut)
+        _assert_non_members_unmoved(src, out, target["runs"])
+
+    def test_split_validation_fails_closed(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (No split here) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        for bad in (0, len(para["text"]), -3, "x"):
+            with pytest.raises(ValueError, match="split position"):
+                _apply(src, out, para, para["text"], split_at=bad)
+        assert not os.path.exists(out)
+
+    def test_split_none_is_byte_identical(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Plain edit of the text) Tj ET")
+        out_a = os.path.join(tmp_dir, "a.pdf")
+        out_b = os.path.join(tmp_dir, "b.pdf")
+        para = _paras(src)[0]
+        new = para["text"] + " grown"
+        _apply(src, out_a, para, new)
+        _apply(src, out_b, para, new, split_at=None)
+        with pikepdf.open(out_a) as pa, pikepdf.open(out_b) as pb:
+            assert pa.pages[0].Contents.read_bytes() == pb.pages[0].Contents.read_bytes()
+
+    def test_merge_joins_into_previous_box(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (First paragraph words) Tj "
+            b"0 -60 Td (Second paragraph words) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        assert len(paras) == 2
+        _merge(src, out, paras, 1)
+        relisted = _paras(out)
+        assert len(relisted) == 1
+        assert relisted[0]["text"] == "First paragraph words Second paragraph words"
+        # Anchored at the PREVIOUS paragraph's first baseline (y=700 →
+        # box top ≈ original prev top, not the second's).
+        assert relisted[0]["box"][3] == pytest.approx(paras[0]["box"][3], abs=1.0)
+
+    def test_merge_cjk_no_space_join(self, tmp_dir):
+        src = os.path.join(tmp_dir, "cjk2.pdf")
+        pdf = pikepdf.new()
+        mapping = {1: "日", 2: "本", 3: "語", 4: "文"}
+        entries = "\n".join(f"<{c:04x}> <{ord(ch):04x}>" for c, ch in mapping.items())
+        tounicode = (
+            "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
+            "1 begincodespacerange <0000> <ffff> endcodespacerange\n"
+            f"{len(mapping)} beginbfchar\n{entries}\nendbfchar\n"
+            "endcmap end end\n"
+        ).encode("ascii")
+        desc = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"), Subtype=Name("/CIDFontType2"),
+                BaseFont=Name("/AAAAAA+CJK"),
+                CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+                DW=1000,
+            )
+        )
+        cid_font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"), Subtype=Name("/Type0"),
+                BaseFont=Name("/AAAAAA+CJK"), Encoding=Name("/Identity-H"),
+                DescendantFonts=Array([desc]), ToUnicode=pdf.make_stream(tounicode),
+            )
+        )
+        _page(
+            pdf,
+            b"BT /F1 12 Tf 72 700 Td <00010002> Tj 0 -60 Td <00030004> Tj ET",
+            {"/F1": cid_font},
+        )
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        assert [p["text"] for p in paras] == ["日本", "語文"]
+        _merge(src, out, paras, 1)
+        assert _paras(out)[0]["text"] == "日本語文"  # no space at the join
+
+    def test_merge_keeps_non_members_unmoved(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Merge one) Tj "
+            b"0 -60 Td (Merge two) Tj "
+            b"0 -120 Td (Bystander three) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        assert len(paras) == 3
+        _merge(src, out, paras, 1)
+        union = sorted(set(paras[0]["runs"]) | set(paras[1]["runs"]))
+        _assert_non_members_unmoved(src, out, union)
+        assert any("Bystander three" in p["text"] for p in _paras(out))
+
+    def test_merge_first_paragraph_refuses(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Only paragraph) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        from engine.text_paragraphs import merge_paragraph_with_previous
+
+        p0 = _paras(src)[0]
+        with pytest.raises(ValueError, match="no previous paragraph"):
+            merge_paragraph_with_previous(
+                src, out, 1, 0, [], "", p0["runs"], p0["text"]
+            )
+        assert not os.path.exists(out)
+
+    def test_merge_stale_fingerprint_refuses(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Alpha one) Tj 0 -60 Td (Beta two) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        from engine.text_paragraphs import merge_paragraph_with_previous
+
+        with pytest.raises(ValueError, match="changed underneath"):
+            merge_paragraph_with_previous(
+                src, out, 1, 1,
+                paras[0]["runs"], "stale text", paras[1]["runs"], paras[1]["text"],
+            )
+        assert not os.path.exists(out)
+
+    def test_split_survives_condensed_leading(self, tmp_dir):
+        # Review-caught HIGH: 2×leading alone rejoined GARBLED when
+        # leading ≤ 0.8×eff (a single-line first block joins under the
+        # 1.6-em cap, not the drift window). The 2×eff floor defeats it.
+        src = _build(
+            tmp_dir,
+            b"BT /F1 10 Tf 72 700 Td (Alpha bb) Tj "
+            b"0 -7 Td (Second line words) Tj "
+            b"0 -7 Td (Third line words) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        cut = para["text"].index("bb")
+        _apply(src, out, para, para["text"], split_at=cut)
+        relisted = _paras(out)
+        assert [p["text"] for p in relisted] == [
+            "Alpha",
+            "bb Second line words Third line words",
+        ]
+
+    def test_merge_different_scale_refuses(self, tmp_dir):
+        # Review-caught: merging across a CTM-scale boundary silently
+        # resized cur's text to prev's scale. The lkey guard refuses.
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Normal scale text) Tj ET "
+            b"q 2 0 0 2 0 0 cm BT /F1 12 Tf 36 300 Td (Double scale text) Tj ET Q",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        assert len(paras) == 2
+        with pytest.raises(ValueError, match="different formatting"):
+            _merge(src, out, paras, 1)
+        assert not os.path.exists(out)
+
+    def test_merge_cross_stream_refuses(self, tmp_dir):
+        # prev on the page stream, cur inside a form → different streams.
+        src = os.path.join(tmp_dir, "xs.pdf")
+        pdf = pikepdf.new()
+        helv = _helv(pdf)
+        form = pdf.make_stream(b"BT /F1 12 Tf 0 0 Td (Form paragraph words) Tj ET")
+        form["/Type"] = Name("/XObject")
+        form["/Subtype"] = Name("/Form")
+        form["/BBox"] = Array([0, 0, 300, 20])
+        form["/Resources"] = Dictionary(Font=Dictionary(F1=_helv(pdf)))
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            Font=Dictionary(F1=helv), XObject=Dictionary(Fm1=pdf.make_indirect(form))
+        )
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 72 700 Td (Page paragraph words) Tj ET "
+            b"q 1 0 0 1 72 600 cm /Fm1 Do Q"
+        )
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        assert len(paras) == 2
+        with pytest.raises(ValueError, match="different content streams"):
+            _merge(src, out, paras, 1)
+        assert not os.path.exists(out)
+
+
 class TestAlignmentDetection:
     def test_center(self, tmp_dir):
         # Centers share x=150; Hello=27.34pt wide, Hi=11.33pt.
