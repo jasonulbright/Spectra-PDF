@@ -34,6 +34,20 @@ export interface EditParagraph {
   lineCount: number;
   /** run index → its encodable inventory (live validation). */
   encodableByRun: Map<number, string>;
+  /** A1 restyle seeds: the paragraph's dominant size (points) + fill
+   * colour (#rrggbb). The editor sends an override only when the user
+   * changes these from the seed. */
+  fontSize: number;
+  color: string;
+}
+
+/** A1 restyle overrides carried on a paragraph commit. */
+export interface ParagraphEditOpts {
+  convert?: boolean;
+  /** New uniform font size in points (undefined = keep). */
+  size?: number;
+  /** New uniform fill colour as [r,g,b] 0-1 (undefined = keep). */
+  color?: [number, number, number];
 }
 
 export interface EditTextListing {
@@ -63,7 +77,17 @@ interface EngineParagraphListing {
     line_count: number;
     editable: boolean;
     reason: string | null;
+    font_size: number;
+    color: string;
   }[];
+}
+
+/** Parse #rrggbb → [r,g,b] in 0-1, or null if not a valid hex colour. */
+export function hexToRgb(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255];
 }
 
 export async function fetchEditTextListing(
@@ -100,6 +124,8 @@ export async function fetchEditTextListing(
       lineCount: p.line_count,
       rect: pdfRectToDisplay(p.box, geometry.box, geometry.bakedRotate),
       encodableByRun: new Map(p.runs.map((r) => [r, rawRuns[r]?.encodable ?? ''])),
+      fontSize: p.font_size ?? 12,
+      color: p.color ?? '#000000',
     });
   }
   return { runBoxes: runs.filter((r) => !covered.has(r.index)), paragraphs };

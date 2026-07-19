@@ -27,7 +27,7 @@ import type { EditImagePlacement } from '../../lib/edit-images';
 import { EDIT_DECLINED } from '../../lib/edit-text';
 import { pageIdAtSourceIndex } from '../../lib/durable-identity';
 import { computeEditSpans, fetchEditTextListing } from '../../lib/edit-paragraphs';
-import type { EditTextListing } from '../../lib/edit-paragraphs';
+import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import { workspacePageNumber } from '../../lib/workspace-commit';
 import { runCommitGate } from '../../lib/commit-gate';
 
@@ -99,7 +99,7 @@ interface WorkspaceCanvasViewProps {
     para: { index: number; runs: number[]; text: string },
     newText: string,
     spans: { start: number; end: number; run: number }[],
-    opts?: { convert?: boolean },
+    opts?: ParagraphEditOpts,
   ) => Promise<string | void>;
   // Add-page ghost (2n.3): pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
@@ -1131,7 +1131,7 @@ export function WorkspaceCanvasView({
       pageId: string,
       index: number,
       newText: string,
-      opts?: { convert?: boolean },
+      opts?: ParagraphEditOpts,
     ): Promise<void> => {
       if (!focusedDoc || committingTextRef.current) return;
       const para = editTextByPage.get(pageId)?.paragraphs.find((p) => p.index === index);

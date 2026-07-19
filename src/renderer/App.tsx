@@ -9,6 +9,7 @@ import {
   type ReplacementSource,
 } from './lib/image-replace';
 import { EDIT_DECLINED } from './lib/edit-text';
+import type { ParagraphEditOpts } from './lib/edit-paragraphs';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
 import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
 import { SplitPanel } from './panels/SplitPanel';
@@ -730,7 +731,7 @@ function AppContent(): React.ReactElement {
       para: { index: number; runs: number[]; text: string },
       newText: string,
       spans: { start: number; end: number; run: number }[],
-      opts?: { convert?: boolean },
+      opts?: ParagraphEditOpts,
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
@@ -746,6 +747,9 @@ function AppContent(): React.ReactElement {
         expected_runs: para.runs,
         expected_text: para.text,
       };
+      // A1 restyle: uniform size (points) / fill colour ([r,g,b] 0-1).
+      if (opts?.size !== undefined) params.size = opts.size;
+      if (opts?.color !== undefined) params.color = opts.color;
       if (opts?.convert) {
         // 7.4's fallback at span granularity: only the characters the
         // mapped fonts cannot express render in the bundled font.

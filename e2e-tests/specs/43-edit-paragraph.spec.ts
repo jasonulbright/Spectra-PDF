@@ -178,4 +178,47 @@ describe('edit paragraph (Phase 7.5)', () => {
       { timeout: 30_000, timeoutMsg: 'undo did not revert the conversion' },
     );
   });
+
+  it('A1 restyle: raising the size rewraps the paragraph, undo restores it', async function () {
+    this.timeout(120_000);
+    await waitForHarness();
+    await invokeAppCommand('tools.open.edit');
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        return (await editParagraphs(ids[0])).length > 0;
+      },
+      { timeout: 30_000, timeoutMsg: 'paragraphs never loaded' },
+    );
+    const { pageId, para } = await firstParagraph();
+    const beforeLines = para.lineCount;
+
+    await editParagraphOpen(pageId, para.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    // Bump the size well above the fixture's — the same box must wrap more.
+    await setReactInputValue('[data-testid="edit-para-size"]', '30');
+    await browser.keys(['Enter']);
+
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        const paras = await editParagraphs(ids[0]);
+        return paras.some((p) => p.text === para.text && p.lineCount > beforeLines);
+      },
+      { timeout: 30_000, timeoutMsg: 'the size bump never rewrapped the paragraph' },
+    );
+
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        const paras = await editParagraphs(ids[0]);
+        return paras.some((p) => p.text === para.text && p.lineCount === beforeLines);
+      },
+      { timeout: 30_000, timeoutMsg: 'undo did not restore the original size/wrap' },
+    );
+  });
 });

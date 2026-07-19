@@ -514,29 +514,46 @@ export async function buildSignatureAppearance(): Promise<{
  * way to set the whole value in one shot.
  */
 export async function setReactInputValue(selector: string, value: string): Promise<void> {
-  const el = await $(selector);
-  await el.waitForDisplayed({ timeout: 10_000 });
-  await browser.execute(
-    function (element, v) {
-      const input = element as unknown as HTMLInputElement | HTMLTextAreaElement;
-      // The native value setter lives on the CONCRETE prototype — calling
-      // the input setter with a textarea `this` is an illegal invocation
-      // (7.5's paragraph editor is a textarea).
-      const proto =
-        input.tagName === 'TEXTAREA'
-          ? window.HTMLTextAreaElement.prototype
-          : window.HTMLInputElement.prototype;
-      const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
-      setter.call(input, v);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+  await $(selector).waitForDisplayed({ timeout: 10_000 });
+  // Robust against two observed WebView2 flakes (dev-notes; 3 occurrences
+  // across the session before this hardening):
+  //  1. STALE HANDLE — grabbing the wdio element then handing it to a
+  //     separate `execute` leaves a window in which a React re-render
+  //     replaces the DOM node. Re-query the selector INSIDE the execute,
+  //     one synchronous frame, so no cross-call handle exists.
+  //  2. onChange NOT FIRING — React tracks a controlled input's value via
+  //     an internal `_valueTracker`; the native-setter workaround can
+  //     still miss if the tracker already holds the target, so onChange
+  //     never fires and the live-validation render never happens. Poke
+  //     the tracker to a DIFFERENT value first, guaranteeing a change.
+  // Loop until the DOM value sticks (the controlled input reflects React
+  // state on the next render) — a bare set-then-assert raced both flakes.
+  await browser.waitUntil(
+    async () =>
+      browser.execute(function (sel, v) {
+        const input = document.querySelector(sel) as
+          | HTMLInputElement
+          | HTMLTextAreaElement
+          | null;
+        if (!input) return false;
+        const proto =
+          input.tagName === 'TEXTAREA'
+            ? window.HTMLTextAreaElement.prototype
+            : window.HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+        const tracker = (input as unknown as { _valueTracker?: { setValue(v: string): void } })
+          ._valueTracker;
+        if (tracker) tracker.setValue(v + ' '); // force a tracked change
+        setter.call(input, v);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        return input.value === v;
+      }, selector, value),
+    {
+      timeout: 10_000,
+      interval: 150,
+      timeoutMsg: `setReactInputValue: ${selector} never held ${JSON.stringify(value)}`,
     },
-    el,
-    value,
   );
-  const readBack = await el.getValue();
-  if (readBack !== value) {
-    throw new Error(`setReactInputValue: field holds ${JSON.stringify(readBack)}, expected ${JSON.stringify(value)}`);
-  }
 }
 
 // --- On-canvas form fill (2n.4b) ------------------------------------------

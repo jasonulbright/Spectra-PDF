@@ -9,9 +9,10 @@ import type { OcrWord } from '../../ocr/types';
 import type { EditImagePlacement } from '../../lib/edit-images';
 import type { EditTextRun } from '../../lib/edit-text';
 import { unencodableChars } from '../../lib/edit-text';
-import type { EditParagraph } from '../../lib/edit-paragraphs';
+import type { EditParagraph, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import {
   computeEditSpans,
+  hexToRgb,
   paragraphUnencodable,
   sanitizeParagraphInput,
 } from '../../lib/edit-paragraphs';
@@ -344,7 +345,7 @@ interface PageCellProps {
     pageId: string,
     index: number,
     newText: string,
-    opts?: { convert?: boolean },
+    opts?: ParagraphEditOpts,
   ) => void;
   onCancelParagraphEdit?: () => void;
   // Pending visible-signature placement, when it sits on THIS page (transient
@@ -1223,18 +1224,19 @@ function ParagraphEditor({
   para: EditParagraph;
   rect: { x: number; y: number; w: number; h: number };
   lineHeightPx: number;
-  onCommit: (value: string, opts?: { convert?: boolean }) => void;
+  onCommit: (value: string, opts?: ParagraphEditOpts) => void;
   onCancel: () => void;
 }): React.JSX.Element {
   const [value, setValue] = useState(para.text);
+  // A1 restyle controls, seeded from the paragraph's own size/colour.
+  const [size, setSize] = useState(para.fontSize);
+  const [color, setColor] = useState(para.color);
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   // ONE outcome per editor instance: Enter-commit, Escape-cancel, blur,
   // and the convert button all race through here — whichever fires first
-  // wins and any refire is a no-op. React's removal of the focused
-  // element fires a stray blur (observed live in this codebase twice),
-  // and without this an Escape-CANCEL was converted into a COMMIT by the
-  // refired blur reading the still-valid closure (review-caught HIGH;
-  // committingTextRef only guards the commit→commit refire).
+  // wins and any refire is a no-op (review-caught HIGH; the unmount-blur
+  // refire otherwise turns an Escape-cancel into a commit).
   const settledRef = useRef(false);
   const settle = (fn: () => void): void => {
     if (settledRef.current) return;
@@ -1248,14 +1250,29 @@ function ParagraphEditor({
   const spans = computeEditSpans(para.text, value, para.spans, para.runs[0]);
   const missing = paragraphUnencodable(value, spans, para.encodableByRun);
   const valid = missing.length === 0;
-  const changed = value !== para.text;
+  const sizeChanged = Math.abs(size - para.fontSize) > 0.01;
+  const colorChanged = color.toLowerCase() !== para.color.toLowerCase();
+  const changed = value !== para.text || sizeChanged || colorChanged;
+  // The restyle overrides sent with a commit — only fields the user
+  // actually changed from the seed (unchanged size/colour stay the
+  // paragraph's own, engine-side).
+  const restyleOpts = (extra?: ParagraphEditOpts): ParagraphEditOpts => {
+    const o: ParagraphEditOpts = { ...extra };
+    if (sizeChanged && size > 0) o.size = size;
+    if (colorChanged) {
+      const rgb = hexToRgb(color);
+      if (rgb) o.color = rgb;
+    }
+    return o;
+  };
   const finish = (): void => {
-    if (valid && changed) settle(() => onCommit(value));
+    if (valid && changed) settle(() => onCommit(value, restyleOpts()));
     else settle(onCancel);
   };
   const fontPx = Math.min(48, Math.max(8, lineHeightPx * 0.8));
   return (
     <div
+      ref={wrapperRef}
       className="page-edittext-editor page-editpara-editor"
       style={{
         left: `${rect.x * 100}%`,
@@ -1264,13 +1281,67 @@ function ParagraphEditor({
       }}
       onPointerDown={(e) => {
         e.stopPropagation();
-        // The 7.2 rule: a press on the editor's own chrome (the error
-        // line) must not blur the input — blur means commit-or-cancel.
-        if (e.target !== areaRef.current) e.preventDefault();
+        // A press on non-focusable chrome (the error line) must not blur
+        // the input — blur means commit-or-cancel. Focusable controls
+        // (the size/colour inputs, buttons) ARE allowed to take focus;
+        // the focus-within onBlur below keeps that from committing.
+        const t = e.target as HTMLElement;
+        if (!/^(INPUT|BUTTON|SELECT|TEXTAREA)$/.test(t.tagName)) e.preventDefault();
       }}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        // Enter/Escape at the WRAPPER so they work from EVERY control
+        // (the size/colour inputs, not just the textarea — review-caught
+        // that Escape did nothing while a control had focus).
+        if (e.key === 'Enter') {
+          e.preventDefault(); // also stops a newline in the textarea
+          if (valid && changed) settle(() => onCommit(value, restyleOpts()));
+          else if (!changed) settle(onCancel);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          settle(onCancel);
+        }
+      }}
+      onBlur={(e) => {
+        // Commit only when focus leaves the WHOLE editor — moving between
+        // the textarea and the restyle controls must not commit (A1).
+        const next = e.relatedTarget as Node | null;
+        if (next && wrapperRef.current?.contains(next)) return;
+        finish();
+      }}
     >
+      <div className="page-editpara-toolbar" role="group" aria-label="Text style">
+        <label className="page-editpara-ctl">
+          Size
+          <input
+            type="number"
+            data-testid="edit-para-size"
+            min={1}
+            max={1638}
+            step={1}
+            value={Number.isFinite(size) ? Math.round(size) : ''}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              // Clamp to the same [1,1638] the input declares; on an
+              // empty/NaN field keep the last valid size (the old
+              // `|| para.fontSize` snapped back to the ORIGINAL seed,
+              // fighting a clear-and-retype — review-caught).
+              if (Number.isFinite(v)) setSize(Math.max(1, Math.min(1638, v)));
+            }}
+          />
+        </label>
+        <label className="page-editpara-ctl">
+          Colour
+          <input
+            type="color"
+            data-testid="edit-para-color"
+            value={/^#[0-9a-f]{6}$/i.test(color) ? color : '#000000'}
+            onChange={(e) => setColor(e.target.value)}
+          />
+        </label>
+      </div>
       <textarea
         ref={areaRef}
         data-testid="edit-para-input"
@@ -1279,21 +1350,9 @@ function ParagraphEditor({
         rows={Math.min(12, para.lineCount + 1)}
         style={{ fontSize: `${fontPx}px`, lineHeight: 1.25 }}
         onChange={(e) => setValue(sanitizeParagraphInput(e.target.value))}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            // Invalid + changed: HOLD the editor open (not settled) with
-            // the error named — Enter never silently discards, and never
-            // commits the inexpressible.
-            if (valid && changed) settle(() => onCommit(value));
-            else if (!changed) settle(onCancel);
-          } else if (e.key === 'Escape') {
-            e.preventDefault();
-            e.stopPropagation();
-            settle(onCancel);
-          }
-        }}
-        onBlur={finish}
+        /* Enter/Escape handled at the wrapper (works from every control).
+           Invalid+changed holds the editor open there — Enter never
+           silently discards or commits the inexpressible. */
       />
       {!valid && (
         <div className="page-edittext-error" data-testid="edit-para-error" aria-live="polite">
@@ -1302,7 +1361,7 @@ function ParagraphEditor({
             type="button"
             data-testid="edit-para-convert"
             className="page-edittext-convert"
-            onClick={() => settle(() => onCommit(value, { convert: true }))}
+            onClick={() => settle(() => onCommit(value, restyleOpts({ convert: true })))}
           >
             Use a compatible font
           </button>

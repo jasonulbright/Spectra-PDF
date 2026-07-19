@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeEditSpans,
   fetchEditTextListing,
+  hexToRgb,
   paragraphUnencodable,
   sanitizeParagraphInput,
 } from '../src/renderer/lib/edit-paragraphs';
@@ -104,6 +105,25 @@ describe('paragraphUnencodable (per-span validation)', () => {
 describe('sanitizeParagraphInput', () => {
   it('newlines become spaces', () => {
     expect(sanitizeParagraphInput('a\r\nb\nc')).toBe('a b c');
+  });
+});
+
+describe('hexToRgb (A1 colour control)', () => {
+  it('parses #rrggbb to 0-1 floats', () => {
+    expect(hexToRgb('#ff0000')).toEqual([1, 0, 0]);
+    expect(hexToRgb('#000000')).toEqual([0, 0, 0]);
+    const [r, g, b] = hexToRgb('#8040c0')!;
+    expect(r).toBeCloseTo(0x80 / 255);
+    expect(g).toBeCloseTo(0x40 / 255);
+    expect(b).toBeCloseTo(0xc0 / 255);
+  });
+  it('accepts without the hash and is case-insensitive', () => {
+    expect(hexToRgb('FF0000')).toEqual([1, 0, 0]);
+  });
+  it('rejects malformed input', () => {
+    expect(hexToRgb('#fff')).toBeNull();
+    expect(hexToRgb('red')).toBeNull();
+    expect(hexToRgb('#gggggg')).toBeNull();
   });
 });
 

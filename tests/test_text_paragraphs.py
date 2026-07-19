@@ -968,6 +968,117 @@ class TestReplaceParagraphText:
         assert not any("LiberationSans" in b for b in base)
 
 
+class TestStyleControls:
+    """Phase 9.A1 — uniform size + colour restyle of a paragraph."""
+
+    def test_color_override_emits_fill_op_and_recolors(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Recolor this whole paragraph now) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], color=[1.0, 0.0, 0.0])
+        after = _detail_runs(out)
+        run = next(r for r in after if "Recolor" in r["text"])
+        assert _color_repr(run["style"]["fill_color"])[1] == ("rg", (1.0, 0.0, 0.0))
+
+    def test_size_override_changes_glyph_size_and_rewraps(self, tmp_dir):
+        # A short paragraph at 12pt on one line; doubling the size makes it
+        # wider and (in a fixed box) wraps to more lines.
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta words) Tj "
+            b"0 -14 Td (second line of the paragraph here) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], size=24)
+        after = list_text_paragraphs(out, 1)
+        # The runs now render at ~24pt (font_size in the listing).
+        assert any(abs(r["font_size"] - 24) < 0.01 for r in after["runs"])
+        relisted = after["paragraphs"]
+        # Doubled text in the same box wraps to strictly more lines.
+        assert relisted[0]["line_count"] > para["line_count"]
+
+    def test_size_override_scales_leading(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 10 Tf 72 700 Td (Line one of this paragraph) Tj "
+            b"0 -12 Td (Line two of this paragraph) Tj "
+            b"0 -12 Td (Line three of this paragraph) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        assert para["line_count"] == 3
+        # Original leading is 12pt at 10pt text; at 20pt it should ~double.
+        _apply(src, out, para, para["text"], size=20)
+        out_runs = list_text_paragraphs(out, 1)["runs"]
+        tops = sorted({round(r["rect"][1], 1) for r in out_runs}, reverse=True)
+        assert len(tops) >= 2
+        gap = tops[0] - tops[1]
+        assert gap == pytest.approx(24.0, abs=1.5)  # 12 * (20/10)
+
+    def test_size_and_color_together(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Both at once please) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], size=18, color=[0.0, 0.0, 1.0])
+        after = _detail_runs(out)
+        run = next(r for r in after if "Both" in r["text"])
+        assert run["style"]["size"] == pytest.approx(18, abs=0.01)
+        assert _color_repr(run["style"]["fill_color"])[1] == ("rg", (0.0, 0.0, 1.0))
+
+    def test_size_is_clamped_so_text_cannot_fly_off_page(self, tmp_dir):
+        # Review-caught HIGH: an unbounded size pushed most of the
+        # paragraph off the page. A fat-fingered 9999 clamps to the
+        # editor max (1638) and the text stays on the mediabox.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Clamp this size please) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], size=9999)
+        after = list_text_paragraphs(out, 1)["runs"]
+        assert any(abs(r["font_size"] - 1638) < 0.1 for r in after)
+
+    def test_color_recolors_stroke_rendered_text(self, tmp_dir):
+        # Review-caught: Tr 1 (stroke) text shows its STROKE colour, so a
+        # fill-only recolour was a silent no-op. The override must reach
+        # stroke_color for stroke/fill-stroke render modes.
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 1 Tr 0 0 0 RG 72 700 Td (Outline text here) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], color=[1.0, 0.0, 0.0])
+        after = _detail_runs(out)
+        run = next(r for r in after if "Outline" in r["text"])
+        assert _color_repr(run["style"]["stroke_color"])[1] == ("RG", (1.0, 0.0, 0.0))
+
+    def test_size_seed_is_the_dominant_member_not_a_lead_in(self, tmp_dir):
+        # Review-caught: the seed shown to the user (font_size) must match
+        # the member the leading-scale reasons from — the widest of line 0,
+        # not a small first-by-index marker.
+        src = _build(
+            tmp_dir,
+            b"BT /F1 6 Tf 72 700 Td (1) Tj /F1 12 Tf 10 0 Td (Main body text of the note) Tj ET",
+        )
+        para = _paras(src)[0]
+        assert para["font_size"] == pytest.approx(12, abs=0.01)  # the body, not the 6pt marker
+
+    def test_no_override_is_byte_identical_to_plain_edit(self, tmp_dir):
+        # size=None/color=None must not perturb the shipped 7.5 path.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Grow this paragraph text) Tj ET")
+        out_a = os.path.join(tmp_dir, "a.pdf")
+        out_b = os.path.join(tmp_dir, "b.pdf")
+        para = _paras(src)[0]
+        new = para["text"] + " with more"
+        _apply(src, out_a, para, new)
+        _apply(src, out_b, para, new, size=None, color=None)
+        with pikepdf.open(out_a) as pa, pikepdf.open(out_b) as pb:
+            assert pa.pages[0].Contents.read_bytes() == pb.pages[0].Contents.read_bytes()
+
+
 class TestAlignmentDetection:
     def test_center(self, tmp_dir):
         # Centers share x=150; Hello=27.34pt wide, Hi=11.33pt.

@@ -503,9 +503,43 @@ def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
     return paragraphs
 
 
+def _fill_color_hex(color) -> str:
+    """Best-effort #rrggbb for the A1 colour swatch seed. Device gray/rgb
+    convert exactly; k (CMYK) approximates; anything else (the default,
+    Separation, ICC…) seeds black — the editor only SENDS a colour the
+    user actively changes, so a black seed on an unknown space keeps the
+    original untouched."""
+    _cs, val = color
+    if val is None:
+        return "#000000"
+    op, operands = val
+    try:
+        nums = [float(v) for v in operands]
+    except (TypeError, ValueError):
+        return "#000000"
+
+    def hx(rgb):
+        return "#" + "".join(f"{max(0, min(255, round(c * 255))):02x}" for c in rgb)
+
+    if op == "g" and len(nums) == 1:
+        return hx((nums[0], nums[0], nums[0]))
+    if op == "rg" and len(nums) == 3:
+        return hx(nums)
+    if op == "k" and len(nums) == 4:
+        c, m, y, k = nums
+        return hx(((1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k)))
+    return "#000000"
+
+
 def _listing(paragraphs: list[_Paragraph]) -> list[dict]:
     out = []
     for i, p in enumerate(paragraphs):
+        # The DOMINANT member: the widest on the first line — the SAME rule
+        # _Emission uses to compute the leading scale, so the size the
+        # editor shows is the size that scale is reasoned from (a first-by-
+        # index lead-in marker otherwise seeded a mismatched number —
+        # review-caught).
+        first = _widest(p.lines[0].members)
         out.append(
             {
                 "index": i,
@@ -517,6 +551,10 @@ def _listing(paragraphs: list[_Paragraph]) -> list[dict]:
                 "line_count": len(p.lines),
                 "editable": p.editable,
                 "reason": p.reason,
+                # A1 restyle seeds: the paragraph's dominant (first-member)
+                # size + fill colour.
+                "font_size": round(first.style["size"], 2),
+                "color": _fill_color_hex(first.style["fill_color"]),
             }
         )
     return out
@@ -573,15 +611,53 @@ class _StyleRef:
     """One rendering style for a slice of new text: a member run's
     measured style, optionally re-fonted to the shared fallback subset."""
 
-    __slots__ = ("member", "fallback")
+    __slots__ = ("member", "fallback", "size_override", "color_override")
 
-    def __init__(self, member: _Member, fallback: bool):
+    def __init__(self, member: _Member, fallback: bool, size_override=None, color_override=None):
         self.member = member
         self.fallback = fallback
+        # A1: uniform size (points) / fill-color (ColorState) overrides,
+        # or None to keep the member's own. Applied via style().
+        self.size_override = size_override
+        self.color_override = color_override
 
     @property
     def key(self) -> tuple:
-        return (self.member.index, self.fallback)
+        return (self.member.index, self.fallback, self.size_override, self.color_override)
+
+    def style(self) -> dict:
+        """The effective style: the member's, with A1 size/color overrides
+        applied. All width/emit paths read THIS, not member.style."""
+        s = self.member.style
+        if self.size_override is None and self.color_override is None:
+            return s
+        s = dict(s)
+        if self.size_override is not None:
+            s["size"] = self.size_override
+        if self.color_override is not None:
+            s["fill_color"] = self.color_override
+            # Text painted via STROKE (Tr 1 = stroke, Tr 2 = fill+stroke)
+            # shows its stroke colour — recolour that too, or the swatch
+            # would be a silent no-op on outline text (review-caught). The
+            # stroke colour uses the UPPERCASE op (rg→RG, g→G, k→K), so the
+            # fill override must be converted, not copied verbatim.
+            if s.get("render_mode") in (1, 2):
+                s["stroke_color"] = _to_stroke_color(self.color_override)
+        return s
+
+
+def _to_stroke_color(color):
+    """Map a FILL ColorState to its STROKE equivalent — the PDF stroke
+    colour operators are the uppercase of the fill ones (rg→RG, g→G, k→K,
+    cs→CS, sc→SC, scn→SCN)."""
+
+    def up(op):
+        if op is None:
+            return None
+        operator, operands = op
+        return (operator.upper(), operands)
+
+    return (up(color[0]), up(color[1]))
 
 
 class _Fallback:
@@ -602,6 +678,8 @@ def _styled_chars(
     spans: list[dict],
     members_by_index: dict[int, _Member],
     convert: bool,
+    size_override=None,
+    color_override=None,
 ) -> tuple[list[tuple[str, _StyleRef]], str]:
     """Map every char of the new text to its style source; returns the
     styled stream plus the characters that need the fallback font (empty
@@ -629,7 +707,7 @@ def _styled_chars(
     def ref(member: _Member, fb: bool) -> _StyleRef:
         k = (member.index, fb)
         if k not in refs:
-            refs[k] = _StyleRef(member, fb)
+            refs[k] = _StyleRef(member, fb, size_override, color_override)
         return refs[k]
 
     for span in spans:
@@ -657,7 +735,7 @@ class _Word:
 
 def _char_width_user(ch: str, st: _StyleRef, fb: _Fallback | None, median_gap_1000: float) -> float:
     m = st.member
-    s = m.style
+    s = st.style()
     if st.fallback:
         w1000 = fb.width_1000(ch) if fb is not None else 0.0
         w = w1000 / 1000.0 * s["size"] + s["char_spacing"]
@@ -820,17 +898,29 @@ def _f(v: float) -> float:
 # before wrapping, and wrapped lines stack at standard single spacing.
 SINGLE_LINE_LEADING_EM = 1.2
 
+# A1 size clamp: the common PDF viewer maximum (matches the editor input's
+# declared max). Bounds a fat-fingered size so text can't fly off the page.
+_MAX_EDIT_SIZE = 1638.0
+
 
 class _Emission:
     """The paragraph's replacement ops, built once the rewriter reaches the
     first member (the ctm there anchors the user-space line targets)."""
 
-    def __init__(self, para: _Paragraph, styled, fb: _Fallback | None, page_x0: float, page_x1: float):
+    def __init__(
+        self, para: _Paragraph, styled, fb: _Fallback | None, page_x0: float, page_x1: float,
+        size_override=None,
+    ):
         self.para = para
         self.styled = styled
         self.fb = fb
         self.page_x0 = page_x0
         self.page_x1 = page_x1
+        # A1: when the size is overridden, the paragraph leading scales by
+        # the same factor so bigger text doesn't overlap (and smaller
+        # text doesn't waste space) — the ratio to the paragraph's
+        # dominant original size.
+        self.size_override = size_override
 
     def build(self, ctm) -> list[tuple]:
         """[(kind, instruction, raw_width|None)]; kind ∈ {'op','show'} —
@@ -847,12 +937,18 @@ class _Emission:
         body_left = min(body_lefts) if body_lefts else first_left
         if para.alignment in ("center", "right"):
             first_left = body_left = para.left
+        # A1 leading scale: new size / the dominant original size.
+        dom_style_size = _widest(para.lines[0].members).style["size"] or 12.0
+        size_scale = (self.size_override / dom_style_size) if self.size_override else 1.0
         if para.leading is not None:
-            leading = para.leading
+            leading = para.leading * size_scale
             right_limit = para.right
         else:
             dominant = _widest(para.lines[0].members)
-            leading = SINGLE_LINE_LEADING_EM * dominant.eff
+            base_eff = (
+                dominant.eff * size_scale if self.size_override else dominant.eff
+            )
+            leading = SINGLE_LINE_LEADING_EM * base_eff
             # Symmetric page margin, never narrower than the existing line
             # (unchanged text must not rewrap under its own edit).
             margin = max(para.left - self.page_x0, 0.0)
@@ -922,7 +1018,7 @@ class _Emission:
 
     def _state_ops(self, st: _StyleRef) -> list[tuple]:
         m = st.member
-        s = m.style
+        s = st.style()  # A1: effective (possibly size/color-overridden)
         ops: list[tuple] = []
         font = self.fb.name if st.fallback else s["font_name"]
         if st.fallback and self.fb is not None:
@@ -946,7 +1042,7 @@ class _Emission:
         text-space advance (pre-h_scale) for state feeding."""
         st: _StyleRef = seg["style"]
         m = st.member
-        s = m.style
+        s = st.style()  # A1: effective size/color
         items: list = []
         buf: list[str] = []
         raw = 0.0
@@ -1325,6 +1421,8 @@ def replace_paragraph_text(
     expected_text: str,
     convert: bool = False,
     font_path: str | None = None,
+    size: float | None = None,
+    color: list | None = None,
 ) -> dict:
     """Replace a paragraph's text and re-lay-out inside its box (7.5).
 
@@ -1333,7 +1431,12 @@ def replace_paragraph_text(
     is a heuristic, so the apply re-derives it and REFUSES on mismatch
     rather than ever silently retargeting. `convert=True` renders
     characters the mapped font cannot express in the bundled fallback
-    font (`font_path`), the 7.4 machinery shared at span granularity."""
+    font (`font_path`), the 7.4 machinery shared at span granularity.
+
+    A1 restyle: `size` (points) applies a uniform new font size to the
+    whole paragraph (scaling leading + rewrapping); `color` is an
+    [r, g, b] triple (0-1) applied as a uniform fill colour. Either None
+    keeps the paragraph's own."""
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -1369,9 +1472,30 @@ def replace_paragraph_text(
         if [int(r) for r in expected_runs] != para.run_indexes or str(expected_text) != para.text:
             raise ValueError("the page's text changed underneath this edit — reopen the editor")
 
+        # A1 overrides: a size in points (clamped to a sane editing range —
+        # an unbounded value pushed most of the paragraph off the page on a
+        # typo, review-caught), an [r,g,b] fill colour.
+        size_override = None
+        if size is not None:
+            try:
+                sv = float(size)
+            except (TypeError, ValueError):
+                sv = 0.0
+            if sv > 0:
+                size_override = max(1.0, min(_MAX_EDIT_SIZE, sv))
+        color_override = None
+        if color is not None:
+            try:
+                rgb = [max(0.0, min(1.0, float(c))) for c in color]
+            except (TypeError, ValueError):
+                rgb = []
+            if len(rgb) == 3:
+                color_override = (None, ("rg", tuple(rgb)))
+
         members_by_index = {m.index: m for m in para.members}
         styled, fb_chars = _styled_chars(
-            str(new_text), list(spans), members_by_index, bool(convert)
+            str(new_text), list(spans), members_by_index, bool(convert),
+            size_override=size_override, color_override=color_override,
         )
         fallback = None
         if fb_chars:
@@ -1413,7 +1537,7 @@ def replace_paragraph_text(
             para.stream,
             set(ordinal_of.values()),
             ordinal_of[min(member_set)],
-            _Emission(para, styled, fallback, page_x0, page_x1),
+            _Emission(para, styled, fallback, page_x0, page_x1, size_override=size_override),
             fallback,
         )
         kept, changed, new_forms = _rewrite_paragraph_stream(

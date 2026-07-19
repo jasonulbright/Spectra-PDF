@@ -12,7 +12,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation, PageRef } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { EditImagePlacement } from '../../lib/edit-images';
-import type { EditTextListing } from '../../lib/edit-paragraphs';
+import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -87,7 +87,7 @@ export interface DocumentViewProps {
   onCancelTextEdit: () => void;
   onSelectEditParagraph: (pageId: string, index: number) => void;
   onOpenParagraphEditor: (pageId: string, index: number) => void;
-  onCommitParagraphEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
+  onCommitParagraphEdit: (pageId: string, index: number, newText: string, opts?: ParagraphEditOpts) => void;
   onCancelParagraphEdit: () => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
