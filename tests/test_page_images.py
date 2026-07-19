@@ -663,3 +663,30 @@ class TestAddPageImage:
         assert any(n.startswith("/EditIm") for n in p1_names)  # page 1 got it
         assert not any(n.startswith("/EditIm") for n in p2_names)  # page 2 did NOT
         assert "/Im0" in p1_names and "/Im0" in p2_names  # both keep the original
+
+    def test_replace_does_not_leak_into_a_sibling_sharing_resources(self, tmp_dir):
+        # The same page-local-/Resources guard, for replace: replacing page 1's
+        # image must NOT register the new /EditImN into page 2's shared /XObject.
+        src = os.path.join(tmp_dir, "shared.pdf")
+        pdf = pikepdf.new()
+        im = _rgb_image(pdf, 10, 20, 30)
+        shared_res = pdf.make_indirect(Dictionary(XObject=Dictionary(Im0=im)))
+        p1 = pdf.add_blank_page(page_size=(400, 400))
+        p2 = pdf.add_blank_page(page_size=(400, 400))
+        p1.obj["/Resources"] = shared_res
+        p2.obj["/Resources"] = shared_res
+        p1.Contents = pdf.make_stream(b"q 50 0 0 50 10 10 cm /Im0 Do Q")
+        p2.Contents = pdf.make_stream(b"q 50 0 0 50 10 10 cm /Im0 Do Q")
+        pdf.save(src)
+        pdf.close()
+        raw = os.path.join(tmp_dir, "px.raw")
+        with open(raw, "wb") as f:
+            f.write(bytes([9, 9, 9]) * 4)  # 2x2 RGB
+        out = os.path.join(tmp_dir, "o.pdf")
+        replace_page_image(
+            src, out, 1, 0, {"raw_path": raw, "width": 2, "height": 2, "channels": 3}
+        )
+        with pikepdf.open(out) as opdf:
+            p2_names = {str(k) for k in opdf.pages[1].obj["/Resources"]["/XObject"].keys()}
+        assert not any(n.startswith("/EditIm") for n in p2_names)  # no leak
+        assert "/Im0" in p2_names  # page 2's image intact

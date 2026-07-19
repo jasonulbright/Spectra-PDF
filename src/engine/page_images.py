@@ -358,7 +358,15 @@ def delete_page_image(file: str, output: str, page: int, index: int) -> dict:
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        resources = _resolve_resources(p)
+        # Copy-on-write a page-LOCAL /Resources (the C2 review fix, applied to
+        # every page-level image op): qpdf flattens inherited /Resources onto
+        # each page's own dict BY REFERENCE, so registering an edit's new
+        # XObject / form copies on the resolved dict would leak them into every
+        # sibling page sharing it. `_copy_resources_for_write` gives a fresh
+        # /XObject; existing draws resolve against the copied (shared-by-ref)
+        # entries.
+        resources = _copy_resources_for_write(pdf, _resolve_resources(p))
+        p.obj["/Resources"] = resources
         count = len(
             _walk_placements(
                 pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
@@ -409,7 +417,12 @@ def transform_page_image(file: str, output: str, page: int, index: int, matrix: 
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        resources = _resolve_resources(p)
+        # Copy-on-write a page-LOCAL /Resources — nested-placement transforms
+        # register a form COPY, which on a shared (qpdf-flattened) /Resources
+        # would leak into sibling pages (the C2 review fix, uniform across the
+        # page-level image ops).
+        resources = _copy_resources_for_write(pdf, _resolve_resources(p))
+        p.obj["/Resources"] = resources
         placements = _walk_placements(
             pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
         )
@@ -555,7 +568,15 @@ def replace_page_image(file: str, output: str, page: int, index: int, source: di
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        resources = _resolve_resources(p)
+        # Copy-on-write a page-LOCAL /Resources (the C2 review fix, applied to
+        # every page-level image op): qpdf flattens inherited /Resources onto
+        # each page's own dict BY REFERENCE, so registering an edit's new
+        # XObject / form copies on the resolved dict would leak them into every
+        # sibling page sharing it. `_copy_resources_for_write` gives a fresh
+        # /XObject; existing draws resolve against the copied (shared-by-ref)
+        # entries.
+        resources = _copy_resources_for_write(pdf, _resolve_resources(p))
+        p.obj["/Resources"] = resources
         count = len(
             _walk_placements(
                 pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
