@@ -913,6 +913,60 @@ class TestReplaceParagraphText:
         assert relisted[0]["editable"] is True
         assert "→" in relisted[0]["text"]
 
+    @pytest.mark.skipif(
+        not os.path.isfile(FALLBACK_FONT), reason="bundled fallback font not provisioned"
+    )
+    def test_convert_of_nested_form_paragraph_uses_form_scoped_family(self, tmp_dir):
+        # 9.B1 review-caught: the paragraph living in a nested form must
+        # classify its family from the FORM'S resources, not the page's —
+        # a form's `F1` (serif Times here) differs from the page's `F1`
+        # (Helvetica). Converting must embed the SERIF fallback face.
+        import os as _os
+
+        fonts_dir = _os.path.dirname(FALLBACK_FONT)
+        src = os.path.join(tmp_dir, "nf.pdf")
+        pdf = pikepdf.new()
+        page_helv = _helv(pdf)
+        form_serif = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type1"),
+                BaseFont=Name("/TimesNewRoman"),
+                Encoding=Name("/WinAnsiEncoding"),
+                FontDescriptor=pdf.make_indirect(
+                    Dictionary(Type=Name("/FontDescriptor"), Flags=2)
+                ),
+            )
+        )
+        form = pdf.make_stream(b"BT /F1 12 Tf 0 0 Td (Serif form text) Tj ET")
+        form["/Type"] = Name("/XObject")
+        form["/Subtype"] = Name("/Form")
+        form["/BBox"] = Array([0, 0, 300, 20])
+        form["/Resources"] = Dictionary(Font=Dictionary(F1=form_serif))
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            Font=Dictionary(F1=page_helv), XObject=Dictionary(Fm1=form)
+        )
+        page.Contents = pdf.make_stream(b"q 1 0 0 1 72 700 cm /Fm1 Do Q")
+        pdf.save(src)
+        pdf.close()
+
+        para = _paras(src)[0]
+        assert "Serif form text" in para["text"]
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, "Serif form → text", convert=True, font_path=fonts_dir)
+        with pikepdf.open(out) as opened:
+            base = []
+            for pg in opened.pages:
+                for _nm, xobj in (pg.get("/Resources", {}).get("/XObject", {}) or {}).items():
+                    fonts = xobj.get("/Resources", {}).get("/Font", {}) or {}
+                    for k in fonts.keys():
+                        bf = fonts[k].get("/BaseFont")
+                        if bf is not None:
+                            base.append(str(bf))
+        assert any("LiberationSerif" in b for b in base)
+        assert not any("LiberationSans" in b for b in base)
+
 
 class TestAlignmentDetection:
     def test_center(self, tmp_dir):

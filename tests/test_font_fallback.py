@@ -3,7 +3,7 @@
 import os
 
 import pikepdf
-from pikepdf import Dictionary, Name
+from pikepdf import Array, Dictionary, Name
 import pytest
 
 from engine.extract_text import extract_text
@@ -35,11 +35,154 @@ def _helv(pdf) -> pikepdf.Object:
     )
 
 
-def _page(pdf, content: bytes):
+def _page(pdf, content: bytes, fonts=None):
     page = pdf.add_blank_page(page_size=(612, 792))
-    page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=_helv(pdf)))
+    page.obj["/Resources"] = Dictionary(
+        Font=Dictionary(F1=_helv(pdf)) if fonts is None else Dictionary(**fonts)
+    )
     page.Contents = pdf.make_stream(content)
     return page
+
+
+FONTS_DIR = os.path.dirname(FONT)
+
+
+def _serif_font(pdf):
+    # A serif simple font: FontDescriptor /Flags Serif bit (2) set, and a
+    # Times BaseFont for the name-heuristic belt.
+    desc = pdf.make_indirect(
+        Dictionary(Type=Name("/FontDescriptor"), FontName=Name("/TimesNewRoman"), Flags=2)
+    )
+    return pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type1"),
+            BaseFont=Name("/TimesNewRoman"),
+            Encoding=Name("/WinAnsiEncoding"),
+            FontDescriptor=desc,
+        )
+    )
+
+
+class TestFamilyClassification:
+    def test_flags_serif_bit_wins(self):
+        pdf = pikepdf.new()
+        from engine.font_fallback import classify_font_family
+
+        assert classify_font_family(_serif_font(pdf)) == "serif"
+
+    def test_flags_fixed_pitch_is_mono(self):
+        pdf = pikepdf.new()
+        from engine.font_fallback import classify_font_family
+
+        f = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type1"),
+                BaseFont=Name("/SomeFont"),
+                FontDescriptor=pdf.make_indirect(
+                    Dictionary(Type=Name("/FontDescriptor"), Flags=1)
+                ),
+            )
+        )
+        assert classify_font_family(f) == "mono"
+
+    def test_basefont_name_heuristic_when_no_flags(self):
+        pdf = pikepdf.new()
+        from engine.font_fallback import classify_font_family
+
+        courier = Dictionary(Type=Name("/Font"), Subtype=Name("/Type1"), BaseFont=Name("/Courier"))
+        georgia = Dictionary(Type=Name("/Font"), Subtype=Name("/Type1"), BaseFont=Name("/Georgia"))
+        helv = Dictionary(Type=Name("/Font"), Subtype=Name("/Type1"), BaseFont=Name("/Helvetica"))
+        assert classify_font_family(courier) == "mono"
+        assert classify_font_family(georgia) == "serif"
+        assert classify_font_family(helv) == "sans"
+
+    def test_resolve_picks_the_family_face(self):
+        pdf = pikepdf.new()
+        from engine.font_fallback import resolve_fallback_font
+
+        serif = resolve_fallback_font(FONTS_DIR, _serif_font(pdf))
+        assert serif.endswith("LiberationSerif-Regular.ttf")
+        sans = resolve_fallback_font(FONTS_DIR, None)
+        assert sans.endswith("LiberationSans-Regular.ttf")
+
+    def test_resolve_passes_a_concrete_file_through(self):
+        from engine.font_fallback import resolve_fallback_font
+
+        assert resolve_fallback_font(FONT, None) == FONT
+
+    def test_malformed_descendant_fonts_degrades_not_crashes(self):
+        # A damaged Type0 whose /DescendantFonts holds a non-dict element
+        # must degrade to the name heuristic, never raise (review-caught:
+        # AttributeError escaped as a raw RPC error).
+        pdf = pikepdf.new()
+        from engine.font_fallback import classify_font_family
+
+        broken = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/Courier"),  # name heuristic still reaches mono
+                DescendantFonts=Array([pikepdf.Integer(5)]),
+            )
+        )
+        assert classify_font_family(broken) == "mono"
+        # A plain (non-array) /DescendantFonts likewise.
+        broken2 = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/Helvetica"),
+                DescendantFonts=Dictionary(Type=Name("/Font")),
+            )
+        )
+        assert classify_font_family(broken2) == "sans"
+
+
+class TestFamilyMatchedConvert:
+    def test_serif_run_converts_in_a_serif_face(self, tmp_dir):
+        src = os.path.join(tmp_dir, "t.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        _page(pdf, b"BT /F1 12 Tf 72 700 Td (Hello) Tj ET", fonts={"F1": _serif_font(pdf)})
+        pdf.save(src)
+        pdf.close()
+        # Pass the fonts DIR (as the app does) — the engine picks the face.
+        convert_text_run(src, out, 1, 0, "A → B", FONTS_DIR)
+        text = extract_text(out)["text"]
+        assert "A → B" in text
+        # The embedded fallback names the SERIF face, not Sans.
+        with pikepdf.open(out) as opened:
+            base_fonts = _all_basefonts(opened)
+        assert any("LiberationSerif" in b for b in base_fonts)
+        assert not any("LiberationSans" in b for b in base_fonts)
+
+    def test_sans_run_converts_in_sans(self, tmp_dir):
+        src = os.path.join(tmp_dir, "t.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        _page(pdf, b"BT /F1 12 Tf 72 700 Td (Hello) Tj ET")  # Helvetica = sans
+        pdf.save(src)
+        pdf.close()
+        convert_text_run(src, out, 1, 0, "A → B", FONTS_DIR)
+        with pikepdf.open(out) as opened:
+            base_fonts = _all_basefonts(opened)
+        assert any("LiberationSans" in b for b in base_fonts)
+
+
+def _all_basefonts(pdf):
+    out = []
+    for page in pdf.pages:
+        res = page.get("/Resources")
+        fonts = res.get("/Font") if res is not None else None
+        if fonts is None:
+            continue
+        for k in fonts.keys():
+            bf = fonts[k].get("/BaseFont")
+            if bf is not None:
+                out.append(str(bf))
+    return out
 
 
 class TestConvertTextRun:

@@ -119,6 +119,8 @@ class _Member:
         "tm",
         "ctm",
         "lkey",
+        "resources",
+        "fallback",
     )
 
 
@@ -197,6 +199,10 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.tm = det["tm"]
         mem.ctm = det["ctm"]
         mem.lkey = _linear_key(m)
+        # Stream-scoped resources for family classification (9.B1) — a
+        # nested form's font is not in page resources (review-caught).
+        mem.resources = det.get("resources")
+        mem.fallback = det.get("fallback")
         members.append(mem)
     return members
 
@@ -1369,11 +1375,25 @@ def replace_paragraph_text(
         )
         fallback = None
         if fb_chars:
-            from engine.font_fallback import build_fallback_font
+            from engine.font_fallback import build_fallback_font, resolve_fallback_font
+            from engine.text_runs import _lookup_font
 
             if not font_path:
                 raise ValueError("fallback font path is required to convert")
-            font_dict, encode, width_1000 = build_fallback_font(pdf, str(font_path), fb_chars)
+            # Phase 9.B1: one fallback face for the paragraph, its family
+            # matched to the paragraph's first member run (a serif body
+            # converts in serif). Per-span fallback families (a mono code
+            # span inside a serif paragraph) is a documented tail — one
+            # face here, chosen from the dominant member. The font is
+            # looked up in the member's OWN stream resources (form-scoped
+            # when nested), page resources as fallback — a form's `F1` can
+            # differ from the page's (review-caught).
+            first = min(para.members, key=lambda m: m.index)
+            original = _lookup_font(
+                first.style["font_name"], first.resources or resources, resources
+            )
+            face = resolve_fallback_font(str(font_path), original)
+            font_dict, encode, width_1000 = build_fallback_font(pdf, face, fb_chars)
             fallback = _Fallback(None, font_dict, encode, width_1000)
 
         member_set = set(para.run_indexes)

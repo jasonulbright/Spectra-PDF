@@ -38,11 +38,14 @@ Bundled Python packages (installed into the embedded runtime):
 
 ## Fonts
 
-**Liberation Sans** (Regular) — © Red Hat / the Liberation Fonts project,
-licensed under the **SIL Open Font License 1.1**. Bundled (vendored by
-`scripts/sync-edit-fonts.ps1` into the app's `fonts` resources) as the
-Edit tool's replacement font: when a document's own font cannot express a
-typed character, the edited run is re-rendered in a subset of this font.
+**Liberation Sans, Liberation Serif, Liberation Mono** (Regular) —
+© Red Hat / the Liberation Fonts project, licensed under the **SIL Open
+Font License 1.1**. Bundled (vendored by `scripts/sync-edit-fonts.ps1`
+into the app's `fonts` resources) as the Edit tool's replacement font
+family: when a document's own font cannot express a typed character, the
+edited run is re-rendered in a subset of the face matching that font's
+style (serif documents convert in serif, monospaced in monospaced). All
+three are metric-compatible with the corresponding Microsoft core fonts.
 License text: https://github.com/liberationfonts/liberation-fonts/blob/main/LICENSE
 
 ## Frontend / runtime libraries

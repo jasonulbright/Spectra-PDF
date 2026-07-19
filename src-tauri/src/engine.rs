@@ -57,8 +57,11 @@ pub fn get_gs_path(app: &AppHandle) -> String {
 }
 
 /// The bundled fallback font for Edit ▸ Text's convert-to-compatible-font
-/// path (7.4): Liberation Sans (OFL) — vendored by scripts/sync-edit-fonts
-/// into resources/fonts, same class as the gs/python runtimes.
+/// The bundled fallback-font DIRECTORY (7.4 + 9.B1): the vendored
+/// Liberation family (Sans/Serif/Mono, OFL) lives in resources/fonts,
+/// same class as the gs/python runtimes. Returns the DIR — the engine
+/// (font_fallback.resolve_fallback_font) picks the face matching the
+/// run's own font so a serif document's converted text stays serif.
 pub fn get_edit_font_path(app: &AppHandle) -> String {
     let resource_dir = app
         .path()
@@ -66,7 +69,6 @@ pub fn get_edit_font_path(app: &AppHandle) -> String {
         .expect("failed to resolve resource dir");
     resource_dir
         .join("fonts")
-        .join("LiberationSans-Regular.ttf")
         .to_string_lossy()
         .to_string()
 }

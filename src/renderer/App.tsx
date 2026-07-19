@@ -704,9 +704,11 @@ function AppContent(): React.ReactElement {
       if (!f) throw new Error('The file is no longer open.');
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       if (opts?.convert) {
-        // 7.4: render the replacement in the bundled fallback font — the
-        // path the editor offers when the run's own font can't express the
-        // typed characters.
+        // 7.4 + 9.B1: render the replacement in the bundled fallback
+        // font FAMILY — getEditFontPath returns the fonts DIRECTORY and
+        // the engine picks the face (serif/sans/mono) matching the run's
+        // own font. The path the editor offers when the run's own font
+        // can't express the typed characters.
         const fontPath = await app.getEditFontPath();
         await performOperation(path, 'convert_text_run', {
           page,

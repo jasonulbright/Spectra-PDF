@@ -274,6 +274,14 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                         "combined": combined,
                         "raw_width": raw_width,
                         "rect": (x0, y0, x1, y1),
+                        # The STREAM-scoped resources this run's font resolves
+                        # against (form-scoped when nested), + the invoker's
+                        # resources as the fallback — the exact pair the
+                        # FontCache used above. 9.B1's paragraph family
+                        # classification needs form scope: a form's `F1` can
+                        # differ from the page's `F1` (review-caught).
+                        "resources": resources,
+                        "fallback": fallback,
                     }
                 )
             state.advance_after_show(raw_width)
@@ -603,7 +611,7 @@ def convert_text_run(
     characters. Same targeting, Δ math, anchors, and form copy-on-edit as
     `replace_text_run`; only the replacement renderer differs (a subsetted
     Type0/Identity-H embed + a Tf restoring the original font after)."""
-    from engine.font_fallback import build_fallback_font
+    from engine.font_fallback import build_fallback_font, resolve_fallback_font
 
     input_path = Path(file)
     output_path = Path(output)
@@ -628,7 +636,15 @@ def convert_text_run(
         holder: dict = {}
 
         def builder(pdf_, stream_resources, gts, text):
-            font_dict, encode, width_1000 = build_fallback_font(pdf_, font_path, text)
+            # Phase 9.B1: pick the fallback FACE matching the run's own
+            # font (serif/sans/mono) so a serif document's converted text
+            # stays serif. `font_path` is the vendored fonts DIR from the
+            # app; a concrete .ttf (tests) passes through untouched. The
+            # page `resources` back the lookup when a nested form's font
+            # lives there.
+            original = _lookup_font(gts.font_name, stream_resources, resources)
+            face = resolve_fallback_font(font_path, original)
+            font_dict, encode, width_1000 = build_fallback_font(pdf_, face, text)
             fname = _fresh_font_name(stream_resources, counter, reserved)
             holder["edit"].pending_font = (fname, font_dict)
             encoded = encode(text)

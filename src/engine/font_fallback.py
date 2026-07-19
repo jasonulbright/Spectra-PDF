@@ -24,6 +24,7 @@ shipped and tested.
 """
 
 import io
+import os
 from pathlib import Path
 
 import pikepdf
@@ -31,6 +32,89 @@ from pikepdf import Array, Dictionary, Name
 
 from fontTools import subset as ft_subset
 from fontTools.ttLib import TTFont
+
+# The vendored fallback family (scripts/sync-edit-fonts.ps1); the engine
+# picks the face matching the run's own font so a serif document's
+# converted text stays serif (Phase 9.B1). All three are metric-compatible
+# with the Microsoft cores.
+_FACE_FILES = {
+    "serif": "LiberationSerif-Regular.ttf",
+    "sans": "LiberationSans-Regular.ttf",
+    "mono": "LiberationMono-Regular.ttf",
+}
+
+# PDF FontDescriptor /Flags bits (PDF spec Table 121, 1-based in the spec).
+_FLAG_FIXED_PITCH = 1 << 0
+_FLAG_SERIF = 1 << 1
+
+_SERIF_HINTS = ("times", "serif", "georgia", "garamond", "minion", "roman", "mincho", "song")
+_MONO_HINTS = ("courier", "mono", "consol", "console", "typewriter", "code")
+
+
+def classify_font_family(font_dict) -> str:
+    """serif | sans | mono for a pikepdf font dict — from the
+    FontDescriptor /Flags first (authoritative when present), then a
+    BaseFont-name heuristic. Defaults to 'sans' (the common body case).
+
+    For a Type0 font the descriptor lives on the descendant CIDFont, so
+    look there too."""
+    flags = 0
+    descriptors = []
+    desc = font_dict.get("/FontDescriptor")
+    if desc is not None:
+        descriptors.append(desc)
+    desc_fonts = font_dict.get("/DescendantFonts")
+    if desc_fonts is not None:
+        # AttributeError too: a malformed /DescendantFonts (a plain dict,
+        # or an array holding an int/Null) makes `.get` raise on a
+        # non-dict element — a damaged/hand-built PDF this app's repair
+        # engines exist for. Degrade to the name heuristic, never abort
+        # the edit with a raw error (review-caught).
+        try:
+            for d in desc_fonts:
+                dd = d.get("/FontDescriptor")
+                if dd is not None:
+                    descriptors.append(dd)
+        except (TypeError, ValueError, AttributeError):
+            pass
+    for d in descriptors:
+        try:
+            flags |= int(d.get("/Flags", 0))
+        except (TypeError, ValueError, AttributeError):
+            pass
+    if flags & _FLAG_FIXED_PITCH:
+        return "mono"
+    if flags & _FLAG_SERIF:
+        return "serif"
+
+    name = str(font_dict.get("/BaseFont", "")).lstrip("/").lower()
+    if any(h in name for h in _MONO_HINTS):
+        return "mono"
+    if any(h in name for h in _SERIF_HINTS):
+        return "serif"
+    return "sans"
+
+
+def resolve_fallback_font(font_path: str, original_font=None) -> str:
+    """Resolve the concrete fallback .ttf to embed. `font_path` may be a
+    DIRECTORY (the vendored `resources/fonts` — the real app passes this,
+    and the family matching the original font is chosen) or a FILE (a
+    specific face — the test/back-compat path, used verbatim). Falls back
+    to Sans, then to whatever single .ttf is present, so a partially
+    provisioned bundle degrades instead of crashing."""
+    if not os.path.isdir(font_path):
+        return font_path
+    family = classify_font_family(original_font) if original_font is not None else "sans"
+    candidate = os.path.join(font_path, _FACE_FILES[family])
+    if os.path.isfile(candidate):
+        return candidate
+    sans = os.path.join(font_path, _FACE_FILES["sans"])
+    if os.path.isfile(sans):
+        return sans
+    for name in sorted(os.listdir(font_path)):
+        if name.lower().endswith(".ttf"):
+            return os.path.join(font_path, name)
+    raise ValueError(f"no fallback font found in {font_path}")
 
 
 def _subset_font(font_path: str, text: str) -> tuple[bytes, "TTFont"]:
@@ -113,7 +197,14 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
     def width_1000(s: str) -> float:
         return sum(widths[used[ch]] for ch in s if ch in used)
 
-    base_name = "ABCDEF+LiberationSans"
+    # Derive the embedded BaseFont from the ACTUAL face (9.B1: it may now
+    # be Serif/Mono, not always Sans) — a hardcoded "LiberationSans" would
+    # lie about a serif embed. "-Regular" is dropped; the "ABCDEF+" fake
+    # subset tag marks it as subsetted.
+    stem = Path(font_path).stem
+    if stem.endswith("-Regular"):
+        stem = stem[: -len("-Regular")]
+    base_name = f"ABCDEF+{stem or 'FallbackFont'}"
     file2 = pdf.make_stream(ttf_bytes)
     file2["/Length1"] = len(ttf_bytes)
 
