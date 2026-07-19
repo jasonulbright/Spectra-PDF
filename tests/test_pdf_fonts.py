@@ -194,8 +194,99 @@ class TestType0Fonts:
         vertical = Dictionary(no_tou)
         vertical["/Encoding"] = Name("/Identity-V")
         cap2 = font_capability(pdf.make_indirect(vertical))
-        assert not cap2.editable and "encoding" in (cap2.reason or "")
+        assert not cap2.editable and "vertical" in (cap2.reason or "")
 
         t3 = Dictionary(Type=Name("/Font"), Subtype=Name("/Type3"))
         cap3 = font_capability(pdf.make_indirect(t3))
         assert not cap3.editable and "Type3" in (cap3.reason or "")
+
+
+class TestPredefinedCjkCMaps:
+    """Phase 9.B2 — Type0 fonts with a named Unicode horizontal CMap."""
+
+    def _cjk_font(self, pdf, chars, encoding, cid_widths=None, dw=500, with_tou=True):
+        w_array = None
+        if cid_widths:
+            items = []
+            for cid, w in cid_widths.items():
+                items.extend([cid, Array([w])])
+            w_array = Array(items)
+        desc_d = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name("/CJKFont"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"GB1", Supplement=2),
+            DW=dw,
+        )
+        if w_array is not None:
+            desc_d["/W"] = w_array
+        font_d = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type0"),
+            BaseFont=Name("/CJKFont"),
+            Encoding=Name("/" + encoding),
+            DescendantFonts=Array([pdf.make_indirect(desc_d)]),
+        )
+        if with_tou:
+            font_d["/ToUnicode"] = _tounicode_stream(pdf, chars)
+        return pdf.make_indirect(font_d)
+
+    def test_ucs2_h_round_trip_and_cmap_remapped_widths(self):
+        from pdfminer.cmapdb import CMapDB
+
+        pdf = pikepdf.new()
+        # For UniGB-UCS2-H the CODE is the UCS-2 value itself.
+        chars = {0x4E2D: "中", 0x6587: "文"}  # noqa: RUF001
+        cm = CMapDB.get_cmap("UniGB-UCS2-H")
+        cid = {code: list(cm.decode(code.to_bytes(2, "big")))[0] for code in chars}
+        # Distinct /W per CID so the code->CID->width remap is observable.
+        font = self._cjk_font(
+            pdf, chars, "UniGB-UCS2-H", cid_widths={cid[0x4E2D]: 900, cid[0x6587]: 1000}
+        )
+        cap = font_capability(font)
+        assert cap.editable
+        assert cap.decode(b"\x4e\x2d\x65\x87") == "中文"  # noqa: RUF001
+        assert cap.encode("中文") == b"\x4e\x2d\x65\x87"  # noqa: RUF001
+        # Widths came through the CMap remap (NOT read as if code==CID).
+        assert cap.char_width("中") == 900  # noqa: RUF001
+        assert cap.char_width("文") == 1000  # noqa: RUF001
+        assert set(cap.encodable()) == {"中", "文"}  # noqa: RUF001
+
+    def test_vertical_named_cmap_refuses(self):
+        pdf = pikepdf.new()
+        cap = font_capability(self._cjk_font(pdf, {0x4E2D: "中"}, "UniGB-UCS2-V"))  # noqa: RUF001
+        assert not cap.editable and "vertical" in (cap.reason or "")
+
+    def test_non_unicode_legacy_cmap_refuses(self):
+        pdf = pikepdf.new()
+        cap = font_capability(self._cjk_font(pdf, {0x41: "A"}, "GBK-EUC-H"))
+        assert not cap.editable and "encoding" in (cap.reason or "")
+
+    def test_unicode_cmap_without_tounicode_refuses(self):
+        pdf = pikepdf.new()
+        cap = font_capability(
+            self._cjk_font(pdf, {0x4E2D: "中"}, "UniGB-UCS2-H", with_tou=False)  # noqa: RUF001
+        )
+        assert not cap.editable and "ToUnicode" in (cap.reason or "")
+
+    def test_unknown_cmap_name_refuses_cleanly(self):
+        pdf = pikepdf.new()
+        cap = font_capability(self._cjk_font(pdf, {0x41: "A"}, "UniBogus-XYZ-H"))
+        assert not cap.editable and "encoding" in (cap.reason or "")
+
+    @pytest.mark.parametrize("enc", ["UniGB-UTF8-H", "UniGB-UTF16-H", "UniGB-UTF32-H"])
+    def test_non_2byte_unicode_cmaps_refuse_not_corrupt(self, enc):
+        # Review-caught CRITICAL: these are Uni*-H but NOT fixed-2-byte
+        # (UTF8=3B for CJK, UTF32=4B, UTF16=surrogates), so the 2-byte
+        # pipeline would SILENTLY CORRUPT them. Accept boundary is now
+        # UCS2-only — they must refuse, never reach editable=True.
+        pdf = pikepdf.new()
+        cap = font_capability(self._cjk_font(pdf, {0x4E2D: "中"}, enc))  # noqa: RUF001
+        assert not cap.editable
+        assert "encoding" in (cap.reason or "")
+
+    def test_ucs2_hw_variant_still_accepts(self):
+        # -UCS2-HW-H (half-width) is also fixed 2-byte — must stay editable.
+        pdf = pikepdf.new()
+        cap = font_capability(self._cjk_font(pdf, {0x4E2D: "中"}, "UniJIS-UCS2-HW-H"))  # noqa: RUF001
+        assert cap.editable

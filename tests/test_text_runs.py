@@ -396,3 +396,67 @@ class TestReplaceTextRun:
         pdf.close()
         with pytest.raises(ValueError, match="out of range"):
             replace_text_run(src, os.path.join(tmp_dir, "o.pdf"), 1, 5, "X")
+
+
+class TestPredefinedCjkEditing:
+    """Phase 9.B2 — end-to-end edit of CJK text under a named Unicode CMap."""
+
+    def _cjk_page(self, pdf, chars, content):
+        from tests.test_pdf_fonts import _tounicode_stream
+
+        desc = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/CIDFontType2"),
+                BaseFont=Name("/CJKFont"),
+                CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"GB1", Supplement=2),
+                DW=1000,
+            )
+        )
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/CJKFont"),
+                Encoding=Name("/UniGB-UCS2-H"),
+                DescendantFonts=Array([desc]),
+                ToUnicode=_tounicode_stream(pdf, chars),
+            )
+        )
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=font))
+        page.Contents = pdf.make_stream(content)
+        return page
+
+    def test_lists_and_replaces_cjk_text(self, tmp_dir):
+        src = os.path.join(tmp_dir, "cjk.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        # 中 U+4E2D, 文 U+6587, 编 U+7F16, 辑 U+8F91 — all in the ToUnicode.
+        chars = {0x4E2D: "中", 0x6587: "文", 0x7F16: "编", 0x8F91: "辑"}  # noqa: RUF001
+        # Show "中文" (codes 4e2d 6587).
+        self._cjk_page(pdf, chars, b"BT /F1 12 Tf 72 700 Td <4e2d6587> Tj ET")
+        pdf.save(src)
+        pdf.close()
+
+        runs = list_text_runs(src, 1)["runs"]
+        assert runs[0]["text"] == "中文"  # noqa: RUF001
+        assert runs[0]["editable"] is True
+
+        # Replace with "编辑" (both in the encodable set). Verification is
+        # the RE-LIST round-trip: our encode emits the exact ToUnicode
+        # codes for the new chars, which our decode reads back — proving
+        # the output's bytes are the correct codes (a real Adobe-GB1
+        # viewer then maps them code->CID->glyph via UniGB-UCS2-H).
+        # pdfminer's extract_text is NOT used here: for a synthetic
+        # glyphless font it renders named-CMap codes as (cid:N), which
+        # tests pdfminer's extraction, not our edit.
+        replace_text_run(src, out, 1, 0, "编辑")  # noqa: RUF001
+        relisted = list_text_runs(out, 1)["runs"]
+        assert relisted[0]["text"] == "编辑"  # noqa: RUF001
+        assert relisted[0]["editable"] is True
+        # The emitted codes ARE the reversed-ToUnicode 2-byte UCS2 values
+        # (pikepdf serializes the non-printable string as a hex literal).
+        with pikepdf.open(out) as opened:
+            content = opened.pages[0].Contents.read_bytes()
+        assert b"7f168f91" in content.replace(b" ", b"").lower()

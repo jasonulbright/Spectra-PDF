@@ -236,6 +236,29 @@ def _simple_widths(font_obj, code2uni: dict[int, str]) -> tuple[dict[int, float]
     return {}, DEFAULT_WIDTH
 
 
+def _cmap_code_widths(named_cmap, codes, cid_widths: dict[int, float]) -> dict[int, float]:
+    """Remap CID-keyed /W to CODE-keyed for a predefined CMap (9.B2):
+    each 2-byte code decodes to a CID via the CMap, whose /W width becomes
+    the code's. A code the CMap can't decode (or an out-of-BMP code) is
+    left to the capability's default width — text still edits, only its
+    same-line Δ is approximate for that glyph."""
+    out: dict[int, float] = {}
+    for code in codes:
+        try:
+            data = int(code).to_bytes(2, "big")
+        except (OverflowError, ValueError, TypeError):
+            continue  # not a 2-byte code (astral / malformed) — DW applies
+        try:
+            cids = list(named_cmap.decode(data))
+        except Exception:
+            cids = []
+        if cids:
+            w = cid_widths.get(cids[0])
+            if w is not None:
+                out[code] = w
+    return out
+
+
 def _cid_widths(descendant) -> tuple[dict[int, float], float]:
     from pdfminer.pdffont import get_widths
 
@@ -280,10 +303,41 @@ def font_capability(font_obj) -> FontCapability:
 
     if subtype == "Type0":
         enc = str(font_obj.get("/Encoding", "")).lstrip("/")
-        if enc not in ("Identity-H",):
-            return _refused(
-                f"unsupported composite-font encoding ({enc or 'embedded CMap'})", code_bytes=2
-            )
+        # Identity-H (code == CID) OR a predefined UNICODE horizontal CMap
+        # (Uni*-H — the modern CJK majority; 9.B2). The named CMap is
+        # loaded via pdfminer's bundled CMap DB and used ONLY to remap
+        # widths (its code->CID differs from Identity); the text
+        # round-trip rides ToUnicode either way. Vertical + non-Unicode
+        # legacy encodings stay refused with a reason.
+        named_cmap = None
+        if enc != "Identity-H":
+            if enc.endswith("-V"):
+                return _refused("vertical writing is not editable yet", code_bytes=2)
+            # ONLY the -UCS2- family: UCS-2 is by DEFINITION a fixed 2-byte
+            # encoding, so our fixed-2-byte decode/encode is exact. The
+            # other Uni* widths are NOT 2-byte — UTF8 is 3 bytes for CJK,
+            # UTF32 is 4, UTF16 uses surrogate pairs for astral — and the
+            # 2-byte pipeline SILENTLY CORRUPTS them (review-reproduced:
+            # dropped/injected chars on decode, truncated codes on encode,
+            # written to disk with no round-trip check). Refuse them; a
+            # UTF16-BMP-only refinement is a documented tail, not B2.
+            if "-UCS2-" in enc and enc.startswith("Uni"):
+                try:
+                    from pdfminer.cmapdb import CMapDB
+
+                    cm = CMapDB.get_cmap(enc)
+                except Exception:
+                    cm = None
+                if cm is None or cm.is_vertical():
+                    return _refused(
+                        f"unsupported composite-font encoding ({enc})", code_bytes=2
+                    )
+                named_cmap = cm
+            else:
+                return _refused(
+                    f"unsupported composite-font encoding ({enc or 'embedded CMap'})",
+                    code_bytes=2,
+                )
         tou = font_obj.get("/ToUnicode")
         if tou is None:
             return _refused("no ToUnicode map — this text cannot be re-entered", code_bytes=2)
@@ -294,10 +348,20 @@ def font_capability(font_obj) -> FontCapability:
         if not code2uni:
             return _refused("empty ToUnicode map", code_bytes=2)
         desc_fonts = font_obj.get("/DescendantFonts")
-        widths: dict[int, float] = {}
+        cid_widths: dict[int, float] = {}
         default = 1000.0
         if desc_fonts is not None and len(desc_fonts) > 0:
-            widths, default = _cid_widths(desc_fonts[0])
+            cid_widths, default = _cid_widths(desc_fonts[0])
+        if named_cmap is None:
+            # Identity-H: the byte code IS the CID, so the /W table
+            # (CID-keyed) doubles as code-keyed unchanged.
+            widths = cid_widths
+        else:
+            # Named CMap: remap /W (CID-keyed) to CODE-keyed via the
+            # CMap's code->CID. FontCapability.decoded_width keys on the
+            # emitted CODE bytes, which are what encode() produces, so the
+            # widths dict must be code-keyed to stay honest.
+            widths = _cmap_code_widths(named_cmap, code2uni.keys(), cid_widths)
         return FontCapability(True, None, code2uni, _reverse(code2uni), widths, default, 2)
 
     # Simple fonts (Type1, MMType1, TrueType).
