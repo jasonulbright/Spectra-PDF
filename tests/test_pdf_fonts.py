@@ -1,5 +1,10 @@
 """Tests for the font round-trip capability layer (Phase 7.2)."""
 
+from io import BytesIO
+
+from fontTools.fontBuilder import FontBuilder
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib.tables._c_m_a_p import CmapSubtable, table__c_m_a_p
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 import pytest
@@ -21,6 +26,66 @@ def _tounicode_stream(pdf, mapping: dict[int, str]) -> pikepdf.Object:
         "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
     )
     return pdf.make_stream(body.encode("ascii"))
+
+
+def _program_ttf(cmap_subtables, advances, upem=1000):
+    """A minimal in-test TrueType (9.B3 zoo): each subtable is
+    (platformID, platEncID, {code: glyphname}); post carries the glyph
+    names; hmtx carries `advances` (font units, default 500)."""
+    names = sorted({g for _, _, m in cmap_subtables for g in m.values()})
+    order = [".notdef"] + [g for g in names if g != ".notdef"]
+    fb = FontBuilder(upem, isTTF=True)
+    fb.setupGlyphOrder(order)
+    glyphs = {}
+    for name in order:
+        pen = TTGlyphPen(None)
+        pen.moveTo((0, 0))
+        pen.lineTo((0, 500))
+        pen.lineTo((500, 500))
+        pen.closePath()
+        glyphs[name] = pen.glyph()
+    fb.setupGlyf(glyphs)
+    cmap = table__c_m_a_p()
+    cmap.tableVersion = 0
+    cmap.tables = []
+    for pid, eid, mapping in cmap_subtables:
+        st = CmapSubtable.newSubtable(4)
+        st.platformID = pid
+        st.platEncID = eid
+        st.language = 0
+        st.cmap = dict(mapping)
+        cmap.tables.append(st)
+    fb.font["cmap"] = cmap
+    fb.setupHorizontalMetrics({n: (advances.get(n, 500), 0) for n in order})
+    fb.setupHorizontalHeader(ascent=800, descent=-200)
+    fb.setupNameTable({"familyName": "ZooSym", "styleName": "Regular"})
+    fb.setupPost()
+    buf = BytesIO()
+    fb.save(buf)
+    return buf.getvalue()
+
+
+def _symbolic_program_font(pdf, ttf_bytes, widths=None, first_char=None, tounicode=None):
+    """A symbolic TrueType dict (no /Encoding) carrying `ttf_bytes` as its
+    embedded FontFile2 — the exact shape the 9.B3 derivation targets."""
+    desc = Dictionary(
+        Type=Name("/FontDescriptor"),
+        FontName=Name("/ZooSym"),
+        Flags=4,  # symbolic
+        FontFile2=pdf.make_stream(ttf_bytes),
+    )
+    font = Dictionary(
+        Type=Name("/Font"),
+        Subtype=Name("/TrueType"),
+        BaseFont=Name("/ZooSym"),
+        FontDescriptor=desc,
+    )
+    if widths is not None:
+        font["/FirstChar"] = first_char
+        font["/Widths"] = Array(widths)
+    if tounicode is not None:
+        font["/ToUnicode"] = _tounicode_stream(pdf, tounicode)
+    return pdf.make_indirect(font)
 
 
 class TestSimpleFonts:
@@ -290,3 +355,156 @@ class TestPredefinedCjkCMaps:
         pdf = pikepdf.new()
         cap = font_capability(self._cjk_font(pdf, {0x4E2D: "中"}, "UniJIS-UCS2-HW-H"))  # noqa: RUF001
         assert cap.editable
+
+
+class TestSymbolicProgramDerivedEncoding:
+    """Phase 9.B3 — a symbolic simple font with no usable /Encoding and no
+    ToUnicode derives its code map from the embedded program instead of
+    refusing; the refusal survives only when nothing derives."""
+
+    def test_win_unicode_cmap_round_trip(self):
+        pdf = pikepdf.new()
+        data = _program_ttf(
+            [(3, 1, {0x41: "glyphA", 0x42: "glyphB"})],
+            {"glyphA": 600, "glyphB": 650},
+        )
+        font = _symbolic_program_font(pdf, data, widths=[601, 651], first_char=65)
+        cap = font_capability(font)
+        assert cap.editable and cap.reason is None
+        assert cap.decode(b"\x41\x42") == "AB"
+        assert cap.encode("AB") == b"\x41\x42"
+        assert set(cap.encodable()) == {"A", "B"}
+        # /Widths (601/651) beats the program's hmtx (600/650).
+        assert cap.char_width("A") == 601
+        assert cap.char_width("B") == 651
+        with pytest.raises(ValueError, match="cannot encode"):
+            cap.encode("C")
+
+    def test_symbol_cmap_derives_via_glyph_names(self):
+        pdf = pikepdf.new()
+        data = _program_ttf(
+            [(3, 0, {0xF041: "alpha", 0xF042: "uni2318", 0x43: "beta", 0xF044: "orn001"})],
+            {"alpha": 700, "uni2318": 800, "beta": 550, "orn001": 420},
+        )
+        cap = font_capability(_symbolic_program_font(pdf, data))
+        assert cap.editable
+        assert cap.decode(b"\x41") == "α"  # AGL name
+        assert cap.decode(b"\x42") == "⌘"  # uniXXXX-form name
+        assert cap.decode(b"\x43") == "β"  # bare-code (non-F000) entry
+        assert cap.decode(b"\x44") == "�"  # underivable name stays unmapped
+        assert cap.encode("α⌘β") == b"\x41\x42\x43"
+        assert set(cap.encodable()) == {"α", "⌘", "β"}
+        # No /Widths → the program's hmtx (upem 1000: advances pass through).
+        assert cap.char_width("α") == 700
+        assert cap.char_width("⌘") == 800
+        # The unmapped-but-real glyph still carries its true advance by CODE.
+        assert cap.decoded_width(b"\x44") == 420
+
+    def test_underivable_program_still_refuses_with_stated_reason(self):
+        pdf = pikepdf.new()
+        data = _program_ttf([(3, 0, {0xF041: "orn001", 0xF042: "orn002"})], {})
+        cap = font_capability(_symbolic_program_font(pdf, data))
+        assert not cap.editable
+        assert cap.reason == "no resolvable encoding (symbolic font without ToUnicode)"
+
+    def test_tounicode_takes_precedence_over_program(self):
+        pdf = pikepdf.new()
+        data = _program_ttf([(3, 1, {0x41: "glyphA"})], {"glyphA": 600})
+        font = _symbolic_program_font(pdf, data, tounicode={0x41: "Z"})
+        cap = font_capability(font)
+        assert cap.editable
+        assert cap.decode(b"\x41") == "Z"  # ToUnicode, not the program's "A"
+        assert cap.encode("Z") == b"\x41"
+        assert set(cap.encodable()) == {"Z"}
+        with pytest.raises(ValueError):
+            cap.encode("A")
+        # Byte-identical to today: no program widths harvested on this path.
+        assert cap.char_width("Z") == 500.0
+
+    def test_mac_cmap_and_hmtx_width_scaling(self):
+        pdf = pikepdf.new()
+        data = _program_ttf(
+            [(1, 0, {0x41: "alpha", 0x42: "beta"})],
+            {"alpha": 1024, "beta": 512},
+            upem=2048,
+        )
+        cap = font_capability(_symbolic_program_font(pdf, data))
+        assert cap.editable
+        assert cap.decode(b"\x41\x42") == "αβ"
+        assert cap.encode("β") == b"\x42"
+        assert cap.char_width("α") == 500.0  # 1024 × 1000/2048
+        assert cap.char_width("β") == 250.0
+        assert cap.text_width("αβ") == 750.0
+
+    def test_bare_cff_fontfile3_refuses_cleanly(self):
+        # Bare CFF (Type1C) is not SFNT — fontTools TTFont rejects it, and
+        # the refusal must stand (cffLib derivation is a scoped-out tail).
+        pdf = pikepdf.new()
+        desc = Dictionary(
+            Type=Name("/FontDescriptor"),
+            FontName=Name("/ZooCff"),
+            Flags=4,
+            FontFile3=pdf.make_stream(b"\x01\x00\x04\x02" + b"\x00" * 64),
+        )
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type1"),
+                BaseFont=Name("/ZooCff"),
+                FontDescriptor=desc,
+            )
+        )
+        cap = font_capability(font)
+        assert not cap.editable
+        assert cap.reason == "no resolvable encoding (symbolic font without ToUnicode)"
+
+class TestWidthsGuardHardening:
+    """9.B3 review round: the /Widths subset guard vs degenerate arrays."""
+
+    def test_empty_widths_array_does_not_collapse_encodability(self):
+        # Review-caught HIGH: /Widths [] inverted the guard range and
+        # emptied the encode map while char_width fell to the default —
+        # editable=True with nothing encodable and every advance wrong.
+        import pikepdf
+        from pikepdf import Array, Dictionary, Name
+
+        pdf = pikepdf.new()
+        data = _program_ttf([(3, 1, {0x41: "A", 0x42: "B", 0x43: "C"})], {"A": 600, "B": 650, "C": 700})
+        ff = pdf.make_stream(data)
+        font = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/TrueType"),
+            BaseFont=Name("/AAAAAA+Sym"),
+            FirstChar=65,
+            Widths=Array([]),
+            FontDescriptor=Dictionary(Type=Name("/FontDescriptor"), Flags=4, FontFile2=ff),
+        )
+        cap = font_capability(font)
+        assert cap.editable is True
+        assert set(cap.encodable()) == {"A", "B", "C"}
+        assert cap.encode("A") == b"A"
+        assert cap.char_width("A") == pytest.approx(600.0)
+
+    def test_partial_widths_merge_keeps_program_advances(self):
+        # Review-caught: a partial /Widths discarded real hmtx advances
+        # for uncovered codes (decoded_width fell to the 500 default).
+        # Declared entries still win per-code; the rest keep hmtx truth.
+        import pikepdf
+        from pikepdf import Array, Dictionary, Name
+
+        pdf = pikepdf.new()
+        data = _program_ttf([(3, 1, {0x41: "A", 0x42: "B", 0x43: "C"})], {"A": 600, "B": 650, "C": 700})
+        ff = pdf.make_stream(data)
+        font = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/TrueType"),
+            BaseFont=Name("/AAAAAA+Sym"),
+            FirstChar=65,
+            Widths=Array([601]),
+            FontDescriptor=Dictionary(Type=Name("/FontDescriptor"), Flags=4, FontFile2=ff),
+        )
+        cap = font_capability(font)
+        assert cap.decoded_width(b"A") == pytest.approx(601.0)  # declared wins
+        assert cap.decoded_width(b"B") == pytest.approx(650.0)  # hmtx kept
+        assert cap.decoded_width(b"C") == pytest.approx(700.0)
+

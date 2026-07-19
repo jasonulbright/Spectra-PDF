@@ -20,6 +20,9 @@ document-free subset:
 
 Editability taxonomy (every run is LISTED; refusal carries the reason):
   - Simple Type1/TrueType with a resolvable encoding → editable.
+  - Symbolic simple fonts without one: ToUnicode when present, else a map
+    DERIVED from the embedded program's cmap + glyph names (9.B3); refused
+    only when neither yields a single code.
   - Type0 + Identity-H + ToUnicode → editable (the copy-paste capability
     bar: text you can extract is text you can re-enter).
   - Type3 ("glyphs are procedures"), Type0 without ToUnicode or with a
@@ -207,6 +210,101 @@ def _simple_encoding_map(font_obj) -> Optional[dict[int, str]]:
         return None
 
 
+def _hmtx_code_widths(tt, code2glyph: dict[int, str]) -> dict[int, float]:
+    """hmtx advances × (1000/unitsPerEm), keyed by the derived codes (9.B3)."""
+    try:
+        hmtx = tt["hmtx"]
+        upem = int(tt["head"].unitsPerEm)
+    except Exception:
+        return {}
+    if upem <= 0:
+        return {}
+    scale = 1000.0 / upem
+    out: dict[int, float] = {}
+    for code, glyph in code2glyph.items():
+        try:
+            out[code] = float(hmtx[glyph][0]) * scale
+        except Exception:
+            continue
+    return out
+
+
+def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
+    """code → unicode + code → advance (1000/em) derived from the embedded
+    font program (9.B3) — the last resort for a symbolic simple font with no
+    usable /Encoding and no ToUnicode. FontFile2 and SFNT-wrapped FontFile3
+    (/OpenType) parse via fontTools; bare-CFF FontFile3 (Type1C) raises in
+    TTFont and keeps the refusal — cffLib builtin-encoding + charstring-width
+    extraction is a scoped-out tail, not attempted.
+    Subtable preference (first that derives any unicode wins):
+      (3,1) Windows-Unicode — code c maps to chr(c) when c is in the cmap;
+      (3,0) Windows-Symbol  — glyph at 0xF000+c (or bare c), then the glyph
+            NAME through the AGL (uniXXXX/uXXXX forms included);
+      (1,0) Mac             — glyph at c, same name derivation.
+    Codes with no derivable unicode stay unmapped (decode → U+FFFD, encode
+    refuses); widths still cover every code resolving to a real glyph, since
+    decoded_width keys on CODES. An EMPTY derivation returns ({}, {}) — the
+    caller must keep refusing rather than accept garbage decoding."""
+    try:
+        desc = font_obj.get("/FontDescriptor")
+        if desc is None:
+            return {}, {}
+        program = desc.get("/FontFile2")
+        if program is None:
+            program = desc.get("/FontFile3")
+        if program is None:
+            return {}, {}
+        raw = program.read_bytes()
+    except Exception:
+        return {}, {}
+    try:
+        from fontTools.ttLib import TTFont
+
+        tt = TTFont(BytesIO(raw), fontNumber=0, lazy=True)
+        subtables = list(tt["cmap"].tables)
+    except Exception:
+        return {}, {}
+    from fontTools import agl
+
+    by_key: dict[tuple[int, int], dict[int, str]] = {}
+    for t in subtables:
+        key = (getattr(t, "platformID", None), getattr(t, "platEncID", None))
+        if key not in ((3, 1), (3, 0), (1, 0)) or key in by_key:
+            continue
+        try:
+            m = dict(t.cmap)
+        except Exception:
+            continue
+        if m:
+            by_key[key] = m
+    for key in ((3, 1), (3, 0), (1, 0)):
+        m = by_key.get(key)
+        if m is None:
+            continue
+        code2uni: dict[int, str] = {}
+        code2glyph: dict[int, str] = {}
+        for code in range(256):
+            if key == (3, 1):
+                glyph = m.get(code)
+                if glyph is None or glyph == ".notdef":
+                    continue
+                code2glyph[code] = glyph
+                code2uni[code] = chr(code)
+                continue
+            glyph = m.get(0xF000 + code) if key == (3, 0) else None
+            if glyph is None:
+                glyph = m.get(code)
+            if glyph is None or glyph == ".notdef":
+                continue
+            code2glyph[code] = glyph
+            u = agl.toUnicode(glyph)
+            if u:
+                code2uni[code] = u
+        if code2uni:
+            return code2uni, _hmtx_code_widths(tt, code2glyph)
+    return {}, {}
+
+
 def _simple_widths(font_obj, code2uni: dict[int, str]) -> tuple[dict[int, float], float]:
     """code → advance for a simple font: /Widths + /FirstChar, else base-14
     AFM metrics via /BaseFont (AFM widths are keyed by unicode CHAR)."""
@@ -373,12 +471,20 @@ def font_capability(font_obj) -> FontCapability:
             tou_map = _parse_tounicode(tou.read_bytes())
         except Exception:
             tou_map = {}
+    program_widths: dict[int, float] = {}
     if code2uni is None:
         if tou_map:
             # Symbolic font, but ToUnicode names its codes — usable both ways.
             code2uni = tou_map
         else:
-            return _refused("no resolvable encoding (symbolic font without ToUnicode)")
+            # 9.B3: exactly where the refusal used to fire — derive from the
+            # embedded program. ToUnicode and usable-/Encoding paths above
+            # stay byte-identical; an empty derivation keeps the refusal
+            # (never accept a font that would decode as garbage).
+            derived, program_widths = _program_encoding_map(font_obj)
+            if not derived:
+                return _refused("no resolvable encoding (symbolic font without ToUnicode)")
+            code2uni = derived
     elif tou_map:
         # ToUnicode refines decoding where present (it is authoritative for
         # extraction); encoding entries fill the rest.
@@ -386,6 +492,14 @@ def font_capability(font_obj) -> FontCapability:
         merged.update(tou_map)
         code2uni = merged
     widths, default = _simple_widths(font_obj, code2uni)
+    # 9.B3: declared /Widths entries stay authoritative PER CODE; the
+    # embedded program's own hmtx (1000/em-scaled, keyed by the derived
+    # codes) fills every code /Widths does not cover — a wholesale
+    # either/or here dropped real program advances to the 500 default for
+    # any code outside a partial /Widths range (review-caught, repro'd
+    # via decoded_width on an under-declared subset).
+    if program_widths:
+        widths = {**program_widths, **widths}
     # Subset-coverage guard (review-caught; the phase doc's stated design):
     # /Encoding is a fixed 256-slot table that says nothing about which
     # glyphs an EMBEDDED SUBSET actually contains — encode() succeeding for
@@ -399,7 +513,14 @@ def font_capability(font_obj) -> FontCapability:
     # real-world shape at zero new dependencies.
     encode_map = code2uni
     w = font_obj.get("/Widths")
-    if w is not None and len(widths) > 0:
+    # len(w) > 0: an EMPTY declared /Widths carries no subset-boundary
+    # information — treating it as one inverted the range (last < first)
+    # and collapsed the encodable set to nothing on a font whose glyphs
+    # are all present, while char_width silently fell to the default
+    # (review-caught HIGH, repro'd: editable=True with encodable()=="" and
+    # every advance wrong — the silent-corruption class the completeness
+    # rule forbids).
+    if w is not None and len(w) > 0 and len(widths) > 0:
         try:
             first = int(font_obj.get("/FirstChar", 0))
             last = first + len(w) - 1
