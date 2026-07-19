@@ -19,6 +19,9 @@ export interface EditImagePlacement {
   matrix: [number, number, number, number, number, number];
   /** Effective fill alpha at the draw (9.C3) — the opacity slider's seed. */
   opacity: number;
+  /** C4: an inline (BI/ID/EI) draw vs a regular XObject placement —
+   * replace/extract are XObject-only (the toolbar disables them). */
+  kind: 'inline' | 'xobject';
 }
 
 /** The selected image's transform context (9.C1) — its user-space matrix plus
@@ -42,6 +45,7 @@ interface EngineListing {
     nested: boolean;
     matrix: [number, number, number, number, number, number];
     opacity: number;
+    kind: 'inline' | 'xobject';
   }[];
 }
 
@@ -61,5 +65,6 @@ export async function fetchEditPlacements(
     rect: pdfRectToDisplay(image.rect, geometry.box, geometry.bakedRotate),
     matrix: image.matrix,
     opacity: typeof image.opacity === 'number' ? image.opacity : 1,
+    kind: image.kind === 'inline' ? 'inline' : 'xobject',
   }));
 }

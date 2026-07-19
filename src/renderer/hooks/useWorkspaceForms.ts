@@ -3,7 +3,7 @@ import { readFormFields } from '../lib/forms';
 import type { FormField } from '../lib/forms';
 import { projectFieldWidgets } from '../lib/form-overlay';
 import type { OverlayWidget, PageBox } from '../lib/form-overlay';
-import { getDocumentProxy } from '../lib/pdfDocCache';
+import { requestDocumentProxy } from '../lib/pdfDocCache';
 import type { OpenFile, PdfBuffer } from '../state/types';
 
 export interface FileFormInfo {
@@ -87,7 +87,12 @@ export function useWorkspaceForms(files: Map<string, OpenFile>): ReadonlyMap<str
                 if (gen !== genRef.current) return;
                 // The shared canvas proxy for THESE bytes; form-less files
                 // never wait on (or fail with) the pdf.js load at all.
-                const proxy = await getDocumentProxy(path, buffer);
+                // requestDocumentProxy re-checks currency at the cache
+                // boundary (round 24 tail) — double protection with the
+                // guard above, and the reusable shape for any future
+                // async-gap caller.
+                const proxy = await requestDocumentProxy(path, buffer, () => gen === genRef.current);
+                if (!proxy) return; // superseded — the newer generation's run covers it
                 for (const i of pageIndexes) {
                   if (i < 0 || i >= proxy.numPages) continue;
                   const page = await proxy.getPage(i + 1);

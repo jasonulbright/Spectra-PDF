@@ -442,11 +442,14 @@ class TestJpegInfoRobustness:
 
 
 class TestInlineImages:
-    def test_inline_image_round_trips_through_a_rewrite(self, tmp_dir):
-        """BI/ID/EI blocks are never listed and must survive a rewrite
-        byte-safe (they pass through unparse untouched)."""
+    """C4 re-ratified the 7.1 boundary: BI/ID/EI draws are PLACEMENTS now
+    (listed + editable via the wrap/drop family). The original pin here
+    ('never listed, pass through verbatim') became this mixed-page pin:
+    draw-order ids across both kinds, and byte-faithful survival of the
+    inline object under a NEIGHBORING edit (the same resync property)."""
+
+    def _mixed_page(self, tmp_dir):
         src = os.path.join(tmp_dir, "inline.pdf")
-        out = os.path.join(tmp_dir, "out.pdf")
         pdf = pikepdf.new()
         page = pdf.add_blank_page(page_size=(612, 792))
         im = _rgb_image(pdf, 200, 0, 0)
@@ -457,16 +460,120 @@ class TestInlineImages:
         )
         pdf.save(src)
         pdf.close()
+        return src
 
-        r = list_page_images(src, 1)
-        assert len(r["images"]) == 1  # the XObject only, never the inline
-        delete_page_image(src, out, 1, 0)
-        assert list_page_images(out, 1)["images"] == []
+    def test_mixed_page_lists_both_kinds_in_draw_order(self, tmp_dir):
+        src = self._mixed_page(tmp_dir)
+        imgs = list_page_images(src, 1)["images"]
+        assert [i["kind"] for i in imgs] == ["inline", "xobject"]
+        assert imgs[0]["name"] is None
+        assert imgs[0]["native_width"] == 1 and imgs[0]["native_height"] == 1
+        assert imgs[1]["name"] == "/ImA"
+
+    def test_deleting_the_xobject_leaves_the_inline_byte_faithful(self, tmp_dir):
+        src = self._mixed_page(tmp_dir)
+        out = os.path.join(tmp_dir, "out.pdf")
+        delete_page_image(src, out, 1, 1)  # the XObject is index 1 now
+        imgs = list_page_images(out, 1)["images"]
+        assert [i["kind"] for i in imgs] == ["inline"]
         with pikepdf.open(out) as pdf2:
             content = pikepdf.unparse_content_stream(
                 pikepdf.parse_content_stream(pdf2.pages[0])
             )
             assert b"BI" in content and b"EI" in content  # inline survived
+
+    def test_deleting_the_inline_leaves_the_xobject(self, tmp_dir):
+        src = self._mixed_page(tmp_dir)
+        out = os.path.join(tmp_dir, "out.pdf")
+        delete_page_image(src, out, 1, 0)
+        imgs = list_page_images(out, 1)["images"]
+        assert [i["kind"] for i in imgs] == ["xobject"]
+        with pikepdf.open(out) as pdf2:
+            content = pikepdf.unparse_content_stream(
+                pikepdf.parse_content_stream(pdf2.pages[0])
+            )
+            assert b"BI" not in content  # the inline bytes went with the draw
+
+    def test_transform_moves_only_the_inline(self, tmp_dir):
+        src = self._mixed_page(tmp_dir)
+        out = os.path.join(tmp_dir, "out.pdf")
+        m = list_page_images(src, 1)["images"][0]["matrix"]
+        target = list(m)
+        target[4] += 25
+        transform_page_image(src, out, 1, 0, target)
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["kind"] == "inline"
+        assert imgs[0]["matrix"][4] == pytest.approx(m[4] + 25, abs=1e-4)
+        # The XObject sibling is untouched.
+        assert imgs[1]["matrix"] == pytest.approx([100, 0, 0, 80, 50, 600], abs=1e-4)
+
+    def test_crop_and_opacity_wrap_the_inline(self, tmp_dir):
+        from engine.page_images import crop_page_image, set_image_opacity
+
+        src = self._mixed_page(tmp_dir)
+        cropped = os.path.join(tmp_dir, "c.pdf")
+        crop_page_image(src, cropped, 1, 0, [0.25, 0.25, 0.75, 0.75])
+        with pikepdf.open(cropped) as pdf2:
+            ops = [str(i.operator) for i in pikepdf.parse_content_stream(pdf2.pages[0])]
+        assert "W" in ops  # the clip landed
+        assert list_page_images(cropped, 1)["images"][0]["kind"] == "inline"
+        dimmed = os.path.join(tmp_dir, "d.pdf")
+        set_image_opacity(cropped, dimmed, 1, 0, 0.4)
+        imgs = list_page_images(dimmed, 1)["images"]
+        assert imgs[0]["opacity"] == pytest.approx(0.4)
+        assert imgs[1]["opacity"] == pytest.approx(1.0)
+
+    def test_inline_inside_a_form_copies_the_form(self, tmp_dir):
+        src = os.path.join(tmp_dir, "if.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        form = pdf.make_stream(
+            b"q 40 0 0 40 0 0 cm BI /W 1 /H 1 /CS /G /BPC 8 ID \x22 EI Q"
+        )
+        form["/Type"] = Name("/XObject")
+        form["/Subtype"] = Name("/Form")
+        form["/BBox"] = pikepdf.Array([0, 0, 40, 40])
+        fi = pdf.make_indirect(form)
+        page.obj["/Resources"] = Dictionary(XObject=Dictionary(Fm1=fi))
+        page.Contents = pdf.make_stream(
+            b"q 1 0 0 1 50 500 cm /Fm1 Do Q q 1 0 0 1 300 200 cm /Fm1 Do Q"
+        )
+        pdf.save(src)
+        pdf.close()
+        imgs = list_page_images(src, 1)["images"]
+        assert [i["kind"] for i in imgs] == ["inline", "inline"]
+        out = os.path.join(tmp_dir, "o.pdf")
+        delete_page_image(src, out, 1, 0)
+        after = list_page_images(out, 1)["images"]
+        assert len(after) == 1  # only the second form draw still shows one
+        names = _names_in_page_stream(out)
+        assert names[0] != "/Fm1" and names[1] == "/Fm1"  # copy-on-edit
+
+    def test_replace_and_extract_refuse_inline(self, tmp_dir):
+        from engine.page_images import extract_page_image
+
+        src = self._mixed_page(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        raw = os.path.join(tmp_dir, "px.raw")
+        with open(raw, "wb") as f:
+            f.write(bytes([9, 9, 9]) * 4)
+        with pytest.raises(ValueError, match="cannot be replaced"):
+            replace_page_image(
+                src, out, 1, 0, {"raw_path": raw, "width": 2, "height": 2, "channels": 3}
+            )
+        with pytest.raises(ValueError, match="cannot be extracted"):
+            extract_page_image(src, 1, 0, os.path.join(tmp_dir, "x"))
+        assert not os.path.exists(out)
+
+    def test_extract_of_the_xobject_on_a_mixed_page_stays_aligned(self, tmp_dir):
+        # The inline draw occupies listing slot 0; extracting slot 1 must
+        # hit the XObject, not misalign (the _collect placeholder rule).
+        from engine.page_images import extract_page_image
+
+        src = self._mixed_page(tmp_dir)
+        prefix = os.path.join(tmp_dir, "ex")
+        result = extract_page_image(src, 1, 1, prefix)
+        assert os.path.exists(result["output"])
 
 
 def _matrix_of(path, index):

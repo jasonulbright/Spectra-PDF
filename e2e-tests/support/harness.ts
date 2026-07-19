@@ -834,8 +834,8 @@ export async function editImagePageIds(): Promise<string[]> {
 
 export async function editImagePlacements(
   pageId: string,
-): Promise<{ index: number; nested: boolean; matrix: number[]; opacity: number }[]> {
-  return await browser.execute<{ index: number; nested: boolean; matrix: number[]; opacity: number }[], [string]>(
+): Promise<{ index: number; nested: boolean; matrix: number[]; opacity: number; kind: string }[]> {
+  return await browser.execute<{ index: number; nested: boolean; matrix: number[]; opacity: number; kind: string }[], [string]>(
     function (p) {
       return (window as any).__SPECTRA_TEST__.editImagePlacements(p);
     },

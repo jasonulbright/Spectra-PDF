@@ -170,7 +170,7 @@ export interface CanvasEditImagesHandlers {
   pageIds: () => string[];
   placements: (
     pageId: string,
-  ) => { index: number; nested: boolean; matrix: number[]; opacity: number }[];
+  ) => { index: number; nested: boolean; matrix: number[]; opacity: number; kind: string }[];
   select: (pageId: string, index: number) => void;
   /** Transform (9.C1) the selected image via the real commit path. */
   transformImage: (pageId: string, index: number, matrix: number[]) => Promise<void>;
@@ -597,7 +597,7 @@ export interface TestHarness {
   editImagePageIds: () => string[];
   editImagePlacements: (
     pageId: string,
-  ) => { index: number; nested: boolean; matrix: number[]; opacity: number }[];
+  ) => { index: number; nested: boolean; matrix: number[]; opacity: number; kind: string }[];
   editImageSelect: (pageId: string, index: number) => void;
   /** Transform (9.C1) an image placement to an absolute user-space matrix. */
   editImageTransform: (pageId: string, index: number, matrix: number[]) => Promise<void>;

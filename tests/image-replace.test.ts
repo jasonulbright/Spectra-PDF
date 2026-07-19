@@ -76,8 +76,9 @@ describe('fetchEditPlacements (7.1)', () => {
       { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
     );
     expect(placements).toEqual([
-      // opacity defaults to 1 when the engine omits it (9.C3 seed).
-      { index: 0, nested: false, rect: { x: 0, y: 0, w: 0.25, h: 0.25 }, opacity: 1 },
+      // opacity defaults to 1 when the engine omits it (9.C3 seed);
+      // kind defaults to 'xobject' (9.C4 — inline draws report 'inline').
+      { index: 0, nested: false, rect: { x: 0, y: 0, w: 0.25, h: 0.25 }, opacity: 1, kind: 'xobject' },
     ]);
   });
 

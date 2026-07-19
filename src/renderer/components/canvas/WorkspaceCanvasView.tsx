@@ -599,6 +599,11 @@ export function WorkspaceCanvasView({
     ) => {
       const doc = docs.find((d) => d.id === docId);
       if (!doc) return;
+      // Anchor only to CURRENT ids — the onSetNewFieldRect rule (2n.4c /
+      // Phase 9, round 24 tail: the sibling flows shared the silent-no-op
+      // pattern without the guard). A placement drawn against docs indexed
+      // from a superseded buffer dies at SET_WORKSPACE_DOCUMENTS — refuse.
+      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
       setAddTextPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
       setSigPlacement(null); // one placement card at a time…
       setNewFieldPlacement(null);
@@ -606,7 +611,7 @@ export function WorkspaceCanvasView({
       setAtText('');
       setAtError(null);
     },
-    [docs],
+    [docs, state.files],
   );
   const onClearAddTextPlacement = useCallback(() => {
     setAddTextPlacement(null);
@@ -632,8 +637,19 @@ export function WorkspaceCanvasView({
       color?: [number, number, number];
       family?: 'sans' | 'serif' | 'mono';
     }): Promise<void> => {
+      if (creatingTextRef.current) return; // re-entry: the button is disabled while creating
       const placement = liveAddTextPlacement;
-      if (!placement || creatingTextRef.current) return;
+      // Same reject-loudly rule as createFieldFromPlacement (round 24 tail):
+      // a buffer change between place and commit kills the placement, and
+      // while its reindex is in flight the surviving ids are about to rotate
+      // — converting sourcePageIndex against the new bytes could land the
+      // text on the wrong page. Silently resolving made a skipped commit
+      // indistinguishable from a done one — reject.
+      if (!placement || !placementDocsCurrent(state.files, docs, placement.path)) {
+        const msg = 'The page this text was placed on changed — draw the box again.';
+        setAtError(msg);
+        throw new Error(msg);
+      }
       if (!params.text.trim()) {
         setAtError('Enter some text to add.');
         return;
@@ -882,6 +898,10 @@ export function WorkspaceCanvasView({
     ) => {
       const doc = docs.find((d) => d.id === docId);
       if (!doc) return;
+      // Anchor only to CURRENT ids — the onSetNewFieldRect rule (2n.4c /
+      // Phase 9, round 24 tail): a placement drawn against docs indexed from
+      // a superseded buffer is stillborn — refuse rather than arm it.
+      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
       setSigPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
       setNewFieldPlacement(null);
       setAddTextPlacement(null); // one placement card at a time (9.A2)
@@ -889,7 +909,7 @@ export function WorkspaceCanvasView({
       setSignDone(null);
       setSignError(null);
     },
-    [docs],
+    [docs, state.files],
   );
   const onClearSignaturePlacement = useCallback(() => setSigPlacement(null), []);
 
@@ -1590,6 +1610,15 @@ export function WorkspaceCanvasView({
     [editImageTransform, commitImageTransform],
   );
 
+  // C4: the selected placement's kind — replace/extract disable for an
+  // inline draw (honest disable at the control, engine refusal as belt).
+  const editImageKind = useMemo(() => {
+    if (!editSel || editSel.kind !== 'image') return null;
+    return (
+      editImagesByPage.get(editSel.pageId)?.find((pl) => pl.index === editSel.index)?.kind ?? null
+    );
+  }, [editSel, editImagesByPage]);
+
   // The selected placement's current opacity — the slider's honest seed.
   const editImageOpacity = useMemo(() => {
     if (!editSel || editSel.kind !== 'image') return null;
@@ -1683,6 +1712,11 @@ export function WorkspaceCanvasView({
     const doc = docs.find((d) => d.path === state.activeFileId);
     const page = doc?.pages[0];
     if (!doc || !page) return false;
+    // Same currency rule as harnessPlaceFieldRef (round 24 tail) — the
+    // harness polls this, so refusing while a reindex is in flight makes
+    // place→commit atomic against the id rotation instead of arming a
+    // doomed placement.
+    if (!placementDocsCurrent(state.files, docs, doc.path)) return false;
     setAddTextPlacement({
       id: crypto.randomUUID(),
       path: doc.path,
@@ -1702,6 +1736,7 @@ export function WorkspaceCanvasView({
           nested: p.nested,
           matrix: [...p.matrix],
           opacity: p.opacity,
+          kind: p.kind,
         })),
       transformImage: (pageId, index, matrix) =>
         commitImageTransformRef.current(pageId, index, matrix),
@@ -1959,6 +1994,16 @@ export function WorkspaceCanvasView({
       setSignError('Apply the pending page changes first, then sign the field.');
       return;
     }
+    if (placement && !placementDocsCurrent(state.files, docs, placement.path)) {
+      // Same stale-docs rule as createFieldFromPlacement (round 24 tail): a
+      // placement whose docs were indexed from a superseded buffer converts
+      // sourcePageIndex against ids that are about to rotate — the stamp
+      // could land on the wrong page. The invalidation effect clears the
+      // placement when the buffer change lands; this covers the in-flight
+      // window where it hasn't yet. Loud, not silent — the card stays open.
+      setSignError('The page this signature was placed on changed — draw the box again.');
+      return;
+    }
     signingRef.current = true;
     setSigningBusy(true);
     setSignError(null);
@@ -2061,6 +2106,10 @@ export function WorkspaceCanvasView({
     const doc = docs.find((d) => d.path === state.activeFileId);
     const page = doc?.pages[0];
     if (!doc || !page) return false;
+    // Same currency rule as harnessPlaceFieldRef (round 24 tail) — the
+    // harness polls this, so a transient refusal during a reindex
+    // self-heals instead of arming a doomed placement.
+    if (!placementDocsCurrent(state.files, docs, doc.path)) return false;
     setSigPlacement({
       id: crypto.randomUUID(),
       path: doc.path,
@@ -2396,6 +2445,7 @@ export function WorkspaceCanvasView({
         editNotice={editNotice}
         onEditAction={(kind) => void runEditAction(kind)}
         editImageOpacity={editImageOpacity}
+        editImageKind={editImageKind}
         onSetImageOpacity={commitImageOpacity}
         imageCropArmed={imageCropArmed}
         onToggleImageCrop={() => setImageCropArmed((a) => !a)}

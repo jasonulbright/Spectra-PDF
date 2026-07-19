@@ -32,6 +32,22 @@ export function getDocumentProxy(path: string, buffer: PdfBuffer): Promise<PDFDo
   return entry.promise;
 }
 
+// Entry point for callers whose buffer crossed an async gap (Phase 9,
+// round 24 tail). getDocumentProxy trusts its caller: handed a superseded
+// buffer, it would EVICT + DESTROY the live entry for the path's CURRENT
+// bytes — re-creating the mid-flight-destroy hang on whoever holds that
+// proxy. The cache cannot know files-currency, so an async-gap caller states
+// it: when isStillWanted() is false at call time nothing is touched and null
+// comes back. Synchronous callers keep using getDocumentProxy directly.
+export function requestDocumentProxy(
+  path: string,
+  buffer: PdfBuffer,
+  isStillWanted: () => boolean,
+): Promise<PDFDocumentProxy> | null {
+  if (!isStillWanted()) return null;
+  return getDocumentProxy(path, buffer);
+}
+
 // Drop cached proxies for files that are no longer open.
 export function evictExcept(openPaths: ReadonlySet<string>): void {
   for (const [path, entry] of cache) {

@@ -61,6 +61,9 @@ export interface SecondaryToolbarProps {
    * (null = no image selected), commit-on-release, the crop-mode toggle,
    * and the rotate-90 steps (routed through the C1 transform). */
   editImageOpacity: number | null;
+  /** C4: the selected placement's kind — inline draws can't replace or
+   * extract (the engine refuses; the buttons disable with the reason). */
+  editImageKind: 'inline' | 'xobject' | null;
   onSetImageOpacity: (value: number) => void;
   imageCropArmed: boolean;
   onToggleImageCrop: () => void;
@@ -83,6 +86,7 @@ export function SecondaryToolbar({
   onEditAction,
   onEditTextOpen,
   editImageOpacity,
+  editImageKind,
   onSetImageOpacity,
   imageCropArmed,
   onToggleImageCrop,
@@ -184,7 +188,12 @@ export function SecondaryToolbar({
             type="button"
             data-testid="edit-action-replace"
             className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editBusy}
+            disabled={editSelectionKind !== 'image' || editBusy || editImageKind === 'inline'}
+            title={
+              editImageKind === 'inline'
+                ? 'An inline image cannot be replaced — delete it and add an image instead'
+                : undefined
+            }
             onClick={() => onEditAction('replace')}
           >
             Replace…
@@ -193,7 +202,10 @@ export function SecondaryToolbar({
             type="button"
             data-testid="edit-action-extract"
             className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editBusy}
+            disabled={editSelectionKind !== 'image' || editBusy || editImageKind === 'inline'}
+            title={
+              editImageKind === 'inline' ? 'An inline image cannot be extracted' : undefined
+            }
             onClick={() => onEditAction('extract')}
           >
             Extract…

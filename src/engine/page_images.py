@@ -33,9 +33,13 @@ module only embeds):
     8-bit pixels from the renderer's canvas decode. channels=4 splits the
     alpha plane into an /SMask.
 
-Inline images (BI/ID/EI) are NOT listed and never touched — they pass
-through rewrites verbatim. Rare in modern PDFs; recorded as a v1 non-goal
-in the phase doc.
+Inline images (BI/ID/EI) are placements too (9.C4 re-ratified the 7.1
+non-goal): they list with `kind: "inline"` in the same depth-first id
+order as XObject draws (`kind: "xobject"`), and the wrap/drop family
+(delete/transform/crop/opacity) applies to them identically — both draw
+the unit square under the live CTM. REPLACE and EXTRACT refuse inline
+targets with named reasons (delete + add covers the workflow; the bytes
+live in the stream, so a deleted inline draw needs no GC).
 
 Text-run editing (7.2) will consolidate this walker and redact.py's into
 one shared interpreter; for this slice the graphics-state tracking is
@@ -109,6 +113,32 @@ def _walk_placements(
                 break
         if state.feed(operator, operands):
             continue
+        if operator == "INLINE IMAGE":
+            # C4: a BI/ID/EI object occupies ONE stream slot and draws the
+            # unit square under the live CTM exactly like an image Do — it
+            # is a placement in the SAME depth-first id order (the
+            # walker-agreement invariant covers both machines). pikepdf
+            # normalizes the abbreviated keys (/W → /Width …).
+            obj = instruction.iimage.obj
+            x0, y0, x1, y1 = _bbox_of_rect_under_matrix(state.ctm, 1.0, 1.0)
+            try:
+                nw, nh = int(obj.get("/Width", 0) or 0), int(obj.get("/Height", 0) or 0)
+            except (TypeError, ValueError):
+                nw = nh = 0
+            out.append(
+                {
+                    "index": len(out),
+                    "rect": [x0, y0, x1, y1],
+                    "matrix": list(state.ctm),
+                    "name": None,
+                    "kind": "inline",
+                    "nested": nested,
+                    "native_width": nw,
+                    "native_height": nh,
+                    "opacity": round(alpha, 4),
+                }
+            )
+            continue
         if operator == "Do":
             name = str(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback_resources)
@@ -124,6 +154,7 @@ def _walk_placements(
                         # it to build the delta cm; `rect` is just its bbox.
                         "matrix": list(state.ctm),
                         "name": name,
+                        "kind": "xobject",
                         "nested": nested,
                         "native_width": int(xobj.get("/Width", 0)),
                         "native_height": int(xobj.get("/Height", 0)),
@@ -238,6 +269,41 @@ class _EditState:
         self.superseded_forms: set = set()
 
 
+def _emit_wrap(kept, instruction, state, resources, fallback_resources, reserved) -> bool:
+    """The WRAP actions (transform/crop/opacity) at the target draw —
+    shared by Do and inline-image targets (C4): both draw the unit square
+    under the live CTM, so the q/Q-bounded prefix is identical. Returns
+    True when the action was one of the wraps."""
+    if state.action == "transform":
+        kept.append(_op([], "q"))
+        kept.append(_op([round(float(v), 6) for v in state.delta], "cm"))
+        kept.append(instruction)
+        kept.append(_op([], "Q"))
+        return True
+    if state.action == "crop":
+        cx0, cy0, cx1, cy1 = state.crop_rect
+        kept.append(_op([], "q"))
+        kept.append(
+            _op(
+                [round(cx0, 6), round(cy0, 6), round(cx1 - cx0, 6), round(cy1 - cy0, 6)],
+                "re",
+            )
+        )
+        kept.append(_op([], "W"))
+        kept.append(_op([], "n"))
+        kept.append(instruction)
+        kept.append(_op([], "Q"))
+        return True
+    if state.action == "opacity":
+        state.gs_name = _fresh_gs_name(resources, fallback_resources, reserved)
+        kept.append(_op([], "q"))
+        kept.append(_op([Name(state.gs_name)], "gs"))
+        kept.append(instruction)
+        kept.append(_op([], "Q"))
+        return True
+    return False
+
+
 def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, name_counter, reserved):
     """Return (kept_instructions, changed, new_forms). Recurses into forms;
     when the target draw lies inside one, the form is COPIED (fresh name,
@@ -254,6 +320,26 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
     new_forms: dict = {}
     for instruction in instructions:
         operator = str(instruction.operator)
+        if operator == "INLINE IMAGE":
+            # C4: inline draws share the ordinal stream with image Do's —
+            # the lister counts both, so the rewriter must too (a later
+            # inline draw still occupies its counted slot after the edit
+            # is done).
+            if not state.done and state.seen == state.target:
+                state.done = True
+                changed = True
+                if state.action == "delete":
+                    pass  # dropped — inline bytes live in the stream itself
+                elif not _emit_wrap(
+                    kept, instruction, state, resources, fallback_resources, reserved
+                ):
+                    # replace targets an XObject draw; the op refuses
+                    # upstream — this is the belt.
+                    raise ValueError("an inline image cannot be replaced")
+            else:
+                kept.append(instruction)
+            state.seen += 1
+            continue
         operands = list(instruction.operands)
         if operator != "Do" or state.done:
             kept.append(instruction)
@@ -268,49 +354,13 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                 if state.action == "delete":
                     state.deleted_name = name
                     # drop the instruction
-                elif state.action == "transform":
-                    # Wrap the ORIGINAL draw in q/Q with the delta cm. The
-                    # accumulated CTM at this point is exactly M_cur, so the
-                    # pre-concatenated D makes the effective transform D·M_cur =
-                    # M' at any nesting depth; the q/Q keeps the cm from leaking
-                    # to later draws.
-                    kept.append(_op([], "q"))
-                    kept.append(_op([round(float(v), 6) for v in state.delta], "cm"))
-                    kept.append(instruction)
-                    kept.append(_op([], "Q"))
-                elif state.action == "crop":
-                    # C3: clip to the crop rect expressed in the image's own
-                    # UNIT space — the path is emitted at the draw, so it
-                    # rides the exact CTM the unit square draws under, at any
-                    # nesting depth. q/Q bounds the clip to this one draw; a
-                    # re-crop wraps again = clip INTERSECTION (the honest
-                    # compose).
-                    cx0, cy0, cx1, cy1 = state.crop_rect
-                    kept.append(_op([], "q"))
-                    kept.append(
-                        _op(
-                            [
-                                round(cx0, 6),
-                                round(cy0, 6),
-                                round(cx1 - cx0, 6),
-                                round(cy1 - cy0, 6),
-                            ],
-                            "re",
-                        )
-                    )
-                    kept.append(_op([], "W"))
-                    kept.append(_op([], "n"))
-                    kept.append(instruction)
-                    kept.append(_op([], "Q"))
-                elif state.action == "opacity":
-                    # C3: name allocated HERE, against the resources actually
-                    # in scope at the draw — a nested target must never
-                    # shadow its form's own /ExtGState names.
-                    state.gs_name = _fresh_gs_name(resources, fallback_resources, reserved)
-                    kept.append(_op([], "q"))
-                    kept.append(_op([Name(state.gs_name)], "gs"))
-                    kept.append(instruction)
-                    kept.append(_op([], "Q"))
+                elif _emit_wrap(kept, instruction, state, resources, fallback_resources, reserved):
+                    # transform: q D cm — effective D·M_cur = M' at any depth.
+                    # crop (C3): the clip rect rides the image's own unit
+                    # space; a re-crop wraps again = intersection.
+                    # opacity (C3): gs name allocated AT the draw against the
+                    # resources in scope (never shadows a form's own names).
+                    pass
                 else:
                     kept.append(_do_instruction(state.replacement_name))
             else:
@@ -827,13 +877,18 @@ def replace_page_image(file: str, output: str, page: int, index: int, source: di
         # entries.
         resources = _copy_resources_for_write(pdf, _resolve_resources(p))
         p.obj["/Resources"] = resources
-        count = len(
-            _walk_placements(
-                pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
-            )
+        placements = _walk_placements(
+            pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
         )
+        count = len(placements)
         if not (0 <= int(index) < count):
             raise ValueError(f"image index {index} is out of range (page has {count})")
+        if placements[int(index)].get("kind") == "inline":
+            # C4 v1 boundary: replacing would need inline re-encoding whose
+            # value is near-zero for this rare class; delete + add covers it.
+            raise ValueError(
+                "an inline image cannot be replaced — delete it and add an image instead"
+            )
         name_counter = [0]
         reserved: set = set()
         state = _EditState(
@@ -946,13 +1001,22 @@ def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> 
         if not (0 <= int(index) < len(placements)):
             raise ValueError(f"image index {index} is out of range (page has {len(placements)})")
         target = placements[int(index)]
+        if target.get("kind") == "inline":
+            # C4 v1 boundary: inline extraction needs its own decode
+            # machinery; the class is rare and the honest refusal names it.
+            raise ValueError("an inline image cannot be extracted")
 
         # Re-walk to the owning xobject: the lister records the NAME and
         # nesting; resolve the actual object by replaying the same order.
+        # Inline draws occupy listing slots (C4) — placehold them so
+        # holder[index] stays aligned with the listing on mixed pages.
         holder: list = []
 
         def _collect(instructions, res, depth, fallback):
             for instruction in instructions:
+                if str(instruction.operator) == "INLINE IMAGE":
+                    holder.append(None)
+                    continue
                 if str(instruction.operator) != "Do" or not instruction.operands:
                     continue
                 nm = str(instruction.operands[0])
