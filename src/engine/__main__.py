@@ -47,10 +47,12 @@ from engine.forms import read_form_fields, fill_form_fields
 from engine.ocr_layer import apply_ocr_layer
 from engine.page_images import (
     add_page_image,
+    crop_page_image,
     delete_page_image,
     extract_page_image,
     list_page_images,
     replace_page_image,
+    set_image_opacity,
     transform_page_image,
 )
 from engine.distill import distill
@@ -107,6 +109,8 @@ def main() -> None:
     server.register("extract_page_image", extract_page_image)
     server.register("transform_page_image", transform_page_image)
     server.register("add_page_image", add_page_image)
+    server.register("crop_page_image", crop_page_image)
+    server.register("set_image_opacity", set_image_opacity)
     server.register("list_text_runs", list_text_runs)
     server.register("replace_text_run", replace_text_run)
     server.register("convert_text_run", convert_text_run)

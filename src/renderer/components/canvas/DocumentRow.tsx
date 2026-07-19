@@ -39,6 +39,9 @@ interface DocumentRowProps {
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
+  /** 9.C3 crop mode: armed flag + unit-space rect commit. */
+  imageCropArmed: boolean;
+  onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
   editTextByPage: ReadonlyMap<string, EditTextListing>;
   editSelection: { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
   /** The ONE open inline editor — a run's (kind 'text') or a paragraph's. */
@@ -123,6 +126,8 @@ function DocumentRowImpl({
   editImagesByPage,
   editImageTransform,
   onCommitImageTransform,
+  imageCropArmed,
+  onCommitImageCrop,
   editTextByPage,
   editSelection,
   editingText,
@@ -193,6 +198,8 @@ function DocumentRowImpl({
         editImages={editImagesByPage.get(page.id)}
         editImageTransform={editImageTransform?.pageId === page.id ? editImageTransform : null}
         onCommitImageTransform={onCommitImageTransform}
+        imageCropArmed={imageCropArmed}
+        onCommitImageCrop={onCommitImageCrop}
         editTextRuns={editTextByPage.get(page.id)?.runBoxes}
         editParagraphs={editTextByPage.get(page.id)?.paragraphs}
         editSelectedIndex={

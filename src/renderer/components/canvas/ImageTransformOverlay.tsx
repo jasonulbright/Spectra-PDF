@@ -4,8 +4,11 @@ import {
   applyMove,
   applyResizeCorner,
   applyRotate,
+  cropRectFromLocalPoints,
   displayQuad,
   displayToUser,
+  invert,
+  transformPoint,
   userCenter,
   userToDisplay,
   type Mat,
@@ -18,12 +21,20 @@ import {
 // USER space (rotation-agnostic), previews live via CSS, and commits the
 // absolute matrix M' on release. Pointer drags use window listeners (the canvas
 // drag invariant — synthetic pointermove doesn't deliver in the WebView).
+//
+// Phase 9.C3 — crop mode: when armed (toolbar toggle), the body drag draws a
+// band in the image's own UNIT space instead of moving; on release the clamped
+// unit rect commits to the engine's clip-based crop. Handles hide while armed
+// (the quad is the crop canvas).
 
 interface Props {
   ctx: EditImageTransformCtx;
   /** Pending in-memory page rotation applied at render (like every overlay). */
   pendingRotate: number;
   onCommit: (matrix: number[]) => void;
+  /** 9.C3: crop mode armed — the body drag draws the crop band. */
+  cropArmed: boolean;
+  onCommitCrop: (rect: [number, number, number, number]) => void;
 }
 
 type Compute = (startUser: [number, number], curUser: [number, number], base: Mat) => Mat;
@@ -34,9 +45,12 @@ export default function ImageTransformOverlay({
   ctx,
   pendingRotate,
   onCommit,
+  cropArmed,
+  onCommitCrop,
 }: Props): React.ReactElement {
   const rootRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Mat | null>(null);
+  const [cropBand, setCropBand] = useState<[number, number, number, number] | null>(null);
   const active = useRef(false);
   // Teardown for an in-flight gesture, so an unmount mid-drag (e.g. a keyboard
   // tool switch) cancels it — a stale window pointerup must not commit against
@@ -98,6 +112,52 @@ export default function ImageTransformOverlay({
     window.addEventListener('pointercancel', onCancel);
   };
 
+  // 9.C3 crop band: drag in the image's LOCAL unit space (pointer → user →
+  // M⁻¹ → clamp), preview the band, commit the clamped rect on release.
+  const startCrop = (e: React.PointerEvent): void => {
+    if (ctx.busy || active.current) return;
+    const inv = invert(base);
+    if (!inv) return; // degenerate placement: nothing sane to crop
+    e.preventDefault();
+    e.stopPropagation();
+    active.current = true;
+    const toLocal = (clientX: number, clientY: number): [number, number] => {
+      const [u, v] = normPointer(clientX, clientY);
+      const [ux, uy] = displayToUser(u, v, box, bakedRotate, pendingRotate);
+      const [lx, ly] = transformPoint(inv, ux, uy);
+      return [Math.max(0, Math.min(1, lx)), Math.max(0, Math.min(1, ly))];
+    };
+    const s = toLocal(e.clientX, e.clientY);
+    let latest: [number, number, number, number] | null = null;
+    const onMove = (ev: PointerEvent): void => {
+      const c = toLocal(ev.clientX, ev.clientY);
+      latest = cropRectFromLocalPoints(s, c);
+      // Preview even a below-min-size band (the user sees it forming);
+      // only a valid rect commits.
+      setCropBand([
+        Math.min(s[0], c[0]),
+        Math.min(s[1], c[1]),
+        Math.max(s[0], c[0]),
+        Math.max(s[1], c[1]),
+      ]);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      active.current = false;
+      cancelRef.current = null;
+      setCropBand(null);
+      if (commit && latest) onCommitCrop(latest);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    cancelRef.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  };
+
   const moveGesture: Compute = (s, c, b) => applyMove(b, c[0] - s[0], c[1] - s[1]);
   const resizeGesture = (corner: number): Compute => (_s, c, b) =>
     applyResizeCorner(b, corner, c[0], c[1]) ?? b;
@@ -111,40 +171,65 @@ export default function ImageTransformOverlay({
     left: `${p[0] * 100}%`,
     top: `${p[1] * 100}%`,
   });
+  // The live crop band's display quad (unit rect → user via m → display).
+  const bandPts = cropBand
+    ? (
+        [
+          [cropBand[0], cropBand[1]],
+          [cropBand[2], cropBand[1]],
+          [cropBand[2], cropBand[3]],
+          [cropBand[0], cropBand[3]],
+        ] as Array<[number, number]>
+      )
+        .map(([lx, ly]) => {
+          const [ux, uy] = transformPoint(m, lx, ly);
+          const [dx, dy] = userToDisplay(ux, uy, box, bakedRotate, pendingRotate);
+          return `${dx * 100},${dy * 100}`;
+        })
+        .join(' ')
+    : null;
 
   return (
     <div ref={rootRef} className="page-imgtx" data-testid={`img-transform-${ctx.index}`}>
       <svg className="page-imgtx-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
-        <line
-          x1={topMid[0] * 100}
-          y1={topMid[1] * 100}
-          x2={rotateHandle[0] * 100}
-          y2={rotateHandle[1] * 100}
-          className="page-imgtx-arm"
-          vectorEffect="non-scaling-stroke"
-        />
+        {!cropArmed && (
+          <line
+            x1={topMid[0] * 100}
+            y1={topMid[1] * 100}
+            x2={rotateHandle[0] * 100}
+            y2={rotateHandle[1] * 100}
+            className="page-imgtx-arm"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
         <polygon
           points={pts}
-          className="page-imgtx-quad"
+          className={'page-imgtx-quad' + (cropArmed ? ' crop' : '')}
           vectorEffect="non-scaling-stroke"
-          onPointerDown={(e) => start(e, moveGesture)}
+          onPointerDown={(e) => (cropArmed ? startCrop(e) : start(e, moveGesture))}
         />
+        {bandPts && (
+          <polygon points={bandPts} className="page-imgtx-cropband" vectorEffect="non-scaling-stroke" />
+        )}
       </svg>
-      {[0, 1, 2, 3].map((i) => (
+      {!cropArmed &&
+        [0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="page-imgtx-handle"
+            data-testid={`img-transform-handle-${i}`}
+            style={dot(quad[i])}
+            onPointerDown={(e) => start(e, resizeGesture(i))}
+          />
+        ))}
+      {!cropArmed && (
         <div
-          key={i}
-          className="page-imgtx-handle"
-          data-testid={`img-transform-handle-${i}`}
-          style={dot(quad[i])}
-          onPointerDown={(e) => start(e, resizeGesture(i))}
+          className="page-imgtx-rotate"
+          data-testid="img-transform-rotate"
+          style={dot(rotateHandle)}
+          onPointerDown={(e) => start(e, rotateGesture)}
         />
-      ))}
-      <div
-        className="page-imgtx-rotate"
-        data-testid="img-transform-rotate"
-        style={dot(rotateHandle)}
-        onPointerDown={(e) => start(e, rotateGesture)}
-      />
+      )}
     </div>
   );
 }

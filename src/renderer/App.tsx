@@ -802,11 +802,17 @@ function AppContent(): React.ReactElement {
 
   const handleEditImage = useCallback(
     async (
-      kind: 'delete' | 'replace' | 'extract' | 'transform',
+      kind: 'delete' | 'replace' | 'extract' | 'transform' | 'crop' | 'opacity',
       path: string,
       page: number,
       index: number,
-      opts?: { source?: ReplacementSource; outputPrefix?: string; matrix?: number[] },
+      opts?: {
+        source?: ReplacementSource;
+        outputPrefix?: string;
+        matrix?: number[];
+        rect?: [number, number, number, number];
+        opacity?: number;
+      },
     ) => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
@@ -826,6 +832,26 @@ function AppContent(): React.ReactElement {
         // is needed here (unlike signature placement).
         if (!opts?.matrix) throw new Error('transform requires a target matrix');
         await performOperation(path, 'transform_page_image', { page, index, matrix: opts.matrix });
+        return;
+      }
+
+      if (kind === 'crop') {
+        // 9.C3: rect is the crop in the image's UNIT space — depth- and
+        // rotation-invariant by construction (the engine emits it as a clip
+        // at the draw), so like transform it needs no re-projection.
+        if (!opts?.rect) throw new Error('crop requires a rect');
+        await performOperation(path, 'crop_page_image', { page, index, rect: opts.rect });
+        return;
+      }
+
+      if (kind === 'opacity') {
+        // 9.C3: uniform placement opacity via a page-local ExtGState.
+        if (opts?.opacity === undefined) throw new Error('opacity requires a value');
+        await performOperation(path, 'set_image_opacity', {
+          page,
+          index,
+          opacity: opts.opacity,
+        });
         return;
       }
 

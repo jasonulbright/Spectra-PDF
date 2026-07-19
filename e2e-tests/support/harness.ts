@@ -834,8 +834,8 @@ export async function editImagePageIds(): Promise<string[]> {
 
 export async function editImagePlacements(
   pageId: string,
-): Promise<{ index: number; nested: boolean; matrix: number[] }[]> {
-  return await browser.execute<{ index: number; nested: boolean; matrix: number[] }[], [string]>(
+): Promise<{ index: number; nested: boolean; matrix: number[]; opacity: number }[]> {
+  return await browser.execute<{ index: number; nested: boolean; matrix: number[]; opacity: number }[], [string]>(
     function (p) {
       return (window as any).__SPECTRA_TEST__.editImagePlacements(p);
     },
@@ -898,12 +898,15 @@ export async function editImageSelect(pageId: string, index: number): Promise<vo
 }
 
 /** Run an edit action through the canvas's REAL handler; opts inject what
- * the native dialogs would collect (replace source / extract prefix). */
+ * the native dialogs would collect (replace source / extract prefix) or,
+ * for the 9.C3 adjustments, the crop rect (image-unit space) / opacity. */
 export async function editImageAct(
-  kind: 'delete' | 'replace' | 'extract',
+  kind: 'delete' | 'replace' | 'extract' | 'crop' | 'opacity',
   opts?: {
     source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 };
     outputPrefix?: string;
+    rect?: [number, number, number, number];
+    opacity?: number;
   },
 ): Promise<void> {
   const result = await browser.executeAsync<string | null, [string, unknown]>(

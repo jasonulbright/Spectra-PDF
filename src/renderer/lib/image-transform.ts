@@ -102,6 +102,24 @@ export function applyRotate(m: Mat, angleRad: number): Mat {
   return matMul(m, rc); // M (→ user space) first, then rotate about C
 }
 
+/** Normalize two LOCAL (image-unit-space) drag points into a crop rect
+ * [x0, y0, x1, y1] clamped to the unit square, or null when the result is
+ * degenerate (below `minSize` on either axis — a bare click or a sliver
+ * must not commit). 9.C3: the engine takes exactly this rect. */
+export function cropRectFromLocalPoints(
+  a: [number, number],
+  b: [number, number],
+  minSize = 0.02,
+): [number, number, number, number] | null {
+  const clamp = (v: number): number => Math.max(0, Math.min(1, v));
+  const x0 = clamp(Math.min(a[0], b[0]));
+  const y0 = clamp(Math.min(a[1], b[1]));
+  const x1 = clamp(Math.max(a[0], b[0]));
+  const y1 = clamp(Math.max(a[1], b[1]));
+  if (x1 - x0 < minSize || y1 - y0 < minSize) return null;
+  return [x0, y0, x1, y1];
+}
+
 // ── display projection (user ⇄ final display-normalized) ────────────────────
 
 export interface PageBox {

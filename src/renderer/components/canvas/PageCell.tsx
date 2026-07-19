@@ -323,6 +323,10 @@ interface PageCellProps {
    * pageId upstream — non-null only on the page whose image is selected. */
   editImageTransform?: EditImageTransformCtx | null;
   onCommitImageTransform?: (pageId: string, index: number, matrix: number[]) => void;
+  /** 9.C3: crop mode armed (toolbar toggle) — the overlay's body drag draws
+   * the crop band instead of moving. */
+  imageCropArmed?: boolean;
+  onCommitImageCrop?: (pageId: string, index: number, rect: [number, number, number, number]) => void;
   /** Edit-mode text runs (7.2+7.3), same projection rules as images.
    * Since 7.5 these are only the runs NOT covered by an editable
    * paragraph (refused paragraphs decompose back to run boxes). */
@@ -443,6 +447,8 @@ function PageCellImpl({
   editSelectedIndex,
   editImageTransform,
   onCommitImageTransform,
+  imageCropArmed,
+  onCommitImageCrop,
   onSelectEditImage,
   editTextRuns,
   editTextSelectedIndex,
@@ -1114,6 +1120,8 @@ function PageCellImpl({
           ctx={editImageTransform}
           pendingRotate={page.rotation}
           onCommit={(matrix) => onCommitImageTransform(page.id, editImageTransform.index, matrix)}
+          cropArmed={Boolean(imageCropArmed)}
+          onCommitCrop={(rect) => onCommitImageCrop?.(page.id, editImageTransform.index, rect)}
         />
       )}
       {(findWords ?? []).map((word, i) => {

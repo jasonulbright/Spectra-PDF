@@ -17,6 +17,8 @@ export interface EditImagePlacement {
   /** The placement's FULL device matrix [a,b,c,d,e,f] in page user space —
    * what C1's transform gesture manipulates (rect is just its bbox). */
   matrix: [number, number, number, number, number, number];
+  /** Effective fill alpha at the draw (9.C3) — the opacity slider's seed. */
+  opacity: number;
 }
 
 /** The selected image's transform context (9.C1) — its user-space matrix plus
@@ -39,6 +41,7 @@ interface EngineListing {
     rect: [number, number, number, number];
     nested: boolean;
     matrix: [number, number, number, number, number, number];
+    opacity: number;
   }[];
 }
 
@@ -57,5 +60,6 @@ export async function fetchEditPlacements(
     nested: Boolean(image.nested),
     rect: pdfRectToDisplay(image.rect, geometry.box, geometry.bakedRotate),
     matrix: image.matrix,
+    opacity: typeof image.opacity === 'number' ? image.opacity : 1,
   }));
 }

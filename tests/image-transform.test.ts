@@ -3,6 +3,7 @@ import {
   applyMove,
   applyResizeCorner,
   applyRotate,
+  cropRectFromLocalPoints,
   displayQuad,
   displayToUser,
   invert,
@@ -93,5 +94,37 @@ describe('display projection', () => {
     expect(Math.min(...ys)).toBeCloseTo(bbox.y, 6);
     expect(Math.max(...xs)).toBeCloseTo(bbox.x + bbox.w, 6);
     expect(Math.max(...ys)).toBeCloseTo(bbox.y + bbox.h, 6);
+  });
+});
+
+describe('crop rect from local drag points (9.C3)', () => {
+  it('normalizes any drag direction into an ordered rect', () => {
+    expect(cropRectFromLocalPoints([0.8, 0.7], [0.2, 0.1])).toEqual([0.2, 0.1, 0.8, 0.7]);
+    expect(cropRectFromLocalPoints([0.2, 0.7], [0.8, 0.1])).toEqual([0.2, 0.1, 0.8, 0.7]);
+  });
+
+  it('clamps to the unit square', () => {
+    expect(cropRectFromLocalPoints([-0.5, -0.5], [1.5, 1.5])).toEqual([0, 0, 1, 1]);
+  });
+
+  it('refuses a degenerate band (a bare click or a sliver)', () => {
+    expect(cropRectFromLocalPoints([0.5, 0.5], [0.5, 0.5])).toBeNull();
+    expect(cropRectFromLocalPoints([0.5, 0.1], [0.505, 0.9])).toBeNull(); // x sliver
+    expect(cropRectFromLocalPoints([0.1, 0.5], [0.9, 0.505])).toBeNull(); // y sliver
+  });
+
+  it('honours a custom minimum size', () => {
+    expect(cropRectFromLocalPoints([0.4, 0.4], [0.45, 0.45], 0.01)).toEqual([
+      0.4, 0.4, 0.45, 0.45,
+    ]);
+    expect(cropRectFromLocalPoints([0.4, 0.4], [0.45, 0.45], 0.1)).toBeNull();
+  });
+
+  it('round-trips through a placement matrix inverse (the overlay path)', () => {
+    // Display drag over M=[100,0,0,80,50,600]: user points → local via M⁻¹.
+    const inv = invert(M)!;
+    const a = transformPoint(inv, 75, 620); // user (75,620) → local (0.25, 0.25)
+    const b = transformPoint(inv, 125, 660); // → (0.75, 0.75)
+    expect(cropRectFromLocalPoints(a, b)).toEqual([0.25, 0.25, 0.75, 0.75]);
   });
 });

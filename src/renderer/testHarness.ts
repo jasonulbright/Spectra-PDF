@@ -170,7 +170,7 @@ export interface CanvasEditImagesHandlers {
   pageIds: () => string[];
   placements: (
     pageId: string,
-  ) => { index: number; nested: boolean; matrix: number[] }[];
+  ) => { index: number; nested: boolean; matrix: number[]; opacity: number }[];
   select: (pageId: string, index: number) => void;
   /** Transform (9.C1) the selected image via the real commit path. */
   transformImage: (pageId: string, index: number, matrix: number[]) => Promise<void>;
@@ -195,10 +195,12 @@ export interface CanvasEditImagesHandlers {
   ) => { index: number; text: string; lineCount: number; alignment: string }[];
   openParagraphEditor: (pageId: string, index: number) => void;
   act: (
-    kind: 'delete' | 'replace' | 'extract',
+    kind: 'delete' | 'replace' | 'extract' | 'crop' | 'opacity',
     opts?: {
       source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 };
       outputPrefix?: string;
+      rect?: [number, number, number, number];
+      opacity?: number;
     },
   ) => Promise<void>;
   /** Add Text (9.A2): place a box on the active file's first page (the band
@@ -595,15 +597,17 @@ export interface TestHarness {
   editImagePageIds: () => string[];
   editImagePlacements: (
     pageId: string,
-  ) => { index: number; nested: boolean; matrix: number[] }[];
+  ) => { index: number; nested: boolean; matrix: number[]; opacity: number }[];
   editImageSelect: (pageId: string, index: number) => void;
   /** Transform (9.C1) an image placement to an absolute user-space matrix. */
   editImageTransform: (pageId: string, index: number, matrix: number[]) => Promise<void>;
   editImageAct: (
-    kind: 'delete' | 'replace' | 'extract',
+    kind: 'delete' | 'replace' | 'extract' | 'crop' | 'opacity',
     opts?: {
       source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 };
       outputPrefix?: string;
+      rect?: [number, number, number, number];
+      opacity?: number;
     },
   ) => Promise<void>;
   /** Add Image (9.C2): embed a source at a user-space rect. */

@@ -28,6 +28,7 @@ import { EDIT_DECLINED } from '../../lib/edit-text';
 import { pageIdAtSourceIndex } from '../../lib/durable-identity';
 import { computeEditSpans, fetchEditTextListing, hexToRgb } from '../../lib/edit-paragraphs';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
+import { applyRotate } from '../../lib/image-transform';
 import { workspacePageNumber } from '../../lib/workspace-commit';
 import { runCommitGate } from '../../lib/commit-gate';
 
@@ -71,11 +72,17 @@ interface WorkspaceCanvasViewProps {
   // read + save, resolving to a user-facing notice naming the real output).
   // `opts` is the harness's dialog bypass.
   onEditImage: (
-    kind: 'delete' | 'replace' | 'extract' | 'transform',
+    kind: 'delete' | 'replace' | 'extract' | 'transform' | 'crop' | 'opacity',
     path: string,
     page: number,
     index: number,
-    opts?: { source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 }; outputPrefix?: string; matrix?: number[] },
+    opts?: {
+      source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 };
+      outputPrefix?: string;
+      matrix?: number[];
+      rect?: [number, number, number, number];
+      opacity?: number;
+    },
   ) => Promise<string | void>;
   // Edit ▸ Text (7.2+7.3): replace one run's text — same one-snapshot,
   // undoable App routing (engine replace_text_run). Resolves EDIT_DECLINED
@@ -1350,7 +1357,7 @@ export function WorkspaceCanvasView({
 
   const runEditAction = useCallback(
     async (
-      kind: 'delete' | 'replace' | 'extract',
+      kind: 'delete' | 'replace' | 'extract' | 'crop' | 'opacity',
       opts?: Parameters<typeof onEditImage>[4],
     ): Promise<void> => {
       if (!editSel || editSel.kind !== 'image' || !focusedDoc || editBusy) return;
@@ -1453,6 +1460,57 @@ export function WorkspaceCanvasView({
     },
     [focusedDoc, docs, onEditImage, editBusy],
   );
+
+  // 9.C3: crop mode (toolbar toggle) — armed, the overlay's body drag draws
+  // the crop band. Reset whenever the selection changes: a stale armed crop
+  // on a fresh selection would surprise.
+  const [imageCropArmed, setImageCropArmed] = useState(false);
+  useEffect(() => {
+    setImageCropArmed(false);
+  }, [editSel]);
+
+  // The overlay reports pageId/index explicitly; they always match the
+  // selection (the overlay only renders for it) — verified, then routed
+  // through runEditAction so busy/notice/stale-box handling is shared.
+  const commitImageCrop = useCallback(
+    (pageId: string, index: number, rect: [number, number, number, number]): void => {
+      if (!editSel || editSel.kind !== 'image') return;
+      if (editSel.pageId !== pageId || editSel.index !== index) return;
+      setImageCropArmed(false);
+      void runEditAction('crop', { rect });
+    },
+    [editSel, runEditAction],
+  );
+
+  // 9.C3: opacity commit (slider release) — same shared routing.
+  const commitImageOpacity = useCallback(
+    (value: number): void => {
+      void runEditAction('opacity', { opacity: value });
+    },
+    [runEditAction],
+  );
+
+  // 9.C3: rotate-90 buttons — pure composition onto the committed matrix,
+  // committed through the SHIPPED transform op (zero new engine surface).
+  const rotateImage90 = useCallback(
+    (dir: 1 | -1): void => {
+      if (!editImageTransform || editImageTransform.busy) return;
+      const m = applyRotate(
+        editImageTransform.matrix as [number, number, number, number, number, number],
+        (dir * Math.PI) / 2,
+      );
+      void commitImageTransform(editImageTransform.pageId, editImageTransform.index, [...m]);
+    },
+    [editImageTransform, commitImageTransform],
+  );
+
+  // The selected placement's current opacity — the slider's honest seed.
+  const editImageOpacity = useMemo(() => {
+    if (!editSel || editSel.kind !== 'image') return null;
+    return (
+      editImagesByPage.get(editSel.pageId)?.find((pl) => pl.index === editSel.index)?.opacity ?? 1
+    );
+  }, [editSel, editImagesByPage]);
 
   // 9.C2 Add Image: the band draws the box; convert display→user space
   // (buildSignatureAppearance, verbatim from A2) and hand it to App's
@@ -1557,6 +1615,7 @@ export function WorkspaceCanvasView({
           index: p.index,
           nested: p.nested,
           matrix: [...p.matrix],
+          opacity: p.opacity,
         })),
       transformImage: (pageId, index, matrix) =>
         commitImageTransformRef.current(pageId, index, matrix),
@@ -2246,6 +2305,11 @@ export function WorkspaceCanvasView({
         editBusy={editBusy}
         editNotice={editNotice}
         onEditAction={(kind) => void runEditAction(kind)}
+        editImageOpacity={editImageOpacity}
+        onSetImageOpacity={commitImageOpacity}
+        imageCropArmed={imageCropArmed}
+        onToggleImageCrop={() => setImageCropArmed((a) => !a)}
+        onRotateImage={rotateImage90}
         onEditTextOpen={() => {
           if (editSel?.kind === 'text') handleOpenTextEditor(editSel.pageId, editSel.index);
           else if (editSel?.kind === 'para')
@@ -2272,6 +2336,8 @@ export function WorkspaceCanvasView({
           editImagesByPage={editImagesByPage}
           editImageTransform={editImageTransform}
           onCommitImageTransform={commitImageTransform}
+          imageCropArmed={imageCropArmed}
+          onCommitImageCrop={commitImageCrop}
           editTextByPage={editTextByPage}
           editSelection={editSel}
           editingText={editingText}
@@ -2352,6 +2418,8 @@ export function WorkspaceCanvasView({
           editImagesByPage={editImagesByPage}
           editImageTransform={editImageTransform}
           onCommitImageTransform={commitImageTransform}
+          imageCropArmed={imageCropArmed}
+          onCommitImageCrop={commitImageCrop}
           editTextByPage={editTextByPage}
           editSelection={editSel}
           editingText={editingText}

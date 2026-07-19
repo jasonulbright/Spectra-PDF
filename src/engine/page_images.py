@@ -71,14 +71,42 @@ from engine.redact import (
 # ── listing ───────────────────────────────────────────────────────────────
 
 
-def _walk_placements(pdf, instructions, resources, base_ctm, depth, fallback_resources, out, nested):
+def _walk_placements(
+    pdf, instructions, resources, base_ctm, depth, fallback_resources, out, nested, base_alpha=1.0
+):
     """Append one dict per image `Do` to `out`, in encounter order. State
     tracking is the shared GraphicsTextState (7.2 consolidation) — the same
-    machine the rewriter's DFS order agreement is proven against."""
+    machine the rewriter's DFS order agreement is proven against.
+
+    Fill alpha (the C3 opacity seed) is tracked LOCALLY: the shared state
+    machine's feed() has no resources access, and `gs` needs the current
+    stream's /ExtGState to resolve — so alpha rides its own q/Q-scoped
+    stack here, inherited into forms at their Do like the CTM."""
     state = GraphicsTextState(base_ctm)
+    alpha = float(base_alpha)
+    alpha_stack: list[float] = []
     for instruction in instructions:
         operator = str(instruction.operator)
         operands = list(instruction.operands)
+        if operator == "q":
+            alpha_stack.append(alpha)
+        elif operator == "Q":
+            alpha = alpha_stack.pop() if alpha_stack else float(base_alpha)
+        elif operator == "gs" and operands:
+            gs_name = str(operands[0])
+            for res in (resources, fallback_resources):
+                if res is None:
+                    continue
+                try:
+                    egs = res.get("/ExtGState")
+                    if egs is None or Name(gs_name) not in egs:
+                        continue
+                    ca = egs[Name(gs_name)].get("/ca")
+                    if ca is not None:
+                        alpha = max(0.0, min(1.0, float(ca)))
+                except (TypeError, ValueError, AttributeError, KeyError):
+                    pass  # malformed ExtGState: alpha unchanged, never abort a listing
+                break
         if state.feed(operator, operands):
             continue
         if operator == "Do":
@@ -99,6 +127,9 @@ def _walk_placements(pdf, instructions, resources, base_ctm, depth, fallback_res
                         "nested": nested,
                         "native_width": int(xobj.get("/Width", 0)),
                         "native_height": int(xobj.get("/Height", 0)),
+                        # C3: effective fill alpha at this draw (the opacity
+                        # slider's honest seed).
+                        "opacity": round(alpha, 4),
                     }
                 )
             elif xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
@@ -113,6 +144,7 @@ def _walk_placements(pdf, instructions, resources, base_ctm, depth, fallback_res
                     resources,
                     out,
                     True,
+                    base_alpha=alpha,
                 )
     return out
 
@@ -167,15 +199,34 @@ class _EditState:
     draws in the SAME order as the lister; applies the action at `target`."""
 
     def __init__(
-        self, target: int, action: str, replacement_name: str | None, pending_image=None, delta=None
+        self,
+        target: int,
+        action: str,
+        replacement_name: str | None,
+        pending_image=None,
+        delta=None,
+        crop_rect=None,
+        pending_gs=None,
     ):
         self.target = target
-        self.action = action  # 'delete' | 'replace' | 'transform'
+        self.action = action  # 'delete' | 'replace' | 'transform' | 'crop' | 'opacity'
         self.replacement_name = replacement_name
         self.pending_image = pending_image
         # 'transform' only: the delta matrix D injected as `q D cm Do Q` at the
         # target draw so the placement's effective CTM becomes the caller's M'.
         self.delta = delta
+        # 'crop' only (C3): [cx0, cy0, cx1, cy1] in the image's UNIT space —
+        # emitted as a clip path AT the draw, so it rides the same CTM as the
+        # unit square at any nesting depth (no matrix math needed).
+        self.crop_rect = crop_rect
+        # 'opacity' only (C3): the ExtGState dict to register. The NAME is
+        # allocated AT the target draw against the resources actually in
+        # scope there (a nested target must never shadow the form's own
+        # /ExtGState names); `registered_nested` records that a form copy
+        # took the registration, so the op function skips the page level.
+        self.pending_gs = pending_gs
+        self.gs_name: str | None = None
+        self.registered_nested = False
         self.seen = 0
         self.done = False
         self.deleted_name: str | None = None
@@ -227,6 +278,39 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     kept.append(_op([round(float(v), 6) for v in state.delta], "cm"))
                     kept.append(instruction)
                     kept.append(_op([], "Q"))
+                elif state.action == "crop":
+                    # C3: clip to the crop rect expressed in the image's own
+                    # UNIT space — the path is emitted at the draw, so it
+                    # rides the exact CTM the unit square draws under, at any
+                    # nesting depth. q/Q bounds the clip to this one draw; a
+                    # re-crop wraps again = clip INTERSECTION (the honest
+                    # compose).
+                    cx0, cy0, cx1, cy1 = state.crop_rect
+                    kept.append(_op([], "q"))
+                    kept.append(
+                        _op(
+                            [
+                                round(cx0, 6),
+                                round(cy0, 6),
+                                round(cx1 - cx0, 6),
+                                round(cy1 - cy0, 6),
+                            ],
+                            "re",
+                        )
+                    )
+                    kept.append(_op([], "W"))
+                    kept.append(_op([], "n"))
+                    kept.append(instruction)
+                    kept.append(_op([], "Q"))
+                elif state.action == "opacity":
+                    # C3: name allocated HERE, against the resources actually
+                    # in scope at the draw — a nested target must never
+                    # shadow its form's own /ExtGState names.
+                    state.gs_name = _fresh_gs_name(resources, fallback_resources, reserved)
+                    kept.append(_op([], "q"))
+                    kept.append(_op([Name(state.gs_name)], "gs"))
+                    kept.append(instruction)
+                    kept.append(_op([], "Q"))
                 else:
                     kept.append(_do_instruction(state.replacement_name))
             else:
@@ -264,6 +348,20 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     copy_res["/XObject"][Name(state.replacement_name)] = pdf.make_indirect(
                         state.pending_image
                     )
+                if state.action == "opacity" and state.gs_name and not state.registered_nested:
+                    # The `gs` resolves against the copy holding the draw —
+                    # the INNERMOST copy (first unwind) takes it; outer
+                    # frames skip. /ExtGState gets a FRESH subdict: the
+                    # copied resources share it by reference, and mutating
+                    # the shared one is the C2 sibling-leak class.
+                    src_egs = copy_res.get("/ExtGState")
+                    fresh_egs = Dictionary()
+                    if src_egs is not None:
+                        for k in src_egs.keys():
+                            fresh_egs[k] = src_egs[k]
+                    fresh_egs[Name(state.gs_name)] = pdf.make_indirect(state.pending_gs)
+                    copy_res["/ExtGState"] = fresh_egs
+                    state.registered_nested = True
                 copy["/Resources"] = copy_res
                 new_name = _fresh_name(resources, name_counter, reserved)
                 new_forms[new_name] = copy
@@ -275,6 +373,29 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
         else:
             kept.append(instruction)
     return kept, changed, new_forms
+
+
+def _fresh_gs_name(resources, fallback_resources, reserved: set) -> str:
+    """A /ExtGState name unused by the resources in scope at the target
+    draw AND by this op's prior allocations. Separate from `_fresh_name`
+    (which scans /XObject): the two live in different namespaces."""
+    taken = set(reserved)
+    for res in (resources, fallback_resources):
+        if res is None:
+            continue
+        try:
+            egs = res.get("/ExtGState")
+            if egs is not None:
+                taken.update(str(k) for k in egs.keys())
+        except (TypeError, ValueError, AttributeError):
+            pass
+    i = 0
+    while True:
+        name = f"/EditGS{i}"
+        if name not in taken:
+            reserved.add(name)
+            return name
+        i += 1
 
 
 def _fresh_name(resources, name_counter, reserved: set) -> str:
@@ -445,6 +566,135 @@ def transform_page_image(file: str, output: str, page: int, index: int, matrix: 
         _finalize_page_rewrite(p, kept, state.superseded_forms)
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(index)}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def crop_page_image(file: str, output: str, page: int, index: int, rect: list) -> dict:
+    """Crop ONE image placement to `rect` = [cx0, cy0, cx1, cy1] in the
+    image's UNIT space ([0,0] = bottom-left of the drawn image, [1,1] =
+    top-right) — Phase 9.C3. Display-only: the draw is wrapped in a q/Q
+    clip (`re W n`) at the target Do, the image bytes stay untouched, and
+    the visible region stays exactly where it was on the page
+    (crop-in-place). A second crop composes by clip intersection.
+    Per-placement like every sibling op: shared XObjects elsewhere and
+    other pages are untouched; a nested placement crops on a COPY of its
+    form."""
+    try:
+        cx0, cy0, cx1, cy1 = (float(v) for v in rect)
+    except (TypeError, ValueError):
+        raise ValueError("rect must be [cx0, cy0, cx1, cy1]") from None
+    lo_x, hi_x = min(cx0, cx1), max(cx0, cx1)
+    lo_y, hi_y = min(cy0, cy1), max(cy0, cy1)
+    eps = 1e-6
+    if lo_x < -eps or lo_y < -eps or hi_x > 1 + eps or hi_y > 1 + eps:
+        raise ValueError("crop rect must lie within the image (unit coordinates 0..1)")
+    lo_x, lo_y = max(lo_x, 0.0), max(lo_y, 0.0)
+    hi_x, hi_y = min(hi_x, 1.0), min(hi_y, 1.0)
+    if (hi_x - lo_x) < 1e-4 or (hi_y - lo_y) < 1e-4:
+        raise ValueError("crop rect is degenerate (nothing would remain visible)")
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        # Page-local /Resources copy-on-write (the C2 sibling-leak rule,
+        # uniform across the page-image op family).
+        resources = _copy_resources_for_write(pdf, _resolve_resources(p))
+        p.obj["/Resources"] = resources
+        placements = _walk_placements(
+            pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
+        )
+        if not (0 <= int(index) < len(placements)):
+            raise ValueError(
+                f"image index {index} is out of range (page has {len(placements)})"
+            )
+        state = _EditState(int(index), "crop", None, crop_rect=(lo_x, lo_y, hi_x, hi_y))
+        kept, changed, new_forms = _rewrite(
+            pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
+        )
+        if not changed:
+            raise ValueError("edit did not apply (placement not found)")
+        for nm, st in new_forms.items():
+            _register_xobject(pdf, resources, nm, st)
+        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        _finalize_page_rewrite(p, kept, state.superseded_forms)
+        _save(pdf, input_path, output_path)
+        return {"output": str(output_path), "page": int(page), "index": int(index)}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def set_image_opacity(file: str, output: str, page: int, index: int, opacity: float) -> dict:
+    """Set ONE image placement's opacity — Phase 9.C3. The draw is wrapped
+    as `q /EditGSn gs Do Q` with a page-local (or form-copy-local, for a
+    nested target) /ExtGState carrying `/ca` and `/CA` = `opacity`
+    (clamped 0..1). Non-destructive and per-placement; the gs name is
+    allocated against the resources in scope at the draw so it can never
+    shadow an existing entry."""
+    try:
+        alpha = float(opacity)
+    except (TypeError, ValueError):
+        raise ValueError("opacity must be a number between 0 and 1") from None
+    if not (0.0 <= alpha <= 1.0):
+        raise ValueError("opacity must be between 0 and 1")
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        resources = _copy_resources_for_write(pdf, _resolve_resources(p))
+        p.obj["/Resources"] = resources
+        placements = _walk_placements(
+            pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
+        )
+        if not (0 <= int(index) < len(placements)):
+            raise ValueError(
+                f"image index {index} is out of range (page has {len(placements)})"
+            )
+        gs_dict = Dictionary(
+            Type=Name("/ExtGState"), ca=round(alpha, 4), CA=round(alpha, 4)
+        )
+        state = _EditState(int(index), "opacity", None, pending_gs=gs_dict)
+        kept, changed, new_forms = _rewrite(
+            pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
+        )
+        if not changed:
+            raise ValueError("edit did not apply (placement not found)")
+        for nm, st in new_forms.items():
+            _register_xobject(pdf, resources, nm, st)
+        if state.gs_name and not state.registered_nested:
+            # Top-level target: register on the page's resources — with a
+            # FRESH /ExtGState subdict (the copied resources share the old
+            # one by reference; mutating it is the C2 sibling-leak class).
+            src_egs = resources.get("/ExtGState")
+            fresh_egs = Dictionary()
+            if src_egs is not None:
+                for k in src_egs.keys():
+                    fresh_egs[k] = src_egs[k]
+            fresh_egs[Name(state.gs_name)] = pdf.make_indirect(gs_dict)
+            resources["/ExtGState"] = fresh_egs
+        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        _finalize_page_rewrite(p, kept, state.superseded_forms)
+        _save(pdf, input_path, output_path)
+        return {
+            "output": str(output_path),
+            "page": int(page),
+            "index": int(index),
+            "opacity": round(alpha, 4),
+        }
     finally:
         try:
             pdf.close()

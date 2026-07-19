@@ -34,6 +34,9 @@ interface DocLayerProps {
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
+  /** 9.C3 crop mode: armed flag + unit-space rect commit. */
+  imageCropArmed: boolean;
+  onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
   editTextByPage: ReadonlyMap<string, EditTextListing>;
   editSelection: { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
   editingText: { kind: 'text' | 'para'; pageId: string; index: number } | null;
@@ -139,6 +142,8 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               editImagesByPage={props.editImagesByPage}
               editImageTransform={props.editImageTransform}
               onCommitImageTransform={props.onCommitImageTransform}
+              imageCropArmed={props.imageCropArmed}
+              onCommitImageCrop={props.onCommitImageCrop}
               editTextByPage={props.editTextByPage}
               editSelection={props.editSelection}
               editingText={props.editingText}

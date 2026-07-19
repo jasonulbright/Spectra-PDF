@@ -690,3 +690,234 @@ class TestAddPageImage:
             p2_names = {str(k) for k in opdf.pages[1].obj["/Resources"]["/XObject"].keys()}
         assert not any(n.startswith("/EditIm") for n in p2_names)  # no leak
         assert "/Im0" in p2_names  # page 2's image intact
+
+
+def _ops_in_page_stream(path):
+    with pikepdf.open(path) as pdf:
+        return [
+            (str(i.operator), [str(o) for o in i.operands])
+            for i in pikepdf.parse_content_stream(pdf.pages[0])
+        ]
+
+
+class TestCropPageImage:
+    """Phase 9.C3 — crop = a unit-space clip at the target draw."""
+
+    def test_crop_wraps_the_target_draw(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        from engine.page_images import crop_page_image
+
+        crop_page_image(src, out, 1, 0, [0.25, 0.25, 0.75, 0.75])
+        ops = _ops_in_page_stream(out)
+        # The clip lands directly before the FIRST /ImA Do, inside q/Q.
+        i_re = next(i for i, (op, _) in enumerate(ops) if op == "re" and _[0].startswith("0.25"))
+        assert ops[i_re + 1][0] == "W"
+        assert ops[i_re + 2][0] == "n"
+        assert ops[i_re + 3] == ("Do", ["/ImA"])
+        # All three draws survive; the placements' matrices are unchanged
+        # (crop clips — it never moves anything).
+        before = list_page_images(src, 1)["images"]
+        after = list_page_images(out, 1)["images"]
+        assert len(after) == 3
+        for b, a in zip(before, after):
+            assert a["matrix"] == pytest.approx(b["matrix"], abs=1e-6)
+
+    def test_crop_then_transform_compose(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_images(src)
+        cropped = os.path.join(tmp_dir, "c.pdf")
+        moved = os.path.join(tmp_dir, "m.pdf")
+        from engine.page_images import crop_page_image
+
+        crop_page_image(src, cropped, 1, 0, [0.0, 0.0, 0.5, 0.5])
+        m = list_page_images(cropped, 1)["images"][0]["matrix"]
+        target = list(m)
+        target[4] += 40  # translate x
+        transform_page_image(cropped, moved, 1, 0, target)
+        after = list_page_images(moved, 1)["images"]
+        assert after[0]["matrix"][4] == pytest.approx(m[4] + 40, abs=1e-4)
+        # Both wraps present: the clip re and the delta cm.
+        ops = _ops_in_page_stream(moved)
+        assert any(op == "re" for op, _ in ops)
+        assert any(op == "W" for op, _ in ops)
+
+    def test_form_nested_crop_copies_the_form(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_form_image(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        from engine.page_images import crop_page_image
+
+        crop_page_image(src, out, 1, 0, [0.1, 0.1, 0.9, 0.9])
+        names = _names_in_page_stream(out)
+        assert len(names) == 2
+        assert names[0] != "/Fm1"  # first draw renamed to the copy
+        assert names[1] == "/Fm1"  # second draw untouched
+        # The copy's stream carries the clip; the original form's does not.
+        with pikepdf.open(out) as pdf:
+            xo = pdf.pages[0].obj["/Resources"]["/XObject"]
+            copy_ops = [
+                str(i.operator) for i in pikepdf.parse_content_stream(xo[Name(names[0])])
+            ]
+            orig_ops = [
+                str(i.operator) for i in pikepdf.parse_content_stream(xo[Name("/Fm1")])
+            ]
+        assert "W" in copy_ops
+        assert "W" not in orig_ops
+
+    def test_crop_validation_fails_closed(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        from engine.page_images import crop_page_image
+
+        with pytest.raises(ValueError, match="within the image"):
+            crop_page_image(src, out, 1, 0, [-0.2, 0, 1, 1])
+        with pytest.raises(ValueError, match="degenerate"):
+            crop_page_image(src, out, 1, 0, [0.5, 0.5, 0.5, 0.9])
+        with pytest.raises(ValueError, match="rect must be"):
+            crop_page_image(src, out, 1, 0, [0.1, 0.2, 0.3])
+        with pytest.raises(ValueError, match="out of range"):
+            crop_page_image(src, out, 1, 9, [0.1, 0.1, 0.9, 0.9])
+        assert not os.path.exists(out)
+
+
+class TestSetImageOpacity:
+    """Phase 9.C3 — opacity = a page-local ExtGState at the target draw."""
+
+    def test_opacity_registers_page_local_extgstate(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        from engine.page_images import set_image_opacity
+
+        set_image_opacity(src, out, 1, 0, 0.5)
+        with pikepdf.open(out) as pdf:
+            egs = pdf.pages[0].obj["/Resources"]["/ExtGState"]
+            entry = egs[Name("/EditGS0")]
+            assert float(entry["/ca"]) == pytest.approx(0.5)
+            assert float(entry["/CA"]) == pytest.approx(0.5)
+        ops = _ops_in_page_stream(out)
+        i_gs = next(i for i, (op, args) in enumerate(ops) if op == "gs")
+        assert ops[i_gs][1] == ["/EditGS0"]
+        assert ops[i_gs + 1] == ("Do", ["/ImA"])
+
+    def test_opacity_lists_back_as_seed_and_touches_one_placement(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        from engine.page_images import set_image_opacity
+
+        set_image_opacity(src, out, 1, 1, 0.3)  # the SECOND /ImA placement
+        listed = list_page_images(out, 1)["images"]
+        assert listed[0]["opacity"] == pytest.approx(1.0)  # shared XObject, untouched draw
+        assert listed[1]["opacity"] == pytest.approx(0.3)
+        assert listed[2]["opacity"] == pytest.approx(1.0)
+
+    def test_nested_opacity_registers_on_the_form_copy(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_form_image(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        from engine.page_images import set_image_opacity
+
+        set_image_opacity(src, out, 1, 0, 0.4)
+        names = _names_in_page_stream(out)
+        assert names[0] != "/Fm1" and names[1] == "/Fm1"
+        with pikepdf.open(out) as pdf:
+            xo = pdf.pages[0].obj["/Resources"]["/XObject"]
+            copy_res = xo[Name(names[0])].get("/Resources")
+            orig_res = xo[Name("/Fm1")].get("/Resources")
+            assert "/EditGS0" in {str(k) for k in copy_res["/ExtGState"].keys()}
+            orig_egs = orig_res.get("/ExtGState")
+            assert orig_egs is None or "/EditGS0" not in {str(k) for k in orig_egs.keys()}
+        listed = list_page_images(out, 1)["images"]
+        assert listed[0]["opacity"] == pytest.approx(0.4)
+        assert listed[1]["opacity"] == pytest.approx(1.0)
+
+    def test_opacity_does_not_leak_into_sibling_sharing_resources(self, tmp_dir):
+        # The C2 sibling-leak shape, for /ExtGState: two pages share ONE
+        # /Resources object; dimming page 1's image must not surface the
+        # /EditGS entry on page 2.
+        src = os.path.join(tmp_dir, "shared.pdf")
+        pdf = pikepdf.new()
+        im = _rgb_image(pdf, 10, 20, 30)
+        shared_res = pdf.make_indirect(Dictionary(XObject=Dictionary(Im0=im)))
+        p1 = pdf.add_blank_page(page_size=(400, 400))
+        p2 = pdf.add_blank_page(page_size=(400, 400))
+        p1.obj["/Resources"] = shared_res
+        p2.obj["/Resources"] = shared_res
+        p1.Contents = pdf.make_stream(b"q 50 0 0 50 10 10 cm /Im0 Do Q")
+        p2.Contents = pdf.make_stream(b"q 50 0 0 50 10 10 cm /Im0 Do Q")
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        from engine.page_images import set_image_opacity
+
+        set_image_opacity(src, out, 1, 0, 0.5)
+        with pikepdf.open(out) as opdf:
+            p1_res = opdf.pages[0].obj["/Resources"]
+            p2_res = opdf.pages[1].obj["/Resources"]
+            p1_egs = p1_res.get("/ExtGState")
+            p2_egs = p2_res.get("/ExtGState")
+            assert p1_egs is not None and "/EditGS0" in {str(k) for k in p1_egs.keys()}
+            assert p2_egs is None or "/EditGS0" not in {str(k) for k in p2_egs.keys()}
+
+    def test_opacity_name_never_shadows_an_existing_entry(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(400, 400))
+        im = _rgb_image(pdf, 200, 100, 0)
+        taken = pdf.make_indirect(Dictionary(Type=Name("/ExtGState"), ca=0.9))
+        page.obj["/Resources"] = Dictionary(
+            XObject=Dictionary(Im0=im), ExtGState=Dictionary(EditGS0=taken)
+        )
+        page.Contents = pdf.make_stream(b"q /EditGS0 gs 50 0 0 50 10 10 cm /Im0 Do Q")
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        from engine.page_images import set_image_opacity
+
+        set_image_opacity(src, out, 1, 0, 0.2)
+        with pikepdf.open(out) as opdf:
+            egs = opdf.pages[0].obj["/Resources"]["/ExtGState"]
+            names = {str(k) for k in egs.keys()}
+            assert "/EditGS0" in names  # the document's own, untouched
+            assert "/EditGS1" in names  # ours, allocated past the collision
+            assert float(egs[Name("/EditGS0")]["/ca"]) == pytest.approx(0.9)
+            assert float(egs[Name("/EditGS1")]["/ca"]) == pytest.approx(0.2)
+
+    def test_opacity_validation_fails_closed(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        from engine.page_images import set_image_opacity
+
+        with pytest.raises(ValueError, match="between 0 and 1"):
+            set_image_opacity(src, out, 1, 0, 1.5)
+        with pytest.raises(ValueError, match="between 0 and 1"):
+            set_image_opacity(src, out, 1, 0, -0.1)
+        with pytest.raises(ValueError, match="must be a number"):
+            set_image_opacity(src, out, 1, 0, "solid")
+        assert not os.path.exists(out)
+
+    def test_walker_alpha_respects_q_scope(self, tmp_dir):
+        # A gs inside q/Q must not bleed into a later draw; a draw inside
+        # the scope reports the dimmed alpha.
+        src = os.path.join(tmp_dir, "s.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(400, 400))
+        im = _rgb_image(pdf, 5, 5, 5)
+        half = pdf.make_indirect(Dictionary(Type=Name("/ExtGState"), ca=0.5))
+        page.obj["/Resources"] = Dictionary(
+            XObject=Dictionary(Im0=im), ExtGState=Dictionary(GHalf=half)
+        )
+        page.Contents = pdf.make_stream(
+            b"q /GHalf gs 50 0 0 50 10 10 cm /Im0 Do Q "
+            b"q 50 0 0 50 200 10 cm /Im0 Do Q"
+        )
+        pdf.save(src)
+        pdf.close()
+        listed = list_page_images(src, 1)["images"]
+        assert listed[0]["opacity"] == pytest.approx(0.5)
+        assert listed[1]["opacity"] == pytest.approx(1.0)

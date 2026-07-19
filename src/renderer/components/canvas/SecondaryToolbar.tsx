@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { invokeCommand } from '../../commands/context';
 import { COMMANDS, SECONDARY_TOOLBAR_ACTIONS, TOOL_TITLES } from '../../commands/registry';
 import { toolById } from '../../commands/tools';
@@ -57,6 +57,14 @@ export interface SecondaryToolbarProps {
   onEditAction: (kind: 'delete' | 'replace' | 'extract') => void;
   /** Open the inline editor for the selected text run. */
   onEditTextOpen: () => void;
+  /** 9.C3 image adjustments: the selected placement's current opacity
+   * (null = no image selected), commit-on-release, the crop-mode toggle,
+   * and the rotate-90 steps (routed through the C1 transform). */
+  editImageOpacity: number | null;
+  onSetImageOpacity: (value: number) => void;
+  imageCropArmed: boolean;
+  onToggleImageCrop: () => void;
+  onRotateImage: (dir: 1 | -1) => void;
 }
 
 export function SecondaryToolbar({
@@ -74,6 +82,11 @@ export function SecondaryToolbar({
   editNotice,
   onEditAction,
   onEditTextOpen,
+  editImageOpacity,
+  onSetImageOpacity,
+  imageCropArmed,
+  onToggleImageCrop,
+  onRotateImage,
 }: SecondaryToolbarProps): React.JSX.Element | null {
   // The strip belongs to the OPEN TOOL, not to the armed mode: Escape means
   // "stop drawing", not "close Comment", and with the pill gone a strip that
@@ -194,6 +207,46 @@ export function SecondaryToolbar({
           >
             Delete
           </button>
+          {/* 9.C3 image adjustments — enabled only with an image selected. */}
+          <button
+            type="button"
+            data-testid="edit-action-crop"
+            className="secondary-tool"
+            aria-pressed={imageCropArmed}
+            disabled={editSelectionKind !== 'image' || editBusy}
+            title="Crop — drag inside the image to keep a region"
+            onClick={onToggleImageCrop}
+          >
+            Crop
+          </button>
+          <button
+            type="button"
+            data-testid="edit-action-rotate-ccw"
+            className="secondary-tool"
+            disabled={editSelectionKind !== 'image' || editBusy}
+            title="Rotate 90° counter-clockwise"
+            onClick={() => onRotateImage(1)}
+          >
+            ↺ 90°
+          </button>
+          <button
+            type="button"
+            data-testid="edit-action-rotate-cw"
+            className="secondary-tool"
+            disabled={editSelectionKind !== 'image' || editBusy}
+            title="Rotate 90° clockwise"
+            onClick={() => onRotateImage(-1)}
+          >
+            ↻ 90°
+          </button>
+          {editSelectionKind === 'image' && editImageOpacity !== null && (
+            <OpacitySlider
+              key={`${editImageOpacity}`}
+              seed={editImageOpacity}
+              disabled={editBusy}
+              onCommit={onSetImageOpacity}
+            />
+          )}
         </div>
       )}
       {tool === 'stamp' && (
@@ -242,3 +295,53 @@ export function SecondaryToolbar({
   );
 }
 
+/** 9.C3: opacity with commit-on-release — dragging previews the number
+ * locally; only releasing (pointer or keyboard) commits, so one drag is ONE
+ * undoable engine op, not thirty. The parent keys this by the seed, so a
+ * fresh listing remounts it holding the committed value. */
+function OpacitySlider({
+  seed,
+  disabled,
+  onCommit,
+}: {
+  seed: number;
+  disabled: boolean;
+  onCommit: (value: number) => void;
+}): React.JSX.Element {
+  const [value, setValue] = useState(Math.round(seed * 100));
+  const commit = (): void => {
+    const v = value / 100;
+    // Sub-percent wiggle back to the seed is a no-op, not an engine call.
+    if (Math.abs(v - seed) > 0.004) onCommit(v);
+  };
+  const commitKeys = new Set([
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowUp',
+    'ArrowDown',
+    'Home',
+    'End',
+    'PageUp',
+    'PageDown',
+  ]);
+  return (
+    <label className="secondary-toolbar-opacity" title="Image opacity">
+      Opacity
+      <input
+        type="range"
+        data-testid="edit-image-opacity"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => setValue(Number(e.target.value))}
+        onPointerUp={commit}
+        onKeyUp={(e) => {
+          if (commitKeys.has(e.key)) commit();
+        }}
+      />
+      <span data-testid="edit-image-opacity-value">{value}%</span>
+    </label>
+  );
+}

@@ -1348,6 +1348,34 @@
   color: #111;
   font-size: 11px;
 }
+/* C3 image adjustments: the crop band + the armed crop quad + the opacity
+   slider row. */
+.page-imgtx-quad.crop {
+  cursor: crosshair;
+}
+.page-imgtx-cropband {
+  fill: rgba(59, 130, 246, 0.18);
+  stroke: var(--accent, #3b82f6);
+  stroke-width: 1.5px;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+.secondary-toolbar-opacity {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: inherit;
+}
+.secondary-toolbar-opacity input[type='range'] {
+  width: 90px;
+}
+.secondary-toolbar-opacity span {
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* A3b style toggles: B / I substitution buttons. */
 .page-editpara-style {
   min-width: 20px;
