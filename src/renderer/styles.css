@@ -1339,6 +1339,15 @@
   background: none;
   cursor: pointer;
 }
+/* A3a family swap: the substitute-face dropdown beside size/colour. */
+.page-editpara-ctl select {
+  padding: 1px 3px;
+  border: 1px solid rgba(120, 120, 120, 0.5);
+  border-radius: 2px;
+  background: #fff;
+  color: #111;
+  font-size: 11px;
+}
 .page-edittext-editor input {
   width: 100%;
   min-width: 60px;

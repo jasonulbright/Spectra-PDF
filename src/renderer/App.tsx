@@ -750,16 +750,16 @@ function AppContent(): React.ReactElement {
       // A1 restyle: uniform size (points) / fill colour ([r,g,b] 0-1).
       if (opts?.size !== undefined) params.size = opts.size;
       if (opts?.color !== undefined) params.color = opts.color;
-      if (opts?.convert) {
-        // 7.4's fallback at span granularity: only the characters the
-        // mapped fonts cannot express render in the bundled font.
-        const fontPath = await app.getEditFontPath();
-        await performOperation(path, 'replace_paragraph_text', {
-          ...params,
-          convert: true,
-          font_path: fontPath,
-        });
-        return;
+      // A3a family swap: the whole paragraph re-renders in the chosen
+      // bundled face.
+      if (opts?.family !== undefined) params.family = opts.family;
+      if (opts?.convert) params.convert = true;
+      if (opts?.convert || opts?.family !== undefined) {
+        // The bundled fallback faces (7.4/9.B1): convert renders only the
+        // characters the mapped fonts cannot express; family substitutes
+        // every character. Either way the engine resolves the face from
+        // the fonts DIRECTORY.
+        params.font_path = await app.getEditFontPath();
       }
       await performOperation(path, 'replace_paragraph_text', params);
     },

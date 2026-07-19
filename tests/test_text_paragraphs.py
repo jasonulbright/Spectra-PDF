@@ -1067,16 +1067,176 @@ class TestStyleControls:
         assert para["font_size"] == pytest.approx(12, abs=0.01)  # the body, not the 6pt marker
 
     def test_no_override_is_byte_identical_to_plain_edit(self, tmp_dir):
-        # size=None/color=None must not perturb the shipped 7.5 path.
+        # size=None/color=None/family=None must not perturb the shipped
+        # 7.5 path (family joined the guard at 9.A3a).
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Grow this paragraph text) Tj ET")
         out_a = os.path.join(tmp_dir, "a.pdf")
         out_b = os.path.join(tmp_dir, "b.pdf")
         para = _paras(src)[0]
         new = para["text"] + " with more"
         _apply(src, out_a, para, new)
-        _apply(src, out_b, para, new, size=None, color=None)
+        _apply(src, out_b, para, new, size=None, color=None, family=None)
         with pikepdf.open(out_a) as pa, pikepdf.open(out_b) as pb:
             assert pa.pages[0].Contents.read_bytes() == pb.pages[0].Contents.read_bytes()
+
+
+def _times(pdf) -> pikepdf.Object:
+    """Serif-classified simple font (the nested-form test's shape)."""
+    return pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type1"),
+            BaseFont=Name("/TimesNewRoman"),
+            Encoding=Name("/WinAnsiEncoding"),
+            FontDescriptor=pdf.make_indirect(
+                Dictionary(Type=Name("/FontDescriptor"), Flags=2)
+            ),
+        )
+    )
+
+
+def _page_base_fonts(path: str) -> list[str]:
+    with pikepdf.open(path) as pdf:
+        fonts = pdf.pages[0].obj.get("/Resources", {}).get("/Font", {}) or {}
+        return [str(fonts[k].get("/BaseFont", "")) for k in fonts.keys()]
+
+
+FONTS_DIR = os.path.dirname(FALLBACK_FONT)
+SERIF_FONT = os.path.join(FONTS_DIR, "LiberationSerif-Regular.ttf")
+MONO_FONT = os.path.join(FONTS_DIR, "LiberationMono-Regular.ttf")
+
+_needs_faces = pytest.mark.skipif(
+    not (os.path.isfile(FALLBACK_FONT) and os.path.isfile(SERIF_FONT) and os.path.isfile(MONO_FONT)),
+    reason="bundled fallback faces not provisioned",
+)
+
+
+class TestFamilySwap:
+    """Phase 9.A3a — whole-paragraph family substitution (sans/serif/mono).
+
+    The swap forces EVERY character through the fallback machinery in the
+    chosen Liberation face — an honest substitution of the original
+    foundry font. The no-family path must stay byte-identical to shipped
+    7.5/A1 (guarded above in test_no_override_is_byte_identical…)."""
+
+    @_needs_faces
+    def test_swap_to_serif_embeds_liberation_serif_and_round_trips(self, tmp_dir):
+        # Pure restyle: SAME text, family only. The sans (Helvetica)
+        # paragraph re-renders wholly in Liberation Serif and stays one
+        # editable, extractable paragraph.
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta words) Tj "
+            b"0 -14 Td (flowing on the second line) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], family="serif", font_path=FONTS_DIR)
+        assert any("LiberationSerif" in b for b in _page_base_fonts(out))
+        text = extract_text(out)["text"]
+        assert "Alpha beta gamma delta words" in text
+        assert "flowing on the second line" in text
+        relisted = _paras(out)
+        assert len(relisted) == 1
+        assert relisted[0]["editable"] is True
+        assert relisted[0]["text"] == para["text"]
+
+    @_needs_faces
+    def test_swap_serif_paragraph_to_sans(self, tmp_dir):
+        # The opposite direction, with a text change riding along — the
+        # serif original must land in the SANS face (classification
+        # bypassed by the explicit choice, not re-derived from the run).
+        srcpdf = pikepdf.new()
+        _page(
+            srcpdf,
+            b"BT /F1 12 Tf 72 700 Td (Serif body text here) Tj ET",
+            {"/F1": _times(srcpdf)},
+        )
+        src = os.path.join(tmp_dir, "serif.pdf")
+        srcpdf.save(src)
+        srcpdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, "Serif body now sans", family="sans", font_path=FONTS_DIR)
+        base = _page_base_fonts(out)
+        assert any("LiberationSans" in b for b in base)
+        assert not any("LiberationSerif" in b for b in base)
+        assert "Serif body now sans" in extract_text(out)["text"]
+
+    @_needs_faces
+    def test_swap_to_mono(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Now in a code face) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], family="mono", font_path=FONTS_DIR)
+        assert any("LiberationMono" in b for b in _page_base_fonts(out))
+
+    @_needs_faces
+    def test_family_composes_with_size_and_color(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (All three at once) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(
+            src, out, para, para["text"],
+            family="serif", size=18, color=[0.0, 0.0, 1.0], font_path=FONTS_DIR,
+        )
+        assert any("LiberationSerif" in b for b in _page_base_fonts(out))
+        after = _detail_runs(out)
+        run = next(r for r in after if "All three" in r["text"])
+        assert run["style"]["size"] == pytest.approx(18, abs=0.01)
+        assert _color_repr(run["style"]["fill_color"])[1] == ("rg", (0.0, 0.0, 1.0))
+
+    @_needs_faces
+    def test_family_swap_keeps_other_paragraphs_unmoved(self, tmp_dir):
+        # THE delicate-rewriter guard at A3a scope: swapping one
+        # paragraph's family must leave every other show op at an
+        # identical matrix with identical state (the resync property).
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Swap this paragraph only) Tj "
+            b"0 -60 Td (This one stays untouched) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        assert len(paras) == 2
+        target = next(p for p in paras if "Swap this" in p["text"])
+        _apply(src, out, target, target["text"], family="serif", font_path=FONTS_DIR)
+        _assert_non_members_unmoved(src, out, target["runs"])
+        assert any("This one stays untouched" in p["text"] for p in _paras(out))
+
+    @_needs_faces
+    def test_family_refuses_chars_outside_liberation(self, tmp_dir):
+        # Liberation has no CJK — the swap must refuse with the char
+        # named, never emit a missing glyph.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello world) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        new = "Hello 你 world"
+        with pytest.raises(ValueError, match="cannot express"):
+            _apply(src, out, para, new, family="serif", font_path=FONTS_DIR)
+
+    def test_invalid_family_refuses(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Whatever text) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        with pytest.raises(ValueError, match="family must be"):
+            _apply(src, out, para, para["text"], family="cursive", font_path=FONTS_DIR)
+
+    def test_family_requires_font_path(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Needs the fonts dir) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        with pytest.raises(ValueError, match="fallback font path"):
+            _apply(src, out, para, para["text"], family="serif")
+
+    def test_no_family_edit_does_not_embed_fallback(self, tmp_dir):
+        # Direct pin that force_fallback is OFF by default: a plain text
+        # edit embeds nothing (the byte-identical guard's readable twin).
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Plain edit stays plain) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"] + " grown")
+        assert not any("Liberation" in b for b in _page_base_fonts(out))
 
 
 class TestAlignmentDetection:

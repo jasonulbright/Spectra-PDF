@@ -1308,6 +1308,10 @@ function ParagraphEditor({
   // A1 restyle controls, seeded from the paragraph's own size/colour.
   const [size, setSize] = useState(para.fontSize);
   const [color, setColor] = useState(para.color);
+  // A3a family swap — '' = keep the original fonts. The options name the
+  // ACTUAL substitute faces (Liberation …): the swap is an honest
+  // substitution, not a style toggle on the foundry font.
+  const [family, setFamily] = useState<'' | 'serif' | 'sans' | 'mono'>('');
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   // ONE outcome per editor instance: Enter-commit, Escape-cancel, blur,
@@ -1325,13 +1329,20 @@ function ParagraphEditor({
     areaRef.current?.select();
   }, []);
   const spans = computeEditSpans(para.text, value, para.spans, para.runs[0]);
-  const missing = paragraphUnencodable(value, spans, para.encodableByRun);
+  const familyChanged = family !== '';
+  // With a family swap EVERY character re-renders in the chosen Liberation
+  // face, so the members' own coverage no longer applies — the live
+  // run-inventory check would wrongly block (e.g. a char the original
+  // subset lacks but Liberation has). Coverage the LIBERATION face lacks
+  // (CJK, astral) refuses engine-side with a stated reason, surfaced as
+  // the standard edit notice — the same honest boundary as convert.
+  const missing = familyChanged ? [] : paragraphUnencodable(value, spans, para.encodableByRun);
   const valid = missing.length === 0;
   const sizeChanged = Math.abs(size - para.fontSize) > 0.01;
   const colorChanged = color.toLowerCase() !== para.color.toLowerCase();
-  const changed = value !== para.text || sizeChanged || colorChanged;
+  const changed = value !== para.text || sizeChanged || colorChanged || familyChanged;
   // The restyle overrides sent with a commit — only fields the user
-  // actually changed from the seed (unchanged size/colour stay the
+  // actually changed from the seed (unchanged size/colour/family stay the
   // paragraph's own, engine-side).
   const restyleOpts = (extra?: ParagraphEditOpts): ParagraphEditOpts => {
     const o: ParagraphEditOpts = { ...extra };
@@ -1340,6 +1351,7 @@ function ParagraphEditor({
       const rgb = hexToRgb(color);
       if (rgb) o.color = rgb;
     }
+    if (familyChanged) o.family = family;
     return o;
   };
   const finish = (): void => {
@@ -1417,6 +1429,20 @@ function ParagraphEditor({
             value={/^#[0-9a-f]{6}$/i.test(color) ? color : '#000000'}
             onChange={(e) => setColor(e.target.value)}
           />
+        </label>
+        <label className="page-editpara-ctl">
+          Font
+          <select
+            data-testid="edit-para-family"
+            value={family}
+            title="Replaces the paragraph's font with the chosen bundled face"
+            onChange={(e) => setFamily(e.target.value as '' | 'serif' | 'sans' | 'mono')}
+          >
+            <option value="">Keep original font</option>
+            <option value="sans">Liberation Sans</option>
+            <option value="serif">Liberation Serif</option>
+            <option value="mono">Liberation Mono</option>
+          </select>
         </label>
       </div>
       <textarea

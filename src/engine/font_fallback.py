@@ -95,6 +95,27 @@ def classify_font_family(font_dict) -> str:
     return "sans"
 
 
+def synthetic_family_font(family: str):
+    """A minimal font dict whose classification is forced to `family` —
+    the way to drive `resolve_fallback_font` when there is no original
+    font to match (authoring, 9.A2) or the user picked the family
+    explicitly (9.A3 restyle). serif/mono ride the /Flags bits the
+    classifier reads first; anything else lands on the sans default.
+    The dict is only ever classified, never embedded."""
+    if family == "serif":
+        flags, base = _FLAG_SERIF, "/Times"
+    elif family == "mono":
+        flags, base = _FLAG_FIXED_PITCH, "/Courier"
+    else:
+        flags, base = 32, "/Helvetica"  # non-symbolic → sans
+    return Dictionary(
+        Type=Name("/Font"),
+        Subtype=Name("/Type1"),
+        BaseFont=Name(base),
+        FontDescriptor=Dictionary(Type=Name("/FontDescriptor"), Flags=flags),
+    )
+
+
 def resolve_fallback_font(font_path: str, original_font=None) -> str:
     """Resolve the concrete fallback .ttf to embed. `font_path` may be a
     DIRECTORY (the vendored `resources/fonts` — the real app passes this,

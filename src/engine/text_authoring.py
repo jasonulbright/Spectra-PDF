@@ -19,7 +19,7 @@ import pikepdf
 from pikepdf import ContentStreamInstruction as _CSI
 from pikepdf import Dictionary, Name, Operator, String
 
-from engine.font_fallback import build_fallback_font, resolve_fallback_font
+from engine.font_fallback import build_fallback_font, resolve_fallback_font, synthetic_family_font
 from engine.page_images import _save
 
 _LEADING_EM = 1.2
@@ -115,20 +115,7 @@ def add_text_box(
         # A face matching the requested family (B1); no original font to
         # match against, so `family` drives it (sans default).
         if family in ("serif", "mono", "sans"):
-            fake = Dictionary(
-                Type=Name("/Font"),
-                Subtype=Name("/Type1"),
-                BaseFont=Name(
-                    "/Times" if family == "serif" else "/Courier" if family == "mono" else "/Helvetica"
-                ),
-                FontDescriptor=pdf.make_indirect(
-                    Dictionary(
-                        Type=Name("/FontDescriptor"),
-                        Flags=(2 if family == "serif" else 1 if family == "mono" else 32),
-                    )
-                ),
-            )
-            face = resolve_fallback_font(str(font_path), fake)
+            face = resolve_fallback_font(str(font_path), synthetic_family_font(family))
         else:
             face = resolve_fallback_font(str(font_path), None)
 

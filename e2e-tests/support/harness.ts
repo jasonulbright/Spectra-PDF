@@ -556,6 +556,36 @@ export async function setReactInputValue(selector: string, value: string): Promi
   );
 }
 
+/** setReactInputValue's sibling for a controlled `<select>` (A3a family
+ * dropdown): same hardened shape — re-query inside the execute, poke the
+ * value tracker, loop until the value sticks — but the native setter is
+ * HTMLSelectElement's and React hears `change` (not `input`) on selects. */
+export async function setReactSelectValue(selector: string, value: string): Promise<void> {
+  await $(selector).waitForDisplayed({ timeout: 10_000 });
+  await browser.waitUntil(
+    async () =>
+      browser.execute(function (sel, v) {
+        const el = document.querySelector(sel) as HTMLSelectElement | null;
+        if (!el) return false;
+        const setter = Object.getOwnPropertyDescriptor(
+          window.HTMLSelectElement.prototype,
+          'value',
+        )!.set!;
+        const tracker = (el as unknown as { _valueTracker?: { setValue(v: string): void } })
+          ._valueTracker;
+        if (tracker) tracker.setValue(v + ' '); // force a tracked change
+        setter.call(el, v);
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return el.value === v;
+      }, selector, value),
+    {
+      timeout: 10_000,
+      interval: 150,
+      timeoutMsg: `setReactSelectValue: ${selector} never held ${JSON.stringify(value)}`,
+    },
+  );
+}
+
 // --- On-canvas form fill (2n.4b) ------------------------------------------
 
 export async function setCanvasFormValue(

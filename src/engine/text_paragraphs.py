@@ -680,12 +680,20 @@ def _styled_chars(
     convert: bool,
     size_override=None,
     color_override=None,
+    force_fallback: bool = False,
 ) -> tuple[list[tuple[str, _StyleRef]], str]:
     """Map every char of the new text to its style source; returns the
     styled stream plus the characters that need the fallback font (empty
     unless convert). Refuses (ValueError, naming the char) when a char is
     unencodable and convert is off — the renderer validates live, this is
-    the belt."""
+    the belt.
+
+    `force_fallback` (9.A3a family swap) routes EVERY character through
+    the fallback font — the whole paragraph re-renders in the chosen
+    face, so the members' own coverage is irrelevant (spaces included:
+    they become real fallback glyphs, not synthetic kerns). Default False
+    keeps the shipped branch order untouched — a no-family edit must stay
+    byte-identical to 7.5/A1 output."""
     if not spans and new_text:
         raise ValueError("edit spans are missing")
     covered = 0
@@ -713,7 +721,10 @@ def _styled_chars(
     for span in spans:
         member = members_by_index[int(span["run"])]
         for ch in new_text[span["start"] : span["end"]]:
-            if ch == " " or member.cap.can_encode(ch):
+            if force_fallback:
+                fallback_chars.add(ch)
+                styled.append((ch, ref(member, True)))
+            elif ch == " " or member.cap.can_encode(ch):
                 styled.append((ch, ref(member, False)))
             elif convert:
                 fallback_chars.add(ch)
@@ -1423,6 +1434,7 @@ def replace_paragraph_text(
     font_path: str | None = None,
     size: float | None = None,
     color: list | None = None,
+    family: str | None = None,
 ) -> dict:
     """Replace a paragraph's text and re-lay-out inside its box (7.5).
 
@@ -1436,7 +1448,15 @@ def replace_paragraph_text(
     A1 restyle: `size` (points) applies a uniform new font size to the
     whole paragraph (scaling leading + rewrapping); `color` is an
     [r, g, b] triple (0-1) applied as a uniform fill colour. Either None
-    keeps the paragraph's own."""
+    keeps the paragraph's own.
+
+    A3a restyle: `family` ("serif" | "sans" | "mono") substitutes the
+    WHOLE paragraph into the bundled Liberation face of that family —
+    every character re-embeds via the fallback machinery (`font_path`
+    required), an honest substitution of the original foundry font.
+    Characters the Liberation face lacks refuse with a stated reason.
+    None keeps the paragraph's own fonts (the shipped 7.5/A1 path,
+    byte-identical)."""
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -1491,32 +1511,52 @@ def replace_paragraph_text(
                 rgb = []
             if len(rgb) == 3:
                 color_override = (None, ("rg", tuple(rgb)))
+        # A3a family swap: an explicit selector, so garbage REFUSES rather
+        # than silently keeping the original (a swap that did nothing would
+        # be a success that lied).
+        family_override = None
+        if family is not None:
+            fam = str(family).strip().lower()
+            if fam not in ("serif", "sans", "mono"):
+                raise ValueError("family must be serif, sans, or mono")
+            family_override = fam
 
         members_by_index = {m.index: m for m in para.members}
         styled, fb_chars = _styled_chars(
             str(new_text), list(spans), members_by_index, bool(convert),
             size_override=size_override, color_override=color_override,
+            force_fallback=family_override is not None,
         )
         fallback = None
         if fb_chars:
-            from engine.font_fallback import build_fallback_font, resolve_fallback_font
+            from engine.font_fallback import (
+                build_fallback_font,
+                resolve_fallback_font,
+                synthetic_family_font,
+            )
             from engine.text_runs import _lookup_font
 
             if not font_path:
                 raise ValueError("fallback font path is required to convert")
-            # Phase 9.B1: one fallback face for the paragraph, its family
-            # matched to the paragraph's first member run (a serif body
-            # converts in serif). Per-span fallback families (a mono code
-            # span inside a serif paragraph) is a documented tail — one
-            # face here, chosen from the dominant member. The font is
-            # looked up in the member's OWN stream resources (form-scoped
-            # when nested), page resources as fallback — a form's `F1` can
-            # differ from the page's (review-caught).
-            first = min(para.members, key=lambda m: m.index)
-            original = _lookup_font(
-                first.style["font_name"], first.resources or resources, resources
-            )
-            face = resolve_fallback_font(str(font_path), original)
+            if family_override is not None:
+                # A3a: the user picked the family — classification is
+                # bypassed via a synthetic /Flags dict (the A2 trick), so
+                # the substitution lands on exactly that face.
+                face = resolve_fallback_font(str(font_path), synthetic_family_font(family_override))
+            else:
+                # Phase 9.B1: one fallback face for the paragraph, its family
+                # matched to the paragraph's first member run (a serif body
+                # converts in serif). Per-span fallback families (a mono code
+                # span inside a serif paragraph) is a documented tail — one
+                # face here, chosen from the dominant member. The font is
+                # looked up in the member's OWN stream resources (form-scoped
+                # when nested), page resources as fallback — a form's `F1` can
+                # differ from the page's (review-caught).
+                first = min(para.members, key=lambda m: m.index)
+                original = _lookup_font(
+                    first.style["font_name"], first.resources or resources, resources
+                )
+                face = resolve_fallback_font(str(font_path), original)
             font_dict, encode, width_1000 = build_fallback_font(pdf, face, fb_chars)
             fallback = _Fallback(None, font_dict, encode, width_1000)
 

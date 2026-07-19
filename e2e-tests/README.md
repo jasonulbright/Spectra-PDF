@@ -80,6 +80,17 @@ runs every `specs/*.spec.ts` file.
    save through the engine directly rather than the native Win32 dialogs.
 3. Keep fixtures under `fixtures/`. Anything > 100 KB should be
    `.gitignore`d and committed only if hand-curated and stable.
+4. **After any engine op (commit or undo), key waits on the page id
+   ADVANCING, not on listing content alone.** Page ids are
+   generation-tagged (`…#gN#pI`) and the post-op reindex is async: a wait
+   that matches on text can be satisfied by the STALE pre-op listing
+   whenever the op leaves the text unchanged (restyles, transforms), and
+   racing past it leaves the reindex to land mid-next-step — where (by
+   durable-identity design) it invalidates open editors/selections keyed
+   to the old generation. Capture `editTextPageIds()[0]` before the op
+   and wait for it to change AND the content condition to hold — see
+   `waitForReindexedListing` in `49-restyle-family.spec.ts`, which exists
+   because exactly this race failed deterministically.
 
 ## Tooling
 

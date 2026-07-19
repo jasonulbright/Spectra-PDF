@@ -41,13 +41,18 @@ export interface EditParagraph {
   color: string;
 }
 
-/** A1 restyle overrides carried on a paragraph commit. */
+/** A1/A3 restyle overrides carried on a paragraph commit. */
 export interface ParagraphEditOpts {
   convert?: boolean;
   /** New uniform font size in points (undefined = keep). */
   size?: number;
   /** New uniform fill colour as [r,g,b] 0-1 (undefined = keep). */
   color?: [number, number, number];
+  /** A3a: substitute the WHOLE paragraph into this bundled Liberation
+   * family (an honest face replacement; undefined = keep the original
+   * fonts). With a family set the members' own coverage is irrelevant —
+   * every character re-renders in the chosen face. */
+  family?: 'serif' | 'sans' | 'mono';
 }
 
 export interface EditTextListing {
