@@ -13,17 +13,21 @@ import { unencodableChars } from '../../lib/edit-text';
 import type { EditParagraph, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import {
   applySpanColor,
+  applySpanFace,
   backdropSegments,
   computeEditSpans,
   hexToRgb,
   mergeSpanColors,
+  mergeSpanFaces,
   paragraphUnencodable,
   remapRanges,
   sanitizeParagraphInput,
   seedSpanColors,
   spanColorsToStyles,
+  spanFacesToStyles,
   utf16ToCodePointIndex,
   type SpanColor,
+  type SpanFace,
 } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -1368,6 +1372,16 @@ function ParagraphEditor({
   const [spanColors, setSpanColors] = useState<SpanColor[]>(() =>
     seedSpanColors(para.spans, para.color),
   );
+  // A5b per-span faces: ranges substituted into a bundled weight/slant/
+  // family. No listing seed in v1 (the listing carries per-span colour,
+  // not weight/slant), so a fresh editor starts empty.
+  const [spanFaces, setSpanFaces] = useState<SpanFace[]>([]);
+  // The face covering a code-point position (for a per-span toggle to flip
+  // one axis while keeping the others), or the plain default.
+  const faceAt = (pos: number): { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | 'mono' } => {
+    const hit = mergeSpanFaces(spanFaces).find((f) => pos >= f.start && pos < f.end);
+    return hit ? { bold: hit.bold, italic: hit.italic, family: hit.family } : { bold: false, italic: false };
+  };
   // The live textarea selection in CODE POINTS — captured continuously so
   // the colour swatch (which loses the DOM selection when its native picker
   // opens) can still apply to what WAS selected.
@@ -1416,7 +1430,12 @@ function ParagraphEditor({
   const spanColorsChanged =
     JSON.stringify(spanColors) !== JSON.stringify(seededSpanColors);
   const changed =
-    value !== para.text || sizeChanged || colorChanged || substituting || spanColorsChanged;
+    value !== para.text ||
+    sizeChanged ||
+    colorChanged ||
+    substituting ||
+    spanColorsChanged ||
+    spanFaces.length > 0;
   // The restyle overrides sent with a commit — only fields the user
   // actually changed from the seed (unchanged size/colour/face stay the
   // paragraph's own, engine-side). On a substitution the style pair rides
@@ -1434,11 +1453,11 @@ function ParagraphEditor({
       o.bold = bold;
       o.italic = italic;
     }
-    // A5a: send the per-span colours (only when the user set any).
-    if (spanColors.length > 0) {
-      const styles = spanColorsToStyles(spanColors);
-      if (styles.length > 0) o.span_styles = styles;
-    }
+    // A5a/A5b: send per-span colour AND face entries (the engine folds each
+    // field independently, so they ride the one span_styles list with
+    // possibly-unaligned ranges).
+    const perSpan = [...spanColorsToStyles(spanColors), ...spanFacesToStyles(spanFaces)];
+    if (perSpan.length > 0) o.span_styles = perSpan;
     return o;
   };
   const finish = (): void => {
@@ -1572,7 +1591,19 @@ function ParagraphEditor({
                 ? 'Vertical text keeps its font — the bundled faces are horizontal'
                 : "Replaces the paragraph's font with the chosen bundled face"
             }
-            onChange={(e) => setFamily(e.target.value as '' | 'serif' | 'sans' | 'mono')}
+            onChange={(e) => {
+              // A5b dual role: a real family + a live selection → per-span
+              // face on that range; otherwise the shipped whole-paragraph
+              // family swap.
+              const fam = e.target.value as '' | 'serif' | 'sans' | 'mono';
+              const sel = selRef.current;
+              if (fam !== '' && sel.end > sel.start) {
+                const base = faceAt(sel.start);
+                setSpanFaces((prev) => applySpanFace(prev, sel.start, sel.end, { ...base, family: fam }));
+              } else {
+                setFamily(fam);
+              }
+            }}
           >
             <option value="">Keep original font</option>
             <option value="sans">Liberation Sans</option>
@@ -1591,7 +1622,20 @@ function ParagraphEditor({
               ? 'Vertical text keeps its font — the bundled faces are horizontal'
               : 'Bold — substitutes the bundled bold face'
           }
-          onClick={() => setBold((b) => !b)}
+          onClick={() => {
+            // A5b dual role: a live selection toggles bold on that range
+            // (keeping its other axes); a collapsed caret toggles the whole
+            // paragraph (the shipped A3b).
+            const sel = selRef.current;
+            if (sel.end > sel.start) {
+              const base = faceAt(sel.start);
+              setSpanFaces((prev) =>
+                applySpanFace(prev, sel.start, sel.end, { ...base, bold: !base.bold }),
+              );
+            } else {
+              setBold((b) => !b);
+            }
+          }}
         >
           B
         </button>
@@ -1606,17 +1650,27 @@ function ParagraphEditor({
               ? 'Vertical text keeps its font — the bundled faces are horizontal'
               : 'Italic — substitutes the bundled italic face'
           }
-          onClick={() => setItalic((i) => !i)}
+          onClick={() => {
+            const sel = selRef.current;
+            if (sel.end > sel.start) {
+              const base = faceAt(sel.start);
+              setSpanFaces((prev) =>
+                applySpanFace(prev, sel.start, sel.end, { ...base, italic: !base.italic }),
+              );
+            } else {
+              setItalic((i) => !i);
+            }
+          }}
         >
           I
         </button>
       </div>
-      {/* 9.A5a mirror overlay: a backdrop renders the text with the
-          per-span colours; the textarea (transparent text, visible caret)
-          sits on top for input. Both share the exact font/size/padding/
-          wrap so the coloured backdrop lines up under the caret. The
-          textarea's text stays opaque #111 until a colour is applied, so
-          a plain edit is visually unchanged. */}
+      {/* 9.A5a/A5b mirror overlay: a backdrop renders the text with the
+          per-span colours AND weight/slant; the textarea (transparent
+          text, visible caret) sits on top for input. Both share the exact
+          font/size/padding/wrap so the styled backdrop lines up under the
+          caret. The textarea's text stays opaque #111 until a per-span
+          style is applied, so a plain edit is visually unchanged. */}
       <div className="page-editpara-inputwrap">
         <div
           className="page-editpara-backdrop"
@@ -1624,15 +1678,18 @@ function ParagraphEditor({
           data-testid="edit-para-backdrop"
           style={{ fontSize: `${fontPx}px`, lineHeight: 1.25 }}
         >
-          {backdropSegments(value, spanColors).map((seg, i) =>
-            seg.color ? (
-              <span key={i} style={{ color: seg.color }}>
-                {seg.text}
-              </span>
-            ) : (
-              <span key={i}>{seg.text}</span>
-            ),
-          )}
+          {backdropSegments(value, spanColors, spanFaces).map((seg, i) => (
+            <span
+              key={i}
+              style={{
+                ...(seg.color ? { color: seg.color } : {}),
+                ...(seg.bold ? { fontWeight: 700 } : {}),
+                ...(seg.italic ? { fontStyle: 'italic' } : {}),
+              }}
+            >
+              {seg.text}
+            </span>
+          ))}
           {/* trailing zero-width space so a text ending in a newline still
               renders its final (empty) line in the backdrop */}
           {'​'}
@@ -1646,18 +1703,19 @@ function ParagraphEditor({
           style={{
             fontSize: `${fontPx}px`,
             lineHeight: 1.25,
-            color: spanColors.length > 0 ? 'transparent' : '#111',
+            color: spanColors.length > 0 || spanFaces.length > 0 ? 'transparent' : '#111',
             caretColor: '#111',
           }}
           onChange={(e) => {
             const next = sanitizeParagraphInput(e.target.value);
-            // Per-span colours follow the text edit (same diff as the spans),
-            // then flatten to disjoint — a retype whose window spans two
-            // differently-coloured ranges would otherwise leave them
-            // overlapping, and the preview would show a different winner than
-            // the commit (round-32 HIGH). `mergeSpanColors` resolves it the
-            // same way the engine folds, so state stays canonical.
+            // Per-span overrides follow the text edit (same diff as the
+            // spans), then flatten to disjoint — a retype whose window spans
+            // two different ranges would otherwise leave them overlapping and
+            // the preview would show a different winner than the commit
+            // (round-32 HIGH). The merge resolves it the way the engine
+            // folds, so state stays canonical.
             setSpanColors((prev) => mergeSpanColors(remapRanges(value, next, prev)));
+            setSpanFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
             setValue(next);
           }}
           onSelect={captureSelection}

@@ -1239,6 +1239,15 @@ def _page_base_fonts(path: str) -> list[str]:
         return [str(fonts[k].get("/BaseFont", "")) for k in fonts.keys()]
 
 
+def _fallback_font_names(path: str) -> list[str]:
+    """The page-level /EditFb* subset font names — one per embedded fallback
+    subset. len() == the count of distinct faces the edit substituted (9.A5b:
+    zero for a colour-only or plain edit, one for a whole-para A3 swap)."""
+    with pikepdf.open(path) as pdf:
+        fonts = pdf.pages[0].obj.get("/Resources", {}).get("/Font", {}) or {}
+        return [str(k) for k in fonts.keys() if str(k).startswith("/EditFb")]
+
+
 FONTS_DIR = os.path.dirname(FALLBACK_FONT)
 
 # The COMPLETE vendored bundle (sync-edit-fonts.ps1's $Faces): the guard
@@ -2600,3 +2609,174 @@ class TestPerSpanColor:
             _apply(src, out, p, p["text"], span_styles=[{"start": 0, "end": 999, "color": [1.0, 0.0, 0.0]}])
         with pytest.raises(ValueError, match=r"\[r, g, b\]"):
             _apply(src, out, p, p["text"], span_styles=[{"start": 0, "end": 3, "color": [1.0, 0.0]}])
+
+
+class TestPerSpanFace:
+    """Phase 9.A5b — per-span bold/italic/family: substitute just a
+    character RANGE into a bundled Liberation face. Generalizes the single
+    fallback subset (A5a/A3) to one subset per distinct requested face; the
+    whole-paragraph A3 path is the single-face special case (proven
+    byte-identical vs HEAD out-of-suite; the ONE-subset shape is pinned by
+    test_a3_only_path_embeds_exactly_one_subset here)."""
+
+    @_needs_faces
+    def test_per_span_bold_embeds_bold_face_for_just_the_range(self, tmp_dir):
+        # Bold [5,9) ("this"); the range embeds a -Bold subset, the rest
+        # keeps the member's own font (Helvetica), and it round-trips as
+        # ONE editable paragraph with the same text.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Make this word plain) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        assert p["text"] == "Make this word plain"
+        assert p["text"][5:9] == "this"  # hand-verified range
+        _apply(src, out, p, p["text"], font_path=FONTS_DIR,
+               span_styles=[{"start": 5, "end": 9, "bold": True}])
+        base = _page_base_fonts(out)
+        assert any("LiberationSans-Bold" in b for b in base)  # the styled subset…
+        assert any("Helvetica" in b for b in base)            # …the member font for the rest
+        assert len(_fallback_font_names(out)) == 1
+        relisted = _paras(out)
+        assert relisted[0]["text"] == p["text"]
+        assert relisted[0]["editable"] is True
+
+    @_needs_faces
+    def test_implicit_family_keeps_each_members_own_family(self, tmp_dir):
+        # Round-33 HIGH: a per-span bold with NO explicit family must take the
+        # BOLDED char's OWN member family — not the paragraph's first member.
+        # "Hello " is Times (serif, member 0); "World" is Courier (mono,
+        # member 1). Bolding "World" alone must embed LiberationMONO-Bold,
+        # never LiberationSerif-Bold.
+        src = os.path.join(tmp_dir, "mix.pdf")
+        pdf = pikepdf.new()
+        times = pdf.make_indirect(Dictionary(
+            Type=Name("/Font"), Subtype=Name("/Type1"),
+            BaseFont=Name("/Times-Roman"), Encoding=Name("/WinAnsiEncoding")))
+        cour = pdf.make_indirect(Dictionary(
+            Type=Name("/Font"), Subtype=Name("/Type1"),
+            BaseFont=Name("/Courier"), Encoding=Name("/WinAnsiEncoding")))
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=times, F2=cour))
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 72 700 Td (Hello ) Tj /F2 12 Tf (World) Tj ET")
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        assert p["text"] == "Hello World"
+        _apply(src, out, p, p["text"], p["spans"], font_path=FONTS_DIR,
+               span_styles=[{"start": 6, "end": 11, "bold": True}])
+        base = _page_base_fonts(out)
+        assert any("LiberationMono-Bold" in b for b in base), base
+        assert not any("LiberationSerif" in b for b in base), base
+
+    @_needs_faces
+    def test_two_distinct_faces_embed_two_subsets(self, tmp_dir):
+        # A serif-bold range AND a mono range in one paragraph → two DISTINCT
+        # Liberation subsets embedded, each its own registered /EditFb font.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (alpha beta gamma delta) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        assert p["text"] == "alpha beta gamma delta"
+        assert p["text"][0:5] == "alpha" and p["text"][11:16] == "gamma"
+        _apply(src, out, p, p["text"], font_path=FONTS_DIR, span_styles=[
+            {"start": 0, "end": 5, "family": "serif", "bold": True},   # alpha → serif bold
+            {"start": 11, "end": 16, "family": "mono"},                 # gamma → mono regular
+        ])
+        base = _page_base_fonts(out)
+        assert any("LiberationSerif-Bold" in b for b in base)
+        assert any("LiberationMono" in b for b in base)
+        assert len(_fallback_font_names(out)) == 2  # two distinct subsets
+
+    @_needs_faces
+    def test_per_span_face_composes_with_colour_and_size(self, tmp_dir):
+        # One range bold AND red, PLUS an A1 whole-paragraph size bump: the
+        # bold subset embeds, the range emits red, every Tf carries the new
+        # size (member and subset alike).
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello colored world) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        assert p["text"][6:13] == "colored"
+        _apply(src, out, p, p["text"], size=18.0, font_path=FONTS_DIR,
+               span_styles=[{"start": 6, "end": 13, "bold": True, "color": [1.0, 0.0, 0.0]}])
+        assert any("LiberationSans-Bold" in b for b in _page_base_fonts(out))
+        with pikepdf.open(out) as pdf:
+            ops = [(str(i.operator), [str(x) for x in i.operands])
+                   for i in pikepdf.parse_content_stream(pdf.pages[0])]
+        assert any(op == "rg" and a == ["1", "0", "0"] for op, a in ops)  # the range is red
+        assert {a[1] for op, a in ops if op == "Tf"} == {"18"}  # size reached every Tf
+
+    @_needs_faces
+    def test_a3_only_path_embeds_exactly_one_subset(self, tmp_dir):
+        # The in-suite proxy for the byte-identity gate: a whole-paragraph A3
+        # swap (NO per-span faces) resolves to EXACTLY ONE subset with the
+        # expected BaseFont — the shipped single-face shape, unchanged.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Whole paragraph swap) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        _apply(src, out, p, p["text"], family="serif", font_path=FONTS_DIR)
+        assert len(_fallback_font_names(out)) == 1
+        assert any("LiberationSerif" in b for b in _page_base_fonts(out))
+
+    @_needs_faces
+    def test_colour_only_span_styles_embeds_no_subset(self, tmp_dir):
+        # The no-face path: colour-only span_styles substitute NOTHING, so
+        # the fallback subset count stays zero (A5a's world, unchanged).
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello colored world) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        _apply(src, out, p, p["text"], font_path=FONTS_DIR,
+               span_styles=[{"start": 6, "end": 13, "color": [1.0, 0.0, 0.0]}])
+        assert len(_fallback_font_names(out)) == 0
+        assert not any("Liberation" in b for b in _page_base_fonts(out))
+
+    @_needs_faces
+    def test_per_span_substitution_of_missing_char_refuses(self, tmp_dir):
+        # A per-span face on a char the Liberation face lacks (CJK) refuses
+        # with the stated coverage reason — the A3 boundary, now per-span.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello world) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        new = "Hello 你 world"
+        assert new[6] == "你"  # hand-verified position
+        spans = [{"start": 0, "end": len(new), "run": p["runs"][0]}]
+        with pytest.raises(ValueError, match="cannot express"):
+            _apply(src, out, p, new, spans, font_path=FONTS_DIR,
+                   span_styles=[{"start": 6, "end": 7, "bold": True}])
+
+    @_needs_faces
+    def test_per_span_face_keeps_other_paragraphs_unmoved(self, tmp_dir):
+        # The resync property at A5b scope: a per-span substitution (which
+        # interleaves subset + member Tf switches) must leave every other
+        # show op at an identical matrix + state (the dual-walk harness).
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Bold one word here) Tj "
+            b"0 -60 Td (This one stays untouched) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        assert len(paras) == 2
+        target = next(p for p in paras if "Bold one" in p["text"])
+        assert target["text"][5:8] == "one"
+        _apply(src, out, target, target["text"], font_path=FONTS_DIR,
+               span_styles=[{"start": 5, "end": 8, "bold": True}])
+        _assert_non_members_unmoved(src, out, target["runs"])
+        assert any("This one stays untouched" in p["text"] for p in _paras(out))
+
+    def test_span_style_needs_a_colour_or_a_face(self, tmp_dir):
+        # A span_styles entry that sets neither a colour nor a face is
+        # malformed — refuse loudly rather than silently no-op.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Whatever text here) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        with pytest.raises(ValueError, match="colour or a face"):
+            _apply(src, out, p, p["text"], font_path=FONTS_DIR,
+                   span_styles=[{"start": 0, "end": 4}])
+
+    def test_invalid_span_face_family_refuses(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Whatever text here) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        with pytest.raises(ValueError, match="family must be"):
+            _apply(src, out, p, p["text"], font_path=FONTS_DIR,
+                   span_styles=[{"start": 0, "end": 4, "family": "cursive"}])

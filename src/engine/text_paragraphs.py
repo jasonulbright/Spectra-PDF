@@ -715,11 +715,20 @@ def _cjk(ch: str) -> bool:
 
 class _StyleRef:
     """One rendering style for a slice of new text: a member run's
-    measured style, optionally re-fonted to the shared fallback subset."""
+    measured style, optionally re-fonted to a fallback subset.
+
+    9.A5b: `fallback` is a FACE KEY `(family_or_None, bold, italic)` when
+    this slice substitutes into a bundled Liberation face (a per-span
+    bold/italic/family override, the whole-para A3 swap, or a convert
+    char), else None to render in the member's own font. The key indexes
+    `_Emission.fallbacks`; `family_or_None=None` resolves the face from the
+    member's own classified family (mirrors A3b style-only). Was a plain
+    bool (one shared subset) through A5a — a non-None key is the new truth,
+    so every emission site tests `is not None`, not truthiness."""
 
     __slots__ = ("member", "fallback", "size_override", "color_override")
 
-    def __init__(self, member: _Member, fallback: bool, size_override=None, color_override=None):
+    def __init__(self, member: _Member, fallback, size_override=None, color_override=None):
         self.member = member
         self.fallback = fallback
         # A1: uniform size (points) / fill-color (ColorState) overrides,
@@ -773,7 +782,11 @@ def _to_stroke_color(color):
 
 
 class _Fallback:
-    """The one shared fallback subset for this edit (7.4 machinery)."""
+    """One embedded fallback subset (7.4 machinery). 9.A5b: an edit carries
+    a DICT of these keyed by face — one per distinct requested face — where
+    A5a/A3 carried exactly one. `name` is allocated at emission time against
+    the target stream's resources (deterministic sorted-face order, so the
+    single-subset A3 case keeps its shipped `/EditFb0`)."""
 
     __slots__ = ("name", "font_dict", "encode", "width_1000", "used")
 
@@ -785,6 +798,14 @@ class _Fallback:
         self.used = False
 
 
+def _face_sort_key(key: tuple) -> tuple:
+    """Total order over face keys `(family_or_None, bold, italic)` — None
+    family sorts as "" so the sort never compares NoneType to str. Pins the
+    per-subset name allocation + build order (deterministic bytes)."""
+    fam, bold, italic = key
+    return (fam or "", bold, italic)
+
+
 def _styled_chars(
     new_text: str,
     spans: list[dict],
@@ -792,30 +813,36 @@ def _styled_chars(
     convert: bool,
     size_override=None,
     color_override=None,
-    force_fallback: bool = False,
+    whole_para_face=None,
     color_by_pos=None,
-) -> tuple[list[tuple[str, _StyleRef]], str]:
+    face_by_pos=None,
+    member_family=None,
+) -> tuple[list[tuple[str, _StyleRef]], dict]:
     """Map every char of the new text to its style source; returns the
-    styled stream plus the characters that need the fallback font (empty
-    unless convert). Refuses (ValueError, naming the char) when a char is
-    unencodable and convert is off — the renderer validates live, this is
-    the belt.
+    styled stream plus `fb_by_face` — a dict {face key → the char-set that
+    subset must cover} the caller turns into one `_Fallback` per key.
+    Refuses (ValueError, naming the char) when a char is unencodable and
+    convert is off — the renderer validates live, this is the belt.
 
-    `force_fallback` (9.A3a family swap) routes EVERY character through
-    the fallback font — the whole paragraph re-renders in the chosen
-    face, so the members' own coverage is irrelevant (spaces included:
-    they become real fallback glyphs, not synthetic kerns). Default False
-    keeps the shipped branch order untouched — a no-family edit must stay
-    byte-identical to 7.5/A1 output.
+    9.A5b — face resolution per code point (per-span face at pos > the
+    whole-para A3 substitution `whole_para_face` > None=keep the member
+    font). A non-None key routes THAT char through a keyed fallback subset
+    (one char at a time, spaces included, ligatures never formed — the
+    face is a different font, the member's own coverage is moot), exactly
+    the shipped `force_fallback` behaviour generalized from one boolean to
+    N faces. `whole_para_face` is None or the single whole-paragraph key
+    `(family_or_None, bold, italic)` (A3a/A3b) — when set it covers every
+    char, so it collapses to ONE key/subset and stays byte-identical to
+    the shipped single-face output. The convert path keeps the B1
+    dominant-face key `(None, False, False)`.
 
     `color_by_pos` (9.A5a per-span colour) is None or a list one entry per
     code point of new_text: a ColorState overrides the char at that
     position, None falls through to the call-level `color_override` (the
-    A1 whole-paragraph colour). The override only changes each char's
-    `_StyleRef` colour — `_StyleRef.key`/`_segments` already split the
-    emission per colour, so this needs no emission change. None everywhere
-    (the default) is byte-identical to the shipped path (every char keys
-    on the one `color_override`, collapsing to today's single ref)."""
+    A1 whole-paragraph colour). The colour and face lookups are folded
+    INDEPENDENTLY from the same span_styles list — a char may be per-span
+    red AND bold, on unaligned ranges. Both None (the default) is
+    byte-identical to the shipped path."""
     if not spans and new_text:
         raise ValueError("edit spans are missing")
     covered = 0
@@ -831,10 +858,12 @@ def _styled_chars(
         raise ValueError("edit spans must cover the whole text")
 
     styled: list[tuple[str, _StyleRef]] = []
-    fallback_chars: set[str] = set()
+    fb_by_face: dict[tuple, set[str]] = {}
     refs: dict[tuple, _StyleRef] = {}
 
-    def ref(member: _Member, fb: bool, col) -> _StyleRef:
+    def ref(member: _Member, fb, col) -> _StyleRef:
+        # `fb` is a face KEY (tuple) or None — both hashable, so the memo
+        # key + _StyleRef.key stay hashable/comparable (9.A5b).
         k = (member.index, fb, col)
         if k not in refs:
             refs[k] = _StyleRef(member, fb, size_override, col)
@@ -860,40 +889,74 @@ def _styled_chars(
         # segment; keyed on the default it is the real, intended guard.)
         return None if member.style.get("fill_color") != (None, None) else (None, None)
 
+    def face_at(pos: int, member: _Member):
+        # A5b: per-span face at pos wins, else the whole-para A3 face, else
+        # None (keep the member's own font).
+        if face_by_pos is not None:
+            k = face_by_pos[pos] if 0 <= pos < len(face_by_pos) else None
+            if k is not None:
+                fam, kb, ki = k
+                if fam is None and member_family is not None:
+                    # Round-33 HIGH: a per-span face with NO explicit family
+                    # keeps THIS char's own member family (a bolded mono word
+                    # in a serif paragraph → LiberationMono-Bold, not the
+                    # first member's serif). Bake it into the key HERE, where
+                    # the member is known, so chars from different families
+                    # split into their own subsets and the build step embeds
+                    # the right typeface. `whole_para_face` (the true
+                    # whole-paragraph A3b key) is returned untouched below —
+                    # it resolves from the DOMINANT member, byte-identical.
+                    k = (member_family.get(member.index), kb, ki)
+                return k
+        return whole_para_face
+
+    def seq_crosses_face(pos: int, length: int) -> bool:
+        # A ligature must not span a per-span face boundary — the member-
+        # font sequence would silently swallow a substituted char. Inert
+        # (returns False) whenever there are no per-span faces, so the
+        # shipped/A5a paths keep forming ligatures byte-identically.
+        if face_by_pos is None:
+            return False
+        for q in range(pos, min(pos + length, len(face_by_pos))):
+            if face_by_pos[q] is not None:
+                return True
+        return False
+
     for span in spans:
         member = members_by_index[int(span["run"])]
         seg_text = new_text[span["start"] : span["end"]]
         i = 0
         while i < len(seg_text):
             ch = seg_text[i]
+            pos = span["start"] + i
             # A5a: a ligature/atomic entry can carry ONE colour — resolve at
-            # its FIRST position (the glyph is indivisible; a colour boundary
-            # inside a sequence takes the start colour).
-            col = color_at(span["start"] + i, member)
-            if force_fallback:
+            # its FIRST position (the glyph is indivisible; a colour/face
+            # boundary inside a sequence takes the start value).
+            col = color_at(pos, member)
+            fk = face_at(pos, member)
+            if fk is not None:
                 if member.vertical:
                     # 9.B4b belt (the para-level substitution refusal is
                     # the surface): the fallback faces are horizontal.
                     raise ValueError(
                         "vertical text cannot be converted to the fallback font"
                     )
-                fallback_chars.add(ch)
-                styled.append((ch, ref(member, True, col)))
+                fb_by_face.setdefault(fk, set()).add(ch)
+                styled.append((ch, ref(member, fk, col)))
                 i += 1
                 continue
             # 9.B5: an unambiguous ligature sequence becomes ONE atomic
             # styled entry — matched BEFORE the single map (the encode
             # order), so the width math and the emitted bytes agree by
             # construction (text_width and encode share the matcher).
-            # Sequences never cross spans: the per-span slice enforces
-            # what the per-segment encode does anyway.
+            # Sequences never cross spans; nor a per-span face boundary.
             seq = member.cap._sequence_at(seg_text, i)
-            if seq is not None:
-                styled.append((seq, ref(member, False, col)))
+            if seq is not None and not seq_crosses_face(pos, len(seq)):
+                styled.append((seq, ref(member, None, col)))
                 i += len(seq)
                 continue
             if ch == " " or member.cap.can_encode(ch):
-                styled.append((ch, ref(member, False, col)))
+                styled.append((ch, ref(member, None, col)))
             elif convert:
                 if member.vertical:
                     # 9.B4b: the 7.4 fallback embeds a HORIZONTAL
@@ -903,12 +966,16 @@ def _styled_chars(
                     raise ValueError(
                         "vertical text cannot be converted to the fallback font"
                     )
-                fallback_chars.add(ch)
-                styled.append((ch, ref(member, True, col)))
+                # B1 dominant/convert face: family resolves from the first
+                # member (the build step), style regular — byte-identical to
+                # the shipped single convert subset.
+                ck = (None, False, False)
+                fb_by_face.setdefault(ck, set()).add(ch)
+                styled.append((ch, ref(member, ck, col)))
             else:
                 raise ValueError(f"font cannot encode {ch!r}")
             i += 1
-    return styled, "".join(sorted(fallback_chars))
+    return styled, fb_by_face
 
 
 class _Word:
@@ -921,10 +988,11 @@ class _Word:
         self.gap_styles: list[tuple[str, _StyleRef, float]] = []  # (char, style, w)
 
 
-def _char_width_user(ch: str, st: _StyleRef, fb: _Fallback | None, median_gap_1000: float) -> float:
+def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: float) -> float:
     m = st.member
     s = st.style()
-    if st.fallback:
+    if st.fallback is not None:
+        fb = fallbacks.get(st.fallback)
         w1000 = fb.width_1000(ch) if fb is not None else 0.0
         w = w1000 / 1000.0 * s["size"] + s["char_spacing"]
     elif ch == " " and not m.cap.can_encode(" "):
@@ -948,7 +1016,7 @@ def _char_width_user(ch: str, st: _StyleRef, fb: _Fallback | None, median_gap_10
 
 
 def _tokenize(
-    styled: list[tuple[str, _StyleRef]], fb: _Fallback | None, median_gap_1000: float
+    styled: list[tuple[str, _StyleRef]], fallbacks: dict, median_gap_1000: float
 ) -> list[_Word]:
     """Words with break opportunities: at spaces, and AFTER any CJK char
     (no-space scripts must wrap). Kinsoku-lite: a chunk that would START
@@ -963,7 +1031,7 @@ def _tokenize(
             current = _Word()
 
     for ch, st in styled:
-        w = _char_width_user(ch, st, fb, median_gap_1000)
+        w = _char_width_user(ch, st, fallbacks, median_gap_1000)
         if ch == " ":
             current.gap_after += w
             current.gap_styles.append((ch, st, w))
@@ -1109,12 +1177,14 @@ class _Emission:
     first member (the ctm there anchors the user-space line targets)."""
 
     def __init__(
-        self, para: _Paragraph, styled, fb: _Fallback | None, page_x0: float, page_x1: float,
+        self, para: _Paragraph, styled, fallbacks: dict, page_x0: float, page_x1: float,
         size_override=None, split_at=None,
     ):
         self.para = para
         self.styled = styled
-        self.fb = fb
+        # 9.A5b: {face key → _Fallback}, one subset per distinct requested
+        # face (was the single `self.fb`). Empty when nothing substitutes.
+        self.fallbacks = fallbacks
         # 9.B4b: for a vertical paragraph the caller passes the TRANSPOSED
         # page bounds (x′ = −y of the mediabox) — the whole layout runs in
         # transposed space, the single-line margin rule included.
@@ -1191,7 +1261,7 @@ class _Emission:
         lines: list[_LayoutLine] = []
         y_next: float | None = None
         for part in parts:
-            words = _tokenize(part, self.fb, para.median_gap_1000)
+            words = _tokenize(part, self.fallbacks, para.median_gap_1000)
             if not words:
                 continue
             block = _fill_lines(words, first_measure, body_measure)
@@ -1245,11 +1315,11 @@ class _Emission:
         stream: list[tuple] = []  # ("ch", ch, style, w) | ("kern", style, w)
         for wi, word in enumerate(line.words):
             for ch, st in word.chars:
-                stream.append(("ch", ch, st, _char_width_user(ch, st, self.fb, self.para.median_gap_1000)))
+                stream.append(("ch", ch, st, _char_width_user(ch, st, self.fallbacks, self.para.median_gap_1000)))
             is_last = wi == len(line.words) - 1
             if not is_last:
                 for ch, st, w in word.gap_styles:
-                    if ch == " " and not st.fallback and not st.member.cap.can_encode(" "):
+                    if ch == " " and st.fallback is None and not st.member.cap.can_encode(" "):
                         stream.append(("kern", st, w))
                     else:
                         stream.append(("ch", ch, st, w))
@@ -1274,9 +1344,12 @@ class _Emission:
         m = st.member
         s = st.style()  # A1: effective (possibly size/color-overridden)
         ops: list[tuple] = []
-        font = self.fb.name if st.fallback else s["font_name"]
-        if st.fallback and self.fb is not None:
-            self.fb.used = True
+        if st.fallback is not None:
+            fb = self.fallbacks[st.fallback]
+            fb.used = True  # marks THIS subset for registration (per face)
+            font = fb.name
+        else:
+            font = s["font_name"]
         if font:
             ops.append(("op", _instruction([Name(font), _f(s["size"])], "Tf"), None))
         ops.append(("op", _instruction([_f(s["h_scale"] * 100.0)], "Tz"), None))
@@ -1315,8 +1388,9 @@ class _Emission:
             # single entry to its single code. Per-entry encode makes
             # bytes and widths agree by construction for ANY caller-
             # supplied span shape.
-            if st.fallback:
-                encoded = b"".join(self.fb.encode(t) for t in buf)
+            if st.fallback is not None:
+                fb = self.fallbacks[st.fallback]
+                encoded = b"".join(fb.encode(t) for t in buf)
             else:
                 encoded = b"".join(m.cap.encode(t) for t in buf)
             items.append(encoded)
@@ -1420,16 +1494,20 @@ def _state_sync_instructions(orig: GraphicsTextState, emit: GraphicsTextState) -
 
 
 class _ParaEditState:
-    def __init__(self, target_stream, member_ordinals, first_ordinal, emission, fallback):
+    def __init__(self, target_stream, member_ordinals, first_ordinal, emission, fallbacks):
         self.target_stream = target_stream
         self.member_ordinals = member_ordinals
         self.first_ordinal = first_ordinal
         self.last_ordinal = max(member_ordinals)
         self.emission = emission
-        self.fallback = fallback
+        # 9.A5b: {face key → _Fallback} (was the single `fallback`).
+        self.fallbacks = fallbacks
         self.changed = False
         self.superseded_forms: set = set()
-        self.pending_font: tuple | None = None
+        # 9.A5b: one (name, font_dict) per USED subset (was the single
+        # `pending_font`) — each registered at the top level or into the
+        # nested-form copy.
+        self.pending_fonts: list = []
 
 
 def _rewrite_paragraph_stream(
@@ -1537,7 +1615,7 @@ def _rewrite_paragraph_stream(
                             for nm, st in inner_new_forms.items():
                                 copy_res["/XObject"][Name(nm)] = pdf.make_indirect(st)
                             if (
-                                edit.pending_font is not None
+                                edit.pending_fonts
                                 and path + (my_ordinal,) == edit.target_stream
                             ):
                                 # /Font must be DEEP-copied into the copy
@@ -1550,8 +1628,8 @@ def _rewrite_paragraph_stream(
                                     for k in src_fonts.keys():
                                         fresh_fonts[k] = src_fonts[k]
                                 copy_res["/Font"] = fresh_fonts
-                                fname, fdict = edit.pending_font
-                                _register_font(pdf, copy_res, fname, fdict)
+                                for fname, fdict in edit.pending_fonts:
+                                    _register_font(pdf, copy_res, fname, fdict)
                             copy["/Resources"] = copy_res
                             new_name = _fresh_name(resources, counter, reserved)
                             new_forms[new_name] = copy
@@ -1594,16 +1672,22 @@ def _rewrite_paragraph_stream(
             vert = bool(cap is not None and cap.vertical)
             if is_member:
                 if show_ordinal == edit.first_ordinal:
-                    if edit.fallback is not None:
-                        edit.fallback.name = _fresh_font_name(resources, counter, reserved)
+                    # 9.A5b: allocate a fresh name per subset in sorted-face
+                    # order BEFORE the build (so _state_ops reads it), then
+                    # collect the ones the build actually emitted. One key →
+                    # one `/EditFb0`, byte-identical to the shipped A3 path.
+                    for key in sorted(edit.fallbacks, key=_face_sort_key):
+                        edit.fallbacks[key].name = _fresh_font_name(resources, counter, reserved)
                     for kind, ins, raw_w in edit.emission.build(orig.ctm):
                         kept.append(ins)
                         if kind == "show":
                             emit.advance_after_show(raw_w, edit.emission.vertical)
                         else:
                             emit_feed(ins)
-                    if edit.fallback is not None and edit.fallback.used:
-                        edit.pending_font = (edit.fallback.name, edit.fallback.font_dict)
+                    for key in sorted(edit.fallbacks, key=_face_sort_key):
+                        fb = edit.fallbacks[key]
+                        if fb.used:
+                            edit.pending_fonts.append((fb.name, fb.font_dict))
                 edit.changed = True
                 changed = True
                 diverged = True
@@ -1738,13 +1822,20 @@ def replace_paragraph_text(
     join across, so the result lists as two paragraphs. None = the
     shipped single-block layout (byte-identical).
 
-    A5a per-span colour: `span_styles` is None or a list of
-    `{start, end, color: [r, g, b]}` over CODE-POINT ranges of
-    `new_text` — each recolours just its range (distinct from the
-    style-SOURCE `spans`; sparse; need not align to span boundaries;
-    overlaps fold last-wins). A per-span colour overrides the A1
-    whole-paragraph `color` on its range. Colour is metric-neutral, so
-    this changes no wrap/leading/split — None = byte-identical shipped.
+    A5a/A5b per-span styling: `span_styles` is None or a list of
+    `{start, end, color?: [r, g, b], family?, bold?, italic?}` over
+    CODE-POINT ranges of `new_text` (distinct from the style-SOURCE
+    `spans`; sparse; need not align to span boundaries; overlaps fold
+    last-wins). A `color` recolours its range, overriding the A1
+    whole-paragraph `color` (A5a, metric-neutral). A `family`/`bold`/
+    `italic` SUBSTITUTES its range into the matching bundled Liberation
+    face (A5b) — one embedded subset per distinct requested face, family
+    absent = keep the char's member family, the same honest substitution
+    A3 does whole-paragraph. The colour and face axes fold INDEPENDENTLY
+    (a range can be red AND bold, on unaligned ranges). Per-span faces
+    inherit A3's refusals (a char the Liberation face lacks is named);
+    vertical paragraphs refuse substitution (B4b). None throughout =
+    byte-identical shipped.
 
     9.B4b: vertical paragraphs reflow through the same pipeline in
     transposed space (columns fill top-down at the measured pitch, growth
@@ -1839,14 +1930,15 @@ def replace_paragraph_text(
                 raise ValueError("split position must be inside the text")
             split_point = sp
 
-        # A5a per-span colour: fold the sparse ranges into a per-code-point
-        # ColorState lookup (None where no override applies). Same clamp/
-        # shape as the A1 colour; last-writer-wins on overlap. None keeps
-        # color_by_pos None → _styled_chars stays on the byte-identical path.
+        # A5a/A5b per-span styling: fold the sparse span_styles ranges into
+        # per-code-point lookups — `color_by_pos` (A5a colour) and
+        # `face_by_pos` (A5b face key) INDEPENDENTLY, so one entry may carry
+        # a colour, a face, or both, on unaligned ranges. Last-writer-wins on
+        # overlap. Both stay None when unused → _styled_chars byte-identical.
         color_by_pos = None
+        face_by_pos = None
         if span_styles:
             n_cp = len(str(new_text))
-            color_by_pos = [None] * n_cp
             for entry in span_styles:
                 try:
                     st = int(entry["start"])
@@ -1857,24 +1949,76 @@ def replace_paragraph_text(
                     raise ValueError("span style range out of bounds")
                 if st == en:
                     continue  # empty range: harmless no-op
-                try:
-                    rgb = [max(0.0, min(1.0, float(c))) for c in entry.get("color")]
-                except (TypeError, ValueError):
-                    rgb = []
-                if len(rgb) != 3:
-                    raise ValueError("span style colour must be [r, g, b]")
-                cs = (None, ("rg", tuple(rgb)))
-                for k in range(st, en):
-                    color_by_pos[k] = cs
+                has_face = any(f in entry for f in ("family", "bold", "italic"))
+                has_color = entry.get("color") is not None
+                if not has_face and not has_color:
+                    raise ValueError("span style must set a colour or a face")
+                if has_color:
+                    try:
+                        rgb = [max(0.0, min(1.0, float(c))) for c in entry.get("color")]
+                    except (TypeError, ValueError):
+                        rgb = []
+                    if len(rgb) != 3:
+                        raise ValueError("span style colour must be [r, g, b]")
+                    cs = (None, ("rg", tuple(rgb)))
+                    if color_by_pos is None:
+                        color_by_pos = [None] * n_cp
+                    for k in range(st, en):
+                        color_by_pos[k] = cs
+                if has_face:
+                    # A5b face key (family_or_None, bold, italic): family in
+                    # the trio or absent (None = keep the member family);
+                    # bold/italic coerced bool (absent = False — the absolute
+                    # A3b weight/slant semantics, now per span).
+                    fam = entry.get("family")
+                    if fam is not None:
+                        fam = str(fam).strip().lower()
+                        if fam not in ("serif", "sans", "mono"):
+                            raise ValueError("span style family must be serif, sans, or mono")
+                    facekey = (fam, bool(entry.get("bold")), bool(entry.get("italic")))
+                    if face_by_pos is None:
+                        face_by_pos = [None] * n_cp
+                    for k in range(st, en):
+                        face_by_pos[k] = facekey
+
+        # A3a/A3b whole-paragraph substitution → ONE face key covering every
+        # char (family_override may be None = keep the member family). None
+        # when not substituting. Per-span faces (face_by_pos) override it per
+        # position; the single-key case stays byte-identical to shipped A3.
+        whole_para_face = None
+        if substituting:
+            wb = style_override[0] if style_override is not None else False
+            wi = style_override[1] if style_override is not None else False
+            whole_para_face = (family_override, wb, wi)
 
         members_by_index = {m.index: m for m in para.members}
-        styled, fb_chars = _styled_chars(
+        # 9.A5b (round-33 HIGH): each member's OWN classified family, so a
+        # per-span face with no explicit family lands on that member's family
+        # (a bolded mono word in a serif paragraph → mono-bold). Only needed
+        # when per-span faces are present; the font is looked up in the
+        # member's own stream resources (form-scoped when nested), page
+        # resources as fallback.
+        member_family = None
+        if face_by_pos is not None:
+            from engine.font_fallback import classify_font_family
+            from engine.text_runs import _lookup_font
+
+            member_family = {}
+            for m in para.members:
+                fd = _lookup_font(m.style["font_name"], m.resources or resources, resources)
+                member_family[m.index] = classify_font_family(fd) if fd is not None else "sans"
+        styled, fb_by_face = _styled_chars(
             str(new_text), list(spans), members_by_index, bool(convert),
             size_override=size_override, color_override=color_override,
-            force_fallback=substituting, color_by_pos=color_by_pos,
+            whole_para_face=whole_para_face, color_by_pos=color_by_pos,
+            face_by_pos=face_by_pos, member_family=member_family,
         )
-        fallback = None
-        if fb_chars:
+        # 9.A5b: build ONE _Fallback per face key, sorted-face order so the
+        # subset names + embedded bytes are deterministic. The whole-para A3
+        # path yields exactly one key here → one subset → byte-identical to
+        # the shipped single-_Fallback output.
+        fallbacks: dict[tuple, _Fallback] = {}
+        if fb_by_face:
             from engine.font_fallback import (
                 build_fallback_font,
                 resolve_fallback_font,
@@ -1885,33 +2029,27 @@ def replace_paragraph_text(
 
             if not font_path:
                 raise ValueError("fallback font path is required to convert")
-            want_style = style_key(*style_override) if style_override is not None else "regular"
-            if family_override is not None:
-                # A3a: the user picked the family — classification is
-                # bypassed via a synthetic /Flags dict (the A2 trick), so
-                # the substitution lands on exactly that face.
+            # family=None keys resolve their face from the FIRST member's own
+            # font (form-scoped when nested — a form's `F1` can differ from
+            # the page's, review-caught): this is the B1 dominant face and
+            # reproduces the shipped whole-para style-only / convert resolve
+            # exactly. family=serif|sans|mono keys bypass classification via
+            # a synthetic /Flags dict (the A2 trick).
+            first = min(para.members, key=lambda m: m.index)
+            for key in sorted(fb_by_face, key=_face_sort_key):
+                fam, kbold, kitalic = key
+                if fam is not None:
+                    original = synthetic_family_font(fam)
+                else:
+                    original = _lookup_font(
+                        first.style["font_name"], first.resources or resources, resources
+                    )
                 face = resolve_fallback_font(
-                    str(font_path), synthetic_family_font(family_override), style=want_style
+                    str(font_path), original, style=style_key(kbold, kitalic)
                 )
-            else:
-                # Phase 9.B1: one fallback face for the paragraph, its family
-                # matched to the paragraph's first member run (a serif body
-                # converts in serif) — which also serves the A3b style-only
-                # swap: bold on a serif paragraph lands LiberationSerif-Bold
-                # (want_style is "regular" on the plain convert path, so the
-                # resolve is unchanged there). Per-span fallback families (a
-                # mono code span inside a serif paragraph) is a documented
-                # tail — one face here, chosen from the dominant member. The
-                # font is looked up in the member's OWN stream resources
-                # (form-scoped when nested), page resources as fallback — a
-                # form's `F1` can differ from the page's (review-caught).
-                first = min(para.members, key=lambda m: m.index)
-                original = _lookup_font(
-                    first.style["font_name"], first.resources or resources, resources
-                )
-                face = resolve_fallback_font(str(font_path), original, style=want_style)
-            font_dict, encode, width_1000 = build_fallback_font(pdf, face, fb_chars)
-            fallback = _Fallback(None, font_dict, encode, width_1000)
+                chars = "".join(sorted(fb_by_face[key]))
+                font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars)
+                fallbacks[key] = _Fallback(None, font_dict, encode, width_1000)
 
         member_set = set(para.run_indexes)
         per_stream_counts: dict[tuple, int] = defaultdict(int)
@@ -1939,10 +2077,10 @@ def replace_paragraph_text(
             set(ordinal_of.values()),
             ordinal_of[min(member_set)],
             _Emission(
-                para, styled, fallback, page_x0, page_x1,
+                para, styled, fallbacks, page_x0, page_x1,
                 size_override=size_override, split_at=split_point,
             ),
-            fallback,
+            fallbacks,
         )
         kept, changed, new_forms = _rewrite_paragraph_stream(
             pdf,
@@ -1962,9 +2100,9 @@ def replace_paragraph_text(
             _register_xobject(pdf, resources, nm, st)
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         _finalize_page_rewrite(p, kept, edit.superseded_forms)
-        if edit.pending_font is not None and edit.target_stream == ():
-            fname, fdict = edit.pending_font
-            _register_font(pdf, resources, fname, fdict)
+        if edit.pending_fonts and edit.target_stream == ():
+            for fname, fdict in edit.pending_fonts:
+                _register_font(pdf, resources, fname, fdict)
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(paragraph_index)}
     finally:
@@ -2080,8 +2218,8 @@ def merge_paragraph_with_previous(
             prev.stream,
             set(ordinal_of.values()),
             ordinal_of[min(member_set)],
-            _Emission(prev, styled, None, page_x0, page_x1),
-            None,
+            _Emission(prev, styled, {}, page_x0, page_x1),
+            {},
         )
         kept, changed, new_forms = _rewrite_paragraph_stream(
             pdf,

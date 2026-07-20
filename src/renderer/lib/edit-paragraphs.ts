@@ -75,10 +75,18 @@ export interface ParagraphEditOpts {
   /** A4: split the paragraph at this CODE-POINT offset (strictly inside
    * the text) — the engine lays the halves out as two paragraphs. */
   split_at?: number;
-  /** A5a: per-span colour overrides — recolour just these CODE-POINT
-   * ranges (over the new text), leaving the rest the paragraph's own /
-   * the A1 `color`. Disjoint sorted ranges; the engine folds overlaps. */
-  span_styles?: Array<{ start: number; end: number; color: [number, number, number] }>;
+  /** A5a/A5b: per-span overrides over CODE-POINT ranges of the new text.
+   * An entry carries a `color` (A5a) and/or a face (`bold`/`italic`/
+   * `family`, A5b); the engine folds each field independently, so colour
+   * entries and face entries can be sent together with unaligned ranges. */
+  span_styles?: Array<{
+    start: number;
+    end: number;
+    color?: [number, number, number];
+    bold?: boolean;
+    italic?: boolean;
+    family?: 'serif' | 'sans' | 'mono';
+  }>;
 }
 
 /** UTF-16 index (textarea selectionStart) → code-point index (the engine's
@@ -240,71 +248,102 @@ export interface SpanColor {
   color: string;
 }
 
-/** Flatten span-colour ranges into DISJOINT, coalesced runs. On an overlap
- * the later-starting range wins each shared position (a boundary sweep) —
- * the SAME rule the engine's per-position fold uses, so the live preview
- * (`backdropSegments`) and the commit (`spanColorsToStyles`) can never
- * disagree even when `remapRanges` leaves two different colours overlapping
- * (round-32 HIGH). Empties drop; adjacent same-colour runs merge. */
-export function mergeSpanColors(ranges: SpanColor[]): SpanColor[] {
+/** 9.A5b: one per-span FACE override — a CODE-POINT range substituted into
+ * a bundled Liberation weight/slant/family. `family` undefined = keep the
+ * char's own family, apply the weight/slant (the A3b style-only swap). */
+export interface SpanFace {
+  start: number;
+  end: number;
+  bold: boolean;
+  italic: boolean;
+  family?: 'serif' | 'sans' | 'mono';
+}
+
+/** Flatten CODE-POINT ranges into DISJOINT, coalesced runs. On an overlap
+ * the later-starting range (equal start → later array position) wins each
+ * shared position — the SAME rule the engine's per-position fold uses, so
+ * the live preview and the commit can never disagree even when `remapRanges`
+ * leaves two ranges overlapping (round-32 HIGH). `key` identifies a range's
+ * style (adjacent same-key runs merge). Generic over colour + face. */
+export function flattenIntervals<T extends { start: number; end: number }>(
+  ranges: T[],
+  key: (r: T) => string,
+): T[] {
   const valid = ranges.filter((r) => r.end > r.start);
   if (valid.length === 0) return [];
-  // Preserve array order for the tiebreak, then sort so the sweep reads the
-  // last-covering range deterministically: a later `start`, or (equal start)
-  // a later array position, wins.
-  const ordered = valid.map((r, i) => ({ ...r, i }));
-  const cuts = Array.from(new Set(ordered.flatMap((r) => [r.start, r.end]))).sort((a, b) => a - b);
-  const out: SpanColor[] = [];
+  const ordered = valid.map((r, i) => ({ r, i }));
+  const cuts = Array.from(new Set(valid.flatMap((r) => [r.start, r.end]))).sort((a, b) => a - b);
+  const out: T[] = [];
   for (let k = 0; k < cuts.length - 1; k++) {
     const a = cuts[k];
     const b = cuts[k + 1];
-    let win: { color: string; start: number; i: number } | null = null;
-    for (const r of ordered) {
-      if (r.start <= a && r.end >= b) {
-        if (!win || r.start > win.start || (r.start === win.start && r.i > win.i)) {
-          win = { color: r.color, start: r.start, i: r.i };
+    let win: { r: T; i: number } | null = null;
+    for (const o of ordered) {
+      if (o.r.start <= a && o.r.end >= b) {
+        if (!win || o.r.start > win.r.start || (o.r.start === win.r.start && o.i > win.i)) {
+          win = o;
         }
       }
     }
     if (win) {
       const last = out[out.length - 1];
-      if (last && last.color.toLowerCase() === win.color.toLowerCase() && last.end === a) {
+      if (last && key(last) === key(win.r) && last.end === a) {
         last.end = b;
       } else {
-        out.push({ start: a, end: b, color: win.color });
+        out.push({ ...win.r, start: a, end: b });
       }
     }
   }
   return out;
 }
 
-/** Paint [start, end) a colour: clip any overlapping range (keeping its
- * outside remainders), drop the covered middle, add the new range, coalesce.
- * The selection→swatch action. */
-export function applySpanColor(
+/** Clip [start, end) out of every existing range (keeping outside
+ * remainders), append `added`, and flatten. The selection→control action,
+ * generic over colour + face. */
+export function applyInterval<T extends { start: number; end: number }>(
+  existing: T[],
+  added: T,
+  key: (r: T) => string,
+): T[] {
+  if (added.end <= added.start) return existing;
+  const out: T[] = [];
+  for (const r of existing) {
+    if (r.end <= added.start || r.start >= added.end) {
+      out.push(r);
+      continue;
+    }
+    if (r.start < added.start) out.push({ ...r, end: added.start });
+    if (r.end > added.end) out.push({ ...r, start: added.end });
+  }
+  out.push(added);
+  return flattenIntervals(out, key);
+}
+
+const colorKey = (r: SpanColor): string => r.color.toLowerCase();
+const faceKey = (r: SpanFace): string => `${r.bold}|${r.italic}|${r.family ?? ''}`;
+
+export const mergeSpanColors = (ranges: SpanColor[]): SpanColor[] =>
+  flattenIntervals(ranges, colorKey);
+export const mergeSpanFaces = (ranges: SpanFace[]): SpanFace[] => flattenIntervals(ranges, faceKey);
+
+export const applySpanColor = (
   existing: SpanColor[],
   start: number,
   end: number,
   color: string,
-): SpanColor[] {
-  if (end <= start) return existing;
-  const out: SpanColor[] = [];
-  for (const r of existing) {
-    if (r.end <= start || r.start >= end) {
-      out.push(r); // no overlap
-      continue;
-    }
-    if (r.start < start) out.push({ start: r.start, end: start, color: r.color });
-    if (r.end > end) out.push({ start: end, end: r.end, color: r.color });
-  }
-  out.push({ start, end, color });
-  return mergeSpanColors(out);
-}
+): SpanColor[] => applyInterval(existing, { start, end, color }, colorKey);
 
-/** Seed the editor's per-span colours from a listing's spans: keep only the
- * ranges whose colour DIFFERS from the paragraph-dominant colour (those are
- * the already-mixed ranges the user should see; an all-one-colour paragraph
- * seeds nothing). */
+export const applySpanFace = (
+  existing: SpanFace[],
+  start: number,
+  end: number,
+  face: { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | 'mono' },
+): SpanFace[] => applyInterval(existing, { start, end, ...face }, faceKey);
+
+/** Seed per-span colours from a listing's spans (only ranges DIFFERING from
+ * the paragraph-dominant colour — an all-one-colour paragraph seeds
+ * nothing). Faces have no listing seed in v1 (the listing carries per-span
+ * colour, not per-span weight/slant). */
 export function seedSpanColors(spans: EditSpan[], paragraphColor: string): SpanColor[] {
   const base = paragraphColor.toLowerCase();
   const out: SpanColor[] = [];
@@ -316,30 +355,44 @@ export function seedSpanColors(spans: EditSpan[], paragraphColor: string): SpanC
   return mergeSpanColors(out);
 }
 
-/** Split `text` into consecutive coloured segments for the backdrop render
- * (color null = the base editing colour). Code-point indexed. */
+/** Split `text` into consecutive backdrop segments carrying the resolved
+ * colour AND weight/slant per code point (colour + face folded
+ * independently, segmented where EITHER changes). `color null` = base
+ * editing colour. Family is NOT rendered (the backdrop keeps its own font;
+ * a substituted family previews on the committed page). */
 export function backdropSegments(
   text: string,
-  ranges: SpanColor[],
-): Array<{ text: string; color: string | null }> {
+  colors: SpanColor[],
+  faces: SpanFace[] = [],
+): Array<{ text: string; color: string | null; bold: boolean; italic: boolean }> {
   const chars = Array.from(text);
-  const sorted = mergeSpanColors(ranges);
-  const segs: Array<{ text: string; color: string | null }> = [];
-  let pos = 0;
-  for (const r of sorted) {
-    const s = Math.max(r.start, pos);
-    if (s >= chars.length) break;
-    if (s > pos) segs.push({ text: chars.slice(pos, s).join(''), color: null });
-    const e = Math.min(r.end, chars.length);
-    if (e > s) segs.push({ text: chars.slice(s, e).join(''), color: r.color });
-    pos = e;
+  const n = chars.length;
+  const colorAt: (string | null)[] = new Array(n).fill(null);
+  for (const r of mergeSpanColors(colors)) {
+    for (let k = Math.max(0, r.start); k < Math.min(r.end, n); k++) colorAt[k] = r.color;
   }
-  if (pos < chars.length) segs.push({ text: chars.slice(pos).join(''), color: null });
+  const boldAt: boolean[] = new Array(n).fill(false);
+  const italicAt: boolean[] = new Array(n).fill(false);
+  for (const r of mergeSpanFaces(faces)) {
+    for (let k = Math.max(0, r.start); k < Math.min(r.end, n); k++) {
+      boldAt[k] = r.bold;
+      italicAt[k] = r.italic;
+    }
+  }
+  const segs: Array<{ text: string; color: string | null; bold: boolean; italic: boolean }> = [];
+  for (let k = 0; k < n; k++) {
+    const last = segs[segs.length - 1];
+    if (last && last.color === colorAt[k] && last.bold === boldAt[k] && last.italic === italicAt[k]) {
+      last.text += chars[k];
+    } else {
+      segs.push({ text: chars[k], color: colorAt[k], bold: boldAt[k], italic: italicAt[k] });
+    }
+  }
   return segs;
 }
 
-/** Convert per-span colours to the engine's `span_styles` shape (hex →
- * [r,g,b] 0-1); ranges whose hex won't parse are dropped. */
+/** Convert per-span colours to `span_styles` colour entries (hex → [r,g,b];
+ * unparseable dropped). */
 export function spanColorsToStyles(
   ranges: SpanColor[],
 ): Array<{ start: number; end: number; color: [number, number, number] }> {
@@ -349,6 +402,25 @@ export function spanColorsToStyles(
     if (rgb) out.push({ start: r.start, end: r.end, color: rgb });
   }
   return out;
+}
+
+/** Convert per-span faces to `span_styles` face entries. */
+export function spanFacesToStyles(
+  ranges: SpanFace[],
+): Array<{
+  start: number;
+  end: number;
+  bold: boolean;
+  italic: boolean;
+  family?: 'serif' | 'sans' | 'mono';
+}> {
+  return mergeSpanFaces(ranges).map((r) => ({
+    start: r.start,
+    end: r.end,
+    bold: r.bold,
+    italic: r.italic,
+    ...(r.family ? { family: r.family } : {}),
+  }));
 }
 
 /** Map an edited text back onto style spans: common prefix/suffix keep

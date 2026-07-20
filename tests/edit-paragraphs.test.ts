@@ -1,16 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import {
   applySpanColor,
+  applySpanFace,
   backdropSegments,
   computeEditSpans,
   fetchEditTextListing,
   hexToRgb,
   mergeSpanColors,
+  mergeSpanFaces,
   paragraphUnencodable,
   remapRanges,
   sanitizeParagraphInput,
   seedSpanColors,
   spanColorsToStyles,
+  spanFacesToStyles,
   utf16ToCodePointIndex,
 } from '../src/renderer/lib/edit-paragraphs';
 
@@ -324,11 +327,27 @@ describe('seedSpanColors / backdropSegments / spanColorsToStyles (9.A5a)', () =>
     expect(seedSpanColors([{ start: 0, end: 9, run: 0, color: '#000000' }], '#000000')).toEqual([]);
   });
 
-  it('splits text into base + coloured backdrop segments', () => {
+  it('splits text into base + coloured backdrop segments (with face flags)', () => {
     expect(backdropSegments('Hello colored world', [{ start: 6, end: 13, color: '#ff0000' }])).toEqual([
-      { text: 'Hello ', color: null },
-      { text: 'colored', color: '#ff0000' },
-      { text: ' world', color: null },
+      { text: 'Hello ', color: null, bold: false, italic: false },
+      { text: 'colored', color: '#ff0000', bold: false, italic: false },
+      { text: ' world', color: null, bold: false, italic: false },
+    ]);
+  });
+
+  it('folds colour AND face independently, segmenting where either changes (A5b)', () => {
+    // "Hello world": bold [0,5), red [3,8) — the overlap [3,5) is bold+red.
+    expect(
+      backdropSegments(
+        'Hello world',
+        [{ start: 3, end: 8, color: '#ff0000' }],
+        [{ start: 0, end: 5, bold: true, italic: false }],
+      ),
+    ).toEqual([
+      { text: 'Hel', color: null, bold: true, italic: false },
+      { text: 'lo', color: '#ff0000', bold: true, italic: false },
+      { text: ' wo', color: '#ff0000', bold: false, italic: false },
+      { text: 'rld', color: null, bold: false, italic: false },
     ]);
   });
 
@@ -356,8 +375,8 @@ describe('mergeSpanColors overlap flattening (9.A5a round-32 HIGH)', () => {
     // describe the SAME per-position colours (no silent mismatch).
     const segs = backdropSegments('Hi folks everyone', overlapping);
     expect(segs).toEqual([
-      { text: 'H', color: '#ff0000' },
-      { text: 'i folks everyone', color: '#0000ff' },
+      { text: 'H', color: '#ff0000', bold: false, italic: false },
+      { text: 'i folks everyone', color: '#0000ff', bold: false, italic: false },
     ]);
     expect(spanColorsToStyles(overlapping)).toEqual([
       { start: 0, end: 1, color: [1, 0, 0] },
@@ -375,6 +394,48 @@ describe('mergeSpanColors overlap flattening (9.A5a round-32 HIGH)', () => {
       { start: 0, end: 2, color: '#0000ff' },
       { start: 2, end: 8, color: '#ff0000' }, // the red's later start wins its extent
       { start: 8, end: 10, color: '#0000ff' },
+    ]);
+  });
+});
+
+describe('per-span FACE helpers (9.A5b)', () => {
+  it('applySpanFace paints a weight onto a range, clipping overlaps', () => {
+    const out = applySpanFace([], 2, 6, { bold: true, italic: false });
+    expect(out).toEqual([{ start: 2, end: 6, bold: true, italic: false }]);
+    // Re-apply a different face over part of it: clip + insert.
+    const out2 = applySpanFace(out, 4, 8, { bold: false, italic: true, family: 'serif' });
+    expect(out2).toEqual([
+      { start: 2, end: 4, bold: true, italic: false },
+      { start: 4, end: 8, bold: false, italic: true, family: 'serif' },
+    ]);
+  });
+
+  it('mergeSpanFaces coalesces adjacent identical faces and resolves overlaps', () => {
+    expect(
+      mergeSpanFaces([
+        { start: 0, end: 3, bold: true, italic: false },
+        { start: 3, end: 6, bold: true, italic: false },
+      ]),
+    ).toEqual([{ start: 0, end: 6, bold: true, italic: false }]);
+  });
+
+  it('remapRanges carries face fields through an edit', () => {
+    expect(
+      remapRanges('Hello world', 'XYHello world', [
+        { start: 6, end: 11, bold: true, italic: false, family: 'mono' },
+      ]),
+    ).toEqual([{ start: 8, end: 13, bold: true, italic: false, family: 'mono' }]);
+  });
+
+  it('spanFacesToStyles emits face entries, omitting an unset family', () => {
+    expect(
+      spanFacesToStyles([
+        { start: 0, end: 3, bold: true, italic: false },
+        { start: 5, end: 8, bold: false, italic: true, family: 'serif' },
+      ]),
+    ).toEqual([
+      { start: 0, end: 3, bold: true, italic: false },
+      { start: 5, end: 8, bold: false, italic: true, family: 'serif' },
     ]);
   });
 });
