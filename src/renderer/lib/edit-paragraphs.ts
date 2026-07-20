@@ -18,6 +18,9 @@ export interface EditSpan {
   end: number;
   /** Style-source run (engine DFS index). */
   run: number;
+  /** 9.A5a: the run's fill colour (#rrggbb) — seeds the editor's per-span
+   * colour overlay so a paragraph opened with mixed colours shows them. */
+  color?: string;
 }
 
 export interface EditParagraph {
@@ -72,6 +75,10 @@ export interface ParagraphEditOpts {
   /** A4: split the paragraph at this CODE-POINT offset (strictly inside
    * the text) — the engine lays the halves out as two paragraphs. */
   split_at?: number;
+  /** A5a: per-span colour overrides — recolour just these CODE-POINT
+   * ranges (over the new text), leaving the rest the paragraph's own /
+   * the A1 `color`. Disjoint sorted ranges; the engine folds overlaps. */
+  span_styles?: Array<{ start: number; end: number; color: [number, number, number] }>;
 }
 
 /** UTF-16 index (textarea selectionStart) → code-point index (the engine's
@@ -104,7 +111,7 @@ interface EngineParagraphListing {
     runs: number[];
     box: [number, number, number, number];
     text: string;
-    spans: { start: number; end: number; run: number }[];
+    spans: { start: number; end: number; run: number; color?: string }[];
     alignment: string;
     line_count: number;
     editable: boolean;
@@ -156,7 +163,12 @@ export async function fetchEditTextListing(
       index: p.index,
       runs: p.runs,
       text: p.text,
-      spans: (p.spans ?? []).map((s) => ({ start: s.start, end: s.end, run: s.run })),
+      spans: (p.spans ?? []).map((s) => ({
+        start: s.start,
+        end: s.end,
+        run: s.run,
+        ...(typeof s.color === 'string' ? { color: s.color } : {}),
+      })),
       alignment: p.alignment,
       lineCount: p.line_count,
       rect: pdfRectToDisplay(p.box, geometry.box, geometry.bakedRotate),
@@ -180,6 +192,165 @@ export function sanitizeParagraphInput(value: string): string {
   return value.replace(/[\r\n]+/g, ' ');
 }
 
+/** The common prefix / suffix boundaries of an edit, in CODE POINTS: the
+ * unchanged prefix ends at `p`, the changed region is old[p, oldTail) →
+ * new[p, newTail), everything from oldTail on shifts by `delta`. Shared by
+ * `computeEditSpans` and `remapRanges` so the style-source spans and the
+ * per-span override ranges can never drift under the same edit. */
+function diffBounds(
+  oldA: string[],
+  newA: string[],
+): { p: number; oldTail: number; newTail: number; delta: number } {
+  let p = 0;
+  const shorter = Math.min(oldA.length, newA.length);
+  while (p < shorter && oldA[p] === newA[p]) p++;
+  let s = 0;
+  while (s < shorter - p && oldA[oldA.length - 1 - s] === newA[newA.length - 1 - s]) s++;
+  return { p, oldTail: oldA.length - s, newTail: newA.length - s, delta: newA.length - oldA.length };
+}
+
+/** Remap a list of code-point ranges through an edit (9.A5a per-span
+ * override ranges follow the text). A range wholly before the change stays;
+ * wholly after shifts by `delta`; one that overlaps the changed region
+ * absorbs it (its start clamps to the change start, its end to the change
+ * end) — typing inside a coloured range keeps it coloured. Empty/inverted
+ * results drop. Preserves each range's extra fields (e.g. colour). */
+export function remapRanges<T extends { start: number; end: number }>(
+  oldText: string,
+  newText: string,
+  ranges: T[],
+): T[] {
+  const { p, oldTail, newTail, delta } = diffBounds(Array.from(oldText), Array.from(newText));
+  const mapStart = (x: number): number => (x <= p ? x : x >= oldTail ? x + delta : p);
+  const mapEnd = (x: number): number => (x <= p ? x : x >= oldTail ? x + delta : newTail);
+  const out: T[] = [];
+  for (const r of ranges) {
+    const start = mapStart(r.start);
+    const end = mapEnd(r.end);
+    if (end > start) out.push({ ...r, start, end });
+  }
+  return out;
+}
+
+/** 9.A5a: one per-span colour override — a CODE-POINT range painted a hex
+ * colour. Disjoint + sorted once through `mergeSpanColors`. */
+export interface SpanColor {
+  start: number;
+  end: number;
+  color: string;
+}
+
+/** Flatten span-colour ranges into DISJOINT, coalesced runs. On an overlap
+ * the later-starting range wins each shared position (a boundary sweep) —
+ * the SAME rule the engine's per-position fold uses, so the live preview
+ * (`backdropSegments`) and the commit (`spanColorsToStyles`) can never
+ * disagree even when `remapRanges` leaves two different colours overlapping
+ * (round-32 HIGH). Empties drop; adjacent same-colour runs merge. */
+export function mergeSpanColors(ranges: SpanColor[]): SpanColor[] {
+  const valid = ranges.filter((r) => r.end > r.start);
+  if (valid.length === 0) return [];
+  // Preserve array order for the tiebreak, then sort so the sweep reads the
+  // last-covering range deterministically: a later `start`, or (equal start)
+  // a later array position, wins.
+  const ordered = valid.map((r, i) => ({ ...r, i }));
+  const cuts = Array.from(new Set(ordered.flatMap((r) => [r.start, r.end]))).sort((a, b) => a - b);
+  const out: SpanColor[] = [];
+  for (let k = 0; k < cuts.length - 1; k++) {
+    const a = cuts[k];
+    const b = cuts[k + 1];
+    let win: { color: string; start: number; i: number } | null = null;
+    for (const r of ordered) {
+      if (r.start <= a && r.end >= b) {
+        if (!win || r.start > win.start || (r.start === win.start && r.i > win.i)) {
+          win = { color: r.color, start: r.start, i: r.i };
+        }
+      }
+    }
+    if (win) {
+      const last = out[out.length - 1];
+      if (last && last.color.toLowerCase() === win.color.toLowerCase() && last.end === a) {
+        last.end = b;
+      } else {
+        out.push({ start: a, end: b, color: win.color });
+      }
+    }
+  }
+  return out;
+}
+
+/** Paint [start, end) a colour: clip any overlapping range (keeping its
+ * outside remainders), drop the covered middle, add the new range, coalesce.
+ * The selection→swatch action. */
+export function applySpanColor(
+  existing: SpanColor[],
+  start: number,
+  end: number,
+  color: string,
+): SpanColor[] {
+  if (end <= start) return existing;
+  const out: SpanColor[] = [];
+  for (const r of existing) {
+    if (r.end <= start || r.start >= end) {
+      out.push(r); // no overlap
+      continue;
+    }
+    if (r.start < start) out.push({ start: r.start, end: start, color: r.color });
+    if (r.end > end) out.push({ start: end, end: r.end, color: r.color });
+  }
+  out.push({ start, end, color });
+  return mergeSpanColors(out);
+}
+
+/** Seed the editor's per-span colours from a listing's spans: keep only the
+ * ranges whose colour DIFFERS from the paragraph-dominant colour (those are
+ * the already-mixed ranges the user should see; an all-one-colour paragraph
+ * seeds nothing). */
+export function seedSpanColors(spans: EditSpan[], paragraphColor: string): SpanColor[] {
+  const base = paragraphColor.toLowerCase();
+  const out: SpanColor[] = [];
+  for (const sp of spans) {
+    if (sp.color && sp.color.toLowerCase() !== base) {
+      out.push({ start: sp.start, end: sp.end, color: sp.color });
+    }
+  }
+  return mergeSpanColors(out);
+}
+
+/** Split `text` into consecutive coloured segments for the backdrop render
+ * (color null = the base editing colour). Code-point indexed. */
+export function backdropSegments(
+  text: string,
+  ranges: SpanColor[],
+): Array<{ text: string; color: string | null }> {
+  const chars = Array.from(text);
+  const sorted = mergeSpanColors(ranges);
+  const segs: Array<{ text: string; color: string | null }> = [];
+  let pos = 0;
+  for (const r of sorted) {
+    const s = Math.max(r.start, pos);
+    if (s >= chars.length) break;
+    if (s > pos) segs.push({ text: chars.slice(pos, s).join(''), color: null });
+    const e = Math.min(r.end, chars.length);
+    if (e > s) segs.push({ text: chars.slice(s, e).join(''), color: r.color });
+    pos = e;
+  }
+  if (pos < chars.length) segs.push({ text: chars.slice(pos).join(''), color: null });
+  return segs;
+}
+
+/** Convert per-span colours to the engine's `span_styles` shape (hex →
+ * [r,g,b] 0-1); ranges whose hex won't parse are dropped. */
+export function spanColorsToStyles(
+  ranges: SpanColor[],
+): Array<{ start: number; end: number; color: [number, number, number] }> {
+  const out: Array<{ start: number; end: number; color: [number, number, number] }> = [];
+  for (const r of mergeSpanColors(ranges)) {
+    const rgb = hexToRgb(r.color);
+    if (rgb) out.push({ start: r.start, end: r.end, color: rgb });
+  }
+  return out;
+}
+
 /** Map an edited text back onto style spans: common prefix/suffix keep
  * their original span styles; the changed middle inherits the style of the
  * character just before the change (the caret-inheritance rule). All
@@ -193,14 +364,7 @@ export function computeEditSpans(
   const oldA = Array.from(oldText);
   const newA = Array.from(newText);
   if (newA.length === 0) return [];
-  let p = 0;
-  const shorter = Math.min(oldA.length, newA.length);
-  while (p < shorter && oldA[p] === newA[p]) p++;
-  let s = 0;
-  while (s < shorter - p && oldA[oldA.length - 1 - s] === newA[newA.length - 1 - s]) s++;
-  const oldTail = oldA.length - s;
-  const newTail = newA.length - s;
-  const delta = newA.length - oldA.length;
+  const { p, oldTail, newTail, delta } = diffBounds(oldA, newA);
 
   const inheritAt = Math.max(p - 1, 0);
   // `fallbackRun` (the paragraph's first member) covers the empty-spans

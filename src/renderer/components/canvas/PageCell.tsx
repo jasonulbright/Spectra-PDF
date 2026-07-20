@@ -12,11 +12,18 @@ import type { EditTextRun } from '../../lib/edit-text';
 import { unencodableChars } from '../../lib/edit-text';
 import type { EditParagraph, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import {
+  applySpanColor,
+  backdropSegments,
   computeEditSpans,
   hexToRgb,
+  mergeSpanColors,
   paragraphUnencodable,
+  remapRanges,
   sanitizeParagraphInput,
+  seedSpanColors,
+  spanColorsToStyles,
   utf16ToCodePointIndex,
+  type SpanColor,
 } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -1356,6 +1363,23 @@ function ParagraphEditor({
   const [italic, setItalic] = useState(para.italic);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // A5a per-span colour: the ranges (code points) painted a colour other
+  // than the paragraph default, seeded from the listing's per-span colours.
+  const [spanColors, setSpanColors] = useState<SpanColor[]>(() =>
+    seedSpanColors(para.spans, para.color),
+  );
+  // The live textarea selection in CODE POINTS — captured continuously so
+  // the colour swatch (which loses the DOM selection when its native picker
+  // opens) can still apply to what WAS selected.
+  const selRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+  const captureSelection = (): void => {
+    const ta = areaRef.current;
+    if (!ta) return;
+    selRef.current = {
+      start: utf16ToCodePointIndex(ta.value, ta.selectionStart),
+      end: utf16ToCodePointIndex(ta.value, ta.selectionEnd),
+    };
+  };
   // ONE outcome per editor instance: Enter-commit, Escape-cancel, blur,
   // and the convert button all race through here — whichever fires first
   // wins and any refire is a no-op (review-caught HIGH; the unmount-blur
@@ -1387,7 +1411,12 @@ function ParagraphEditor({
   const valid = missing.length === 0;
   const sizeChanged = Math.abs(size - para.fontSize) > 0.01;
   const colorChanged = color.toLowerCase() !== para.color.toLowerCase();
-  const changed = value !== para.text || sizeChanged || colorChanged || substituting;
+  // A5a: a per-span colour edit is a change even when nothing else moved.
+  const seededSpanColors = seedSpanColors(para.spans, para.color);
+  const spanColorsChanged =
+    JSON.stringify(spanColors) !== JSON.stringify(seededSpanColors);
+  const changed =
+    value !== para.text || sizeChanged || colorChanged || substituting || spanColorsChanged;
   // The restyle overrides sent with a commit — only fields the user
   // actually changed from the seed (unchanged size/colour/face stay the
   // paragraph's own, engine-side). On a substitution the style pair rides
@@ -1404,6 +1433,11 @@ function ParagraphEditor({
       if (familyChanged) o.family = family;
       o.bold = bold;
       o.italic = italic;
+    }
+    // A5a: send the per-span colours (only when the user set any).
+    if (spanColors.length > 0) {
+      const styles = spanColorsToStyles(spanColors);
+      if (styles.length > 0) o.span_styles = styles;
     }
     return o;
   };
@@ -1511,7 +1545,20 @@ function ParagraphEditor({
             type="color"
             data-testid="edit-para-color"
             value={/^#[0-9a-f]{6}$/i.test(color) ? color : '#000000'}
-            onChange={(e) => setColor(e.target.value)}
+            title="With text selected, recolours the selection; otherwise the whole paragraph"
+            onChange={(e) => {
+              // A5a dual role: a live SELECTION recolours just that range
+              // (per-span); a collapsed caret recolours the whole paragraph
+              // (the shipped A1 colour). The selection is captured off the
+              // textarea's onSelect, so it survives the picker taking focus.
+              const hex = e.target.value;
+              const sel = selRef.current;
+              if (sel.end > sel.start) {
+                setSpanColors((prev) => applySpanColor(prev, sel.start, sel.end, hex));
+              } else {
+                setColor(hex);
+              }
+            }}
           />
         </label>
         <label className="page-editpara-ctl">
@@ -1564,18 +1611,68 @@ function ParagraphEditor({
           I
         </button>
       </div>
-      <textarea
-        ref={areaRef}
-        data-testid="edit-para-input"
-        className={valid ? '' : 'invalid'}
-        value={value}
-        rows={Math.min(12, para.lineCount + 1)}
-        style={{ fontSize: `${fontPx}px`, lineHeight: 1.25 }}
-        onChange={(e) => setValue(sanitizeParagraphInput(e.target.value))}
-        /* Enter/Escape handled at the wrapper (works from every control).
-           Invalid+changed holds the editor open there — Enter never
-           silently discards or commits the inexpressible. */
-      />
+      {/* 9.A5a mirror overlay: a backdrop renders the text with the
+          per-span colours; the textarea (transparent text, visible caret)
+          sits on top for input. Both share the exact font/size/padding/
+          wrap so the coloured backdrop lines up under the caret. The
+          textarea's text stays opaque #111 until a colour is applied, so
+          a plain edit is visually unchanged. */}
+      <div className="page-editpara-inputwrap">
+        <div
+          className="page-editpara-backdrop"
+          aria-hidden="true"
+          data-testid="edit-para-backdrop"
+          style={{ fontSize: `${fontPx}px`, lineHeight: 1.25 }}
+        >
+          {backdropSegments(value, spanColors).map((seg, i) =>
+            seg.color ? (
+              <span key={i} style={{ color: seg.color }}>
+                {seg.text}
+              </span>
+            ) : (
+              <span key={i}>{seg.text}</span>
+            ),
+          )}
+          {/* trailing zero-width space so a text ending in a newline still
+              renders its final (empty) line in the backdrop */}
+          {'​'}
+        </div>
+        <textarea
+          ref={areaRef}
+          data-testid="edit-para-input"
+          className={`page-editpara-textarea${valid ? '' : ' invalid'}`}
+          value={value}
+          rows={Math.min(12, para.lineCount + 1)}
+          style={{
+            fontSize: `${fontPx}px`,
+            lineHeight: 1.25,
+            color: spanColors.length > 0 ? 'transparent' : '#111',
+            caretColor: '#111',
+          }}
+          onChange={(e) => {
+            const next = sanitizeParagraphInput(e.target.value);
+            // Per-span colours follow the text edit (same diff as the spans),
+            // then flatten to disjoint — a retype whose window spans two
+            // differently-coloured ranges would otherwise leave them
+            // overlapping, and the preview would show a different winner than
+            // the commit (round-32 HIGH). `mergeSpanColors` resolves it the
+            // same way the engine folds, so state stays canonical.
+            setSpanColors((prev) => mergeSpanColors(remapRanges(value, next, prev)));
+            setValue(next);
+          }}
+          onSelect={captureSelection}
+          onScroll={(e) => {
+            const bd = e.currentTarget.previousElementSibling as HTMLElement | null;
+            if (bd) {
+              bd.scrollTop = e.currentTarget.scrollTop;
+              bd.scrollLeft = e.currentTarget.scrollLeft;
+            }
+          }}
+          /* Enter/Escape handled at the wrapper (works from every control).
+             Invalid+changed holds the editor open there — Enter never
+             silently discards or commits the inexpressible. */
+        />
+      </div>
       {!valid && (
         <div className="page-edittext-error" data-testid="edit-para-error" aria-live="polite">
           This document's font does not contain {missing.map((c) => `'${c}'`).join(' ')}

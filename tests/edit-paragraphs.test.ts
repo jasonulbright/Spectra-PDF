@@ -1,10 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
+  applySpanColor,
+  backdropSegments,
   computeEditSpans,
   fetchEditTextListing,
   hexToRgb,
+  mergeSpanColors,
   paragraphUnencodable,
+  remapRanges,
   sanitizeParagraphInput,
+  seedSpanColors,
+  spanColorsToStyles,
   utf16ToCodePointIndex,
 } from '../src/renderer/lib/edit-paragraphs';
 
@@ -231,5 +237,144 @@ describe('utf16ToCodePointIndex (A4 split caret domain)', () => {
     expect(utf16ToCodePointIndex(text, 2)).toBe(1);
     expect(utf16ToCodePointIndex(text, 3)).toBe(2);
     expect(utf16ToCodePointIndex(text, 4)).toBe(3);
+  });
+});
+
+describe('remapRanges (9.A5a — per-span ranges follow the text)', () => {
+  const R = [{ start: 6, end: 13, color: '#ff0000' }];
+
+  it('shifts a range wholly after an insertion by the delta', () => {
+    // Insert "XY" at the front: [6,13) → [8,15).
+    expect(remapRanges('Hello colored world', 'XYHello colored world', R)).toEqual([
+      { start: 8, end: 15, color: '#ff0000' },
+    ]);
+  });
+
+  it('leaves a range wholly before the change unmoved', () => {
+    // Append at the end — the front range is untouched.
+    expect(remapRanges('Hello colored world', 'Hello colored world!!', R)).toEqual([
+      { start: 6, end: 13, color: '#ff0000' },
+    ]);
+  });
+
+  it('extends a range when typing inside it (the coloured text grows)', () => {
+    // Replace "colored" (6..13) with "coloured" (one longer): the range
+    // absorbs the change — end clamps to the new change end.
+    const out = remapRanges('Hello colored world', 'Hello coloured world', R);
+    expect(out[0].start).toBe(6);
+    expect(out[0].end).toBe(14); // was 13, +1 for the inserted 'u'
+  });
+
+  it('drops a range collapsed to empty by a deletion', () => {
+    // Delete exactly [6,13): the range has nothing left.
+    expect(remapRanges('Hello colored world', 'Hello  world', R)).toEqual([]);
+  });
+
+  it('remaps astral text by CODE POINT, not UTF-16 unit', () => {
+    // '𝄞' is 2 UTF-16 units but ONE code point; a range after it shifts by
+    // the code-point delta.
+    const ranges = [{ start: 2, end: 4, color: '#00ff00' }];
+    // Insert one astral char at front: everything shifts by 1 code point.
+    expect(remapRanges('abcd', '𝄞abcd', ranges)).toEqual([
+      { start: 3, end: 5, color: '#00ff00' },
+    ]);
+  });
+});
+
+describe('applySpanColor / mergeSpanColors (9.A5a selection → colour)', () => {
+  it('adds a colour to an empty set', () => {
+    expect(applySpanColor([], 2, 5, '#ff0000')).toEqual([{ start: 2, end: 5, color: '#ff0000' }]);
+  });
+
+  it('clips an overlapping range, keeping its outside remainders', () => {
+    const existing = [{ start: 0, end: 10, color: '#0000ff' }];
+    // Paint [3,6) red inside the blue [0,10): blue splits to [0,3)+[6,10).
+    expect(applySpanColor(existing, 3, 6, '#ff0000')).toEqual([
+      { start: 0, end: 3, color: '#0000ff' },
+      { start: 3, end: 6, color: '#ff0000' },
+      { start: 6, end: 10, color: '#0000ff' },
+    ]);
+  });
+
+  it('coalesces adjacent same-colour ranges', () => {
+    expect(
+      mergeSpanColors([
+        { start: 0, end: 3, color: '#ff0000' },
+        { start: 3, end: 6, color: '#FF0000' }, // case-insensitive
+      ]),
+    ).toEqual([{ start: 0, end: 6, color: '#ff0000' }]);
+  });
+
+  it('re-painting the same range replaces the colour', () => {
+    const existing = [{ start: 2, end: 5, color: '#ff0000' }];
+    expect(applySpanColor(existing, 2, 5, '#00ff00')).toEqual([
+      { start: 2, end: 5, color: '#00ff00' },
+    ]);
+  });
+});
+
+describe('seedSpanColors / backdropSegments / spanColorsToStyles (9.A5a)', () => {
+  it('seeds only spans that differ from the paragraph colour', () => {
+    const spans = [
+      { start: 0, end: 6, run: 0, color: '#000000' },
+      { start: 6, end: 9, run: 1, color: '#ff0000' },
+    ];
+    expect(seedSpanColors(spans, '#000000')).toEqual([{ start: 6, end: 9, color: '#ff0000' }]);
+    // An all-dominant paragraph seeds nothing.
+    expect(seedSpanColors([{ start: 0, end: 9, run: 0, color: '#000000' }], '#000000')).toEqual([]);
+  });
+
+  it('splits text into base + coloured backdrop segments', () => {
+    expect(backdropSegments('Hello colored world', [{ start: 6, end: 13, color: '#ff0000' }])).toEqual([
+      { text: 'Hello ', color: null },
+      { text: 'colored', color: '#ff0000' },
+      { text: ' world', color: null },
+    ]);
+  });
+
+  it('converts to the engine span_styles shape', () => {
+    expect(spanColorsToStyles([{ start: 2, end: 5, color: '#ff0000' }])).toEqual([
+      { start: 2, end: 5, color: [1, 0, 0] },
+    ]);
+  });
+});
+
+describe('mergeSpanColors overlap flattening (9.A5a round-32 HIGH)', () => {
+  it('resolves an overlap to disjoint runs, later-start wins (preview==commit)', () => {
+    // The lens repro: two same-extent ranges overlapping after a retype
+    // must flatten so the backdrop preview and the engine fold agree.
+    const overlapping = [
+      { start: 0, end: 17, color: '#ff0000' },
+      { start: 1, end: 17, color: '#0000ff' },
+    ];
+    const flat = mergeSpanColors(overlapping);
+    expect(flat).toEqual([
+      { start: 0, end: 1, color: '#ff0000' },
+      { start: 1, end: 17, color: '#0000ff' },
+    ]);
+    // backdropSegments and spanColorsToStyles both go through merge, so they
+    // describe the SAME per-position colours (no silent mismatch).
+    const segs = backdropSegments('Hi folks everyone', overlapping);
+    expect(segs).toEqual([
+      { text: 'H', color: '#ff0000' },
+      { text: 'i folks everyone', color: '#0000ff' },
+    ]);
+    expect(spanColorsToStyles(overlapping)).toEqual([
+      { start: 0, end: 1, color: [1, 0, 0] },
+      { start: 1, end: 17, color: [0, 0, 1] },
+    ]);
+  });
+
+  it('a fully-covering later range wins the whole overlap', () => {
+    expect(
+      mergeSpanColors([
+        { start: 2, end: 8, color: '#ff0000' },
+        { start: 0, end: 10, color: '#0000ff' }, // later start? no — starts earlier
+      ]),
+    ).toEqual([
+      { start: 0, end: 2, color: '#0000ff' },
+      { start: 2, end: 8, color: '#ff0000' }, // the red's later start wins its extent
+      { start: 8, end: 10, color: '#0000ff' },
+    ]);
   });
 });

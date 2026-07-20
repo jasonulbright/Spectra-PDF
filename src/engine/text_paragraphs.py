@@ -607,13 +607,25 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
         # the caller (needs the pdf's font dicts — `style_of(member)` →
         # (bold, italic); None = unclassified, seeds regular).
         b, it = style_of(first) if style_of is not None else (False, False)
+        # A5a: enrich each style-source span with its member's fill colour,
+        # so the editor seeds per-range colours (a source PDF or a prior
+        # A5a edit with mixed colours re-opens showing them). Additive —
+        # the run index the span already carries is unchanged.
+        members_by_index = {m.index: m for m in p.members}
+        spans_out = []
+        for sp in p.spans:
+            entry = dict(sp)
+            m = members_by_index.get(int(sp["run"]))
+            if m is not None:
+                entry["color"] = _fill_color_hex(m.style["fill_color"])
+            spans_out.append(entry)
         out.append(
             {
                 "index": i,
                 "runs": p.run_indexes,
                 "box": [round(v, 4) for v in p.box],
                 "text": p.text,
-                "spans": p.spans,
+                "spans": spans_out,
                 "alignment": p.alignment,
                 "line_count": len(p.lines),
                 "editable": p.editable,
@@ -730,13 +742,19 @@ class _StyleRef:
             s["size"] = self.size_override
         if self.color_override is not None:
             s["fill_color"] = self.color_override
-            # Text painted via STROKE (Tr 1 = stroke, Tr 2 = fill+stroke)
-            # shows its stroke colour — recolour that too, or the swatch
-            # would be a silent no-op on outline text (review-caught). The
-            # stroke colour uses the UPPERCASE op (rg→RG, g→G, k→K), so the
-            # fill override must be converted, not copied verbatim.
-            if s.get("render_mode") in (1, 2):
-                s["stroke_color"] = _to_stroke_color(self.color_override)
+            # 9.A5a: (None, None) is the explicit-default-black RESET marker
+            # — a per-span keep-segment whose member had no colour of its
+            # own emits `0 g` (via _color_sync) so a recoloured neighbour
+            # can't bleed forward. It is NOT a real colour, so it must not
+            # recompute stroke (there's nothing to convert).
+            if self.color_override != (None, None):
+                # Text painted via STROKE (Tr 1 = stroke, Tr 2 = fill+stroke)
+                # shows its stroke colour — recolour that too, or the swatch
+                # would be a silent no-op on outline text (review-caught).
+                # The stroke colour uses the UPPERCASE op (rg→RG, g→G, k→K),
+                # so the fill override must be converted, not copied verbatim.
+                if s.get("render_mode") in (1, 2):
+                    s["stroke_color"] = _to_stroke_color(self.color_override)
         return s
 
 
@@ -775,6 +793,7 @@ def _styled_chars(
     size_override=None,
     color_override=None,
     force_fallback: bool = False,
+    color_by_pos=None,
 ) -> tuple[list[tuple[str, _StyleRef]], str]:
     """Map every char of the new text to its style source; returns the
     styled stream plus the characters that need the fallback font (empty
@@ -787,7 +806,16 @@ def _styled_chars(
     face, so the members' own coverage is irrelevant (spaces included:
     they become real fallback glyphs, not synthetic kerns). Default False
     keeps the shipped branch order untouched — a no-family edit must stay
-    byte-identical to 7.5/A1 output."""
+    byte-identical to 7.5/A1 output.
+
+    `color_by_pos` (9.A5a per-span colour) is None or a list one entry per
+    code point of new_text: a ColorState overrides the char at that
+    position, None falls through to the call-level `color_override` (the
+    A1 whole-paragraph colour). The override only changes each char's
+    `_StyleRef` colour — `_StyleRef.key`/`_segments` already split the
+    emission per colour, so this needs no emission change. None everywhere
+    (the default) is byte-identical to the shipped path (every char keys
+    on the one `color_override`, collapsing to today's single ref)."""
     if not spans and new_text:
         raise ValueError("edit spans are missing")
     covered = 0
@@ -806,11 +834,31 @@ def _styled_chars(
     fallback_chars: set[str] = set()
     refs: dict[tuple, _StyleRef] = {}
 
-    def ref(member: _Member, fb: bool) -> _StyleRef:
-        k = (member.index, fb)
+    def ref(member: _Member, fb: bool, col) -> _StyleRef:
+        k = (member.index, fb, col)
         if k not in refs:
-            refs[k] = _StyleRef(member, fb, size_override, color_override)
+            refs[k] = _StyleRef(member, fb, size_override, col)
         return refs[k]
+
+    def color_at(pos: int, member: _Member):
+        # A5a: resolve this code point's fill override.
+        if color_by_pos is None:
+            return color_override  # shipped path — one call-level colour
+        psc = color_by_pos[pos] if 0 <= pos < len(color_by_pos) else None
+        if psc is not None:
+            return psc  # per-span colour wins
+        if color_override is not None:
+            return color_override  # then the A1 whole-paragraph colour
+        # A per-span edit's KEEP segments must emit a CONCRETE colour so a
+        # recoloured neighbour never bleeds: a member with a REAL colour of
+        # its own already emits (col=None keeps it), but a member at the
+        # device default — the (None, None) ColorState, never Python None —
+        # needs an explicit black reset via the (None, None) marker. (Compare
+        # against the default ColorState, not None: fill_color is ALWAYS a
+        # 2-tuple, so `is not None` was always true — a dead branch that
+        # happened to work only because _state_ops re-emits colour every
+        # segment; keyed on the default it is the real, intended guard.)
+        return None if member.style.get("fill_color") != (None, None) else (None, None)
 
     for span in spans:
         member = members_by_index[int(span["run"])]
@@ -818,6 +866,10 @@ def _styled_chars(
         i = 0
         while i < len(seg_text):
             ch = seg_text[i]
+            # A5a: a ligature/atomic entry can carry ONE colour — resolve at
+            # its FIRST position (the glyph is indivisible; a colour boundary
+            # inside a sequence takes the start colour).
+            col = color_at(span["start"] + i, member)
             if force_fallback:
                 if member.vertical:
                     # 9.B4b belt (the para-level substitution refusal is
@@ -826,7 +878,7 @@ def _styled_chars(
                         "vertical text cannot be converted to the fallback font"
                     )
                 fallback_chars.add(ch)
-                styled.append((ch, ref(member, True)))
+                styled.append((ch, ref(member, True, col)))
                 i += 1
                 continue
             # 9.B5: an unambiguous ligature sequence becomes ONE atomic
@@ -837,11 +889,11 @@ def _styled_chars(
             # what the per-segment encode does anyway.
             seq = member.cap._sequence_at(seg_text, i)
             if seq is not None:
-                styled.append((seq, ref(member, False)))
+                styled.append((seq, ref(member, False, col)))
                 i += len(seq)
                 continue
             if ch == " " or member.cap.can_encode(ch):
-                styled.append((ch, ref(member, False)))
+                styled.append((ch, ref(member, False, col)))
             elif convert:
                 if member.vertical:
                     # 9.B4b: the 7.4 fallback embeds a HORIZONTAL
@@ -852,7 +904,7 @@ def _styled_chars(
                         "vertical text cannot be converted to the fallback font"
                     )
                 fallback_chars.add(ch)
-                styled.append((ch, ref(member, True)))
+                styled.append((ch, ref(member, True, col)))
             else:
                 raise ValueError(f"font cannot encode {ch!r}")
             i += 1
@@ -1652,6 +1704,7 @@ def replace_paragraph_text(
     bold: bool | None = None,
     italic: bool | None = None,
     split_at: int | None = None,
+    span_styles: list | None = None,
 ) -> dict:
     """Replace a paragraph's text and re-lay-out inside its box (7.5).
 
@@ -1684,6 +1737,14 @@ def replace_paragraph_text(
     2×leading below the first — a gap the re-listing grouping can never
     join across, so the result lists as two paragraphs. None = the
     shipped single-block layout (byte-identical).
+
+    A5a per-span colour: `span_styles` is None or a list of
+    `{start, end, color: [r, g, b]}` over CODE-POINT ranges of
+    `new_text` — each recolours just its range (distinct from the
+    style-SOURCE `spans`; sparse; need not align to span boundaries;
+    overlaps fold last-wins). A per-span colour overrides the A1
+    whole-paragraph `color` on its range. Colour is metric-neutral, so
+    this changes no wrap/leading/split — None = byte-identical shipped.
 
     9.B4b: vertical paragraphs reflow through the same pipeline in
     transposed space (columns fill top-down at the measured pitch, growth
@@ -1778,11 +1839,39 @@ def replace_paragraph_text(
                 raise ValueError("split position must be inside the text")
             split_point = sp
 
+        # A5a per-span colour: fold the sparse ranges into a per-code-point
+        # ColorState lookup (None where no override applies). Same clamp/
+        # shape as the A1 colour; last-writer-wins on overlap. None keeps
+        # color_by_pos None → _styled_chars stays on the byte-identical path.
+        color_by_pos = None
+        if span_styles:
+            n_cp = len(str(new_text))
+            color_by_pos = [None] * n_cp
+            for entry in span_styles:
+                try:
+                    st = int(entry["start"])
+                    en = int(entry["end"])
+                except (KeyError, TypeError, ValueError):
+                    raise ValueError("span style needs integer start/end") from None
+                if not (0 <= st <= en <= n_cp):
+                    raise ValueError("span style range out of bounds")
+                if st == en:
+                    continue  # empty range: harmless no-op
+                try:
+                    rgb = [max(0.0, min(1.0, float(c))) for c in entry.get("color")]
+                except (TypeError, ValueError):
+                    rgb = []
+                if len(rgb) != 3:
+                    raise ValueError("span style colour must be [r, g, b]")
+                cs = (None, ("rg", tuple(rgb)))
+                for k in range(st, en):
+                    color_by_pos[k] = cs
+
         members_by_index = {m.index: m for m in para.members}
         styled, fb_chars = _styled_chars(
             str(new_text), list(spans), members_by_index, bool(convert),
             size_override=size_override, color_override=color_override,
-            force_fallback=substituting,
+            force_fallback=substituting, color_by_pos=color_by_pos,
         )
         fallback = None
         if fb_chars:

@@ -1290,20 +1290,56 @@
   position: absolute;
   z-index: 5;
 }
+/* 9.A5a: the textarea + its colour backdrop share ONE box so the coloured
+   text lines up under the caret. The wrapper is sized by the textarea (in
+   flow); the backdrop absolutely fills it. */
+.page-editpara-inputwrap {
+  position: relative;
+  display: block;
+}
 .page-editpara-editor textarea {
   display: block;
+  box-sizing: border-box;
   width: 100%;
   min-width: 120px;
   padding: 1px 3px;
   border: 1.5px solid var(--accent, #3b82f6);
   border-radius: 2px;
-  background: #fff;
+  /* transparent so the backdrop shows through — the white fill is on the
+     backdrop, which fills the same box behind it. */
+  background: transparent;
   color: #111;
   font-family: Helvetica, Arial, sans-serif;
   resize: both;
+  position: relative;
+  z-index: 1;
 }
 .page-editpara-editor textarea.invalid {
   border-color: #dc2626;
+}
+.page-editpara-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  z-index: 0;
+  margin: 0;
+  /* EXACTLY match the textarea's text box: same padding, same border-box
+     (transparent border), same font + wrap so glyphs land identically. */
+  padding: 1px 3px;
+  border: 1.5px solid transparent;
+  border-radius: 2px;
+  background: #fff;
+  color: #111;
+  font-family: Helvetica, Arial, sans-serif;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  overflow: hidden;
+  pointer-events: none;
+  text-align: inherit;
 }
 /* A1 restyle toolbar: a compact size + colour row above the textarea. */
 .page-editpara-toolbar {

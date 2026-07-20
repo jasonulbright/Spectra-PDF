@@ -2455,3 +2455,148 @@ class TestAlignmentDetection:
         )
         paras = _paras(src)
         assert paras[0]["alignment"] == "left"
+
+def _content_bytes(path):
+    with pikepdf.open(path) as pdf:
+        c = pdf.pages[0].obj.get("/Contents")
+        if isinstance(c, pikepdf.Array):
+            return b"".join(bytes(x.read_bytes()) for x in c)
+        return bytes(c.read_bytes())
+
+
+def _color_ops(path):
+    """The (op, args) stream filtered to fill-colour + show ops — enough to
+    read the per-segment colour sequence."""
+    with pikepdf.open(path) as pdf:
+        return [
+            (str(i.operator), [str(x) for x in i.operands])
+            for i in pikepdf.parse_content_stream(pdf.pages[0])
+            if str(i.operator) in ("rg", "g", "k", "Tj", "TJ")
+        ]
+
+
+class TestPerSpanColor:
+    """Phase 9.A5a — per-span colour: recolour a character RANGE inside a
+    paragraph, distinct from the whole-paragraph A1 colour. The emission is
+    already per-segment; the override just becomes per-code-point."""
+
+    def test_recolours_a_middle_range_and_resets_after(self, tmp_dir):
+        # "Hello colored world" — recolour [6,13) ("colored") red. The
+        # surrounding text stays default black, and CRUCIALLY the trailing
+        # " world" emits an explicit reset so the red can't bleed forward.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello colored world) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        _apply(src, out, p, p["text"], span_styles=[{"start": 6, "end": 13, "color": [1.0, 0.0, 0.0]}])
+        ops = _color_ops(out)
+        # Three shows, the middle one red, flanked by explicit black resets.
+        shows = [(op, args) for op, args in ops]
+        assert ("Tj", ["Hello "]) in shows
+        assert ("rg", ["1", "0", "0"]) in [o for o in ops]
+        # After the red show there is a `0 g` before " world" (no bleed).
+        red_i = next(i for i, (op, a) in enumerate(ops) if op == "rg")
+        world_i = next(i for i, (op, a) in enumerate(ops) if op == "Tj" and a == [" world"])
+        assert any(op == "g" and a == ["0"] for op, a in ops[red_i + 1 : world_i + 1])
+
+    def test_no_span_styles_is_byte_identical(self, tmp_dir):
+        # The pin: an edit with span_styles=None (or absent) is byte-for-byte
+        # the shipped path — per-span colour touches nothing when unused.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Plain reword here) Tj ET")
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        p = _paras(src)[0]
+        _apply(src, a, p, p["text"])
+        _apply(src, b, p, p["text"], span_styles=None)
+        assert _content_bytes(a) == _content_bytes(b)
+
+    def test_surrounding_text_matches_a_plain_edit(self, tmp_dir):
+        # Recolouring the middle must not perturb the flanking runs' bytes:
+        # the show ops for "Hello " and " world" are identical to a plain
+        # reword (colour is metric-neutral — same Tm, same widths).
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello colored world) Tj ET")
+        plain = os.path.join(tmp_dir, "plain.pdf")
+        colored = os.path.join(tmp_dir, "colored.pdf")
+        p = _paras(src)[0]
+        _apply(src, plain, p, p["text"])
+        _apply(src, colored, p, p["text"], span_styles=[{"start": 6, "end": 13, "color": [1.0, 0.0, 0.0]}])
+
+        def tms(path):
+            with pikepdf.open(path) as pdf:
+                return [
+                    [str(x) for x in i.operands]
+                    for i in pikepdf.parse_content_stream(pdf.pages[0])
+                    if str(i.operator) == "Tm"
+                ]
+
+        # Plain lays ONE segment (one Tm); coloured splits into THREE (a Tm
+        # per colour segment). The start doesn't move, and the three segment
+        # anchors flow strictly left-to-right — the recolour split the line
+        # without perturbing the layout (colour is metric-neutral).
+        p_tm, c_tm = tms(plain), tms(colored)
+        assert len(p_tm) == 1 and len(c_tm) == 3
+        assert c_tm[0] == p_tm[0]
+        xs = [float(t[4]) for t in c_tm]
+        assert xs[0] < xs[1] < xs[2]
+
+    def test_multi_range_sparse(self, tmp_dir):
+        # Two disjoint recoloured ranges; the gap between stays default.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (alpha beta gamma delta) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        _apply(src, out, p, p["text"], span_styles=[
+            {"start": 0, "end": 5, "color": [1.0, 0.0, 0.0]},   # alpha red
+            {"start": 11, "end": 16, "color": [0.0, 0.0, 1.0]},  # gamma blue
+        ])
+        ops = _color_ops(out)
+        assert any(op == "rg" and a == ["1", "0", "0"] for op, a in ops)
+        assert any(op == "rg" and a == ["0", "0", "1"] for op, a in ops)
+
+    def test_range_splits_a_run_boundary(self, tmp_dir):
+        # A colour range that straddles TWO style-source runs (spanning the
+        # boundary) recolours across it — the override is independent of the
+        # run/span structure.
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (first ) Tj /F1 12 Tf (second) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        assert p["text"] == "first second"
+        # Recolour [3,9) — spans the "st sec" straddle of the run boundary.
+        _apply(src, out, p, p["text"], p["spans"], span_styles=[{"start": 3, "end": 9, "color": [0.0, 0.5, 0.0]}])
+        ops = _color_ops(out)
+        assert any(op == "rg" and a == ["0", "0.5", "0"] for op, a in ops)
+
+    def test_composes_with_a1_size(self, tmp_dir):
+        # Per-span colour AND an A1 whole-paragraph size change together:
+        # size applies uniformly, colour to the range.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello colored world) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        _apply(src, out, p, p["text"], size=18.0, span_styles=[{"start": 6, "end": 13, "color": [1.0, 0.0, 0.0]}])
+        with pikepdf.open(out) as pdf:
+            ops = [(str(i.operator), [str(x) for x in i.operands]) for i in pikepdf.parse_content_stream(pdf.pages[0])]
+        # Every Tf carries size 18; a red rg appears.
+        tf_sizes = {a[1] for op, a in ops if op == "Tf"}
+        assert tf_sizes == {"18"}
+        assert any(op == "rg" and a == ["1", "0", "0"] for op, a in ops)
+
+    def test_listing_exposes_per_span_colour(self, tmp_dir):
+        # The additive seed: each span carries its member's fill colour hex.
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Black ) Tj 1 0 0 rg (red) Tj ET",
+        )
+        p = _paras(src)[0]
+        colors = [sp.get("color") for sp in p["spans"]]
+        assert "#000000" in colors
+        assert "#ff0000" in colors
+
+    def test_out_of_bounds_range_refuses(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (short) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        with pytest.raises(ValueError, match="out of bounds"):
+            _apply(src, out, p, p["text"], span_styles=[{"start": 0, "end": 999, "color": [1.0, 0.0, 0.0]}])
+        with pytest.raises(ValueError, match=r"\[r, g, b\]"):
+            _apply(src, out, p, p["text"], span_styles=[{"start": 0, "end": 3, "color": [1.0, 0.0]}])

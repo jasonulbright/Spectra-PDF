@@ -1921,6 +1921,11 @@ export function WorkspaceCanvasView({
           lineCount: p.lineCount,
           alignment: p.alignment,
           vertical: p.vertical,
+          // 9.A5a: the distinct per-span colours (seed hexes) — an e2e can
+          // assert a recoloured range survives the round-trip.
+          colors: Array.from(
+            new Set(p.spans.map((sp) => sp.color).filter((c): c is string => !!c)),
+          ),
         })),
       openParagraphEditor: (pageId, index) => openParagraphEditorRef.current(pageId, index),
       act: (kind, opts) => runEditActionRef.current(kind, opts),

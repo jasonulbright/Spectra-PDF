@@ -199,7 +199,14 @@ export interface CanvasEditImagesHandlers {
   /** Paragraph layer (7.5). */
   paragraphs: (
     pageId: string,
-  ) => { index: number; text: string; lineCount: number; alignment: string; vertical: boolean }[];
+  ) => {
+    index: number;
+    text: string;
+    lineCount: number;
+    alignment: string;
+    vertical: boolean;
+    colors: string[];
+  }[];
   openParagraphEditor: (pageId: string, index: number) => void;
   act: (
     kind: 'delete' | 'replace' | 'extract' | 'crop' | 'opacity',
@@ -600,7 +607,14 @@ export interface TestHarness {
    * REAL paragraph editor (then driven via data-testid edit-para-input). */
   editParagraphs: (
     pageId: string,
-  ) => { index: number; text: string; lineCount: number; alignment: string; vertical: boolean }[];
+  ) => {
+    index: number;
+    text: string;
+    lineCount: number;
+    alignment: string;
+    vertical: boolean;
+    colors: string[];
+  }[];
   editParagraphOpen: (pageId: string, index: number) => void;
   /** Create PDF from PostScript (Phase 8; dialog must be open). */
   createPdfRun: (source: string, output: string, preset?: string) => Promise<boolean>;
