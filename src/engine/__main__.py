@@ -56,7 +56,7 @@ from engine.page_images import (
     transform_page_image,
 )
 from engine.distill import distill
-from engine.text_authoring import add_text_box
+from engine.text_authoring import add_text_box, measure_text_box
 from engine.text_paragraphs import (
     list_text_paragraphs,
     merge_paragraph_with_previous,
@@ -123,6 +123,7 @@ def main() -> None:
     server.register("merge_paragraph_with_previous", merge_paragraph_with_previous)
     server.register("distill", distill)
     server.register("add_text_box", add_text_box)
+    server.register("measure_text_box", measure_text_box)
     server.register("print", print_pdf)
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)

@@ -14,15 +14,26 @@ inversion needed, unlike the paragraph emitter's in-context rewrite).
 A2-tail: `rotate` wraps that same block in one 90°-step rotation frame
 (`cm`) mapping the local layout onto the drawn box; rotate=0 emits the
 frame-less shipped bytes.
+A2-tail-2: `bold`/`italic` compose the A3b style into the same fallback
+ladder (both face seats), and `measure_text_box` reports the identical
+layout without writing — ONE shared `_layout_box` pass for both ops (the
+walker-agreement discipline), so the card's fit indicator can never
+disagree with the commit.
 """
 
 from pathlib import Path
+from typing import NamedTuple
 
 import pikepdf
 from pikepdf import ContentStreamInstruction as _CSI
 from pikepdf import Dictionary, Name, Operator, String
 
-from engine.font_fallback import build_fallback_font, resolve_fallback_font, synthetic_family_font
+from engine.font_fallback import (
+    build_fallback_font,
+    resolve_fallback_font,
+    style_key,
+    synthetic_family_font,
+)
 from engine.page_images import _save
 
 _LEADING_EM = 1.2
@@ -60,33 +71,37 @@ def _wrap(words, width_1000, size: float, max_width: float) -> list[str]:
     return lines
 
 
-def add_text_box(
-    file: str,
-    output: str,
-    page: int,
-    rect: list,
-    text: str,
-    size: float = 12.0,
-    color: list | None = None,
-    font_path: str = "",
-    align: str = "left",
-    family: str | None = None,
-    rotate: int = 0,
-) -> dict:
-    """Author a new text box on `page`.
+class _BoxLayout(NamedTuple):
+    """Everything the fit-vs-commit agreement depends on, produced ONCE by
+    `_layout_box`. `add_text_box` additionally emits + shift-up + saves;
+    `measure_text_box` reads only `lines`/`leading`/`l_h`."""
+    lines: list
+    body: str
+    leading: float
+    sz: float
+    rot: int
+    l_left: float
+    l_right: float
+    l_top: float
+    l_w: float
+    l_h: float
+    frame: list  # None for rotate=0
+    left: float
+    right: float
+    top: float
+    bottom: float
+    font_dict: object
+    encode: object
+    width_1000: object
 
-    `rect` is [x0, y0, x1, y1] in USER-space PDF points (bottom-left
-    origin). `text` is placed from the top of the box, wrapping at its
-    width; explicit newlines are honoured as hard breaks. `size` (points,
-    clamped), `color` an [r,g,b] 0-1 (default black), `font_path` the
-    bundled fonts dir (or a face), `family` serif/sans/mono (default sans).
-    `rotate` (0/90/180/270, CCW) turns the WHOLE block within the box —
-    at 90/270 it lays out along the box's HEIGHT (reading bottom-to-top /
-    top-to-bottom), at 180 upside-down. Text that would overflow the page
-    BOTTOM is shifted up to stay visible (never a success that renders off
-    the sheet). The authored run is a normal Type0+ToUnicode object —
-    editable and searchable afterward (rotated: on the run surface, the
-    standing rotated-text boundary)."""
+
+def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic) -> _BoxLayout:
+    """The ONE layout pass shared by `add_text_box` and `measure_text_box`
+    — validation, box geometry (incl. the A2-tail rotation transposition),
+    face resolution (family + A3b bold/italic style), subset-font build,
+    and the greedy wrap. Single-sourced on purpose: the card's live fit
+    indicator runs the SAME code the commit runs, so they can never
+    disagree (the walker-agreement discipline applied to authoring)."""
     body = str(text)
     words = body.split()
     if not words:
@@ -100,6 +115,13 @@ def add_text_box(
     # where a silently-coerced wrong value flips the whole geometry.
     if isinstance(rotate, bool) or not isinstance(rotate, (int, float)) or rotate not in (0, 90, 180, 270):
         raise ValueError(f"rotate must be 0, 90, 180, or 270 (got {rotate!r})")
+    # Strict booleans (A2-tail-2): checked as bool, NOT truthiness — bool is
+    # an int subclass, so a real True/False passes while bold=1 / italic="y"
+    # refuse (a coerced style would silently pick the wrong face).
+    if not isinstance(bold, bool):
+        raise ValueError(f"bold must be true or false (got {bold!r})")
+    if not isinstance(italic, bool):
+        raise ValueError(f"italic must be true or false (got {italic!r})")
     rot = int(rotate)
     left, right = min(x0, x1), max(x0, x1)
     top, bottom = max(y0, y1), min(y0, y1)
@@ -131,6 +153,75 @@ def add_text_box(
 
     sz = max(1.0, min(_MAX_SIZE, float(size) if size else 12.0))
     leading = sz * _LEADING_EM
+
+    # A2-tail-2: compose the A3b style into the SAME resolve ladder (both
+    # face seats). style_key(False, False) == "regular" == the shipped
+    # default, so the no-style path stays byte-identical.
+    sk = style_key(bold, italic)
+    if family in ("serif", "mono", "sans"):
+        face = resolve_fallback_font(str(font_path), synthetic_family_font(family), style=sk)
+    else:
+        face = resolve_fallback_font(str(font_path), None, style=sk)
+
+    # Chars actually DRAWN — control whitespace is structural (the line
+    # breaks handled just below), never a glyph, so it stays out of the
+    # embedded subset.
+    unique = "".join(sorted(set(body) - {"\n", "\r", "\t"}))
+    font_dict, encode, width_1000 = build_fallback_font(pdf, face, unique)
+
+    # Honour the user's line breaks as HARD breaks (the entry control is a
+    # textarea), then greedy-wrap each segment to the box width. A blank
+    # line stays a blank line; leading/trailing blanks are trimmed.
+    lines: list[str] = []
+    for segment in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        seg_words = segment.split()
+        if not seg_words:
+            lines.append("")
+            continue
+        lines.extend(_wrap(seg_words, width_1000, sz, l_w))
+    while lines and lines[0] == "":
+        lines.pop(0)
+    while lines and lines[-1] == "":
+        lines.pop()
+
+    return _BoxLayout(
+        lines=lines, body=body, leading=leading, sz=sz, rot=rot,
+        l_left=l_left, l_right=l_right, l_top=l_top, l_w=l_w, l_h=l_h,
+        frame=frame, left=left, right=right, top=top, bottom=bottom,
+        font_dict=font_dict, encode=encode, width_1000=width_1000,
+    )
+
+
+def add_text_box(
+    file: str,
+    output: str,
+    page: int,
+    rect: list,
+    text: str,
+    size: float = 12.0,
+    color: list | None = None,
+    font_path: str = "",
+    align: str = "left",
+    family: str | None = None,
+    rotate: int = 0,
+    bold: bool = False,
+    italic: bool = False,
+) -> dict:
+    """Author a new text box on `page`.
+
+    `rect` is [x0, y0, x1, y1] in USER-space PDF points (bottom-left
+    origin). `text` is placed from the top of the box, wrapping at its
+    width; explicit newlines are honoured as hard breaks. `size` (points,
+    clamped), `color` an [r,g,b] 0-1 (default black), `font_path` the
+    bundled fonts dir (or a face), `family` serif/sans/mono (default sans),
+    `bold`/`italic` (A2-tail-2) pick the styled face from the same bundle.
+    `rotate` (0/90/180/270, CCW) turns the WHOLE block within the box —
+    at 90/270 it lays out along the box's HEIGHT (reading bottom-to-top /
+    top-to-bottom), at 180 upside-down. Text that would overflow the page
+    BOTTOM is shifted up to stay visible (never a success that renders off
+    the sheet). The authored run is a normal Type0+ToUnicode object —
+    editable and searchable afterward (rotated: on the run surface, the
+    standing rotated-text boundary)."""
     if color is None:
         rgb = (0.0, 0.0, 0.0)
     else:
@@ -145,38 +236,20 @@ def add_text_box(
     output_path = Path(output)
     pdf = pikepdf.open(file)
     try:
+        # Input-shape validation (text/rect/rotate/style) runs FIRST, before
+        # the page-range check — the pre-refactor precedence (a doubly-invalid
+        # call surfaces the input error, not the page error).
+        lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic)
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
 
-        # A face matching the requested family (B1); no original font to
-        # match against, so `family` drives it (sans default).
-        if family in ("serif", "mono", "sans"):
-            face = resolve_fallback_font(str(font_path), synthetic_family_font(family))
-        else:
-            face = resolve_fallback_font(str(font_path), None)
-
-        # Chars actually DRAWN — control whitespace is structural (the line
-        # breaks handled just below), never a glyph, so it stays out of the
-        # embedded subset.
-        unique = "".join(sorted(set(body) - {"\n", "\r", "\t"}))
-        font_dict, encode, width_1000 = build_fallback_font(pdf, face, unique)
-
-        # Honour the user's line breaks as HARD breaks (the entry control is a
-        # textarea), then greedy-wrap each segment to the box width. A blank
-        # line stays a blank line; leading/trailing blanks are trimmed.
-        lines: list[str] = []
-        for segment in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-            seg_words = segment.split()
-            if not seg_words:
-                lines.append("")
-                continue
-            lines.extend(_wrap(seg_words, width_1000, sz, l_w))
-        while lines and lines[0] == "":
-            lines.pop(0)
-        while lines and lines[-1] == "":
-            lines.pop()
+        body, lines, leading, sz, rot = lay.body, lay.lines, lay.leading, lay.sz, lay.rot
+        l_left, l_right, l_top, l_w = lay.l_left, lay.l_right, lay.l_top, lay.l_w
+        left, right, top, bottom = lay.left, lay.right, lay.top, lay.bottom
+        frame = lay.frame
+        font_dict, encode, width_1000 = lay.font_dict, lay.encode, lay.width_1000
 
         res = p.obj.get("/Resources")
         if res is None:
@@ -267,6 +340,55 @@ def add_text_box(
             "page": int(page),
             "lines": len(lines),
             "chars": len(body),
+        }
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def measure_text_box(
+    file: str,
+    page: int,
+    rect: list,
+    text: str,
+    size: float = 12.0,
+    font_path: str = "",
+    align: str = "left",
+    family: str | None = None,
+    rotate: int = 0,
+    bold: bool = False,
+    italic: bool = False,
+) -> dict:
+    """A2-tail-2: report how `text` would lay out in the box WITHOUT
+    writing — the card's live fit indicator. Runs the exact `_layout_box`
+    pass `add_text_box` runs (same wrap width, size clamp, family/style/
+    rotate transposition), so `fits` can never disagree with the commit.
+
+    `text_height` = one leading per wrapped line (the block's extent down
+    from the box top); `box_height` = the box dimension ACROSS the reading
+    direction (l_h — the drawn height at 0/180, the drawn width at 90/270).
+    `fits` is text_height <= box_height. Overflow is NOT an error — the box
+    is a guide, not a clip; the card warns, the commit still proceeds."""
+    pdf = pikepdf.open(file)
+    try:
+        # Same precedence as add_text_box: input-shape checks (inside
+        # _layout_box) before the page range.
+        lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic)
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        # Round BEFORE comparing so the verdict matches the reported numbers
+        # and float noise can't flip an exact boundary (14*1.2 and a box's
+        # subtracted height land on different last-bit values otherwise).
+        text_height = round(len(lay.lines) * lay.leading, 4)
+        box_height = round(lay.l_h, 4)
+        return {
+            "lines": len(lay.lines),
+            "text_height": text_height,
+            "box_height": box_height,
+            "fits": text_height <= box_height,
         }
     finally:
         try:

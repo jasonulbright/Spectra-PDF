@@ -10,7 +10,7 @@ import type { PageGeometry, RedactionMark, RedactionRegion } from '../../lib/red
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import { useEngine } from '../../hooks/useEngine';
-import { dialog } from '../../lib/tauri-bridge';
+import { app, dialog } from '../../lib/tauri-bridge';
 import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../SignerSourceFields';
 import type { SignerSource } from '../SignerSourceFields';
 import { sourceKeyOf } from '../../search/useSearchIndex';
@@ -588,6 +588,11 @@ export function WorkspaceCanvasView({
   const [atSize, setAtSize] = useState(12);
   // A2-tail: authoring-time rotation (90-deg steps; sticky like size/family).
   const [atRotate, setAtRotate] = useState<0 | 90 | 180 | 270>(0);
+  // A2-tail-2: whole-box style toggles (sticky) + the live fit result
+  // (null = unknown/measuring; the notice shows only on a definite no).
+  const [atBold, setAtBold] = useState(false);
+  const [atItalic, setAtItalic] = useState(false);
+  const [atFits, setAtFits] = useState<boolean | null>(null);
   const [atColor, setAtColor] = useState('#000000');
   const [atFamily, setAtFamily] = useState<'sans' | 'serif' | 'mono'>('sans');
   const [atError, setAtError] = useState<string | null>(null);
@@ -646,6 +651,8 @@ export function WorkspaceCanvasView({
       color?: [number, number, number];
       family?: 'sans' | 'serif' | 'mono';
       rotate?: 0 | 90 | 180 | 270;
+      bold?: boolean;
+      italic?: boolean;
     }): Promise<void> => {
       if (creatingTextRef.current) return; // re-entry: the button is disabled while creating
       const placement = liveAddTextPlacement;
@@ -687,8 +694,11 @@ export function WorkspaceCanvasView({
             ...(params.color !== undefined ? { color: params.color } : {}),
             ...(params.family !== undefined ? { family: params.family } : {}),
             // rotate=0 sends NOTHING — the engine's no-param path is pinned
-            // byte-identical to shipped A2 (the A2-tail regression).
+            // byte-identical to shipped A2 (the A2-tail regression). The
+            // style toggles share the rule (false sends nothing).
             ...(params.rotate ? { rotate: params.rotate } : {}),
+            ...(params.bold ? { bold: true } : {}),
+            ...(params.italic ? { italic: true } : {}),
           },
         );
         // Signed-doc refusal — keep the card open (the user can cancel).
@@ -705,6 +715,70 @@ export function WorkspaceCanvasView({
     },
     [liveAddTextPlacement, docs, state.files, onAddText],
   );
+  // A2-tail-2: the live fit indicator — measure_text_box is the SAME
+  // layout pass the author op runs (one shared engine function), called
+  // debounced so the card can warn before commit. Non-blocking by design
+  // (the box is a guide, not a clip); errors just clear the notice (the
+  // commit path surfaces real failures).
+  useEffect(() => {
+    const placement = liveAddTextPlacement;
+    if (!placement || !atText.trim()) {
+      setAtFits(null);
+      return;
+    }
+    let stale = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const built = await buildSignatureAppearance(docs, placement, async (page) => {
+            const f = state.files.get(page.sourceDocId);
+            if (!f?.buffer) throw new Error('no buffer');
+            const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+            const p = await proxy.getPage(page.sourcePageIndex + 1);
+            const [vx0, vy0, vx1, vy1] = p.view;
+            return {
+              box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+              bakedRotate: p.rotate,
+            };
+          });
+          if (!built || stale) return;
+          const f = state.files.get(built.path);
+          if (!f) return;
+          const res = (await engineCall('measure_text_box', {
+            file: f.workingPath,
+            page: built.appearance.page,
+            rect: built.appearance.rect,
+            text: atText,
+            size: atSize,
+            font_path: await app.getEditFontPath(),
+            family: atFamily,
+            ...(atRotate ? { rotate: atRotate } : {}),
+            ...(atBold ? { bold: true } : {}),
+            ...(atItalic ? { italic: true } : {}),
+          })) as { fits?: boolean };
+          if (!stale) setAtFits(typeof res?.fits === 'boolean' ? res.fits : null);
+        } catch {
+          if (!stale) setAtFits(null);
+        }
+      })();
+    }, 250);
+    return () => {
+      stale = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    liveAddTextPlacement,
+    atText,
+    atSize,
+    atFamily,
+    atRotate,
+    atBold,
+    atItalic,
+    docs,
+    state.files,
+    engineCall,
+  ]);
+
   const createPlacedText = useCallback(async (): Promise<void> => {
     await commitAddText({
       text: atText,
@@ -712,8 +786,10 @@ export function WorkspaceCanvasView({
       color: hexToRgb(atColor) ?? [0, 0, 0],
       family: atFamily,
       rotate: atRotate,
+      bold: atBold,
+      italic: atItalic,
     }).catch(() => undefined); // surfaced via atError; the card stays open
-  }, [commitAddText, atText, atSize, atColor, atFamily, atRotate]);
+  }, [commitAddText, atText, atSize, atColor, atFamily, atRotate, atBold, atItalic]);
 
   // Bake pending values file by file through App's fill op. Reentrancy-ref'd
   // like applyMarks (two clicks in one tick both read a stale busy flag).
@@ -3153,6 +3229,34 @@ export function WorkspaceCanvasView({
               </span>{' '}
               {atRotate}°
             </button>
+            <button
+              type="button"
+              data-testid="add-text-bold"
+              aria-pressed={atBold}
+              title="Bold — authors in the bundled bold face"
+              onClick={() => setAtBold((b) => !b)}
+              className={`px-2 py-1 text-xs font-bold border rounded ${
+                atBold
+                  ? 'bg-emerald-700/40 border-emerald-500'
+                  : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
+              }`}
+            >
+              B
+            </button>
+            <button
+              type="button"
+              data-testid="add-text-italic"
+              aria-pressed={atItalic}
+              title="Italic — authors in the bundled italic face"
+              onClick={() => setAtItalic((i) => !i)}
+              className={`px-2 py-1 text-xs italic border rounded ${
+                atItalic
+                  ? 'bg-emerald-700/40 border-emerald-500'
+                  : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
+              }`}
+            >
+              I
+            </button>
             <span className="text-xs text-neutral-400 flex-1 text-right shrink-0">Colour</span>
             <input
               data-testid="add-text-color"
@@ -3162,6 +3266,11 @@ export function WorkspaceCanvasView({
               className="h-6 w-8 bg-neutral-800 border border-neutral-700 rounded"
             />
           </div>
+          {atFits === false && (
+            <div data-testid="add-text-overflow" className="text-xs text-amber-400">
+              The text extends below the box — it will continue past it.
+            </div>
+          )}
           {atError && <div data-testid="add-text-error" className="text-xs text-red-400">{atError}</div>}
           <div className="flex justify-end gap-2">
             <button

@@ -59,6 +59,11 @@ const INTERNAL_METHODS = new Set([
   'get_metadata',
   'get_pdf_version',
   'get_outline',
+  // 9.A2-tail-2 fit indicator (round 31): a pure read despite taking a file
+  // — it measures how NEW text would wrap, independent of page content, so
+  // gating it would force-commit unrelated pending page edits on every
+  // keystroke pause in the Add Text card (the exact get_pdf_version bug).
+  'measure_text_box',
 ]);
 
 export function isTrackableMethod(method: string): boolean {

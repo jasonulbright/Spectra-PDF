@@ -220,6 +220,8 @@ export interface CanvasEditImagesHandlers {
     color?: [number, number, number];
     family?: 'sans' | 'serif' | 'mono';
     rotate?: 0 | 90 | 180 | 270;
+    bold?: boolean;
+    italic?: boolean;
   }) => Promise<void>;
 }
 
@@ -641,6 +643,8 @@ export interface TestHarness {
     color?: [number, number, number];
     family?: 'sans' | 'serif' | 'mono';
     rotate?: 0 | 90 | 180 | 270;
+    bold?: boolean;
+    italic?: boolean;
   }) => Promise<void>;
 }
 

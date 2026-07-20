@@ -10,6 +10,7 @@ import {
   invokeAppCommand,
   placeAddText,
   commitAddText,
+  setReactInputValue,
 } from '../support/harness.js';
 
 // Phase 9.A2 — Add Text round-trip against the real binary: arm the Edit
@@ -150,6 +151,56 @@ describe('add text (Phase 9.A2)', () => {
         return true;
       },
       { timeout: 30_000, timeoutMsg: 'undo did not remove the rotated authored text' },
+    );
+  });
+
+  it('authors BOLD text via the style toggle params; undo removes (A2-tail-2)', async function () {
+    this.timeout(120_000);
+    await waitForHarness();
+    await invokeAppCommand('tools.addtext');
+    await placeAddText({ x: 0.15, y: 0.55, w: 0.5, h: 0.12 });
+    await $('[data-testid="add-text-form"]').waitForDisplayed({ timeout: 10_000 });
+
+    const phrase = 'Bold authored words';
+    // The styled Liberation face embeds engine-side (BaseFont pytest-pinned);
+    // the e2e proof is the wire: params through, listed back, undoable.
+    await commitAddText({ text: phrase, size: 14, bold: true });
+
+    expect(await invokeAppCommand('tools.edit')).toBe(true);
+    await browser.waitUntil(async () => (await authoredParagraph('Bold authored')) !== null, {
+      timeout: 30_000,
+      timeoutMsg: 'the bold authored text never listed back',
+    });
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(async () => (await authoredParagraph('Bold authored')) === null, {
+      timeout: 30_000,
+      timeoutMsg: 'undo did not remove the bold authored text',
+    });
+  });
+
+  it('shows the live overflow notice for text exceeding the box, non-blocking (A2-tail-2)', async function () {
+    this.timeout(120_000);
+    await waitForHarness();
+    await invokeAppCommand('tools.addtext');
+    // A short box: three sentences at size 14 cannot fit its height.
+    await placeAddText({ x: 0.15, y: 0.75, w: 0.3, h: 0.04 });
+    await $('[data-testid="add-text-form"]').waitForDisplayed({ timeout: 10_000 });
+    // The measure effect keys off atText — drive the textarea via the
+    // React-aware setter (a bare setValue can miss the controlled input's
+    // onChange, so atText would stay empty and the effect never runs).
+    await setReactInputValue(
+      '[data-testid="add-text-input"]',
+      'A long piece of text that will certainly wrap across many lines and exceed the drawn box height entirely',
+    );
+    // The debounced measure (engine round-trip) flips the notice on.
+    await $('[data-testid="add-text-overflow"]').waitForDisplayed({ timeout: 15_000 });
+    // Non-blocking: the create button stays enabled.
+    expect(await $('[data-testid="add-text-create"]').isEnabled()).toBe(true);
+    // Close without authoring (Escape cancels the card).
+    await browser.keys(['Escape']);
+    await browser.waitUntil(
+      async () => !(await $('[data-testid="add-text-form"]').isDisplayed().catch(() => false)),
+      { timeout: 10_000, timeoutMsg: 'the card never closed' },
     );
   });
 

@@ -812,6 +812,8 @@ function AppContent(): React.ReactElement {
         color?: [number, number, number];
         family?: 'serif' | 'sans' | 'mono';
         rotate?: 0 | 90 | 180 | 270;
+        bold?: boolean;
+        italic?: boolean;
       },
     ): Promise<string | void> => {
       const f = state.files.get(path);
@@ -827,6 +829,8 @@ function AppContent(): React.ReactElement {
       if (opts?.color !== undefined) params.color = opts.color;
       if (opts?.family !== undefined) params.family = opts.family;
       if (opts?.rotate !== undefined) params.rotate = opts.rotate;
+      if (opts?.bold !== undefined) params.bold = opts.bold;
+      if (opts?.italic !== undefined) params.italic = opts.italic;
       await performOperation(path, 'add_text_box', params);
     },
     [state.files, performOperation, confirmEditOfSignedDoc],

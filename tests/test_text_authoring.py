@@ -9,7 +9,7 @@ import pikepdf
 import pytest
 
 from engine.extract_text import extract_text
-from engine.text_authoring import add_text_box
+from engine.text_authoring import add_text_box, measure_text_box
 from engine.text_paragraphs import list_text_paragraphs
 from engine.text_runs import list_text_runs
 
@@ -374,3 +374,109 @@ class TestAddTextRotated:
         ]
         assert added, "authored runs not found"
         assert max(r["rect"][2] for r in added) <= 612 + 0.5
+
+
+class TestAddTextStyleAndMeasure:
+    """Phase 9.A2-tail-2 — authoring style toggles (bold/italic through the
+    A3b face ladder) + `measure_text_box` (the card's fit indicator, run
+    through the SAME `_layout_box` pass as the commit so they can never
+    disagree)."""
+
+    @pytest.mark.parametrize(
+        "kw,suffix",
+        [
+            ({"bold": True}, "-Bold"),
+            ({"italic": True}, "-Italic"),
+            ({"bold": True, "italic": True}, "-BoldItalic"),
+        ],
+    )
+    def test_style_embeds_the_styled_face(self, tmp_dir, kw, suffix):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [72, 660, 400, 720], "Styled words",
+            font_path=FONTS_DIR, family="serif", **kw,
+        )
+        with pikepdf.open(out) as pdf:
+            fonts = pdf.pages[0]["/Resources"]["/Font"]
+            names = [str(fonts[k].get("/BaseFont")) for k in fonts.keys()]
+        # The subset tag (ABCDEF+) prefixes the face name; the A3b style
+        # suffix rides the family, e.g. ABCDEF+LiberationSerif-Bold.
+        assert any(f"LiberationSerif{suffix}" in n for n in names), names
+
+    def test_default_style_is_byte_identical_to_the_shipped_path(self, tmp_dir):
+        # bold=False/italic=False resolve style_key "regular" — the shipped
+        # default — so the no-style call is byte-identical to one passing
+        # the explicit False pair (streams compare; whole files differ only
+        # by pikepdf's random /ID).
+        src = _blank(tmp_dir)
+        out_a = os.path.join(tmp_dir, "a.pdf")
+        out_b = os.path.join(tmp_dir, "b.pdf")
+        add_text_box(src, out_a, 1, [72, 600, 300, 720], "plain words here", size=13, font_path=FONTS_DIR)
+        add_text_box(
+            src, out_b, 1, [72, 600, 300, 720], "plain words here",
+            size=13, font_path=FONTS_DIR, bold=False, italic=False,
+        )
+        assert _page_content(out_a) == _page_content(out_b)
+
+    def test_style_refuses_non_booleans(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="bold"):
+            add_text_box(src, out, 1, [72, 600, 300, 720], "x", font_path=FONTS_DIR, bold=1)
+        with pytest.raises(ValueError, match="italic"):
+            add_text_box(src, out, 1, [72, 600, 300, 720], "x", font_path=FONTS_DIR, italic="yes")
+
+    @pytest.mark.parametrize(
+        "rect,text,kw",
+        [
+            # plain wrap
+            ([72, 400, 260, 720], "one two three four five six seven eight nine ten", {}),
+            # rotated (wrap width = box HEIGHT under transposition)
+            ([100, 300, 150, 700], "sideways one two three four five six seven eight", {"rotate": 90}),
+            # bold (styled widths change the wrap point)
+            ([72, 400, 220, 720], "bold one two three four five six seven eight nine", {"bold": True}),
+        ],
+    )
+    def test_measure_line_count_matches_the_authored_output(self, tmp_dir, rect, text, kw):
+        # THE agreement pin: measure_text_box reports exactly the line count
+        # the authored output actually lists — one shared layout pass, so a
+        # divergence is impossible by construction.
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        m = measure_text_box(src, 1, rect, text, size=14, font_path=FONTS_DIR, **kw)
+        r = add_text_box(src, out, 1, rect, text, size=14, font_path=FONTS_DIR, **kw)
+        assert m["lines"] == r["lines"]
+
+    def test_fits_flips_exactly_at_the_boundary(self, tmp_dir):
+        # A wide box so the text stays one line: text_height = 1 * leading =
+        # 14 * 1.2 = 16.8. A box exactly 16.8 tall fits (<=); 16.7 does not.
+        src = _blank(tmp_dir)
+        just = measure_text_box(src, 1, [72, 600, 500, 616.8], "one line", size=14, font_path=FONTS_DIR)
+        assert just["lines"] == 1
+        assert just["text_height"] == pytest.approx(16.8, abs=0.01)
+        assert just["fits"] is True
+        under = measure_text_box(src, 1, [72, 600, 500, 616.7], "one line", size=14, font_path=FONTS_DIR)
+        assert under["fits"] is False
+
+    def test_measure_refuses_empty_text_and_bad_rotate(self, tmp_dir):
+        src = _blank(tmp_dir)
+        with pytest.raises(ValueError, match="no text"):
+            measure_text_box(src, 1, [72, 600, 300, 720], "   ", font_path=FONTS_DIR)
+        with pytest.raises(ValueError, match="rotate"):
+            measure_text_box(src, 1, [72, 600, 300, 720], "x", font_path=FONTS_DIR, rotate=45)
+        with pytest.raises(ValueError, match="out of range"):
+            measure_text_box(src, 9, [72, 600, 300, 720], "x", font_path=FONTS_DIR)
+
+    def test_input_validation_precedes_page_range(self, tmp_dir):
+        # Round-31 LOW: the refactor must keep the pre-refactor precedence —
+        # a doubly-invalid call surfaces the INPUT-shape error, not the page
+        # error (cheap validation before I/O position). Both ops match.
+        src = _blank(tmp_dir)  # 1 page
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="no text"):
+            add_text_box(src, out, 9, [72, 600, 300, 720], "   ", font_path=FONTS_DIR)
+        with pytest.raises(ValueError, match="rotate"):
+            add_text_box(src, out, 9, [72, 600, 300, 720], "x", font_path=FONTS_DIR, rotate=45)
+        with pytest.raises(ValueError, match="no text"):
+            measure_text_box(src, 9, [72, 600, 300, 720], "   ", font_path=FONTS_DIR)
