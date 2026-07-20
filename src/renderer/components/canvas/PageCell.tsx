@@ -1241,7 +1241,22 @@ function PageCellImpl({
                 height: `${r.h * 100}%`,
               }}
             >
-              <span className="page-form-new-label">NEW TEXT</span>
+              <span className="page-form-new-label">
+                NEW TEXT{' '}
+                <span
+                  className="inline-block"
+                  data-testid="add-text-direction"
+                  // Reading direction: −rotate in CSS (positive CSS = CW;
+                  // rotate=90 reads bottom-to-top ⇒ arrow points up), spun
+                  // WITH the pending view rotation like the box itself.
+                  style={{
+                    transform: `rotate(${page.rotation - (addTextPlacement.rotate ?? 0)}deg)`,
+                  }}
+                  aria-hidden
+                >
+                  →
+                </span>
+              </span>
               {(tool === 'select' || tool === 'edit' || tool === 'addtext') && (
                 <button
                   className="page-annot-x"

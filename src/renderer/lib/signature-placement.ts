@@ -23,6 +23,10 @@ export interface SignaturePlacement {
   // file at sign time and composed there — storing the composition would
   // double-count it; same contract as RedactionMark.rotationAtDraw).
   rotationAtDraw: 0 | 90 | 180 | 270;
+  /** A2-tail, Add-Text placements only: the authoring rotation the card
+   * currently shows — drives the box preview's reading-direction arrow.
+   * Signature/new-field placements never set it. */
+  rotate?: 0 | 90 | 180 | 270;
 }
 
 export interface SignatureAppearance {

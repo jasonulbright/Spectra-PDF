@@ -32,6 +32,14 @@ def _blank(tmp_dir, name="blank.pdf"):
     return src
 
 
+def _page_content(path):
+    with pikepdf.open(path) as pdf:
+        contents = pdf.pages[0].obj.get("/Contents")
+        if isinstance(contents, pikepdf.Array):
+            return b"".join(bytes(s.read_bytes()) for s in contents)
+        return contents.read_bytes()
+
+
 class TestAddText:
     def test_authored_text_lists_as_an_editable_run(self, tmp_dir):
         src = _blank(tmp_dir)
@@ -174,3 +182,195 @@ class TestAddText:
         run = next(r for r in runs if "Anchored here" in r["text"])
         assert run["rect"][0] == pytest.approx(72, abs=2.0)
         assert run["rect"][1] == pytest.approx(720 - 12, abs=3.0)
+
+
+class TestAddTextRotated:
+    """A2-tail: rotated authoring. Every positional test pins its corner
+    anchor with the actual matrix arithmetic in a comment — device points
+    computed by hand from Tm × frame, never by intuition."""
+
+    def test_rotate_90_first_line_hugs_the_left_edge(self, tmp_dir):
+        # Box [100, 500, 160, 700] (W=60, H=200). 90° reads bottom-to-top:
+        # frame [0 1 -1 0 160 500] maps local (x, y) -> (160 - y, 500 + x)
+        # — local origin on the bottom-RIGHT corner, +x runs UP the page,
+        # +y LEFT. Local layout box: l_w=200 (the drawn HEIGHT) by l_h=60;
+        # first baseline Tm [1 0 0 1 0 48] (48 = 60 - 12).
+        # Combined = Tm x frame = [0 1 -1 0 112 500]; the em-box corners:
+        #   (0, 0)  -> (112, 500)     baseline foot at the box bottom edge
+        #   (0, 12) -> (100, 500)     ascent face ON the left edge x=100
+        #   (w, 12) -> (100, 500+w)   the line advances UP the page
+        # => device rect [100, 500, 112, 500+w]: a TALL 12pt-wide strip
+        # hugging the left edge (the 0° top edge, carried there by the CCW
+        # quarter turn).
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [100, 500, 160, 700], "Vertical label",
+            size=12, font_path=FONTS_DIR, rotate=90,
+        )
+        runs = list_text_runs(out, 1)["runs"]
+        run = next(r for r in runs if "Vertical label" in r["text"])
+        x0, y0, x1, y1 = run["rect"]
+        assert x0 == pytest.approx(100, abs=1.0)
+        assert x1 == pytest.approx(112, abs=1.0)
+        assert y0 == pytest.approx(500, abs=1.0)
+        assert (y1 - y0) > (x1 - x0)  # rotated: tall, not wide
+        assert y1 <= 700 + 1.0  # inside the drawn box
+        assert run["editable"] is True  # the run surface still edits it
+        # Rotated text never groups — the shipped paragraph boundary.
+        paras = list_text_paragraphs(out, 1)["paragraphs"]
+        assert not any("Vertical label" in p["text"] for p in paras)
+
+    def test_rotate_180_first_line_hugs_the_bottom_edge(self, tmp_dir):
+        # Box [72, 500, 372, 540] (W=300, H=40). 180°: frame
+        # [-1 0 0 -1 372 540] maps local (x, y) -> (372 - x, 540 - y) —
+        # local origin on the top-RIGHT corner. First baseline
+        # Tm [1 0 0 1 0 28] (28 = 40 - 12); combined = [-1 0 0 -1 372 512]:
+        #   (0, 0)  -> (372, 512)     baseline foot at the box right edge
+        #   (0, 12) -> (372, 500)     ascent face ON the bottom edge y=500
+        #   (w, 0)  -> (372-w, 512)   reading right-to-left
+        # => device rect [372-w, 500, 372, 512]: the 0° top strip carried
+        # to the bottom by the half turn (upside-down text).
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [72, 500, 372, 540], "Upside down",
+            size=12, font_path=FONTS_DIR, rotate=180,
+        )
+        runs = list_text_runs(out, 1)["runs"]
+        run = next(r for r in runs if "Upside down" in r["text"])
+        x0, y0, x1, y1 = run["rect"]
+        assert x1 == pytest.approx(372, abs=1.0)
+        assert y0 == pytest.approx(500, abs=1.0)
+        assert y1 == pytest.approx(512, abs=1.0)
+        assert x0 > 72  # one short line: ends well inside the box
+
+    def test_rotate_270_first_line_hugs_the_right_edge(self, tmp_dir):
+        # Box [400, 500, 460, 700] (W=60, H=200). 270° reads top-to-bottom:
+        # frame [0 -1 1 0 400 700] maps local (x, y) -> (400 + y, 700 - x)
+        # — local origin on the top-LEFT corner, +x runs DOWN the page,
+        # +y RIGHT. First baseline Tm [1 0 0 1 0 48] (l_h = W = 60);
+        # combined = [0 -1 1 0 448 700]:
+        #   (0, 0)  -> (448, 700)     baseline foot at the box top edge
+        #   (0, 12) -> (460, 700)     ascent face ON the right edge x=460
+        #   (w, 0)  -> (448, 700-w)   the line advances DOWN the page
+        # => device rect [448, 700-w, 460, 700] hugging the right edge.
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [400, 500, 460, 700], "Downward",
+            size=12, font_path=FONTS_DIR, rotate=270,
+        )
+        runs = list_text_runs(out, 1)["runs"]
+        run = next(r for r in runs if "Downward" in r["text"])
+        x0, y0, x1, y1 = run["rect"]
+        assert x0 == pytest.approx(448, abs=1.0)
+        assert x1 == pytest.approx(460, abs=1.0)
+        assert y1 == pytest.approx(700, abs=1.0)
+        assert y0 >= 500 - 1.0  # inside the drawn box
+
+    def test_rotate_90_wraps_at_the_box_height(self, tmp_dir):
+        # A 40pt-WIDE, 300pt-TALL box at 90° wraps at 300 — the dimension
+        # ALONG the reading direction — not 40: the same text at 0° in a
+        # 300pt-wide box must produce the IDENTICAL line count, and the
+        # same 40pt-wide box at 0° a strictly larger one.
+        text = (
+            "the quick brown fox jumps over the lazy dog and keeps on "
+            "running until the sentence is long enough to wrap"
+        )
+        src = _blank(tmp_dir)
+        r90 = add_text_box(
+            src, os.path.join(tmp_dir, "a.pdf"), 1, [100, 400, 140, 700],
+            text, size=12, font_path=FONTS_DIR, rotate=90,
+        )
+        r0_wide = add_text_box(
+            src, os.path.join(tmp_dir, "b.pdf"), 1, [100, 400, 400, 700],
+            text, size=12, font_path=FONTS_DIR,
+        )
+        r0_narrow = add_text_box(
+            src, os.path.join(tmp_dir, "c.pdf"), 1, [100, 400, 140, 700],
+            text, size=12, font_path=FONTS_DIR,
+        )
+        assert r90["lines"] > 1
+        assert r90["lines"] == r0_wide["lines"]
+        assert r90["lines"] < r0_narrow["lines"]
+
+    def test_rotate_0_is_byte_identical_to_the_shipped_path(self, tmp_dir):
+        # The regression pin: rotate=0 takes the EXACT shipped path — same
+        # content-stream bytes as a call without the parameter (whole files
+        # differ only by pikepdf's random /ID, so streams compare), and no
+        # rotation frame (`cm`) anywhere. Center + a hard break exercise
+        # the layout arithmetic, not just a single Tm.
+        src = _blank(tmp_dir)
+        out_a = os.path.join(tmp_dir, "a.pdf")
+        out_b = os.path.join(tmp_dir, "b.pdf")
+        add_text_box(
+            src, out_a, 1, [72, 600, 300, 720],
+            "wrap me across a few lines\nhard break",
+            size=13, align="center", font_path=FONTS_DIR,
+        )
+        add_text_box(
+            src, out_b, 1, [72, 600, 300, 720],
+            "wrap me across a few lines\nhard break",
+            size=13, align="center", font_path=FONTS_DIR, rotate=0,
+        )
+        assert _page_content(out_a) == _page_content(out_b)
+        with pikepdf.open(out_a) as pdf:
+            ops = {str(i.operator) for i in pikepdf.parse_content_stream(pdf.pages[0])}
+        assert "cm" not in ops
+
+    def test_rotate_refuses_anything_but_the_four_steps(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        for bad in (45, -90, "90", 360, True):
+            with pytest.raises(ValueError, match="rotate"):
+                add_text_box(
+                    src, out, 1, [72, 600, 300, 720], "x",
+                    font_path=FONTS_DIR, rotate=bad,
+                )
+
+    def test_rotate_90_text_extracts(self, tmp_dir):
+        # The ToUnicode surface is orientation-blind: every 90° authored
+        # glyph round-trips through plain extraction. Character-exact, not
+        # substring: pdfminer's layout analysis shatters non-upright chars
+        # into per-glyph fragments in device-y order (the phrase comes back
+        # reversed with breaks) — that ordering is the extractor's rotated-
+        # layout artifact, not the authored mapping under test. The blank
+        # page holds nothing else, so the multiset pins right chars, right
+        # counts, and no strays.
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [100, 400, 150, 700], "sideways but searchable",
+            font_path=FONTS_DIR, rotate=90,
+        )
+        extracted = extract_text(out)["text"]
+        wanted = "sideways but searchable"
+        assert sorted(c for c in extracted if not c.isspace()) == sorted(
+            c for c in wanted if not c.isspace()
+        )
+
+    def test_rotate_90_shift_up_guard_keeps_text_on_the_sheet(self, tmp_dir):
+        # 90° overflow marches out the page's RIGHT edge (local "down" is
+        # device +x past the box). A box ending at x=600 on the 612-wide
+        # sheet leaves 12pt: unshifted, line n sits at device
+        # x1 = 600 - (28 - (n-1)*14.4), so from the 4th line on the strip
+        # passes 612 — off the sheet. The local-space guard shifts the
+        # block "up" (device: leftward), so every strip stays within the
+        # page; the last line lands exactly at x1 = 612.
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [560, 400, 600, 700],
+            "alpha beta gamma delta epsilon zeta eta theta iota kappa "
+            "lambda mu nu xi omicron pi rho sigma tau upsilon phi chi "
+            "psi omega and once more around the alphabet to overflow",
+            size=12, font_path=FONTS_DIR, rotate=90,
+        )
+        runs = list_text_runs(out, 1)["runs"]
+        added = [
+            r for r in runs
+            if any(w in r["text"] for w in ("alpha", "omega", "overflow"))
+        ]
+        assert added, "authored runs not found"
+        assert max(r["rect"][2] for r in added) <= 612 + 0.5

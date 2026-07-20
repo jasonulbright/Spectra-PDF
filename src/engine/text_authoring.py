@@ -11,6 +11,9 @@ Pure authoring: no content-stream surgery of existing content. The new
 drawing is wrapped in `q … Q` so it can't inherit or leak graphics state,
 and positioned in USER space at the page's top level (identity ctm — no
 inversion needed, unlike the paragraph emitter's in-context rewrite).
+A2-tail: `rotate` wraps that same block in one 90°-step rotation frame
+(`cm`) mapping the local layout onto the drawn box; rotate=0 emits the
+frame-less shipped bytes.
 """
 
 from pathlib import Path
@@ -68,6 +71,7 @@ def add_text_box(
     font_path: str = "",
     align: str = "left",
     family: str | None = None,
+    rotate: int = 0,
 ) -> dict:
     """Author a new text box on `page`.
 
@@ -76,9 +80,13 @@ def add_text_box(
     width; explicit newlines are honoured as hard breaks. `size` (points,
     clamped), `color` an [r,g,b] 0-1 (default black), `font_path` the
     bundled fonts dir (or a face), `family` serif/sans/mono (default sans).
-    Text that would overflow the page BOTTOM is shifted up to stay visible
-    (never a success that renders off the sheet). The authored run is a
-    normal Type0+ToUnicode object — editable and searchable afterward."""
+    `rotate` (0/90/180/270, CCW) turns the WHOLE block within the box —
+    at 90/270 it lays out along the box's HEIGHT (reading bottom-to-top /
+    top-to-bottom), at 180 upside-down. Text that would overflow the page
+    BOTTOM is shifted up to stay visible (never a success that renders off
+    the sheet). The authored run is a normal Type0+ToUnicode object —
+    editable and searchable afterward (rotated: on the run surface, the
+    standing rotated-text boundary)."""
     body = str(text)
     words = body.split()
     if not words:
@@ -87,9 +95,39 @@ def add_text_box(
         x0, y0, x1, y1 = (float(v) for v in rect)
     except (TypeError, ValueError):
         raise ValueError("rect must be [x0, y0, x1, y1]") from None
+    # Strict on purpose (size/rect coerce; this refuses "90"/True): 90°
+    # steps only is the A2-tail contract, and rotate is the one parameter
+    # where a silently-coerced wrong value flips the whole geometry.
+    if isinstance(rotate, bool) or not isinstance(rotate, (int, float)) or rotate not in (0, 90, 180, 270):
+        raise ValueError(f"rotate must be 0, 90, 180, or 270 (got {rotate!r})")
+    rot = int(rotate)
     left, right = min(x0, x1), max(x0, x1)
     top, bottom = max(y0, y1), min(y0, y1)
     box_w = max(right - left, 1.0)
+
+    # A2-tail: the block lays out LOCALLY exactly like rotate=0 in a
+    # [0, 0, l_w, l_h] box whose l_w is the drawn dimension ALONG the
+    # reading direction (90/270 read along the drawn HEIGHT), then ONE
+    # rotation frame `q <cos sin -sin cos tx ty> cm … Q` maps local onto
+    # the drawn box. The anchor is the corner the local ORIGIN lands on —
+    # rotating the box CCW carries its bottom-left there: 90 ⇒ bottom-right
+    # (local +x runs UP the page, +y LEFT), 180 ⇒ top-right, 270 ⇒ top-left
+    # (+x DOWN, +y RIGHT). rotate=0 keeps the shipped device-space path
+    # byte-for-byte (no frame).
+    if rot in (90, 270):
+        l_w, l_h = max(top - bottom, 1.0), right - left
+    else:
+        l_w, l_h = box_w, top - bottom
+    if rot == 0:
+        l_left, l_right, l_top = left, right, top
+        frame = None
+    else:
+        l_left, l_right, l_top = 0.0, l_w, l_h
+        frame = {
+            90: [0, 1, -1, 0, round(right, 4), round(bottom, 4)],
+            180: [-1, 0, 0, -1, round(right, 4), round(top, 4)],
+            270: [0, -1, 1, 0, round(left, 4), round(top, 4)],
+        }[rot]
 
     sz = max(1.0, min(_MAX_SIZE, float(size) if size else 12.0))
     leading = sz * _LEADING_EM
@@ -134,7 +172,7 @@ def add_text_box(
             if not seg_words:
                 lines.append("")
                 continue
-            lines.extend(_wrap(seg_words, width_1000, sz, box_w))
+            lines.extend(_wrap(seg_words, width_1000, sz, l_w))
         while lines and lines[0] == "":
             lines.pop(0)
         while lines and lines[-1] == "":
@@ -160,7 +198,7 @@ def add_text_box(
             csi([Name(fname), sz], "Tf"),
             csi(list(rgb), "rg"),
         ]
-        y_top = top - sz  # first baseline: one em below the box top
+        y_top = l_top - sz  # first baseline: one em below the (local) box top
         # Keep the block on the VISIBLE page. The box's own bottom is only a
         # hint — text may overflow it downward like any text box — but text off
         # the sheet is silently invisible, so if the last baseline would fall
@@ -168,15 +206,29 @@ def add_text_box(
         # shift the whole block UP, capped so the first line never rises above
         # the page top. A block taller than the page still overflows at the
         # bottom (genuinely too much text) but keeps its top visible — never a
-        # success that renders nothing.
+        # success that renders nothing. Rotated: the SAME rule in LOCAL space —
+        # the frame is a rigid 90°-step turn, so the page box's preimage is an
+        # axis-aligned local rect and its local-y band substitutes for
+        # [lly, ury]; local "down" is wherever overflow marches off the sheet
+        # (90: out the page's RIGHT edge, 180: the TOP, 270: the LEFT).
+        # Overflow past the drawn box itself stays permitted, like rotate=0.
         try:
             vbox = [float(v) for v in p.cropbox]
         except Exception:
             try:
                 vbox = [float(v) for v in p.mediabox]
             except Exception:
-                vbox = [0.0, 0.0, 0.0, top + sz]
-        page_lly, page_ury = vbox[1], vbox[3]
+                vbox = None
+        if vbox is None:
+            page_lly, page_ury = 0.0, l_top + sz
+        elif rot == 90:
+            page_lly, page_ury = right - vbox[2], right - vbox[0]
+        elif rot == 180:
+            page_lly, page_ury = top - vbox[3], top - vbox[1]
+        elif rot == 270:
+            page_lly, page_ury = vbox[0] - left, vbox[2] - left
+        else:
+            page_lly, page_ury = vbox[1], vbox[3]
         last_baseline = y_top - (len(lines) - 1) * leading
         if last_baseline < page_lly:
             y_top = min(page_ury - sz, y_top + (page_lly - last_baseline))
@@ -185,16 +237,18 @@ def add_text_box(
                 continue  # blank line: y still advances via `i`
             line_w = width_1000(line) / 1000.0 * sz
             if align == "center":
-                lx = left + (box_w - line_w) / 2
+                lx = l_left + (l_w - line_w) / 2
             elif align == "right":
-                lx = right - line_w
+                lx = l_right - line_w
             else:
-                lx = left
+                lx = l_left
             ly = y_top - i * leading
             instrs.append(csi([1, 0, 0, 1, round(lx, 4), round(ly, 4)], "Tm"))
             instrs.append(csi([String(encode(line))], "Tj"))
         instrs.append(csi([], "ET"))
         instrs.append(csi([], "Q"))
+        if frame is not None:
+            instrs = [csi([], "q"), csi(frame, "cm")] + instrs + [csi([], "Q")]
 
         content = pikepdf.unparse_content_stream(instrs)
         # Shield the EXISTING content in its own q/Q envelope before appending

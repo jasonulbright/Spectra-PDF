@@ -705,6 +705,7 @@ export async function commitAddText(params: {
   size?: number;
   color?: [number, number, number];
   family?: 'sans' | 'serif' | 'mono';
+  rotate?: 0 | 90 | 180 | 270;
 }): Promise<void> {
   const result = await browser.executeAsync<string | null, [typeof params]>(
     function (p, done) {

@@ -614,6 +614,45 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
     return kept, changed, new_forms
 
 
+def _refuse_offpage_retype(pdf, p, resources, fonts, kept, index, old_rect):
+    """Round-30 guard: a retype re-anchors at the ORIGINAL position, so a
+    longer text marches past the page edge — silently invisible, with a
+    success result (worst for rotated authored runs, which have no
+    paragraph-editor fallback). Walk the REWRITTEN instructions and refuse
+    when the target's new rect exits the visible box (cropbox, mediabox
+    fallback — the authoring guard's convention) on a side the OLD rect
+    respected: an already-off-page run stays editable (quirky documents
+    must not regress), and each side is judged independently so fixing
+    one overflow can't be blocked by another. Skipped if the rewrite
+    changed the run COUNT (no honest index mapping — the fallback-builder
+    path never does today)."""
+    new_runs = _walk_runs(pdf, kept, resources, IDENTITY, 0, None, [], False, fonts)
+    if index >= len(new_runs):
+        return
+    new_rect = new_runs[index]["rect"]
+    try:
+        vbox = [float(v) for v in p.cropbox]
+    except Exception:
+        vbox = None
+    if not vbox:
+        try:
+            vbox = [float(v) for v in p.mediabox]
+        except Exception:
+            return
+    x0, y0, x1, y1 = min(vbox[0], vbox[2]), min(vbox[1], vbox[3]), max(vbox[0], vbox[2]), max(vbox[1], vbox[3])
+    eps = 0.5
+    exits = (
+        (new_rect[0] < x0 - eps and old_rect[0] >= x0 - eps)
+        or (new_rect[1] < y0 - eps and old_rect[1] >= y0 - eps)
+        or (new_rect[2] > x1 + eps and old_rect[2] <= x1 + eps)
+        or (new_rect[3] > y1 + eps and old_rect[3] <= y1 + eps)
+    )
+    if exits:
+        raise ValueError(
+            "the new text would extend off the page — shorten it or reduce the size"
+        )
+
+
 def replace_text_run(file: str, output: str, page: int, index: int, new_text: str) -> dict:
     input_path = Path(file)
     output_path = Path(output)
@@ -625,11 +664,10 @@ def replace_text_run(file: str, output: str, page: int, index: int, new_text: st
         p = pdf.pages[int(page) - 1]
         resources = _resolve_resources(p)
         fonts = _FontCache()
-        count = len(
-            _walk_runs(
-                pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False, fonts
-            )
+        pre_runs = _walk_runs(
+            pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False, fonts
         )
+        count = len(pre_runs)
         if not (0 <= int(index) < count):
             raise ValueError(f"text run index {index} is out of range (page has {count})")
 
@@ -649,6 +687,10 @@ def replace_text_run(file: str, output: str, page: int, index: int, new_text: st
             raise ValueError("edit did not apply (run not found)")
         for nm, st in new_forms.items():
             _register_xobject(pdf, resources, nm, st)
+        # After registration — a NESTED target's rewritten form resolves only
+        # once its fresh name is in resources; walking before it would miss
+        # the run (or compare the wrong one) and the guard would no-op.
+        _refuse_offpage_retype(pdf, p, resources, fonts, kept, int(index), pre_runs[int(index)]["rect"])
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         _finalize_page_rewrite(p, kept, edit.superseded_forms)
         _save(pdf, input_path, output_path)
@@ -680,11 +722,10 @@ def convert_text_run(
         p = pdf.pages[int(page) - 1]
         resources = _resolve_resources(p)
         fonts = _FontCache()
-        count = len(
-            _walk_runs(
-                pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False, fonts
-            )
+        pre_runs = _walk_runs(
+            pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False, fonts
         )
+        count = len(pre_runs)
         if not (0 <= int(index) < count):
             raise ValueError(f"text run index {index} is out of range (page has {count})")
 
@@ -750,6 +791,12 @@ def convert_text_run(
                 for i in kept
             ):
                 _register_font(pdf, resources, fname, fdict)
+        # Guard AFTER font+form registration — the walk needs the fallback
+        # face resolvable to width the new run (fresh cache: the rewrite
+        # registered new names this page-scoped cache has never seen).
+        _refuse_offpage_retype(
+            pdf, p, resources, _FontCache(), kept, int(index), pre_runs[int(index)]["rect"]
+        )
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(index)}
     finally:

@@ -586,6 +586,8 @@ export function WorkspaceCanvasView({
   const [addTextPlacement, setAddTextPlacement] = useState<SignaturePlacement | null>(null);
   const [atText, setAtText] = useState('');
   const [atSize, setAtSize] = useState(12);
+  // A2-tail: authoring-time rotation (90-deg steps; sticky like size/family).
+  const [atRotate, setAtRotate] = useState<0 | 90 | 180 | 270>(0);
   const [atColor, setAtColor] = useState('#000000');
   const [atFamily, setAtFamily] = useState<'sans' | 'serif' | 'mono'>('sans');
   const [atError, setAtError] = useState<string | null>(null);
@@ -604,14 +606,21 @@ export function WorkspaceCanvasView({
       // pattern without the guard). A placement drawn against docs indexed
       // from a superseded buffer dies at SET_WORKSPACE_DOCUMENTS — refuse.
       if (!placementDocsCurrent(state.files, docs, doc.path)) return;
-      setAddTextPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
+      setAddTextPlacement({
+        id: crypto.randomUUID(),
+        path: doc.path,
+        pageId,
+        rect,
+        rotationAtDraw,
+        rotate: atRotate,
+      });
       setSigPlacement(null); // one placement card at a time…
       setNewFieldPlacement(null);
       setSigFieldTarget(null); // …including the sign-into-field card (renders on sigFieldTarget)
       setAtText('');
       setAtError(null);
     },
-    [docs, state.files],
+    [docs, state.files, atRotate],
   );
   const onClearAddTextPlacement = useCallback(() => {
     setAddTextPlacement(null);
@@ -636,6 +645,7 @@ export function WorkspaceCanvasView({
       size?: number;
       color?: [number, number, number];
       family?: 'sans' | 'serif' | 'mono';
+      rotate?: 0 | 90 | 180 | 270;
     }): Promise<void> => {
       if (creatingTextRef.current) return; // re-entry: the button is disabled while creating
       const placement = liveAddTextPlacement;
@@ -676,6 +686,9 @@ export function WorkspaceCanvasView({
             ...(params.size !== undefined ? { size: params.size } : {}),
             ...(params.color !== undefined ? { color: params.color } : {}),
             ...(params.family !== undefined ? { family: params.family } : {}),
+            // rotate=0 sends NOTHING — the engine's no-param path is pinned
+            // byte-identical to shipped A2 (the A2-tail regression).
+            ...(params.rotate ? { rotate: params.rotate } : {}),
           },
         );
         // Signed-doc refusal — keep the card open (the user can cancel).
@@ -698,8 +711,9 @@ export function WorkspaceCanvasView({
       size: atSize,
       color: hexToRgb(atColor) ?? [0, 0, 0],
       family: atFamily,
+      rotate: atRotate,
     }).catch(() => undefined); // surfaced via atError; the card stays open
-  }, [commitAddText, atText, atSize, atColor, atFamily]);
+  }, [commitAddText, atText, atSize, atColor, atFamily, atRotate]);
 
   // Bake pending values file by file through App's fill op. Reentrancy-ref'd
   // like applyMarks (two clicks in one tick both read a stale busy flag).
@@ -3116,6 +3130,29 @@ export function WorkspaceCanvasView({
               }}
               className="w-20 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
             />
+            <button
+              type="button"
+              data-testid="add-text-rotate"
+              title="Rotation — the text reads at this angle (90° steps)"
+              onClick={() =>
+                setAtRotate((r) => {
+                  const next = ((r + 90) % 360) as 0 | 90 | 180 | 270;
+                  // The box preview's direction arrow tracks the card live.
+                  setAddTextPlacement((pl) => (pl ? { ...pl, rotate: next } : pl));
+                  return next;
+                })
+              }
+              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:border-emerald-500"
+            >
+              <span
+                className="inline-block"
+                style={{ transform: `rotate(${-atRotate}deg)` }}
+                aria-hidden
+              >
+                →
+              </span>{' '}
+              {atRotate}°
+            </button>
             <span className="text-xs text-neutral-400 flex-1 text-right shrink-0">Colour</span>
             <input
               data-testid="add-text-color"

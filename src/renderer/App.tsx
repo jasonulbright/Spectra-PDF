@@ -807,7 +807,12 @@ function AppContent(): React.ReactElement {
       page: number,
       rect: [number, number, number, number],
       text: string,
-      opts?: { size?: number; color?: [number, number, number]; family?: 'serif' | 'sans' | 'mono' },
+      opts?: {
+        size?: number;
+        color?: [number, number, number];
+        family?: 'serif' | 'sans' | 'mono';
+        rotate?: 0 | 90 | 180 | 270;
+      },
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
@@ -821,6 +826,7 @@ function AppContent(): React.ReactElement {
       if (opts?.size !== undefined) params.size = opts.size;
       if (opts?.color !== undefined) params.color = opts.color;
       if (opts?.family !== undefined) params.family = opts.family;
+      if (opts?.rotate !== undefined) params.rotate = opts.rotate;
       await performOperation(path, 'add_text_box', params);
     },
     [state.files, performOperation, confirmEditOfSignedDoc],

@@ -670,3 +670,88 @@ class TestVerticalRunEditing:
         )
         with pytest.raises(ValueError, match="vertical"):
             convert_text_run(src, out, 1, 0, "X", fonts_dir)
+
+class TestOffPageRetypeGuard:
+    """Round 30 (A2-tail lens): a retype re-anchors at the original
+    position, so longer text marched off the page silently — success
+    result, invisible text. Worst for rotated authored runs (no
+    paragraph-editor fallback). The guard refuses when the NEW rect
+    exits a side of the visible box the OLD rect respected; an
+    already-off-page run stays editable (quirky docs must not regress)."""
+
+    def _authored(self, tmp_dir, rect, rotate=0):
+        from engine.text_authoring import add_text_box
+
+        src = os.path.join(tmp_dir, "s.pdf")
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(612, 792))
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "authored.pdf")
+        fonts_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "resources",
+            "fonts",
+        )
+        kw = {"rotate": rotate} if rotate else {}
+        add_text_box(src, out, 1, rect, "MY DRAFT", size=12, font_path=fonts_dir, **kw)
+        return out
+
+    def test_retype_longer_past_the_right_edge_refuses(self, tmp_dir):
+        # Lens repro shape: box near the right edge; authored rect ends
+        # ~571 (on-sheet); tripling the text would run to ~700 > 612.
+        src = self._authored(tmp_dir, [510, 400, 606, 430])
+        out = os.path.join(tmp_dir, "o.pdf")
+        idx = next(
+            r["index"] for r in list_text_runs(src, 1)["runs"] if "MY DRAFT" in r["text"]
+        )
+        with pytest.raises(ValueError, match="off the page"):
+            replace_text_run(src, out, 1, idx, "MY DRAFT MY DRAFT MY DRAFT")
+        assert not os.path.exists(out)
+
+    def test_rotated_retype_longer_past_the_top_edge_refuses(self, tmp_dir):
+        # 90-deg authored run reads bottom-to-top; longer text marches past
+        # the page TOP (y1 ~890 > 792 in the lens repro).
+        src = self._authored(tmp_dir, [300, 700, 330, 790], rotate=90)
+        out = os.path.join(tmp_dir, "o.pdf")
+        idx = next(
+            r["index"] for r in list_text_runs(src, 1)["runs"] if "MY DRAFT" in r["text"]
+        )
+        with pytest.raises(ValueError, match="off the page"):
+            replace_text_run(src, out, 1, idx, "MY DRAFT MY DRAFT MY DRAFT")
+        assert not os.path.exists(out)
+
+    def test_retype_within_bounds_allows(self, tmp_dir):
+        src = self._authored(tmp_dir, [510, 400, 606, 430])
+        out = os.path.join(tmp_dir, "o.pdf")
+        idx = next(
+            r["index"] for r in list_text_runs(src, 1)["runs"] if "MY DRAFT" in r["text"]
+        )
+        # Subset discipline: the authored face embeds only "MY DRAFT"'s
+        # glyphs, so the shorter probe reuses them.
+        replace_text_run(src, out, 1, idx, "MY")
+        assert any(r["text"] == "MY" for r in list_text_runs(out, 1)["runs"])
+
+    def test_already_off_page_run_stays_editable(self, tmp_dir):
+        # A run that ALREADY exits the right edge (x1 > 612) keeps its
+        # editability — the guard judges sides the OLD rect respected.
+        src = os.path.join(tmp_dir, "q.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        helv = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"), Subtype=Name("/Type1"),
+                BaseFont=Name("/Helvetica"), Encoding=Name("/WinAnsiEncoding"),
+            )
+        )
+        page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=helv))
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 560 400 Td (Already hanging off the page edge) Tj ET"
+        )
+        pdf.save(src)
+        pdf.close()
+        r0 = list_text_runs(src, 1)["runs"][0]
+        assert r0["rect"][2] > 612  # the premise: off-page BEFORE the edit
+        out = os.path.join(tmp_dir, "o.pdf")
+        replace_text_run(src, out, 1, 0, "Still hanging off the page edge, longer even")
+        assert any("Still hanging" in r["text"] for r in list_text_runs(out, 1)["runs"])

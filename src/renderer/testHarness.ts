@@ -219,6 +219,7 @@ export interface CanvasEditImagesHandlers {
     size?: number;
     color?: [number, number, number];
     family?: 'sans' | 'serif' | 'mono';
+    rotate?: 0 | 90 | 180 | 270;
   }) => Promise<void>;
 }
 
@@ -639,6 +640,7 @@ export interface TestHarness {
     size?: number;
     color?: [number, number, number];
     family?: 'sans' | 'serif' | 'mono';
+    rotate?: 0 | 90 | 180 | 270;
   }) => Promise<void>;
 }
 
