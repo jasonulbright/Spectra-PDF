@@ -31,7 +31,9 @@ const RED_DOT_PNG = Buffer.from(
 
 async function firstPlacement(): Promise<{
   pageId: string;
-  p: { index: number; nested: boolean; matrix: number[]; opacity: number } | undefined;
+  p:
+    | { index: number; nested: boolean; matrix: number[]; opacity: number; crop: number[] | null }
+    | undefined;
 }> {
   const ids = await editImagePageIds();
   if (ids.length === 0) return { pageId: '', p: undefined };
@@ -116,8 +118,8 @@ describe('image adjustments (Phase 9.C3)', () => {
     );
   });
 
-  it('crops (bytes change, matrix does not), then undo restores the bytes', async function () {
-    this.timeout(120_000);
+  it('crops, re-crops WIDER via collapse-replace, undoes both', async function () {
+    this.timeout(180_000);
     await waitForHarness();
     await invokeAppCommand('tools.open.edit');
     await browser.waitUntil(async () => (await editImagePageIds()).length > 0, {
@@ -127,10 +129,16 @@ describe('image adjustments (Phase 9.C3)', () => {
     const { pageId, p } = await firstPlacement();
     const matrixBefore = p!.matrix;
     const hashBefore = await workingHash();
+    expect(p!.crop).toBe(null); // pristine image: no tool crop listed
 
     await editImageSelect(pageId, 0);
     await editImageAct('crop', { rect: [0.25, 0.25, 0.75, 0.75] });
-    // Generation-keyed; the crop clips — the placement matrix must NOT move.
+    // Generation-keyed; the crop clips — the placement matrix must NOT
+    // move, and the LISTING now reports the tool crop (C3-tail).
+    const cropIs = (
+      c: number[] | null | undefined,
+      want: [number, number, number, number],
+    ): boolean => !!c && c.length === 4 && c.every((v, i) => Math.abs(v - want[i]) < 0.01);
     await browser.waitUntil(
       async () => {
         const { pageId: nowId, p: now } = await firstPlacement();
@@ -139,13 +147,41 @@ describe('image adjustments (Phase 9.C3)', () => {
           nowId !== pageId &&
           !!now &&
           now.matrix.every((v, i) => Math.abs(v - matrixBefore[i]) < 0.5) &&
+          cropIs(now.crop, [0.25, 0.25, 0.75, 0.75]) &&
           (await workingHash()) !== hashBefore
         );
       },
-      { timeout: 30_000, timeoutMsg: 'the crop never committed (or moved the placement)' },
+      { timeout: 30_000, timeoutMsg: 'the crop never committed (or never listed back)' },
     );
 
-    const preUndoId = (await editImagePageIds())[0];
+    // Re-crop WIDER — inexpressible under the old intersect semantics;
+    // collapse-replace makes the listed crop GROW (the tail headline).
+    // The C1-tail reselect means the selection survived the commit — the
+    // chained act needs no re-select.
+    const midId = (await editImagePageIds())[0];
+    await editImageAct('crop', { rect: [0.1, 0.1, 0.9, 0.9] });
+    await browser.waitUntil(
+      async () => {
+        const { pageId: nowId, p: now } = await firstPlacement();
+        return nowId !== '' && nowId !== midId && !!now && cropIs(now.crop, [0.1, 0.1, 0.9, 0.9]);
+      },
+      { timeout: 30_000, timeoutMsg: 'the re-crop never widened the listed crop' },
+    );
+
+    // Undo the re-crop → the first crop lists again.
+    let preUndoId = (await editImagePageIds())[0];
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const ids = await editImagePageIds();
+        if (ids.length === 0 || ids[0] === preUndoId) return false;
+        const now = (await editImagePlacements(ids[0]))[0];
+        return cropIs(now?.crop, [0.25, 0.25, 0.75, 0.75]);
+      },
+      { timeout: 30_000, timeoutMsg: 'undo did not restore the first crop' },
+    );
+    // Undo the first crop → pristine bytes.
+    preUndoId = (await editImagePageIds())[0];
     expect(await invokeAppCommand('edit.undo')).toBe(true);
     await browser.waitUntil(
       async () => {

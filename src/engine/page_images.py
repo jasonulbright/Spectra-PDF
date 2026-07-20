@@ -74,6 +74,65 @@ from engine.redact import (
 
 # ── listing ───────────────────────────────────────────────────────────────
 
+# The three wrap shapes `_emit_wrap` emits, keyed by the exact operator
+# sequence between the frame's `q` and its inner unit (C3-tail recognition).
+_WRAP_SHAPES = {
+    ("cm",): "transform",
+    ("re", "W", "n"): "crop",
+    ("gs",): "opacity",
+}
+
+
+def _recognized_frames(instructions, t, enclosing):
+    """The stack of tool-authored wrapper frames enclosing the draw at
+    index `t`: the maximal INNERMOST run of enclosing q…Q frames each
+    matching one `_emit_wrap` operator shape EXACTLY — prefix ops, then
+    exactly the inner unit (the draw, or the previously recognized frame),
+    then the closing Q. Anything else in a frame — author clips, arbitrary
+    q-frames, a malformed re — stops recognition THERE (fail closed:
+    outer frames stay unrecognized and untouched). `enclosing` is the
+    open-q input indices around `t`, outermost first. Returns
+    [{kind, open, close[, rect]}] innermost first; crop frames carry
+    `rect` = the re operands as [cx0, cy0, cx1, cy1] (unit space)."""
+    frames = []
+    lo, hi = t, t  # input-index span of the current inner unit
+    for a in reversed(enclosing):
+        prefix = tuple(str(instructions[k].operator) for k in range(a + 1, lo))
+        kind = _WRAP_SHAPES.get(prefix)
+        b = hi + 1
+        if kind is None or b >= len(instructions) or str(instructions[b].operator) != "Q":
+            break
+        frame = {"kind": kind, "open": a, "close": b}
+        if kind == "crop":
+            try:
+                x, y, w, h = (float(v) for v in instructions[a + 1].operands)
+            except (TypeError, ValueError):
+                break
+            frame["rect"] = [x, y, x + w, y + h]
+        frames.append(frame)
+        lo, hi = a, b
+    return frames
+
+
+def _listed_crop(instructions, t, enclosing):
+    """C3-tail additive listing field: the intersection of RECOGNIZED crop
+    frames around the draw at `t` (unit space), None when there are none.
+    Plural frames only arise in pre-tail files (the intersect era) — the
+    op now collapses to one. Author clips are deliberately unreported
+    (unrecognized ⇒ no crop handles ⇒ band-crop UX): handles only where
+    the tool can round-trip."""
+    rects = [
+        f["rect"] for f in _recognized_frames(instructions, t, enclosing) if f["kind"] == "crop"
+    ]
+    if not rects:
+        return None
+    return [
+        round(max(r[0] for r in rects), 6),
+        round(max(r[1] for r in rects), 6),
+        round(min(r[2] for r in rects), 6),
+        round(min(r[3] for r in rects), 6),
+    ]
+
 
 def _walk_placements(
     pdf, instructions, resources, base_ctm, depth, fallback_resources, out, nested, base_alpha=1.0
@@ -85,17 +144,25 @@ def _walk_placements(
     Fill alpha (the C3 opacity seed) is tracked LOCALLY: the shared state
     machine's feed() has no resources access, and `gs` needs the current
     stream's /ExtGState to resolve — so alpha rides its own q/Q-scoped
-    stack here, inherited into forms at their Do like the CTM."""
+    stack here, inherited into forms at their Do like the CTM. The open-q
+    index stack rides alongside for `crop` (C3-tail): wrapper frames live
+    in the SAME instruction list as their draw (nested edits wrap inside
+    the form copy), so per-level recognition sees every tool frame."""
+    instructions = list(instructions)
     state = GraphicsTextState(base_ctm)
     alpha = float(base_alpha)
     alpha_stack: list[float] = []
-    for instruction in instructions:
+    q_open: list[int] = []
+    for idx, instruction in enumerate(instructions):
         operator = str(instruction.operator)
         operands = list(instruction.operands)
         if operator == "q":
             alpha_stack.append(alpha)
+            q_open.append(idx)
         elif operator == "Q":
             alpha = alpha_stack.pop() if alpha_stack else float(base_alpha)
+            if q_open:
+                q_open.pop()
         elif operator == "gs" and operands:
             gs_name = str(operands[0])
             for res in (resources, fallback_resources):
@@ -136,6 +203,7 @@ def _walk_placements(
                     "native_width": nw,
                     "native_height": nh,
                     "opacity": round(alpha, 4),
+                    "crop": _listed_crop(instructions, idx, q_open),
                 }
             )
             continue
@@ -161,6 +229,8 @@ def _walk_placements(
                         # C3: effective fill alpha at this draw (the opacity
                         # slider's honest seed).
                         "opacity": round(alpha, 4),
+                        # C3-tail: the tool crop rect (crop-handle seed).
+                        "crop": _listed_crop(instructions, idx, q_open),
                     }
                 )
             elif xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
@@ -250,6 +320,11 @@ class _EditState:
         # emitted as a clip path AT the draw, so it rides the same CTM as the
         # unit square at any nesting depth (no matrix math needed).
         self.crop_rect = crop_rect
+        # 'transform' only (C3-tail): the intersection of the recognized crop
+        # frames the collapse just dropped at the target — re-emitted as the
+        # innermost frame INSIDE the new cm, so the clip travels with the
+        # move instead of staying in pre-transform space.
+        self.carried_crop = None
         # 'opacity' only (C3): the ExtGState dict to register. The NAME is
         # allocated AT the target draw against the resources actually in
         # scope there (a nested target must never shadow the form's own
@@ -277,7 +352,26 @@ def _emit_wrap(kept, instruction, state, resources, fallback_resources, reserved
     if state.action == "transform":
         kept.append(_op([], "q"))
         kept.append(_op([round(float(v), 6) for v in state.delta], "cm"))
-        kept.append(instruction)
+        if state.carried_crop is not None:
+            # The collapsed crop re-emits as its OWN nested frame
+            # (`q re W n <draw> Q`) inside the transform frame — the exact
+            # recognized shape, so listings still report it and a later
+            # re-crop still collapses it. Innermost = image unit space =
+            # the clip stays correct as the placement moves.
+            cx0, cy0, cx1, cy1 = state.carried_crop
+            kept.append(_op([], "q"))
+            kept.append(
+                _op(
+                    [round(cx0, 6), round(cy0, 6), round(cx1 - cx0, 6), round(cy1 - cy0, 6)],
+                    "re",
+                )
+            )
+            kept.append(_op([], "W"))
+            kept.append(_op([], "n"))
+            kept.append(instruction)
+            kept.append(_op([], "Q"))
+        else:
+            kept.append(instruction)
         kept.append(_op([], "Q"))
         return True
     if state.action == "crop":
@@ -304,6 +398,53 @@ def _emit_wrap(kept, instruction, state, resources, fallback_resources, reserved
     return False
 
 
+def _collapse_crop_frames(kept, instructions, t, open_q, skip_q):
+    """C3-tail collapse-and-replace: at the target draw, drop every
+    RECOGNIZED tool crop frame from the already-emitted `kept` prefix and
+    mark its closing Q for skipping, so the ONE fresh innermost frame
+    `_emit_wrap` is about to emit REPLACES the old rect instead of
+    intersecting it (a re-crop can widen). Recognized transform/opacity
+    frames stay byte-identical; an unrecognized frame stops recognition —
+    fail closed, the fresh clip then intersects (the pre-tail behavior,
+    and the author-clip guarantee). Safe by recognition's exactness: each
+    dropped frame's q/re/W/n landed as four CONTIGUOUS kept entries
+    (nothing else fits between the q and the inner unit), and recognized
+    frames are the innermost run of open_q, so deleting them never shifts
+    an outer open frame's recorded position. Returns the dropped frames'
+    intersection (None when none dropped): `crop` ignores it (the fresh
+    rect is absolute), `transform` re-emits it INSIDE the new cm frame —
+    the clip is unit-space, so the innermost slot is the only one that
+    stays correct as the placement moves (pre-fix, a crop-then-move left
+    the clip in pre-transform space and slivered the moved image)."""
+    removals = []
+    rects = []
+    for frame in _recognized_frames(instructions, t, [i for i, _ in open_q]):
+        if frame["kind"] != "crop":
+            continue
+        kept_at = next((k for i, k in open_q if i == frame["open"]), None)
+        if kept_at is None:
+            continue
+        removals.append(kept_at)
+        rects.append(frame["rect"])
+        skip_q.add(frame["close"])
+    for kept_at in sorted(removals, reverse=True):
+        del kept[kept_at : kept_at + 4]
+    if not rects:
+        return None
+    ix0 = max(r[0] for r in rects)
+    iy0 = max(r[1] for r in rects)
+    ix1 = min(r[2] for r in rects)
+    iy1 = min(r[3] for r in rects)
+    if ix0 >= ix1 or iy0 >= iy1:
+        # DISJOINT frames (pre-tail files): the true intersection is empty.
+        # Never return the raw inverted numbers — PDF `re` normalizes
+        # negative extents, so an inverted rect clips to the region BETWEEN
+        # the crops and un-hides what both hid (round 29 HIGH). A zero-area
+        # rect is the honest carry: still nothing visible.
+        return [ix0, iy0, ix0, iy0]
+    return [ix0, iy0, ix1, iy1]
+
+
 def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, name_counter, reserved):
     """Return (kept_instructions, changed, new_forms). Recurses into forms;
     when the target draw lies inside one, the form is COPIED (fresh name,
@@ -314,12 +455,31 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
     new_forms pattern. Registering into the passed-in `resources` directly
     mutated the ENCLOSING form's ORIGINAL, shared resources for 2-level
     nesting (review-caught by object-identity trace: a letterhead form
-    reused across pages gained stray edit-copy references)."""
+    reused across pages gained stray edit-copy references).
+
+    Ordinal counting (`state.seen`) is untouched by the C3-tail frame
+    bookkeeping: q/Q only ride the open_q/skip_q locals, draws increment
+    exactly as the lister counts them, and collapse edits only the OUTPUT
+    (`kept` + skipped Q's), never the iteration."""
+    instructions = list(instructions)
     kept = []
     changed = False
     new_forms: dict = {}
-    for instruction in instructions:
+    open_q: list[tuple[int, int]] = []  # (input index, kept index) of open q's
+    skip_q: set[int] = set()  # input indices of dropped crop frames' closing Q's
+    for i, instruction in enumerate(instructions):
         operator = str(instruction.operator)
+        if operator == "q":
+            kept.append(instruction)
+            open_q.append((i, len(kept) - 1))
+            continue
+        if operator == "Q":
+            if open_q:
+                open_q.pop()
+            if i in skip_q:
+                continue
+            kept.append(instruction)
+            continue
         if operator == "INLINE IMAGE":
             # C4: inline draws share the ordinal stream with image Do's —
             # the lister counts both, so the rewriter must too (a later
@@ -328,6 +488,12 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
             if not state.done and state.seen == state.target:
                 state.done = True
                 changed = True
+                if state.action == "crop":
+                    _collapse_crop_frames(kept, instructions, i, open_q, skip_q)
+                elif state.action == "transform":
+                    state.carried_crop = _collapse_crop_frames(
+                        kept, instructions, i, open_q, skip_q
+                    )
                 if state.action == "delete":
                     pass  # dropped — inline bytes live in the stream itself
                 elif not _emit_wrap(
@@ -351,13 +517,20 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
             if state.seen == state.target:
                 state.done = True
                 changed = True
+                if state.action == "crop":
+                    _collapse_crop_frames(kept, instructions, i, open_q, skip_q)
+                elif state.action == "transform":
+                    state.carried_crop = _collapse_crop_frames(
+                        kept, instructions, i, open_q, skip_q
+                    )
                 if state.action == "delete":
                     state.deleted_name = name
                     # drop the instruction
                 elif _emit_wrap(kept, instruction, state, resources, fallback_resources, reserved):
                     # transform: q D cm — effective D·M_cur = M' at any depth.
-                    # crop (C3): the clip rect rides the image's own unit
-                    # space; a re-crop wraps again = intersection.
+                    # crop (C3-tail): the clip rect rides the image's own unit
+                    # space; recognized old crop frames were just collapsed,
+                    # so this fresh innermost frame REPLACES (absolute rect).
                     # opacity (C3): gs name allocated AT the draw against the
                     # resources in scope (never shadows a form's own names).
                     pass
@@ -629,10 +802,15 @@ def crop_page_image(file: str, output: str, page: int, index: int, rect: list) -
     top-right) — Phase 9.C3. Display-only: the draw is wrapped in a q/Q
     clip (`re W n`) at the target Do, the image bytes stay untouched, and
     the visible region stays exactly where it was on the page
-    (crop-in-place). A second crop composes by clip intersection.
+    (crop-in-place). Re-crop is COLLAPSE-AND-REPLACE (C3-tail): every
+    RECOGNIZED tool crop frame around the draw is dropped and ONE fresh
+    innermost frame carries the new ABSOLUTE rect — so a re-crop can
+    WIDEN. Recognition is exact-shape over `_emit_wrap`'s three wrappers;
+    author clips and arbitrary q-frames stop it and stay untouched (the
+    fresh clip then intersects naturally — the pre-tail behavior).
     Per-placement like every sibling op: shared XObjects elsewhere and
     other pages are untouched; a nested placement crops on a COPY of its
-    form."""
+    form (the wrapper frames live in that copy)."""
     try:
         cx0, cy0, cx1, cy1 = (float(v) for v in rect)
     except (TypeError, ValueError):

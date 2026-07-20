@@ -1360,6 +1360,25 @@
   stroke-dasharray: 4 3;
   pointer-events: none;
 }
+/* C3-tail: the LISTED tool crop (persistent outline) + its edge handles. */
+.page-imgtx-croprect {
+  fill: none;
+  stroke: var(--accent, #3b82f6);
+  stroke-width: 1.5px;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+.page-imgtx-crophandle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px;
+  border: 1.5px solid var(--accent, #3b82f6);
+  border-radius: 2px;
+  background: #fff;
+  cursor: move;
+  z-index: 3;
+}
 .secondary-toolbar-opacity {
   display: inline-flex;
   align-items: center;

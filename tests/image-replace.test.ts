@@ -77,9 +77,33 @@ describe('fetchEditPlacements (7.1)', () => {
     );
     expect(placements).toEqual([
       // opacity defaults to 1 when the engine omits it (9.C3 seed);
-      // kind defaults to 'xobject' (9.C4 — inline draws report 'inline').
-      { index: 0, nested: false, rect: { x: 0, y: 0, w: 0.25, h: 0.25 }, opacity: 1, kind: 'xobject' },
+      // kind defaults to 'xobject' (9.C4 — inline draws report 'inline');
+      // crop defaults to null (C3-tail — pre-tail engines omit it).
+      {
+        index: 0,
+        nested: false,
+        rect: { x: 0, y: 0, w: 0.25, h: 0.25 },
+        opacity: 1,
+        kind: 'xobject',
+        crop: null,
+      },
     ]);
+  });
+
+  it('crop threads through; degenerate/inverted intersections null out (C3-tail)', async () => {
+    const fetch = (crop: unknown): ReturnType<typeof fetchEditPlacements> =>
+      fetchEditPlacements(
+        async () => ({ images: [{ index: 0, rect: [0, 0, 100, 100], nested: false, crop }] }),
+        'C:\\w.pdf',
+        1,
+        { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+      );
+    expect((await fetch([0.25, 0.25, 0.75, 0.75]))[0].crop).toEqual([0.25, 0.25, 0.75, 0.75]);
+    // A pre-tail disjoint stack lists an INVERTED intersection — no sane
+    // handle seed; the guard nulls it (band-crop heals via replace).
+    expect((await fetch([0.6, 0.6, 0.3, 0.3]))[0].crop).toBe(null);
+    expect((await fetch([0.2, 0.2, 0.2, 0.8]))[0].crop).toBe(null); // zero width
+    expect((await fetch(null))[0].crop).toBe(null);
   });
 
   it('projects under a baked 90° rotation', async () => {

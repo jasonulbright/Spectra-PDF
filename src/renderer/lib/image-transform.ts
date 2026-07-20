@@ -120,6 +120,26 @@ export function cropRectFromLocalPoints(
   return [x0, y0, x1, y1];
 }
 
+/** C3-tail: drag ONE edge of an existing crop rect to a new LOCAL
+ * coordinate. `edge` is 0=left 1=bottom 2=right 3=top (local unit space,
+ * y up — matching the rect's [x0,y0,x1,y1] order). The dragged edge
+ * clamps to the unit square AND to `minSize` short of its opposite edge,
+ * so the rect can never invert or collapse — a drag returns a valid rect
+ * by construction (no null case; the gesture always previews). */
+export function applyCropEdge(
+  rect: [number, number, number, number],
+  edge: 0 | 1 | 2 | 3,
+  local: [number, number],
+  minSize = 0.02,
+): [number, number, number, number] {
+  const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+  const [x0, y0, x1, y1] = rect;
+  if (edge === 0) return [clamp(local[0], 0, x1 - minSize), y0, x1, y1];
+  if (edge === 1) return [x0, clamp(local[1], 0, y1 - minSize), x1, y1];
+  if (edge === 2) return [x0, y0, clamp(local[0], x0 + minSize, 1), y1];
+  return [x0, y0, x1, clamp(local[1], y0 + minSize, 1)];
+}
+
 // ── display projection (user ⇄ final display-normalized) ────────────────────
 
 export interface PageBox {

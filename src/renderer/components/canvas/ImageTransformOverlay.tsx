@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { EditImageTransformCtx } from '../../lib/edit-images';
 import {
+  applyCropEdge,
   applyMove,
   applyResizeCorner,
   applyRotate,
@@ -26,6 +27,11 @@ import {
 // band in the image's own UNIT space instead of moving; on release the clamped
 // unit rect commits to the engine's clip-based crop. Handles hide while armed
 // (the quad is the crop canvas).
+//
+// Phase 9.C3-tail — crop re-edit: a placement whose LISTING carries a tool
+// crop shows that rect as a dashed outline with four EDGE handles; dragging
+// one commits the new ABSOLUTE unit rect (the engine collapse-replaces its
+// own frames, so widening works). Author clips list null — no handles.
 
 interface Props {
   ctx: EditImageTransformCtx;
@@ -51,6 +57,8 @@ export default function ImageTransformOverlay({
   const rootRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Mat | null>(null);
   const [cropBand, setCropBand] = useState<[number, number, number, number] | null>(null);
+  // C3-tail: live preview of an edge-handle drag (null = show ctx.crop).
+  const [cropPreview, setCropPreview] = useState<[number, number, number, number] | null>(null);
   const active = useRef(false);
   // Teardown for an in-flight gesture, so an unmount mid-drag (e.g. a keyboard
   // tool switch) cancels it — a stale window pointerup must not commit against
@@ -158,6 +166,44 @@ export default function ImageTransformOverlay({
     window.addEventListener('pointercancel', onCancel);
   };
 
+  // C3-tail: drag one crop edge in the image's local unit space; commit the
+  // absolute rect on release (same wire as the band — the engine replaces).
+  const startCropEdge = (e: React.PointerEvent, edge: 0 | 1 | 2 | 3): void => {
+    const seed = ctx.crop;
+    if (ctx.busy || active.current || !seed) return;
+    const inv = invert(base);
+    if (!inv) return;
+    e.preventDefault();
+    e.stopPropagation();
+    active.current = true;
+    const toLocal = (clientX: number, clientY: number): [number, number] => {
+      const [u, v] = normPointer(clientX, clientY);
+      const [ux, uy] = displayToUser(u, v, box, bakedRotate, pendingRotate);
+      return transformPoint(inv, ux, uy);
+    };
+    let latest: [number, number, number, number] = seed;
+    const onMove = (ev: PointerEvent): void => {
+      latest = applyCropEdge(seed, edge, toLocal(ev.clientX, ev.clientY));
+      setCropPreview(latest);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      active.current = false;
+      cancelRef.current = null;
+      setCropPreview(null);
+      // Same no-churn rule as the matrix gesture: a bare click commits nothing.
+      if (commit && latest.some((v, i) => Math.abs(v - seed[i]) > 1e-6)) onCommitCrop(latest);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    cancelRef.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  };
+
   const moveGesture: Compute = (s, c, b) => applyMove(b, c[0] - s[0], c[1] - s[1]);
   const resizeGesture = (corner: number): Compute => (_s, c, b) =>
     applyResizeCorner(b, corner, c[0], c[1]) ?? b;
@@ -171,6 +217,33 @@ export default function ImageTransformOverlay({
     left: `${p[0] * 100}%`,
     top: `${p[1] * 100}%`,
   });
+  // C3-tail: the listed crop (or its live drag preview) in display space.
+  const cropRect = cropPreview ?? ctx.crop;
+  const cropCorners =
+    cropRect && !cropArmed
+      ? (
+          [
+            [cropRect[0], cropRect[1]],
+            [cropRect[2], cropRect[1]],
+            [cropRect[2], cropRect[3]],
+            [cropRect[0], cropRect[3]],
+          ] as Array<[number, number]>
+        ).map(([lx, ly]) => {
+          const [ux, uy] = transformPoint(m, lx, ly);
+          return userToDisplay(ux, uy, box, bakedRotate, pendingRotate);
+        })
+      : null;
+  // Edge handle positions: midpoints of left/bottom/right/top crop edges
+  // (indexes into cropCorners: 0-3 = BL,BR,TR,TL in local order above).
+  const cropEdgeMids: Array<[number, number]> | null = cropCorners
+    ? [
+        [(cropCorners[0][0] + cropCorners[3][0]) / 2, (cropCorners[0][1] + cropCorners[3][1]) / 2],
+        [(cropCorners[0][0] + cropCorners[1][0]) / 2, (cropCorners[0][1] + cropCorners[1][1]) / 2],
+        [(cropCorners[1][0] + cropCorners[2][0]) / 2, (cropCorners[1][1] + cropCorners[2][1]) / 2],
+        [(cropCorners[2][0] + cropCorners[3][0]) / 2, (cropCorners[2][1] + cropCorners[3][1]) / 2],
+      ]
+    : null;
+
   // The live crop band's display quad (unit rect → user via m → display).
   const bandPts = cropBand
     ? (
@@ -211,6 +284,13 @@ export default function ImageTransformOverlay({
         {bandPts && (
           <polygon points={bandPts} className="page-imgtx-cropband" vectorEffect="non-scaling-stroke" />
         )}
+        {cropCorners && (
+          <polygon
+            points={cropCorners.map((p) => `${p[0] * 100},${p[1] * 100}`).join(' ')}
+            className="page-imgtx-croprect"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
       </svg>
       {!cropArmed &&
         [0, 1, 2, 3].map((i) => (
@@ -230,6 +310,16 @@ export default function ImageTransformOverlay({
           onPointerDown={(e) => start(e, rotateGesture)}
         />
       )}
+      {cropEdgeMids &&
+        cropEdgeMids.map((p, i) => (
+          <div
+            key={`c${i}`}
+            className="page-imgtx-crophandle"
+            data-testid={`img-crop-edge-${i}`}
+            style={dot(p)}
+            onPointerDown={(e) => startCropEdge(e, i as 0 | 1 | 2 | 3)}
+          />
+        ))}
     </div>
   );
 }

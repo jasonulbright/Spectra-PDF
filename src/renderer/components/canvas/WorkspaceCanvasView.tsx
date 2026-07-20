@@ -1590,6 +1590,7 @@ export function WorkspaceCanvasView({
       pageId: editSel.pageId,
       index: editSel.index,
       matrix: placement.matrix,
+      crop: placement.crop,
       box: geom.box,
       bakedRotate: geom.bakedRotate,
       busy: editBusy,
@@ -1800,6 +1801,7 @@ export function WorkspaceCanvasView({
           matrix: [...p.matrix],
           opacity: p.opacity,
           kind: p.kind,
+          crop: p.crop ? [...p.crop] : null,
         })),
       transformImage: (pageId, index, matrix) =>
         commitImageTransformRef.current(pageId, index, matrix),

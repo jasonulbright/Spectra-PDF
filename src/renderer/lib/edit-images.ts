@@ -22,6 +22,11 @@ export interface EditImagePlacement {
   /** C4: an inline (BI/ID/EI) draw vs a regular XObject placement —
    * replace/extract are XObject-only (the toolbar disables them). */
   kind: 'inline' | 'xobject';
+  /** C3-tail: the tool-authored crop in the image's unit space, or null.
+   * Only RECOGNIZED tool frames are reported (author clips stay null —
+   * no handles, band-crop as before); the crop op replaces the whole
+   * recognized stack, so this is also what the handles seed from. */
+  crop: [number, number, number, number] | null;
 }
 
 /** The selected image's transform context (9.C1) — its user-space matrix plus
@@ -31,6 +36,8 @@ export interface EditImageTransformCtx {
   pageId: string;
   index: number;
   matrix: [number, number, number, number, number, number];
+  /** C3-tail: the listed tool crop (unit space) — seeds the edge handles. */
+  crop: [number, number, number, number] | null;
   box: { x: number; y: number; width: number; height: number };
   bakedRotate: number;
   /** A transform commit is in flight — the overlay refuses to START a new
@@ -46,6 +53,7 @@ interface EngineListing {
     matrix: [number, number, number, number, number, number];
     opacity: number;
     kind: 'inline' | 'xobject';
+    crop?: [number, number, number, number] | null;
   }[];
 }
 
@@ -66,5 +74,17 @@ export async function fetchEditPlacements(
     matrix: image.matrix,
     opacity: typeof image.opacity === 'number' ? image.opacity : 1,
     kind: image.kind === 'inline' ? 'inline' : 'xobject',
+    // Degenerate guard: a pre-tail file with DISJOINT stacked crops lists
+    // an inverted intersection (x0>x1) — no sane handle seed exists, so
+    // treat it as no tool crop (band-crop heals it; the band commit
+    // collapse-replaces the whole stack).
+    crop:
+      Array.isArray(image.crop) &&
+      image.crop.length === 4 &&
+      image.crop.every((v) => Number.isFinite(v)) &&
+      image.crop[0] < image.crop[2] &&
+      image.crop[1] < image.crop[3]
+        ? [image.crop[0], image.crop[1], image.crop[2], image.crop[3]]
+        : null,
   }));
 }

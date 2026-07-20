@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyCropEdge,
   applyMove,
   applyResizeCorner,
   applyRotate,
@@ -126,5 +127,30 @@ describe('crop rect from local drag points (9.C3)', () => {
     const a = transformPoint(inv, 75, 620); // user (75,620) → local (0.25, 0.25)
     const b = transformPoint(inv, 125, 660); // → (0.75, 0.75)
     expect(cropRectFromLocalPoints(a, b)).toEqual([0.25, 0.25, 0.75, 0.75]);
+  });
+});
+
+describe('crop edge drag (9.C3-tail)', () => {
+  const rect: [number, number, number, number] = [0.25, 0.25, 0.75, 0.75];
+
+  it('moves exactly the dragged edge, other three fixed', () => {
+    expect(applyCropEdge(rect, 0, [0.1, 0.9])).toEqual([0.1, 0.25, 0.75, 0.75]);
+    expect(applyCropEdge(rect, 1, [0.9, 0.1])).toEqual([0.25, 0.1, 0.75, 0.75]);
+    expect(applyCropEdge(rect, 2, [0.9, 0.1])).toEqual([0.25, 0.25, 0.9, 0.75]);
+    expect(applyCropEdge(rect, 3, [0.1, 0.9])).toEqual([0.25, 0.25, 0.75, 0.9]);
+  });
+
+  it('widening past the shipped band is expressible (the tail headline)', () => {
+    // Left edge dragged OUTWARD from 0.25 to 0.05 — impossible under the
+    // old intersect-only semantics.
+    expect(applyCropEdge(rect, 0, [0.05, 0.5])).toEqual([0.05, 0.25, 0.75, 0.75]);
+  });
+
+  it('clamps to the unit square and to minSize short of the opposite edge', () => {
+    expect(applyCropEdge(rect, 0, [-0.3, 0.5])[0]).toBe(0);
+    expect(applyCropEdge(rect, 2, [1.4, 0.5])[2]).toBe(1);
+    // Crossing the opposite edge stops minSize short — never inverts.
+    expect(applyCropEdge(rect, 0, [0.99, 0.5])[0]).toBeCloseTo(0.73);
+    expect(applyCropEdge(rect, 3, [0.5, 0.0])[3]).toBeCloseTo(0.27);
   });
 });
