@@ -816,6 +816,7 @@ def _styled_chars(
     whole_para_face=None,
     color_by_pos=None,
     face_by_pos=None,
+    size_by_pos=None,
     member_family=None,
 ) -> tuple[list[tuple[str, _StyleRef]], dict]:
     """Map every char of the new text to its style source; returns the
@@ -839,10 +840,13 @@ def _styled_chars(
     `color_by_pos` (9.A5a per-span colour) is None or a list one entry per
     code point of new_text: a ColorState overrides the char at that
     position, None falls through to the call-level `color_override` (the
-    A1 whole-paragraph colour). The colour and face lookups are folded
+    A1 whole-paragraph colour). `size_by_pos` (9.A5c per-span size) is the
+    same shape for size (points): a float overrides the char at that
+    position, None falls through to the call-level `size_override` (the A1
+    whole-paragraph size). Colour, face, and size lookups fold
     INDEPENDENTLY from the same span_styles list — a char may be per-span
-    red AND bold, on unaligned ranges. Both None (the default) is
-    byte-identical to the shipped path."""
+    red AND bold AND bigger, on unaligned ranges. All None (the default)
+    is byte-identical to the shipped path."""
     if not spans and new_text:
         raise ValueError("edit spans are missing")
     covered = 0
@@ -861,12 +865,15 @@ def _styled_chars(
     fb_by_face: dict[tuple, set[str]] = {}
     refs: dict[tuple, _StyleRef] = {}
 
-    def ref(member: _Member, fb, col) -> _StyleRef:
+    def ref(member: _Member, fb, col, siz) -> _StyleRef:
         # `fb` is a face KEY (tuple) or None — both hashable, so the memo
-        # key + _StyleRef.key stay hashable/comparable (9.A5b).
-        k = (member.index, fb, col)
+        # key + _StyleRef.key stay hashable/comparable (9.A5b). `siz` is
+        # the resolved per-char size (9.A5c: per-span > A1 call > None);
+        # keyed so two chars of one member at different sizes split into
+        # their own segment (via _StyleRef.key), each emitting its own Tf.
+        k = (member.index, fb, col, siz)
         if k not in refs:
-            refs[k] = _StyleRef(member, fb, size_override, col)
+            refs[k] = _StyleRef(member, fb, siz, col)
         return refs[k]
 
     def color_at(pos: int, member: _Member):
@@ -888,6 +895,16 @@ def _styled_chars(
         # happened to work only because _state_ops re-emits colour every
         # segment; keyed on the default it is the real, intended guard.)
         return None if member.style.get("fill_color") != (None, None) else (None, None)
+
+    def size_at(pos: int):
+        # A5c: resolve this code point's size (points). Per-span size at
+        # pos wins, else the A1 call-level size_override, else None (keep
+        # the member's own). size_by_pos None ⇒ the shipped single size —
+        # `size_override` for every char, byte-identical to before.
+        if size_by_pos is None:
+            return size_override
+        pss = size_by_pos[pos] if 0 <= pos < len(size_by_pos) else None
+        return pss if pss is not None else size_override
 
     def face_at(pos: int, member: _Member):
         # A5b: per-span face at pos wins, else the whole-para A3 face, else
@@ -929,10 +946,12 @@ def _styled_chars(
         while i < len(seg_text):
             ch = seg_text[i]
             pos = span["start"] + i
-            # A5a: a ligature/atomic entry can carry ONE colour — resolve at
-            # its FIRST position (the glyph is indivisible; a colour/face
-            # boundary inside a sequence takes the start value).
+            # A5a/A5c: a ligature/atomic entry can carry ONE colour AND one
+            # size — resolve both at its FIRST position (the glyph is
+            # indivisible; a colour/face/size boundary inside a sequence
+            # takes the start value).
             col = color_at(pos, member)
+            siz = size_at(pos)
             fk = face_at(pos, member)
             if fk is not None:
                 if member.vertical:
@@ -942,7 +961,7 @@ def _styled_chars(
                         "vertical text cannot be converted to the fallback font"
                     )
                 fb_by_face.setdefault(fk, set()).add(ch)
-                styled.append((ch, ref(member, fk, col)))
+                styled.append((ch, ref(member, fk, col, siz)))
                 i += 1
                 continue
             # 9.B5: an unambiguous ligature sequence becomes ONE atomic
@@ -952,11 +971,11 @@ def _styled_chars(
             # Sequences never cross spans; nor a per-span face boundary.
             seq = member.cap._sequence_at(seg_text, i)
             if seq is not None and not seq_crosses_face(pos, len(seq)):
-                styled.append((seq, ref(member, None, col)))
+                styled.append((seq, ref(member, None, col, siz)))
                 i += len(seq)
                 continue
             if ch == " " or member.cap.can_encode(ch):
-                styled.append((ch, ref(member, None, col)))
+                styled.append((ch, ref(member, None, col, siz)))
             elif convert:
                 if member.vertical:
                     # 9.B4b: the 7.4 fallback embeds a HORIZONTAL
@@ -971,7 +990,7 @@ def _styled_chars(
                 # the shipped single convert subset.
                 ck = (None, False, False)
                 fb_by_face.setdefault(ck, set()).add(ch)
-                styled.append((ch, ref(member, ck, col)))
+                styled.append((ch, ref(member, ck, col, siz)))
             else:
                 raise ValueError(f"font cannot encode {ch!r}")
             i += 1
@@ -1053,7 +1072,7 @@ def _tokenize(
 
 
 class _LayoutLine:
-    __slots__ = ("words", "width", "x", "y", "justify_extra")
+    __slots__ = ("words", "width", "x", "y", "justify_extra", "max_eff")
 
     def __init__(self):
         self.words: list[_Word] = []
@@ -1061,6 +1080,40 @@ class _LayoutLine:
         self.x = 0.0
         self.y = 0.0
         self.justify_extra = 0.0  # per-gap addition (justified lines)
+        # 9.A5c: the tallest glyph's effective size on this line, filled by
+        # _fill_lines — drives the per-line leading when sizes vary.
+        self.max_eff = 0.0
+
+
+def _char_eff(st: _StyleRef) -> float:
+    # 9.A5c: this char's effective size, scaling the member's OWN eff by the
+    # per-span size ratio. Using member.eff (not a raw size·a) keeps the axis
+    # CONSISTENT with dom_eff_orig / base_ratio — horizontal eff is size·d,
+    # vertical size·a; deriving from member.eff picks the right one for free
+    # (a raw size·a disagreed for an anamorphically-scaled a≠d run). Exact
+    # for the no-override case: size == member's own ⇒ ratio 1 ⇒ member.eff.
+    base_size = st.member.style["size"]
+    if not base_size:
+        return st.member.eff
+    return st.member.eff * (st.style()["size"] / base_size)
+
+
+def _line_max_eff(line: _LayoutLine) -> float:
+    # 9.A5c: the tallest glyph's effective size on the line. Spaces
+    # (gap_styles) count too, so a per-span size on a trailing space still
+    # tallies. Equal across every line ⇒ no per-span size ⇒ _position_lines
+    # takes the shipped path.
+    best = 0.0
+    for word in line.words:
+        for _ch, st in word.chars:
+            eff = _char_eff(st)
+            if eff > best:
+                best = eff
+        for _ch, st, _w in word.gap_styles:
+            eff = _char_eff(st)
+            if eff > best:
+                best = eff
+    return best
 
 
 def _fill_lines(words: list[_Word], first_measure: float, body_measure: float) -> list[_LayoutLine]:
@@ -1079,6 +1132,8 @@ def _fill_lines(words: list[_Word], first_measure: float, body_measure: float) -
         line.width += word.width
     if line.words:
         lines.append(line)
+    for ln in lines:
+        ln.max_eff = _line_max_eff(ln)
     return lines
 
 
@@ -1089,14 +1144,49 @@ def _position_lines(
     body_left: float,
     leading: float,
     y0: float | None = None,
+    base_ratio: float = 0.0,
+    has_span_size: bool = False,
 ) -> None:
     # y0 overrides the anchor for a block that does NOT start at the
     # paragraph's own first baseline (A4 split: the second block starts
     # 2×leading below the first block's last line).
     if y0 is None:
         y0 = para.lines[0].y
+    # 9.A5c per-line leading: when the lines' tallest glyphs DIFFER (a
+    # per-span size edit), each baseline drops by the adjacent-max rule —
+    # `max(max_eff[i-1], max_eff[i]) · base_ratio`, base_ratio = the
+    # leading-per-unit-size the CALLER resolved (`build` passes it from BOTH
+    # the measured-leading and the single-line-fallback branches — round-34
+    # HIGH: an originally-single-line paragraph has `para.leading` None even
+    # after it reflows to many lines, so gating on `para.leading` left its
+    # wrapped output with flat leading around a big glyph). This gives the
+    # bigger line its descenders + the next line's ascenders room. THE
+    # BYTE-IDENTITY GATE (non-negotiable): when every max_eff is equal (no
+    # per-span size — the uniform + A1-whole-para cases), take the EXACT
+    # shipped `y0 - i·leading` (ONE multiply, float-identical). Per-line
+    # accumulation would drift the last bits, so it fires ONLY when sizes
+    # vary. The A4 split gap stays inter-BLOCK (the caller's y0 chaining).
+    # Round 35 (finding 2): the gate is `has_span_size`, NOT max_eff spread —
+    # a grouped paragraph can carry members that ALREADY differ in size (up to
+    # SIZE_JUMP_RATIO) with no size edit at all, and inferring "a size was
+    # requested" from the spread reflowed such a paragraph's lines on a plain
+    # colour/null edit. A whole-paragraph A1 size also stays flat here (its
+    # scale is uniform ⇒ shipped path), so `size_override` deliberately does
+    # NOT arm this — only a per-span size does.
+    effs = [ln.max_eff for ln in lines]
+    varying = (
+        has_span_size
+        and len(effs) > 1
+        and base_ratio > 0.0
+        and (max(effs) - min(effs)) > _MAX_EFF_EPS
+    )
     for i, line in enumerate(lines):
-        line.y = y0 - i * leading
+        if not varying:
+            line.y = y0 - i * leading
+        elif i == 0:
+            line.y = y0
+        else:
+            line.y = lines[i - 1].y - max(effs[i - 1], effs[i]) * base_ratio
         if para.alignment == "center":
             # No clamp: an overflowing line centers symmetrically too.
             line.x = para.left + ((para.right - para.left) - line.width) / 2
@@ -1171,6 +1261,13 @@ SINGLE_LINE_LEADING_EM = 1.2
 # declared max). Bounds a fat-fingered size so text can't fly off the page.
 _MAX_EDIT_SIZE = 1638.0
 
+# 9.A5c per-line-leading uniformity floor: lines whose tallest-glyph eff
+# differ by more than this (points) get per-line leading; equal within it
+# take the shipped constant-leading path (byte-identity gate). Point sizes
+# differ by whole points, and a uniform line's max_eff is float-EXACT, so an
+# absolute epsilon this small never conflates a real size change with noise.
+_MAX_EFF_EPS = 1e-6
+
 
 class _Emission:
     """The paragraph's replacement ops, built once the rewriter reaches the
@@ -1178,10 +1275,19 @@ class _Emission:
 
     def __init__(
         self, para: _Paragraph, styled, fallbacks: dict, page_x0: float, page_x1: float,
-        size_override=None, split_at=None,
+        size_override=None, split_at=None, has_span_size=False,
     ):
         self.para = para
         self.styled = styled
+        # 9.A5c: True when the caller folded per-span SIZE ranges (size_by_pos
+        # is not None). The per-line-leading rule + the size-aware split gap
+        # fire ONLY under this flag — a whole-paragraph A1 size or a
+        # no-size/colour/face edit keeps the shipped flat rhythm and split
+        # gap, so those stay byte-identical even for a paragraph whose grouped
+        # members already vary in size (review round 35, finding 2). The
+        # anisotropic-eff variance a≠d edge is why this can't be inferred from
+        # max_eff spread alone.
+        self.has_span_size = has_span_size
         # 9.A5b: {face key → _Fallback}, one subset per distinct requested
         # face (was the single `self.fb`). Empty when nothing substitutes.
         self.fallbacks = fallbacks
@@ -1219,15 +1325,24 @@ class _Emission:
         # A1 leading scale: new size / the dominant original size.
         dom_style_size = _widest(para.lines[0].members).style["size"] or 12.0
         size_scale = (self.size_override / dom_style_size) if self.size_override else 1.0
+        # 9.A5c: the per-line leading rule (below) maps a line's tallest eff
+        # to its baseline gap via `base_ratio`, resolved HERE in BOTH branches
+        # (round-34 HIGH: an originally-single-line paragraph keeps
+        # `para.leading` None even once its edit reflows it to many lines).
+        dom_eff_orig = _widest(para.lines[0].members).eff
         if para.leading is not None:
             leading = para.leading * size_scale
             right_limit = para.right
+            base_ratio = (para.leading / dom_eff_orig) if dom_eff_orig else 0.0
         else:
             dominant = _widest(para.lines[0].members)
             base_eff = (
                 dominant.eff * size_scale if self.size_override else dominant.eff
             )
             leading = SINGLE_LINE_LEADING_EM * base_eff
+            # The single-line rhythm IS 1.2·eff, so its leading-per-unit-size
+            # is exactly SINGLE_LINE_LEADING_EM (leading / base_eff).
+            base_ratio = SINGLE_LINE_LEADING_EM
             # Symmetric page margin, never narrower than the existing line
             # (unchanged text must not rewrap under its own edit).
             margin = max(para.left - self.page_x0, 0.0)
@@ -1257,17 +1372,38 @@ class _Emission:
         else:
             parts = [self.styled]
         dom_eff = _widest(para.lines[0].members).eff * size_scale
-        split_gap = max(2.0 * leading, 2.0 * dom_eff)
+        base_split_gap = max(2.0 * leading, 2.0 * dom_eff)
         lines: list[_LayoutLine] = []
-        y_next: float | None = None
+        prev_last: _LayoutLine | None = None
         for part in parts:
             words = _tokenize(part, self.fallbacks, para.median_gap_1000)
             if not words:
                 continue
             block = _fill_lines(words, first_measure, body_measure)
-            _position_lines(block, para, first_left, body_left, leading, y0=y_next)
+            if prev_last is not None and block:
+                # A4 split gap from the previous block's last line to this
+                # block's first line. 9.A5c (review round 35, finding 1): with
+                # a per-span size the boundary line's tallest glyph can be far
+                # bigger than the paragraph's dominant size, and a fixed
+                # `2×leading` gap let an enlarged word's DESCENDER bleed into
+                # the next block; widen by the boundary lines' own leading.
+                # Gated on has_span_size so a no-per-span-size split keeps the
+                # shipped gap EXACTLY (the boundary term only ~equals 2×leading
+                # for uniform sizes, so an unconditional max() would perturb it
+                # by a ULP — see _position_lines' byte-identity gate).
+                split_gap = base_split_gap
+                if self.has_span_size:
+                    boundary_eff = max(prev_last.max_eff, block[0].max_eff)
+                    split_gap = max(base_split_gap, 2.0 * boundary_eff * base_ratio)
+                y_next = prev_last.y - split_gap
+            else:
+                y_next = None
+            _position_lines(
+                block, para, first_left, body_left, leading, y0=y_next,
+                base_ratio=base_ratio, has_span_size=self.has_span_size,
+            )
             if block:
-                y_next = block[-1].y - split_gap
+                prev_last = block[-1]
             lines.extend(block)
         if not lines:
             return []
@@ -1822,8 +1958,8 @@ def replace_paragraph_text(
     join across, so the result lists as two paragraphs. None = the
     shipped single-block layout (byte-identical).
 
-    A5a/A5b per-span styling: `span_styles` is None or a list of
-    `{start, end, color?: [r, g, b], family?, bold?, italic?}` over
+    A5a/A5b/A5c per-span styling: `span_styles` is None or a list of
+    `{start, end, color?: [r, g, b], family?, bold?, italic?, size?}` over
     CODE-POINT ranges of `new_text` (distinct from the style-SOURCE
     `spans`; sparse; need not align to span boundaries; overlaps fold
     last-wins). A `color` recolours its range, overriding the A1
@@ -1831,11 +1967,15 @@ def replace_paragraph_text(
     `italic` SUBSTITUTES its range into the matching bundled Liberation
     face (A5b) — one embedded subset per distinct requested face, family
     absent = keep the char's member family, the same honest substitution
-    A3 does whole-paragraph. The colour and face axes fold INDEPENDENTLY
-    (a range can be red AND bold, on unaligned ranges). Per-span faces
-    inherit A3's refusals (a char the Liberation face lacks is named);
-    vertical paragraphs refuse substitution (B4b). None throughout =
-    byte-identical shipped.
+    A3 does whole-paragraph. A `size` (points, clamped [1, 1638]) resizes
+    just its range, overriding the A1 whole-paragraph `size` (A5c) — the
+    range's Tf grows/shrinks, its width and wrap follow, and the LINE it
+    lands on gets tallest-glyph leading while other lines keep theirs. The
+    colour, face, and size axes fold INDEPENDENTLY (a range can be red AND
+    bold AND bigger, on unaligned ranges). Per-span faces inherit A3's
+    refusals (a char the Liberation face lacks is named); vertical
+    paragraphs refuse substitution (B4b). None throughout = byte-identical
+    shipped.
 
     9.B4b: vertical paragraphs reflow through the same pipeline in
     transposed space (columns fill top-down at the measured pitch, growth
@@ -1930,13 +2070,15 @@ def replace_paragraph_text(
                 raise ValueError("split position must be inside the text")
             split_point = sp
 
-        # A5a/A5b per-span styling: fold the sparse span_styles ranges into
-        # per-code-point lookups — `color_by_pos` (A5a colour) and
-        # `face_by_pos` (A5b face key) INDEPENDENTLY, so one entry may carry
-        # a colour, a face, or both, on unaligned ranges. Last-writer-wins on
-        # overlap. Both stay None when unused → _styled_chars byte-identical.
+        # A5a/A5b/A5c per-span styling: fold the sparse span_styles ranges
+        # into per-code-point lookups — `color_by_pos` (A5a colour),
+        # `face_by_pos` (A5b face key), and `size_by_pos` (A5c size, points)
+        # INDEPENDENTLY, so one entry may carry a colour, a face, a size, or
+        # any combination, on unaligned ranges. Last-writer-wins on overlap.
+        # All three stay None when unused → _styled_chars byte-identical.
         color_by_pos = None
         face_by_pos = None
+        size_by_pos = None
         if span_styles:
             n_cp = len(str(new_text))
             for entry in span_styles:
@@ -1951,8 +2093,9 @@ def replace_paragraph_text(
                     continue  # empty range: harmless no-op
                 has_face = any(f in entry for f in ("family", "bold", "italic"))
                 has_color = entry.get("color") is not None
-                if not has_face and not has_color:
-                    raise ValueError("span style must set a colour or a face")
+                has_size = entry.get("size") is not None
+                if not has_face and not has_color and not has_size:
+                    raise ValueError("span style must set a colour, a face, or a size")
                 if has_color:
                     try:
                         rgb = [max(0.0, min(1.0, float(c))) for c in entry.get("color")]
@@ -1980,6 +2123,20 @@ def replace_paragraph_text(
                         face_by_pos = [None] * n_cp
                     for k in range(st, en):
                         face_by_pos[k] = facekey
+                if has_size:
+                    # A5c per-span size (points): coerce + clamp to the A1
+                    # range [1.0, _MAX_EDIT_SIZE] (a fat-fingered 5000 lands
+                    # at the viewer max, never off-page); a non-number refuses
+                    # named, mirroring the colour shape check.
+                    try:
+                        sv = float(entry.get("size"))
+                    except (TypeError, ValueError):
+                        raise ValueError("span style size must be a number") from None
+                    sv = max(1.0, min(_MAX_EDIT_SIZE, sv))
+                    if size_by_pos is None:
+                        size_by_pos = [None] * n_cp
+                    for k in range(st, en):
+                        size_by_pos[k] = sv
 
         # A3a/A3b whole-paragraph substitution → ONE face key covering every
         # char (family_override may be None = keep the member family). None
@@ -2011,7 +2168,8 @@ def replace_paragraph_text(
             str(new_text), list(spans), members_by_index, bool(convert),
             size_override=size_override, color_override=color_override,
             whole_para_face=whole_para_face, color_by_pos=color_by_pos,
-            face_by_pos=face_by_pos, member_family=member_family,
+            face_by_pos=face_by_pos, size_by_pos=size_by_pos,
+            member_family=member_family,
         )
         # 9.A5b: build ONE _Fallback per face key, sorted-face order so the
         # subset names + embedded bytes are deterministic. The whole-para A3
@@ -2079,6 +2237,7 @@ def replace_paragraph_text(
             _Emission(
                 para, styled, fallbacks, page_x0, page_x1,
                 size_override=size_override, split_at=split_point,
+                has_span_size=size_by_pos is not None,
             ),
             fallbacks,
         )

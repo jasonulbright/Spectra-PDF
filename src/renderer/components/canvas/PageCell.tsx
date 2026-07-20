@@ -14,20 +14,24 @@ import type { EditParagraph, ParagraphEditOpts } from '../../lib/edit-paragraphs
 import {
   applySpanColor,
   applySpanFace,
+  applySpanSize,
   backdropSegments,
   computeEditSpans,
   hexToRgb,
   mergeSpanColors,
   mergeSpanFaces,
+  mergeSpanSizes,
   paragraphUnencodable,
   remapRanges,
   sanitizeParagraphInput,
   seedSpanColors,
   spanColorsToStyles,
   spanFacesToStyles,
+  spanSizesToStyles,
   utf16ToCodePointIndex,
   type SpanColor,
   type SpanFace,
+  type SpanSize,
 } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -1376,23 +1380,71 @@ function ParagraphEditor({
   // family. No listing seed in v1 (the listing carries per-span colour,
   // not weight/slant), so a fresh editor starts empty.
   const [spanFaces, setSpanFaces] = useState<SpanFace[]>([]);
+  // A5c per-span sizes: ranges set to a point size. Seeded [] (no listing
+  // per-span-size seed in v1); the backdrop MARKS these ranges (underline)
+  // but can't render the size — the transparent textarea has one uniform
+  // metric, so a bigger glyph would desync the caret.
+  const [spanSizes, setSpanSizes] = useState<SpanSize[]>([]);
   // The face covering a code-point position (for a per-span toggle to flip
   // one axis while keeping the others), or the plain default.
   const faceAt = (pos: number): { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | 'mono' } => {
     const hit = mergeSpanFaces(spanFaces).find((f) => pos >= f.start && pos < f.end);
     return hit ? { bold: hit.bold, italic: hit.italic, family: hit.family } : { bold: false, italic: false };
   };
-  // The live textarea selection in CODE POINTS — captured continuously so
-  // the colour swatch (which loses the DOM selection when its native picker
-  // opens) can still apply to what WAS selected.
-  const selRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
-  const captureSelection = (): void => {
+  // A5c: the size field's displayed value (a string so a clear-and-retype
+  // works), driven by typing and by the current selection's per-span size.
+  const [sizeField, setSizeField] = useState<string>(() => String(Math.round(para.fontSize)));
+  // A5a: the colour swatch's displayed value, driven the same way as the
+  // size field — a per-span pick doesn't touch the whole-paragraph `color`,
+  // so the native picker (a controlled input) needs its own state to hold
+  // what was picked, and to reflect the current selection's per-span colour.
+  const [colorField, setColorField] = useState<string>(() => para.color);
+  // The textarea's LIVE selection in code points, read at the instant a
+  // dual-role control fires. A textarea keeps its selectionStart/End when it
+  // loses focus (the swatch/stepper taking over doesn't clear it), so this
+  // is more robust than a captured ref — and, unlike an onSelect capture, it
+  // works when a test drives selectionStart/End directly (no synthetic
+  // `select` event needed).
+  const liveSel = (): { start: number; end: number } => {
     const ta = areaRef.current;
-    if (!ta) return;
-    selRef.current = {
+    if (!ta) return { start: 0, end: 0 };
+    return {
       start: utf16ToCodePointIndex(ta.value, ta.selectionStart),
       end: utf16ToCodePointIndex(ta.value, ta.selectionEnd),
     };
+  };
+  // The dual-role controls target a PARTIAL selection per-span; a collapsed
+  // caret OR a whole-text selection targets the whole paragraph. Returns the
+  // range for the per-span case, else null. This is what keeps "open editor
+  // (select-all) → click Bold" a clean whole-paragraph substitution (the
+  // shipped A3 path) rather than a per-span face over every character — and
+  // an explicit select-all still styles everything, just via the whole-para
+  // path (functionally identical). Code-point domain, matching liveSel.
+  const spanTarget = (): { start: number; end: number } | null => {
+    const sel = liveSel();
+    if (sel.end <= sel.start) return null; // collapsed → whole paragraph
+    const cpLen = Array.from(areaRef.current?.value ?? '').length;
+    if (sel.start === 0 && sel.end >= cpLen) return null; // whole text → whole paragraph
+    return sel;
+  };
+  // The size field AND colour swatch reflect the current per-span target's
+  // value (or the whole-paragraph value otherwise), so each control edits
+  // what it will actually change — a display sync only (the apply re-reads
+  // spanTarget). A collapsed OR whole-text selection shows the whole-para
+  // value, honestly matching what the control then targets (round-34 MED).
+  const captureSelection = (): void => {
+    const sel = spanTarget();
+    if (sel) {
+      const sizeHit = mergeSpanSizes(spanSizes).find((r) => sel.start >= r.start && sel.start < r.end);
+      setSizeField(String(Math.round(sizeHit ? sizeHit.size : size)));
+      const colorHit = mergeSpanColors(spanColors).find(
+        (r) => sel.start >= r.start && sel.start < r.end,
+      );
+      setColorField(colorHit ? colorHit.color : color);
+    } else {
+      setSizeField(String(Math.round(size)));
+      setColorField(color);
+    }
   };
   // ONE outcome per editor instance: Enter-commit, Escape-cancel, blur,
   // and the convert button all race through here — whichever fires first
@@ -1435,7 +1487,8 @@ function ParagraphEditor({
     colorChanged ||
     substituting ||
     spanColorsChanged ||
-    spanFaces.length > 0;
+    spanFaces.length > 0 ||
+    spanSizes.length > 0;
   // The restyle overrides sent with a commit — only fields the user
   // actually changed from the seed (unchanged size/colour/face stay the
   // paragraph's own, engine-side). On a substitution the style pair rides
@@ -1453,10 +1506,14 @@ function ParagraphEditor({
       o.bold = bold;
       o.italic = italic;
     }
-    // A5a/A5b: send per-span colour AND face entries (the engine folds each
-    // field independently, so they ride the one span_styles list with
-    // possibly-unaligned ranges).
-    const perSpan = [...spanColorsToStyles(spanColors), ...spanFacesToStyles(spanFaces)];
+    // A5a/A5b/A5c: send per-span colour, face, AND size entries (the engine
+    // folds each field independently, so they ride the one span_styles list
+    // with possibly-unaligned ranges).
+    const perSpan = [
+      ...spanColorsToStyles(spanColors),
+      ...spanFacesToStyles(spanFaces),
+      ...spanSizesToStyles(spanSizes),
+    ];
     if (perSpan.length > 0) o.span_styles = perSpan;
     return o;
   };
@@ -1547,14 +1604,22 @@ function ParagraphEditor({
             min={1}
             max={1638}
             step={1}
-            value={Number.isFinite(size) ? Math.round(size) : ''}
+            title="With text selected, sizes the selection; otherwise the whole paragraph"
+            value={sizeField}
             onChange={(e) => {
+              setSizeField(e.target.value);
               const v = parseFloat(e.target.value);
-              // Clamp to the same [1,1638] the input declares; on an
-              // empty/NaN field keep the last valid size (the old
-              // `|| para.fontSize` snapped back to the ORIGINAL seed,
-              // fighting a clear-and-retype — review-caught).
-              if (Number.isFinite(v)) setSize(Math.max(1, Math.min(1638, v)));
+              if (!Number.isFinite(v)) return; // empty/NaN: keep the field
+              const clamped = Math.max(1, Math.min(1638, v));
+              // A5c dual role: a PARTIAL selection sizes just that range
+              // (per-span); a caret or whole-text selection sizes the whole
+              // paragraph (the shipped A1 size).
+              const sel = spanTarget();
+              if (sel) {
+                setSpanSizes((prev) => applySpanSize(prev, sel.start, sel.end, clamped));
+              } else {
+                setSize(clamped);
+              }
             }}
           />
         </label>
@@ -1563,16 +1628,17 @@ function ParagraphEditor({
           <input
             type="color"
             data-testid="edit-para-color"
-            value={/^#[0-9a-f]{6}$/i.test(color) ? color : '#000000'}
+            value={/^#[0-9a-f]{6}$/i.test(colorField) ? colorField : '#000000'}
             title="With text selected, recolours the selection; otherwise the whole paragraph"
             onChange={(e) => {
-              // A5a dual role: a live SELECTION recolours just that range
-              // (per-span); a collapsed caret recolours the whole paragraph
-              // (the shipped A1 colour). The selection is captured off the
-              // textarea's onSelect, so it survives the picker taking focus.
+              // A5a dual role: a PARTIAL selection recolours just that range
+              // (per-span); a caret or whole-text selection recolours the
+              // whole paragraph (the shipped A1 colour). spanTarget reads the
+              // textarea's live selection, so it survives the picker's focus.
               const hex = e.target.value;
-              const sel = selRef.current;
-              if (sel.end > sel.start) {
+              setColorField(hex); // the swatch holds the pick either way
+              const sel = spanTarget();
+              if (sel) {
                 setSpanColors((prev) => applySpanColor(prev, sel.start, sel.end, hex));
               } else {
                 setColor(hex);
@@ -1592,12 +1658,12 @@ function ParagraphEditor({
                 : "Replaces the paragraph's font with the chosen bundled face"
             }
             onChange={(e) => {
-              // A5b dual role: a real family + a live selection → per-span
+              // A5b dual role: a real family + a PARTIAL selection → per-span
               // face on that range; otherwise the shipped whole-paragraph
               // family swap.
               const fam = e.target.value as '' | 'serif' | 'sans' | 'mono';
-              const sel = selRef.current;
-              if (fam !== '' && sel.end > sel.start) {
+              const sel = spanTarget();
+              if (fam !== '' && sel) {
                 const base = faceAt(sel.start);
                 setSpanFaces((prev) => applySpanFace(prev, sel.start, sel.end, { ...base, family: fam }));
               } else {
@@ -1623,11 +1689,11 @@ function ParagraphEditor({
               : 'Bold — substitutes the bundled bold face'
           }
           onClick={() => {
-            // A5b dual role: a live selection toggles bold on that range
-            // (keeping its other axes); a collapsed caret toggles the whole
-            // paragraph (the shipped A3b).
-            const sel = selRef.current;
-            if (sel.end > sel.start) {
+            // A5b dual role: a PARTIAL selection toggles bold on that range
+            // (keeping its other axes); a caret or whole-text selection
+            // toggles the whole paragraph (the shipped A3b).
+            const sel = spanTarget();
+            if (sel) {
               const base = faceAt(sel.start);
               setSpanFaces((prev) =>
                 applySpanFace(prev, sel.start, sel.end, { ...base, bold: !base.bold }),
@@ -1651,8 +1717,10 @@ function ParagraphEditor({
               : 'Italic — substitutes the bundled italic face'
           }
           onClick={() => {
-            const sel = selRef.current;
-            if (sel.end > sel.start) {
+            // A5b dual role: PARTIAL → per-span italic on that range; caret
+            // or whole-text → the shipped whole-paragraph toggle.
+            const sel = spanTarget();
+            if (sel) {
               const base = faceAt(sel.start);
               setSpanFaces((prev) =>
                 applySpanFace(prev, sel.start, sel.end, { ...base, italic: !base.italic }),
@@ -1678,13 +1746,20 @@ function ParagraphEditor({
           data-testid="edit-para-backdrop"
           style={{ fontSize: `${fontPx}px`, lineHeight: 1.25 }}
         >
-          {backdropSegments(value, spanColors, spanFaces).map((seg, i) => (
+          {backdropSegments(value, spanColors, spanFaces, spanSizes).map((seg, i) => (
             <span
               key={i}
               style={{
                 ...(seg.color ? { color: seg.color } : {}),
                 ...(seg.bold ? { fontWeight: 700 } : {}),
                 ...(seg.italic ? { fontStyle: 'italic' } : {}),
+                // A5c: a per-span-sized range is MARKED, not rendered at its
+                // size — the transparent textarea has uniform metrics, so a
+                // bigger glyph would desync the caret. The dotted underline
+                // shows "this range is resized"; the size previews on commit.
+                ...(seg.sized
+                  ? { textDecoration: 'underline dotted', textUnderlineOffset: '2px' }
+                  : {}),
               }}
             >
               {seg.text}
@@ -1703,7 +1778,10 @@ function ParagraphEditor({
           style={{
             fontSize: `${fontPx}px`,
             lineHeight: 1.25,
-            color: spanColors.length > 0 || spanFaces.length > 0 ? 'transparent' : '#111',
+            color:
+              spanColors.length > 0 || spanFaces.length > 0 || spanSizes.length > 0
+                ? 'transparent'
+                : '#111',
             caretColor: '#111',
           }}
           onChange={(e) => {
@@ -1716,6 +1794,7 @@ function ParagraphEditor({
             // folds, so state stays canonical.
             setSpanColors((prev) => mergeSpanColors(remapRanges(value, next, prev)));
             setSpanFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
+            setSpanSizes((prev) => mergeSpanSizes(remapRanges(value, next, prev)));
             setValue(next);
           }}
           onSelect={captureSelection}

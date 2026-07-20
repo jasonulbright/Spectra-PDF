@@ -30,6 +30,9 @@ export interface EditTextRun {
   /** 9.B4a: the run's advances/rect were computed in vertical-writing
    * mode (Identity-V / Uni*-UCS2-V). B4b's surfaces consume this. */
   vertical: boolean;
+  /** 9.A5c: the run's font size (points) — an e2e observes a per-span
+   * size bump as a run listing back at the larger size. */
+  fontSize: number;
 }
 
 interface EngineRunListing {
@@ -43,6 +46,7 @@ interface EngineRunListing {
     encodable: string;
     sequences?: string[];
     vertical?: boolean;
+    font_size?: number;
   }[];
 }
 
@@ -65,6 +69,7 @@ export async function fetchTextRuns(
     encodable: run.encodable ?? '',
     sequences: Array.isArray(run.sequences) ? run.sequences : [],
     vertical: Boolean(run.vertical),
+    fontSize: typeof run.font_size === 'number' ? run.font_size : 0,
     rect: pdfRectToDisplay(run.rect, geometry.box, geometry.bakedRotate),
   }));
 }

@@ -14,6 +14,9 @@ import {
   seedSpanColors,
   spanColorsToStyles,
   spanFacesToStyles,
+  spanSizesToStyles,
+  applySpanSize,
+  mergeSpanSizes,
   utf16ToCodePointIndex,
 } from '../src/renderer/lib/edit-paragraphs';
 
@@ -329,9 +332,9 @@ describe('seedSpanColors / backdropSegments / spanColorsToStyles (9.A5a)', () =>
 
   it('splits text into base + coloured backdrop segments (with face flags)', () => {
     expect(backdropSegments('Hello colored world', [{ start: 6, end: 13, color: '#ff0000' }])).toEqual([
-      { text: 'Hello ', color: null, bold: false, italic: false },
-      { text: 'colored', color: '#ff0000', bold: false, italic: false },
-      { text: ' world', color: null, bold: false, italic: false },
+      { text: 'Hello ', color: null, bold: false, italic: false, sized: false },
+      { text: 'colored', color: '#ff0000', bold: false, italic: false, sized: false },
+      { text: ' world', color: null, bold: false, italic: false, sized: false },
     ]);
   });
 
@@ -344,10 +347,10 @@ describe('seedSpanColors / backdropSegments / spanColorsToStyles (9.A5a)', () =>
         [{ start: 0, end: 5, bold: true, italic: false }],
       ),
     ).toEqual([
-      { text: 'Hel', color: null, bold: true, italic: false },
-      { text: 'lo', color: '#ff0000', bold: true, italic: false },
-      { text: ' wo', color: '#ff0000', bold: false, italic: false },
-      { text: 'rld', color: null, bold: false, italic: false },
+      { text: 'Hel', color: null, bold: true, italic: false, sized: false },
+      { text: 'lo', color: '#ff0000', bold: true, italic: false, sized: false },
+      { text: ' wo', color: '#ff0000', bold: false, italic: false, sized: false },
+      { text: 'rld', color: null, bold: false, italic: false, sized: false },
     ]);
   });
 
@@ -375,8 +378,8 @@ describe('mergeSpanColors overlap flattening (9.A5a round-32 HIGH)', () => {
     // describe the SAME per-position colours (no silent mismatch).
     const segs = backdropSegments('Hi folks everyone', overlapping);
     expect(segs).toEqual([
-      { text: 'H', color: '#ff0000', bold: false, italic: false },
-      { text: 'i folks everyone', color: '#0000ff', bold: false, italic: false },
+      { text: 'H', color: '#ff0000', bold: false, italic: false, sized: false },
+      { text: 'i folks everyone', color: '#0000ff', bold: false, italic: false, sized: false },
     ]);
     expect(spanColorsToStyles(overlapping)).toEqual([
       { start: 0, end: 1, color: [1, 0, 0] },
@@ -436,6 +439,42 @@ describe('per-span FACE helpers (9.A5b)', () => {
     ).toEqual([
       { start: 0, end: 3, bold: true, italic: false },
       { start: 5, end: 8, bold: false, italic: true, family: 'serif' },
+    ]);
+  });
+});
+
+describe('per-span SIZE helpers (9.A5c)', () => {
+  it('applySpanSize paints a size onto a range, clipping overlaps', () => {
+    const out = applySpanSize([], 2, 6, 24);
+    expect(out).toEqual([{ start: 2, end: 6, size: 24 }]);
+    const out2 = applySpanSize(out, 4, 8, 10);
+    expect(out2).toEqual([
+      { start: 2, end: 4, size: 24 },
+      { start: 4, end: 8, size: 10 },
+    ]);
+  });
+
+  it('mergeSpanSizes coalesces adjacent equal sizes', () => {
+    expect(
+      mergeSpanSizes([
+        { start: 0, end: 3, size: 18 },
+        { start: 3, end: 6, size: 18 },
+      ]),
+    ).toEqual([{ start: 0, end: 6, size: 18 }]);
+  });
+
+  it('spanSizesToStyles emits size entries', () => {
+    expect(spanSizesToStyles([{ start: 1, end: 4, size: 20 }])).toEqual([
+      { start: 1, end: 4, size: 20 },
+    ]);
+  });
+
+  it('backdropSegments marks a sized range without changing its width', () => {
+    const segs = backdropSegments('Big word here', [], [], [{ start: 4, end: 8, size: 24 }]);
+    expect(segs).toEqual([
+      { text: 'Big ', color: null, bold: false, italic: false, sized: false },
+      { text: 'word', color: null, bold: false, italic: false, sized: true },
+      { text: ' here', color: null, bold: false, italic: false, sized: false },
     ]);
   });
 });

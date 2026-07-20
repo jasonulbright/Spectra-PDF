@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
@@ -103,7 +103,17 @@ describe('restyle span colour (Phase 9.A5a)', () => {
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const page = doc.addPage([400, 300]);
-    page.drawText('Alpha beta gamma delta words', { x: 60, y: 200, size: 14, font });
+    // Blue base text: a per-span red then leaves the REST blue, so the
+    // re-listing carries BOTH colours — proof the recolour hit just the
+    // range, not the whole paragraph (a default-black base would omit its
+    // colour from the listing, making per-span and whole-para look alike).
+    page.drawText('Alpha beta gamma delta words', {
+      x: 60,
+      y: 200,
+      size: 14,
+      font,
+      color: rgb(0, 0, 1),
+    });
     writeFileSync(pdfPath, await doc.save());
   });
 
@@ -124,8 +134,11 @@ describe('restyle span colour (Phase 9.A5a)', () => {
     const pageId = (await editTextPageIds())[0];
     const para = (await editParagraphs(pageId))[0];
     expect(para.text).toContain('Alpha beta gamma delta');
-    // Pristine: no non-default span colours.
-    expect(para.colors.filter((c) => c !== '#000000')).toHaveLength(0);
+    // Pristine: the blue base, no red yet. Capture the base hex (exact value
+    // is the engine's round-trip of rgb(0,0,1)) to assert it survives.
+    expect(para.colors).not.toContain('#ff0000');
+    const baseColor = para.colors[0];
+    expect(baseColor).toBeDefined();
 
     // Open the editor, select "Alpha" (chars 0..5), pick red on the swatch.
     await editParagraphOpen(pageId, para.index);
@@ -138,8 +151,15 @@ describe('restyle span colour (Phase 9.A5a)', () => {
     // with the text unchanged (a pure per-span restyle).
     await waitForReindexed(
       pageId,
-      (paras) => paras.some((p) => p.text === para.text && p.colors.includes('#ff0000')),
-      'the recoloured span never listed back red',
+      // Red for the range AND the ORIGINAL base colour for the rest — a
+      // per-span recolour, not a whole-paragraph one (which would recolour
+      // every span red and drop the base entirely).
+      (paras) =>
+        paras.some(
+          (p) =>
+            p.text === para.text && p.colors.includes('#ff0000') && p.colors.includes(baseColor),
+        ),
+      'the recoloured span never listed back as a per-span recolour',
     );
 
     // Undo restores the pristine (no red) listing.

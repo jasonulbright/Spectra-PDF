@@ -53,6 +53,10 @@ export interface EditParagraph {
    * but REFUSE substitution restyles and convert — the bundled faces are
    * horizontal — so the editor disables those controls. */
   vertical: boolean;
+  /** 9.A5c: the distinct font sizes among the paragraph's member runs
+   * (rounded points) — a per-span size bump surfaces here (a mixed-size
+   * paragraph lists more than one). */
+  runSizes: number[];
 }
 
 /** A1/A3 restyle overrides carried on a paragraph commit. */
@@ -86,6 +90,7 @@ export interface ParagraphEditOpts {
     bold?: boolean;
     italic?: boolean;
     family?: 'serif' | 'sans' | 'mono';
+    size?: number;
   }>;
 }
 
@@ -113,6 +118,7 @@ interface EngineParagraphListing {
     encodable: string;
     sequences?: string[];
     vertical?: boolean;
+    font_size?: number;
   }[];
   paragraphs: {
     index: number;
@@ -160,6 +166,7 @@ export async function fetchEditTextListing(
     encodable: run.encodable ?? '',
     sequences: Array.isArray(run.sequences) ? run.sequences : [],
     vertical: Boolean(run.vertical),
+    fontSize: typeof run.font_size === 'number' ? run.font_size : 0,
     rect: pdfRectToDisplay(run.rect, geometry.box, geometry.bakedRotate),
   }));
   const covered = new Set<number>();
@@ -189,6 +196,14 @@ export async function fetchEditTextListing(
       bold: Boolean(p.bold),
       italic: Boolean(p.italic),
       vertical: Boolean(p.vertical),
+      runSizes: Array.from(
+        new Set(
+          p.runs
+            .map((r) => rawRuns[r]?.font_size)
+            .filter((s): s is number => typeof s === 'number')
+            .map((s) => Math.round(s)),
+        ),
+      ),
     });
   }
   return { runBoxes: runs.filter((r) => !covered.has(r.index)), paragraphs };
@@ -355,16 +370,36 @@ export function seedSpanColors(spans: EditSpan[], paragraphColor: string): SpanC
   return mergeSpanColors(out);
 }
 
+/** 9.A5c: one per-span SIZE override — a CODE-POINT range set to a point
+ * size. */
+export interface SpanSize {
+  start: number;
+  end: number;
+  size: number;
+}
+
+const sizeKey = (r: SpanSize): string => String(r.size);
+export const mergeSpanSizes = (ranges: SpanSize[]): SpanSize[] => flattenIntervals(ranges, sizeKey);
+export const applySpanSize = (
+  existing: SpanSize[],
+  start: number,
+  end: number,
+  size: number,
+): SpanSize[] => applyInterval(existing, { start, end, size }, sizeKey);
+
 /** Split `text` into consecutive backdrop segments carrying the resolved
- * colour AND weight/slant per code point (colour + face folded
- * independently, segmented where EITHER changes). `color null` = base
- * editing colour. Family is NOT rendered (the backdrop keeps its own font;
- * a substituted family previews on the committed page). */
+ * colour, weight/slant, AND a `sized` flag per code point (all folded
+ * independently, segmented where ANY changes). `color null` = base editing
+ * colour. Family and SIZE are NOT rendered as actual metrics — the
+ * transparent textarea has one uniform metric for caret positioning, so a
+ * bigger/substituted glyph would desync it. `sized` lets the component mark
+ * per-span-sized ranges (an underline) without changing their width. */
 export function backdropSegments(
   text: string,
   colors: SpanColor[],
   faces: SpanFace[] = [],
-): Array<{ text: string; color: string | null; bold: boolean; italic: boolean }> {
+  sizes: SpanSize[] = [],
+): Array<{ text: string; color: string | null; bold: boolean; italic: boolean; sized: boolean }> {
   const chars = Array.from(text);
   const n = chars.length;
   const colorAt: (string | null)[] = new Array(n).fill(null);
@@ -379,13 +414,35 @@ export function backdropSegments(
       italicAt[k] = r.italic;
     }
   }
-  const segs: Array<{ text: string; color: string | null; bold: boolean; italic: boolean }> = [];
+  const sizedAt: boolean[] = new Array(n).fill(false);
+  for (const r of mergeSpanSizes(sizes)) {
+    for (let k = Math.max(0, r.start); k < Math.min(r.end, n); k++) sizedAt[k] = true;
+  }
+  const segs: Array<{
+    text: string;
+    color: string | null;
+    bold: boolean;
+    italic: boolean;
+    sized: boolean;
+  }> = [];
   for (let k = 0; k < n; k++) {
     const last = segs[segs.length - 1];
-    if (last && last.color === colorAt[k] && last.bold === boldAt[k] && last.italic === italicAt[k]) {
+    if (
+      last &&
+      last.color === colorAt[k] &&
+      last.bold === boldAt[k] &&
+      last.italic === italicAt[k] &&
+      last.sized === sizedAt[k]
+    ) {
       last.text += chars[k];
     } else {
-      segs.push({ text: chars[k], color: colorAt[k], bold: boldAt[k], italic: italicAt[k] });
+      segs.push({
+        text: chars[k],
+        color: colorAt[k],
+        bold: boldAt[k],
+        italic: italicAt[k],
+        sized: sizedAt[k],
+      });
     }
   }
   return segs;
@@ -421,6 +478,13 @@ export function spanFacesToStyles(
     italic: r.italic,
     ...(r.family ? { family: r.family } : {}),
   }));
+}
+
+/** Convert per-span sizes to `span_styles` size entries. */
+export function spanSizesToStyles(
+  ranges: SpanSize[],
+): Array<{ start: number; end: number; size: number }> {
+  return mergeSpanSizes(ranges).map((r) => ({ start: r.start, end: r.end, size: r.size }));
 }
 
 /** Map an edited text back onto style spans: common prefix/suffix keep

@@ -1926,6 +1926,8 @@ export function WorkspaceCanvasView({
           colors: Array.from(
             new Set(p.spans.map((sp) => sp.color).filter((c): c is string => !!c)),
           ),
+          // 9.A5c: the distinct member-run font sizes.
+          sizes: p.runSizes,
         })),
       openParagraphEditor: (pageId, index) => openParagraphEditorRef.current(pageId, index),
       act: (kind, opts) => runEditActionRef.current(kind, opts),

@@ -2764,12 +2764,13 @@ class TestPerSpanFace:
         assert any("This one stays untouched" in p["text"] for p in _paras(out))
 
     def test_span_style_needs_a_colour_or_a_face(self, tmp_dir):
-        # A span_styles entry that sets neither a colour nor a face is
-        # malformed — refuse loudly rather than silently no-op.
+        # A span_styles entry that sets none of colour, face, or size (9.A5c
+        # widened the axis set) is malformed — refuse loudly, not silent
+        # no-op.
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Whatever text here) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
         p = _paras(src)[0]
-        with pytest.raises(ValueError, match="colour or a face"):
+        with pytest.raises(ValueError, match="colour, a face, or a size"):
             _apply(src, out, p, p["text"], font_path=FONTS_DIR,
                    span_styles=[{"start": 0, "end": 4}])
 
@@ -2780,3 +2781,233 @@ class TestPerSpanFace:
         with pytest.raises(ValueError, match="family must be"):
             _apply(src, out, p, p["text"], font_path=FONTS_DIR,
                    span_styles=[{"start": 0, "end": 4, "family": "cursive"}])
+
+
+def _seg_tfs(path):
+    """[(seg_text, Tf_size)] in stream order — the font size active at each
+    show op, so a per-segment size split is readable directly."""
+    out = []
+    with pikepdf.open(path) as pdf:
+        cur = None
+        for i in pikepdf.parse_content_stream(pdf.pages[0]):
+            op = str(i.operator)
+            if op == "Tf":
+                cur = float(i.operands[1])
+            elif op == "Tj":
+                out.append((bytes(i.operands[0]), cur))
+            elif op == "TJ":
+                txt = b"".join(bytes(e) for e in i.operands[0] if isinstance(e, pikepdf.String))
+                out.append((txt, cur))
+    return out
+
+
+def _tm_ys(path):
+    """Distinct emission baselines (each Tm's f-component) in stream order —
+    one per laid-out line. The direct measure of the reflow's line rhythm
+    (the re-listing's grouping collapses unreliably around a big glyph)."""
+    ys, cy, seen = [], None, []
+    with pikepdf.open(path) as pdf:
+        for i in pikepdf.parse_content_stream(pdf.pages[0]):
+            op = str(i.operator)
+            if op == "Tm":
+                cy = round(float(i.operands[5]), 4)
+            elif op in ("Tj", "TJ") and cy is not None:
+                ys.append(cy)
+    for y in ys:
+        if y not in seen:
+            seen.append(y)
+    return seen
+
+
+# The A5c per-line-leading fixture: four ONE-word lines at 12pt, baselines
+# 700/686/672/658 (14pt leading), each word alone on its line (the box is one
+# word wide, so a re-emit keeps one per line). Bumping a middle word's size
+# makes THAT line taller by the adjacent-max rule.
+_FOURLINE = (
+    b"BT /F1 12 Tf 72 700 Td (alpha) Tj 0 -14 Td (bravo) Tj "
+    b"0 -14 Td (gamma) Tj 0 -14 Td (delta) Tj ET"
+)
+
+
+class TestPerSpanSize:
+    """Phase 9.A5c — per-span SIZE: resize a character RANGE inside a
+    paragraph, overriding the A1 whole-paragraph size. The range's Tf grows,
+    its width/wrap follow, and the LINE it lands on gets tallest-glyph
+    leading via the adjacent-max rule while other lines keep theirs. No
+    per-span size ⇒ byte-identical to the shipped (uniform-leading) path."""
+
+    def test_bigger_size_widens_range_and_adds_line_leading(self, tmp_dir):
+        # THE crux. Bump "bravo" (line 1, chars [6,11)) to 24pt. Only that
+        # segment emits a 24pt Tf; the LINE it lands on and the one below it
+        # gain leading while the two normal lines below keep 14pt.
+        #   base_ratio = para.leading / dom_eff_orig = 14 / 12 = 7/6
+        #   max_eff    = [12, 24, 12, 12]
+        #   line0.y = 700
+        #   line1.y = 700 - max(12,24)·7/6 = 700 - 28 = 672
+        #   line2.y = 672 - max(24,12)·7/6 = 672 - 28 = 644  (bravo descenders)
+        #   line3.y = 644 - max(12,12)·7/6 = 644 - 14 = 630  (OTHERS keep 14)
+        src = _build(tmp_dir, _FOURLINE)
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        assert p["text"] == "alpha bravo gamma delta"
+        assert p["line_count"] == 4
+        assert p["text"][6:11] == "bravo"  # hand-verified range
+        _apply(src, out, p, p["text"], span_styles=[{"start": 6, "end": 11, "size": 24.0}])
+        # A larger Tf for JUST "bravo".
+        assert [t for _txt, t in _seg_tfs(out)] == [12.0, 24.0, 12.0, 12.0]
+        # The hand-computed per-line baselines (the multi-line leading crux).
+        assert _tm_ys(out) == pytest.approx([700.0, 672.0, 644.0, 630.0], abs=0.02)
+
+    def test_smaller_size_lets_bigger_neighbours_keep_their_leading(self, tmp_dir):
+        # "bravo" (line 1) shrunk to 8pt. The adjacent-max rule PROTECTS the
+        # 12pt neighbours — a lone smaller word can't pull them closer:
+        #   gap = max(12,8)·7/6 = 14 on both sides.
+        # So every baseline stays the uniform 700/686/672/658 (identical to a
+        # plain edit), while bravo's Tf still drops to 8.
+        src = _build(tmp_dir, _FOURLINE)
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        _apply(src, out, p, p["text"], span_styles=[{"start": 6, "end": 11, "size": 8.0}])
+        assert [t for _txt, t in _seg_tfs(out)] == [12.0, 8.0, 12.0, 12.0]
+        assert _tm_ys(out) == pytest.approx([700.0, 686.0, 672.0, 658.0], abs=0.02)
+
+    def test_size_composes_with_per_span_colour(self, tmp_dir):
+        # One range carries BOTH a bigger size AND a colour: the size drives
+        # the Tf (and the line leading), the colour emits its rg — folded
+        # independently on the SAME range.
+        src = _build(tmp_dir, _FOURLINE)
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        _apply(src, out, p, p["text"],
+               span_styles=[{"start": 6, "end": 11, "size": 24.0, "color": [1.0, 0.0, 0.0]}])
+        assert [t for _txt, t in _seg_tfs(out)] == [12.0, 24.0, 12.0, 12.0]  # bigger Tf
+        assert any(op == "rg" and a == ["1", "0", "0"] for op, a in _color_ops(out))  # AND red
+        # The size still moved the leading (line1 down to 672, per the crux).
+        assert _tm_ys(out) == pytest.approx([700.0, 672.0, 644.0, 630.0], abs=0.02)
+
+    def test_single_line_original_reflow_gets_per_line_leading(self, tmp_dir):
+        # Round-34 HIGH: a paragraph that STARTED single-line has para.leading
+        # None even after its edit reflows it to many lines — gating the
+        # per-line rule on para.leading left the wrapped output with FLAT
+        # leading around a big glyph. base_ratio now comes from build()'s
+        # single-line branch (SINGLE_LINE_LEADING_EM), so a bumped word on a
+        # wrapped line gets the adjacent-max gap. Assert the STRUCTURAL
+        # property (exact wrap x's are page-margin-dependent): the biggest
+        # inter-baseline gap (around the 40pt word) clearly exceeds the flat
+        # 12pt one — not all gaps equal.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 60 260 Td (Short line) Tj ET")  # single line
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        new_text = (
+            "Short line now retyped much longer so it wraps across several "
+            "lines inside the same narrow box here today please"
+        )
+        cut = new_text.index("wraps")
+        _apply(
+            src, out, p, new_text,
+            [{"start": 0, "end": len(new_text), "run": p["runs"][0]}],
+            span_styles=[{"start": cut, "end": cut + 5, "size": 40.0}],
+        )
+        assert 40.0 in [t for _txt, t in _seg_tfs(out)]  # the bump landed
+        ys = _tm_ys(out)
+        assert len(ys) >= 2  # it really wrapped ("wraps" lands on line 0)
+        gaps = [round(ys[i] - ys[i + 1], 2) for i in range(len(ys) - 1)]
+        # The gap adjacent to the 40pt word is its adjacent-max (40·1.2 = 48),
+        # NOT the flat single-line 14.4 (12·1.2) — the HIGH: without the fix
+        # this whole reflow used the flat constant.
+        assert max(gaps) > 30.0, gaps
+
+    def test_no_span_size_is_byte_identical(self, tmp_dir):
+        # The self-contained pin: an edit carrying NO span size is byte-for-
+        # byte the shipped path — the A5c size machinery is inert until a
+        # size is present (the uniform-leading + per-code-point-None cases).
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Plain reword here) Tj ET")
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        p = _paras(src)[0]
+        _apply(src, a, p, p["text"])
+        _apply(src, b, p, p["text"], span_styles=None)
+        assert _content_bytes(a) == _content_bytes(b)
+
+    def test_size_is_clamped_to_the_edit_maximum(self, tmp_dir):
+        # A fat-fingered 5000pt clamps to the A1 viewer max (1638) — never a
+        # size that flies the range off the page.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Clamp) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        _apply(src, out, p, p["text"], span_styles=[{"start": 0, "end": 5, "size": 5000}])
+        sizes = {t for _txt, t in _seg_tfs(out)}
+        assert 1638.0 in sizes
+        assert max(sizes) == 1638.0
+
+    def test_size_only_entry_is_accepted(self, tmp_dir):
+        # An entry with ONLY a size (no colour, no face) is a valid span
+        # style — the widened axis-set check accepts it.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Only size here) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        _apply(src, out, p, p["text"], span_styles=[{"start": 0, "end": 4, "size": 20.0}])
+        assert 20.0 in {t for _txt, t in _seg_tfs(out)}
+
+    def test_bigger_glyph_wraps_sooner(self, tmp_dir):
+        # The bigger glyph consumes more of the box, forcing an earlier wrap:
+        # "one two three four five six" fits on 2 emission lines at 12pt; with
+        # "three" at 30pt the reflow needs 3.
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (one two three) Tj 0 -14 Td (four five six) Tj ET",
+        )
+        plain = os.path.join(tmp_dir, "plain.pdf")
+        big = os.path.join(tmp_dir, "big.pdf")
+        p = _paras(src)[0]
+        assert p["text"] == "one two three four five six"
+        cut = p["text"].index("three")
+        _apply(src, plain, p, p["text"])
+        _apply(src, big, p, p["text"], span_styles=[{"start": cut, "end": cut + 5, "size": 30.0}])
+        assert len(_tm_ys(plain)) == 2
+        assert len(_tm_ys(big)) == 3
+
+    def test_split_with_enlarged_boundary_word_clears_descender(self, tmp_dir):
+        # Round-35 finding 1 (HIGH): an A4 split whose block-A boundary word is
+        # enlarged per-span must widen the INTER-BLOCK gap so the big glyph's
+        # descender can't bleed into block B. Split "bravo delta" after
+        # "bravo" with "bravo" at 150pt: the shipped fixed 2×leading gap
+        # (~28.8) put block B's baseline at 671.2, INSIDE the 150pt descender;
+        # the size-aware gap scales with the boundary glyph (2·150·1.2 = 360).
+        # Mutation-pinned: revert to a fixed split_gap ⇒ gap ≈ 28.8 < 150.
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (bravo delta) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        assert p["text"] == "bravo delta"
+        _apply(
+            src, out, p, p["text"], split_at=5,
+            span_styles=[{"start": 0, "end": 5, "size": 150.0}],
+        )
+        ys = _tm_ys(out)
+        assert len(ys) == 2  # block A ("bravo" @150), block B ("delta" @12)
+        assert 150.0 in [t for _txt, t in _seg_tfs(out)]  # the bump landed
+        assert ys[0] - ys[1] >= 150.0  # the gap accounts for the enlarged word
+
+    def test_null_edit_of_size_varied_group_stays_flat(self, tmp_dir):
+        # Round-35 finding 2 (MED): a grouped paragraph whose members ALREADY
+        # differ in size (within SIZE_JUMP_RATIO — 16.5/14 = 1.18 < 1.2, so the
+        # three lines join into ONE editable paragraph) must NOT reflow its
+        # line rhythm on an edit that requests no size change. The per-line
+        # rule is gated on an actual per-span size, NOT on pre-existing max_eff
+        # spread. A null edit keeps the flat 20pt baselines; the bug (gate on
+        # spread alone) drifted them to 23.57pt. Mutation-pinned: drop the
+        # has_span_size gate ⇒ 700/676.43/652.86, not 700/680/660.
+        src = _build(
+            tmp_dir,
+            b"BT /F1 14 Tf 72 700 Td (alpha) Tj "
+            b"/F1 16.5 Tf 0 -20 Td (bravo) Tj "
+            b"/F1 14 Tf 0 -20 Td (gamma) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        p = _paras(src)[0]
+        assert p["text"] == "alpha bravo gamma"
+        assert p["line_count"] == 3  # the size-varied lines grouped into one
+        # The paragraph's OWN spans carry the per-member sizes (14/16.5/14);
+        # spans=None would collapse them to one size and hide the variance.
+        _apply(src, out, p, p["text"], p["spans"])  # NULL edit, per-member spans
+        assert _tm_ys(out) == pytest.approx([700.0, 680.0, 660.0], abs=0.02)

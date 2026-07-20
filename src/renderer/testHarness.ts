@@ -206,6 +206,7 @@ export interface CanvasEditImagesHandlers {
     alignment: string;
     vertical: boolean;
     colors: string[];
+    sizes: number[];
   }[];
   openParagraphEditor: (pageId: string, index: number) => void;
   act: (
@@ -614,6 +615,7 @@ export interface TestHarness {
     alignment: string;
     vertical: boolean;
     colors: string[];
+    sizes: number[];
   }[];
   editParagraphOpen: (pageId: string, index: number) => void;
   /** Create PDF from PostScript (Phase 8; dialog must be open). */

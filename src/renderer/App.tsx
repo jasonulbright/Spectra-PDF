@@ -758,9 +758,19 @@ function AppContent(): React.ReactElement {
       // A4 split: a code-point offset — the engine lays out two blocks.
       if (opts?.split_at !== undefined) params.split_at = opts.split_at;
       if (opts?.convert) params.convert = true;
+      // A5a/A5b/A5c: per-span overrides ride ONE span_styles list (colour,
+      // face, and size fold independently in the engine). Forward it verbatim
+      // — dropping it silently reverts a per-span edit to a plain re-typeset.
+      if (opts?.span_styles !== undefined) params.span_styles = opts.span_styles;
       const substituting =
         opts?.family !== undefined || opts?.bold !== undefined || opts?.italic !== undefined;
-      if (opts?.convert || substituting) {
+      // A per-span FACE (A5b) needs the bundled faces to embed, exactly like a
+      // whole-paragraph substitution; a per-span colour/size does not. Face
+      // entries always carry bold/italic keys (colour/size entries never do).
+      const spanHasFace = (opts?.span_styles ?? []).some(
+        (s) => 'bold' in s || 'italic' in s || 'family' in s,
+      );
+      if (opts?.convert || substituting || spanHasFace) {
         // The bundled fallback faces (7.4/9.B1/9.A3): convert renders only
         // the characters the mapped fonts cannot express; a substitution
         // re-renders every character. Either way the engine resolves the
