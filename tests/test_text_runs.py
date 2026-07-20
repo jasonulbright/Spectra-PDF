@@ -542,3 +542,131 @@ class TestLigatureSequencesListing:
         with pikepdf.open(out) as opened:
             content = opened.pages[0].Contents.read_bytes()
         assert b"00010007" in content.replace(b" ", b"").lower()
+
+
+class TestVerticalRunEditing:
+    """Phase 9.B4a — Identity-V runs on the 7.2 surface: rects stack
+    DOWNWARD by the /W2 advances, edits re-encode in place, and the
+    Δ-anchor resync transposes (same-COLUMN followers shift in y; a tx
+    change is a column boundary). Verification is the re-list round-trip
+    (the B2 discipline — pdfminer's extraction is not what's under test)."""
+
+    # あ=900, い=800 (triplet form), う=750 (range form); 1000/em.
+    CHARS = {3: "あ", 4: "い", 5: "う"}
+    W2 = [3, [-900, 500, 880, -800, 450, 880], 5, 5, -750, 500, 880]
+
+    def _vertical_page(self, pdf, content: bytes):
+        from tests.test_pdf_fonts import _tounicode_stream
+
+        def _arr(items):
+            return Array([Array(el) if isinstance(el, list) else el for el in items])
+
+        desc = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/CIDFontType2"),
+                BaseFont=Name("/VertFace"),
+                CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+                W2=_arr(self.W2),
+            )
+        )
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/VertFace"),
+                Encoding=Name("/Identity-V"),
+                DescendantFonts=Array([desc]),
+                ToUnicode=_tounicode_stream(pdf, self.CHARS),
+            )
+        )
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=font, F2=_helv(pdf)))
+        page.Contents = pdf.make_stream(content)
+        return page
+
+    def test_lists_vertical_column_rects_stack_downward(self, tmp_dir):
+        src = os.path.join(tmp_dir, "v.pdf")
+        pdf = pikepdf.new()
+        # Two flowing shows in one column at (100, 700), size 10, then an
+        # unrelated horizontal run — the additive `vertical` field on both.
+        self._vertical_page(
+            pdf,
+            b"BT /F1 10 Tf 100 700 Td <00030004> Tj <0005> Tj ET"
+            b" BT /F2 12 Tf 72 500 Td (Flat) Tj ET",
+        )
+        pdf.save(src)
+        pdf.close()
+        runs = list_text_runs(src, 1)["runs"]
+        assert [r["text"] for r in runs] == ["あい", "う", "Flat"]
+        assert runs[0]["vertical"] is True and runs[1]["vertical"] is True
+        assert runs[2]["vertical"] is False
+        assert all(r["editable"] for r in runs)
+        # Run 0: one em-wide column centered on x=100, spanning the /W2
+        # advance sum (900+800)/1000×10 = 17 DOWNWARD from y=700.
+        assert runs[0]["rect"] == pytest.approx([95, 683, 105, 700], abs=0.05)
+        # Run 1 FLOWS after the vertical advance — its column continues at
+        # y=683 and spans う's 7.5 (proving the tm.f advance direction).
+        assert runs[1]["rect"] == pytest.approx([95, 675.5, 105, 683], abs=0.05)
+
+    def test_edit_shifts_same_column_follower_by_delta(self, tmp_dir):
+        src = os.path.join(tmp_dir, "v.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        # Follower anchored by a same-column Td (tx == 0) 40pt below.
+        self._vertical_page(
+            pdf, b"BT /F1 10 Tf 100 700 Td <00030004> Tj 0 -40 Td <0005> Tj ET"
+        )
+        pdf.save(src)
+        pdf.close()
+        before = list_text_runs(src, 1)["runs"]
+        assert before[1]["rect"] == pytest.approx([95, 652.5, 105, 660], abs=0.05)
+
+        # "あい" (advance 17) → "あ" (advance 9): Δ = −8, so the follower
+        # is pulled back UP by 8 — the same-line rule transposed.
+        replace_text_run(src, out, 1, 0, "あ")
+        after = list_text_runs(out, 1)["runs"]
+        assert [r["text"] for r in after] == ["あ", "う"]
+        assert after[0]["rect"] == pytest.approx([95, 691, 105, 700], abs=0.05)
+        assert after[1]["rect"] == pytest.approx([95, 660.5, 105, 668], abs=0.05)
+        # The re-encoded bytes are the ToUnicode code (hex serialized).
+        with pikepdf.open(out) as opened:
+            content = opened.pages[0].Contents.read_bytes()
+        assert b"<0003>" in content.replace(b" ", b"") or b"0003" in content.replace(b" ", b"").lower()
+
+    def test_column_change_stops_the_vertical_resync(self, tmp_dir):
+        src = os.path.join(tmp_dir, "v.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        # The follower starts a NEW column (tx ≠ 0) — it must not shift,
+        # the transposed twin of the ty≠0 line-change stop.
+        self._vertical_page(
+            pdf, b"BT /F1 10 Tf 100 700 Td <00030004> Tj -25 0 Td <0005> Tj ET"
+        )
+        pdf.save(src)
+        pdf.close()
+        before = list_text_runs(src, 1)["runs"]
+        assert before[1]["rect"] == pytest.approx([70, 692.5, 80, 700], abs=0.05)
+
+        replace_text_run(src, out, 1, 0, "あ")
+        after = list_text_runs(out, 1)["runs"]
+        assert after[1]["rect"] == pytest.approx([70, 692.5, 80, 700], abs=0.05)
+
+    def test_vertical_convert_to_fallback_fails_closed(self, tmp_dir):
+        from engine.text_runs import convert_text_run
+
+        src = os.path.join(tmp_dir, "v.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        pdf = pikepdf.new()
+        self._vertical_page(pdf, b"BT /F1 10 Tf 100 700 Td <0003> Tj ET")
+        pdf.save(src)
+        pdf.close()
+        # The 7.4 fallback embeds a HORIZONTAL face — dropped into a
+        # vertical column it would render on the wrong axis; refuse.
+        fonts_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "resources",
+            "fonts",
+        )
+        with pytest.raises(ValueError, match="vertical"):
+            convert_text_run(src, out, 1, 0, "X", fonts_dir)

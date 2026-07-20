@@ -24,6 +24,11 @@ Replacement (`replace_text_run`) rewrites exactly one show op:
     word-per-Td generator pattern would overlap a grown word otherwise.
     Any line change (T*, ', ", Td/TD with ty ≠ 0, Tm, BT, ET) stops the
     adjustment. Cross-line reflow is 7.5, deliberately.
+  - vertical runs (9.B4a — Identity-V/UCS2-V capabilities) list with
+    `vertical: true`, an em-wide column rect spanning the /W2 advance sum
+    DOWNWARD, and the anchor rule TRANSPOSED: same-COLUMN Td/TD followers
+    (tx == 0) shift by Δadvance in ty (unscaled — Tz never applies
+    vertically); a tx change is a column boundary and stops.
   - a run inside a Form XObject edits a COPY of the form for that draw
     (the page_images.py pattern verbatim).
 
@@ -48,6 +53,7 @@ from engine.redact import (
     IDENTITY,
     MAX_FORM_DEPTH,
     _as_matrix,
+    _bbox_of_corners_under_matrix,
     _bbox_of_rect_under_matrix,
     _copy_resources_for_write,
     _lookup_xobject,
@@ -235,9 +241,19 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
             cap = fonts.capability(resources, fallback, state.font_name)
             text, raw_width = _run_metrics(operator, operands, cap, state)
             combined = _mat_mult(state.tm, state.ctm)
-            x0, y0, x1, y1 = _bbox_of_rect_under_matrix(
-                combined, max(raw_width * state.h_scale, 0.01), max(state.font_size, 0.01)
-            )
+            vertical = bool(cap is not None and cap.vertical)
+            if vertical:
+                # 9.B4a v1 rect: a vertical run occupies one em-wide column
+                # centered on the pen (the vx = w/2 default) and spans the
+                # advance sum DOWNWARD from the start point.
+                half = max(state.font_size, 0.01) / 2.0
+                x0, y0, x1, y1 = _bbox_of_corners_under_matrix(
+                    combined, -half, -max(raw_width, 0.01), half, 0.0
+                )
+            else:
+                x0, y0, x1, y1 = _bbox_of_rect_under_matrix(
+                    combined, max(raw_width * state.h_scale, 0.01), max(state.font_size, 0.01)
+                )
             editable = bool(cap and cap.editable and text.strip())
             reason = None
             if cap is None:
@@ -261,6 +277,11 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     # round-trip — the renderer's longest-match validation
                     # reads these next to `encodable`. [] when none/refused.
                     "sequences": cap.encodable_sequences() if (cap and cap.editable) else [],
+                    # 9.B4a, additive: True when this run's advances/rect
+                    # were computed in vertical-writing mode (B4b's surface
+                    # reads it). A refused vertical font reports False —
+                    # the field describes the geometry actually computed.
+                    "vertical": vertical,
                 }
             )
             if detail is not None:
@@ -288,7 +309,7 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                         "fallback": fallback,
                     }
                 )
-            state.advance_after_show(raw_width)
+            state.advance_after_show(raw_width, vertical)
         elif operator == "Do":
             name = str(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback)
@@ -352,6 +373,10 @@ class _TextEditState:
         self.done = False
         # Set at the edit site; consumed by the same-line anchor pass.
         self.delta_scaled = 0.0  # Δ advance in text-space units incl. Tz
+        # 9.B4a: True when the edited run's font is vertical — the anchor
+        # pass transposes (same-COLUMN followers shift in ty; Tz does not
+        # scale delta_scaled).
+        self.vertical = False
         # (name, font_dict) a 7.4 builder produced — registered by the
         # rewriter into the CORRECT resources (page, or the form COPY).
         self.pending_font: tuple[str, object] | None = None
@@ -414,7 +439,21 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                 except (TypeError, ValueError, IndexError):
                     adjusting = False
                 else:
-                    if ty == 0.0:
+                    if edit.vertical:
+                        # 9.B4a: the same-line rule TRANSPOSED — a
+                        # same-COLUMN follower (tx == 0) shifts DOWN by
+                        # Δadvance (ty − Δ; a shrink pulls it back up);
+                        # any tx change is a column boundary and stops.
+                        # One adjustment only, same rationale as below.
+                        if tx == 0.0:
+                            gts.feed(operator, operands)
+                            kept.append(
+                                _instruction([tx, ty - edit.delta_scaled], operator)
+                            )
+                            adjusting = False
+                            continue
+                        adjusting = False
+                    elif ty == 0.0:
                         # Δ is applied to the FIRST same-line anchor ONLY:
                         # Td translations are RELATIVE to the previous line
                         # matrix, so the one adjustment propagates through
@@ -428,7 +467,8 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                         )
                         adjusting = False
                         continue
-                    adjusting = False
+                    else:
+                        adjusting = False
 
         if operator in SHOW_OPS and not edit.done:
             if edit.seen == edit.target:
@@ -460,6 +500,15 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     raise ValueError("no font is active for this text run")
                 if not cap.editable:
                     raise ValueError(cap.reason or "this text is not editable")
+                edit.vertical = bool(cap.vertical)
+                if edit.vertical and edit.builder is not None:
+                    # 9.B4a: the 7.4 fallback builder embeds a HORIZONTAL
+                    # Identity-H face — dropped into a vertical column it
+                    # would render on the wrong axis. Fail closed (the
+                    # builder-path guard discipline above).
+                    raise ValueError(
+                        "vertical text cannot be converted to the fallback font"
+                    )
                 _old_text, old_raw = _run_metrics(operator, operands, cap, gts)
                 if edit.builder is not None:
                     # 7.4 fallback path: the builder renders the replacement
@@ -478,8 +527,12 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                         + gts.word_spacing * _spaces_in(encoded, cap)
                     )
                     kept.append(_instruction([pikepdf.String(encoded)], "Tj"))
-                edit.delta_scaled = (new_raw - old_raw) * gts.h_scale
-                gts.advance_after_show(new_raw)
+                # 9.B4a: Tz never scales vertical advances, so the vertical
+                # Δ is unscaled.
+                edit.delta_scaled = (new_raw - old_raw) * (
+                    1.0 if edit.vertical else gts.h_scale
+                )
+                gts.advance_after_show(new_raw, edit.vertical)
                 adjusting = True
                 edit.seen += 1
                 continue
@@ -494,7 +547,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                         pass
             cap = fonts.capability(resources, fallback, gts.font_name)
             _text, raw = _run_metrics(operator, operands, cap, gts)
-            gts.advance_after_show(raw)
+            gts.advance_after_show(raw, bool(cap is not None and cap.vertical))
             kept.append(instruction)
             edit.seen += 1
             continue

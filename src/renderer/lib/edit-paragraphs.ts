@@ -93,6 +93,7 @@ interface EngineParagraphListing {
     reason: string | null;
     encodable: string;
     sequences?: string[];
+    vertical?: boolean;
   }[];
   paragraphs: {
     index: number;
@@ -138,6 +139,7 @@ export async function fetchEditTextListing(
     reason: run.reason ?? null,
     encodable: run.encodable ?? '',
     sequences: Array.isArray(run.sequences) ? run.sequences : [],
+    vertical: Boolean(run.vertical),
     rect: pdfRectToDisplay(run.rect, geometry.box, geometry.bakedRotate),
   }));
   const covered = new Set<number>();

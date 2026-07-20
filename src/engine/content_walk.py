@@ -172,9 +172,17 @@ class GraphicsTextState:
         self.tlm = mat_mult((1, 0, 0, 1, 0, -self.leading), self.tlm)
         self.tm = self.tlm
 
-    def advance_after_show(self, raw_width: float) -> None:
+    def advance_after_show(self, raw_width: float, vertical: bool = False) -> None:
         """Advance tm by a show's estimated width (the actual h-scale is
-        applied here so subsequent same-line runs stay positioned)."""
+        applied here so subsequent same-line runs stay positioned).
+        9.B4a: a vertical show advances tm F DOWNWARD instead — Tz never
+        scales vertical advances (spec 9.4.4: Th applies to tx only);
+        Tc/Tw ride inside `raw_width`, composed by the caller either way.
+        Callers pass the active font capability's `vertical`; the default
+        keeps every horizontal call site bit-identical."""
+        if vertical:
+            self.tm = mat_mult((1, 0, 0, 1, 0, -raw_width), self.tm)
+            return
         self.tm = mat_mult((1, 0, 0, 1, raw_width * self.h_scale, 0), self.tm)
 
     def feed(self, operator: str, operands: list) -> bool:

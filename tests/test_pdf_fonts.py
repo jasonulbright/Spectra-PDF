@@ -323,10 +323,24 @@ class TestPredefinedCjkCMaps:
         assert cap.char_width("文") == 1000  # noqa: RUF001
         assert set(cap.encodable()) == {"中", "文"}  # noqa: RUF001
 
-    def test_vertical_named_cmap_refuses(self):
+    def test_vertical_ucs2_without_tounicode_refuses(self):
+        # Pre-9.B4a this pinned a refusal for ALL vertical CMaps; B4a lifts
+        # exactly the ToUnicode-bearing UCS2-V class (TestVerticalWriting
+        # pins the acceptance). Without ToUnicode the refusal stands, and
+        # its reason still names the vertical class.
         pdf = pikepdf.new()
-        cap = font_capability(self._cjk_font(pdf, {0x4E2D: "中"}, "UniGB-UCS2-V"))  # noqa: RUF001
-        assert not cap.editable and "vertical" in (cap.reason or "")
+        cap = font_capability(
+            self._cjk_font(pdf, {0x4E2D: "中"}, "UniGB-UCS2-V", with_tou=False)  # noqa: RUF001
+        )
+        assert not cap.editable
+        assert "vertical" in (cap.reason or "") and "ToUnicode" in (cap.reason or "")
+
+    def test_legacy_vertical_cmap_still_refuses(self):
+        # Non-Unicode legacy encodings refuse regardless of writing mode —
+        # the 9.B4a acceptance is the Uni*-UCS2-V/Identity-V family only.
+        pdf = pikepdf.new()
+        cap = font_capability(self._cjk_font(pdf, {0x41: "A"}, "GBK-EUC-V"))
+        assert not cap.editable and "encoding" in (cap.reason or "")
 
     def test_non_unicode_legacy_cmap_refuses(self):
         pdf = pikepdf.new()
@@ -361,6 +375,165 @@ class TestPredefinedCjkCMaps:
         pdf = pikepdf.new()
         cap = font_capability(self._cjk_font(pdf, {0x4E2D: "中"}, "UniJIS-UCS2-HW-H"))  # noqa: RUF001
         assert cap.editable
+
+
+class TestVerticalWriting:
+    """Phase 9.B4a — Identity-V / Uni*-UCS2-V vertical twins: the same
+    ToUnicode round-trip as their -H counterparts, with /W2//DW2 VERTICAL
+    advances (|w1y|, 1000/em) served by the width methods and vertical=True
+    on the capability; horizontal fonts stay byte-identical."""
+
+    def _identity_v_font(self, pdf, mapping, w2=None, dw2=None, with_tou=True):
+        desc = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name("/AAAAAA+VertFace"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+        )
+        if w2 is not None:
+            desc["/W2"] = w2
+        if dw2 is not None:
+            desc["/DW2"] = Array(dw2)
+        font = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type0"),
+            BaseFont=Name("/AAAAAA+VertFace"),
+            Encoding=Name("/Identity-V"),
+            DescendantFonts=Array([pdf.make_indirect(desc)]),
+        )
+        if with_tou:
+            font["/ToUnicode"] = _tounicode_stream(pdf, mapping)
+        return pdf.make_indirect(font)
+
+    def test_identity_v_round_trip_and_w2_both_forms(self):
+        pdf = pikepdf.new()
+        # Triplet form `c [w1y vx vy …]` covers CIDs 3,4; range form
+        # `cfirst clast w1y vx vy` covers 5..6; CID 9 is unlisted (DW2
+        # default). Advances are |w1y|.
+        font = self._identity_v_font(
+            pdf,
+            {3: "あ", 4: "い", 5: "う", 6: "え", 9: "お"},
+            w2=Array([3, Array([-900, 500, 880, -800, 450, 880]), 5, 6, -750, 500, 880]),
+        )
+        cap = font_capability(font)
+        assert cap.editable and cap.reason is None
+        assert cap.vertical is True
+        # The round-trip is Identity-H's twin — decode/encode ride ToUnicode.
+        assert cap.decode(b"\x00\x03\x00\x04") == "あい"
+        assert cap.encode("あい") == b"\x00\x03\x00\x04"
+        assert set(cap.encodable()) == {"あ", "い", "う", "え", "お"}
+        with pytest.raises(ValueError):
+            cap.encode("X")
+        # Vertical advances: triplet form...
+        assert cap.char_width("あ") == 900
+        assert cap.char_width("い") == 800
+        # ...range form...
+        assert cap.char_width("う") == 750 and cap.char_width("え") == 750
+        # ...and the spec DW2 default ([880 -1000] → 1000) for unlisted CIDs.
+        assert cap.decoded_width(b"\x00\x09") == 1000
+        assert cap.text_width("あい") == 1700
+
+    def test_explicit_dw2_overrides_the_default_advance(self):
+        pdf = pikepdf.new()
+        font = self._identity_v_font(pdf, {3: "あ"}, dw2=[880, -500])
+        cap = font_capability(font)
+        assert cap.editable and cap.vertical is True
+        assert cap.char_width("あ") == 500
+        assert cap.decoded_width(b"\x00\x63") == 500
+
+    def test_ucs2_v_accepts_with_remapped_vertical_advances(self):
+        from pdfminer.cmapdb import CMapDB
+
+        pdf = pikepdf.new()
+        chars = {0x4E2D: "中", 0x6587: "文"}  # noqa: RUF001
+        # The -V CMap carries its own code->CID (incl. vertical-variant
+        # CIDs), so /W2 is keyed by ITS cids — the same remap discipline
+        # as the B2 horizontal test.
+        cm = CMapDB.get_cmap("UniGB-UCS2-V")
+        assert cm.is_vertical()
+        cid = {code: list(cm.decode(code.to_bytes(2, "big")))[0] for code in chars}
+        desc = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name("/CJKVert"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"GB1", Supplement=2),
+            W2=Array(
+                [
+                    cid[0x4E2D],
+                    Array([-900, 500, 880]),
+                    cid[0x6587],
+                    Array([-950, 500, 880]),
+                ]
+            ),
+        )
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/CJKVert"),
+                Encoding=Name("/UniGB-UCS2-V"),
+                DescendantFonts=Array([pdf.make_indirect(desc)]),
+                ToUnicode=_tounicode_stream(pdf, chars),
+            )
+        )
+        cap = font_capability(font)
+        assert cap.editable and cap.reason is None
+        assert cap.vertical is True
+        assert cap.decode(b"\x4e\x2d\x65\x87") == "中文"  # noqa: RUF001
+        assert cap.encode("中文") == b"\x4e\x2d\x65\x87"  # noqa: RUF001
+        # Widths came through the -V CMap's code->CID remap of /W2.
+        assert cap.char_width("中") == 900  # noqa: RUF001
+        assert cap.char_width("文") == 950  # noqa: RUF001
+
+    def test_horizontal_font_is_byte_identical_and_ignores_w2(self):
+        # The vertical=False guard: an Identity-H capability is untouched
+        # by B4a even when the descendant carries /W2//DW2 — widths stay
+        # the /W table's, the flag stays False.
+        pdf = pikepdf.new()
+        desc = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name("/AAAAAA+Face"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+            W=Array([3, Array([600, 300])]),
+            DW=750,
+            W2=Array([3, Array([-900, 500, 880, -800, 450, 880])]),
+            DW2=Array([880, -500]),
+        )
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/AAAAAA+Face"),
+                Encoding=Name("/Identity-H"),
+                DescendantFonts=Array([pdf.make_indirect(desc)]),
+                ToUnicode=_tounicode_stream(pdf, {3: "H", 4: "i"}),
+            )
+        )
+        cap = font_capability(font)
+        assert cap.vertical is False
+        assert cap.char_width("H") == 600  # /W, not /W2's 900
+        assert cap.char_width("i") == 300
+        assert cap.decoded_width(b"\x00\x63") == 750  # /DW, not /DW2's 500
+        # Simple fonts default the flag too.
+        simple = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type1"),
+                BaseFont=Name("/Helvetica"),
+                Encoding=Name("/WinAnsiEncoding"),
+            )
+        )
+        assert font_capability(simple).vertical is False
+
+    def test_vertical_without_tounicode_keeps_refusing(self):
+        # The lifted classes are ToUnicode-bearing ONLY; the vertical
+        # refusal (naming the class) survives without one — the pin the
+        # old blanket-refusal test carried forward.
+        pdf = pikepdf.new()
+        cap = font_capability(self._identity_v_font(pdf, {}, with_tou=False))
+        assert not cap.editable
+        assert "vertical" in (cap.reason or "") and "ToUnicode" in (cap.reason or "")
 
 
 class TestSymbolicProgramDerivedEncoding:

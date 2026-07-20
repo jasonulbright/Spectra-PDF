@@ -167,6 +167,11 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         cap = det["cap"]
         if cap is None:
             continue  # no active font: degenerate, run-box surface
+        if cap.vertical:
+            # 9.B4a: vertical runs never group — they stay editable on the
+            # run-box surface (like rotated text above); axis-transposed
+            # grouping is B4b.
+            continue
         style = det["style"]
         a, _b, _c, d, e, f = m
         mem = _Member()
@@ -1428,6 +1433,12 @@ def _rewrite_paragraph_stream(
                         pass
             cap = fonts.capability(resources, fallback_res, orig.font_name)
             _text, raw = _run_metrics(operator, operands, cap, orig)
+            # 9.B4a: a KEPT vertical run advances the parallel walks
+            # downward — the model's tm must match reality or the next
+            # injected absolute Tm would move a kept show. (Members are
+            # never vertical: _members_from skips them; emission raw_w at
+            # the first-ordinal build below is horizontal by construction.)
+            vert = bool(cap is not None and cap.vertical)
             if is_member:
                 if show_ordinal == edit.first_ordinal:
                     if edit.fallback is not None:
@@ -1443,7 +1454,7 @@ def _rewrite_paragraph_stream(
                 edit.changed = True
                 changed = True
                 diverged = True
-                orig.advance_after_show(raw)
+                orig.advance_after_show(raw, vert)
                 show_ordinal += 1
                 continue
             if diverged:
@@ -1457,8 +1468,8 @@ def _rewrite_paragraph_stream(
                     kept.append(_instruction([payload], "Tj"))
                 else:
                     kept.append(instruction)
-                orig.advance_after_show(raw)
-                emit.advance_after_show(raw)
+                orig.advance_after_show(raw, vert)
+                emit.advance_after_show(raw, vert)
                 if _states_equal(orig, emit):
                     diverged = False
             else:
@@ -1471,8 +1482,8 @@ def _rewrite_paragraph_stream(
                             emit.char_spacing = float(operands[1])
                         except (TypeError, ValueError):
                             pass
-                orig.advance_after_show(raw)
-                emit.advance_after_show(raw)
+                orig.advance_after_show(raw, vert)
+                emit.advance_after_show(raw, vert)
             show_ordinal += 1
             continue
 

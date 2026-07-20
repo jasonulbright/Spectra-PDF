@@ -161,6 +161,31 @@ def _hebrew(pdf) -> pikepdf.Object:
     )
 
 
+def _identity_v(pdf, mapping: dict[int, str], w2: list) -> pikepdf.Object:
+    """Identity-V + ToUnicode + /W2 — the 9.B4a vertical-run producer."""
+    from tests.test_pdf_fonts import _tounicode_stream
+
+    desc = pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name("/VertFace"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+            W2=Array([Array(el) if isinstance(el, list) else el for el in w2]),
+        )
+    )
+    return pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type0"),
+            BaseFont=Name("/VertFace"),
+            Encoding=Name("/Identity-V"),
+            DescendantFonts=Array([desc]),
+            ToUnicode=_tounicode_stream(pdf, mapping),
+        )
+    )
+
+
 def _page(pdf, content: bytes, fonts: dict, xobjects: dict | None = None):
     page = pdf.add_blank_page(page_size=(612, 792))
     res = Dictionary(Font=Dictionary(**{k.lstrip("/"): v for k, v in fonts.items()}))
@@ -310,6 +335,26 @@ class TestGrouping:
         assert listing["paragraphs"] == []
         assert len(listing["runs"]) == 1
 
+    def test_vertical_text_never_groups(self, tmp_dir):
+        # 9.B4a: vertical runs are EDITABLE run boxes but never paragraph
+        # members (axis-transposed grouping is B4b) — the rotated-text
+        # boundary's twin. Two stacked shows in one column would happily
+        # baseline-cluster if the skip ever regressed.
+        src = os.path.join(tmp_dir, "vert.pdf")
+        pdf = pikepdf.new()
+        vfont = _identity_v(pdf, {3: "あ", 4: "い"}, [3, [-900, 500, 880, -800, 450, 880]])
+        _page(
+            pdf,
+            b"BT /F1 10 Tf 100 700 Td <00030004> Tj 0 -40 Td <0003> Tj ET",
+            {"/F1": vfont},
+        )
+        pdf.save(src)
+        pdf.close()
+        listing = list_text_paragraphs(src, 1)
+        assert listing["paragraphs"] == []
+        assert len(listing["runs"]) == 2
+        assert all(r["vertical"] and r["editable"] for r in listing["runs"])
+
     def test_streams_never_share_a_paragraph(self, tmp_dir):
         src = os.path.join(tmp_dir, "form.pdf")
         pdf = pikepdf.new()
@@ -434,6 +479,92 @@ class TestReplaceParagraphText:
         first = paras[0]
         _apply(src, out, first, "First para text grown by several words")
         _assert_non_members_unmoved(src, out, first["runs"])
+
+    def test_kept_vertical_column_survives_a_paragraph_edit(self, tmp_dir):
+        # 9.B4a: the resync's REPOSITIONING is direction-agnostic (kept
+        # shows are re-anchored at the parallel walk's ABSOLUTE tm), but
+        # the walk's model must advance a kept vertical show DOWNWARD.
+        # The column here FLOWS from the member with no Td between, so
+        # divergence is still live at BOTH vertical shows and their
+        # injected anchors bake the model's axis into the file — asserted
+        # against HAND-COMPUTED spec positions (a self-consistent
+        # wrong-axis model passes any walker-vs-walker comparison, so the
+        # dual-walk harness alone cannot pin this).
+        src = os.path.join(tmp_dir, "mix.pdf")
+        pdf = pikepdf.new()
+        vfont = _identity_v(pdf, {3: "あ", 4: "い"}, [3, [-900, 500, 880, -800, 450, 880]])
+        # Member "HH" (Helvetica 722×2 → 17.328 wide at 12); the column
+        # flows at x = 72+17.328, advances (900+800)/1000×10 = 17 then
+        # 900/1000×10 = 9 downward from y = 700.
+        _page(
+            pdf,
+            b"BT /F1 12 Tf 72 700 Td (HH) Tj /FV 10 Tf <00030004> Tj <0003> Tj ET",
+            {"/F1": _helv(pdf), "/FV": vfont},
+        )
+        pdf.save(src)
+        pdf.close()
+        v1 = [72 + 17.328 - 5, 683, 72 + 17.328 + 5, 700]
+        v2 = [72 + 17.328 - 5, 674, 72 + 17.328 + 5, 683]
+        before = list_text_runs(src, 1)["runs"]
+        assert before[1]["rect"] == pytest.approx(v1, abs=0.05)
+        assert before[2]["rect"] == pytest.approx(v2, abs=0.05)
+
+        paras = _paras(src)
+        assert len(paras) == 1  # the vertical column never groups
+        target = paras[0]
+        _apply(src, out := os.path.join(tmp_dir, "o.pdf"), target, "HHH")
+        _assert_non_members_unmoved(src, out, target["runs"])
+        after = list_text_runs(out, 1)["runs"]
+        assert [r["vertical"] for r in after] == [False, True, True]
+        # The kept column sits at its ORIGINAL spec positions — the grown
+        # member does not push it, and the flowed second show's baked
+        # anchor is one advance DOWN, not sideways.
+        assert after[1]["rect"] == pytest.approx(v1, abs=0.05)
+        assert after[2]["rect"] == pytest.approx(v2, abs=0.05)
+
+    def test_flowing_vertical_run_between_members_keeps_the_tail_unmoved(self, tmp_dir):
+        # 9.B4a round-27 coverage gap: the KEPT-ALREADY-RESYNCED advance
+        # site (the else branch after divergence closes) was mutation-
+        # invisible — dropping its `vert` flag failed NOTHING while a
+        # trailing run silently jumped sideways. The exposing shape: a
+        # vertical column FLOWING (no Td) between two members of one
+        # paragraph, and a further vertical run flowing after the second
+        # member; editing the paragraph must leave the tail at its
+        # hand-computed spec position (lens-repro'd drift: ~9pt x-jump
+        # with the flag dropped).
+        # The exposing shape (lens blueprint): `0 0 Td` before the column
+        # + a LONG replacement lets the resync CLOSE divergence before
+        # the tail show — routing it through the kept-already-resynced
+        # else branch, the one site every other test misses.
+        src = os.path.join(tmp_dir, "gap.pdf")
+        pdf = pikepdf.new()
+        vfont = _identity_v(pdf, {3: "a"}, [3, [-900, 500, 880]])
+        _page(
+            pdf,
+            b"BT /F1 12 Tf 72 700 Td (Row) Tj"
+            b" 0 0 Td /FV 10 Tf <0003> Tj <0003> Tj"
+            b" /F1 12 Tf (Two) Tj"
+            b" /FV 10 Tf <0003> Tj ET",
+            {"/F1": _helv(pdf), "/FV": vfont},
+        )
+        pdf.save(src)
+        pdf.close()
+        before = list_text_runs(src, 1)["runs"]
+        tail_before = [r for r in before if r["vertical"]][-1]["rect"]
+
+        paras = _paras(src)
+        target = next(p for p in paras if "Row" in p["text"])
+        assert len(target["runs"]) >= 2  # both horizontal members grouped
+        out = os.path.join(tmp_dir, "o.pdf")
+        spans = [{"start": 0, "end": len("Rowxxxxxxxxxx Two"), "run": target["runs"][0]}]
+        _apply(src, out, target, "Rowxxxxxxxxxx Two", spans=spans)
+        after = list_text_runs(out, 1)["runs"]
+        tail_after = [r for r in after if r["vertical"]][-1]["rect"]
+        # With the else-branch advance's `vert` flag dropped, this tail
+        # jumps sideways (lens mutation repro); correct axis = unmoved.
+        assert tail_after == pytest.approx(tail_before, abs=0.05), (
+            f"tail moved: {tail_after} vs {tail_before}"
+        )
 
     def test_deletion_removes_members_and_moves_nothing(self, tmp_dir):
         src = _build(

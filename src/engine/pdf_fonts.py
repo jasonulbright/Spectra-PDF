@@ -26,7 +26,11 @@ Editability taxonomy (every run is LISTED; refusal carries the reason):
     DERIVED from the embedded program's cmap + glyph names (9.B3); refused
     only when neither yields a single code.
   - Type0 + Identity-H + ToUnicode → editable (the copy-paste capability
-    bar: text you can extract is text you can re-enter).
+    bar: text you can extract is text you can re-enter). Identity-V and
+    Uni*-UCS2-V are their vertical twins (9.B4a): same 2-byte codes, same
+    ToUnicode round-trip; the capability carries `vertical=True` and its
+    widths are the /W2//DW2 VERTICAL advances (|w1y|, 1000/em) — callers
+    apply the downward direction.
   - Type3 ("glyphs are procedures"), Type0 without ToUnicode or with a
     non-Identity CMap, and fonts with no resolvable encoding → refused,
     with that reason. These are the rare classes; 7.4's replacement-font
@@ -65,6 +69,7 @@ class FontCapability:
         default_width: float,
         code_bytes: int,
         sequences: Optional[dict[str, int]] = None,
+        vertical: bool = False,
     ):
         self.editable = editable
         self.reason = reason
@@ -78,6 +83,11 @@ class FontCapability:
         # encode()/text_width() match these longest-first; encodable()/
         # can_encode stay the single-char conservative floor.
         self._sequences = sequences or {}
+        # 9.B4a: vertical writing mode. When True, `widths`/`default_width`
+        # ARE the vertical advances (|w1y| from /W2//DW2, 1000/em), so
+        # char_width/text_width/decoded_width return the vertical advance
+        # magnitude unchanged — callers apply the downward direction.
+        self.vertical = vertical
 
     # -- decode ------------------------------------------------------------
     def decode(self, data: bytes) -> str:
@@ -424,6 +434,21 @@ def _cmap_code_widths(named_cmap, codes, cid_widths: dict[int, float]) -> dict[i
     return out
 
 
+def _plain(el):
+    # Numbers FIRST (pdfminer's get_widths/get_widths2 want real ints for
+    # CID starts), then arrays; pikepdf's universal Object surface defeats
+    # hasattr-based duck typing (same trap as the encoding branch).
+    try:
+        f = float(el)
+        return int(f) if f.is_integer() else f
+    except (TypeError, ValueError):
+        pass
+    try:
+        return [_plain(x) for x in el]
+    except TypeError:
+        return el
+
+
 def _cid_widths(descendant) -> tuple[dict[int, float], float]:
     from pdfminer.pdffont import get_widths
 
@@ -437,24 +462,35 @@ def _cid_widths(descendant) -> tuple[dict[int, float], float]:
     w = descendant.get("/W")
     if w is None:
         return {}, default
-
-    def _plain(el):
-        # Numbers FIRST (pdfminer's get_widths wants real ints for CID
-        # starts), then arrays; pikepdf's universal Object surface defeats
-        # hasattr-based duck typing (same trap as the encoding branch).
-        try:
-            f = float(el)
-            return int(f) if f.is_integer() else f
-        except (TypeError, ValueError):
-            pass
-        try:
-            return [_plain(x) for x in el]
-        except TypeError:
-            return el
-
     try:
         parsed = get_widths(_plain(list(w)))
         return {int(k): float(v) for k, v in parsed.items()}, default
+    except Exception:
+        return {}, default
+
+
+def _cid_vertical_advances(descendant) -> tuple[dict[int, float], float]:
+    """CID → |w1y| vertical advance (1000/em) from /W2 (both spec forms:
+    `c [w1y vx vy …]` triplets and `cfirst clast w1y vx vy` — pdfminer's
+    get_widths2 parses both), default from /DW2 (spec default [880 -1000] →
+    advance 1000). 9.B4a: magnitudes only — the walker applies the downward
+    direction; the vx/vy position vectors are approximated by the v1 rect
+    (vx = w/2 centering), not stored."""
+    from pdfminer.pdffont import get_widths2
+
+    default = 1000.0
+    try:
+        dw2 = descendant.get("/DW2")
+        if dw2 is not None and len(dw2) >= 2:
+            default = abs(float(dw2[1]))
+    except (TypeError, ValueError):
+        pass
+    w2 = descendant.get("/W2")
+    if w2 is None:
+        return {}, default
+    try:
+        parsed = get_widths2(_plain(list(w2)))
+        return {int(k): abs(float(v[0])) for k, v in parsed.items()}, default
     except Exception:
         return {}, default
 
@@ -469,15 +505,16 @@ def font_capability(font_obj) -> FontCapability:
     if subtype == "Type0":
         enc = str(font_obj.get("/Encoding", "")).lstrip("/")
         # Identity-H (code == CID) OR a predefined UNICODE horizontal CMap
-        # (Uni*-H — the modern CJK majority; 9.B2). The named CMap is
-        # loaded via pdfminer's bundled CMap DB and used ONLY to remap
-        # widths (its code->CID differs from Identity); the text
-        # round-trip rides ToUnicode either way. Vertical + non-Unicode
-        # legacy encodings stay refused with a reason.
+        # (Uni*-H — the modern CJK majority; 9.B2), plus their vertical
+        # twins Identity-V / Uni*-UCS2-V (9.B4a) — same 2-byte codes, same
+        # ToUnicode round-trip; only the ADVANCE AXIS differs, carried as
+        # `vertical=True` + /W2//DW2 advances. The named CMap is loaded
+        # via pdfminer's bundled CMap DB and used ONLY to remap widths
+        # (its code->CID differs from Identity); non-Unicode legacy
+        # encodings stay refused with a reason.
         named_cmap = None
-        if enc != "Identity-H":
-            if enc.endswith("-V"):
-                return _refused("vertical writing is not editable yet", code_bytes=2)
+        vertical = enc.endswith("-V")
+        if enc not in ("Identity-H", "Identity-V"):
             # ONLY the -UCS2- family: UCS-2 is by DEFINITION a fixed 2-byte
             # encoding, so our fixed-2-byte decode/encode is exact. The
             # other Uni* widths are NOT 2-byte — UTF8 is 3 bytes for CJK,
@@ -493,7 +530,10 @@ def font_capability(font_obj) -> FontCapability:
                     cm = CMapDB.get_cmap(enc)
                 except Exception:
                     cm = None
-                if cm is None or cm.is_vertical():
+                # 9.B4a: the loaded CMap's own writing mode must AGREE with
+                # the name's -H/-V suffix (a disagreement is malformed) —
+                # for -H names this is B2's is_vertical() gate unchanged.
+                if cm is None or cm.is_vertical() != vertical:
                     return _refused(
                         f"unsupported composite-font encoding ({enc})", code_bytes=2
                     )
@@ -505,6 +545,13 @@ def font_capability(font_obj) -> FontCapability:
                 )
         tou = font_obj.get("/ToUnicode")
         if tou is None:
+            if vertical:
+                # 9.B4a: the accepted vertical classes still require
+                # ToUnicode; the reason keeps naming the vertical class
+                # (the zoo pins the "vertical" substring).
+                return _refused(
+                    "no ToUnicode map — vertical text cannot be re-entered", code_bytes=2
+                )
             return _refused("no ToUnicode map — this text cannot be re-entered", code_bytes=2)
         try:
             code2uni = _parse_tounicode(tou.read_bytes())
@@ -516,16 +563,25 @@ def font_capability(font_obj) -> FontCapability:
         cid_widths: dict[int, float] = {}
         default = 1000.0
         if desc_fonts is not None and len(desc_fonts) > 0:
-            cid_widths, default = _cid_widths(desc_fonts[0])
+            # 9.B4a: a vertical capability's widths ARE the vertical
+            # advances (/W2//DW2); /W//DW stay the horizontal path's,
+            # byte-identical.
+            if vertical:
+                cid_widths, default = _cid_vertical_advances(desc_fonts[0])
+            else:
+                cid_widths, default = _cid_widths(desc_fonts[0])
         if named_cmap is None:
             # Identity-H: the byte code IS the CID, so the /W table
-            # (CID-keyed) doubles as code-keyed unchanged.
+            # (CID-keyed) doubles as code-keyed unchanged (Identity-V
+            # likewise for /W2; 9.B4a).
             widths = cid_widths
         else:
             # Named CMap: remap /W (CID-keyed) to CODE-keyed via the
             # CMap's code->CID. FontCapability.decoded_width keys on the
             # emitted CODE bytes, which are what encode() produces, so the
-            # widths dict must be code-keyed to stay honest.
+            # widths dict must be code-keyed to stay honest. The -V CMaps
+            # carry their own code->CID (incl. vertical-variant CIDs), so
+            # the same remap serves /W2 (9.B4a).
             widths = _cmap_code_widths(named_cmap, code2uni.keys(), cid_widths)
         # 9.B5: no /Widths subset guard on the composite path, so the
         # ligature table's encode filter is the decode map itself.
@@ -538,6 +594,7 @@ def font_capability(font_obj) -> FontCapability:
             default,
             2,
             sequences=_ligatures(code2uni, code2uni),
+            vertical=vertical,
         )
 
     # Simple fonts (Type1, MMType1, TrueType).

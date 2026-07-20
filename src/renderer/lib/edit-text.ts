@@ -27,6 +27,9 @@ export interface EditTextRun {
   /** 9.B5: ligature sequences the font round-trips (unambiguous
    * multi-char inverses) — validation matches them longest-first. */
   sequences: string[];
+  /** 9.B4a: the run's advances/rect were computed in vertical-writing
+   * mode (Identity-V / Uni*-UCS2-V). B4b's surfaces consume this. */
+  vertical: boolean;
 }
 
 interface EngineRunListing {
@@ -39,6 +42,7 @@ interface EngineRunListing {
     reason: string | null;
     encodable: string;
     sequences?: string[];
+    vertical?: boolean;
   }[];
 }
 
@@ -60,6 +64,7 @@ export async function fetchTextRuns(
     reason: run.reason ?? null,
     encodable: run.encodable ?? '',
     sequences: Array.isArray(run.sequences) ? run.sequences : [],
+    vertical: Boolean(run.vertical),
     rect: pdfRectToDisplay(run.rect, geometry.box, geometry.bakedRotate),
   }));
 }
