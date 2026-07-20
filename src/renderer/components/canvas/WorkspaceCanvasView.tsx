@@ -1096,20 +1096,45 @@ export function WorkspaceCanvasView({
   // in-progress edit because of an unrelated file's op (review-caught
   // CRITICAL). Those reruns still refetch listings (ordering can shift);
   // they just stop closing the editor.
-  const prevEditCtxRef = useRef<{ tool: unknown; docId: unknown; buffer: unknown }>({
-    tool: null,
-    docId: null,
-    buffer: null,
-  });
+  const prevEditCtxRef = useRef<{ tool: unknown; docId: unknown; buffer: unknown; path: unknown }>(
+    { tool: null, docId: null, buffer: null, path: null },
+  );
+  // C1-tail (keep selection across a transform): count-PRESERVING image
+  // ops (transform/rotate/crop/opacity/replace) stash {pageNumber, index}
+  // at commit; when the post-op refetch lands (page ids regenerated —
+  // the non-authored-rebuild rule), the effect below re-selects the same
+  // placement so chained nudges need no re-click. Delete/extract never
+  // stash (the index dies / nothing changes); declines and failures
+  // clear it.
+  const imageReselectRef = useRef<{ pageNumber: number; index: number } | null>(null);
   useEffect(() => {
     const token = ++editFetchTokenRef.current;
     const prev = prevEditCtxRef.current;
     const ctxChanged =
       prev.tool !== tool || prev.docId !== (focusedDoc?.id ?? null) || prev.buffer !== editBuffer;
-    prevEditCtxRef.current = { tool, docId: focusedDoc?.id ?? null, buffer: editBuffer };
+    // The reselect stash dies ONLY on a tool or FILE (path) change. Not
+    // on buffer identity, not on doc id: a commit lands as TWO passes
+    // here (bytes first with the old id, then the reindex's regenerated
+    // id with the same bytes — instrumented, not assumed), so any rule
+    // keyed on those terms kills the stash mid-flight (e2e-caught, three
+    // designs deep — buffer term, docId term, then a bytes-vs-id
+    // discriminator that the two-pass anatomy defeats). Path is the
+    // durable file identity across generations (ids stay opaque — never
+    // parsed); the manifest-partition corner this leaves open is safe
+    // because `workspacePageNumber` is FILE-level — same-path partitions
+    // occupy disjoint number ranges, so a lingering stash can only ever
+    // re-match its own physical page.
+    const toolOrPathChanged = prev.tool !== tool || prev.path !== (focusedDoc?.path ?? null);
+    prevEditCtxRef.current = {
+      tool,
+      docId: focusedDoc?.id ?? null,
+      buffer: editBuffer,
+      path: focusedDoc?.path ?? null,
+    };
     if (ctxChanged) {
       setEditSel(null);
       setEditingText(null);
+      if (toolOrPathChanged) imageReselectRef.current = null;
     }
     if (tool !== 'edit' || !focusedDoc || !editBuffer) {
       setEditImagesByPage(NO_EDIT_IMAGES);
@@ -1181,6 +1206,29 @@ export function WorkspaceCanvasView({
           }
           setEditImagesByPage(new Map(nextImages)); // incremental fill
           setEditGeomByPage(new Map(nextGeom));
+          // C1-tail: restore the stashed selection when ITS page's fresh
+          // listing lands. Matched on sourcePageIndex, NOT the recomputed
+          // tier position — a concurrent page-strip drag reorders tier
+          // positions mid-flight while sourcePageIndex stays the physical
+          // file slot (round 28 MEDIUM). The stash PERSISTS across passes
+          // (round 28 HIGH: a commit's buffer pass and its reindex pass
+          // each wipe editSel; a one-shot consume restored on the first
+          // pass only for the second to wipe it) — restoring is idempotent
+          // (the functional ?? keeps any user pick), and the stash dies on
+          // tool/path change, decline/error, a USER selection (the
+          // handleSelect*/open-editor/harness kills), or its target index
+          // vanishing from its page.
+          const stash = imageReselectRef.current;
+          if (stash && page.sourcePageIndex === stash.pageNumber - 1) {
+            if (placements.some((pl) => pl.index === stash.index)) {
+              setEditSel(
+                (prevSel) =>
+                  prevSel ?? { kind: 'image' as const, pageId: page.id, index: stash.index },
+              );
+            } else {
+              imageReselectRef.current = null;
+            }
+          }
           if (listing.runBoxes.length > 0 || listing.paragraphs.length > 0) {
             nextText.set(page.id, listing);
           } else {
@@ -1214,6 +1262,7 @@ export function WorkspaceCanvasView({
   const committingTextRef = useRef(false);
 
   const handleSelectEditImage = useCallback((pageId: string, index: number) => {
+    imageReselectRef.current = null; // a user pick owns selection now
     setEditNotice(null);
     setEditingText(null);
     setEditSel((prev) =>
@@ -1224,6 +1273,7 @@ export function WorkspaceCanvasView({
   }, []);
 
   const handleSelectEditText = useCallback((pageId: string, index: number) => {
+    imageReselectRef.current = null; // a user pick owns selection now
     setEditNotice(null);
     setEditingText(null);
     setEditSel((prev) =>
@@ -1239,6 +1289,7 @@ export function WorkspaceCanvasView({
       if (editBusy || committingTextRef.current) return;
       const run = editTextByPage.get(pageId)?.runBoxes.find((r) => r.index === index);
       if (!run) return;
+      imageReselectRef.current = null; // a user pick owns selection now
       if (!run.editable) {
         // The refusal SELECTS the run too — the toolbar must reflect what
         // was just clicked, not a previous image selection (review-caught).
@@ -1254,6 +1305,7 @@ export function WorkspaceCanvasView({
   );
 
   const handleSelectEditParagraph = useCallback((pageId: string, index: number) => {
+    imageReselectRef.current = null; // a user pick owns selection now
     setEditNotice(null);
     setEditingText(null);
     setEditSel((prev) =>
@@ -1271,6 +1323,7 @@ export function WorkspaceCanvasView({
       if (editBusy || committingTextRef.current) return;
       const para = editTextByPage.get(pageId)?.paragraphs.find((p) => p.index === index);
       if (!para) return; // only editable paragraphs are listed
+      imageReselectRef.current = null; // a user pick owns selection now
       setEditNotice(null);
       setEditSel({ kind: 'para', pageId, index });
       setEditingText({ kind: 'para', pageId, index });
@@ -1472,6 +1525,12 @@ export function WorkspaceCanvasView({
       const target = editSel;
       setEditBusy(true);
       setEditNotice(null);
+      // Count-preserving kinds re-select after the rebuild; delete's
+      // index dies with the placement and extract changes nothing.
+      imageReselectRef.current =
+        kind === 'replace' || kind === 'crop' || kind === 'opacity'
+          ? { pageNumber, index: target.index }
+          : null;
       const previousPlacements = editImagesByPage.get(target.pageId);
       if (kind !== 'extract') {
         // Indexes shift under a delete; the refetch is a per-page engine
@@ -1489,6 +1548,7 @@ export function WorkspaceCanvasView({
       try {
         const notice = await onEditImage(kind, focusedDoc.path, pageNumber, target.index, opts);
         if (notice === EDIT_DECLINED) {
+          imageReselectRef.current = null;
           // Declined signed-doc warning: no buffer change, no refetch —
           // restore the synchronously-dropped placements and say so
           // (review-caught: silence read as success).
@@ -1504,6 +1564,7 @@ export function WorkspaceCanvasView({
           setEditNotice({ text: notice, error: false });
         }
       } catch (err) {
+        imageReselectRef.current = null;
         setEditNotice({
           text: err instanceof Error ? err.message : String(err),
           error: true,
@@ -1539,9 +1600,8 @@ export function WorkspaceCanvasView({
   // (the redaction-mark rule), so the commit gate baking a pending page
   // rotation can't invalidate it — no re-projection needed, unlike A2's
   // signature placement. The whole-file op rebuilds the page (positional ids
-  // regenerate), so the buffer-change refetch clears the selection and the
-  // overlay just like delete/replace — a second nudge means re-selecting the
-  // image (v1; keeping selection across the rebuild is a C-tail).
+  // regenerate); the reselect stash restores the selection when the fresh
+  // listing lands, so chained nudges need no re-click (the shipped C-tail).
   const commitImageTransform = useCallback(
     async (pageId: string, index: number, matrix: number[]): Promise<void> => {
       if (!focusedDoc || editBusy) return;
@@ -1549,16 +1609,19 @@ export function WorkspaceCanvasView({
       if (pageNumber == null) return;
       setEditBusy(true);
       setEditNotice(null);
+      imageReselectRef.current = { pageNumber, index };
       try {
         const notice = await onEditImage('transform', focusedDoc.path, pageNumber, index, {
           matrix,
         });
         if (notice === EDIT_DECLINED) {
+          imageReselectRef.current = null;
           setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
         } else if (typeof notice === 'string') {
           setEditNotice({ text: notice, error: false });
         }
       } catch (err) {
+        imageReselectRef.current = null;
         setEditNotice({ text: err instanceof Error ? err.message : String(err), error: true });
       } finally {
         setEditBusy(false);
@@ -1745,7 +1808,10 @@ export function WorkspaceCanvasView({
         if (!path) throw new Error('addImage: no active document');
         await onAddImageRef.current(path, page, rect, source);
       },
-      select: (pageId, index) => setEditSel({ kind: 'image', pageId, index }),
+      select: (pageId, index) => {
+        imageReselectRef.current = null; // harness picks are user picks
+        setEditSel({ kind: 'image', pageId, index });
+      },
       selection: () => editSelRef.current,
       textPageIds: () => [...editTextRef.current.keys()],
       textRuns: (pageId) =>
@@ -1762,6 +1828,7 @@ export function WorkspaceCanvasView({
           text: p.text,
           lineCount: p.lineCount,
           alignment: p.alignment,
+          vertical: p.vertical,
         })),
       openParagraphEditor: (pageId, index) => openParagraphEditorRef.current(pageId, index),
       act: (kind, opts) => runEditActionRef.current(kind, opts),

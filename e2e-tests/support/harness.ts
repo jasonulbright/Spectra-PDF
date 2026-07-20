@@ -887,6 +887,16 @@ export async function editImageAdd(
   }
 }
 
+export async function editImageSelection(): Promise<
+  { kind: string; pageId: string; index: number } | null
+> {
+  return await browser.execute<{ kind: string; pageId: string; index: number } | null, []>(
+    function () {
+      return (window as any).__SPECTRA_TEST__.editImageSelection();
+    },
+  );
+}
+
 export async function editImageSelect(pageId: string, index: number): Promise<void> {
   await browser.execute<void, [string, number]>(
     function (p, i) {

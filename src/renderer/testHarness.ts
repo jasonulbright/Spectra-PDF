@@ -192,7 +192,7 @@ export interface CanvasEditImagesHandlers {
   /** Paragraph layer (7.5). */
   paragraphs: (
     pageId: string,
-  ) => { index: number; text: string; lineCount: number; alignment: string }[];
+  ) => { index: number; text: string; lineCount: number; alignment: string; vertical: boolean }[];
   openParagraphEditor: (pageId: string, index: number) => void;
   act: (
     kind: 'delete' | 'replace' | 'extract' | 'crop' | 'opacity',
@@ -590,7 +590,7 @@ export interface TestHarness {
    * REAL paragraph editor (then driven via data-testid edit-para-input). */
   editParagraphs: (
     pageId: string,
-  ) => { index: number; text: string; lineCount: number; alignment: string }[];
+  ) => { index: number; text: string; lineCount: number; alignment: string; vertical: boolean }[];
   editParagraphOpen: (pageId: string, index: number) => void;
   /** Create PDF from PostScript (Phase 8; dialog must be open). */
   createPdfRun: (source: string, output: string, preset?: string) => Promise<boolean>;
@@ -599,6 +599,8 @@ export interface TestHarness {
     pageId: string,
   ) => { index: number; nested: boolean; matrix: number[]; opacity: number; kind: string }[];
   editImageSelect: (pageId: string, index: number) => void;
+  /** The live edit selection (C1-tail: proves the post-op auto-reselect). */
+  editImageSelection: () => { kind: string; pageId: string; index: number } | null;
   /** Transform (9.C1) an image placement to an absolute user-space matrix. */
   editImageTransform: (pageId: string, index: number, matrix: number[]) => Promise<void>;
   editImageAct: (
@@ -1076,6 +1078,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     editImagePageIds: () => canvasEditImages?.pageIds() ?? [],
     editImagePlacements: (pageId) => canvasEditImages?.placements(pageId) ?? [],
     editImageSelect: (pageId, index) => canvasEditImages?.select(pageId, index),
+    editImageSelection: () => canvasEditImages?.selection() ?? null,
     editImageAct: async (kind, opts) => {
       if (!canvasEditImages) {
         const msg = 'editImageAct: canvas edit mode not mounted';

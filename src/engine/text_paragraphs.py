@@ -24,6 +24,16 @@ one-line summary of every structural rule:
     — never de-/re-hyphenated).
   - The heuristic THRESHOLDS below are code constants pinned by the
     fixture matrix (tests own the numbers, the doc owns the intent).
+  - Vertical runs (9.B4b) ride the SAME pipeline under one 90°
+    transposition T(x, y) = (−y, x), applied at exactly TWO boundaries:
+    member admission (`_members_from` — a column IS a line, the column
+    pitch IS the leading, top-alignment IS left-alignment) and the
+    emission's per-segment Tm anchor (T⁻¹(x', y') = (y', −x'); the
+    linear part is untouched — glyphs stay upright, the walker's
+    vertical advance model owns the direction). Every grouping heuristic
+    between the boundaries applies unchanged. Modes never mix: the
+    writing mode rides INSIDE lkey, which also makes the A4 merge's
+    lkey guard refuse cross-mode merges for free.
 
 The rewrite half (`replace_paragraph_text`) lives here too: member show
 ops are removed, the paragraph re-emitted at the first member's position
@@ -121,6 +131,7 @@ class _Member:
         "lkey",
         "resources",
         "fallback",
+        "vertical",
     )
 
 
@@ -167,13 +178,9 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         cap = det["cap"]
         if cap is None:
             continue  # no active font: degenerate, run-box surface
-        if cap.vertical:
-            # 9.B4a: vertical runs never group — they stay editable on the
-            # run-box surface (like rotated text above); axis-transposed
-            # grouping is B4b.
-            continue
         style = det["style"]
         a, _b, _c, d, e, f = m
+        vertical = bool(cap.vertical)
         mem = _Member()
         mem.index = run["index"]
         mem.stream = det["stream"]
@@ -183,14 +190,32 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.operator = det["operator"]
         mem.a = a
         mem.d = d
-        mem.x0 = e
-        mem.x1 = e + det["raw_width"] * style["h_scale"] * a
-        mem.y = f
-        mem.eff = max(style["size"] * d, 0.01)
+        mem.vertical = vertical
         space_1000 = (
             cap.char_width(" ") if cap.can_encode(" ") else FALLBACK_SPACE_1000
         )
-        mem.space_w = space_1000 / 1000.0 * style["size"] * style["h_scale"] * a
+        if vertical:
+            # 9.B4b: ONE 90° transposition T(x, y) = (−y, x) admits a
+            # vertical run into the horizontal model — the downward
+            # advance from the pen (e, f) maps to +x′, the column's x to
+            # the line baseline y′, the em width (size×a, the column
+            # axis) to the line size, and the space width scales by d
+            # (Tz never applies vertically; the B4a advances are the
+            # widths). Every heuristic downstream then applies unchanged;
+            # the emission untransposes at its Tm anchors (T⁻¹).
+            mem.x0 = -f
+            mem.x1 = -f + det["raw_width"] * d
+            mem.y = e
+            mem.eff = max(style["size"] * a, 0.01)
+            mem.space_w = space_1000 / 1000.0 * style["size"] * d
+        else:
+            mem.x0 = e
+            mem.x1 = e + det["raw_width"] * style["h_scale"] * a
+            mem.y = f
+            mem.eff = max(style["size"] * d, 0.01)
+            mem.space_w = space_1000 / 1000.0 * style["size"] * style["h_scale"] * a
+        # REAL (untransposed) rect in both modes — paragraph boxes union
+        # these, so the listing draws real page rects with no un-mapping.
         mem.rect = det["rect"]
         mem.ptext, mem.gaps_1000 = _ptext_and_gaps(det)
         mem.editable = bool(run["editable"])
@@ -203,7 +228,10 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.rise_user = style["rise"] * d
         mem.tm = det["tm"]
         mem.ctm = det["ctm"]
-        mem.lkey = _linear_key(m)
+        # 9.B4b: the writing mode rides INSIDE lkey — modes can never
+        # co-group, AND the A4 merge's existing lkey guard refuses a
+        # cross-mode merge for free (no new merge code).
+        mem.lkey = _linear_key(m) + (vertical,)
         # Stream-scoped resources for family classification (9.B1) — a
         # nested form's font is not in page resources (review-caught).
         mem.resources = det.get("resources")
@@ -331,6 +359,12 @@ class _Paragraph:
     def run_indexes(self) -> list[int]:
         return sorted(m.index for m in self.members)
 
+    @property
+    def vertical(self) -> bool:
+        # 9.B4b: all members share one writing mode by group construction
+        # (the mode rides in lkey) — the paragraph's mode is any member's.
+        return self.lines[0].members[0].vertical
+
 
 def _join_paragraphs(lines: list[_Line]) -> list[list[_Line]]:
     """Column-aware top-down joining: each line (y-descending) joins the
@@ -437,7 +471,11 @@ def _assemble_text(lines: list[_Line]) -> tuple[str, list[dict], list[float]]:
                 if gap >= WORD_GAP_FRACTION * prev.space_w:
                     if last_char != " ":
                         emit(" ", prev.index)
-                    denom = prev.a * prev.style["h_scale"] * prev.style["size"]
+                    # 9.B4b: the gap converts to 1000ths at the ADVANCE
+                    # axis's user scale — d for vertical (Tz never applies
+                    # vertically), h_scale×a for horizontal (unchanged).
+                    axis = prev.d if prev.vertical else prev.a * prev.style["h_scale"]
+                    denom = axis * prev.style["size"]
                     if denom > 1e-9:
                         gaps.append(gap / denom * 1000.0)
             emit(mem.ptext, mem.index)
@@ -488,6 +526,17 @@ def _analyze(paras: list[list[_Line]], stream: tuple, lkey: tuple) -> list[_Para
         elif any(unicodedata.bidirectional(ch) in _RTL_CLASSES for ch in p.text):
             p.editable = False
             p.reason = "right-to-left text does not reflow"
+        elif p.vertical and any(m.rise_user != 0.0 for m in p.members):
+            # 9.B4b review (round 28 HIGH): a vertical member's rise_user
+            # carries a REAL-X displacement (its transposed-y offset from
+            # the column baseline — e.g. a ruby/superscript run attached
+            # BESIDE the column), but Ts displaces along the advance axis
+            # (real Y for vertical text) — it structurally cannot express
+            # a sideways shift, so an edit would silently restack the run
+            # INTO the column. Fail closed, the v1 refusal family; the
+            # runs stay individually editable on the 7.2 surface.
+            p.editable = False
+            p.reason = "vertical text with raised characters does not reflow"
         out.append(p)
     return out
 
@@ -504,7 +553,16 @@ def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
             paragraphs.extend(_analyze([para_lines], stream, lkey))
     # Whitespace-only clusters offer nothing to edit — no box at all.
     paragraphs = [p for p in paragraphs if p.text.strip()]
-    paragraphs.sort(key=lambda p: (p.stream, -p.lines[0].y, p.left))
+    # Reading order on a MIXED page needs a mode-agnostic PRIMARY key:
+    # lines[0].y is real Y for horizontal but real X for vertical (round
+    # 28 MEDIUM — a mid-page vertical column outsorted the page-top
+    # header). The box is real-page space in both modes, so top-edge
+    # first; the TIEBREAK is per-mode (side-by-side blocks share a top):
+    # horizontal reads leftmost-first, vertical columns read
+    # rightmost-first (the RTL column convention).
+    paragraphs.sort(
+        key=lambda p: (p.stream, -p.box[3], -p.box[2] if p.vertical else p.box[0])
+    )
     return paragraphs
 
 
@@ -560,6 +618,11 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
                 "line_count": len(p.lines),
                 "editable": p.editable,
                 "reason": p.reason,
+                # 9.B4b, additive: the paragraph's writing mode (the run
+                # listing's B4a field, lifted). Boxes are REAL rects in
+                # both modes; alignment names are the TRANSPOSED ones for
+                # vertical ("left" ≡ top — the editor doesn't label them).
+                "vertical": p.vertical,
                 # A1 restyle seeds: the paragraph's dominant (first-member)
                 # size + fill colour.
                 "font_size": round(first.style["size"], 2),
@@ -756,6 +819,12 @@ def _styled_chars(
         while i < len(seg_text):
             ch = seg_text[i]
             if force_fallback:
+                if member.vertical:
+                    # 9.B4b belt (the para-level substitution refusal is
+                    # the surface): the fallback faces are horizontal.
+                    raise ValueError(
+                        "vertical text cannot be converted to the fallback font"
+                    )
                 fallback_chars.add(ch)
                 styled.append((ch, ref(member, True)))
                 i += 1
@@ -774,6 +843,14 @@ def _styled_chars(
             if ch == " " or member.cap.can_encode(ch):
                 styled.append((ch, ref(member, False)))
             elif convert:
+                if member.vertical:
+                    # 9.B4b: the 7.4 fallback embeds a HORIZONTAL
+                    # Identity-H face — dropped into a column it would
+                    # render on the wrong axis (the B4a convert-refusal
+                    # rule, held here for the per-char path).
+                    raise ValueError(
+                        "vertical text cannot be converted to the fallback font"
+                    )
                 fallback_chars.add(ch)
                 styled.append((ch, ref(member, True)))
             else:
@@ -812,7 +889,10 @@ def _char_width_user(ch: str, st: _StyleRef, fb: _Fallback | None, median_gap_10
                     w += s["word_spacing"]
             except ValueError:
                 pass
-    return w * s["h_scale"] * m.a
+    # 9.B4b: a vertical member's advance lives on the transposed x′ axis,
+    # whose user scale is d — Tz never applies vertically (Tc does, and
+    # already rode in above). Horizontal is byte-identical.
+    return w * (m.d if m.vertical else s["h_scale"] * m.a)
 
 
 def _tokenize(
@@ -983,8 +1063,14 @@ class _Emission:
         self.para = para
         self.styled = styled
         self.fb = fb
+        # 9.B4b: for a vertical paragraph the caller passes the TRANSPOSED
+        # page bounds (x′ = −y of the mediabox) — the whole layout runs in
+        # transposed space, the single-line margin rule included.
         self.page_x0 = page_x0
         self.page_x1 = page_x1
+        # 9.B4b: the paragraph's writing mode — the rewriter advances its
+        # emitted-state machine on this axis after each emitted show.
+        self.vertical = para.vertical
         # A1: when the size is overridden, the paragraph leading scales by
         # the same factor so bigger text doesn't overlap (and smaller
         # text doesn't waste space) — the ratio to the paragraph's
@@ -1073,7 +1159,17 @@ class _Emission:
                 st: _StyleRef = seg["style"]
                 # Rise renders via Ts (a state op), never the matrix —
                 # the line target is the BASELINE.
-                target = (lin_a, 0.0, 0.0, lin_d, line.x + seg["dx"], line.y)
+                if self.vertical:
+                    # 9.B4b: THE untranspose — layout ran wholly in
+                    # transposed space; only the anchor maps back through
+                    # T⁻¹(x′, y′) = (y′, −x′). The linear part stays
+                    # (a, 0, 0, d): glyphs upright — the advance
+                    # DIRECTION is the walker's vertical model
+                    # (advance_after_show), never the matrix.
+                    tx, ty = line.y, -(line.x + seg["dx"])
+                else:
+                    tx, ty = line.x + seg["dx"], line.y
+                target = (lin_a, 0.0, 0.0, lin_d, tx, ty)
                 tm_op = mat_mult(target, ctm_inv)
                 out.append(("op", _instruction([_f(v) for v in tm_op], "Tm"), None))
                 out.extend(self._state_ops(st))
@@ -1174,18 +1270,22 @@ class _Emission:
             items.append(encoded)
             buf.clear()
 
+        # 9.B4b: kern numbers and the raw advance convert at the ADVANCE
+        # axis's user scale — d for vertical (Tz never applies), h_scale×a
+        # for horizontal (unchanged). The kern SIGN convention is the B4a
+        # mirror (negative pushes the pen along the advance) either way.
+        axis = m.d if m.vertical else s["h_scale"] * m.a
         for item in seg["items"]:
             if item[0] == "ch":
                 buf.append(item[1])
             else:
                 flush()
                 gap_user = item[2]
-                denom = s["h_scale"] * m.a * s["size"]
+                denom = axis * s["size"]
                 kern_1000 = gap_user / denom * 1000.0 if denom else 0.0
                 items.append(-kern_1000)
         flush()
-        denom_user = s["h_scale"] * m.a
-        raw = seg["width"] / denom_user if denom_user else 0.0
+        raw = seg["width"] / axis if axis else 0.0
         return items, raw
 
 
@@ -1435,9 +1535,10 @@ def _rewrite_paragraph_stream(
             _text, raw = _run_metrics(operator, operands, cap, orig)
             # 9.B4a: a KEPT vertical run advances the parallel walks
             # downward — the model's tm must match reality or the next
-            # injected absolute Tm would move a kept show. (Members are
-            # never vertical: _members_from skips them; emission raw_w at
-            # the first-ordinal build below is horizontal by construction.)
+            # injected absolute Tm would move a kept show. (9.B4b lifted
+            # the B4a members-are-never-vertical boundary: the emission
+            # feed below advances the emit machine on the PARAGRAPH's
+            # axis, so its model matches the emitted shows too.)
             vert = bool(cap is not None and cap.vertical)
             if is_member:
                 if show_ordinal == edit.first_ordinal:
@@ -1446,7 +1547,7 @@ def _rewrite_paragraph_stream(
                     for kind, ins, raw_w in edit.emission.build(orig.ctm):
                         kept.append(ins)
                         if kind == "show":
-                            emit.advance_after_show(raw_w)
+                            emit.advance_after_show(raw_w, edit.emission.vertical)
                         else:
                             emit_feed(ins)
                     if edit.fallback is not None and edit.fallback.used:
@@ -1582,7 +1683,13 @@ def replace_paragraph_text(
     `new_text`) lays the text out as TWO blocks, the second starting
     2×leading below the first — a gap the re-listing grouping can never
     join across, so the result lists as two paragraphs. None = the
-    shipped single-block layout (byte-identical)."""
+    shipped single-block layout (byte-identical).
+
+    9.B4b: vertical paragraphs reflow through the same pipeline in
+    transposed space (columns fill top-down at the measured pitch, growth
+    adds columns leftward; size scales the pitch, split gaps transpose).
+    Family/bold/italic substitution and per-char convert refuse — the
+    fallback faces are horizontal (v1 boundary)."""
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -1652,6 +1759,11 @@ def replace_paragraph_text(
         if bold is not None or italic is not None:
             style_override = (bool(bold), bool(italic))
         substituting = family_override is not None or style_override is not None
+        # 9.B4b: the bundled Liberation faces are horizontal — substituted
+        # into a column their glyphs would lay out on the wrong axis.
+        # Refuse outright (the B4a convert-refusal honesty; v1 boundary).
+        if substituting and para.vertical:
+            raise ValueError("vertical text cannot substitute a horizontal face")
         # A4 split: an explicit selector — a caret offset outside the open
         # interval refuses (a "split" that splits nothing would be a
         # success that lied). Code points: Python strings index them
@@ -1722,9 +1834,17 @@ def replace_paragraph_text(
                 ordinal_of[i] = o
         try:
             box = [float(v) for v in p.mediabox]
-            page_x0, page_x1 = min(box[0], box[2]), max(box[0], box[2])
+            if para.vertical:
+                # 9.B4b: the emission lays out in TRANSPOSED space, where
+                # the page's x′-extent is T of its y-extent (x′ = −y) —
+                # the single-column margin rule then mirrors the top inset
+                # to the bottom, exactly as the horizontal rule mirrors
+                # left to right.
+                page_x0, page_x1 = -max(box[1], box[3]), -min(box[1], box[3])
+            else:
+                page_x0, page_x1 = min(box[0], box[2]), max(box[0], box[2])
         except (TypeError, ValueError):
-            page_x0, page_x1 = 0.0, 612.0
+            page_x0, page_x1 = (-792.0, 0.0) if para.vertical else (0.0, 612.0)
         edit = _ParaEditState(
             para.stream,
             set(ordinal_of.values()),
@@ -1782,7 +1902,8 @@ def merge_paragraph_with_previous(
     BOTH paragraphs refuse a stale view; different content streams refuse
     (a cross-column merge is nonsense); unencodable characters refuse
     named (a decoded char without a single-char reverse — the B5
-    boundary — cannot re-emit)."""
+    boundary — cannot re-emit). Cross-writing-mode merges refuse via the
+    existing lkey guard — the mode rides in lkey (9.B4b)."""
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -1858,9 +1979,14 @@ def merge_paragraph_with_previous(
                 ordinal_of[i] = o
         try:
             box = [float(v) for v in p.mediabox]
-            page_x0, page_x1 = min(box[0], box[2]), max(box[0], box[2])
+            if prev.vertical:
+                # 9.B4b: transposed page bounds for a vertical emission
+                # (x′ = −y) — see replace_paragraph_text.
+                page_x0, page_x1 = -max(box[1], box[3]), -min(box[1], box[3])
+            else:
+                page_x0, page_x1 = min(box[0], box[2]), max(box[0], box[2])
         except (TypeError, ValueError):
-            page_x0, page_x1 = 0.0, 612.0
+            page_x0, page_x1 = (-792.0, 0.0) if prev.vertical else (0.0, 612.0)
         edit = _ParaEditState(
             prev.stream,
             set(ordinal_of.values()),

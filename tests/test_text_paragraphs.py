@@ -335,11 +335,12 @@ class TestGrouping:
         assert listing["paragraphs"] == []
         assert len(listing["runs"]) == 1
 
-    def test_vertical_text_never_groups(self, tmp_dir):
-        # 9.B4a: vertical runs are EDITABLE run boxes but never paragraph
-        # members (axis-transposed grouping is B4b) — the rotated-text
-        # boundary's twin. Two stacked shows in one column would happily
-        # baseline-cluster if the skip ever regressed.
+    def test_vertical_runs_group_with_column_gap_paragraph_break(self, tmp_dir):
+        # 9.B4b lifted the B4a never-groups boundary: vertical runs now
+        # group under the transposition — a column IS a line, and a large
+        # gap DOWN the column (transposed: a large x-gap) is a paragraph
+        # break, exactly the horizontal column-split rule. This fixture's
+        # 40pt hop past a 17pt column therefore lists TWO paragraphs.
         src = os.path.join(tmp_dir, "vert.pdf")
         pdf = pikepdf.new()
         vfont = _identity_v(pdf, {3: "あ", 4: "い"}, [3, [-900, 500, 880, -800, 450, 880]])
@@ -351,9 +352,11 @@ class TestGrouping:
         pdf.save(src)
         pdf.close()
         listing = list_text_paragraphs(src, 1)
-        assert listing["paragraphs"] == []
         assert len(listing["runs"]) == 2
         assert all(r["vertical"] and r["editable"] for r in listing["runs"])
+        paras = listing["paragraphs"]
+        assert [p["text"] for p in paras] == ["あい", "あ"]
+        assert all(p["vertical"] and p["editable"] for p in paras)
 
     def test_streams_never_share_a_paragraph(self, tmp_dir):
         src = os.path.join(tmp_dir, "form.pdf")
@@ -510,8 +513,11 @@ class TestReplaceParagraphText:
         assert before[2]["rect"] == pytest.approx(v2, abs=0.05)
 
         paras = _paras(src)
-        assert len(paras) == 1  # the vertical column never groups
-        target = paras[0]
+        # 9.B4b: the vertical column now groups as its OWN paragraph —
+        # still never a member of the horizontal one (the mode key), so
+        # it stays a KEPT run for this edit.
+        assert len(paras) == 2
+        target = next(p for p in paras if "HH" in p["text"])
         _apply(src, out := os.path.join(tmp_dir, "o.pdf"), target, "HHH")
         _assert_non_members_unmoved(src, out, target["runs"])
         after = list_text_runs(out, 1)["runs"]
@@ -1776,6 +1782,499 @@ class TestSplitMerge:
         with pytest.raises(ValueError, match="different content streams"):
             _merge(src, out, paras, 1)
         assert not os.path.exists(out)
+
+
+def _vpage(tmp_dir, content: bytes, name="v.pdf", with_helv=False) -> str:
+    """A page with /FV = Identity-V あいう at uniform /W2 advance 1000
+    (10pt per char at size 10 — the hand-math base), plus /F1 Helvetica
+    when a fixture mixes modes."""
+    src = os.path.join(tmp_dir, name)
+    pdf = pikepdf.new()
+    vfont = _identity_v(
+        pdf,
+        {3: "あ", 4: "い", 5: "う"},
+        [3, [-1000, 500, 880, -1000, 500, 880, -1000, 500, 880]],
+    )
+    fonts = {"/FV": vfont}
+    if with_helv:
+        fonts["/F1"] = _helv(pdf)
+    _page(pdf, content, fonts)
+    pdf.save(src)
+    pdf.close()
+    return src
+
+
+class TestVerticalParagraphs:
+    """Phase 9.B4b — vertical paragraph reflow: one 90° transposition
+    T(x, y) = (−y, x) at member admission and T⁻¹ at the emission's Tm
+    anchors; every grouping heuristic reused unchanged. Positions are
+    HAND-COMPUTED (the round-27 discipline) — a self-consistent
+    wrong-axis model passes any walker-vs-walker comparison, so the
+    dual-walk harness alone cannot pin the axis."""
+
+    def test_two_column_vertical_paragraph_groups_as_one(self, tmp_dir):
+        # Columns at x=300 and x=286 (pitch 14 — the leading analogue),
+        # both TOP-aligned at y=700: under T they are two left-aligned
+        # lines 14 apart and join into ONE paragraph, read right-to-left
+        # (rightmost column first), chars top-to-bottom, CJK no-space
+        # line join.
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj -14 0 Td <00030004> Tj ET",
+        )
+        paras = _paras(src)
+        assert len(paras) == 1
+        p = paras[0]
+        assert p["text"] == "あいうあい"
+        assert p["line_count"] == 2
+        assert p["vertical"] is True
+        assert p["editable"] is True
+        # "left" IS top for vertical (the transposed name is reported
+        # as-is; the editor doesn't label alignment).
+        assert p["alignment"] == "left"
+        # The listing box is the REAL page rect around both columns.
+        assert p["box"] == pytest.approx([281, 670, 305, 700], abs=0.05)
+        assert p["runs"] == [0, 1]
+
+    def test_vertical_retype_reflows_at_the_measured_pitch(self, tmp_dir):
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj -14 0 Td <00030004> Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, "いいいいい")
+        after = list_text_runs(out, 1)["runs"]
+        assert [r["vertical"] for r in after] == [True, True]
+        assert [r["text"] for r in after] == ["いいい", "いい"]
+        # Hand-computed: the box measure (30 = 3 chars at the /W2
+        # advance) refills top-down from x=300, then one measured pitch
+        # (14) LEFT at x=286, both columns re-anchored at y=700.
+        assert after[0]["rect"] == pytest.approx([295, 670, 305, 700], abs=0.05)
+        assert after[1]["rect"] == pytest.approx([281, 680, 291, 700], abs=0.05)
+        relisted = _paras(out)
+        assert relisted[0]["text"] == "いいいいい"
+        assert relisted[0]["vertical"] is True
+
+    def test_vertical_growth_adds_a_column_leftward(self, tmp_dir):
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj -14 0 Td <00030004> Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        old_leftmost = para["box"][0]
+        _apply(src, out, para, "あいうあいうあ")  # 7 chars → columns of 3+3+1
+        after = list_text_runs(out, 1)["runs"]
+        assert [r["vertical"] for r in after] == [True, True, True]
+        assert after[0]["rect"] == pytest.approx([295, 670, 305, 700], abs=0.05)
+        assert after[1]["rect"] == pytest.approx([281, 670, 291, 700], abs=0.05)
+        # The overflow column lands one pitch further LEFT — growth is
+        # leftward, the vertical analogue of downward.
+        assert after[2]["rect"] == pytest.approx([267, 690, 277, 700], abs=0.05)
+        assert after[2]["rect"][0] < old_leftmost
+        relisted = _paras(out)
+        assert relisted[0]["text"] == "あいうあいうあ"
+        assert relisted[0]["line_count"] == 3
+
+    def test_vertical_reflow_under_scaled_ctm_ignores_tz(self, tmp_dir):
+        # cm (2,0,0,4) + 50 Tz: vertical advances scale by d (4) and Tz
+        # NEVER applies (spec 9.4.4: Th is tx-only) — an h_scale·a width
+        # model would fit 12 chars per column instead of 3. The fixture
+        # is the only place a≠d≠h_scale·a, so it is what actually pins
+        # the axis choice at every width site.
+        src = _vpage(
+            tmp_dir,
+            b"q 2 0 0 4 0 0 cm BT /FV 10 Tf 50 Tz 150 175 Td <000300040005> Tj"
+            b" -7 0 Td <00030004> Tj ET Q",
+        )
+        para = _paras(src)[0]
+        assert para["text"] == "あいうあい"
+        assert para["vertical"] is True
+        assert para["box"] == pytest.approx([276, 580, 310, 700], abs=0.05)
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, "いいいいい")
+        after = list_text_runs(out, 1)["runs"]
+        assert [r["text"] for r in after] == ["いいい", "いい"]
+        # Hand-computed user space: 40pt per char (10 × d), columns at
+        # x=300 and one 14pt pitch left at x=286, tops at y=700.
+        assert after[0]["rect"] == pytest.approx([290, 580, 310, 700], abs=0.05)
+        assert after[1]["rect"] == pytest.approx([276, 620, 296, 700], abs=0.05)
+
+    def test_vertical_word_gap_round_trips_under_scaled_ctm(self, tmp_dir):
+        # A TJ word gap (−500 at size 10 → a synthetic space) in the
+        # scaled (d=4) + Tz 50 column: the gap must MEASURE and RE-EMIT
+        # at the d scale — the gap-median denominator, the synthetic-
+        # space width, and the emitted kern number all pin here (an
+        # h_scale·a model re-emits the kern 4× too large and the
+        # re-listed column's rect stretches accordingly).
+        src = _vpage(
+            tmp_dir,
+            b"q 2 0 0 4 0 0 cm BT /FV 10 Tf 50 Tz 150 175 Td"
+            b" [<0003> -500 <0004>] TJ ET Q",
+        )
+        para = _paras(src)[0]
+        assert para["text"] == "あ い"
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, "い あ")
+        after = list_text_runs(out, 1)["runs"]
+        assert len(after) == 1 and after[0]["vertical"]
+        # raw advance 10 + 5 (the kern-gap) + 10 = 25 text units → 100
+        # user below y=700.
+        assert after[0]["rect"] == pytest.approx([290, 600, 310, 700], abs=0.05)
+        assert _paras(out)[0]["text"] == "い あ"
+
+    def test_vertical_positioned_gap_between_members_measures_at_d_scale(self, tmp_dir):
+        # The INTER-member positioned gap (a Td hop down the same
+        # column, under the column-split threshold) is measured by
+        # _assemble_text — its 1000ths conversion must also use the d
+        # scale. Same scaled+Tz discipline: the wrong axis medians the
+        # 5-text-unit gap as 2000 and the re-emitted column stretches.
+        src = _vpage(
+            tmp_dir,
+            b"q 2 0 0 4 0 0 cm BT /FV 10 Tf 50 Tz 150 175 Td <0003> Tj"
+            b" 0 -15 Td <0004> Tj ET Q",
+        )
+        para = _paras(src)[0]
+        assert para["text"] == "あ い"
+        assert para["line_count"] == 1
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, "い あ")
+        after = list_text_runs(out, 1)["runs"]
+        assert len(after) == 1 and after[0]["vertical"]
+        # One column: 10 + 5 (the measured gap, 20 user / d) + 10 text
+        # units of descent → 100 user below y=700.
+        assert after[0]["rect"] == pytest.approx([290, 600, 310, 700], abs=0.05)
+        assert _paras(out)[0]["text"] == "い あ"
+
+    def test_vertical_edit_resyncs_kept_column_at_hand_computed_positions(self, tmp_dir):
+        # A Td-anchored block LOWER in the second column (a paragraph
+        # gap down the column) is a kept run; the paragraph reflow must
+        # leave it at its spec position — asserted against hand-computed
+        # numbers, not just the dual-walk property.
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <00030004> Tj -14 0 Td <0003> Tj"
+            b" 0 -40 Td <00040004> Tj ET",
+        )
+        paras = _paras(src)
+        assert [p["text"] for p in paras] == ["あいあ", "いい"]
+        target = paras[0]
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, target, "あいあい")  # 4 chars → 2 per column
+        _assert_non_members_unmoved(src, out, target["runs"])
+        after = list_text_runs(out, 1)["runs"]
+        kept = next(r for r in after if r["text"] == "いい")
+        # Hand-computed: the kept block was anchored `0 -40 Td` under
+        # the second column's start — absolute (286, 660), 20 down.
+        assert kept["rect"] == pytest.approx([281, 640, 291, 660], abs=0.05)
+        # The reflowed members: two chars per column at the original
+        # column anchors.
+        assert after[0]["rect"] == pytest.approx([295, 680, 305, 700], abs=0.05)
+        assert after[1]["rect"] == pytest.approx([281, 680, 291, 700], abs=0.05)
+
+    def test_flowing_horizontal_tail_after_vertical_members_keeps_spec_positions(self, tmp_dir):
+        # The B4a flowing-tail template, axis-swapped: horizontal runs
+        # FLOW (no Td) straight off the vertical members' pen. Editing
+        # the vertical paragraph must leave the tail at hand-computed
+        # spec positions — the resync's model of the emitted vertical
+        # advances is what anchors the injected absolute Tm.
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <0003> Tj <0003> Tj"
+            b" /F1 12 Tf (Aa) Tj (Bb) Tj ET",
+            with_helv=True,
+        )
+        before = list_text_runs(src, 1)["runs"]
+        # Spec: the tail flows at the pen after the column's 20pt
+        # descent; Aa and Bb are each 14.676 wide (Helvetica at 12).
+        assert before[2]["rect"] == pytest.approx([300, 680, 314.676, 692], abs=0.05)
+        assert before[3]["rect"] == pytest.approx([314.676, 680, 329.352, 692], abs=0.05)
+        paras = _paras(src)
+        target = next(p for p in paras if p["text"] == "ああ")
+        assert target["vertical"] is True
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, target, "あああ")  # the column grows 20 → 30
+        _assert_non_members_unmoved(src, out, target["runs"])
+        after = list_text_runs(out, 1)["runs"]
+        got_aa = next(r for r in after if r["text"] == "Aa")
+        got_bb = next(r for r in after if r["text"] == "Bb")
+        assert got_aa["rect"] == pytest.approx([300, 680, 314.676, 692], abs=0.05)
+        assert got_bb["rect"] == pytest.approx([314.676, 680, 329.352, 692], abs=0.05)
+        grown = next(r for r in after if r["vertical"])
+        assert grown["rect"] == pytest.approx([295, 670, 305, 700], abs=0.05)
+
+    def test_vertical_and_horizontal_never_co_group(self, tmp_dir):
+        # A DELIBERATE coordinate collision: the horizontal baseline
+        # (y=300, x from 60) and the transposed vertical member (column
+        # x=300 topping at y=−60 → x0′=60, y′=300) land in the SAME
+        # transposed band — without the mode in the group key they
+        # would cluster into one mixed line. The mode key keeps them
+        # apart.
+        src = _vpage(
+            tmp_dir,
+            b"BT /F1 12 Tf 60 300 Td (Hmix) Tj ET"
+            b" BT /FV 10 Tf 300 -60 Td <0003> Tj ET",
+            with_helv=True,
+        )
+        listing = list_text_paragraphs(src, 1)
+        paras = listing["paragraphs"]
+        assert len(paras) == 2
+        assert {p["text"] for p in paras} == {"Hmix", "あ"}
+        runs = listing["runs"]
+        for p in paras:
+            modes = {runs[i]["vertical"] for i in p["runs"]}
+            assert len(modes) == 1  # single-mode paragraphs, always
+
+    def test_split_vertical_paragraph_gap_transposes(self, tmp_dir):
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj -14 0 Td <00030004> Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], split_at=3)
+        relisted = _paras(out)
+        assert [p["text"] for p in relisted] == ["あいう", "あい"]
+        assert all(p["vertical"] for p in relisted)
+        after = list_text_runs(out, 1)["runs"]
+        # The A4 split gap TRANSPOSES: block B's column starts one
+        # split gap (max(2×leading, 2×eff) = 28) LEFT of block A's —
+        # a gap the re-listing grouping can never join across.
+        assert after[0]["rect"] == pytest.approx([295, 670, 305, 700], abs=0.05)
+        assert after[1]["rect"] == pytest.approx([267, 680, 277, 700], abs=0.05)
+
+    def test_merge_two_vertical_paragraphs_reflows_in_prev_column(self, tmp_dir):
+        # Two single-column vertical paragraphs 28 apart (a paragraph
+        # gap); the merge re-lays the CJK-joined text out from the
+        # PREVIOUS (rightmost) paragraph's anchor — one column, since a
+        # single-column paragraph's measure extends to the mirrored
+        # bottom margin (the single-line rule, transposed).
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj -28 0 Td <00030004> Tj ET",
+        )
+        paras = _paras(src)
+        assert [p["text"] for p in paras] == ["あいう", "あい"]
+        out = os.path.join(tmp_dir, "o.pdf")
+        _merge(src, out, paras, 1)
+        relisted = _paras(out)
+        assert len(relisted) == 1
+        assert relisted[0]["text"] == "あいうあい"  # no space at the join
+        after = list_text_runs(out, 1)["runs"]
+        # Style continuity keeps one show per source paragraph — both
+        # flow contiguously down ONE 50pt column from prev's anchor
+        # (the second segment's dx untransposes to a further descent).
+        assert [r["vertical"] for r in after] == [True, True]
+        assert after[0]["rect"] == pytest.approx([295, 670, 305, 700], abs=0.05)
+        assert after[1]["rect"] == pytest.approx([295, 650, 305, 670], abs=0.05)
+
+    def test_merge_across_writing_modes_refuses(self, tmp_dir):
+        src = _vpage(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (Top words) Tj ET"
+            b" BT /FV 10 Tf 300 680 Td <00030004> Tj ET",
+            with_helv=True,
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        assert len(paras) == 2
+        assert [p["vertical"] for p in paras] == [False, True]
+        # FREE refusal: the writing mode rides in lkey, so the existing
+        # different-formatting guard fires with no mode-specific code.
+        with pytest.raises(ValueError, match="different formatting"):
+            _merge(src, out, paras, 1)
+        assert not os.path.exists(out)
+
+    def test_substitution_and_convert_refuse_on_vertical(self, tmp_dir):
+        # The Liberation faces are horizontal — family/bold/italic
+        # substitution refuses outright, and the convert=True per-char
+        # fallback fails closed the same way (the B4a rule). Both fire
+        # before any font file is touched, so no faces guard is needed.
+        src = _vpage(tmp_dir, b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        for kw in ({"family": "serif"}, {"bold": True}, {"italic": True}):
+            with pytest.raises(ValueError, match="vertical text cannot substitute"):
+                _apply(src, out, para, para["text"], font_path=FONTS_DIR, **kw)
+        with pytest.raises(ValueError, match="vertical text cannot be converted"):
+            _apply(src, out, para, para["text"] + "Z", convert=True, font_path=FONTS_DIR)
+        assert not os.path.exists(out)
+
+    def test_transposition_round_trip_on_member_geometry(self, tmp_dir):
+        # T(x, y) = (−y, x) / T⁻¹(x′, y′) = (y′, −x′): an inverse pair,
+        # and the admitted member's transposed fields map back exactly
+        # to the run's REAL pen geometry.
+        def t(x, y):
+            return (-y, x)
+
+        def t_inv(x, y):
+            return (y, -x)
+
+        for x, y in [(0, 0), (300, 700), (-14, 40), (612.5, -792.25)]:
+            assert t_inv(*t(x, y)) == (x, y)
+            assert t(*t_inv(x, y)) == (x, y)
+
+        from engine.text_paragraphs import _members_from
+
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj -14 0 Td <00030004> Tj ET",
+        )
+        with pikepdf.open(src) as pdf:
+            p = pdf.pages[0]
+            resources = _resolve_resources(p)
+            runs: list = []
+            det: list = []
+            _walk_runs(
+                pdf,
+                pikepdf.parse_content_stream(p),
+                resources,
+                IDENTITY,
+                0,
+                None,
+                runs,
+                False,
+                _FontCache(),
+                detail=det,
+            )
+            members = _members_from(runs, det)
+            assert len(members) == 2
+            for m, d in zip(members, det):
+                a, _b, _c, dd, e, f = d["combined"]
+                assert m.vertical is True
+                assert m.lkey[-1] is True  # the mode rides IN lkey
+                # T maps the real pen (e, f) to the transposed anchor…
+                assert (m.x0, m.y) == pytest.approx(t(e, f))
+                # …and T⁻¹ recovers it exactly.
+                assert t_inv(m.x0, m.y) == pytest.approx((e, f))
+                # The advance maps to +x′ at the d scale; eff is the
+                # column axis (size × a).
+                assert m.x1 - m.x0 == pytest.approx(d["raw_width"] * dd)
+                assert m.eff == pytest.approx(d["style"]["size"] * a)
+
+        # A NON-UNIFORM ctm (a=2, d=4) + Tz 50 pins every axis choice
+        # numerically: the advance and space width scale by d (never
+        # h_scale·a), eff by a (the column axis).
+        ssrc = _vpage(
+            tmp_dir,
+            b"q 2 0 0 4 0 0 cm BT /FV 10 Tf 50 Tz 150 175 Td <000300040005> Tj ET Q",
+            name="scaled.pdf",
+        )
+        with pikepdf.open(ssrc) as pdf:
+            p = pdf.pages[0]
+            resources = _resolve_resources(p)
+            runs = []
+            det = []
+            _walk_runs(
+                pdf,
+                pikepdf.parse_content_stream(p),
+                resources,
+                IDENTITY,
+                0,
+                None,
+                runs,
+                False,
+                _FontCache(),
+                detail=det,
+            )
+            m = _members_from(runs, det)[0]
+            assert (m.x0, m.y) == pytest.approx((-700.0, 300.0))
+            assert m.x1 - m.x0 == pytest.approx(30 * 4.0)  # raw × d
+            assert m.eff == pytest.approx(10 * 2.0)  # size × a
+            assert m.space_w == pytest.approx(250 / 1000 * 10 * 4.0)  # d, no Tz
+
+        # The horizontal guard: byte-identical construction, mode False
+        # in the lkey tail.
+        hsrc = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hz) Tj ET")
+        with pikepdf.open(hsrc) as pdf:
+            p = pdf.pages[0]
+            resources = _resolve_resources(p)
+            runs = []
+            det = []
+            _walk_runs(
+                pdf,
+                pikepdf.parse_content_stream(p),
+                resources,
+                IDENTITY,
+                0,
+                None,
+                runs,
+                False,
+                _FontCache(),
+                detail=det,
+            )
+            members = _members_from(runs, det)
+            assert members[0].vertical is False
+            assert members[0].lkey[-1] is False
+            assert (members[0].x0, members[0].y) == pytest.approx((72, 700))
+
+    def test_vertical_rise_attach_refuses_to_edit(self, tmp_dir):
+        # Round 28 HIGH: a markedly-smaller vertical run BESIDE a column
+        # rise-attaches (the shipped superscript heuristic, mode-blind),
+        # and its rise_user then carries a REAL-X displacement — which Ts
+        # (a real-Y displacement for vertical text) structurally cannot
+        # express, so an edit silently restacked the small run INTO the
+        # column. Fail closed: the paragraph refuses with a stated
+        # reason; the runs stay on the 7.2 surface.
+        # Attach math (ctm 2/4): main eff 10·2=20, small at real x 304 vs
+        # 300 → transposed-y offset 4 ≤ 0.5·20 and 6 ≤ 0.8·20 → attaches;
+        # rise 4 ≥ 0.05·20 → nonzero.
+        src = os.path.join(tmp_dir, "vrise.pdf")
+        pdf = pikepdf.new()
+        vfont = _identity_v(
+            pdf, {3: "あ", 4: "い"}, [3, [-1000, 500, 880, -1000, 500, 880]]
+        )
+        _page(
+            pdf,
+            b"q 2 0 0 4 0 0 cm BT /FV 10 Tf 150 175 Td <0003> Tj "
+            b"/FV 3 Tf 2 0 Td <0004> Tj ET Q",
+            {"/FV": vfont},
+        )
+        pdf.save(src)
+        pdf.close()
+        paras = _paras(src)
+        assert len(paras) == 1
+        p = paras[0]
+        assert p["vertical"] is True
+        assert p["editable"] is False
+        assert p["reason"] == "vertical text with raised characters does not reflow"
+        runs = list_text_runs(src, 1)["runs"]
+        assert [r["vertical"] for r in runs] == [True, True]
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="raised characters"):
+            replace_paragraph_text(
+                src, out, 1, p["index"], p["text"], p["spans"], p["runs"], p["text"]
+            )
+        assert not os.path.exists(out)
+
+    def test_mixed_page_lists_in_reading_order(self, tmp_dir):
+        # Round 28 MEDIUM: the sort key compared real Y (horizontal)
+        # against real X (vertical) — a mid-page vertical column at high
+        # x outsorted the page-top header. The key is now the box top
+        # (real-page space in both modes), per-mode tiebreak.
+        src = os.path.join(tmp_dir, "mixed.pdf")
+        pdf = pikepdf.new()
+        vfont = _identity_v(
+            pdf, {3: "あ", 4: "い"}, [3, [-1000, 500, 880, -1000, 500, 880]]
+        )
+        _page(
+            pdf,
+            # The column's real X (600) must EXCEED the header's real Y
+            # (500) — that inversion is what the old key misordered; a
+            # column-x between the two y's sorts the same under both keys
+            # (first draft was mutation-invisible exactly that way).
+            b"BT /F1 12 Tf 72 500 Td (Header text here) Tj ET "
+            b"BT /FV 10 Tf 600 400 Td <00030004> Tj ET "
+            b"BT /F1 12 Tf 72 100 Td (Footer text here) Tj ET",
+            {"/F1": _helv(pdf), "/FV": vfont},
+        )
+        pdf.save(src)
+        pdf.close()
+        paras = _paras(src)
+        assert [p["text"] for p in paras] == ["Header text here", "あい", "Footer text here"]
+        assert [p["vertical"] for p in paras] == [False, True, False]
+        assert [p["index"] for p in paras] == [0, 1, 2]
 
 
 class TestLigatureParagraphs:

@@ -178,6 +178,28 @@ describe('fetchEditTextListing projection', () => {
     expect(out.paragraphs[0].rect.x).toBeCloseTo(72 / 612);
   });
 
+  it('threads the writing mode; absent means horizontal (9.B4b)', async () => {
+    const vertical = {
+      ...listing,
+      paragraphs: [{ ...listing.paragraphs[0], vertical: true }],
+    };
+    const out = await fetchEditTextListing(
+      async () => vertical,
+      'C:\\w.pdf',
+      1,
+      { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+    );
+    expect(out.paragraphs[0].vertical).toBe(true);
+    // Pre-B4b engines omit the field — it must default false, not crash.
+    const plain = await fetchEditTextListing(
+      async () => listing,
+      'C:\\w.pdf',
+      1,
+      { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+    );
+    expect(plain.paragraphs[0].vertical).toBe(false);
+  });
+
   it('refused paragraphs decompose to run boxes', async () => {
     const refused = {
       ...listing,

@@ -46,6 +46,10 @@ export interface EditParagraph {
    * classification — descriptor flags/angle + name hints). */
   bold: boolean;
   italic: boolean;
+  /** 9.B4b: writing mode. Vertical paragraphs reflow (transposed layout)
+   * but REFUSE substitution restyles and convert — the bundled faces are
+   * horizontal — so the editor disables those controls. */
+  vertical: boolean;
 }
 
 /** A1/A3 restyle overrides carried on a paragraph commit. */
@@ -109,6 +113,7 @@ interface EngineParagraphListing {
     color: string;
     bold: boolean;
     italic: boolean;
+    vertical?: boolean;
   }[];
 }
 
@@ -163,6 +168,7 @@ export async function fetchEditTextListing(
       color: p.color ?? '#000000',
       bold: Boolean(p.bold),
       italic: Boolean(p.italic),
+      vertical: Boolean(p.vertical),
     });
   }
   return { runBoxes: runs.filter((r) => !covered.has(r.index)), paragraphs };

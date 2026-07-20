@@ -12,6 +12,7 @@ import {
   editImagePageIds,
   editImagePlacements,
   editImageSelect,
+  editImageSelection,
   editImageAct,
 } from '../support/harness.js';
 
@@ -91,6 +92,15 @@ describe('image adjustments (Phase 9.C3)', () => {
         return nowId !== '' && nowId !== pageId && Math.abs((now?.opacity ?? 0) - 0.5) < 0.01;
       },
       { timeout: 30_000, timeoutMsg: 'opacity 0.5 never listed back' },
+    );
+    // C1-tail: the selection SURVIVED the rebuild (auto-reselect against
+    // the regenerated page id) — a chained edit needs no re-click.
+    await browser.waitUntil(
+      async () => {
+        const sel = await editImageSelection();
+        return sel !== null && sel.kind === 'image' && sel.index === 0;
+      },
+      { timeout: 10_000, timeoutMsg: 'the selection did not auto-restore after the commit' },
     );
 
     const preUndoId = (await editImagePageIds())[0];

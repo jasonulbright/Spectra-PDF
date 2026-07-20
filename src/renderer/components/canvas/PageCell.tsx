@@ -1504,7 +1504,12 @@ function ParagraphEditor({
           <select
             data-testid="edit-para-family"
             value={family}
-            title="Replaces the paragraph's font with the chosen bundled face"
+            disabled={para.vertical}
+            title={
+              para.vertical
+                ? 'Vertical text keeps its font — the bundled faces are horizontal'
+                : "Replaces the paragraph's font with the chosen bundled face"
+            }
             onChange={(e) => setFamily(e.target.value as '' | 'serif' | 'sans' | 'mono')}
           >
             <option value="">Keep original font</option>
@@ -1518,7 +1523,12 @@ function ParagraphEditor({
           data-testid="edit-para-bold"
           className={`page-editpara-style${bold ? ' pressed' : ''}`}
           aria-pressed={bold}
-          title="Bold — substitutes the bundled bold face"
+          disabled={para.vertical}
+          title={
+            para.vertical
+              ? 'Vertical text keeps its font — the bundled faces are horizontal'
+              : 'Bold — substitutes the bundled bold face'
+          }
           onClick={() => setBold((b) => !b)}
         >
           B
@@ -1528,7 +1538,12 @@ function ParagraphEditor({
           data-testid="edit-para-italic"
           className={`page-editpara-style page-editpara-style-i${italic ? ' pressed' : ''}`}
           aria-pressed={italic}
-          title="Italic — substitutes the bundled italic face"
+          disabled={para.vertical}
+          title={
+            para.vertical
+              ? 'Vertical text keeps its font — the bundled faces are horizontal'
+              : 'Italic — substitutes the bundled italic face'
+          }
           onClick={() => setItalic((i) => !i)}
         >
           I
@@ -1549,14 +1564,19 @@ function ParagraphEditor({
       {!valid && (
         <div className="page-edittext-error" data-testid="edit-para-error" aria-live="polite">
           This document's font does not contain {missing.map((c) => `'${c}'`).join(' ')}
-          <button
-            type="button"
-            data-testid="edit-para-convert"
-            className="page-edittext-convert"
-            onClick={() => settle(() => onCommit(value, restyleOpts({ convert: true })))}
-          >
-            Use a compatible font
-          </button>
+          {/* 9.B4b: no fallback for vertical — the engine refuses convert
+              (the bundled fallback face is horizontal), so the offer would
+              only ever produce an error notice. */}
+          {!para.vertical && (
+            <button
+              type="button"
+              data-testid="edit-para-convert"
+              className="page-edittext-convert"
+              onClick={() => settle(() => onCommit(value, restyleOpts({ convert: true })))}
+            >
+              Use a compatible font
+            </button>
+          )}
         </div>
       )}
     </div>
