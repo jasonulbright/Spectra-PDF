@@ -9,6 +9,7 @@ import {
   getState,
   invokeAppCommand,
   setReactInputValue,
+  setContentEditableValue,
 } from '../support/harness.js';
 
 // Phase 7.5 — paragraph reflow round-trip against the real binary: a
@@ -102,7 +103,7 @@ describe('edit paragraph (Phase 7.5)', () => {
     const grown = `${para.text} plus several appended growth words`;
     await editParagraphOpen(pageId, para.index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
-    await setReactInputValue('[data-testid="edit-para-input"]', grown);
+    await setContentEditableValue('[data-testid="edit-para-input"]', grown);
     await browser.keys(['Enter']);
 
     // The op reloads the buffer; the re-listing regroups the REWRAPPED
@@ -149,7 +150,7 @@ describe('edit paragraph (Phase 7.5)', () => {
     // The arrow is outside WinAnsi — the error line names it and Enter
     // must NOT commit (the editor holds open with the invalid value).
     const withArrow = `${para.text} →`;
-    await setReactInputValue('[data-testid="edit-para-input"]', withArrow);
+    await setContentEditableValue('[data-testid="edit-para-input"]', withArrow);
     await $('[data-testid="edit-para-error"]').waitForDisplayed({ timeout: 5_000 });
     await browser.keys(['Enter']);
     expect(await $('[data-testid="edit-para-input"]').isDisplayed()).toBe(true);

@@ -970,3 +970,111 @@ export async function setDocViewMode(mode: 'organize' | 'document'): Promise<voi
     mode,
   );
 }
+
+/**
+ * 9.A5-tails-b: the paragraph editor is a contentEditable RICH SURFACE, not a
+ * textarea — per-span colour/weight/slant/family/size render as real styles so
+ * the caret, the selection and the line wrapping are computed from the same
+ * glyphs the user sees (the mirror-overlay it replaced positioned the caret
+ * from a uniform-metric textarea, which drifts under any bold/size/family run).
+ *
+ * `setReactInputValue` cannot drive it: there is no `value` property and no
+ * React `_valueTracker`. Replace the text and fire the same `input` event the
+ * browser fires, then wait for React to render its state back.
+ */
+export async function setContentEditableValue(selector: string, value: string): Promise<void> {
+  await $(selector).waitForDisplayed({ timeout: 10_000 });
+  await browser.waitUntil(
+    async () =>
+      browser.execute(
+        function (sel, v) {
+          // Re-query INSIDE the execute — a React re-render can replace the
+          // node between calls (the setReactInputValue stale-handle lesson).
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if (!el) return false;
+          el.focus();
+          el.textContent = v;
+          // Caret to the end so a following keystroke appends, and so the
+          // component's input handler reads a real selection.
+          const selection = window.getSelection();
+          if (selection && el.firstChild) {
+            const r = document.createRange();
+            r.setStart(el.firstChild, (el.firstChild.textContent ?? '').length);
+            r.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(r);
+          }
+          el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+          return (el.textContent ?? '') === v;
+        },
+        selector,
+        value,
+      ),
+    { timeout: 10_000, timeoutMsg: `contentEditable ${selector} never took the value` },
+  );
+}
+
+/**
+ * Select a CODE-POINT range in the paragraph editor (the domain the engine's
+ * spans use — `Array.from`, so an astral char is ONE unit). Replaces the
+ * `ta.selectionStart = x` idiom the textarea specs used; walks the rendered
+ * style segments' text nodes so a selection can span several styled runs.
+ */
+export async function setParagraphSelection(start: number, end: number): Promise<void> {
+  const selector = '[data-testid="edit-para-input"]';
+  await $(selector).waitForDisplayed({ timeout: 10_000 });
+  await browser.execute(
+    function (sel, s, e) {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      if (!el) throw new Error('paragraph editor not open');
+      // code-point offset -> UTF-16 offset inside one string
+      const cpToUtf16 = function (str: string, cp: number): number {
+        let i = 0;
+        let n = 0;
+        while (n < cp && i < str.length) {
+          const c = str.codePointAt(i) as number;
+          i += c > 0xffff ? 2 : 1;
+          n++;
+        }
+        return i;
+      };
+      // Walk text nodes in order, converting an absolute code-point offset
+      // into (node, utf16Offset).
+      const locate = function (target: number): { node: Node; offset: number } {
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        let seen = 0;
+        let last: Node | null = null;
+        let node = walker.nextNode();
+        while (node) {
+          const text = node.textContent ?? '';
+          const len = Array.from(text).length;
+          if (seen + len >= target) {
+            return { node, offset: cpToUtf16(text, target - seen) };
+          }
+          seen += len;
+          last = node;
+          node = walker.nextNode();
+        }
+        // Past the end: clamp to the last text node's end.
+        if (last) return { node: last, offset: (last.textContent ?? '').length };
+        return { node: el, offset: 0 };
+      };
+      el.focus();
+      const a = locate(s);
+      const b = locate(e);
+      const range = document.createRange();
+      range.setStart(a.node, a.offset);
+      range.setEnd(b.node, b.offset);
+      const selection = window.getSelection();
+      if (!selection) throw new Error('no selection object');
+      selection.removeAllRanges();
+      selection.addRange(range);
+      // Mirror what a real drag does, so the component's selection capture runs.
+      el.dispatchEvent(new Event('select', { bubbles: true }));
+      document.dispatchEvent(new Event('selectionchange', { bubbles: true }));
+    },
+    selector,
+    start,
+    end,
+  );
+}

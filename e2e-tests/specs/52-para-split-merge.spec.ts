@@ -8,6 +8,7 @@ import {
   openByPaths,
   getState,
   invokeAppCommand,
+  setParagraphSelection,
 } from '../support/harness.js';
 
 // Phase 9.A4 — paragraph split (Enter mid-text) + merge (Backspace at the
@@ -43,16 +44,11 @@ async function editParagraphOpen(pageId: string, index: number): Promise<void> {
   );
 }
 
-/** Place the REAL textarea caret (collapsed) at a UTF-16 offset. */
+/** Place the REAL caret (collapsed) at a CODE-POINT offset. The editor is a
+ * contentEditable rich surface (9.A5-tails-b) — the harness walks the styled
+ * segments to find the spot. */
 async function setEditorCaret(offset: number): Promise<void> {
-  await browser.execute<void, [number]>(function (o) {
-    const ta = document.querySelector(
-      '[data-testid="edit-para-input"]',
-    ) as HTMLTextAreaElement | null;
-    if (!ta) throw new Error('paragraph editor not open');
-    ta.focus();
-    ta.setSelectionRange(o, o);
-  }, offset);
+  await setParagraphSelection(offset, offset);
 }
 
 async function waitForReindexedParas(

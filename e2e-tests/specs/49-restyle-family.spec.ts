@@ -8,8 +8,8 @@ import {
   openByPaths,
   getState,
   invokeAppCommand,
-  setReactInputValue,
   setReactSelectValue,
+  setContentEditableValue,
 } from '../support/harness.js';
 
 // Phase 9.A3a — family swap on the paragraph editor, end to end: the
@@ -185,7 +185,7 @@ describe('restyle family (Phase 9.A3a)', () => {
     // this text blocks (spec 43 pins that). With Liberation chosen the
     // run inventory no longer applies: no error line, and Enter commits.
     const withArrow = `${para.text} →`;
-    await setReactInputValue('[data-testid="edit-para-input"]', withArrow);
+    await setContentEditableValue('[data-testid="edit-para-input"]', withArrow);
     await $('[data-testid="edit-para-error"]').waitForDisplayed({ timeout: 5_000 });
     await setReactSelectValue('[data-testid="edit-para-family"]', 'sans');
     // The error line disappears the moment the family bypasses the

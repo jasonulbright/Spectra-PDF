@@ -8,6 +8,7 @@ import {
   openByPaths,
   getState,
   invokeAppCommand,
+  setParagraphSelection,
 } from '../support/harness.js';
 
 // Phase 9.A5b — per-span bold on the paragraph editor: select a word, click
@@ -47,20 +48,11 @@ async function editParagraphOpen(pageId: string, index: number): Promise<void> {
   );
 }
 
+/** Select a CODE-POINT range in the paragraph editor. The editor is a
+ * contentEditable rich surface (9.A5-tails-b), so this delegates to the
+ * harness helper that walks the rendered style segments' text nodes. */
 async function selectRange(start: number, end: number): Promise<void> {
-  await browser.execute<void, [number, number]>(
-    function (s, e) {
-      const ta = document.querySelector(
-        '[data-testid="edit-para-input"]',
-      ) as HTMLTextAreaElement | null;
-      if (!ta) throw new Error('paragraph editor not open');
-      ta.focus();
-      ta.setSelectionRange(s, e);
-      ta.dispatchEvent(new Event('select', { bubbles: true }));
-    },
-    start,
-    end,
-  );
+  await setParagraphSelection(start, end);
 }
 
 async function workingCopyHas(needle: string): Promise<boolean> {

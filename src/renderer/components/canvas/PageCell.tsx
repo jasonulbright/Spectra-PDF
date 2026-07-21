@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { showsFormWidgets } from '../../commands/tools';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
@@ -15,7 +15,8 @@ import type { EditParagraph, ParagraphEditOpts } from '../../lib/edit-paragraphs
 import {
   applySpanColor,
   applySpanSize,
-  backdropSegments,
+  styledSegments,
+  segmentsToHtml,
   composeSpanFaces,
   composeSpanSizes,
   computeEditSpans,
@@ -34,7 +35,6 @@ import {
   spanColorsToStyles,
   spanFacesToStyles,
   spanSizesToStyles,
-  utf16ToCodePointIndex,
   type SpanColor,
   type SpanFace,
   type SpanSize,
@@ -1584,13 +1584,106 @@ function PageCellImpl({
   );
 }
 
-/** The paragraph editor (7.5): a textarea at the box rect seeded with the
- * paragraph's logical text; per keystroke it re-derives the span mapping
- * (prefix/suffix diff, caret inheritance) and validates each range against
- * its style-source font — the 7.2 live-refusal discipline at paragraph
- * scale. Enter COMMITS (paragraphs are one flowing block; splitting is a
- * stated non-goal, pasted newlines become spaces); Escape cancels; blur
- * commits-if-valid-and-changed, else cancels. */
+/** 9.A5-tails-b contentEditable plumbing. The rich surface renders one <span>
+ * per style segment, so a caret/selection lives at (text node, UTF-16 offset)
+ * rather than a flat textarea index. These map that to and from the CODE-POINT
+ * domain the engine's spans use (`Array.from` — an astral char is ONE unit).
+ * They touch the DOM, so they are proven by e2e rather than unit tests (this
+ * repo has no DOM test environment); the pure index arithmetic they lean on
+ * (`segmentPosToCodePoint`/`codePointToSegmentPos`) IS unit-tested. */
+function domPosToCodePoint(root: HTMLElement, node: Node, offset: number): number {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let total = 0;
+  let current = walker.nextNode();
+  while (current) {
+    if (current === node) {
+      return total + Array.from((current.textContent ?? '').slice(0, offset)).length;
+    }
+    total += Array.from(current.textContent ?? '').length;
+    current = walker.nextNode();
+  }
+  // The position is an ELEMENT node (e.g. the editor itself when empty, or a
+  // boundary between spans): `offset` counts child elements, so sum the text
+  // of the children before it.
+  if (node === root) {
+    let seen = 0;
+    for (let i = 0; i < offset && i < root.childNodes.length; i++) {
+      seen += Array.from(root.childNodes[i].textContent ?? '').length;
+    }
+    return seen;
+  }
+  return total;
+}
+
+/** (text node, UTF-16 offset) for an absolute code-point index. */
+function codePointToDomPos(root: HTMLElement, index: number): { node: Node; offset: number } {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let seen = 0;
+  let last: Node | null = null;
+  let node = walker.nextNode();
+  while (node) {
+    const text = node.textContent ?? '';
+    const chars = Array.from(text);
+    if (seen + chars.length >= index) {
+      return { node, offset: chars.slice(0, index - seen).join('').length };
+    }
+    seen += chars.length;
+    last = node;
+    node = walker.nextNode();
+  }
+  if (last) return { node: last, offset: (last.textContent ?? '').length };
+  return { node: root, offset: 0 };
+}
+
+/** The editor's current selection in code points, or null when the browser
+ * selection is absent or outside the editor (contentEditable drops it on
+ * blur — see `lastSelRef`). */
+function readEditorSelection(
+  root: HTMLElement | null,
+): { start: number; end: number } | null {
+  if (!root) return null;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+  const a = domPosToCodePoint(root, range.startContainer, range.startOffset);
+  const b = domPosToCodePoint(root, range.endContainer, range.endOffset);
+  return { start: Math.min(a, b), end: Math.max(a, b) };
+}
+
+/** Read just the caret (collapsed end) — used before a re-render replaces the
+ * nodes the browser selection points into. */
+function readCaret(root: HTMLElement): number {
+  const sel = readEditorSelection(root);
+  return sel ? sel.end : Array.from(root.textContent ?? '').length;
+}
+
+/** Put the selection back after a render, in code points. */
+function setEditorSelection(root: HTMLElement, start: number, end: number): void {
+  const a = codePointToDomPos(root, start);
+  const b = codePointToDomPos(root, end);
+  const range = document.createRange();
+  try {
+    range.setStart(a.node, a.offset);
+    range.setEnd(b.node, b.offset);
+  } catch {
+    return; // stale offsets after an out-of-band change: leave the caret alone
+  }
+  const sel = window.getSelection();
+  if (!sel) return;
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+/** The paragraph editor (7.5, rich surface since 9.A5-tails-b): a
+ * contentEditable at the box rect seeded with the paragraph's logical text;
+ * per keystroke it re-derives the span mapping (prefix/suffix diff, caret
+ * inheritance) and validates each range against its style-source font — the
+ * 7.2 live-refusal discipline at paragraph scale. Enter COMMITS (paragraphs
+ * are one flowing block; splitting is a stated non-goal, pasted newlines
+ * become spaces); Escape cancels; blur commits-if-valid-and-changed, else
+ * cancels. The DOM is rendered FROM state every keystroke and is never the
+ * source of truth, so the value is always a plain string. */
 function ParagraphEditor({
   para,
   rect,
@@ -1621,7 +1714,33 @@ function ParagraphEditor({
   // face (same honesty as the family swap).
   const [bold, setBold] = useState(para.bold);
   const [italic, setItalic] = useState(para.italic);
-  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const areaRef = useRef<HTMLDivElement>(null);
+  // 9.A5-tails-b: a contentEditable DROPS its selection when it loses focus,
+  // where a textarea kept selectionStart/End. The dual-role controls (swatch,
+  // size stepper, B/I, family) all take focus when clicked, so without this
+  // every per-span action would see an empty selection and fall through to the
+  // whole-paragraph branch — the exact silent-wrong-path failure the round-35
+  // repair was about. `liveSel` therefore prefers the LIVE DOM selection and
+  // falls back to the last one observed inside the editor.
+  const lastSelRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+  // Caret to restore after the next render (the segment spans the browser
+  // selection pointed into are replaced on every keystroke).
+  const pendingCaretRef = useRef<number | null>(null);
+  // Render revision. The browser mutates the contentEditable's DOM directly,
+  // so React's virtual DOM is stale by the time `input` fires. When the edit
+  // leaves `value` UNCHANGED (the sanitizer collapsed it), `setValue` bails
+  // out, nothing re-renders, and the browser's mutation would survive as a
+  // silent DOM-vs-state divergence. Bumping this on every sync forces a
+  // render, and the spans are KEYED on it so they remount and the DOM is
+  // exactly what React rendered from `value`.
+  const [rev, setRev] = useState(0);
+  // IME composition (the CJK documents B2 exists for): the browser owns the
+  // DOM mid-compose, so remounting the spans under it would break the
+  // composition. Skip syncing until it ends.
+  const composingRef = useRef(false);
+  // The html last committed to the DOM — lets the layout effect tell a
+  // DOM-rebuilding render (a text edit or a restyle) from an ordinary one.
+  const lastHtmlRef = useRef<string>('');
   const wrapperRef = useRef<HTMLDivElement>(null);
   // A5a per-span colour: the ranges (code points) painted a colour other
   // than the paragraph default, seeded from the listing's per-span colours.
@@ -1651,6 +1770,15 @@ function ParagraphEditor({
   // backdrop read this; the commit still reads the overrides alone.
   const shownFaces = composeSpanFaces(seedFaces, spanFaces);
   const shownSizes = composeSpanSizes(seedSizes, spanSizes);
+  const fontPx = Math.min(48, Math.max(8, lineHeightPx * 0.8));
+  // The rich surface's content, computed once: the JSX assigns it and the
+  // layout effect compares against the last committed copy to know when the
+  // DOM was rebuilt (and the selection therefore needs restoring).
+  const html = segmentsToHtml(styledSegments(value, spanColors, shownFaces, shownSizes), {
+    basePx: fontPx,
+    baseSize: Math.max(1, size),
+    rev,
+  });
   // The face covering a code-point position (for a per-span toggle to flip
   // one axis while keeping the others), or the plain default.
   const faceAt = (pos: number): { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | 'mono' } => {
@@ -1665,19 +1793,24 @@ function ParagraphEditor({
   // so the native picker (a controlled input) needs its own state to hold
   // what was picked, and to reflect the current selection's per-span colour.
   const [colorField, setColorField] = useState<string>(() => para.color);
-  // The textarea's LIVE selection in code points, read at the instant a
-  // dual-role control fires. A textarea keeps its selectionStart/End when it
-  // loses focus (the swatch/stepper taking over doesn't clear it), so this
-  // is more robust than a captured ref — and, unlike an onSelect capture, it
-  // works when a test drives selectionStart/End directly (no synthetic
-  // `select` event needed).
+  // 9.A5-tails-a/b: the B/I buttons' PRESSED look. A partial selection shows
+  // that range's actual face (seeds included, so a paragraph opened on
+  // already-bold text shows B pressed and the click un-bolds); a caret or
+  // select-all shows the whole-paragraph override, which is what those target.
+  // null = "use the paragraph state", mirroring sizeField/colorField.
+  const [faceField, setFaceField] = useState<{ bold: boolean; italic: boolean } | null>(null);
+  // The editor's LIVE selection in code points, read at the instant a
+  // dual-role control fires — and, unlike an onSelect capture, it works when a
+  // test drives the DOM selection directly (no synthetic `select` event
+  // needed; the round-35 repair's requirement). Falls back to the last
+  // selection seen inside the editor for the blur case above.
   const liveSel = (): { start: number; end: number } => {
-    const ta = areaRef.current;
-    if (!ta) return { start: 0, end: 0 };
-    return {
-      start: utf16ToCodePointIndex(ta.value, ta.selectionStart),
-      end: utf16ToCodePointIndex(ta.value, ta.selectionEnd),
-    };
+    const live = readEditorSelection(areaRef.current);
+    if (live) {
+      lastSelRef.current = live;
+      return live;
+    }
+    return lastSelRef.current;
   };
   // The dual-role controls target a PARTIAL selection per-span; a collapsed
   // caret OR a whole-text selection targets the whole paragraph. Returns the
@@ -1689,7 +1822,7 @@ function ParagraphEditor({
   const spanTarget = (): { start: number; end: number } | null => {
     const sel = liveSel();
     if (sel.end <= sel.start) return null; // collapsed → whole paragraph
-    const cpLen = Array.from(areaRef.current?.value ?? '').length;
+    const cpLen = Array.from(value).length;
     if (sel.start === 0 && sel.end >= cpLen) return null; // whole text → whole paragraph
     return sel;
   };
@@ -1710,10 +1843,41 @@ function ParagraphEditor({
         (r) => sel.start >= r.start && sel.start < r.end,
       );
       setColorField(colorHit ? colorHit.color : color);
+      const f = faceAt(sel.start);
+      // Stable identity — this runs on every `selectionchange`, so allocating
+      // a fresh object each tick would re-render the editor continuously.
+      setFaceField((prev) =>
+        prev && prev.bold === f.bold && prev.italic === f.italic
+          ? prev
+          : { bold: f.bold, italic: f.italic },
+      );
     } else {
       setSizeField(String(Math.round(size)));
       setColorField(color);
+      setFaceField(null);
     }
+  };
+  // 9.A5-tails-b: the ONE path text changes take (typing, IME commit, paste).
+  // `next` is already sanitized; `caret` is a code-point offset in it.
+  const applyText = (next: string, caret: number): void => {
+    // Per-span overrides follow the text edit (same diff as the spans), then
+    // flatten to disjoint — a retype whose window spans two different ranges
+    // would otherwise leave them overlapping and the preview would show a
+    // different winner than the commit (round-32 HIGH). The merge resolves it
+    // the way the engine folds, so state stays canonical.
+    setSpanColors((prev) => mergeSpanColors(remapRanges(value, next, prev)));
+    setSpanFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
+    setSpanSizes((prev) => mergeSpanSizes(remapRanges(value, next, prev)));
+    // 9.A5-tails-a: the DISPLAY seeds ride the same diff, so they stay
+    // attached to their characters as the text is edited (never sent).
+    setSeedFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
+    setSeedSizes((prev) => mergeSpanSizes(remapRanges(value, next, prev)));
+    setValue(next);
+    // Always bump: when `next === value` React would otherwise skip the
+    // render and leave the browser's raw DOM mutation in place.
+    setRev((r) => r + 1);
+    // Sanitizing can SHORTEN the text (a pasted CRLF becomes one space).
+    pendingCaretRef.current = Math.max(0, Math.min(caret, Array.from(next).length));
   };
   // ONE outcome per editor instance: Enter-commit, Escape-cancel, blur,
   // and the convert button all race through here — whichever fires first
@@ -1726,9 +1890,76 @@ function ParagraphEditor({
     fn();
   };
   useEffect(() => {
-    areaRef.current?.focus();
-    areaRef.current?.select();
+    const el = areaRef.current;
+    if (!el) return;
+    el.focus();
+    // Open with everything selected (the textarea's `.select()`), so typing
+    // replaces the paragraph — the shipped behaviour every spec relies on.
+    setEditorSelection(el, 0, Array.from(el.textContent ?? '').length);
+    lastSelRef.current = { start: 0, end: Array.from(para.text).length };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 9.A5-tails-b: track the selection from the DOCUMENT's `selectionchange`.
+  // React's `onSelect` is reliable for <input>/<textarea> but NOT for a
+  // contentEditable, and `selectionchange` is the signal browsers actually
+  // fire for caret/selection movement here. Without it the dual-role controls
+  // read a stale range and every per-span action falls through to the
+  // whole-paragraph branch — the round-35 failure in new clothing.
+  // `captureSelection` is held in a ref so the listener never closes over
+  // stale state.
+  const captureRef = useRef(captureSelection);
+  captureRef.current = captureSelection;
+  useEffect(() => {
+    const onSelectionChange = (): void => {
+      const s = readEditorSelection(areaRef.current);
+      if (!s) return; // selection elsewhere: keep the last one we saw
+      lastSelRef.current = s;
+      captureRef.current();
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => document.removeEventListener('selectionchange', onSelectionChange);
+  }, []);
+  // 9.A5-tails-b: restore the caret after a keystroke re-renders the segment
+  // spans (the nodes the browser selection pointed into no longer exist).
+  // useLayoutEffect so it lands before paint — no visible caret jump.
+  useLayoutEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const pending = pendingCaretRef.current;
+    if (pending !== null) {
+      pendingCaretRef.current = null;
+      setEditorSelection(el, pending, pending);
+      lastSelRef.current = { start: pending, end: pending };
+      lastHtmlRef.current = html;
+      return;
+    }
+    // A RESTYLE also rebuilds the DOM (the new colour/weight/size is in the
+    // html), which drops the browser selection. Put it back: the user's word
+    // stays selected so a second control acts on the same range — and without
+    // this, the transient collapse gets cached and the NEXT control falls
+    // through to the whole-paragraph branch, silently restyling everything.
+    const rebuilt = lastHtmlRef.current !== html;
+    lastHtmlRef.current = html;
+    const s = lastSelRef.current;
+    if (s.end <= s.start) return; // nothing meaningful to put back
+    if (rebuilt) {
+      setEditorSelection(el, s.start, s.end);
+      return;
+    }
+    // SELF-HEAL. A re-render can drop the selection even when the html is
+    // unchanged (observed: the first `captureSelection` after selecting a word
+    // left the caret collapsed on the editor element). The signature is
+    // precise and worth keying on: a programmatic clobber anchors on the
+    // ELEMENT, whereas a user clicking to place a caret always lands inside a
+    // TEXT node. So restore only when the live selection sits on the element
+    // itself — never fighting a deliberate caret placement.
+    const live = window.getSelection();
+    if (!live || live.rangeCount === 0) return;
+    const range = live.getRangeAt(0);
+    if (!el.contains(range.startContainer)) return;
+    const onElement = range.startContainer.nodeType !== Node.TEXT_NODE;
+    if (onElement && range.collapsed) setEditorSelection(el, s.start, s.end);
+  });
   const spans = computeEditSpans(para.text, value, para.spans, para.runs[0]);
   const familyChanged = family !== '';
   const styleChanged = bold !== para.bold || italic !== para.italic;
@@ -1790,7 +2021,6 @@ function ParagraphEditor({
     if (valid && changed) settle(() => onCommit(value, restyleOpts()));
     else settle(onCancel);
   };
-  const fontPx = Math.min(48, Math.max(8, lineHeightPx * 0.8));
   return (
     <div
       ref={wrapperRef}
@@ -1822,16 +2052,18 @@ function ParagraphEditor({
           // Caret at the end (the committed shape every prior spec uses)
           // falls through to the shipped commit.
           const ta = areaRef.current;
+          const caret = readEditorSelection(ta); // code points already
+          const cpLen = Array.from(value).length;
           if (
-            e.target === ta &&
             ta &&
-            ta.selectionStart === ta.selectionEnd &&
-            ta.selectionStart > 0 &&
-            ta.selectionStart < value.length
+            (e.target === ta || ta.contains(e.target as Node)) &&
+            caret &&
+            caret.start === caret.end &&
+            caret.start > 0 &&
+            caret.start < cpLen
           ) {
             if (valid) {
-              const cp = utf16ToCodePointIndex(value, ta.selectionStart);
-              settle(() => onCommit(value, restyleOpts({ split_at: cp })));
+              settle(() => onCommit(value, restyleOpts({ split_at: caret.start })));
             }
             return;
           }
@@ -1840,9 +2072,12 @@ function ParagraphEditor({
         } else if (
           e.key === 'Backspace' &&
           onMergePrev &&
-          e.target === areaRef.current &&
-          areaRef.current?.selectionStart === 0 &&
-          areaRef.current?.selectionEnd === 0 &&
+          areaRef.current &&
+          (e.target === areaRef.current || areaRef.current.contains(e.target as Node)) &&
+          (() => {
+            const c = readEditorSelection(areaRef.current);
+            return c !== null && c.start === 0 && c.end === 0;
+          })() &&
           value === para.text
         ) {
           // A4 merge: backspace at the very start of an UNCHANGED editor
@@ -1937,7 +2172,7 @@ function ParagraphEditor({
                 // of the selection keeps its own weight and slant and only the
                 // family changes. (This shared the toggles' collapse bug:
                 // it painted the selection-start's bold/italic over the lot.)
-                setSpanFaces(() => setSpanFaceFamily(shownFaces, sel.start, sel.end, fam));
+                setSpanFaces((prev) => setSpanFaceFamily(prev, shownFaces, sel.start, sel.end, fam));
               } else {
                 setFamily(fam);
               }
@@ -1952,8 +2187,8 @@ function ParagraphEditor({
         <button
           type="button"
           data-testid="edit-para-bold"
-          className={`page-editpara-style${bold ? ' pressed' : ''}`}
-          aria-pressed={bold}
+          className={`page-editpara-style${(faceField ? faceField.bold : bold) ? ' pressed' : ''}`}
+          aria-pressed={faceField ? faceField.bold : bold}
           disabled={para.vertical}
           title={
             para.vertical
@@ -1974,9 +2209,12 @@ function ParagraphEditor({
               // and written into the overrides because an explicit toggle IS
               // the request to substitute.
               const target = !faceAt(sel.start).bold;
-              setSpanFaces(() =>
-                toggleSpanFaceAxis(shownFaces, sel.start, sel.end, 'bold', target),
+              setSpanFaces((prev) =>
+                toggleSpanFaceAxis(prev, shownFaces, sel.start, sel.end, 'bold', target),
               );
+              // The selection does not change, so captureSelection will not
+              // re-fire — refresh the pressed look here.
+              setFaceField((f) => ({ bold: target, italic: f ? f.italic : italic }));
             } else {
               setBold((b) => !b);
             }
@@ -1987,8 +2225,8 @@ function ParagraphEditor({
         <button
           type="button"
           data-testid="edit-para-italic"
-          className={`page-editpara-style page-editpara-style-i${italic ? ' pressed' : ''}`}
-          aria-pressed={italic}
+          className={`page-editpara-style page-editpara-style-i${(faceField ? faceField.italic : italic) ? ' pressed' : ''}`}
+          aria-pressed={faceField ? faceField.italic : italic}
           disabled={para.vertical}
           title={
             para.vertical
@@ -2002,9 +2240,10 @@ function ParagraphEditor({
             const sel = spanTarget();
             if (sel) {
               const target = !faceAt(sel.start).italic;
-              setSpanFaces(() =>
-                toggleSpanFaceAxis(shownFaces, sel.start, sel.end, 'italic', target),
+              setSpanFaces((prev) =>
+                toggleSpanFaceAxis(prev, shownFaces, sel.start, sel.end, 'italic', target),
               );
+              setFaceField((f) => ({ bold: f ? f.bold : bold, italic: target }));
             } else {
               setItalic((i) => !i);
             }
@@ -2013,86 +2252,78 @@ function ParagraphEditor({
           I
         </button>
       </div>
-      {/* 9.A5a/A5b mirror overlay: a backdrop renders the text with the
-          per-span colours AND weight/slant; the textarea (transparent
-          text, visible caret) sits on top for input. Both share the exact
-          font/size/padding/wrap so the styled backdrop lines up under the
-          caret. The textarea's text stays opaque #111 until a per-span
-          style is applied, so a plain edit is visually unchanged. */}
+      {/* 9.A5-tails-b RICH SURFACE. One contentEditable: the styled text the
+          user sees IS the input, so the caret, the selection and the line
+          wrapping are computed by the browser from these very glyphs and agree
+          BY CONSTRUCTION. It replaces a mirror overlay (styled backdrop +
+          transparent textarea) which positioned the caret from a SEPARATE
+          uniform-metric textarea — measurably wrong: Arial Bold runs +2.32px
+          on "Hello" and +10.83px on "The quick brown fox" at 14px, so the
+          caret drifted from the visible glyphs after any bolded word, and
+          per-span size (+9..+36px) and substituted families could never be
+          rendered at all.
+
+          The DOM is a VIEW rendered from `value` every keystroke — never the
+          source of truth — so no pasted markup can enter the value: input is
+          read as text, sanitized, and re-rendered. */}
       <div className="page-editpara-inputwrap">
         <div
-          className="page-editpara-backdrop"
-          aria-hidden="true"
-          data-testid="edit-para-backdrop"
-          style={{ fontSize: `${fontPx}px`, lineHeight: 1.25 }}
-        >
-          {backdropSegments(value, spanColors, spanFaces, spanSizes).map((seg, i) => (
-            <span
-              key={i}
-              style={{
-                ...(seg.color ? { color: seg.color } : {}),
-                ...(seg.bold ? { fontWeight: 700 } : {}),
-                ...(seg.italic ? { fontStyle: 'italic' } : {}),
-                // A5c: a per-span-sized range is MARKED, not rendered at its
-                // size — the transparent textarea has uniform metrics, so a
-                // bigger glyph would desync the caret. The dotted underline
-                // shows "this range is resized"; the size previews on commit.
-                ...(seg.sized
-                  ? { textDecoration: 'underline dotted', textUnderlineOffset: '2px' }
-                  : {}),
-              }}
-            >
-              {seg.text}
-            </span>
-          ))}
-          {/* trailing zero-width space so a text ending in a newline still
-              renders its final (empty) line in the backdrop */}
-          {'​'}
-        </div>
-        <textarea
           ref={areaRef}
           data-testid="edit-para-input"
-          className={`page-editpara-textarea${valid ? '' : ' invalid'}`}
-          value={value}
-          rows={Math.min(12, para.lineCount + 1)}
+          className={`page-editpara-rich${valid ? '' : ' invalid'}`}
+          contentEditable
+          suppressContentEditableWarning
+          role="textbox"
+          aria-multiline="true"
+          aria-label="Paragraph text"
+          spellCheck={false}
           style={{
             fontSize: `${fontPx}px`,
             lineHeight: 1.25,
-            color:
-              spanColors.length > 0 || spanFaces.length > 0 || spanSizes.length > 0
-                ? 'transparent'
-                : '#111',
-            caretColor: '#111',
+            maxHeight: `${Math.min(12, para.lineCount + 1) * fontPx * 1.25 + 8}px`,
           }}
-          onChange={(e) => {
-            const next = sanitizeParagraphInput(e.target.value);
-            // Per-span overrides follow the text edit (same diff as the
-            // spans), then flatten to disjoint — a retype whose window spans
-            // two different ranges would otherwise leave them overlapping and
-            // the preview would show a different winner than the commit
-            // (round-32 HIGH). The merge resolves it the way the engine
-            // folds, so state stays canonical.
-            setSpanColors((prev) => mergeSpanColors(remapRanges(value, next, prev)));
-            setSpanFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
-            setSpanSizes((prev) => mergeSpanSizes(remapRanges(value, next, prev)));
-            // 9.A5-tails-a: the DISPLAY seeds ride the same diff, so they stay
-            // attached to their characters as the text is edited (they are
-            // never sent — see the seed state above).
-            setSeedFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
-            setSeedSizes((prev) => mergeSpanSizes(remapRanges(value, next, prev)));
-            setValue(next);
+          onInput={(e) => {
+            // Mid-IME the browser owns the DOM; sync when composition ends.
+            if (composingRef.current) return;
+            const el = e.currentTarget;
+            // Read the caret BEFORE React re-renders the segments (the DOM
+            // nodes it points into are about to be replaced).
+            applyText(sanitizeParagraphInput(el.textContent ?? ''), readCaret(el));
+          }}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={(e) => {
+            composingRef.current = false;
+            const el = e.currentTarget;
+            applyText(sanitizeParagraphInput(el.textContent ?? ''), readCaret(el));
+          }}
+          onPaste={(e) => {
+            // Plain text only — styles come from the controls, never from
+            // pasted content, and the value must stay a plain string.
+            e.preventDefault();
+            const text = sanitizeParagraphInput(e.clipboardData.getData('text/plain'));
+            const sel = liveSel();
+            const chars = Array.from(value);
+            const next = sanitizeParagraphInput(
+              chars.slice(0, sel.start).join('') + text + chars.slice(sel.end).join(''),
+            );
+            applyText(next, sel.start + Array.from(text).length);
           }}
           onSelect={captureSelection}
-          onScroll={(e) => {
-            const bd = e.currentTarget.previousElementSibling as HTMLElement | null;
-            if (bd) {
-              bd.scrollTop = e.currentTarget.scrollTop;
-              bd.scrollLeft = e.currentTarget.scrollLeft;
-            }
-          }}
+          onKeyUp={captureSelection}
+          onMouseUp={captureSelection}
           /* Enter/Escape handled at the wrapper (works from every control).
              Invalid+changed holds the editor open there — Enter never
              silently discards or commits the inexpressible. */
+          /* ONE opaque html string, never React children: the browser edits
+             this DOM directly (merging text nodes, deleting spans), so a React
+             child reconcile would removeChild nodes that no longer exist and
+             throw. Family and size RENDER here — the Liberation faces were
+             chosen for metric compatibility with Arial/Times/Courier (B1), so
+             the browser stand-ins preview the substituted face honestly; the
+             committed page remains the fidelity authority. */
+          dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>
       {!valid && (

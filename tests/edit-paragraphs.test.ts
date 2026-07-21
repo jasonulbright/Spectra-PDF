@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   applySpanColor,
   applySpanFace,
-  backdropSegments,
+  styledSegments,
+  segmentPosToCodePoint,
+  segmentsToHtml,
+  escapeHtml,
+  codePointToSegmentPos,
   computeEditSpans,
   fetchEditTextListing,
   hexToRgb,
@@ -325,7 +329,7 @@ describe('applySpanColor / mergeSpanColors (9.A5a selection → colour)', () => 
   });
 });
 
-describe('seedSpanColors / backdropSegments / spanColorsToStyles (9.A5a)', () => {
+describe('seedSpanColors / styledSegments / spanColorsToStyles (9.A5a)', () => {
   it('seeds only spans that differ from the paragraph colour', () => {
     const spans = [
       { start: 0, end: 6, run: 0, color: '#000000' },
@@ -337,26 +341,26 @@ describe('seedSpanColors / backdropSegments / spanColorsToStyles (9.A5a)', () =>
   });
 
   it('splits text into base + coloured backdrop segments (with face flags)', () => {
-    expect(backdropSegments('Hello colored world', [{ start: 6, end: 13, color: '#ff0000' }])).toEqual([
-      { text: 'Hello ', color: null, bold: false, italic: false, sized: false },
-      { text: 'colored', color: '#ff0000', bold: false, italic: false, sized: false },
-      { text: ' world', color: null, bold: false, italic: false, sized: false },
+    expect(styledSegments('Hello colored world', [{ start: 6, end: 13, color: '#ff0000' }])).toEqual([
+      { text: 'Hello ', color: null, bold: false, italic: false, size: null },
+      { text: 'colored', color: '#ff0000', bold: false, italic: false, size: null },
+      { text: ' world', color: null, bold: false, italic: false, size: null },
     ]);
   });
 
   it('folds colour AND face independently, segmenting where either changes (A5b)', () => {
     // "Hello world": bold [0,5), red [3,8) — the overlap [3,5) is bold+red.
     expect(
-      backdropSegments(
+      styledSegments(
         'Hello world',
         [{ start: 3, end: 8, color: '#ff0000' }],
         [{ start: 0, end: 5, bold: true, italic: false }],
       ),
     ).toEqual([
-      { text: 'Hel', color: null, bold: true, italic: false, sized: false },
-      { text: 'lo', color: '#ff0000', bold: true, italic: false, sized: false },
-      { text: ' wo', color: '#ff0000', bold: false, italic: false, sized: false },
-      { text: 'rld', color: null, bold: false, italic: false, sized: false },
+      { text: 'Hel', color: null, bold: true, italic: false, size: null },
+      { text: 'lo', color: '#ff0000', bold: true, italic: false, size: null },
+      { text: ' wo', color: '#ff0000', bold: false, italic: false, size: null },
+      { text: 'rld', color: null, bold: false, italic: false, size: null },
     ]);
   });
 
@@ -380,12 +384,12 @@ describe('mergeSpanColors overlap flattening (9.A5a round-32 HIGH)', () => {
       { start: 0, end: 1, color: '#ff0000' },
       { start: 1, end: 17, color: '#0000ff' },
     ]);
-    // backdropSegments and spanColorsToStyles both go through merge, so they
+    // styledSegments and spanColorsToStyles both go through merge, so they
     // describe the SAME per-position colours (no silent mismatch).
-    const segs = backdropSegments('Hi folks everyone', overlapping);
+    const segs = styledSegments('Hi folks everyone', overlapping);
     expect(segs).toEqual([
-      { text: 'H', color: '#ff0000', bold: false, italic: false, sized: false },
-      { text: 'i folks everyone', color: '#0000ff', bold: false, italic: false, sized: false },
+      { text: 'H', color: '#ff0000', bold: false, italic: false, size: null },
+      { text: 'i folks everyone', color: '#0000ff', bold: false, italic: false, size: null },
     ]);
     expect(spanColorsToStyles(overlapping)).toEqual([
       { start: 0, end: 1, color: [1, 0, 0] },
@@ -475,13 +479,70 @@ describe('per-span SIZE helpers (9.A5c)', () => {
     ]);
   });
 
-  it('backdropSegments marks a sized range without changing its width', () => {
-    const segs = backdropSegments('Big word here', [], [], [{ start: 4, end: 8, size: 24 }]);
+  it('styledSegments carries the REAL per-span size (9.A5-tails-b)', () => {
+    // Was: the segment only carried a `sized` flag, because the mirror
+    // overlay could not render a different metric without desyncing the
+    // textarea's caret. The contentEditable surface renders the size itself.
+    const segs = styledSegments('Big word here', [], [], [{ start: 4, end: 8, size: 24 }]);
     expect(segs).toEqual([
-      { text: 'Big ', color: null, bold: false, italic: false, sized: false },
-      { text: 'word', color: null, bold: false, italic: false, sized: true },
-      { text: ' here', color: null, bold: false, italic: false, sized: false },
+      { text: 'Big ', color: null, bold: false, italic: false, size: null },
+      { text: 'word', color: null, bold: false, italic: false, size: 24 },
+      { text: ' here', color: null, bold: false, italic: false, size: null },
     ]);
+  });
+
+  it('styledSegments carries the substituted FAMILY and segments on it', () => {
+    const segs = styledSegments(
+      'plain serif plain',
+      [],
+      [{ start: 6, end: 11, bold: false, italic: false, family: 'serif' }],
+      [],
+    );
+    expect(segs).toEqual([
+      { text: 'plain ', color: null, bold: false, italic: false, size: null },
+      { text: 'serif', color: null, bold: false, italic: false, family: 'serif', size: null },
+      { text: ' plain', color: null, bold: false, italic: false, size: null },
+    ]);
+  });
+});
+
+describe('9.A5-tails-b — caret code-point mapping over styled segments', () => {
+  const segs = [{ text: 'Hello ' }, { text: 'big' }, { text: ' world' }];
+
+  it('maps a position inside a segment to an absolute code-point index', () => {
+    expect(segmentPosToCodePoint(segs, 0, 0)).toBe(0);
+    expect(segmentPosToCodePoint(segs, 1, 0)).toBe(6);
+    expect(segmentPosToCodePoint(segs, 1, 3)).toBe(9);
+    expect(segmentPosToCodePoint(segs, 2, 6)).toBe(15);
+  });
+
+  it('clamps an offset past the segment end', () => {
+    expect(segmentPosToCodePoint(segs, 1, 99)).toBe(9);
+  });
+
+  it('round-trips with codePointToSegmentPos', () => {
+    for (let i = 0; i <= 15; i++) {
+      const pos = codePointToSegmentPos(segs, i);
+      expect(segmentPosToCodePoint(segs, pos.segIndex, pos.offset)).toBe(i);
+    }
+  });
+
+  it('a boundary index belongs to the start of the following segment', () => {
+    expect(codePointToSegmentPos(segs, 6)).toEqual({ segIndex: 1, offset: 0 });
+  });
+
+  it('past-the-end clamps to the end of the last segment', () => {
+    expect(codePointToSegmentPos(segs, 999)).toEqual({ segIndex: 2, offset: 6 });
+  });
+
+  it('counts astral characters as ONE code point (the engine span domain)', () => {
+    const astral = [{ text: 'a𝄞' }, { text: 'b' }];
+    expect(segmentPosToCodePoint(astral, 1, 1)).toBe(3);
+    expect(codePointToSegmentPos(astral, 2)).toEqual({ segIndex: 1, offset: 0 });
+  });
+
+  it('empty segment list is safe', () => {
+    expect(codePointToSegmentPos([], 4)).toEqual({ segIndex: 0, offset: 0 });
   });
 });
 
@@ -494,7 +555,7 @@ describe('9.A5-tails-a — per-segment face toggle + display seeds', () => {
         { start: 0, end: 5, bold: true, italic: false, family: 'serif' as const },
         { start: 5, end: 10, bold: false, italic: true, family: 'mono' as const },
       ];
-      const out = toggleSpanFaceAxis(existing, 0, 10, 'bold');
+      const out = toggleSpanFaceAxis(existing, existing, 0, 10, 'bold');
       // Each segment keeps its family and its italic, only bold flipped.
       expect(out).toEqual([
         { start: 0, end: 5, bold: false, italic: false, family: 'serif' },
@@ -507,14 +568,14 @@ describe('9.A5-tails-a — per-segment face toggle + display seeds', () => {
         { start: 0, end: 4, bold: true, italic: false, family: 'serif' as const },
         { start: 4, end: 8, bold: false, italic: false },
       ];
-      const out = toggleSpanFaceAxis(existing, 4, 8, 'italic');
+      const out = toggleSpanFaceAxis(existing, existing, 4, 8, 'italic');
       expect(out[0]).toEqual({ start: 0, end: 4, bold: true, italic: false, family: 'serif' });
       expect(out.find((r) => r.start === 4)).toEqual({ start: 4, end: 8, bold: false, italic: true });
     });
 
     it('splits a range the selection only partially covers', () => {
       const existing = [{ start: 0, end: 10, bold: false, italic: false, family: 'mono' as const }];
-      const out = toggleSpanFaceAxis(existing, 3, 6, 'bold');
+      const out = toggleSpanFaceAxis(existing, existing, 3, 6, 'bold');
       expect(out).toEqual([
         { start: 0, end: 3, bold: false, italic: false, family: 'mono' },
         { start: 3, end: 6, bold: true, italic: false, family: 'mono' },
@@ -523,7 +584,7 @@ describe('9.A5-tails-a — per-segment face toggle + display seeds', () => {
     });
 
     it('fills an uncovered gap with the default plus the axis', () => {
-      const out = toggleSpanFaceAxis([], 2, 5, 'bold');
+      const out = toggleSpanFaceAxis([], [], 2, 5, 'bold');
       expect(out).toEqual([{ start: 2, end: 5, bold: true, italic: false }]);
     });
 
@@ -532,13 +593,13 @@ describe('9.A5-tails-a — per-segment face toggle + display seeds', () => {
         { start: 0, end: 3, bold: true, italic: false },
         { start: 3, end: 6, bold: false, italic: false },
       ];
-      const out = toggleSpanFaceAxis(existing, 0, 6, 'bold', true);
+      const out = toggleSpanFaceAxis(existing, existing, 0, 6, 'bold', true);
       expect(out).toEqual([{ start: 0, end: 6, bold: true, italic: false }]);
     });
 
     it('is a no-op for an empty range', () => {
       const existing = [{ start: 0, end: 4, bold: true, italic: false }];
-      expect(toggleSpanFaceAxis(existing, 2, 2, 'bold')).toEqual(existing);
+      expect(toggleSpanFaceAxis(existing, existing, 2, 2, 'bold')).toEqual(existing);
     });
 
     it('round-trips: flipping the same axis twice restores the faces', () => {
@@ -546,8 +607,8 @@ describe('9.A5-tails-a — per-segment face toggle + display seeds', () => {
         { start: 0, end: 5, bold: true, italic: false, family: 'serif' as const },
         { start: 5, end: 10, bold: false, italic: true, family: 'mono' as const },
       ];
-      const once = toggleSpanFaceAxis(existing, 0, 10, 'italic');
-      const twice = toggleSpanFaceAxis(once, 0, 10, 'italic');
+      const once = toggleSpanFaceAxis(existing, existing, 0, 10, 'italic');
+      const twice = toggleSpanFaceAxis(once, once, 0, 10, 'italic');
       expect(twice).toEqual(existing);
     });
   });
@@ -626,15 +687,117 @@ describe('9.A5-tails-a — setSpanFaceFamily (the family select shared the colla
       { start: 0, end: 5, bold: true, italic: false, family: 'serif' as const },
       { start: 5, end: 10, bold: false, italic: true },
     ];
-    expect(setSpanFaceFamily(existing, 0, 10, 'mono')).toEqual([
+    expect(setSpanFaceFamily(existing, existing, 0, 10, 'mono')).toEqual([
       { start: 0, end: 5, bold: true, italic: false, family: 'mono' },
       { start: 5, end: 10, bold: false, italic: true, family: 'mono' },
     ]);
   });
 
   it('applies to an unstyled gap with the plain default', () => {
-    expect(setSpanFaceFamily([], 1, 4, 'serif')).toEqual([
+    expect(setSpanFaceFamily([], [], 1, 4, 'serif')).toEqual([
       { start: 1, end: 4, bold: false, italic: false, family: 'serif' },
     ]);
+  });
+});
+
+describe('9.A5-tails-b — segmentsToHtml (the rich surface renders ONE html string)', () => {
+  const base = { basePx: 14, baseSize: 12, rev: 3 };
+
+  it('escapes untrusted paragraph text', () => {
+    // Paragraph text comes from the PDF; it must never reach the markup raw.
+    expect(escapeHtml('<script>alert(1)</script>')).toBe(
+      '&lt;script&gt;alert(1)&lt;/script&gt;',
+    );
+    expect(escapeHtml('a & b "q" \'r\'')).toBe('a &amp; b &quot;q&quot; &#39;r&#39;');
+    const html = segmentsToHtml(
+      [{ text: '<img src=x onerror=1>', color: null, bold: false, italic: false, size: null }],
+      base,
+    );
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
+  });
+
+  it('emits colour/weight/slant/family/size as styles', () => {
+    const html = segmentsToHtml(
+      [
+        { text: 'a', color: '#ff0000', bold: true, italic: true, family: 'serif', size: 24 },
+      ],
+      base,
+    );
+    expect(html).toContain('color:#ff0000');
+    expect(html).toContain('font-weight:700');
+    expect(html).toContain('font-style:italic');
+    expect(html).toContain('Liberation Serif');
+    // 24pt against a 12pt base at 14px => 28px
+    expect(html).toContain('font-size:28.00px');
+  });
+
+  it('drops a malformed colour rather than interpolating it', () => {
+    const html = segmentsToHtml(
+      [{ text: 'a', color: 'red;background:url(x)', bold: false, italic: false, size: null }],
+      base,
+    );
+    expect(html).not.toContain('background');
+    expect(html).not.toContain('color:');
+  });
+
+  it('stamps the revision so a same-text edit still changes the string', () => {
+    const seg = [{ text: 'same', color: null, bold: false, italic: false, size: null }];
+    const a = segmentsToHtml(seg, { ...base, rev: 1 });
+    const b = segmentsToHtml(seg, { ...base, rev: 2 });
+    expect(a).not.toBe(b);
+  });
+
+  it('a plain paragraph produces plain spans (no style attribute)', () => {
+    const html = segmentsToHtml(
+      [{ text: 'plain', color: null, bold: false, italic: false, size: null }],
+      base,
+    );
+    expect(html).toBe('<span data-seg="0" data-r="3">plain</span>');
+  });
+});
+
+describe('9.A5-tails-a — display seeds must NEVER leak into sent overrides (round-40 CRITICAL)', () => {
+  // The review repro: a paragraph of "Plain " (Helvetica) + "bold"
+  // (Helvetica-Bold). The listing seeds [6,10) bold. The user selects ONLY
+  // "Plain " (0-6) and clicks Italic. Before the preserve/view split, the
+  // whole composed view was written back as overrides, so the untouched
+  // "bold" word was sent as a face override — and a face override
+  // SUBSTITUTES its range into a bundled Liberation face. The reviewer
+  // confirmed against the real engine that the untouched word came back
+  // embedded as LiberationSans instead of Helvetica-Bold.
+  const seed = [{ start: 6, end: 10, bold: true, italic: false }];
+  const overrides: typeof seed = [];
+  const view = composeSpanFaces(seed, overrides);
+
+  it('a toggle outside a seeded range does not adopt that seed as an override', () => {
+    const out = toggleSpanFaceAxis(overrides, view, 0, 6, 'italic', true);
+    expect(out).toEqual([{ start: 0, end: 6, bold: false, italic: true }]);
+    // The seeded range must be absent — it is display state, not a request.
+    expect(out.some((r) => r.start === 6 && r.end === 10)).toBe(false);
+    // And nothing sent describes the untouched word.
+    expect(spanFacesToStyles(out).some((r) => r.start >= 6)).toBe(false);
+  });
+
+  it('the family select does not adopt seeds either', () => {
+    const out = setSpanFaceFamily(overrides, view, 0, 6, 'serif');
+    expect(out).toEqual([{ start: 0, end: 6, bold: false, italic: false, family: 'serif' }]);
+  });
+
+  it('a toggle INSIDE a seeded range still flips from what the user sees', () => {
+    // Selecting the already-bold word and clicking B must UN-bold it, which
+    // legitimately becomes an override (you cannot un-bold a foundry bold
+    // face without substituting) — that is a user action, not a leak.
+    const out = toggleSpanFaceAxis(overrides, view, 6, 10, 'bold', false);
+    expect(out).toEqual([{ start: 6, end: 10, bold: false, italic: false }]);
+  });
+
+  it('prior overrides elsewhere survive a new toggle', () => {
+    const prior = [{ start: 12, end: 16, bold: false, italic: true }];
+    const v = composeSpanFaces(seed, prior);
+    const out = toggleSpanFaceAxis(prior, v, 0, 6, 'bold', true);
+    expect(out).toContainEqual({ start: 12, end: 16, bold: false, italic: true });
+    expect(out).toContainEqual({ start: 0, end: 6, bold: true, italic: false });
+    expect(out.some((r) => r.start === 6 && r.end === 10)).toBe(false);
   });
 });

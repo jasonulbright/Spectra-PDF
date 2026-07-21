@@ -7,6 +7,7 @@ import {
   openByPaths,
   getState,
   invokeAppCommand,
+  setContentEditableValue,
 } from '../support/harness.js';
 
 // Phase 9.B4b — vertical paragraph reflow against the built binary. The
@@ -48,26 +49,13 @@ async function editParagraphOpen(pageId: string, index: number): Promise<void> {
   );
 }
 
-/** Replace the editor's value wholesale via the native setter (WebDriver
- * key injection is unreliable for CJK on Windows; this is the standard
- * controlled-input path — React 18 hears the bubbled `input`). Caret lands
- * collapsed at the END so Enter commits rather than splitting (the A4
- * mid-text branch). */
+/** Replace the editor's text wholesale (WebDriver key injection is
+ * unreliable for CJK on Windows). The editor is a contentEditable rich
+ * surface (9.A5-tails-b), so this goes through the harness helper, which
+ * fires the same `input` event the browser does and leaves the caret at the
+ * END so Enter commits rather than splitting (the A4 mid-text branch). */
 async function setEditorValue(text: string): Promise<void> {
-  await browser.execute<void, [string]>(function (t) {
-    const ta = document.querySelector(
-      '[data-testid="edit-para-input"]',
-    ) as HTMLTextAreaElement | null;
-    if (!ta) throw new Error('paragraph editor not open');
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLTextAreaElement.prototype,
-      'value',
-    )!.set!;
-    setter.call(ta, t);
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-    ta.focus();
-    ta.setSelectionRange(t.length, t.length);
-  }, text);
+  await setContentEditableValue('[data-testid="edit-para-input"]', text);
 }
 
 async function waitForReindexedParas(

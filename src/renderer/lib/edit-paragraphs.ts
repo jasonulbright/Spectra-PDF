@@ -412,26 +412,38 @@ type FaceValue = { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | '
  * reason a selection covering two different faces no longer collapses to
  * one. */
 function segmentedFaceApply(
-  existing: SpanFace[],
+  /** The user's existing OVERRIDES. Everything outside [start,end) comes from
+   * here — never from `view`. */
+  preserve: SpanFace[],
+  /** The composed display view (seeds + overrides), read ONLY to find segment
+   * boundaries and each touched segment's current base face. */
+  view: SpanFace[],
   start: number,
   end: number,
   make: (base: FaceValue) => FaceValue,
 ): SpanFace[] {
-  if (end <= start) return mergeSpanFaces(existing);
-  const merged = mergeSpanFaces(existing);
-  // Boundaries inside the selection: every existing edge, clamped.
+  if (end <= start) return mergeSpanFaces(preserve);
+  const seen = mergeSpanFaces(view);
+  // Boundaries inside the selection: every visible edge, clamped.
   const cuts = new Set<number>([start, end]);
-  for (const r of merged) {
+  for (const r of seen) {
     if (r.start > start && r.start < end) cuts.add(r.start);
     if (r.end > start && r.end < end) cuts.add(r.end);
   }
   const points = Array.from(cuts).sort((a, b) => a - b);
-  let out = merged;
+  // START FROM THE OVERRIDES, not the view. Seeding from the view would
+  // promote every seed range OUTSIDE the selection into a real override, and
+  // an override with a bold/italic key SUBSTITUTES its range into a bundled
+  // face — silently replacing the document's own font on text the user never
+  // touched. (Reproduced end-to-end before this split existed: selecting
+  // "Plain " and clicking Italic re-embedded an untouched bold word as
+  // LiberationSans.)
+  let out = mergeSpanFaces(preserve);
   for (let i = 0; i < points.length - 1; i++) {
     const segStart = points[i];
     const segEnd = points[i + 1];
     if (segEnd <= segStart) continue;
-    const covering = merged.find((r) => segStart >= r.start && segStart < r.end);
+    const covering = seen.find((r) => segStart >= r.start && segStart < r.end);
     const base: FaceValue = covering
       ? { bold: covering.bold, italic: covering.italic, family: covering.family }
       : { bold: false, italic: false, family: undefined };
@@ -441,14 +453,18 @@ function segmentedFaceApply(
 }
 
 export function toggleSpanFaceAxis(
-  existing: SpanFace[],
+  /** Prior user overrides — preserved verbatim outside [start,end). */
+  preserve: SpanFace[],
+  /** Composed view (seeds + overrides) — the base each touched segment flips
+   * from, so the toggle acts on what the user can actually see. */
+  view: SpanFace[],
   start: number,
   end: number,
   axis: 'bold' | 'italic',
   /** Target value; omit to flip each segment relative to its own value. */
   value?: boolean,
 ): SpanFace[] {
-  return segmentedFaceApply(existing, start, end, (base) => ({
+  return segmentedFaceApply(preserve, view, start, end, (base) => ({
     ...base,
     [axis]: value !== undefined ? value : !base[axis],
   }));
@@ -458,12 +474,13 @@ export function toggleSpanFaceAxis(
  * weight and slant. (The family select had the same collapse bug the B/I
  * toggles did: it painted the selection-start's bold/italic over everything.) */
 export function setSpanFaceFamily(
-  existing: SpanFace[],
+  preserve: SpanFace[],
+  view: SpanFace[],
   start: number,
   end: number,
   family: 'serif' | 'sans' | 'mono' | undefined,
 ): SpanFace[] {
-  return segmentedFaceApply(existing, start, end, (base) => ({ ...base, family }));
+  return segmentedFaceApply(preserve, view, start, end, (base) => ({ ...base, family }));
 }
 
 /** 9.A5-tails-a: the DISPLAY view = user overrides laid over listing seeds.
@@ -563,19 +580,32 @@ export function seedSpanSizes(spans: EditSpan[], paragraphSize: number): SpanSiz
   return mergeSpanSizes(out);
 }
 
-/** Split `text` into consecutive backdrop segments carrying the resolved
- * colour, weight/slant, AND a `sized` flag per code point (all folded
- * independently, segmented where ANY changes). `color null` = base editing
- * colour. Family and SIZE are NOT rendered as actual metrics — the
- * transparent textarea has one uniform metric for caret positioning, so a
- * bigger/substituted glyph would desync it. `sized` lets the component mark
- * per-span-sized ranges (an underline) without changing their width. */
-export function backdropSegments(
+/** Split `text` into consecutive style segments carrying the resolved colour,
+ * weight/slant, family AND size per code point (each folded independently,
+ * segmented where ANY changes). `color null` = base editing colour;
+ * `family undefined` / `size null` = the editor's own.
+ *
+ * 9.A5-tails-b: family and size are now REAL rendered styles, not flags. The
+ * surface these feed is a contentEditable — the text the user sees IS the
+ * input — so the caret, the selection and the line wrapping are computed by
+ * the browser from these very glyphs and agree by construction. (The mirror
+ * overlay this replaced could not render them: it positioned the caret from a
+ * separate uniform-metric textarea, which measurably drifts — Arial Bold runs
+ * +2.32px on "Hello" and +10.83px on "The quick brown fox" at 14px, and a
+ * 14→18px span drifts up to +35.79px.) */
+export function styledSegments(
   text: string,
   colors: SpanColor[],
   faces: SpanFace[] = [],
   sizes: SpanSize[] = [],
-): Array<{ text: string; color: string | null; bold: boolean; italic: boolean; sized: boolean }> {
+): Array<{
+  text: string;
+  color: string | null;
+  bold: boolean;
+  italic: boolean;
+  family?: 'serif' | 'sans' | 'mono';
+  size: number | null;
+}> {
   const chars = Array.from(text);
   const n = chars.length;
   const colorAt: (string | null)[] = new Array(n).fill(null);
@@ -584,22 +614,25 @@ export function backdropSegments(
   }
   const boldAt: boolean[] = new Array(n).fill(false);
   const italicAt: boolean[] = new Array(n).fill(false);
+  const familyAt: (('serif' | 'sans' | 'mono') | undefined)[] = new Array(n).fill(undefined);
   for (const r of mergeSpanFaces(faces)) {
     for (let k = Math.max(0, r.start); k < Math.min(r.end, n); k++) {
       boldAt[k] = r.bold;
       italicAt[k] = r.italic;
+      familyAt[k] = r.family;
     }
   }
-  const sizedAt: boolean[] = new Array(n).fill(false);
+  const sizeAt: (number | null)[] = new Array(n).fill(null);
   for (const r of mergeSpanSizes(sizes)) {
-    for (let k = Math.max(0, r.start); k < Math.min(r.end, n); k++) sizedAt[k] = true;
+    for (let k = Math.max(0, r.start); k < Math.min(r.end, n); k++) sizeAt[k] = r.size;
   }
   const segs: Array<{
     text: string;
     color: string | null;
     bold: boolean;
     italic: boolean;
-    sized: boolean;
+    family?: 'serif' | 'sans' | 'mono';
+    size: number | null;
   }> = [];
   for (let k = 0; k < n; k++) {
     const last = segs[segs.length - 1];
@@ -608,7 +641,8 @@ export function backdropSegments(
       last.color === colorAt[k] &&
       last.bold === boldAt[k] &&
       last.italic === italicAt[k] &&
-      last.sized === sizedAt[k]
+      last.family === familyAt[k] &&
+      last.size === sizeAt[k]
     ) {
       last.text += chars[k];
     } else {
@@ -617,11 +651,121 @@ export function backdropSegments(
         color: colorAt[k],
         bold: boldAt[k],
         italic: italicAt[k],
-        sized: sizedAt[k],
+        ...(familyAt[k] ? { family: familyAt[k] } : {}),
+        size: sizeAt[k],
       });
     }
   }
   return segs;
+}
+
+/** Escape text for inclusion in HTML (the rich surface sets its content as one
+ * innerHTML string — see `segmentsToHtml`). Paragraph text comes from the PDF,
+ * so it is untrusted and must never be interpolated raw. */
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const HTML_FAMILY: Record<'serif' | 'sans' | 'mono', string> = {
+  serif: 'Liberation Serif, Times New Roman, Times, serif',
+  sans: 'Liberation Sans, Arial, Helvetica, sans-serif',
+  mono: 'Liberation Mono, Courier New, Courier, monospace',
+};
+
+/** 9.A5-tails-b: render the style segments as ONE html string for the rich
+ * surface.
+ *
+ * WHY innerHTML rather than React children: the surface is contentEditable, so
+ * the BROWSER mutates its DOM on every keystroke (merging text nodes, deleting
+ * spans). React does not know that, and on the next render it calls removeChild
+ * against the nodes it remembers — which are gone — and throws. Handing React
+ * one opaque html string means it never reconciles individual children: it
+ * assigns innerHTML wholesale, so whatever the browser did is simply replaced
+ * by exactly what we rendered from `value`.
+ *
+ * `rev` is stamped as an attribute so the string always differs after an edit
+ * that leaves the text identical (the sanitizer collapsing an input) —
+ * otherwise React would skip the assignment and the raw browser mutation would
+ * survive as DOM-vs-state divergence.
+ *
+ * Every interpolated value is either escaped text or drawn from a closed set
+ * (a validated #rrggbb, a finite number, a fixed family stack), so no caller
+ * input reaches the markup unchecked. */
+export function segmentsToHtml(
+  segments: Array<{
+    text: string;
+    color: string | null;
+    bold: boolean;
+    italic: boolean;
+    family?: 'serif' | 'sans' | 'mono';
+    size: number | null;
+  }>,
+  opts: { basePx: number; baseSize: number; rev: number },
+): string {
+  const { basePx, baseSize, rev } = opts;
+  const parts: string[] = [];
+  segments.forEach((seg, i) => {
+    const style: string[] = [];
+    if (seg.color && /^#[0-9a-f]{6}$/i.test(seg.color)) style.push(`color:${seg.color}`);
+    if (seg.bold) style.push('font-weight:700');
+    if (seg.italic) style.push('font-style:italic');
+    if (seg.family && HTML_FAMILY[seg.family]) style.push(`font-family:${HTML_FAMILY[seg.family]}`);
+    if (seg.size !== null && Number.isFinite(seg.size) && baseSize > 0) {
+      const px = (seg.size / baseSize) * basePx;
+      if (Number.isFinite(px) && px > 0) style.push(`font-size:${px.toFixed(2)}px`);
+    }
+    parts.push(
+      `<span data-seg="${i}" data-r="${rev}"${
+        style.length ? ` style="${style.join(';')}"` : ''
+      }>${escapeHtml(seg.text)}</span>`,
+    );
+  });
+  return parts.join('');
+}
+
+/** 9.A5-tails-b: absolute CODE-POINT offset of a position inside the rendered
+ * segments — the pure half of the contentEditable caret mapping (the DOM walk
+ * that finds which segment a browser selection landed in lives in the
+ * component, where there is no test environment; this arithmetic is testable
+ * and is where an off-by-one would actually bite). */
+export function segmentPosToCodePoint(
+  segments: Array<{ text: string }>,
+  segIndex: number,
+  offsetInSegment: number,
+): number {
+  let total = 0;
+  for (let i = 0; i < segments.length && i < segIndex; i++) {
+    total += Array.from(segments[i].text).length;
+  }
+  const own = segIndex < segments.length ? Array.from(segments[segIndex].text).length : 0;
+  return total + Math.max(0, Math.min(offsetInSegment, own));
+}
+
+/** Inverse of `segmentPosToCodePoint`: which segment holds an absolute
+ * code-point index, and how far into it. An index past the end clamps to the
+ * end of the last segment (the caret-at-end case). */
+export function codePointToSegmentPos(
+  segments: Array<{ text: string }>,
+  index: number,
+): { segIndex: number; offset: number } {
+  if (segments.length === 0) return { segIndex: 0, offset: 0 };
+  const target = Math.max(0, index);
+  let seen = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const len = Array.from(segments[i].text).length;
+    // `<` not `<=` so a boundary index belongs to the START of the next
+    // segment where one exists — a caret typed at a style boundary then
+    // inherits the following run, matching the segment the browser puts it in.
+    if (target < seen + len) return { segIndex: i, offset: target - seen };
+    seen += len;
+  }
+  const lastIdx = segments.length - 1;
+  return { segIndex: lastIdx, offset: Array.from(segments[lastIdx].text).length };
 }
 
 /** Convert per-span colours to `span_styles` colour entries (hex → [r,g,b];
