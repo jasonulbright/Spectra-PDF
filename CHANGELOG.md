@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.7.1 — Redaction fix (recommended update)
+
+### Redaction now removes everything under a mark
+Redaction removes content from the file rather than covering it. Three kinds
+of content could survive underneath a redaction mark and remain extractable
+from the saved file:
+
+- **Inline images** — images stored directly in the page's content stream,
+  rather than as a separate resource. One under a mark was left in place with
+  the black box drawn over it.
+- **Shading and gradient fills** covering a marked area.
+- **Annotations whose position could not be read** — a damaged or malformed
+  rectangle caused the annotation to be treated as "not overlapping" and kept.
+  Position data that cannot be read is now treated as overlapping, so the
+  annotation is removed.
+
+If you have redacted documents with an earlier version and the originals
+contained inline images, gradients, or damaged annotations in the redacted
+areas, re-check those files.
+
 ## 2.7.0 — Style a selection, edit the shapes
 
 ### Rich text — style a SELECTION, not just the whole box
