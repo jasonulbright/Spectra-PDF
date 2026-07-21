@@ -2138,6 +2138,7 @@ export function WorkspaceCanvasView({
           fill: v.fill ? [...v.fill] : null,
           stroke: v.stroke ? [...v.stroke] : null,
           lineWidth: v.lineWidth,
+          nested: v.nested,
           userRect: [...v.userRect] as [number, number, number, number],
         })),
       selectVector: (pageId, index) => setSelectedVector({ pageId, index }),

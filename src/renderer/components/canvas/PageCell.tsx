@@ -1184,7 +1184,7 @@ function PageCellImpl({
                 type="button"
                 data-testid={`edit-vector-${vec.index}`}
                 className="page-editvec-hit"
-                title={`Vector object (${vec.kind})`}
+                title={`Vector object (${vec.kind})${vec.nested ? ' — inside a group' : ''}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();

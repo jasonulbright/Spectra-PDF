@@ -24,6 +24,8 @@ export interface EditVectorObject {
   stroke: [number, number, number] | null;
   /** The effective line width (D3's width control seed). */
   lineWidth: number;
+  /** 9.D4: the path is inside a Form XObject (edited on a copy of the form). */
+  nested: boolean;
 }
 
 /** [r,g,b] 0-1 → '#rrggbb'; null → black. */
@@ -52,6 +54,7 @@ interface EngineListing {
     fill?: [number, number, number] | null;
     stroke?: [number, number, number] | null;
     line_width?: number;
+    nested?: boolean;
   }[];
 }
 
@@ -79,5 +82,6 @@ export async function fetchEditVectors(
     fill: clampRgb(v.fill),
     stroke: clampRgb(v.stroke),
     lineWidth: typeof v.line_width === 'number' && Number.isFinite(v.line_width) ? v.line_width : 1,
+    nested: Boolean(v.nested),
   }));
 }

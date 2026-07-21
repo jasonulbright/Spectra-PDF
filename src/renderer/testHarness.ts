@@ -239,6 +239,7 @@ export interface CanvasEditImagesHandlers {
     fill: [number, number, number] | null;
     stroke: [number, number, number] | null;
     lineWidth: number;
+    nested: boolean;
     userRect: [number, number, number, number];
   }[];
   selectVector: (pageId: string, index: number) => void;
@@ -665,6 +666,7 @@ export interface TestHarness {
     fill: [number, number, number] | null;
     stroke: [number, number, number] | null;
     lineWidth: number;
+    nested: boolean;
     userRect: [number, number, number, number];
   }[];
   editVectorSelect: (pageId: string, index: number) => void;

@@ -141,6 +141,8 @@ class GraphicsTextState:
         leading: float = 0.0,
         h_scale: float = 1.0,
         font_name: Optional[str] = None,
+        fill_color: ColorState = DEFAULT_COLOR,
+        stroke_color: ColorState = DEFAULT_COLOR,
     ):
         self.ctm: Matrix = base_ctm
         self.tm: Matrix = IDENTITY
@@ -159,10 +161,14 @@ class GraphicsTextState:
         # the most recent color-setting instruction(s). Colors are replayed,
         # never interpreted — link-blue spans survive without a color-space
         # model. sc/scn keep their cs/CS prefix; g/rg/k stand alone.
+        # 9.D4: fill/stroke seed the INVOKING state when a Form XObject inherits
+        # the caller's colour (a form runs in the caller's graphics state, ISO
+        # 32000 §8.10.2); default DEFAULT_COLOR keeps every existing caller
+        # (redact/page_images/text) byte-identical.
         self.render_mode = 0
         self.rise = 0.0
-        self.fill_color: ColorState = DEFAULT_COLOR
-        self.stroke_color: ColorState = DEFAULT_COLOR
+        self.fill_color: ColorState = fill_color
+        self.stroke_color: ColorState = stroke_color
         self._stack: list = []
 
     def snapshot(self) -> TextStateSnapshot:

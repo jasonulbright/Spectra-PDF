@@ -42,9 +42,23 @@ from pathlib import Path
 
 import pikepdf
 
-from engine.content_walk import GraphicsTextState, mat_mult, transform_point
-from engine.page_images import _invert_matrix, _op, _save
-from engine.redact import IDENTITY, _as_matrix
+from engine.content_walk import DEFAULT_COLOR, GraphicsTextState, mat_mult, transform_point
+from engine.page_images import (
+    _do_instruction,
+    _finalize_page_rewrite,
+    _invert_matrix,
+    _op,
+    _register_xobject,
+    _save,
+)
+from engine.redact import (
+    IDENTITY,
+    MAX_FORM_DEPTH,
+    _as_matrix,
+    _copy_resources_for_write,
+    _lookup_xobject,
+    _resolve_resources,
+)
 
 # Path-construction operators and how many (x, y) points each contributes.
 # `h` (close) adds no new point; `re` contributes its four corners.
@@ -111,22 +125,37 @@ def _color_rgb(color_state):
     return None  # sc/scn/pattern/shading — honest unknown, never a wrong colour
 
 
-def _walk_vectors(instructions: list) -> list:
-    """One dict per PAINTED, non-clip, top-level path in encounter order.
-    Each dict carries the public listing fields PLUS an internal `drop_idxs`
-    (the EXACT construction-op indices + the paint index) the delete rewriter
-    removes. It's a precise index SET, not a range: a state op (q/Q/cm/colour)
-    a producer places BETWEEN a path's construction and its paint is
-    transparent to path continuity, so it must survive the delete — a range
-    delete would drop it, leaking a neighbour's colour or unbalancing q/Q
-    (review round 36 HIGH)."""
-    state = GraphicsTextState(IDENTITY)
-    out: list = []
+def _walk_vectors(
+    instructions: list,
+    pdf=None,
+    resources=None,
+    base_ctm=IDENTITY,
+    depth: int = 0,
+    root_do_idx=None,
+    form_name=None,
+    base_line_width: float = 1.0,
+    base_fill=DEFAULT_COLOR,
+    base_stroke=DEFAULT_COLOR,
+    out=None,
+) -> list:
+    """One dict per PAINTED, non-clip path in depth-first encounter order.
+    Recurses into Form XObjects (9.D4) when `pdf`/`resources` are supplied, so
+    nested paths list too (a page-content-only walk passes neither and stays
+    flat). Each dict carries the public listing fields plus internals the
+    editors use: `drop_idxs` (the EXACT construction-op indices + the paint
+    index — a precise SET so a state op interleaved into the path survives a
+    delete, round-36 HIGH) and, for a nested path, `_form_name` (the DIRECT
+    page-level form to copy-on-write) + `_root_do_idx` (the page `Do` to swap)
+    + `_edit_depth` (only depth-1 nesting edits in v1; deeper lists but refuses
+    the edit — copying a chain of forms is out of scope)."""
+    if out is None:
+        out = []
+    state = GraphicsTextState(base_ctm, fill_color=base_fill, stroke_color=base_stroke)
     path_start = None  # instruction index of the current path's first construct op
     construct_idxs: list = []  # EXACT indices of this path's construction ops
     pts: list = []  # device-space points accumulated for the bbox
     has_clip = False
-    line_width = 1.0  # `w`, PDF default 1.0 — inflates a STROKE's bbox (D-tail)
+    line_width = base_line_width  # `w` (PDF default 1.0) — a form inherits the caller's
     w_stack: list = []  # line width IS graphics state — q/Q-scoped like the rest
     for idx, instruction in enumerate(instructions):
         operator = str(instruction.operator)
@@ -191,11 +220,44 @@ def _walk_vectors(instructions: list) -> list:
                         # D3: the effective line width (the width control's seed);
                         # meaningful for a stroke/fillstroke, informational for a fill.
                         "line_width": round(line_width, 4),
+                        "nested": depth > 0,
                         "drop_idxs": construct_idxs + [idx],
+                        "_form_name": form_name,
+                        "_root_do_idx": root_do_idx,
+                        "_edit_depth": depth,
                     }
                 )
             path_start, construct_idxs, pts, has_clip = None, [], [], False
             continue
+        # 9.D4: recurse into a Form XObject so its paths list too (page walk
+        # only — `pdf` is None for the flat page-content walks the editors run
+        # on their own instruction list). The page-level `Do` index + the form
+        # name ride down so a nested edit knows which form to copy and which
+        # `Do` to swap.
+        if operator == "Do" and pdf is not None and operands and depth < MAX_FORM_DEPTH:
+            fname = str(operands[0])
+            xobj = _lookup_xobject(fname, resources, resources)
+            if xobj is not None and str(xobj.get("/Subtype", "")) == "/Form":
+                fmatrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
+                fres = xobj.get("/Resources")
+                # A form inherits the caller's graphics state (§8.10.2): thread
+                # the live CTM, line width, and fill/stroke into the recursion
+                # so a form whose own content sets none lists with the right
+                # colour/width/bbox (round-39 MED). Enclosing resources are the
+                # fallback for a form whose /Resources omits a nested name.
+                _walk_vectors(
+                    list(pikepdf.parse_content_stream(xobj)),
+                    pdf=pdf,
+                    resources=fres if fres is not None else resources,
+                    base_ctm=mat_mult(fmatrix, state.ctm),
+                    depth=depth + 1,
+                    root_do_idx=idx if depth == 0 else root_do_idx,
+                    form_name=fname if depth == 0 else form_name,
+                    base_line_width=line_width,
+                    base_fill=state.fill_color,
+                    base_stroke=state.stroke_color,
+                    out=out,
+                )
         # Any other operator (a show, Do, sh, inline image, w/d/gs line-state):
         # not part of a path. A path left unpainted before other content is
         # abandoned (malformed input) — reset so a stale path can't attach.
@@ -204,24 +266,93 @@ def _walk_vectors(instructions: list) -> list:
 
 
 def list_page_vectors(file: str, page: int) -> dict:
-    """Vector path objects on 1-based `page`, in the id order `delete_page_vector`
-    targets. Page-content paths only (v1); each carries a device-space `rect`
-    (bbox for selection), the CTM `matrix` (for a later transform), `kind`
-    (fill/stroke/fillstroke), and best-effort `fill`/`stroke` colours."""
+    """Vector path objects on 1-based `page`, in the id order the editors
+    target. Page-content AND form-nested paths (9.D4); each carries a
+    device-space `rect` (bbox for selection), the CTM `matrix` (for a
+    transform), `kind` (fill/stroke/fillstroke), best-effort `fill`/`stroke`
+    colours, `line_width`, and `nested` (inside a Form XObject)."""
+    _INTERNAL = ("drop_idxs", "_form_name", "_root_do_idx", "_edit_depth")
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        vectors = _walk_vectors(list(pikepdf.parse_content_stream(p)))
+        vectors = _walk_vectors(
+            list(pikepdf.parse_content_stream(p)), pdf=pdf, resources=_resolve_resources(p)
+        )
         for v in vectors:
-            del v["drop_idxs"]  # internal to the walk; the public listing omits it
+            for k in _INTERNAL:
+                v.pop(k, None)  # internal to the walk; the public listing omits them
         return {"page": int(page), "vectors": vectors}
+
+
+def _fresh_vec_name(resources) -> str:
+    """An XObject name (with the leading `/`) not already in `resources`."""
+    xo = resources.get("/XObject")
+    existing = set()
+    if xo is not None:
+        try:
+            existing = {str(k) for k in xo.keys()}
+        except AttributeError:
+            existing = set()
+    n = 0
+    while f"/EditVec{n}" in existing:
+        n += 1
+    return f"/EditVec{n}"
+
+
+def _edit_nested_vector(pdf, p, obj, rewrite) -> None:
+    """9.D4: edit a vector object INSIDE a Form XObject on a COPY of that form
+    (fresh name, rewritten stream), swapping only THIS `Do` — a form stamped
+    elsewhere is untouched (the image copy-on-edit pattern). `rewrite` runs on
+    the FORM's instruction list and may raise (validation) before any mutation.
+    Only ONE level of nesting edits (v1); deeper is refused by the caller."""
+    resources = _copy_resources_for_write(pdf, _resolve_resources(p))
+    p.obj["/Resources"] = resources
+    form = _lookup_xobject(obj["_form_name"], resources, None)
+    if form is None or str(form.get("/Subtype", "")) != "/Form":
+        raise ValueError("the form for this nested vector object was not found")
+    new_form_instrs = rewrite(list(pikepdf.parse_content_stream(form)))
+    new_form = pdf.make_stream(pikepdf.unparse_content_stream(new_form_instrs))
+    # Copy every key off the original EXCEPT the stream-encoding ones (a
+    # BLOCKLIST like redact.py/page_images — an allowlist silently dropped
+    # keys the edited form needs, e.g. /OC layer membership; round-39 HIGH).
+    for key in form.keys():
+        if str(key) in ("/Length", "/Filter", "/DecodeParms"):
+            continue
+        new_form[key] = form[key]
+    new_name = _fresh_vec_name(resources)
+    _register_xobject(pdf, resources, new_name, new_form)
+    page_instrs = list(pikepdf.parse_content_stream(p))
+    page_instrs[obj["_root_do_idx"]] = _do_instruction(new_name)
+    p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(page_instrs))
+    # Reclaim the form we just superseded — otherwise the OLD form (incl. a
+    # "deleted" path's geometry) stays embedded + reachable forever, and
+    # repeated edits grow the file unbounded (round-39 HIGH). Only drops it
+    # when nothing in the rewritten page still draws it (a form Do'd twice on
+    # the page keeps its other occurrence — the reachability check handles it).
+    _finalize_page_rewrite(p, page_instrs, {obj["_form_name"]})
+
+
+def _resolve_target(pdf, p, index):
+    """The walked object at `index` (recursive listing) + a validated nested
+    edit-depth. Raises on out-of-range or a too-deeply-nested object."""
+    instructions = list(pikepdf.parse_content_stream(p))
+    vectors = _walk_vectors(instructions, pdf=pdf, resources=_resolve_resources(p))
+    if not (0 <= int(index) < len(vectors)):
+        raise ValueError(f"vector index {index} is out of range (page has {len(vectors)})")
+    obj = vectors[int(index)]
+    if obj["nested"] and obj["_edit_depth"] != 1:
+        raise ValueError(
+            "this vector object is nested more than one form deep and cannot be edited"
+        )
+    return instructions, obj
 
 
 def delete_page_vector(file: str, output: str, page: int, index: int) -> dict:
     """Remove one vector path object — drop its construction ops + paint op
-    from the page content stream (per-object; surrounding state untouched)."""
+    (per-object; surrounding state untouched). A NESTED path is dropped on a
+    copy of its form (9.D4)."""
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -230,23 +361,22 @@ def delete_page_vector(file: str, output: str, page: int, index: int) -> dict:
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        instructions = list(pikepdf.parse_content_stream(p))
-        vectors = _walk_vectors(instructions)
-        if not (0 <= int(index) < len(vectors)):
-            raise ValueError(
-                f"vector index {index} is out of range (page has {len(vectors)})"
-            )
-        drop = set(vectors[int(index)]["drop_idxs"])
-        kept = [ins for i, ins in enumerate(instructions) if i not in drop]
+        instructions, obj = _resolve_target(pdf, p, index)
         # Drop ONLY this object's construction ops + its paint (the exact index
         # set). Every surrounding op stays — including a state op (q/Q/cm/colour)
         # a producer placed BETWEEN construction and paint: it flows to
         # following content EXACTLY as before, so removing it would change that
         # content or unbalance q/Q (review round 36 HIGH). No resource sweep: a
-        # now-unreferenced /Pattern is harmless dead weight, and pruning a
-        # possibly-INHERITED /Resources could break a sibling page (the image
-        # family's copy-on-write lesson).
-        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        # now-unreferenced /Pattern is harmless dead weight.
+        drop = set(obj["drop_idxs"])
+
+        def rewrite(instrs):
+            return [ins for i, ins in enumerate(instrs) if i not in drop]
+
+        if obj["nested"]:
+            _edit_nested_vector(pdf, p, obj, rewrite)
+        else:
+            p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(rewrite(instructions)))
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(index)}
     finally:
@@ -280,13 +410,7 @@ def transform_page_vector(file: str, output: str, page: int, index: int, matrix:
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        instructions = list(pikepdf.parse_content_stream(p))
-        vectors = _walk_vectors(instructions)
-        if not (0 <= int(index) < len(vectors)):
-            raise ValueError(
-                f"vector index {index} is out of range (page has {len(vectors)})"
-            )
-        obj = vectors[int(index)]
+        instructions, obj = _resolve_target(pdf, p, index)
         drop = obj["drop_idxs"]
         first, last = drop[0], drop[-1]
         if drop != list(range(first, last + 1)):
@@ -307,19 +431,28 @@ def transform_page_vector(file: str, output: str, page: int, index: int, matrix:
         # T maps a DEVICE point in the current bbox to the target bbox
         # (unlike the image delta M'·M_cur⁻¹, which acts in unit-square space —
         # a vector's path coords are device coords, not a unit square). Then
-        # `cm = C·T·C⁻¹` so T acts in device space even under a nested CTM C.
+        # `cm = C·T·C⁻¹` so T acts in device space even under a nested CTM C —
+        # so a NESTED path (wrapped inside its form's stream) transforms in
+        # device space too, exactly like a top-level one.
         t_dev = mat_mult(_invert_matrix(m_cur), tuple(m_target))
         m_insert = mat_mult(mat_mult(c, t_dev), _invert_matrix(c))
         cm = _op([round(float(v), 6) for v in m_insert], "cm")
-        kept: list = []
-        for i, ins in enumerate(instructions):
-            if i == first:
-                kept.append(_op([], "q"))
-                kept.append(cm)
-            kept.append(ins)
-            if i == last:
-                kept.append(_op([], "Q"))
-        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+
+        def rewrite(instrs):
+            kept: list = []
+            for i, ins in enumerate(instrs):
+                if i == first:
+                    kept.append(_op([], "q"))
+                    kept.append(cm)
+                kept.append(ins)
+                if i == last:
+                    kept.append(_op([], "Q"))
+            return kept
+
+        if obj["nested"]:
+            _edit_nested_vector(pdf, p, obj, rewrite)
+        else:
+            p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(rewrite(instructions)))
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(index)}
     finally:
@@ -382,70 +515,76 @@ def restyle_page_vector(
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        instructions = list(pikepdf.parse_content_stream(p))
-        vectors = _walk_vectors(instructions)
-        if not (0 <= int(index) < len(vectors)):
-            raise ValueError(
-                f"vector index {index} is out of range (page has {len(vectors)})"
-            )
-        drop = vectors[int(index)]["drop_idxs"]
+        instructions, obj = _resolve_target(pdf, p, index)
+        drop = obj["drop_idxs"]
         first, last = drop[0], drop[-1]
         if drop != list(range(first, last + 1)):
             raise ValueError(
                 "vector object has interleaved graphics-state operators and cannot be restyled"
             )
-        # Round-38 MED: if a PRIOR restyle already wrapped this object in
-        # `q <state setters> run Q`, MERGE into that wrap (replace the setters
-        # this request overrides, keep the rest) rather than nesting another
-        # layer — repeated restyles otherwise grew the stream / q-Q depth
-        # without bound. The setters we recognise are the pure colour/width ops.
-        _SETTERS = {"rg", "RG", "g", "G", "k", "K", "w"}
-        wrap_start = first
-        old_setters: list = []
-        j = first - 1
-        while j >= 0 and str(instructions[j].operator) in _SETTERS:
-            old_setters.insert(0, instructions[j])
-            j -= 1
-        enclosed = (
-            old_setters
-            and j >= 0
-            and str(instructions[j].operator) == "q"
-            and last + 1 < len(instructions)
-            and str(instructions[last + 1].operator) == "Q"
-        )
-        if enclosed:
-            wrap_start = j  # the existing `q`
-            has_fill, has_stroke, has_w = fill is not None, stroke is not None, line_width is not None
-            merged: list = []
-            for op in old_setters:
-                name = str(op.operator)
-                if name in ("rg", "g", "k") and has_fill:
-                    continue
-                if name in ("RG", "G", "K") and has_stroke:
-                    continue
-                if name == "w" and has_w:
-                    continue
-                merged.append(op)  # a setter this request doesn't override — keep it
-            merged.extend(ops)  # the new setters
-            ops = merged
-        kept: list = []
-        for i, ins in enumerate(instructions):
+
+        def rewrite(instrs):
+            # Round-38 MED: if a PRIOR restyle already wrapped this object in
+            # `q <state setters> run Q`, MERGE into that wrap (replace the
+            # setters this request overrides, keep the rest) rather than nesting
+            # another layer — repeated restyles otherwise grew the stream / q-Q
+            # depth without bound. The setters we recognise are the pure
+            # colour/width ops.
+            new_ops = list(ops)
+            _SETTERS = {"rg", "RG", "g", "G", "k", "K", "w"}
+            wrap_start = first
+            old_setters: list = []
+            j = first - 1
+            while j >= 0 and str(instrs[j].operator) in _SETTERS:
+                old_setters.insert(0, instrs[j])
+                j -= 1
+            enclosed = (
+                old_setters
+                and j >= 0
+                and str(instrs[j].operator) == "q"
+                and last + 1 < len(instrs)
+                and str(instrs[last + 1].operator) == "Q"
+            )
             if enclosed:
-                if i == wrap_start:
-                    kept.append(_op([], "q"))  # re-open the (merged) wrap
-                    kept.extend(ops)
-                    continue  # drop the ORIGINAL `q`
-                if wrap_start < i < first:
-                    continue  # drop the old setters (merged into `ops`)
-                if i == last + 1:
-                    continue  # drop the old outer `Q` (our own is emitted below)
-            elif i == first:
-                kept.append(_op([], "q"))
-                kept.extend(ops)
-            kept.append(ins)
-            if i == last:
-                kept.append(_op([], "Q"))
-        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+                wrap_start = j  # the existing `q`
+                has_fill = fill is not None
+                has_stroke = stroke is not None
+                has_w = line_width is not None
+                merged: list = []
+                for op in old_setters:
+                    name = str(op.operator)
+                    if name in ("rg", "g", "k") and has_fill:
+                        continue
+                    if name in ("RG", "G", "K") and has_stroke:
+                        continue
+                    if name == "w" and has_w:
+                        continue
+                    merged.append(op)  # a setter this request doesn't override — keep it
+                merged.extend(ops)  # the new setters
+                new_ops = merged
+            kept: list = []
+            for i, ins in enumerate(instrs):
+                if enclosed:
+                    if i == wrap_start:
+                        kept.append(_op([], "q"))  # re-open the (merged) wrap
+                        kept.extend(new_ops)
+                        continue  # drop the ORIGINAL `q`
+                    if wrap_start < i < first:
+                        continue  # drop the old setters (merged into `new_ops`)
+                    if i == last + 1:
+                        continue  # drop the old outer `Q` (our own is emitted below)
+                elif i == first:
+                    kept.append(_op([], "q"))
+                    kept.extend(new_ops)
+                kept.append(ins)
+                if i == last:
+                    kept.append(_op([], "Q"))
+            return kept
+
+        if obj["nested"]:
+            _edit_nested_vector(pdf, p, obj, rewrite)
+        else:
+            p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(rewrite(instructions)))
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(index)}
     finally:

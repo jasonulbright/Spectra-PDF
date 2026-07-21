@@ -164,9 +164,9 @@ class TestListVectors:
         # leaked 10.
         assert vs[1]["rect"] == [-0.5, 99.5, 100.5, 100.5]
 
-    def test_form_nested_paths_not_listed_v1(self, tmp_dir):
-        # A path inside a Form XObject is NOT listed in v1 (page-content only —
-        # a pinned boundary; a later D-slice that lifts it is a visible diff).
+    def test_form_nested_paths_listed(self, tmp_dir):
+        # 9.D4: a path inside a Form XObject IS listed now, flagged `nested`,
+        # with its bbox in DEVICE space (the form's Matrix composed into the CTM).
         pdf = pikepdf.new()
         pg = pdf.add_blank_page(page_size=(612, 792))
         form = pikepdf.Stream(
@@ -177,16 +177,20 @@ class TestListVectors:
             BBox=[0, 0, 40, 40],
         )
         pg.Contents = pdf.make_stream(
-            b"100 100 40 40 re f\n"      # page-level object (listed)
-            b"q /Fm Do Q\n"             # form draw — its inner path NOT listed
+            b"100 100 40 40 re f\n"      # page-level object
+            b"q 1 0 0 1 200 200 cm /Fm Do Q\n"  # form drawn translated by (200,200)
         )
         pg.Resources = Dictionary(XObject=Dictionary(Fm=pdf.make_indirect(form)))
         path = os.path.join(tmp_dir, "fm.pdf")
         pdf.save(path)
         pdf.close()
         vs = _vecs(path)
-        assert len(vs) == 1
+        assert len(vs) == 2
+        assert vs[0]["nested"] is False
         assert vs[0]["rect"] == [100.0, 100.0, 140.0, 140.0]
+        # The nested rect [5,5,35,35] under the (200,200) translation → device.
+        assert vs[1]["nested"] is True
+        assert vs[1]["rect"] == [205.0, 205.0, 235.0, 235.0]
 
 
 class TestDeleteVector:
@@ -275,6 +279,152 @@ class TestDeleteVector:
         src = _pdf(tmp_dir, b"10 10 20 20 re f\n")
         with pytest.raises(ValueError, match="out of range"):
             list_page_vectors(src, 9)
+
+
+class TestNestedVector:
+    """Phase 9.D4 — form-nested vector paths: list them, and edit ONE on a
+    COPY of its form (the image copy-on-edit pattern), so a form stamped
+    elsewhere is untouched. One level of nesting edits in v1."""
+
+    def _nested_pdf(self, tmp_dir, page_content, extra_pages=0):
+        pdf = pikepdf.new()
+        form = pikepdf.Stream(
+            pdf, b"1 0 0 rg 5 5 30 30 re f\n",
+            Type=Name.XObject, Subtype=Name.Form, BBox=[0, 0, 40, 40],
+        )
+        fref = pdf.make_indirect(form)
+        pg = pdf.add_blank_page(page_size=(612, 792))
+        pg.Contents = pdf.make_stream(page_content)
+        pg.Resources = Dictionary(XObject=Dictionary(Fm=fref))
+        for _ in range(extra_pages):
+            pg2 = pdf.add_blank_page(page_size=(612, 792))
+            pg2.Contents = pdf.make_stream(b"q /Fm Do Q\n")
+            pg2.Resources = Dictionary(XObject=Dictionary(Fm=fref))
+        path = os.path.join(tmp_dir, "fm.pdf")
+        pdf.save(path)
+        pdf.close()
+        return path
+
+    _CONTENT = b"0 0 1 rg 100 100 40 40 re f\nq 1 0 0 1 200 200 cm /Fm Do Q\n"
+
+    def test_delete_nested_leaves_page_object(self, tmp_dir):
+        src = self._nested_pdf(tmp_dir, self._CONTENT)
+        out = os.path.join(tmp_dir, "o.pdf")
+        delete_page_vector(src, out, 1, 1)  # the nested rect
+        vs = _vecs(out)
+        assert len(vs) == 1 and vs[0]["nested"] is False  # only the page rect stays
+
+    def test_transform_nested(self, tmp_dir):
+        src = self._nested_pdf(tmp_dir, self._CONTENT)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # nested device bbox [205,205,235,235] → move +50,+30.
+        transform_page_vector(src, out, 1, 1, [30, 0, 0, 30, 255, 235])
+        v = [x for x in _vecs(out) if x["nested"]][0]
+        assert [round(c) for c in v["rect"]] == [255, 235, 285, 265]
+
+    def test_restyle_nested(self, tmp_dir):
+        src = self._nested_pdf(tmp_dir, self._CONTENT)
+        out = os.path.join(tmp_dir, "o.pdf")
+        restyle_page_vector(src, out, 1, 1, fill=[0, 1, 0])
+        v = [x for x in _vecs(out) if x["nested"]][0]
+        assert v["fill"] == [0.0, 1.0, 0.0]
+
+    def test_shared_form_isolation(self, tmp_dir):
+        # The SAME form is drawn on page 1 (with a page rect) and page 2.
+        # Editing page 1's nested path must NOT change page 2's copy.
+        src = self._nested_pdf(tmp_dir, self._CONTENT, extra_pages=1)
+        out = os.path.join(tmp_dir, "o.pdf")
+        delete_page_vector(src, out, 1, 1)  # delete the nested on page 1
+        assert len([v for v in _vecs(out) if v["nested"]]) == 0  # gone on page 1
+        # Page 2 still shows the nested rect (its Do still points at the original).
+        p2 = list_page_vectors(out, 2)["vectors"]
+        assert len(p2) == 1 and p2[0]["nested"] is True
+
+    def test_nested_delete_reclaims_superseded_form(self, tmp_dir):
+        # Round-39 HIGH: the OLD form (with the deleted geometry) must be GONE
+        # from the page resources — not left embedded + reachable forever.
+        src = self._nested_pdf(tmp_dir, self._CONTENT)
+        out = os.path.join(tmp_dir, "o.pdf")
+        delete_page_vector(src, out, 1, 1)
+        with pikepdf.open(out) as o:
+            xo = o.pages[0].Resources.get("/XObject")
+            names = {str(k) for k in xo.keys()} if xo is not None else set()
+        assert "/Fm" not in names  # the superseded form was reclaimed
+
+    def test_repeated_nested_edits_dont_accumulate_forms(self, tmp_dir):
+        # Round-39 HIGH: repeated nested edits reclaim each superseded copy, so
+        # the resource dict doesn't grow one form per edit.
+        cur = self._nested_pdf(tmp_dir, self._CONTENT)
+        for i in range(5):
+            out = os.path.join(tmp_dir, f"o{i}.pdf")
+            restyle_page_vector(cur, out, 1, 1, fill=[0, (i + 1) / 6, 0])
+            cur = out
+        with pikepdf.open(cur) as o:
+            xo = o.pages[0].Resources.get("/XObject")
+            forms = [k for k in (xo.keys() if xo is not None else []) if "EditVec" in str(k)]
+        assert len(forms) == 1  # ONE live copy, not five
+
+    def test_nested_edit_preserves_form_keys(self, tmp_dir):
+        # Round-39 HIGH: the form copy keeps ALL keys (blocklist, not allowlist)
+        # — e.g. /OC layer membership, which an allowlist silently dropped.
+        pdf = pikepdf.new()
+        ocg = pdf.make_indirect(Dictionary(Type=Name.OCG, Name="Layer1"))
+        form = pikepdf.Stream(
+            pdf, b"1 0 0 rg 5 5 30 30 re f\n",
+            Type=Name.XObject, Subtype=Name.Form, BBox=[0, 0, 40, 40], OC=ocg,
+        )
+        pg = pdf.add_blank_page(page_size=(400, 300))
+        pg.Contents = pdf.make_stream(b"q 1 0 0 1 100 100 cm /Fm Do Q\n")
+        pg.Resources = Dictionary(XObject=Dictionary(Fm=pdf.make_indirect(form)))
+        path = os.path.join(tmp_dir, "oc.pdf")
+        pdf.save(path)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        restyle_page_vector(path, out, 1, 0, fill=[0, 1, 0])
+        with pikepdf.open(out) as o:
+            copy_name = next(k for k in o.pages[0].Resources.XObject.keys() if "EditVec" in str(k))
+            assert "/OC" in o.pages[0].Resources.XObject[copy_name]  # layer key survived
+
+    def test_nested_inherits_caller_graphics_state(self, tmp_dir):
+        # Round-39 MED: a form whose own content sets no colour/width lists with
+        # the caller's (page-level) width + stroke colour (§8.10.2), so the seed
+        # values + the D-tail bbox are right.
+        pdf = pikepdf.new()
+        form = pikepdf.Stream(
+            pdf, b"0 0 m 40 0 l S\n", Type=Name.XObject, Subtype=Name.Form, BBox=[0, 0, 40, 40]
+        )
+        pg = pdf.add_blank_page(page_size=(400, 300))
+        pg.Contents = pdf.make_stream(b"6 w 0 0 1 RG q 1 0 0 1 100 100 cm /Fm Do Q\n")
+        pg.Resources = Dictionary(XObject=Dictionary(Fm=pdf.make_indirect(form)))
+        path = os.path.join(tmp_dir, "inh.pdf")
+        pdf.save(path)
+        pdf.close()
+        v = _vecs(path)[0]
+        assert v["line_width"] == 6.0
+        assert v["stroke"] == [0.0, 0.0, 1.0]
+
+    def test_depth_2_nesting_lists_but_refuses_edit(self, tmp_dir):
+        # form OUTER draws form INNER, which draws the rect → depth 2. It lists
+        # (visible) but edits refuse in v1 (copying a chain of forms is scope).
+        pdf = pikepdf.new()
+        inner = pikepdf.Stream(
+            pdf, b"5 5 20 20 re f\n", Type=Name.XObject, Subtype=Name.Form, BBox=[0, 0, 30, 30]
+        )
+        outer = pikepdf.Stream(
+            pdf, b"q /In Do Q\n", Type=Name.XObject, Subtype=Name.Form, BBox=[0, 0, 30, 30],
+            Resources=Dictionary(XObject=Dictionary(In=pdf.make_indirect(inner))),
+        )
+        pg = pdf.add_blank_page(page_size=(612, 792))
+        pg.Contents = pdf.make_stream(b"q /Out Do Q\n")
+        pg.Resources = Dictionary(XObject=Dictionary(Out=pdf.make_indirect(outer)))
+        path = os.path.join(tmp_dir, "deep.pdf")
+        pdf.save(path)
+        pdf.close()
+        vs = _vecs(path)
+        assert len(vs) == 1 and vs[0]["nested"] is True  # listed
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="more than one form deep"):
+            delete_page_vector(path, out, 1, 0)
 
 
 class TestTransformVector:
