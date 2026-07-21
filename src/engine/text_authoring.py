@@ -52,23 +52,56 @@ def _fresh_font_name(fonts) -> str:
 
 def _wrap(words, width_1000, size: float, max_width: float) -> list[str]:
     """Greedy fill at `max_width` (user units). A single over-wide word
-    still gets its own line (never dropped)."""
-    space_w = width_1000(" ") / 1000.0 * size
+    still gets its own line (never dropped).
+
+    9.K1: the candidate line is measured AS A WHOLE STRING rather than as a
+    sum of word widths plus spaces. With kerning on, a per-word sum would
+    miss the pairs that straddle the spaces, so the wrap could disagree with
+    what is actually drawn — and measurement agreeing with drawing is the
+    property this shares with `measure_text_box`."""
     lines: list[str] = []
     cur: list[str] = []
-    cur_w = 0.0
     for word in words:
-        ww = width_1000(word) / 1000.0 * size
-        add = ww + (space_w if cur else 0.0)
-        if cur and cur_w + add > max_width:
+        candidate = " ".join(cur + [word])
+        if cur and width_1000(candidate) / 1000.0 * size > max_width:
             lines.append(" ".join(cur))
-            cur, cur_w = [word], ww
+            cur = [word]
         else:
             cur.append(word)
-            cur_w += add
     if cur:
         lines.append(" ".join(cur))
     return lines
+
+
+def _show_instruction(line: str, encode, pairs, csi, Array) -> object:
+    """The show op for one line: a plain `Tj`, or a `TJ` array carrying the
+    face's pair kerning (9.K1).
+
+    Sign discipline, stated where it is emitted: a number in a `TJ` array
+    moves the next glyph LEFT by `n/1000 x size`, and kern values are
+    negative when a pair should tighten, so the emitted number is the
+    NEGATION of the kern (`tj_offset`). A line whose pairs all happen to be
+    zero falls back to `Tj`, so a face with no kerning (Liberation Mono) and
+    `kern=False` produce byte-identical output to the shipped path."""
+    from engine.font_kerning import tj_offset
+
+    if not pairs or len(line) < 2:
+        return csi([String(encode(line))], "Tj")
+    parts: list = []
+    chunk = ""
+    for i, ch in enumerate(line):
+        chunk += ch
+        if i + 1 < len(line):
+            k = pairs.get((ch, line[i + 1]), 0.0)
+            if k:
+                parts.append(String(encode(chunk)))
+                parts.append(round(tj_offset(k), 3))
+                chunk = ""
+    if chunk:
+        parts.append(String(encode(chunk)))
+    if len(parts) < 2:  # nothing actually kerned on this line
+        return csi([String(encode(line))], "Tj")
+    return csi([Array(parts)], "TJ")
 
 
 class _BoxLayout(NamedTuple):
@@ -93,9 +126,13 @@ class _BoxLayout(NamedTuple):
     font_dict: object
     encode: object
     width_1000: object
+    # 9.K1: the face's pair kerning ({} when kern=False, or when the face has
+    # none — Liberation Mono genuinely has none, so a monospace box simply
+    # never kerns with no special case).
+    kern_pairs: dict
 
 
-def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic) -> _BoxLayout:
+def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern=True) -> _BoxLayout:
     """The ONE layout pass shared by `add_text_box` and `measure_text_box`
     — validation, box geometry (incl. the A2-tail rotation transposition),
     face resolution (family + A3b bold/italic style), subset-font build,
@@ -169,6 +206,23 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic) 
     unique = "".join(sorted(set(body) - {"\n", "\r", "\t"}))
     font_dict, encode, width_1000 = build_fallback_font(pdf, face, unique)
 
+    # 9.K1: pair kerning from the resolved face. Wrapping, centring and
+    # justification all read `width_1000`, so folding the kern INTO it is what
+    # keeps measurement and drawing in agreement — the same property
+    # `measure_text_box` depends on by sharing this pass.
+    if not isinstance(kern, bool):
+        raise ValueError(f"kern must be true or false (got {kern!r})")
+    pairs: dict = {}
+    if kern:
+        from engine.font_kerning import kern_pairs as _kern_pairs, kerned_width
+
+        pairs = _kern_pairs(str(face))
+        if pairs:
+            _base_width = width_1000
+
+            def width_1000(t, _b=_base_width, _p=pairs):  # noqa: F811
+                return _b(t) + kerned_width(_p, t)
+
     # Honour the user's line breaks as HARD breaks (the entry control is a
     # textarea), then greedy-wrap each segment to the box width. A blank
     # line stays a blank line; leading/trailing blanks are trimmed.
@@ -189,6 +243,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic) 
         l_left=l_left, l_right=l_right, l_top=l_top, l_w=l_w, l_h=l_h,
         frame=frame, left=left, right=right, top=top, bottom=bottom,
         font_dict=font_dict, encode=encode, width_1000=width_1000,
+        kern_pairs=pairs,
     )
 
 
@@ -206,6 +261,7 @@ def add_text_box(
     rotate: int = 0,
     bold: bool = False,
     italic: bool = False,
+    kern: bool = True,
 ) -> dict:
     """Author a new text box on `page`.
 
@@ -239,7 +295,7 @@ def add_text_box(
         # Input-shape validation (text/rect/rotate/style) runs FIRST, before
         # the page-range check — the pre-refactor precedence (a doubly-invalid
         # call surfaces the input error, not the page error).
-        lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic)
+        lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern)
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
@@ -317,7 +373,10 @@ def add_text_box(
                 lx = l_left
             ly = y_top - i * leading
             instrs.append(csi([1, 0, 0, 1, round(lx, 4), round(ly, 4)], "Tm"))
-            instrs.append(csi([String(encode(line))], "Tj"))
+            # 9.K1: a TJ array carrying the face's pair kerning; falls back to
+            # the shipped Tj when nothing kerns (kern=False, or a face like
+            # Liberation Mono that has no pairs at all).
+            instrs.append(_show_instruction(line, encode, lay.kern_pairs, csi, pikepdf.Array))
         instrs.append(csi([], "ET"))
         instrs.append(csi([], "Q"))
         if frame is not None:
@@ -360,11 +419,13 @@ def measure_text_box(
     rotate: int = 0,
     bold: bool = False,
     italic: bool = False,
+    kern: bool = True,
 ) -> dict:
     """A2-tail-2: report how `text` would lay out in the box WITHOUT
     writing — the card's live fit indicator. Runs the exact `_layout_box`
     pass `add_text_box` runs (same wrap width, size clamp, family/style/
-    rotate transposition), so `fits` can never disagree with the commit.
+    rotate transposition, and 9.K1 kerning), so `fits` can never disagree
+    with the commit.
 
     `text_height` = one leading per wrapped line (the block's extent down
     from the box top); `box_height` = the box dimension ACROSS the reading
@@ -375,7 +436,7 @@ def measure_text_box(
     try:
         # Same precedence as add_text_box: input-shape checks (inside
         # _layout_box) before the page range.
-        lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic)
+        lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern)
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")

@@ -824,6 +824,9 @@ function AppContent(): React.ReactElement {
         rotate?: 0 | 90 | 180 | 270;
         bold?: boolean;
         italic?: boolean;
+        /** 9.K1: pair kerning. Defaults ON engine-side, so only an explicit
+         * opt-OUT is ever sent. */
+        kern?: boolean;
       },
     ): Promise<string | void> => {
       const f = state.files.get(path);
@@ -841,6 +844,7 @@ function AppContent(): React.ReactElement {
       if (opts?.rotate !== undefined) params.rotate = opts.rotate;
       if (opts?.bold !== undefined) params.bold = opts.bold;
       if (opts?.italic !== undefined) params.italic = opts.italic;
+      if (opts?.kern === false) params.kern = false;
       await performOperation(path, 'add_text_box', params);
     },
     [state.files, performOperation, confirmEditOfSignedDoc],

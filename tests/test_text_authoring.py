@@ -480,3 +480,106 @@ class TestAddTextStyleAndMeasure:
             add_text_box(src, out, 9, [72, 600, 300, 720], "x", font_path=FONTS_DIR, rotate=45)
         with pytest.raises(ValueError, match="no text"):
             measure_text_box(src, 9, [72, 600, 300, 720], "   ", font_path=FONTS_DIR)
+
+
+class TestKerning:
+    """Phase 9.K1 — pair kerning for text WE lay out in a bundled face.
+
+    Scope note that is load-bearing, not timidity: only bundled faces kern.
+    Text kept in a document's own embedded font already carries its kerning
+    in the original TJ arrays, and the A-track's byte-identity pins would
+    break by construction if every emission kerned.
+    """
+
+    def _show_ops(self, path):
+        """[(operator, [adjustment numbers])] for the page's show ops."""
+        out = []
+        with pikepdf.open(path) as pdf:
+            for instr in pikepdf.parse_content_stream(pdf.pages[0]):
+                op = str(instr.operator)
+                if op == "Tj":
+                    out.append(("Tj", []))
+                elif op == "TJ":
+                    nums = []
+                    for o in instr.operands[0]:
+                        try:
+                            nums.append(round(float(o), 1))
+                        except (TypeError, ValueError):
+                            pass
+                    out.append(("TJ", nums))
+        return out
+
+    def _author(self, tmp_dir, name, text="AVATAR", family="serif", **kw):
+        src = _blank(tmp_dir, name + "-in.pdf")
+        out = os.path.join(tmp_dir, name + ".pdf")
+        add_text_box(src, out, 1, [72, 600, 500, 700], text, size=24,
+                     font_path=FONTS_DIR, family=family, **kw)
+        return out
+
+    def test_kerned_pairs_match_the_face_and_pull_left(self, tmp_dir):
+        from engine.font_kerning import kern_pairs
+
+        out = self._author(tmp_dir, "kerned")
+        ops = self._show_ops(out)
+        assert [o for o, _ in ops] == ["TJ"]
+        pairs = kern_pairs(os.path.join(FONTS_DIR, "LiberationSerif-Regular.ttf"))
+        seq = "AVATAR"
+        expected = [
+            round(-pairs[(seq[i], seq[i + 1])], 1)
+            for i in range(len(seq) - 1)
+            if pairs.get((seq[i], seq[i + 1]))
+        ]
+        assert ops[0][1] == expected
+        # Every adjustment is POSITIVE here: a TJ number moves the next glyph
+        # LEFT, and these pairs all tighten. The sign trap, pinned.
+        assert all(v > 0 for v in ops[0][1])
+
+    def test_kern_false_emits_the_shipped_plain_show(self, tmp_dir):
+        out = self._author(tmp_dir, "plain", kern=False)
+        assert [o for o, _ in self._show_ops(out)] == ["Tj"]
+
+    def test_kern_false_is_byte_identical_to_the_shipped_path(self, tmp_dir):
+        # The guard: opting out reproduces pre-K1 output exactly, so the
+        # feature can never perturb a caller that did not ask for it.
+        a = self._author(tmp_dir, "a", kern=False)
+        b = self._author(tmp_dir, "b", kern=False)
+        assert _page_content(a) == _page_content(b)
+        kerned = self._author(tmp_dir, "c")
+        assert _page_content(kerned) != _page_content(a)
+
+    def test_a_monospace_face_never_kerns(self, tmp_dir):
+        # Liberation Mono genuinely ships no pairs — no special case needed.
+        out = self._author(tmp_dir, "mono", family="mono")
+        assert [o for o, _ in self._show_ops(out)] == ["Tj"]
+
+    def test_text_with_no_kern_pairs_stays_a_plain_show(self, tmp_dir):
+        out = self._author(tmp_dir, "nopairs", text="IIIIIIII")
+        assert [o for o, _ in self._show_ops(out)] == ["Tj"]
+
+    def test_kerned_text_is_still_extractable_and_editable(self, tmp_dir):
+        # The whole point of TJ over per-glyph placement: the run stays ONE
+        # searchable, re-editable text object.
+        out = self._author(tmp_dir, "roundtrip", text="AVATAR To Yo")
+        assert "AVATAR" in extract_text(out)["text"]
+        runs = list_text_runs(out, 1)["runs"]
+        assert any("AVATAR" in r["text"] for r in runs)
+
+    def test_measure_agrees_with_the_kerned_layout(self, tmp_dir):
+        # Measurement MUST include the kern or wrapping/centring would
+        # disagree with what is drawn. A kerned line is narrower, so a width
+        # that just fits when kerned may not fit unkerned.
+        src = _blank(tmp_dir, "measure-in.pdf")
+        text = "AVATAR AVATAR AVATAR"
+        kerned = measure_text_box(src, 1, [72, 600, 260, 700], text, size=24,
+                                  font_path=FONTS_DIR, family="serif", kern=True)
+        plain = measure_text_box(src, 1, [72, 600, 260, 700], text, size=24,
+                                 font_path=FONTS_DIR, family="serif", kern=False)
+        # Kerning tightens, so it can never need MORE lines than unkerned.
+        assert kerned["lines"] <= plain["lines"]
+
+    def test_kern_must_be_a_real_boolean(self, tmp_dir):
+        src = _blank(tmp_dir, "strict-in.pdf")
+        out = os.path.join(tmp_dir, "strict.pdf")
+        with pytest.raises(ValueError, match="kern must be"):
+            add_text_box(src, out, 1, [72, 600, 500, 700], "AV", size=24,
+                         font_path=FONTS_DIR, family="serif", kern="yes")

@@ -610,6 +610,10 @@ export function WorkspaceCanvasView({
   // (null = unknown/measuring; the notice shows only on a definite no).
   const [atBold, setAtBold] = useState(false);
   const [atItalic, setAtItalic] = useState(false);
+  // 9.K1: pair kerning, ON by default (correct typography is the right
+  // default and is what the fit measurement assumes); the toggle is an
+  // opt-OUT, and only that opt-out is ever sent.
+  const [atKern, setAtKern] = useState(true);
   const [atFits, setAtFits] = useState<boolean | null>(null);
   const [atColor, setAtColor] = useState('#000000');
   const [atFamily, setAtFamily] = useState<'sans' | 'serif' | 'mono'>('sans');
@@ -671,6 +675,9 @@ export function WorkspaceCanvasView({
       rotate?: 0 | 90 | 180 | 270;
       bold?: boolean;
       italic?: boolean;
+      /** 9.K1: pair kerning — ON by default engine-side, so only `false`
+       * travels. */
+      kern?: boolean;
     }): Promise<void> => {
       if (creatingTextRef.current) return; // re-entry: the button is disabled while creating
       const placement = liveAddTextPlacement;
@@ -717,6 +724,9 @@ export function WorkspaceCanvasView({
             ...(params.rotate ? { rotate: params.rotate } : {}),
             ...(params.bold ? { bold: true } : {}),
             ...(params.italic ? { italic: true } : {}),
+            // 9.K1 inverts the send-nothing rule: kerning is ON by default,
+            // so only an explicit opt-OUT travels.
+            ...(params.kern === false ? { kern: false } : {}),
           },
         );
         // Signed-doc refusal — keep the card open (the user can cancel).
@@ -773,6 +783,9 @@ export function WorkspaceCanvasView({
             ...(atRotate ? { rotate: atRotate } : {}),
             ...(atBold ? { bold: true } : {}),
             ...(atItalic ? { italic: true } : {}),
+            // The fit indicator MUST measure with the same kerning the commit
+            // will use, or the card could promise a fit the commit breaks.
+            ...(atKern ? {} : { kern: false }),
           })) as { fits?: boolean };
           if (!stale) setAtFits(typeof res?.fits === 'boolean' ? res.fits : null);
         } catch {
@@ -792,6 +805,7 @@ export function WorkspaceCanvasView({
     atRotate,
     atBold,
     atItalic,
+    atKern,
     docs,
     state.files,
     engineCall,
@@ -806,8 +820,9 @@ export function WorkspaceCanvasView({
       rotate: atRotate,
       bold: atBold,
       italic: atItalic,
+      kern: atKern,
     }).catch(() => undefined); // surfaced via atError; the card stays open
-  }, [commitAddText, atText, atSize, atColor, atFamily, atRotate, atBold, atItalic]);
+  }, [commitAddText, atText, atSize, atColor, atFamily, atRotate, atBold, atItalic, atKern]);
 
   // Bake pending values file by file through App's fill op. Reentrancy-ref'd
   // like applyMarks (two clicks in one tick both read a stale busy flag).
@@ -3482,6 +3497,20 @@ export function WorkspaceCanvasView({
               }`}
             >
               B
+            </button>
+            <button
+              type="button"
+              data-testid="add-text-kern"
+              aria-pressed={atKern}
+              title="Kerning — tightens pairs like AV and To using the face's own metrics"
+              onClick={() => setAtKern((k) => !k)}
+              className={`px-2 py-1 text-xs border rounded ${
+                atKern
+                  ? 'bg-emerald-700/40 border-emerald-500'
+                  : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
+              }`}
+            >
+              AV
             </button>
             <button
               type="button"
