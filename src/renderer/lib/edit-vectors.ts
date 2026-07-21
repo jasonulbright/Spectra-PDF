@@ -22,6 +22,26 @@ export interface EditVectorObject {
   fill: [number, number, number] | null;
   /** Best-effort stroke colour [r,g,b] 0-1 (device spaces only), else null. */
   stroke: [number, number, number] | null;
+  /** The effective line width (D3's width control seed). */
+  lineWidth: number;
+}
+
+/** [r,g,b] 0-1 → '#rrggbb'; null → black. */
+export function rgb01ToHex(c: [number, number, number] | null): string {
+  const v = c ?? [0, 0, 0];
+  const h = (x: number): string =>
+    Math.round(Math.max(0, Math.min(1, x)) * 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${h(v[0])}${h(v[1])}${h(v[2])}`;
+}
+
+/** '#rrggbb' → [r,g,b] 0-1; unparseable → black. */
+export function hex01ToRgb(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  return m
+    ? [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255]
+    : [0, 0, 0];
 }
 
 interface EngineListing {
@@ -31,6 +51,7 @@ interface EngineListing {
     kind: 'fill' | 'stroke' | 'fillstroke';
     fill?: [number, number, number] | null;
     stroke?: [number, number, number] | null;
+    line_width?: number;
   }[];
 }
 
@@ -57,5 +78,6 @@ export async function fetchEditVectors(
     kind: v.kind === 'stroke' ? 'stroke' : v.kind === 'fillstroke' ? 'fillstroke' : 'fill',
     fill: clampRgb(v.fill),
     stroke: clampRgb(v.stroke),
+    lineWidth: typeof v.line_width === 'number' && Number.isFinite(v.line_width) ? v.line_width : 1,
   }));
 }

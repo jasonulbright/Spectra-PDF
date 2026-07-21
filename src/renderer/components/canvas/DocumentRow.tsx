@@ -54,6 +54,15 @@ interface DocumentRowProps {
   onSelectEditImage: (pageId: string, index: number) => void;
   onSelectEditVector: (pageId: string, index: number) => void;
   onDeleteVector: () => void;
+  onRestyleVector: (
+    pageId: string,
+    index: number,
+    opts: {
+      fill?: [number, number, number];
+      stroke?: [number, number, number];
+      lineWidth?: number;
+    },
+  ) => void;
   onSelectEditText: (pageId: string, index: number) => void;
   onOpenTextEditor: (pageId: string, index: number) => void;
   onCommitTextEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
@@ -146,6 +155,7 @@ function DocumentRowImpl({
   onSelectEditImage,
   onSelectEditVector,
   onDeleteVector,
+  onRestyleVector,
   onSelectEditText,
   onOpenTextEditor,
   onCommitTextEdit,
@@ -249,6 +259,7 @@ function DocumentRowImpl({
         onSelectEditImage={onSelectEditImage}
         onSelectEditVector={onSelectEditVector}
         onDeleteVector={onDeleteVector}
+        onRestyleVector={onRestyleVector}
         onSelectEditText={onSelectEditText}
         onOpenTextEditor={onOpenTextEditor}
         onCommitTextEdit={onCommitTextEdit}

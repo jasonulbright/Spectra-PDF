@@ -48,6 +48,15 @@ interface DocLayerProps {
   onSelectEditImage: (pageId: string, index: number) => void;
   onSelectEditVector: (pageId: string, index: number) => void;
   onDeleteVector: () => void;
+  onRestyleVector: (
+    pageId: string,
+    index: number,
+    opts: {
+      fill?: [number, number, number];
+      stroke?: [number, number, number];
+      lineWidth?: number;
+    },
+  ) => void;
   onSelectEditText: (pageId: string, index: number) => void;
   onOpenTextEditor: (pageId: string, index: number) => void;
   onCommitTextEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
@@ -162,6 +171,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onSelectEditImage={props.onSelectEditImage}
               onSelectEditVector={props.onSelectEditVector}
               onDeleteVector={props.onDeleteVector}
+              onRestyleVector={props.onRestyleVector}
               onSelectEditText={props.onSelectEditText}
               onOpenTextEditor={props.onOpenTextEditor}
               onCommitTextEdit={props.onCommitTextEdit}

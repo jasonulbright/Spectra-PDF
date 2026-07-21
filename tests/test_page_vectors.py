@@ -15,6 +15,7 @@ from pikepdf import Dictionary, Name
 from engine.page_vectors import (
     delete_page_vector,
     list_page_vectors,
+    restyle_page_vector,
     transform_page_vector,
 )
 
@@ -370,3 +371,90 @@ class TestTransformVector:
         out = os.path.join(tmp_dir, "o.pdf")
         with pytest.raises(ValueError, match="vector object's transform matrix is degenerate"):
             transform_page_vector(src, out, 1, 0, [10.0, 0.0, 0.0, 10.0, 0.0, 0.0])
+
+
+class TestRestyleVector:
+    """Phase 9.D3 — recolour / re-width a vector object by wrapping its run in
+    `q <state ops> … Q`; the new fill/stroke/width apply to THIS object, the
+    Q scopes them (a neighbour inheriting the surrounding state is untouched)."""
+
+    def test_recolours_fill_leaves_neighbour(self, tmp_dir):
+        src = _pdf(
+            tmp_dir,
+            b"1 0 0 rg 50 50 100 60 re f\n0 0 1 RG 200 200 m 300 250 l S\n",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        restyle_page_vector(src, out, 1, 0, fill=[0, 1, 0])
+        vs = _vecs(out)
+        assert vs[0]["fill"] == [0.0, 1.0, 0.0]  # recoloured green
+        assert vs[1]["stroke"] == [0.0, 0.0, 1.0]  # the stroke line untouched
+
+    def test_restroke_and_width_inflates_bbox(self, tmp_dir):
+        src = _pdf(tmp_dir, b"0 0 1 RG 200 200 m 300 250 l S\n")
+        out = os.path.join(tmp_dir, "o.pdf")
+        restyle_page_vector(src, out, 1, 0, stroke=[1, 0, 1], line_width=4)
+        v = _vecs(out)[0]
+        assert v["stroke"] == [1.0, 0.0, 1.0]  # magenta
+        assert v["rect"] == [198.0, 198.0, 302.0, 252.0]  # width 4 → ±2
+
+    def test_recolour_is_scoped_to_the_object(self, tmp_dir):
+        # Two rects inherit an OUTER blue; recolouring the first must NOT leak
+        # (the wrap's Q restores the blue for the second).
+        src = _pdf(tmp_dir, b"0 0 1 rg 10 10 20 20 re f\n40 40 20 20 re f\n")
+        out = os.path.join(tmp_dir, "o.pdf")
+        restyle_page_vector(src, out, 1, 0, fill=[1, 0, 0])
+        vs = _vecs(out)
+        assert vs[0]["fill"] == [1.0, 0.0, 0.0]  # recoloured red
+        assert vs[1]["fill"] == [0.0, 0.0, 1.0]  # STILL blue — not leaked
+
+    def test_keeps_qQ_balanced(self, tmp_dir):
+        src = _pdf(tmp_dir, b"1 0 0 rg 10 10 20 20 re f\n")
+        out = os.path.join(tmp_dir, "o.pdf")
+        restyle_page_vector(src, out, 1, 0, fill=[0, 1, 0])
+        ops = _ops(out)
+        assert ops.count("q") == ops.count("Q")
+
+    def test_refuses_interleaved_state(self, tmp_dir):
+        src = _pdf(tmp_dir, b"10 10 m 1 0 0 rg 50 50 l 90 90 l f\n")
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="interleaved"):
+            restyle_page_vector(src, out, 1, 0, fill=[0, 1, 0])
+
+    def test_refuses_empty_request(self, tmp_dir):
+        src = _pdf(tmp_dir, b"10 10 20 20 re f\n")
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="at least one"):
+            restyle_page_vector(src, out, 1, 0)
+
+    def test_out_of_range_raises(self, tmp_dir):
+        src = _pdf(tmp_dir, b"10 10 20 20 re f\n")
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="out of range"):
+            restyle_page_vector(src, out, 1, 5, fill=[0, 1, 0])
+
+    def test_repeated_restyle_merges_not_nests(self, tmp_dir):
+        # Round-38 MED: repeated restyles MERGE into the prior wrap (replace the
+        # overridden setters, keep the rest) instead of nesting a new q…Q each
+        # time — the stream/q-Q depth stays bounded, the final value is right,
+        # and a field set earlier but NOT re-set survives.
+        src = _pdf(tmp_dir, b"0 0 1 RG 200 200 m 300 250 l S\n")
+        cur = src
+        for i, w in enumerate([1, 2, 3, 4, 5]):
+            out = os.path.join(tmp_dir, f"o{i}.pdf")
+            restyle_page_vector(cur, out, 1, 0, line_width=w)
+            cur = out
+        ops = _ops(cur)
+        assert ops.count("q") == 1 and ops.count("Q") == 1  # ONE wrap, not five
+        v = _vecs(cur)[0]
+        assert v["line_width"] == 5.0  # final width
+        assert v["stroke"] == [0.0, 0.0, 1.0]  # the ORIGINAL stroke survived (never re-set)
+
+    def test_merge_overrides_same_field(self, tmp_dir):
+        # A second restyle of the SAME field replaces it (still one wrap).
+        src = _pdf(tmp_dir, b"1 0 0 rg 10 10 20 20 re f\n")
+        a = os.path.join(tmp_dir, "a.pdf")
+        restyle_page_vector(src, a, 1, 0, fill=[0, 1, 0])
+        b = os.path.join(tmp_dir, "b.pdf")
+        restyle_page_vector(a, b, 1, 0, fill=[0, 0, 1])
+        assert _ops(b).count("q") == 1
+        assert _vecs(b)[0]["fill"] == [0.0, 0.0, 1.0]  # last write wins

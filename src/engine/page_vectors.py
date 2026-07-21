@@ -188,6 +188,9 @@ def _walk_vectors(instructions: list) -> list:
                         "stroke": _color_rgb(state.stroke_color)
                         if operator not in _PAINT_FILL
                         else None,
+                        # D3: the effective line width (the width control's seed);
+                        # meaningful for a stroke/fillstroke, informational for a fill.
+                        "line_width": round(line_width, 4),
                         "drop_idxs": construct_idxs + [idx],
                     }
                 )
@@ -313,6 +316,132 @@ def transform_page_vector(file: str, output: str, page: int, index: int, matrix:
             if i == first:
                 kept.append(_op([], "q"))
                 kept.append(cm)
+            kept.append(ins)
+            if i == last:
+                kept.append(_op([], "Q"))
+        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        _save(pdf, input_path, output_path)
+        return {"output": str(output_path), "page": int(page), "index": int(index)}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def _rgb3(v, name):
+    try:
+        c = [max(0.0, min(1.0, float(x))) for x in v]
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be [r, g, b]") from None
+    if len(c) != 3:
+        raise ValueError(f"{name} must be [r, g, b]")
+    return [round(x, 6) for x in c]
+
+
+def restyle_page_vector(
+    file: str,
+    output: str,
+    page: int,
+    index: int,
+    fill=None,
+    stroke=None,
+    line_width=None,
+) -> dict:
+    """Recolour / re-width ONE vector object (Phase 9.D3) by wrapping its path
+    run in `q <state ops> … Q`.
+
+    The new fill (`rg`), stroke (`RG`), and/or line width (`w`) are injected
+    INSIDE the wrap, BEFORE the object's existing run, so they apply to THIS
+    object and the `Q` scopes them (a neighbour that inherits the surrounding
+    colour is untouched — the object's own paint just uses the new state).
+    `fill`/`stroke` are [r,g,b] 0-1 (clamped); `line_width` is a number ≥ 0.
+    REFUSES an object with interleaved graphics-state operators (non-contiguous
+    run — a wrap's `Q` would scope them, the round-36 hazard) or a request that
+    sets nothing."""
+    ops: list = []
+    if fill is not None:
+        ops.append(_op(_rgb3(fill, "fill"), "rg"))
+    if stroke is not None:
+        ops.append(_op(_rgb3(stroke, "stroke"), "RG"))
+    if line_width is not None:
+        try:
+            lw = float(line_width)
+        except (TypeError, ValueError):
+            raise ValueError("line_width must be a number") from None
+        if lw < 0:
+            raise ValueError("line_width must be >= 0")
+        ops.append(_op([round(lw, 6)], "w"))
+    if not ops:
+        raise ValueError("restyle requires at least one of fill, stroke, line_width")
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        instructions = list(pikepdf.parse_content_stream(p))
+        vectors = _walk_vectors(instructions)
+        if not (0 <= int(index) < len(vectors)):
+            raise ValueError(
+                f"vector index {index} is out of range (page has {len(vectors)})"
+            )
+        drop = vectors[int(index)]["drop_idxs"]
+        first, last = drop[0], drop[-1]
+        if drop != list(range(first, last + 1)):
+            raise ValueError(
+                "vector object has interleaved graphics-state operators and cannot be restyled"
+            )
+        # Round-38 MED: if a PRIOR restyle already wrapped this object in
+        # `q <state setters> run Q`, MERGE into that wrap (replace the setters
+        # this request overrides, keep the rest) rather than nesting another
+        # layer — repeated restyles otherwise grew the stream / q-Q depth
+        # without bound. The setters we recognise are the pure colour/width ops.
+        _SETTERS = {"rg", "RG", "g", "G", "k", "K", "w"}
+        wrap_start = first
+        old_setters: list = []
+        j = first - 1
+        while j >= 0 and str(instructions[j].operator) in _SETTERS:
+            old_setters.insert(0, instructions[j])
+            j -= 1
+        enclosed = (
+            old_setters
+            and j >= 0
+            and str(instructions[j].operator) == "q"
+            and last + 1 < len(instructions)
+            and str(instructions[last + 1].operator) == "Q"
+        )
+        if enclosed:
+            wrap_start = j  # the existing `q`
+            has_fill, has_stroke, has_w = fill is not None, stroke is not None, line_width is not None
+            merged: list = []
+            for op in old_setters:
+                name = str(op.operator)
+                if name in ("rg", "g", "k") and has_fill:
+                    continue
+                if name in ("RG", "G", "K") and has_stroke:
+                    continue
+                if name == "w" and has_w:
+                    continue
+                merged.append(op)  # a setter this request doesn't override — keep it
+            merged.extend(ops)  # the new setters
+            ops = merged
+        kept: list = []
+        for i, ins in enumerate(instructions):
+            if enclosed:
+                if i == wrap_start:
+                    kept.append(_op([], "q"))  # re-open the (merged) wrap
+                    kept.extend(ops)
+                    continue  # drop the ORIGINAL `q`
+                if wrap_start < i < first:
+                    continue  # drop the old setters (merged into `ops`)
+                if i == last + 1:
+                    continue  # drop the old outer `Q` (our own is emitted below)
+            elif i == first:
+                kept.append(_op([], "q"))
+                kept.extend(ops)
             kept.append(ins)
             if i == last:
                 kept.append(_op([], "Q"))

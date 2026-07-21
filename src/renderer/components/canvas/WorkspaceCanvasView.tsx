@@ -85,15 +85,20 @@ interface WorkspaceCanvasViewProps {
       opacity?: number;
     },
   ) => Promise<string | void>;
-  // Edit ▸ Vectors (9.D1/D2): delete OR transform one vector path object —
-  // same undoable App routing. EDIT_DECLINED on a refused signed-doc warning,
-  // like the image/text handlers. `matrix` is D2's target placement.
+  // Edit ▸ Vectors (9.D1/D2/D3): delete, transform, or restyle one vector path
+  // object — same undoable App routing. EDIT_DECLINED on a refused signed-doc
+  // warning, like the image/text handlers.
   onEditVector: (
-    kind: 'delete' | 'transform',
+    kind: 'delete' | 'transform' | 'restyle',
     path: string,
     page: number,
     index: number,
-    matrix?: number[],
+    opts?: {
+      matrix?: number[];
+      fill?: [number, number, number];
+      stroke?: [number, number, number];
+      lineWidth?: number;
+    },
   ) => Promise<string | void>;
   // Edit ▸ Text (7.2+7.3): replace one run's text — same one-snapshot,
   // undoable App routing (engine replace_text_run). Resolves EDIT_DECLINED
@@ -1478,7 +1483,44 @@ export function WorkspaceCanvasView({
       // Stash for the post-op reselect (the rebuild regenerates page ids).
       vectorReselectRef.current = { pageNumber, index };
       try {
-        const notice = await onEditVector('transform', focusedDoc.path, pageNumber, index, matrix);
+        const notice = await onEditVector('transform', focusedDoc.path, pageNumber, index, {
+          matrix,
+        });
+        if (notice === EDIT_DECLINED) {
+          setEditNotice({
+            text: 'Edit cancelled — the document was left unchanged.',
+            error: false,
+          });
+        }
+      } catch (err) {
+        setEditNotice({ text: err instanceof Error ? err.message : String(err), error: true });
+      } finally {
+        setEditBusy(false);
+      }
+    },
+    [focusedDoc, docs, onEditVector, editBusy],
+  );
+
+  // 9.D3: recolour / re-width a vector object. The whole-file op rebuilds the
+  // page, so it reselects like a transform (the same stash).
+  const commitVectorRestyle = useCallback(
+    async (
+      pageId: string,
+      index: number,
+      opts: {
+        fill?: [number, number, number];
+        stroke?: [number, number, number];
+        lineWidth?: number;
+      },
+    ): Promise<void> => {
+      if (!focusedDoc || editBusy) return;
+      const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
+      if (pageNumber == null) return;
+      setEditBusy(true);
+      setEditNotice(null);
+      vectorReselectRef.current = { pageNumber, index };
+      try {
+        const notice = await onEditVector('restyle', focusedDoc.path, pageNumber, index, opts);
         if (notice === EDIT_DECLINED) {
           setEditNotice({
             text: 'Edit cancelled — the document was left unchanged.',
@@ -1990,6 +2032,8 @@ export function WorkspaceCanvasView({
   handleDeleteVectorRef.current = handleDeleteVector;
   const commitVectorTransformRef = useRef(commitVectorTransform);
   commitVectorTransformRef.current = commitVectorTransform;
+  const commitVectorRestyleRef = useRef(commitVectorRestyle);
+  commitVectorRestyleRef.current = commitVectorRestyle;
   const editTextRef = useRef(editTextByPage);
   editTextRef.current = editTextByPage;
   const editSelRef = useRef(editSel);
@@ -2093,6 +2137,7 @@ export function WorkspaceCanvasView({
           kind: v.kind,
           fill: v.fill ? [...v.fill] : null,
           stroke: v.stroke ? [...v.stroke] : null,
+          lineWidth: v.lineWidth,
           userRect: [...v.userRect] as [number, number, number, number],
         })),
       selectVector: (pageId, index) => setSelectedVector({ pageId, index }),
@@ -2100,6 +2145,8 @@ export function WorkspaceCanvasView({
       deleteSelectedVector: () => handleDeleteVectorRef.current(),
       transformVector: (pageId, index, matrix) =>
         commitVectorTransformRef.current(pageId, index, matrix),
+      restyleVector: (pageId, index, opts) =>
+        commitVectorRestyleRef.current(pageId, index, opts),
     });
     return () => registerCanvasEditImages(null);
   }, []);
@@ -2823,6 +2870,7 @@ export function WorkspaceCanvasView({
           onSelectEditImage={handleSelectEditImage}
           onSelectEditVector={handleSelectEditVector}
           onDeleteVector={() => void handleDeleteVector()}
+          onRestyleVector={(pageId, index, opts) => void commitVectorRestyle(pageId, index, opts)}
           onSelectEditText={handleSelectEditText}
           onOpenTextEditor={handleOpenTextEditor}
           onCommitTextEdit={(pageId, index, text, opts) =>
@@ -2914,6 +2962,7 @@ export function WorkspaceCanvasView({
           onSelectEditImage={handleSelectEditImage}
           onSelectEditVector={handleSelectEditVector}
           onDeleteVector={() => void handleDeleteVector()}
+          onRestyleVector={(pageId, index, opts) => void commitVectorRestyle(pageId, index, opts)}
           onSelectEditText={handleSelectEditText}
           onOpenTextEditor={handleOpenTextEditor}
           onCommitTextEdit={(pageId, index, text, opts) =>

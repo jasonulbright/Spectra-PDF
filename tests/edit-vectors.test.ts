@@ -1,6 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { fetchEditVectors } from '../src/renderer/lib/edit-vectors';
+import { fetchEditVectors, rgb01ToHex, hex01ToRgb } from '../src/renderer/lib/edit-vectors';
 import type { PageGeometry } from '../src/renderer/lib/redaction';
+
+describe('D3 colour helpers', () => {
+  it('rgb01ToHex round-trips and clamps', () => {
+    expect(rgb01ToHex([1, 0, 0])).toBe('#ff0000');
+    expect(rgb01ToHex([0, 1, 0])).toBe('#00ff00');
+    expect(rgb01ToHex([0, 0, 1])).toBe('#0000ff');
+    expect(rgb01ToHex(null)).toBe('#000000');
+    expect(rgb01ToHex([2, -1, 0.5])).toBe('#ff0080'); // clamped
+  });
+  it('hex01ToRgb parses and falls back to black', () => {
+    expect(hex01ToRgb('#ff0000')).toEqual([1, 0, 0]);
+    expect(hex01ToRgb('00ff00')).toEqual([0, 1, 0]);
+    expect(hex01ToRgb('nonsense')).toEqual([0, 0, 0]);
+  });
+});
 
 const GEO: PageGeometry = {
   box: { x: 0, y: 0, width: 400, height: 300 },

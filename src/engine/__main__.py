@@ -58,6 +58,7 @@ from engine.page_images import (
 from engine.page_vectors import (
     delete_page_vector,
     list_page_vectors,
+    restyle_page_vector,
     transform_page_vector,
 )
 from engine.distill import distill
@@ -122,6 +123,7 @@ def main() -> None:
     server.register("list_page_vectors", list_page_vectors)
     server.register("delete_page_vector", delete_page_vector)
     server.register("transform_page_vector", transform_page_vector)
+    server.register("restyle_page_vector", restyle_page_vector)
     server.register("set_image_opacity", set_image_opacity)
     server.register("list_text_runs", list_text_runs)
     server.register("replace_text_run", replace_text_run)

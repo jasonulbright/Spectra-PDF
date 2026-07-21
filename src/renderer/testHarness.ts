@@ -238,12 +238,22 @@ export interface CanvasEditImagesHandlers {
     kind: 'fill' | 'stroke' | 'fillstroke';
     fill: [number, number, number] | null;
     stroke: [number, number, number] | null;
+    lineWidth: number;
     userRect: [number, number, number, number];
   }[];
   selectVector: (pageId: string, index: number) => void;
   selectedVector: () => { pageId: string; index: number } | null;
   deleteSelectedVector: () => Promise<void>;
   transformVector: (pageId: string, index: number, matrix: number[]) => Promise<void>;
+  restyleVector: (
+    pageId: string,
+    index: number,
+    opts: {
+      fill?: [number, number, number];
+      stroke?: [number, number, number];
+      lineWidth?: number;
+    },
+  ) => Promise<void>;
 }
 
 let canvasEditImages: CanvasEditImagesHandlers | null = null;
@@ -654,6 +664,7 @@ export interface TestHarness {
     kind: 'fill' | 'stroke' | 'fillstroke';
     fill: [number, number, number] | null;
     stroke: [number, number, number] | null;
+    lineWidth: number;
     userRect: [number, number, number, number];
   }[];
   editVectorSelect: (pageId: string, index: number) => void;
@@ -661,6 +672,16 @@ export interface TestHarness {
   editVectorDelete: () => Promise<void>;
   /** 9.D2: transform (move/resize/rotate) a vector to a target placement M'. */
   editVectorTransform: (pageId: string, index: number, matrix: number[]) => Promise<void>;
+  /** 9.D3: recolour / re-width a vector object. */
+  editVectorRestyle: (
+    pageId: string,
+    index: number,
+    opts: {
+      fill?: [number, number, number];
+      stroke?: [number, number, number];
+      lineWidth?: number;
+    },
+  ) => Promise<void>;
   /** Transform (9.C1) an image placement to an absolute user-space matrix. */
   editImageTransform: (pageId: string, index: number, matrix: number[]) => Promise<void>;
   editImageAct: (
@@ -1161,6 +1182,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       await canvasEditImages.transformVector(pageId, index, matrix);
+    },
+    editVectorRestyle: async (pageId, index, opts) => {
+      if (!canvasEditImages) {
+        const msg = 'editVectorRestyle: canvas edit mode not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      await canvasEditImages.restyleVector(pageId, index, opts);
     },
     editImageAct: async (kind, opts) => {
       if (!canvasEditImages) {

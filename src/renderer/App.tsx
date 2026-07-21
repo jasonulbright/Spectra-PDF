@@ -846,23 +846,36 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
-  // 9.D1/D2: delete or transform (move/resize/rotate) one vector path object.
-  // Same undoable snapshot/commit-gate flow as an image edit (signed-doc-
-  // guarded), just a different engine op. `matrix` is the D2 target placement.
+  // 9.D1/D2/D3: delete, transform (move/resize/rotate), or restyle (recolour /
+  // line-width) one vector path object. Same undoable snapshot/commit-gate flow
+  // as an image edit (signed-doc-guarded), just a different engine op.
   const handleEditVector = useCallback(
     async (
-      kind: 'delete' | 'transform',
+      kind: 'delete' | 'transform' | 'restyle',
       path: string,
       page: number,
       index: number,
-      matrix?: number[],
+      opts?: {
+        matrix?: number[];
+        fill?: [number, number, number];
+        stroke?: [number, number, number];
+        lineWidth?: number;
+      },
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       if (kind === 'transform') {
-        if (!matrix) throw new Error('transform requires a target matrix');
-        await performOperation(path, 'transform_page_vector', { page, index, matrix });
+        if (!opts?.matrix) throw new Error('transform requires a target matrix');
+        await performOperation(path, 'transform_page_vector', { page, index, matrix: opts.matrix });
+        return;
+      }
+      if (kind === 'restyle') {
+        const params: Record<string, unknown> = { page, index };
+        if (opts?.fill) params.fill = opts.fill;
+        if (opts?.stroke) params.stroke = opts.stroke;
+        if (opts?.lineWidth !== undefined) params.line_width = opts.lineWidth;
+        await performOperation(path, 'restyle_page_vector', params);
         return;
       }
       await performOperation(path, 'delete_page_vector', { page, index });

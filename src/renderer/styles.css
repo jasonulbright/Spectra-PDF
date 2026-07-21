@@ -1231,6 +1231,42 @@
 .page-editvec-del:hover {
   background: #0b8f8a;
 }
+.page-editvec-toolbar {
+  position: absolute;
+  transform: translateY(6px);
+  z-index: 20;
+}
+.page-editvec-toolbar.above {
+  transform: translateY(calc(-100% - 6px));
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(20, 24, 28, 0.92);
+  border: 1px solid #0b8f8a;
+  white-space: nowrap;
+}
+.page-editvec-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #cfeeea;
+}
+.page-editvec-ctl input[type='color'] {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.page-editvec-width {
+  width: 48px;
+  font-size: 11px;
+  padding: 1px 3px;
+}
 
 /* C1 image transform overlay (9.C1): outline quad + handles on the selected
    image. The root spans the page (coordinate reference); only the polygon and

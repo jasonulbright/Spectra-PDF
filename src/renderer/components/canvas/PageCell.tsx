@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { showsFormWidgets } from '../../commands/tools';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
@@ -7,7 +7,7 @@ import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '.
 import type { RedactionMark } from '../../lib/redaction';
 import type { OcrWord } from '../../ocr/types';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
-import type { EditVectorObject } from '../../lib/edit-vectors';
+import { rgb01ToHex, hex01ToRgb, type EditVectorObject } from '../../lib/edit-vectors';
 import ImageTransformOverlay from './ImageTransformOverlay';
 import type { EditTextRun } from '../../lib/edit-text';
 import { unencodableChars } from '../../lib/edit-text';
@@ -342,6 +342,16 @@ interface PageCellProps {
   selectedVectorIndex?: number | null;
   onSelectEditVector?: (pageId: string, index: number) => void;
   onDeleteVector?: () => void;
+  /** 9.D3: recolour / re-width the selected vector object. */
+  onRestyleVector?: (
+    pageId: string,
+    index: number,
+    opts: {
+      fill?: [number, number, number];
+      stroke?: [number, number, number];
+      lineWidth?: number;
+    },
+  ) => void;
   /** 9.D2: transform context for THIS page's selected vector (pre-filtered by
    * pageId) — reuses the image transform overlay (crop null). */
   vectorTransform?: EditImageTransformCtx | null;
@@ -458,6 +468,119 @@ interface PageCellProps {
   onClearSignaturePlacement: () => void;
 }
 
+type VectorRestyleOpts = {
+  fill?: [number, number, number];
+  stroke?: [number, number, number];
+  lineWidth?: number;
+};
+
+// 9.D3 restyle toolbar for the selected vector object. Keyed by the object
+// index upstream, so it REMOUNTS (re-seeding local state) when the selection
+// switches — the fill/stroke swatches AND the width field never show a stale
+// prior object's value (round-38 HIGH #1). Every input previews LOCALLY and
+// commits on a debounce that re-arms while a prior commit is in flight, so a
+// colour-picker drag or multi-digit width edit is ONE undoable engine op with
+// the FINAL value, not a stream of dropped intermediates (round-38 HIGH #2).
+function VectorRestyleToolbar({
+  obj,
+  busy,
+  className,
+  style,
+  testid,
+  onCommit,
+}: {
+  obj: EditVectorObject;
+  busy: boolean;
+  className: string;
+  style: React.CSSProperties;
+  testid: string;
+  onCommit: (opts: VectorRestyleOpts) => void;
+}): React.ReactElement {
+  const [fill, setFill] = useState(() => rgb01ToHex(obj.fill));
+  const [stroke, setStroke] = useState(() => rgb01ToHex(obj.stroke));
+  const [width, setWidth] = useState(() => String(obj.lineWidth));
+  const pending = useRef<VectorRestyleOpts>({});
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flush = useCallback(() => {
+    timer.current = null;
+    const p = pending.current;
+    if (p.fill === undefined && p.stroke === undefined && p.lineWidth === undefined) return;
+    if (busyRef.current) {
+      timer.current = setTimeout(flush, 150); // a commit is in flight — wait it out
+      return;
+    }
+    pending.current = {};
+    onCommit(p);
+  }, [onCommit]);
+  const schedule = (): void => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, 250);
+  };
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+  return (
+    <div className={className} data-testid={testid} style={style} onPointerDown={(e) => e.stopPropagation()}>
+      {obj.kind !== 'stroke' && (
+        <label className="page-editvec-ctl" title="Fill colour">
+          Fill
+          <input
+            type="color"
+            data-testid={`edit-vector-fill-${obj.index}`}
+            value={fill}
+            onChange={(e) => {
+              setFill(e.target.value);
+              pending.current.fill = hex01ToRgb(e.target.value);
+              schedule();
+            }}
+          />
+        </label>
+      )}
+      {obj.kind !== 'fill' && (
+        <>
+          <label className="page-editvec-ctl" title="Stroke colour">
+            Line
+            <input
+              type="color"
+              data-testid={`edit-vector-stroke-${obj.index}`}
+              value={stroke}
+              onChange={(e) => {
+                setStroke(e.target.value);
+                pending.current.stroke = hex01ToRgb(e.target.value);
+                schedule();
+              }}
+            />
+          </label>
+          <label className="page-editvec-ctl" title="Line width">
+            W
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              className="page-editvec-width"
+              data-testid={`edit-vector-width-${obj.index}`}
+              value={width}
+              onChange={(e) => {
+                setWidth(e.target.value);
+                const w = parseFloat(e.target.value);
+                if (Number.isFinite(w) && w >= 0) {
+                  pending.current.lineWidth = w;
+                  schedule();
+                }
+              }}
+            />
+          </label>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PageCellImpl({
   docId,
   page,
@@ -479,6 +602,7 @@ function PageCellImpl({
   selectedVectorIndex,
   onSelectEditVector,
   onDeleteVector,
+  onRestyleVector,
   vectorTransform,
   onCommitVectorTransform,
   editImageTransform,
@@ -1106,6 +1230,27 @@ function PageCellImpl({
                   ×
                 </button>
               )}
+              {dr &&
+                selVec &&
+                onRestyleVector &&
+                (() => {
+                  // Round-38 MED #4: flip the toolbar ABOVE a near-bottom
+                  // object and clamp its left so it can't render off the
+                  // clipped page (a footer rule / far-right object).
+                  const above = dr.y + dr.h > 0.82;
+                  const left = Math.max(0, Math.min(dr.x, 0.6));
+                  return (
+                    <VectorRestyleToolbar
+                      key={selVec.index}
+                      obj={selVec}
+                      busy={vectorTransform.busy}
+                      className={'page-editvec-toolbar' + (above ? ' above' : '')}
+                      style={{ left: `${left * 100}%`, top: `${(above ? dr.y : dr.y + dr.h) * 100}%` }}
+                      testid={`edit-vector-toolbar-${vectorTransform.index}`}
+                      onCommit={(opts) => onRestyleVector(page.id, vectorTransform.index, opts)}
+                    />
+                  );
+                })()}
             </>
           );
         })()}
