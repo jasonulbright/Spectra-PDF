@@ -159,6 +159,11 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         raise ValueError(f"bold must be true or false (got {bold!r})")
     if not isinstance(italic, bool):
         raise ValueError(f"italic must be true or false (got {italic!r})")
+    # 9.K1 (round-41 LOW): validated HERE with its siblings, not later beside
+    # the face work — input-shape checks run FIRST, so a bad `kern` reports
+    # itself rather than surfacing whatever the font machinery hits on the way.
+    if not isinstance(kern, bool):
+        raise ValueError(f"kern must be true or false (got {kern!r})")
     rot = int(rotate)
     left, right = min(x0, x1), max(x0, x1)
     top, bottom = max(y0, y1), min(y0, y1)
@@ -210,8 +215,6 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # justification all read `width_1000`, so folding the kern INTO it is what
     # keeps measurement and drawing in agreement — the same property
     # `measure_text_box` depends on by sharing this pass.
-    if not isinstance(kern, bool):
-        raise ValueError(f"kern must be true or false (got {kern!r})")
     pairs: dict = {}
     if kern:
         from engine.font_kerning import kern_pairs as _kern_pairs, kerned_width

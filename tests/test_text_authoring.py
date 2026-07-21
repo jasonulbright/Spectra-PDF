@@ -583,3 +583,86 @@ class TestKerning:
         with pytest.raises(ValueError, match="kern must be"):
             add_text_box(src, out, 1, [72, 600, 500, 700], "AV", size=24,
                          font_path=FONTS_DIR, family="serif", kern="yes")
+
+
+class TestKernCoverageBits:
+    """Round-41 review: the legacy `kern` subtable COVERAGE filter.
+
+    Bits (kern format 0): 0x1 horizontal, 0x2 minimum, 0x4 cross-stream,
+    0x8 override. Only horizontal, additive pair kerning may reach a `TJ`
+    array. The first cut tested 0x2 while calling it cross-stream and never
+    checked horizontal at all, so a genuine cross-stream or vertical-only
+    subtable passed straight through — inert for every shipped Liberation
+    face (all are coverage 0x01) but live the moment a resync or a new
+    family brought one in.
+    """
+
+    class _Sub:
+        def __init__(self, coverage, table):
+            self.coverage = coverage
+            self.kernTable = table
+
+    class _Kern:
+        def __init__(self, subs):
+            self.kernTables = subs
+
+    class _Font:
+        def __init__(self, kern):
+            self._kern = kern
+
+        def __getitem__(self, key):
+            if key == "kern":
+                return self._kern
+            raise KeyError(key)
+
+    def _run(self, coverage):
+        from engine.font_kerning import _legacy_kern
+
+        sub = self._Sub(coverage, {("A", "V"): -500})
+        font = self._Font(self._Kern([sub]))
+        return _legacy_kern(font, {"A": "A", "V": "V"})
+
+    def test_horizontal_additive_is_accepted(self):
+        assert self._run(0x01) == {("A", "V"): -500}
+
+    def test_cross_stream_is_excluded(self):
+        # 0x4 is cross-stream: perpendicular movement (accent placement).
+        # Folding it into a horizontal TJ would displace the wrong axis.
+        assert self._run(0x05) == {}
+
+    def test_vertical_only_is_excluded(self):
+        # Horizontal bit clear = vertical kerning.
+        assert self._run(0x00) == {}
+
+    def test_minimum_is_excluded(self):
+        # 0x2 is a spacing FLOOR, not an additive delta — summing it is
+        # meaningless.
+        assert self._run(0x03) == {}
+
+    def test_shipped_faces_are_all_plain_horizontal(self):
+        # The reason the bug was inert: pin it so a resync that changes it
+        # fails here rather than silently mis-kerning.
+        from fontTools.ttLib import TTFont
+        import glob
+
+        for path in glob.glob(os.path.join(FONTS_DIR, "*.ttf")):
+            font = TTFont(path, fontNumber=0, lazy=True)
+            try:
+                if "kern" not in font:
+                    continue
+                for sub in font["kern"].kernTables:
+                    assert sub.coverage & 0x1, f"{path}: non-horizontal kern subtable"
+                    assert not (sub.coverage & 0x6), f"{path}: minimum/cross-stream kern"
+            finally:
+                font.close()
+
+
+def test_kern_validation_runs_before_font_work(tmp_dir):
+    """Round-41 LOW: input-shape checks run FIRST, so an invalid `kern`
+    reports itself rather than surfacing whatever the font machinery hits
+    on the way (the round-31 precedent this had broken)."""
+    src = _blank(tmp_dir, "precedence-in.pdf")
+    out = os.path.join(tmp_dir, "precedence.pdf")
+    with pytest.raises(ValueError, match="kern must be"):
+        add_text_box(src, out, 1, [72, 600, 500, 700], "unencodable \U0001F600",
+                     size=24, font_path=FONTS_DIR, family="serif", kern="yes")

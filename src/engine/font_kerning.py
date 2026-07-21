@@ -43,10 +43,28 @@ def _legacy_kern(font, cmap_rev: dict[str, str]) -> dict[tuple[str, str], int]:
     except Exception:
         return out
     for sub in getattr(table, "kernTables", []) or []:
-        # Only horizontal, non-cross-stream subtables carry ordinary pair
-        # kerning; anything else is a different feature wearing the same table.
-        if getattr(sub, "coverage", 1) & 0x2:  # cross-stream
-            continue
+        # Only HORIZONTAL, additive pair kerning belongs in a `TJ` array.
+        # The coverage bits (kern format 0): 0x1 horizontal, 0x2 minimum,
+        # 0x4 cross-stream, 0x8 override.
+        #   - not horizontal  -> vertical kerning; folding it into a
+        #     horizontal TJ would displace glyphs along the wrong axis.
+        #   - minimum         -> a floor on spacing, NOT an additive delta;
+        #     summing it would be meaningless.
+        #   - cross-stream    -> perpendicular movement (accent placement);
+        #     again the wrong axis.
+        # (Round-41 review: this previously tested 0x2 while CALLING it
+        # cross-stream and never checked horizontal at all, so a genuine
+        # cross-stream or vertical-only subtable passed straight through.
+        # Inert for every shipped Liberation face — all are coverage 0x01 —
+        # but a font resync or an added family would have activated it
+        # silently, which is exactly the class of latent bug worth closing.)
+        coverage = getattr(sub, "coverage", 0x1)
+        if not (coverage & 0x1):
+            continue  # vertical
+        if coverage & 0x2:
+            continue  # minimum
+        if coverage & 0x4:
+            continue  # cross-stream
         pairs = getattr(sub, "kernTable", None)
         if not pairs:
             continue
