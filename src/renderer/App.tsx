@@ -762,14 +762,6 @@ function AppContent(): React.ReactElement {
       // face, and size fold independently in the engine). Forward it verbatim
       // — dropping it silently reverts a per-span edit to a plain re-typeset.
       if (opts?.span_styles !== undefined) params.span_styles = opts.span_styles;
-      const substituting =
-        opts?.family !== undefined || opts?.bold !== undefined || opts?.italic !== undefined;
-      // A per-span FACE (A5b) needs the bundled faces to embed, exactly like a
-      // whole-paragraph substitution; a per-span colour/size does not. Face
-      // entries always carry bold/italic keys (colour/size entries never do).
-      const spanHasFace = (opts?.span_styles ?? []).some(
-        (s) => 'bold' in s || 'italic' in s || 'family' in s,
-      );
       // The bundled fallback faces (7.4/9.B1/9.A3): convert renders only the
       // characters the mapped fonts cannot express; a substitution re-renders
       // every character. Either way the engine resolves the face from the
