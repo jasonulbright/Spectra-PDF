@@ -2551,3 +2551,282 @@ class TestPrintFitSemantics:
         assert 185 <= (y1 - y0 + 1) <= 215, (y0, y1)
         assert x0 <= 5, x0
         assert y1 >= h - 6, (y1, h)
+
+
+class TestRedactionLeaks:
+    """Security regressions: redaction MUST remove content, not cover it.
+
+    A false negative — content that should have been removed and wasn't — is
+    the dangerous failure mode for a redaction tool (redact.py's own
+    docstring says so). Both cases below shipped in v2.7.0.
+
+    Note for anyone extending these: assert on the DECOMPRESSED content
+    stream. A raw byte-grep of the saved file false-negatives because pikepdf
+    compresses on save, which produced a false PASS during the original
+    investigation.
+    """
+
+    SECRET = bytes([0xDE, 0xAD, 0xBE, 0xEF] * 3)  # 2x2 RGB inline image data
+
+    def _inline_image_pdf(self, path, cm=b"100 0 0 100 50 50"):
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        page.Contents = pdf.make_stream(
+            b"q " + cm + b" cm\nBI /W 2 /H 2 /CS /RGB /BPC 8 ID " + self.SECRET + b" EI\nQ\n"
+        )
+        page.obj["/Resources"] = pikepdf.Dictionary()
+        pdf.save(path)
+        pdf.close()
+
+    def _stream_and_ops(self, path):
+        with pikepdf.open(path) as pdf:
+            ops = [str(i.operator) for i in pikepdf.parse_content_stream(pdf.pages[0])]
+            return pdf.pages[0].Contents.read_bytes(), ops
+
+    def test_inline_image_under_a_region_is_REMOVED_not_covered(self, tmp_dir):
+        # The leak: redact.py had no INLINE IMAGE branch, so a BI/ID/EI image
+        # fell through to `else: kept.append(instruction)` and survived. The
+        # tool drew a black box over it and reported images_removed=0.
+        src = os.path.join(tmp_dir, "inline_in.pdf")
+        out = os.path.join(tmp_dir, "inline_out.pdf")
+        self._inline_image_pdf(src)
+        before, _ = self._stream_and_ops(src)
+        assert self.SECRET in before, "fixture is wrong: no inline data to leak"
+
+        result = redact(src, out, [{"page": 1, "rect": [40, 40, 160, 160]}])
+
+        after, ops = self._stream_and_ops(out)
+        assert self.SECRET not in after, "inline image data SURVIVED redaction"
+        assert "INLINE IMAGE" not in ops
+        assert result["images_removed"] == 1
+
+    def test_inline_image_outside_the_region_is_untouched(self, tmp_dir):
+        # Failing closed must not become over-removal.
+        src = os.path.join(tmp_dir, "inline_keep_in.pdf")
+        out = os.path.join(tmp_dir, "inline_keep_out.pdf")
+        self._inline_image_pdf(src, cm=b"20 0 0 20 5 5")
+
+        result = redact(src, out, [{"page": 1, "rect": [150, 150, 190, 190]}])
+
+        after, ops = self._stream_and_ops(out)
+        assert self.SECRET in after, "an uncovered inline image was destroyed"
+        assert "INLINE IMAGE" in ops
+        assert result["images_removed"] == 0
+
+    def _annot_pdf(self, path, rect):
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        annot = pdf.make_indirect(
+            pikepdf.Dictionary(
+                Type=pikepdf.Name("/Annot"),
+                Subtype=pikepdf.Name("/Square"),
+                Contents=pikepdf.String("sensitive"),
+            )
+        )
+        if rect is not None:
+            annot["/Rect"] = rect
+        page.obj["/Annots"] = pdf.make_indirect(pikepdf.Array([annot]))
+        pdf.save(path)
+        pdf.close()
+
+    def test_annotation_with_an_unreadable_rect_is_REMOVED(self, tmp_dir):
+        # _annot_overlaps returned False on any /Rect it could not read, so a
+        # damaged annotation over a redacted region was KEPT. It now fails
+        # CLOSED: unreadable means "assume it overlaps".
+        src = os.path.join(tmp_dir, "annot_bad_in.pdf")
+        out = os.path.join(tmp_dir, "annot_bad_out.pdf")
+        self._annot_pdf(src, pikepdf.Array([pikepdf.String("x"), 0, 200, 200]))
+
+        redact(src, out, [{"page": 1, "rect": [0, 0, 200, 200]}])
+
+        with pikepdf.open(out) as pdf:
+            annots = pdf.pages[0].obj.get("/Annots")
+            assert not annots or len(annots) == 0, "malformed-/Rect annotation survived"
+
+    def test_annotation_with_no_rect_is_REMOVED(self, tmp_dir):
+        src = os.path.join(tmp_dir, "annot_none_in.pdf")
+        out = os.path.join(tmp_dir, "annot_none_out.pdf")
+        self._annot_pdf(src, None)
+
+        redact(src, out, [{"page": 1, "rect": [0, 0, 200, 200]}])
+
+        with pikepdf.open(out) as pdf:
+            annots = pdf.pages[0].obj.get("/Annots")
+            assert not annots or len(annots) == 0, "/Rect-less annotation survived"
+
+    def test_a_clear_annotation_still_survives(self, tmp_dir):
+        # The fail-closed change must not remove annotations that are plainly
+        # outside every region.
+        src = os.path.join(tmp_dir, "annot_ok_in.pdf")
+        out = os.path.join(tmp_dir, "annot_ok_out.pdf")
+        self._annot_pdf(src, pikepdf.Array([0, 0, 10, 10]))
+
+        redact(src, out, [{"page": 1, "rect": [150, 150, 190, 190]}])
+
+        with pikepdf.open(out) as pdf:
+            annots = pdf.pages[0].obj.get("/Annots")
+            assert annots is not None and len(annots) == 1
+
+
+class TestRedactionLeaks:
+    """Security regressions: redaction MUST remove content, not cover it.
+
+    A false negative — content that should have been removed and wasn't — is
+    the dangerous failure mode for a redaction tool (redact.py's own
+    docstring says so). Both cases below shipped in v2.7.0.
+
+    Assert on the DECOMPRESSED content stream. A raw byte-grep of the saved
+    file false-negatives because pikepdf compresses on save — that produced a
+    false PASS during the original investigation.
+    """
+
+    SECRET = bytes([0xDE, 0xAD, 0xBE, 0xEF] * 3)  # 2x2 RGB inline image data
+
+    def _inline_image_pdf(self, path, cm=b"100 0 0 100 50 50"):
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        page.Contents = pdf.make_stream(
+            b"q " + cm + b" cm\nBI /W 2 /H 2 /CS /RGB /BPC 8 ID " + self.SECRET + b" EI\nQ\n"
+        )
+        page.obj["/Resources"] = pikepdf.Dictionary()
+        pdf.save(path)
+        pdf.close()
+
+    def _stream_and_ops(self, path):
+        with pikepdf.open(path) as pdf:
+            ops = [str(i.operator) for i in pikepdf.parse_content_stream(pdf.pages[0])]
+            return pdf.pages[0].Contents.read_bytes(), ops
+
+    def test_inline_image_under_a_region_is_REMOVED_not_covered(self, tmp_dir):
+        # The leak: no INLINE IMAGE branch, so a BI/ID/EI image fell through
+        # to `else: kept.append(instruction)` and survived. The tool drew a
+        # black box over it and reported images_removed=0.
+        src = os.path.join(tmp_dir, "inline_in.pdf")
+        out = os.path.join(tmp_dir, "inline_out.pdf")
+        self._inline_image_pdf(src)
+        before, _ = self._stream_and_ops(src)
+        assert self.SECRET in before, "fixture is wrong: no inline data to leak"
+
+        result = redact(src, out, [{"page": 1, "rect": [40, 40, 160, 160]}])
+
+        after, ops = self._stream_and_ops(out)
+        assert self.SECRET not in after, "inline image data SURVIVED redaction"
+        assert "INLINE IMAGE" not in ops
+        assert result["images_removed"] == 1
+
+    def test_inline_image_outside_the_region_is_untouched(self, tmp_dir):
+        # Failing closed must not become over-removal.
+        src = os.path.join(tmp_dir, "inline_keep_in.pdf")
+        out = os.path.join(tmp_dir, "inline_keep_out.pdf")
+        self._inline_image_pdf(src, cm=b"20 0 0 20 5 5")
+
+        result = redact(src, out, [{"page": 1, "rect": [150, 150, 190, 190]}])
+
+        after, ops = self._stream_and_ops(out)
+        assert self.SECRET in after, "an uncovered inline image was destroyed"
+        assert "INLINE IMAGE" in ops
+        assert result["images_removed"] == 0
+
+    def _annot_pdf(self, path, rect):
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        annot = pdf.make_indirect(
+            pikepdf.Dictionary(
+                Type=pikepdf.Name("/Annot"),
+                Subtype=pikepdf.Name("/Square"),
+                Contents=pikepdf.String("sensitive"),
+            )
+        )
+        if rect is not None:
+            annot["/Rect"] = rect
+        page.obj["/Annots"] = pdf.make_indirect(pikepdf.Array([annot]))
+        pdf.save(path)
+        pdf.close()
+
+    def test_annotation_with_an_unreadable_rect_is_REMOVED(self, tmp_dir):
+        # _annot_overlaps returned False on any /Rect it could not read, so a
+        # damaged annotation over a redacted region was KEPT. Now fails
+        # CLOSED: unreadable means "assume it overlaps".
+        src = os.path.join(tmp_dir, "annot_bad_in.pdf")
+        out = os.path.join(tmp_dir, "annot_bad_out.pdf")
+        self._annot_pdf(src, pikepdf.Array([pikepdf.String("x"), 0, 200, 200]))
+
+        redact(src, out, [{"page": 1, "rect": [0, 0, 200, 200]}])
+
+        with pikepdf.open(out) as pdf:
+            annots = pdf.pages[0].obj.get("/Annots")
+            assert not annots or len(annots) == 0, "malformed-/Rect annotation survived"
+
+    def test_annotation_with_no_rect_is_REMOVED(self, tmp_dir):
+        src = os.path.join(tmp_dir, "annot_none_in.pdf")
+        out = os.path.join(tmp_dir, "annot_none_out.pdf")
+        self._annot_pdf(src, None)
+
+        redact(src, out, [{"page": 1, "rect": [0, 0, 200, 200]}])
+
+        with pikepdf.open(out) as pdf:
+            annots = pdf.pages[0].obj.get("/Annots")
+            assert not annots or len(annots) == 0, "/Rect-less annotation survived"
+
+    def test_a_clear_annotation_still_survives(self, tmp_dir):
+        # Failing closed must not remove annotations plainly outside every region.
+        src = os.path.join(tmp_dir, "annot_ok_in.pdf")
+        out = os.path.join(tmp_dir, "annot_ok_out.pdf")
+        self._annot_pdf(src, pikepdf.Array([0, 0, 10, 10]))
+
+        redact(src, out, [{"page": 1, "rect": [150, 150, 190, 190]}])
+
+        with pikepdf.open(out) as pdf:
+            annots = pdf.pages[0].obj.get("/Annots")
+            assert annots is not None and len(annots) == 1
+
+    def _shading_pdf(self, path, clipped):
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        sh = pdf.make_indirect(
+            pikepdf.Dictionary(
+                ShadingType=2,
+                ColorSpace=pikepdf.Name("/DeviceRGB"),
+                Coords=[0, 0, 200, 200],
+                Function=pdf.make_indirect(
+                    pikepdf.Dictionary(
+                        FunctionType=2, Domain=[0, 1], C0=[1, 0, 0], C1=[0, 0, 1], N=1
+                    )
+                ),
+            )
+        )
+        page.obj["/Resources"] = pikepdf.Dictionary(Shading=pikepdf.Dictionary(Sh0=sh))
+        body = b"q 0 0 30 30 re W n /Sh0 sh Q\n" if clipped else b"q /Sh0 sh Q\n"
+        page.Contents = pdf.make_stream(body)
+        pdf.save(path)
+        pdf.close()
+
+    def _ops(self, path):
+        with pikepdf.open(path) as pdf:
+            return [str(i.operator) for i in pikepdf.parse_content_stream(pdf.pages[0])]
+
+    def test_unclipped_shading_over_a_region_is_removed(self, tmp_dir):
+        # `sh` paints the current clip; unclipped it covers the whole page, so
+        # it genuinely covers the region. Removing it is correctness, not
+        # over-removal. (It used to fall through the final `else` and survive.)
+        src = os.path.join(tmp_dir, "sh_unclipped.pdf")
+        out = os.path.join(tmp_dir, "sh_unclipped_out.pdf")
+        self._shading_pdf(src, clipped=False)
+        redact(src, out, [{"page": 1, "rect": [80, 80, 120, 120]}])
+        assert "sh" not in self._ops(out)
+
+    def test_clipped_shading_clear_of_the_region_survives(self, tmp_dir):
+        # Requires real clip tracking: the shared state machine does not track
+        # W/W*, so without it this would be over-removed.
+        src = os.path.join(tmp_dir, "sh_clip_far.pdf")
+        out = os.path.join(tmp_dir, "sh_clip_far_out.pdf")
+        self._shading_pdf(src, clipped=True)  # clipped to 0,0..30,30
+        redact(src, out, [{"page": 1, "rect": [150, 150, 190, 190]}])
+        assert "sh" in self._ops(out)
+
+    def test_clipped_shading_overlapping_the_region_is_removed(self, tmp_dir):
+        src = os.path.join(tmp_dir, "sh_clip_hit.pdf")
+        out = os.path.join(tmp_dir, "sh_clip_hit_out.pdf")
+        self._shading_pdf(src, clipped=True)
+        redact(src, out, [{"page": 1, "rect": [0, 0, 20, 20]}])
+        assert "sh" not in self._ops(out)
