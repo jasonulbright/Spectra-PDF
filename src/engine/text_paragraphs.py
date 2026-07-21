@@ -596,6 +596,17 @@ def _fill_color_hex(color) -> str:
 
 def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
     out = []
+    # A5-tails-a: `style_of` reads the pdf's font dicts, so memoize per member
+    # index — the per-SPAN display seeds below call it once per span and a
+    # paragraph routinely has many spans over few distinct members.
+    style_cache: dict[int, tuple[bool, bool, str | None]] = {}
+
+    def member_style(m) -> tuple[bool, bool, str | None]:
+        key = int(m.index)
+        if key not in style_cache:
+            style_cache[key] = style_of(m) if style_of is not None else (False, False, None)
+        return style_cache[key]
+
     for i, p in enumerate(paragraphs):
         # The DOMINANT member: the widest on the first line — the SAME rule
         # _Emission uses to compute the leading scale, so the size the
@@ -606,7 +617,7 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
         # A3b seeds: the dominant member's own weight/slant, classified by
         # the caller (needs the pdf's font dicts — `style_of(member)` →
         # (bold, italic); None = unclassified, seeds regular).
-        b, it = style_of(first) if style_of is not None else (False, False)
+        b, it, _fam = member_style(first)
         # A5a: enrich each style-source span with its member's fill colour,
         # so the editor seeds per-range colours (a source PDF or a prior
         # A5a edit with mixed colours re-opens showing them). Additive —
@@ -618,6 +629,21 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
             m = members_by_index.get(int(sp["run"]))
             if m is not None:
                 entry["color"] = _fill_color_hex(m.style["fill_color"])
+                # A5-tails-a: per-span DISPLAY seeds — the span's own
+                # weight/slant/family/size, so a reopened editor can SHOW
+                # genuinely mixed per-span styling instead of starting blank.
+                # DISPLAY-ONLY BY CONTRACT: the renderer keeps these apart
+                # from user overrides and never sends them back, because a
+                # face entry SUBSTITUTES its range into a bundled Liberation
+                # face — re-sending a seed would silently replace the
+                # document's own foundry font on any commit. (That hazard is
+                # why the A5b round left the seed out entirely.)
+                sb, sit, sfam = member_style(m)
+                entry["bold"] = sb
+                entry["italic"] = sit
+                if sfam is not None:
+                    entry["family"] = sfam
+                entry["size"] = round(m.style["size"], 2)
             spans_out.append(entry)
         out.append(
             {
@@ -672,10 +698,13 @@ def list_text_paragraphs(file: str, page: int) -> dict:
 
         # A3b: seed the style toggles from each paragraph's dominant
         # member's OWN font (stream-scoped resources — the B1 discipline).
-        from engine.font_fallback import classify_font_style
+        from engine.font_fallback import classify_font_family, classify_font_style
         from engine.text_runs import _lookup_font
 
-        def style_of(member: _Member) -> tuple[bool, bool]:
+        def style_of(member: _Member) -> tuple[bool, bool, str | None]:
+            """(bold, italic, family) of a member's OWN font. The family is a
+            DISPLAY seed only (A5-tails-a) — it names what the member already
+            is, never a substitution request."""
             try:
                 fd = _lookup_font(
                     member.style["font_name"], member.resources or resources, resources
@@ -683,11 +712,16 @@ def list_text_paragraphs(file: str, page: int) -> dict:
             except Exception:
                 fd = None
             if fd is None:
-                return (False, False)
+                return (False, False, None)
             try:
-                return classify_font_style(fd)
+                b, it = classify_font_style(fd)
             except Exception:
-                return (False, False)
+                b, it = (False, False)
+            try:
+                fam = classify_font_family(fd)
+            except Exception:
+                fam = None
+            return (b, it, fam)
 
         return {"page": int(page), "runs": runs, "paragraphs": _listing(paragraphs, style_of)}
 

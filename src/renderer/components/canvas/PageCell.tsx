@@ -14,9 +14,10 @@ import { unencodableChars } from '../../lib/edit-text';
 import type { EditParagraph, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import {
   applySpanColor,
-  applySpanFace,
   applySpanSize,
   backdropSegments,
+  composeSpanFaces,
+  composeSpanSizes,
   computeEditSpans,
   hexToRgb,
   mergeSpanColors,
@@ -26,6 +27,10 @@ import {
   remapRanges,
   sanitizeParagraphInput,
   seedSpanColors,
+  seedSpanFaces,
+  seedSpanSizes,
+  setSpanFaceFamily,
+  toggleSpanFaceAxis,
   spanColorsToStyles,
   spanFacesToStyles,
   spanSizesToStyles,
@@ -1623,19 +1628,33 @@ function ParagraphEditor({
   const [spanColors, setSpanColors] = useState<SpanColor[]>(() =>
     seedSpanColors(para.spans, para.color),
   );
-  // A5b per-span faces: ranges substituted into a bundled weight/slant/
-  // family. No listing seed in v1 (the listing carries per-span colour,
-  // not weight/slant), so a fresh editor starts empty.
+  // A5b per-span faces: ranges the USER substituted into a bundled weight/
+  // slant/family. These are the ONLY face ranges ever sent to the engine.
   const [spanFaces, setSpanFaces] = useState<SpanFace[]>([]);
-  // A5c per-span sizes: ranges set to a point size. Seeded [] (no listing
-  // per-span-size seed in v1); the backdrop MARKS these ranges (underline)
-  // but can't render the size — the transparent textarea has one uniform
-  // metric, so a bigger glyph would desync the caret.
+  // A5c per-span sizes the USER set — likewise the only ones sent.
   const [spanSizes, setSpanSizes] = useState<SpanSize[]>([]);
+  // 9.A5-tails-a DISPLAY seeds: what the paragraph's spans ALREADY are, from
+  // the listing, so a reopened mixed-face/mixed-size paragraph shows its
+  // styling instead of starting blank. Deliberately SEPARATE from the user
+  // overrides above and never sent: a face entry SUBSTITUTES its range into a
+  // bundled Liberation face, so echoing a seed back would silently replace
+  // the document's own foundry font just for opening the editor and pressing
+  // Enter. (That hazard is why A5b shipped with no seed at all.) They still
+  // ride the text diff so they stay attached to their characters.
+  const [seedFaces, setSeedFaces] = useState<SpanFace[]>(() =>
+    seedSpanFaces(para.spans, { bold: para.bold, italic: para.italic }),
+  );
+  const [seedSizes, setSeedSizes] = useState<SpanSize[]>(() =>
+    seedSpanSizes(para.spans, para.fontSize),
+  );
+  // What the user can SEE: overrides laid over the seeds. Toggles and the
+  // backdrop read this; the commit still reads the overrides alone.
+  const shownFaces = composeSpanFaces(seedFaces, spanFaces);
+  const shownSizes = composeSpanSizes(seedSizes, spanSizes);
   // The face covering a code-point position (for a per-span toggle to flip
   // one axis while keeping the others), or the plain default.
   const faceAt = (pos: number): { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | 'mono' } => {
-    const hit = mergeSpanFaces(spanFaces).find((f) => pos >= f.start && pos < f.end);
+    const hit = shownFaces.find((f) => pos >= f.start && pos < f.end);
     return hit ? { bold: hit.bold, italic: hit.italic, family: hit.family } : { bold: false, italic: false };
   };
   // A5c: the size field's displayed value (a string so a clear-and-retype
@@ -1682,7 +1701,10 @@ function ParagraphEditor({
   const captureSelection = (): void => {
     const sel = spanTarget();
     if (sel) {
-      const sizeHit = mergeSpanSizes(spanSizes).find((r) => sel.start >= r.start && sel.start < r.end);
+      // 9.A5-tails-a: read the SHOWN sizes (seeds + overrides) so the field
+      // reports the size the selected text actually has, not just one the
+      // user set this session.
+      const sizeHit = shownSizes.find((r) => sel.start >= r.start && sel.start < r.end);
       setSizeField(String(Math.round(sizeHit ? sizeHit.size : size)));
       const colorHit = mergeSpanColors(spanColors).find(
         (r) => sel.start >= r.start && sel.start < r.end,
@@ -1911,8 +1933,11 @@ function ParagraphEditor({
               const fam = e.target.value as '' | 'serif' | 'sans' | 'mono';
               const sel = spanTarget();
               if (fam !== '' && sel) {
-                const base = faceAt(sel.start);
-                setSpanFaces((prev) => applySpanFace(prev, sel.start, sel.end, { ...base, family: fam }));
+                // 9.A5-tails-a: PER SEGMENT, like the B/I toggles — each piece
+                // of the selection keeps its own weight and slant and only the
+                // family changes. (This shared the toggles' collapse bug:
+                // it painted the selection-start's bold/italic over the lot.)
+                setSpanFaces(() => setSpanFaceFamily(shownFaces, sel.start, sel.end, fam));
               } else {
                 setFamily(fam);
               }
@@ -1941,9 +1966,16 @@ function ParagraphEditor({
             // toggles the whole paragraph (the shipped A3b).
             const sel = spanTarget();
             if (sel) {
-              const base = faceAt(sel.start);
-              setSpanFaces((prev) =>
-                applySpanFace(prev, sel.start, sel.end, { ...base, bold: !base.bold }),
+              // 9.A5-tails-a: PER SEGMENT — each differently-faced piece of
+              // the selection keeps its own family and slant and flips only
+              // bold. (The shipped version read the START face and painted it
+              // across everything, collapsing a mixed selection to one face.)
+              // Computed over the SHOWN faces so it flips what the user sees,
+              // and written into the overrides because an explicit toggle IS
+              // the request to substitute.
+              const target = !faceAt(sel.start).bold;
+              setSpanFaces(() =>
+                toggleSpanFaceAxis(shownFaces, sel.start, sel.end, 'bold', target),
               );
             } else {
               setBold((b) => !b);
@@ -1965,12 +1997,13 @@ function ParagraphEditor({
           }
           onClick={() => {
             // A5b dual role: PARTIAL → per-span italic on that range; caret
-            // or whole-text → the shipped whole-paragraph toggle.
+            // or whole-text → the shipped whole-paragraph toggle. Per SEGMENT
+            // (9.A5-tails-a) — the bold button's comment has the rationale.
             const sel = spanTarget();
             if (sel) {
-              const base = faceAt(sel.start);
-              setSpanFaces((prev) =>
-                applySpanFace(prev, sel.start, sel.end, { ...base, italic: !base.italic }),
+              const target = !faceAt(sel.start).italic;
+              setSpanFaces(() =>
+                toggleSpanFaceAxis(shownFaces, sel.start, sel.end, 'italic', target),
               );
             } else {
               setItalic((i) => !i);
@@ -2042,6 +2075,11 @@ function ParagraphEditor({
             setSpanColors((prev) => mergeSpanColors(remapRanges(value, next, prev)));
             setSpanFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
             setSpanSizes((prev) => mergeSpanSizes(remapRanges(value, next, prev)));
+            // 9.A5-tails-a: the DISPLAY seeds ride the same diff, so they stay
+            // attached to their characters as the text is edited (they are
+            // never sent — see the seed state above).
+            setSeedFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
+            setSeedSizes((prev) => mergeSpanSizes(remapRanges(value, next, prev)));
             setValue(next);
           }}
           onSelect={captureSelection}

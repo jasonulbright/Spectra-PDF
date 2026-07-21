@@ -21,6 +21,24 @@ export interface EditSpan {
   /** 9.A5a: the run's fill colour (#rrggbb) — seeds the editor's per-span
    * colour overlay so a paragraph opened with mixed colours shows them. */
   color?: string;
+  /** 9.A5-tails-a DISPLAY seeds: the span's OWN weight/slant/family/size,
+   * so a reopened editor SHOWS genuinely mixed styling instead of starting
+   * blank.
+   *
+   * DISPLAY-ONLY BY CONTRACT — these never become `span_styles` on a
+   * commit. A face entry SUBSTITUTES its range into a bundled Liberation
+   * face, so echoing a seed back would silently replace the document's own
+   * foundry font just for opening the editor and pressing Enter. The
+   * editor therefore keeps seeds (`seedSpanFaces`/`seedSpanSizes`) apart
+   * from user overrides (`spanFaces`/`spanSizes`) and sends only the
+   * latter; `composeSpanFaces`/`composeSpanSizes` merge them for display.
+   * (Colour is exempt from the hazard — re-emitting the same fill is
+   * metric-neutral and visually identical — which is why `color` seeds
+   * straight into the sent ranges.) */
+  bold?: boolean;
+  italic?: boolean;
+  family?: 'serif' | 'sans' | 'mono';
+  size?: number;
 }
 
 export interface EditParagraph {
@@ -125,7 +143,17 @@ interface EngineParagraphListing {
     runs: number[];
     box: [number, number, number, number];
     text: string;
-    spans: { start: number; end: number; run: number; color?: string }[];
+    spans: {
+      start: number;
+      end: number;
+      run: number;
+      color?: string;
+      // 9.A5-tails-a: per-span DISPLAY seeds (the span's OWN face/size).
+      bold?: boolean;
+      italic?: boolean;
+      family?: 'serif' | 'sans' | 'mono';
+      size?: number;
+    }[];
     alignment: string;
     line_count: number;
     editable: boolean;
@@ -183,6 +211,13 @@ export async function fetchEditTextListing(
         end: s.end,
         run: s.run,
         ...(typeof s.color === 'string' ? { color: s.color } : {}),
+        // 9.A5-tails-a display seeds (never echoed back — see EditSpan).
+        ...(typeof s.bold === 'boolean' ? { bold: s.bold } : {}),
+        ...(typeof s.italic === 'boolean' ? { italic: s.italic } : {}),
+        ...(s.family === 'serif' || s.family === 'sans' || s.family === 'mono'
+          ? { family: s.family }
+          : {}),
+        ...(typeof s.size === 'number' && Number.isFinite(s.size) ? { size: s.size } : {}),
       })),
       alignment: p.alignment,
       lineCount: p.line_count,
@@ -355,10 +390,131 @@ export const applySpanFace = (
   face: { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | 'mono' },
 ): SpanFace[] => applyInterval(existing, { start, end, ...face }, faceKey);
 
+/** 9.A5-tails-a: flip ONE axis of a face across a range, PER SEGMENT.
+ *
+ * The shipped toggle read the face at the selection's first code point,
+ * flipped an axis on it, and painted that single face across the whole
+ * selection — so a selection spanning two differently-faced ranges
+ * COLLAPSED them to the start's face (a bold-serif range and an
+ * italic-mono range both became one). Here each existing segment inside
+ * [start,end) keeps its own family and its other axis, and only the named
+ * axis changes; uncovered gaps take the default with the axis applied.
+ *
+ * `existing` should be the COMPOSED view (seeds + overrides) so a toggle
+ * over seeded-but-not-yet-overridden text flips from what the user can
+ * actually see. The result is written into the user-override list: an
+ * explicit toggle is exactly when a substitution is intended. */
+type FaceValue = { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | 'mono' };
+
+/** Re-face [start,end) SEGMENT BY SEGMENT: split the range at every existing
+ * face boundary and rebuild each piece from its OWN current face via `make`.
+ * This is the shared primitive behind every per-span face control — the
+ * reason a selection covering two different faces no longer collapses to
+ * one. */
+function segmentedFaceApply(
+  existing: SpanFace[],
+  start: number,
+  end: number,
+  make: (base: FaceValue) => FaceValue,
+): SpanFace[] {
+  if (end <= start) return mergeSpanFaces(existing);
+  const merged = mergeSpanFaces(existing);
+  // Boundaries inside the selection: every existing edge, clamped.
+  const cuts = new Set<number>([start, end]);
+  for (const r of merged) {
+    if (r.start > start && r.start < end) cuts.add(r.start);
+    if (r.end > start && r.end < end) cuts.add(r.end);
+  }
+  const points = Array.from(cuts).sort((a, b) => a - b);
+  let out = merged;
+  for (let i = 0; i < points.length - 1; i++) {
+    const segStart = points[i];
+    const segEnd = points[i + 1];
+    if (segEnd <= segStart) continue;
+    const covering = merged.find((r) => segStart >= r.start && segStart < r.end);
+    const base: FaceValue = covering
+      ? { bold: covering.bold, italic: covering.italic, family: covering.family }
+      : { bold: false, italic: false, family: undefined };
+    out = applySpanFace(out, segStart, segEnd, make(base));
+  }
+  return mergeSpanFaces(out);
+}
+
+export function toggleSpanFaceAxis(
+  existing: SpanFace[],
+  start: number,
+  end: number,
+  axis: 'bold' | 'italic',
+  /** Target value; omit to flip each segment relative to its own value. */
+  value?: boolean,
+): SpanFace[] {
+  return segmentedFaceApply(existing, start, end, (base) => ({
+    ...base,
+    [axis]: value !== undefined ? value : !base[axis],
+  }));
+}
+
+/** Set the FAMILY across a selection per segment — each piece keeps its own
+ * weight and slant. (The family select had the same collapse bug the B/I
+ * toggles did: it painted the selection-start's bold/italic over everything.) */
+export function setSpanFaceFamily(
+  existing: SpanFace[],
+  start: number,
+  end: number,
+  family: 'serif' | 'sans' | 'mono' | undefined,
+): SpanFace[] {
+  return segmentedFaceApply(existing, start, end, (base) => ({ ...base, family }));
+}
+
+/** 9.A5-tails-a: the DISPLAY view = user overrides laid over listing seeds.
+ * Seeds describe what the text ALREADY is; overrides are what the user
+ * asked for. Only overrides are ever sent to the engine (a face entry
+ * substitutes its range into a bundled face — echoing a seed back would
+ * silently replace the document's own font), so this composition exists
+ * purely so the toggles and the rendered text agree with what is on
+ * screen. */
+export const composeSpanFaces = (seed: SpanFace[], overrides: SpanFace[]): SpanFace[] => {
+  let out = mergeSpanFaces(seed);
+  for (const r of mergeSpanFaces(overrides)) {
+    out = applySpanFace(out, r.start, r.end, {
+      bold: r.bold,
+      italic: r.italic,
+      family: r.family,
+    });
+  }
+  return mergeSpanFaces(out);
+};
+
+/** Seed per-span FACES from a listing's spans — only ranges whose own
+ * weight/slant/family differs from the paragraph's dominant seed (a
+ * uniform paragraph seeds nothing, so the plain-edit path is unchanged).
+ * DISPLAY-ONLY: see `EditSpan` — never sent as `span_styles`. */
+export function seedSpanFaces(
+  spans: EditSpan[],
+  paragraph: { bold: boolean; italic: boolean },
+): SpanFace[] {
+  const out: SpanFace[] = [];
+  for (const sp of spans) {
+    if (typeof sp.bold !== 'boolean' && typeof sp.italic !== 'boolean') continue;
+    const bold = Boolean(sp.bold);
+    const italic = Boolean(sp.italic);
+    if (bold === paragraph.bold && italic === paragraph.italic) continue;
+    out.push({
+      start: sp.start,
+      end: sp.end,
+      bold,
+      italic,
+      ...(sp.family ? { family: sp.family } : {}),
+    });
+  }
+  return mergeSpanFaces(out);
+}
+
 /** Seed per-span colours from a listing's spans (only ranges DIFFERING from
  * the paragraph-dominant colour — an all-one-colour paragraph seeds
- * nothing). Faces have no listing seed in v1 (the listing carries per-span
- * colour, not per-span weight/slant). */
+ * nothing). Unlike faces/sizes these seed straight into the SENT ranges:
+ * re-emitting the same fill is metric-neutral and visually identical, so
+ * there is no substitution hazard to keep them apart from. */
 export function seedSpanColors(spans: EditSpan[], paragraphColor: string): SpanColor[] {
   const base = paragraphColor.toLowerCase();
   const out: SpanColor[] = [];
@@ -386,6 +542,26 @@ export const applySpanSize = (
   end: number,
   size: number,
 ): SpanSize[] => applyInterval(existing, { start, end, size }, sizeKey);
+
+/** 9.A5-tails-a: user size overrides laid over listing size seeds (display
+ * only — the sibling of `composeSpanFaces`). */
+export const composeSpanSizes = (seed: SpanSize[], overrides: SpanSize[]): SpanSize[] => {
+  let out = mergeSpanSizes(seed);
+  for (const r of mergeSpanSizes(overrides)) out = applySpanSize(out, r.start, r.end, r.size);
+  return mergeSpanSizes(out);
+};
+
+/** Seed per-span SIZES from a listing's spans (only ranges differing from
+ * the paragraph's dominant size). DISPLAY-ONLY, like the face seed. */
+export function seedSpanSizes(spans: EditSpan[], paragraphSize: number): SpanSize[] {
+  const out: SpanSize[] = [];
+  for (const sp of spans) {
+    if (typeof sp.size !== 'number' || !Number.isFinite(sp.size)) continue;
+    if (Math.abs(sp.size - paragraphSize) <= 0.01) continue;
+    out.push({ start: sp.start, end: sp.end, size: sp.size });
+  }
+  return mergeSpanSizes(out);
+}
 
 /** Split `text` into consecutive backdrop segments carrying the resolved
  * colour, weight/slant, AND a `sized` flag per code point (all folded

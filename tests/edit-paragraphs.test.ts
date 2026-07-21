@@ -18,6 +18,12 @@ import {
   applySpanSize,
   mergeSpanSizes,
   utf16ToCodePointIndex,
+  toggleSpanFaceAxis,
+  setSpanFaceFamily,
+  composeSpanFaces,
+  composeSpanSizes,
+  seedSpanFaces,
+  seedSpanSizes,
 } from '../src/renderer/lib/edit-paragraphs';
 
 describe('computeEditSpans (7.5 caret inheritance)', () => {
@@ -475,6 +481,160 @@ describe('per-span SIZE helpers (9.A5c)', () => {
       { text: 'Big ', color: null, bold: false, italic: false, sized: false },
       { text: 'word', color: null, bold: false, italic: false, sized: true },
       { text: ' here', color: null, bold: false, italic: false, sized: false },
+    ]);
+  });
+});
+
+describe('9.A5-tails-a — per-segment face toggle + display seeds', () => {
+  describe('toggleSpanFaceAxis', () => {
+    it('flips ONE axis per segment, keeping each segment family + other axis', () => {
+      // The round-33 LOW's exact shape: a selection spanning two DIFFERENT
+      // faces. The shipped toggle collapsed both to the start's face.
+      const existing = [
+        { start: 0, end: 5, bold: true, italic: false, family: 'serif' as const },
+        { start: 5, end: 10, bold: false, italic: true, family: 'mono' as const },
+      ];
+      const out = toggleSpanFaceAxis(existing, 0, 10, 'bold');
+      // Each segment keeps its family and its italic, only bold flipped.
+      expect(out).toEqual([
+        { start: 0, end: 5, bold: false, italic: false, family: 'serif' },
+        { start: 5, end: 10, bold: true, italic: true, family: 'mono' },
+      ]);
+    });
+
+    it('does not disturb ranges outside the selection', () => {
+      const existing = [
+        { start: 0, end: 4, bold: true, italic: false, family: 'serif' as const },
+        { start: 4, end: 8, bold: false, italic: false },
+      ];
+      const out = toggleSpanFaceAxis(existing, 4, 8, 'italic');
+      expect(out[0]).toEqual({ start: 0, end: 4, bold: true, italic: false, family: 'serif' });
+      expect(out.find((r) => r.start === 4)).toEqual({ start: 4, end: 8, bold: false, italic: true });
+    });
+
+    it('splits a range the selection only partially covers', () => {
+      const existing = [{ start: 0, end: 10, bold: false, italic: false, family: 'mono' as const }];
+      const out = toggleSpanFaceAxis(existing, 3, 6, 'bold');
+      expect(out).toEqual([
+        { start: 0, end: 3, bold: false, italic: false, family: 'mono' },
+        { start: 3, end: 6, bold: true, italic: false, family: 'mono' },
+        { start: 6, end: 10, bold: false, italic: false, family: 'mono' },
+      ]);
+    });
+
+    it('fills an uncovered gap with the default plus the axis', () => {
+      const out = toggleSpanFaceAxis([], 2, 5, 'bold');
+      expect(out).toEqual([{ start: 2, end: 5, bold: true, italic: false }]);
+    });
+
+    it('an explicit value sets rather than flips (mixed selection converges)', () => {
+      const existing = [
+        { start: 0, end: 3, bold: true, italic: false },
+        { start: 3, end: 6, bold: false, italic: false },
+      ];
+      const out = toggleSpanFaceAxis(existing, 0, 6, 'bold', true);
+      expect(out).toEqual([{ start: 0, end: 6, bold: true, italic: false }]);
+    });
+
+    it('is a no-op for an empty range', () => {
+      const existing = [{ start: 0, end: 4, bold: true, italic: false }];
+      expect(toggleSpanFaceAxis(existing, 2, 2, 'bold')).toEqual(existing);
+    });
+
+    it('round-trips: flipping the same axis twice restores the faces', () => {
+      const existing = [
+        { start: 0, end: 5, bold: true, italic: false, family: 'serif' as const },
+        { start: 5, end: 10, bold: false, italic: true, family: 'mono' as const },
+      ];
+      const once = toggleSpanFaceAxis(existing, 0, 10, 'italic');
+      const twice = toggleSpanFaceAxis(once, 0, 10, 'italic');
+      expect(twice).toEqual(existing);
+    });
+  });
+
+  describe('display seeds (never echoed back to the engine)', () => {
+    it('seeds only spans whose face differs from the paragraph default', () => {
+      const spans = [
+        { start: 0, end: 6, run: 0, bold: false, italic: false },
+        { start: 6, end: 10, run: 1, bold: true, italic: false, family: 'serif' as const },
+      ];
+      expect(seedSpanFaces(spans, { bold: false, italic: false })).toEqual([
+        { start: 6, end: 10, bold: true, italic: false, family: 'serif' },
+      ]);
+    });
+
+    it('a uniform paragraph seeds nothing (plain-edit path unchanged)', () => {
+      const spans = [
+        { start: 0, end: 6, run: 0, bold: false, italic: false },
+        { start: 6, end: 10, run: 1, bold: false, italic: false },
+      ];
+      expect(seedSpanFaces(spans, { bold: false, italic: false })).toEqual([]);
+    });
+
+    it('a wholly-bold paragraph seeds nothing (its dominant seed is bold)', () => {
+      const spans = [{ start: 0, end: 10, run: 0, bold: true, italic: false }];
+      expect(seedSpanFaces(spans, { bold: true, italic: false })).toEqual([]);
+    });
+
+    it('seeds per-span sizes only where they differ from the dominant size', () => {
+      const spans = [
+        { start: 0, end: 6, run: 0, size: 12 },
+        { start: 6, end: 9, run: 1, size: 24 },
+      ];
+      expect(seedSpanSizes(spans, 12)).toEqual([{ start: 6, end: 9, size: 24 }]);
+      expect(seedSpanSizes([{ start: 0, end: 9, run: 0, size: 12 }], 12)).toEqual([]);
+    });
+
+    it('spans with no seed fields contribute nothing', () => {
+      expect(seedSpanFaces([{ start: 0, end: 5, run: 0 }], { bold: false, italic: false })).toEqual(
+        [],
+      );
+      expect(seedSpanSizes([{ start: 0, end: 5, run: 0 }], 12)).toEqual([]);
+    });
+  });
+
+  describe('composition (override wins over seed)', () => {
+    it('a user override replaces the seed on its range only', () => {
+      const seed = [{ start: 0, end: 10, bold: true, italic: false, family: 'serif' as const }];
+      const overrides = [{ start: 4, end: 7, bold: false, italic: true }];
+      expect(composeSpanFaces(seed, overrides)).toEqual([
+        { start: 0, end: 4, bold: true, italic: false, family: 'serif' },
+        { start: 4, end: 7, bold: false, italic: true },
+        { start: 7, end: 10, bold: true, italic: false, family: 'serif' },
+      ]);
+    });
+
+    it('with no overrides the composition IS the seed', () => {
+      const seed = [{ start: 2, end: 5, bold: true, italic: false }];
+      expect(composeSpanFaces(seed, [])).toEqual(seed);
+    });
+
+    it('composes sizes the same way', () => {
+      const seed = [{ start: 0, end: 10, size: 24 }];
+      expect(composeSpanSizes(seed, [{ start: 3, end: 6, size: 8 }])).toEqual([
+        { start: 0, end: 3, size: 24 },
+        { start: 3, end: 6, size: 8 },
+        { start: 6, end: 10, size: 24 },
+      ]);
+    });
+  });
+});
+
+describe('9.A5-tails-a — setSpanFaceFamily (the family select shared the collapse bug)', () => {
+  it('changes family per segment, keeping each segment weight and slant', () => {
+    const existing = [
+      { start: 0, end: 5, bold: true, italic: false, family: 'serif' as const },
+      { start: 5, end: 10, bold: false, italic: true },
+    ];
+    expect(setSpanFaceFamily(existing, 0, 10, 'mono')).toEqual([
+      { start: 0, end: 5, bold: true, italic: false, family: 'mono' },
+      { start: 5, end: 10, bold: false, italic: true, family: 'mono' },
+    ]);
+  });
+
+  it('applies to an unstyled gap with the plain default', () => {
+    expect(setSpanFaceFamily([], 1, 4, 'serif')).toEqual([
+      { start: 1, end: 4, bold: false, italic: false, family: 'serif' },
     ]);
   });
 });

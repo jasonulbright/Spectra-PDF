@@ -2611,6 +2611,77 @@ class TestPerSpanColor:
             _apply(src, out, p, p["text"], span_styles=[{"start": 0, "end": 3, "color": [1.0, 0.0]}])
 
 
+class TestPerSpanDisplaySeeds:
+    """Phase 9.A5-tails-a — the listing's per-span DISPLAY seeds (weight,
+    slant, family, size), so a reopened editor can SHOW genuinely mixed
+    per-span styling instead of starting blank.
+
+    These are display-only by contract: the renderer keeps them apart from
+    user overrides and never sends them back. A face entry SUBSTITUTES its
+    range into a bundled face, so re-sending a seed would silently replace
+    the document's own foundry font on any commit — which is exactly why
+    the A5b round shipped with no seed at all."""
+
+    def test_mixed_face_paragraph_seeds_each_span(self, tmp_dir):
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            b"BT /F1 12 Tf 72 700 Td (Plain ) Tj /F2 12 Tf (bold) Tj ET",
+            {"/F1": _helv(pdf), "/F2": _helv_bold(pdf)},
+        )
+        src = os.path.join(tmp_dir, "mixed.pdf")
+        pdf.save(src)
+        pdf.close()
+        para = _paras(src)[0]
+        by_bold = {sp.get("bold") for sp in para["spans"]}
+        # The paragraph genuinely mixes weights, so BOTH seeds appear.
+        assert by_bold == {False, True}
+        # And the span carrying the bold run is the later one.
+        bold_spans = [sp for sp in para["spans"] if sp.get("bold")]
+        assert bold_spans and bold_spans[0]["start"] >= len("Plain ") - 1
+
+    def test_uniform_paragraph_never_false_mixes(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (All one face here) Tj ET")
+        para = _paras(src)[0]
+        assert {sp.get("bold") for sp in para["spans"]} == {False}
+        assert {sp.get("italic") for sp in para["spans"]} == {False}
+        # One size across the paragraph: the seed agrees with the A1 seed.
+        assert {sp.get("size") for sp in para["spans"]} == {para["font_size"]}
+
+    def test_mixed_size_paragraph_seeds_per_span_size(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (small ) Tj /F1 24 Tf (BIG) Tj ET",
+        )
+        para = _paras(src)[0]
+        sizes = {sp.get("size") for sp in para["spans"]}
+        assert 12.0 in sizes and 24.0 in sizes
+
+    def test_family_seed_names_the_members_own_family(self, tmp_dir):
+        # A serif member seeds 'serif' — it NAMES what the span already is,
+        # it is not a substitution request.
+        pdf = pikepdf.new()
+        times = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type1"),
+                BaseFont=Name("/Times-Roman"),
+                Encoding=Name("/WinAnsiEncoding"),
+            )
+        )
+        _page(
+            pdf,
+            b"BT /F1 12 Tf 72 700 Td (Sans ) Tj /F2 12 Tf (serif) Tj ET",
+            {"/F1": _helv(pdf), "/F2": times},
+        )
+        src = os.path.join(tmp_dir, "fam.pdf")
+        pdf.save(src)
+        pdf.close()
+        para = _paras(src)[0]
+        fams = {sp.get("family") for sp in para["spans"]}
+        assert "serif" in fams and "sans" in fams
+
+
 class TestPerSpanFace:
     """Phase 9.A5b — per-span bold/italic/family: substitute just a
     character RANGE into a bundled Liberation face. Generalizes the single
