@@ -3082,3 +3082,108 @@ class TestPerSpanSize:
         # spans=None would collapse them to one size and hide the variance.
         _apply(src, out, p, p["text"], p["spans"])  # NULL edit, per-member spans
         assert _tm_ys(out) == pytest.approx([700.0, 680.0, 660.0], abs=0.02)
+
+
+class TestDocumentFontKerning:
+    """Phase 9.K1b — kerning the DOCUMENT'S OWN font.
+
+    K1 shipped bundled-faces-only; that left a live regression, because
+    re-emitting a paragraph DISCARDS the kerning its original `TJ` carried.
+    A no-op re-type visibly un-kerned the text (DECISIONS #37).
+
+    These pins deliberately pass `font_path`, because the app always does.
+    The older byte-identity pins call the engine WITHOUT it, so they exercise
+    a path the product no longer takes on its own.
+    """
+
+    def _tj_numbers(self, path):
+        with pikepdf.open(path) as pdf:
+            for instr in pikepdf.parse_content_stream(pdf.pages[0]):
+                op = str(instr.operator)
+                if op == "TJ":
+                    out = []
+                    for o in instr.operands[0]:
+                        try:
+                            out.append(round(float(o), 1))
+                        except (TypeError, ValueError):
+                            pass
+                    return out
+                if op == "Tj":
+                    return None
+        return None
+
+    def _kerned_source(self, tmp_dir, name="kern_src.pdf"):
+        # A paragraph whose ORIGINAL stream carries real kerning.
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            b"BT /F1 12 Tf 72 700 Td [(A) 74 (V) 74 (A) 55 (T) 40 (AR)] TJ ET",
+            {"/F1": _helv(pdf)},
+        )
+        src = os.path.join(tmp_dir, name)
+        pdf.save(src)
+        pdf.close()
+        return src
+
+    @_needs_faces
+    def test_a_retype_KEEPS_the_text_kerned(self, tmp_dir):
+        # The regression, inverted: before K1b this came back a plain `Tj`.
+        src = self._kerned_source(tmp_dir)
+        out = os.path.join(tmp_dir, "kern_out.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], font_path=FONTS_DIR)
+        nums = self._tj_numbers(out)
+        assert nums, "the re-typed paragraph lost its kerning (plain Tj)"
+        assert all(v > 0 for v in nums), "kerns must TIGHTEN (positive TJ numbers)"
+
+    @_needs_faces
+    def test_the_kerns_match_the_metric_twins_own_table(self, tmp_dir):
+        # Helvetica ships no program and our Core14 metrics carry no pairs, so
+        # the kerning comes from Liberation Sans — the face B1 vendored for
+        # exactly that metric compatibility.
+        from engine.font_kerning import kern_pairs
+
+        src = self._kerned_source(tmp_dir, "twin_src.pdf")
+        out = os.path.join(tmp_dir, "twin_out.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], font_path=FONTS_DIR)
+
+        twin = kern_pairs(os.path.join(FONTS_DIR, "LiberationSans-Regular.ttf"))
+        text = para["text"]
+        expected = [
+            round(-twin[(text[i], text[i + 1])], 1)
+            for i in range(len(text) - 1)
+            if twin.get((text[i], text[i + 1]))
+        ]
+        assert self._tj_numbers(out) == expected
+
+    def test_without_a_font_path_the_output_is_unchanged(self, tmp_dir):
+        # Back-compat for direct/CLI callers that pass no fonts dir: no dir
+        # means no metric twin, so a non-embedded font simply does not kern.
+        src = self._kerned_source(tmp_dir, "nodir_src.pdf")
+        out = os.path.join(tmp_dir, "nodir_out.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"])
+        assert self._tj_numbers(out) is None  # plain Tj
+
+    @_needs_faces
+    def test_kerning_does_not_cross_a_style_boundary(self, tmp_dir):
+        # A pair straddling two different faces is not a pair either font has
+        # an opinion about; taking one would invent spacing.
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            b"BT /F1 12 Tf 72 700 Td (A) Tj /F2 12 Tf (V) Tj ET",
+            {"/F1": _helv(pdf), "/F2": _helv_bold(pdf)},
+        )
+        src = os.path.join(tmp_dir, "boundary.pdf")
+        pdf.save(src)
+        pdf.close()
+        para = _paras(src)[0]
+        out = os.path.join(tmp_dir, "boundary_out.pdf")
+        # The REAL spans map each char to its own member run — `_apply`'s
+        # default would style everything from the first run, collapsing the
+        # two faces into one style and legitimately kerning the pair.
+        _apply(src, out, para, para["text"], para["spans"], font_path=FONTS_DIR)
+        # Two members, two styles: the A|V pair spans them, so no kern rides.
+        assert self._tj_numbers(out) is None

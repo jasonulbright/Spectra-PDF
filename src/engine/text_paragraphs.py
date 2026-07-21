@@ -822,14 +822,17 @@ class _Fallback:
     the target stream's resources (deterministic sorted-face order, so the
     single-subset A3 case keeps its shipped `/EditFb0`)."""
 
-    __slots__ = ("name", "font_dict", "encode", "width_1000", "used")
+    __slots__ = ("name", "font_dict", "encode", "width_1000", "used", "face_path")
 
-    def __init__(self, name, font_dict, encode, width_1000):
+    def __init__(self, name, font_dict, encode, width_1000, face_path=None):
         self.name = name
         self.font_dict = font_dict
         self.encode = encode
         self.width_1000 = width_1000
         self.used = False
+        # 9.K1b: the resolved face file, so the kern source can read this
+        # face's own pair table rather than guessing from the family.
+        self.face_path = face_path
 
 
 def _face_sort_key(key: tuple) -> tuple:
@@ -1041,7 +1044,73 @@ class _Word:
         self.gap_styles: list[tuple[str, _StyleRef, float]] = []  # (char, style, w)
 
 
-def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: float) -> float:
+class _KernSource:
+    """Pair kerning for whatever face a slice actually renders in (9.K1b).
+
+    Resolution per style: a slice substituted into a bundled face kerns from
+    that face; a slice left in the document's own font kerns from that font —
+    its EMBEDDED program if it has one, else its metric twin among the bundled
+    faces (B1 vendored Liberation for Helvetica/Times/Courier metric
+    compatibility, and kerning is a metric).
+
+    Kerning the document's own fonts is the point, not a bonus: re-emitting a
+    paragraph DISCARDS the kerning its original `TJ` carried, so before this
+    an edit visibly un-kerned the text (DECISIONS #37).
+
+    Memoized on (member index, face key) — members repeat across spans and
+    parsing a font program per character would be absurd. `{}` everywhere
+    means "no kerning", which is also the honest answer for a monospace face
+    or an unreadable program.
+    """
+
+    __slots__ = ("_resources", "_font_dir", "_fallbacks", "_cache")
+
+    def __init__(self, resources, font_dir, fallbacks: dict):
+        self._resources = resources
+        self._font_dir = str(font_dir or "")
+        self._fallbacks = fallbacks
+        self._cache: dict = {}
+
+    def pairs_for(self, st: "_StyleRef") -> dict:
+        key = (st.member.index, st.fallback)
+        hit = self._cache.get(key)
+        if hit is not None:
+            return hit
+        pairs: dict = {}
+        try:
+            from engine.font_kerning import kern_pairs, kern_pairs_for_font
+
+            if st.fallback is not None:
+                fb = self._fallbacks.get(st.fallback)
+                face = getattr(fb, "face_path", None) if fb is not None else None
+                if face:
+                    pairs = kern_pairs(str(face))
+            else:
+                from engine.text_runs import _lookup_font
+
+                fd = _lookup_font(
+                    st.member.style["font_name"],
+                    st.member.resources or self._resources,
+                    self._resources,
+                )
+                if fd is not None:
+                    pairs = kern_pairs_for_font(fd, self._font_dir)
+        except Exception:
+            pairs = {}  # never let a font quirk break an edit
+        self._cache[key] = pairs
+        return pairs
+
+    def between(self, prev_ch, ch: str, st: "_StyleRef") -> float:
+        """Kern between two adjacent chars in the SAME style, 1000ths of em.
+        Returns 0 across a style boundary — a pair spanning two different
+        faces is not a pair either font has an opinion about."""
+        if not prev_ch:
+            return 0.0
+        return self.pairs_for(st).get((prev_ch, ch), 0.0)
+
+
+def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: float,
+                     kerns=None, prev_ch=None, prev_st=None) -> float:
     m = st.member
     s = st.style()
     if st.fallback is not None:
@@ -1062,6 +1131,11 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
                     w += s["word_spacing"]
             except ValueError:
                 pass
+    # 9.K1b: the pair kern with the PRECEDING character, when both render in
+    # the same style. The width model must carry it or wrapping, justify and
+    # the resync would disagree with what the TJ actually draws.
+    if kerns is not None and prev_ch and prev_st is not None and prev_st.key == st.key:
+        w += kerns.between(prev_ch, ch, st) / 1000.0 * s["size"]
     # 9.B4b: a vertical member's advance lives on the transposed x′ axis,
     # whose user scale is d — Tz never applies vertically (Tc does, and
     # already rode in above). Horizontal is byte-identical.
@@ -1069,7 +1143,8 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
 
 
 def _tokenize(
-    styled: list[tuple[str, _StyleRef]], fallbacks: dict, median_gap_1000: float
+    styled: list[tuple[str, _StyleRef]], fallbacks: dict, median_gap_1000: float,
+    kerns=None,
 ) -> list[_Word]:
     """Words with break opportunities: at spaces, and AFTER any CJK char
     (no-space scripts must wrap). Kinsoku-lite: a chunk that would START
@@ -1083,8 +1158,11 @@ def _tokenize(
             words.append(current)
             current = _Word()
 
+    prev_ch = None
+    prev_st = None
     for ch, st in styled:
-        w = _char_width_user(ch, st, fallbacks, median_gap_1000)
+        w = _char_width_user(ch, st, fallbacks, median_gap_1000, kerns, prev_ch, prev_st)
+        prev_ch, prev_st = ch[-1] if ch else None, st
         if ch == " ":
             current.gap_after += w
             current.gap_styles.append((ch, st, w))
@@ -1309,10 +1387,13 @@ class _Emission:
 
     def __init__(
         self, para: _Paragraph, styled, fallbacks: dict, page_x0: float, page_x1: float,
-        size_override=None, split_at=None, has_span_size=False,
+        size_override=None, split_at=None, has_span_size=False, kerns=None,
     ):
         self.para = para
         self.styled = styled
+        # 9.K1b: pair-kerning source for whatever face each slice renders
+        # in; None keeps the pre-K1b un-kerned emission.
+        self.kerns = kerns
         # 9.A5c: True when the caller folded per-span SIZE ranges (size_by_pos
         # is not None). The per-line-leading rule + the size-aware split gap
         # fire ONLY under this flag — a whole-paragraph A1 size or a
@@ -1410,7 +1491,7 @@ class _Emission:
         lines: list[_LayoutLine] = []
         prev_last: _LayoutLine | None = None
         for part in parts:
-            words = _tokenize(part, self.fallbacks, para.median_gap_1000)
+            words = _tokenize(part, self.fallbacks, para.median_gap_1000, self.kerns)
             if not words:
                 continue
             block = _fill_lines(words, first_measure, body_measure)
@@ -1483,9 +1564,18 @@ class _Emission:
         spaces and justify extras become in-segment kerns (or fold into
         the next segment's absolute x at a style boundary)."""
         stream: list[tuple] = []  # ("ch", ch, style, w) | ("kern", style, w)
+        # 9.K1b: the preceding char/style, so a pair kern is only taken
+        # between adjacent chars rendering in the SAME style.
+        prev_ch_seg = None
+        prev_st_seg = None
         for wi, word in enumerate(line.words):
             for ch, st in word.chars:
-                stream.append(("ch", ch, st, _char_width_user(ch, st, self.fallbacks, self.para.median_gap_1000)))
+                stream.append((
+                    "ch", ch, st,
+                    _char_width_user(ch, st, self.fallbacks, self.para.median_gap_1000,
+                                     self.kerns, prev_ch_seg, prev_st_seg),
+                ))
+                prev_ch_seg, prev_st_seg = (ch[-1] if ch else None), st
             is_last = wi == len(line.words) - 1
             if not is_last:
                 for ch, st, w in word.gap_styles:
@@ -1571,10 +1661,25 @@ class _Emission:
         # for horizontal (unchanged). The kern SIGN convention is the B4a
         # mirror (negative pushes the pen along the advance) either way.
         axis = m.d if m.vertical else s["h_scale"] * m.a
+        # 9.K1b: a pair kern splits the buffer and emits its own TJ number,
+        # exactly like the synthetic-gap kerns below. The sign convention is
+        # this loop's existing one — `items.append(-kern_1000)` — so a
+        # tightening (negative) kern becomes a POSITIVE TJ number, which moves
+        # the next glyph left. Widths already carry the same kern via
+        # _char_width_user, so what is measured is what is drawn.
+        prev_enc = None
         for item in seg["items"]:
             if item[0] == "ch":
-                buf.append(item[1])
+                ch_txt = item[1]
+                if self.kerns is not None and prev_enc:
+                    k = self.kerns.between(prev_enc, ch_txt[0] if ch_txt else "", st)
+                    if k:
+                        flush()
+                        items.append(-k)
+                buf.append(ch_txt)
+                prev_enc = ch_txt[-1] if ch_txt else prev_enc
             else:
+                prev_enc = None
                 flush()
                 gap_user = item[2]
                 denom = axis * s["size"]
@@ -2241,7 +2346,7 @@ def replace_paragraph_text(
                 )
                 chars = "".join(sorted(fb_by_face[key]))
                 font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars)
-                fallbacks[key] = _Fallback(None, font_dict, encode, width_1000)
+                fallbacks[key] = _Fallback(None, font_dict, encode, width_1000, face)
 
         member_set = set(para.run_indexes)
         per_stream_counts: dict[tuple, int] = defaultdict(int)
@@ -2272,6 +2377,10 @@ def replace_paragraph_text(
                 para, styled, fallbacks, page_x0, page_x1,
                 size_override=size_override, split_at=split_point,
                 has_span_size=size_by_pos is not None,
+                # 9.K1b: kern from whatever face each slice renders in — the
+                # bundled subset when substituted, the document's own font
+                # (embedded program, else its metric twin) otherwise.
+                kerns=_KernSource(resources, font_path, fallbacks),
             ),
             fallbacks,
         )
@@ -2314,6 +2423,10 @@ def merge_paragraph_with_previous(
     expected_prev_text: str,
     expected_runs: list,
     expected_text: str,
+    # 9.K1b: the bundled-fonts dir, so a merge kerns the same way an edit
+    # does. Without it a non-embedded standard-14 font would kern on edit
+    # (via its metric twin) but not on merge — "some documents, not others".
+    font_path: str | None = None,
 ) -> dict:
     """Merge a paragraph into the one above it in the listing (A4): the
     joined text (space-joined; no space across a CJK-CJK boundary — the
@@ -2411,7 +2524,8 @@ def merge_paragraph_with_previous(
             prev.stream,
             set(ordinal_of.values()),
             ordinal_of[min(member_set)],
-            _Emission(prev, styled, {}, page_x0, page_x1),
+            _Emission(prev, styled, {}, page_x0, page_x1,
+                      kerns=_KernSource(resources, font_path, {})),
             {},
         )
         kept, changed, new_forms = _rewrite_paragraph_stream(

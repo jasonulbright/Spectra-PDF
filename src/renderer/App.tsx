@@ -770,13 +770,15 @@ function AppContent(): React.ReactElement {
       const spanHasFace = (opts?.span_styles ?? []).some(
         (s) => 'bold' in s || 'italic' in s || 'family' in s,
       );
-      if (opts?.convert || substituting || spanHasFace) {
-        // The bundled fallback faces (7.4/9.B1/9.A3): convert renders only
-        // the characters the mapped fonts cannot express; a substitution
-        // re-renders every character. Either way the engine resolves the
-        // face from the fonts DIRECTORY.
-        params.font_path = await app.getEditFontPath();
-      }
+      // The bundled fallback faces (7.4/9.B1/9.A3): convert renders only the
+      // characters the mapped fonts cannot express; a substitution re-renders
+      // every character. Either way the engine resolves the face from the
+      // fonts DIRECTORY.
+      // 9.K1b: sent UNCONDITIONALLY now — kerning reads the document's own
+      // font, and a non-embedded standard-14 reaches its kern data through
+      // the metric twin in that directory. Gating this on substitution would
+      // kern some documents and silently not others.
+      params.font_path = await app.getEditFontPath();
       await performOperation(path, 'replace_paragraph_text', params);
     },
     [state.files, performOperation, confirmEditOfSignedDoc],
@@ -801,6 +803,9 @@ function AppContent(): React.ReactElement {
         expected_prev_text: prev.text,
         expected_runs: cur.runs,
         expected_text: cur.text,
+        // 9.K1b: a merge re-lays-out text too, so it needs the same kern
+        // source an edit gets.
+        font_path: await app.getEditFontPath(),
       });
     },
     [state.files, performOperation, confirmEditOfSignedDoc],
