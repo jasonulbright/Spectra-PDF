@@ -42,6 +42,8 @@ interface DocumentRowProps {
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
+  vectorTransform: EditImageTransformCtx | null;
+  onCommitVectorTransform: (pageId: string, index: number, matrix: number[]) => void;
   /** 9.C3 crop mode: armed flag + unit-space rect commit. */
   imageCropArmed: boolean;
   onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
@@ -134,6 +136,8 @@ function DocumentRowImpl({
   selectedVector,
   editImageTransform,
   onCommitImageTransform,
+  vectorTransform,
+  onCommitVectorTransform,
   imageCropArmed,
   onCommitImageCrop,
   editTextByPage,
@@ -211,6 +215,8 @@ function DocumentRowImpl({
         selectedVectorIndex={selectedVector?.pageId === page.id ? selectedVector.index : null}
         editImageTransform={editImageTransform?.pageId === page.id ? editImageTransform : null}
         onCommitImageTransform={onCommitImageTransform}
+        vectorTransform={vectorTransform?.pageId === page.id ? vectorTransform : null}
+        onCommitVectorTransform={onCommitVectorTransform}
         imageCropArmed={imageCropArmed}
         onCommitImageCrop={onCommitImageCrop}
         editTextRuns={editTextByPage.get(page.id)?.runBoxes}

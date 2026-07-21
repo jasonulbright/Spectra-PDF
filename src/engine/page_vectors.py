@@ -37,13 +37,14 @@ listed for it, exactly as C1 needed the image CTM), then recolour /
 line-width, then form-nested paths.
 """
 
+import math
 from pathlib import Path
 
 import pikepdf
 
-from engine.content_walk import GraphicsTextState, transform_point
-from engine.page_images import _save
-from engine.redact import IDENTITY
+from engine.content_walk import GraphicsTextState, mat_mult, transform_point
+from engine.page_images import _invert_matrix, _op, _save
+from engine.redact import IDENTITY, _as_matrix
 
 # Path-construction operators and how many (x, y) points each contributes.
 # `h` (close) adds no new point; `re` contributes its four corners.
@@ -125,11 +126,26 @@ def _walk_vectors(instructions: list) -> list:
     construct_idxs: list = []  # EXACT indices of this path's construction ops
     pts: list = []  # device-space points accumulated for the bbox
     has_clip = False
+    line_width = 1.0  # `w`, PDF default 1.0 — inflates a STROKE's bbox (D-tail)
+    w_stack: list = []  # line width IS graphics state — q/Q-scoped like the rest
     for idx, instruction in enumerate(instructions):
         operator = str(instruction.operator)
         operands = list(instruction.operands)
+        # Line width is graphics state; GraphicsTextState doesn't track it, so
+        # save/restore it in lockstep with q/Q here (round-37 HIGH: a `w` set
+        # inside a q…Q otherwise leaked forward and mis-inflated later strokes).
+        if operator == "q":
+            w_stack.append(line_width)
+        elif operator == "Q" and w_stack:
+            line_width = w_stack.pop()
         if state.feed(operator, operands):
             continue  # q/Q/cm/colour/Tf/BT/Tm/… — state, not a path op
+        if operator == "w":
+            try:
+                line_width = float(operands[0])
+            except (TypeError, ValueError, IndexError):
+                pass
+            continue  # a line-state op, NOT a path op — never resets the path
         if operator in _CONSTRUCT:
             if path_start is None:
                 path_start = idx
@@ -151,10 +167,19 @@ def _walk_vectors(instructions: list) -> list:
                     kind = "stroke"
                 else:
                     kind = "fillstroke"
+                # D-tail: a stroke paints ±half the line width AROUND the path,
+                # so a thin line (zero-extent construction box) still gets a
+                # real, grab-able bbox. Half-width scales into device space by
+                # the CTM's geometric mean scale (√|det|).
+                hw = 0.0
+                if operator not in _PAINT_FILL:
+                    c = state.ctm
+                    scale = math.sqrt(abs(c[0] * c[3] - c[1] * c[2]))
+                    hw = max(0.0, line_width) / 2.0 * scale
                 out.append(
                     {
                         "index": len(out),
-                        "rect": [min(xs), min(ys), max(xs), max(ys)],
+                        "rect": [min(xs) - hw, min(ys) - hw, max(xs) + hw, max(ys) + hw],
                         "matrix": list(state.ctm),
                         "kind": kind,
                         "fill": _color_rgb(state.fill_color)
@@ -218,6 +243,79 @@ def delete_page_vector(file: str, output: str, page: int, index: int) -> dict:
         # now-unreferenced /Pattern is harmless dead weight, and pruning a
         # possibly-INHERITED /Resources could break a sibling page (the image
         # family's copy-on-write lesson).
+        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        _save(pdf, input_path, output_path)
+        return {"output": str(output_path), "page": int(page), "index": int(index)}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def transform_page_vector(file: str, output: str, page: int, index: int, matrix: list) -> dict:
+    """Move / resize / rotate ONE vector object (Phase 9.D2) by wrapping its
+    path run in `q <cm> … Q` — the C1 mirror.
+
+    `matrix` is the DESIRED absolute placement M' of the object's bbox as a
+    unit-square matrix [a,b,c,d,e,f] in DEVICE space — what the canvas gesture
+    produced from `list_page_vectors`' `rect` (bbox → [w,0,0,h,x0,y0]). The op
+    recomputes the object's CURRENT bbox → M_cur, the device-space delta
+    D = M'·M_cur⁻¹, and the insert `cm = C·D·C⁻¹` (C = the object's own CTM) so
+    D acts in DEVICE space even under a nested CTM, then wraps the object's
+    contiguous op run. REFUSES an object whose path has graphics-state
+    operators interleaved into it (non-contiguous — a wrap's `Q` would scope
+    them, the round-36 hazard) or a degenerate (zero-area) bbox."""
+    m_target = _as_matrix(matrix)
+    if m_target is None:
+        raise ValueError("matrix must be [a, b, c, d, e, f]")
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        instructions = list(pikepdf.parse_content_stream(p))
+        vectors = _walk_vectors(instructions)
+        if not (0 <= int(index) < len(vectors)):
+            raise ValueError(
+                f"vector index {index} is out of range (page has {len(vectors)})"
+            )
+        obj = vectors[int(index)]
+        drop = obj["drop_idxs"]
+        first, last = drop[0], drop[-1]
+        if drop != list(range(first, last + 1)):
+            raise ValueError(
+                "vector object has interleaved graphics-state operators and cannot be transformed"
+            )
+        bx0, by0, bx1, by1 = obj["rect"]
+        bw, bh = bx1 - bx0, by1 - by0
+        if abs(bw) < 1e-6 or abs(bh) < 1e-6:
+            raise ValueError("vector object bbox is degenerate and cannot be transformed")
+        c = tuple(obj["matrix"])
+        if abs(c[0] * c[3] - c[1] * c[2]) < 1e-9:
+            # A rank-deficient object CTM (a shear collapsing the path onto a
+            # line) survives the bbox guard but can't be inverted for the
+            # conjugation — a vector-specific message (not the image one).
+            raise ValueError("vector object's transform matrix is degenerate and cannot be transformed")
+        m_cur = (bw, 0.0, 0.0, bh, bx0, by0)
+        # T maps a DEVICE point in the current bbox to the target bbox
+        # (unlike the image delta M'·M_cur⁻¹, which acts in unit-square space —
+        # a vector's path coords are device coords, not a unit square). Then
+        # `cm = C·T·C⁻¹` so T acts in device space even under a nested CTM C.
+        t_dev = mat_mult(_invert_matrix(m_cur), tuple(m_target))
+        m_insert = mat_mult(mat_mult(c, t_dev), _invert_matrix(c))
+        cm = _op([round(float(v), 6) for v in m_insert], "cm")
+        kept: list = []
+        for i, ins in enumerate(instructions):
+            if i == first:
+                kept.append(_op([], "q"))
+                kept.append(cm)
+            kept.append(ins)
+            if i == last:
+                kept.append(_op([], "Q"))
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(index)}

@@ -85,10 +85,16 @@ interface WorkspaceCanvasViewProps {
       opacity?: number;
     },
   ) => Promise<string | void>;
-  // Edit ▸ Vectors (9.D1): delete one vector path object — same undoable App
-  // routing (engine delete_page_vector). EDIT_DECLINED on a refused signed-doc
-  // warning, like the image/text handlers.
-  onEditVector: (path: string, page: number, index: number) => Promise<string | void>;
+  // Edit ▸ Vectors (9.D1/D2): delete OR transform one vector path object —
+  // same undoable App routing. EDIT_DECLINED on a refused signed-doc warning,
+  // like the image/text handlers. `matrix` is D2's target placement.
+  onEditVector: (
+    kind: 'delete' | 'transform',
+    path: string,
+    page: number,
+    index: number,
+    matrix?: number[],
+  ) => Promise<string | void>;
   // Edit ▸ Text (7.2+7.3): replace one run's text — same one-snapshot,
   // undoable App routing (engine replace_text_run). Resolves EDIT_DECLINED
   // when the signed-doc warning was refused (the canvas restores its
@@ -1212,6 +1218,12 @@ export function WorkspaceCanvasView({
   // stash (the index dies / nothing changes); declines and failures
   // clear it.
   const imageReselectRef = useRef<{ pageNumber: number; index: number } | null>(null);
+  // 9.D2 (round-37 MED): the same reselect stash for a vector transform — a
+  // whole-file op regenerates every page id, so the pre-op selectedVector id
+  // is dead; this re-selects the object on its page once the fresh listing
+  // lands, so chained move/resize/rotate (and a follow-up delete) need no
+  // re-click. Same lifecycle as imageReselectRef.
+  const vectorReselectRef = useRef<{ pageNumber: number; index: number } | null>(null);
   useEffect(() => {
     const token = ++editFetchTokenRef.current;
     const prev = prevEditCtxRef.current;
@@ -1241,7 +1253,10 @@ export function WorkspaceCanvasView({
       setEditingText(null);
       if (toolOrPathChanged) imageReselectRef.current = null;
     }
-    if (toolOrPathChanged) setSelectedVector(null);
+    if (toolOrPathChanged) {
+      setSelectedVector(null);
+      vectorReselectRef.current = null;
+    }
     if (tool !== 'edit' || !focusedDoc || !editBuffer) {
       setEditImagesByPage(NO_EDIT_IMAGES);
       setEditVectorsByPage(NO_EDIT_VECTORS);
@@ -1347,6 +1362,17 @@ export function WorkspaceCanvasView({
               imageReselectRef.current = null;
             }
           }
+          // 9.D2 (round-37 MED): the same idempotent reselect for a vector
+          // transform — restore selectedVector to the moved object on its
+          // fresh-id page (the functional ?? keeps any user pick).
+          const vstash = vectorReselectRef.current;
+          if (vstash && page.sourcePageIndex === vstash.pageNumber - 1) {
+            if (vectors.some((v) => v.index === vstash.index)) {
+              setSelectedVector((prev) => prev ?? { pageId: page.id, index: vstash.index });
+            } else {
+              vectorReselectRef.current = null;
+            }
+          }
           if (listing.runBoxes.length > 0 || listing.paragraphs.length > 0) {
             nextText.set(page.id, listing);
           } else {
@@ -1405,6 +1431,7 @@ export function WorkspaceCanvasView({
   // state, independent of the image/text `editSel`.
   const handleSelectEditVector = useCallback((pageId: string, index: number) => {
     setEditNotice(null);
+    vectorReselectRef.current = null; // a user pick owns selection now
     setSelectedVector((prev) =>
       prev && prev.pageId === pageId && prev.index === index ? null : { pageId, index },
     );
@@ -1418,10 +1445,11 @@ export function WorkspaceCanvasView({
     const { pageId, index } = selectedVector;
     const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
     if (pageNumber == null) return;
+    vectorReselectRef.current = null; // the object vanishes; ordinals renumber
     setEditBusy(true);
     setEditNotice(null);
     try {
-      const notice = await onEditVector(focusedDoc.path, pageNumber, index);
+      const notice = await onEditVector('delete', focusedDoc.path, pageNumber, index);
       if (notice === EDIT_DECLINED) {
         setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
       } else {
@@ -1433,6 +1461,38 @@ export function WorkspaceCanvasView({
       setEditBusy(false);
     }
   }, [selectedVector, focusedDoc, docs, onEditVector, editBusy]);
+
+  // 9.D2: commit a move/resize/rotate — the transform overlay produces the
+  // target placement matrix M' (device space). The whole-file op rebuilds the
+  // page, so re-fetch drops the selection like every other vector op; a second
+  // gesture re-derives from the re-listed bbox (the C1 "rebuild → re-select"
+  // shape). No committingTextRef churn — the overlay's own busy gate blocks a
+  // second gesture mid-commit.
+  const commitVectorTransform = useCallback(
+    async (pageId: string, index: number, matrix: number[]): Promise<void> => {
+      if (!focusedDoc || editBusy) return;
+      const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
+      if (pageNumber == null) return;
+      setEditBusy(true);
+      setEditNotice(null);
+      // Stash for the post-op reselect (the rebuild regenerates page ids).
+      vectorReselectRef.current = { pageNumber, index };
+      try {
+        const notice = await onEditVector('transform', focusedDoc.path, pageNumber, index, matrix);
+        if (notice === EDIT_DECLINED) {
+          setEditNotice({
+            text: 'Edit cancelled — the document was left unchanged.',
+            error: false,
+          });
+        }
+      } catch (err) {
+        setEditNotice({ text: err instanceof Error ? err.message : String(err), error: true });
+      } finally {
+        setEditBusy(false);
+      }
+    },
+    [focusedDoc, docs, onEditVector, editBusy],
+  );
 
   const handleOpenTextEditor = useCallback(
     (pageId: string, index: number) => {
@@ -1748,6 +1808,29 @@ export function WorkspaceCanvasView({
     };
   }, [editSel, editImagesByPage, editGeomByPage, editBusy]);
 
+  // 9.D2: the selected vector's transform context — the SAME shape the image
+  // transform overlay consumes (reused directly), with the object's bbox as a
+  // unit-square placement matrix [w,0,0,h,x0,y0] and no crop (vectors don't
+  // crop). Null unless a vector is selected on a page with known geometry.
+  const vectorTransform = useMemo(() => {
+    if (!selectedVector) return null;
+    const obj = editVectorsByPage
+      .get(selectedVector.pageId)
+      ?.find((v) => v.index === selectedVector.index);
+    const geom = editGeomByPage.get(selectedVector.pageId);
+    if (!obj || !geom) return null;
+    const [x0, y0, x1, y1] = obj.userRect;
+    return {
+      pageId: selectedVector.pageId,
+      index: selectedVector.index,
+      matrix: [x1 - x0, 0, 0, y1 - y0, x0, y0] as [number, number, number, number, number, number],
+      crop: null,
+      box: geom.box,
+      bakedRotate: geom.bakedRotate,
+      busy: editBusy,
+    };
+  }, [selectedVector, editVectorsByPage, editGeomByPage, editBusy]);
+
   // Commit a transform gesture (9.C1). M' is user-space and /Rotate-invariant
   // (the redaction-mark rule), so the commit gate baking a pending page
   // rotation can't invalidate it — no re-projection needed, unlike A2's
@@ -1905,6 +1988,8 @@ export function WorkspaceCanvasView({
   selectedVectorRef.current = selectedVector;
   const handleDeleteVectorRef = useRef(handleDeleteVector);
   handleDeleteVectorRef.current = handleDeleteVector;
+  const commitVectorTransformRef = useRef(commitVectorTransform);
+  commitVectorTransformRef.current = commitVectorTransform;
   const editTextRef = useRef(editTextByPage);
   editTextRef.current = editTextByPage;
   const editSelRef = useRef(editSel);
@@ -2008,10 +2093,13 @@ export function WorkspaceCanvasView({
           kind: v.kind,
           fill: v.fill ? [...v.fill] : null,
           stroke: v.stroke ? [...v.stroke] : null,
+          userRect: [...v.userRect] as [number, number, number, number],
         })),
       selectVector: (pageId, index) => setSelectedVector({ pageId, index }),
       selectedVector: () => selectedVectorRef.current,
       deleteSelectedVector: () => handleDeleteVectorRef.current(),
+      transformVector: (pageId, index, matrix) =>
+        commitVectorTransformRef.current(pageId, index, matrix),
     });
     return () => registerCanvasEditImages(null);
   }, []);
@@ -2723,6 +2811,10 @@ export function WorkspaceCanvasView({
           selectedVector={selectedVector}
           editImageTransform={editImageTransform}
           onCommitImageTransform={commitImageTransform}
+          vectorTransform={vectorTransform}
+          onCommitVectorTransform={(pageId, index, matrix) =>
+            void commitVectorTransform(pageId, index, matrix)
+          }
           imageCropArmed={imageCropArmed}
           onCommitImageCrop={commitImageCrop}
           editTextByPage={editTextByPage}
@@ -2810,6 +2902,10 @@ export function WorkspaceCanvasView({
           selectedVector={selectedVector}
           editImageTransform={editImageTransform}
           onCommitImageTransform={commitImageTransform}
+          vectorTransform={vectorTransform}
+          onCommitVectorTransform={(pageId, index, matrix) =>
+            void commitVectorTransform(pageId, index, matrix)
+          }
           imageCropArmed={imageCropArmed}
           onCommitImageCrop={commitImageCrop}
           editTextByPage={editTextByPage}

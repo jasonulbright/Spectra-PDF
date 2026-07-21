@@ -846,13 +846,25 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
-  // 9.D1: delete one vector path object. Same undoable snapshot/commit-gate
-  // flow as an image delete (signed-doc-guarded), just a different engine op.
+  // 9.D1/D2: delete or transform (move/resize/rotate) one vector path object.
+  // Same undoable snapshot/commit-gate flow as an image edit (signed-doc-
+  // guarded), just a different engine op. `matrix` is the D2 target placement.
   const handleEditVector = useCallback(
-    async (path: string, page: number, index: number): Promise<string | void> => {
+    async (
+      kind: 'delete' | 'transform',
+      path: string,
+      page: number,
+      index: number,
+      matrix?: number[],
+    ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (kind === 'transform') {
+        if (!matrix) throw new Error('transform requires a target matrix');
+        await performOperation(path, 'transform_page_vector', { page, index, matrix });
+        return;
+      }
       await performOperation(path, 'delete_page_vector', { page, index });
     },
     [state.files, performOperation, confirmEditOfSignedDoc],

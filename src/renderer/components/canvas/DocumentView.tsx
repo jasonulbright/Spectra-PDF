@@ -82,6 +82,8 @@ export interface DocumentViewProps {
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
+  vectorTransform: EditImageTransformCtx | null;
+  onCommitVectorTransform: (pageId: string, index: number, matrix: number[]) => void;
   /** 9.C3 crop mode: armed flag + unit-space rect commit. */
   imageCropArmed: boolean;
   onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
@@ -508,6 +510,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
             props.editImageTransform?.pageId === page.id ? props.editImageTransform : null
           }
           onCommitImageTransform={props.onCommitImageTransform}
+          vectorTransform={
+            props.vectorTransform?.pageId === page.id ? props.vectorTransform : null
+          }
+          onCommitVectorTransform={props.onCommitVectorTransform}
           imageCropArmed={props.imageCropArmed}
           onCommitImageCrop={props.onCommitImageCrop}
           editTextRuns={props.editTextByPage.get(page.id)?.runBoxes}

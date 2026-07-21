@@ -342,6 +342,10 @@ interface PageCellProps {
   selectedVectorIndex?: number | null;
   onSelectEditVector?: (pageId: string, index: number) => void;
   onDeleteVector?: () => void;
+  /** 9.D2: transform context for THIS page's selected vector (pre-filtered by
+   * pageId) — reuses the image transform overlay (crop null). */
+  vectorTransform?: EditImageTransformCtx | null;
+  onCommitVectorTransform?: (pageId: string, index: number, matrix: number[]) => void;
   /** Transform context for THIS page's selected image (9.C1), pre-filtered by
    * pageId upstream — non-null only on the page whose image is selected. */
   editImageTransform?: EditImageTransformCtx | null;
@@ -475,6 +479,8 @@ function PageCellImpl({
   selectedVectorIndex,
   onSelectEditVector,
   onDeleteVector,
+  vectorTransform,
+  onCommitVectorTransform,
   editImageTransform,
   onCommitImageTransform,
   imageCropArmed,
@@ -1027,6 +1033,10 @@ function PageCellImpl({
           for a later transform, is unchanged). */}
       {tool === 'edit' &&
         (editVectors ?? []).map((vec) => {
+          const selected = selectedVectorIndex === vec.index;
+          // The SELECTED vector is handled by the transform overlay + delete
+          // affordance below; unselected ones are plain selectable boxes.
+          if (selected) return null;
           const r0 = rotateNormalizedRect(vec.rect, page.rotation);
           const MIN_HIT = 0.012;
           const r = {
@@ -1035,11 +1045,10 @@ function PageCellImpl({
             w: Math.max(r0.w, MIN_HIT),
             h: Math.max(r0.h, MIN_HIT),
           };
-          const selected = selectedVectorIndex === vec.index;
           return (
             <div
               key={`ev-${vec.index}`}
-              className={'page-editvec' + (selected ? ' selected' : '')}
+              className="page-editvec"
               style={{
                 left: `${r.x * 100}%`,
                 top: `${r.y * 100}%`,
@@ -1052,19 +1061,42 @@ function PageCellImpl({
                 data-testid={`edit-vector-${vec.index}`}
                 className="page-editvec-hit"
                 title={`Vector object (${vec.kind})`}
-                aria-pressed={selected}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   onSelectEditVector?.(page.id, vec.index);
                 }}
               />
-              {selected && onDeleteVector && (
+            </div>
+          );
+        })}
+      {/* 9.D2: the selected vector's transform overlay (move/resize/rotate —
+          the image overlay reused, crop disabled) + a delete affordance
+          positioned at its bbox. */}
+      {tool === 'edit' &&
+        vectorTransform &&
+        onCommitVectorTransform &&
+        (() => {
+          const selVec = (editVectors ?? []).find((v) => v.index === vectorTransform.index);
+          const dr = selVec ? rotateNormalizedRect(selVec.rect, page.rotation) : null;
+          return (
+            <>
+              <ImageTransformOverlay
+                ctx={vectorTransform}
+                pendingRotate={page.rotation}
+                onCommit={(matrix) =>
+                  onCommitVectorTransform(page.id, vectorTransform.index, matrix)
+                }
+                cropArmed={false}
+                onCommitCrop={() => {}}
+              />
+              {dr && onDeleteVector && (
                 <button
                   type="button"
-                  data-testid={`edit-vector-delete-${vec.index}`}
+                  data-testid={`edit-vector-delete-${vectorTransform.index}`}
                   className="page-editvec-del"
                   title="Delete this vector object"
+                  style={{ left: `${(dr.x + dr.w) * 100}%`, top: `${dr.y * 100}%` }}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1074,9 +1106,9 @@ function PageCellImpl({
                   ×
                 </button>
               )}
-            </div>
+            </>
           );
-        })}
+        })()}
       {tool === 'edit' &&
         (editParagraphs ?? []).map((para) => {
           const r = rotateNormalizedRect(para.rect, page.rotation);

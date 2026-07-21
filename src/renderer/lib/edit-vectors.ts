@@ -13,6 +13,9 @@ export interface EditVectorObject {
   index: number;
   /** Display-normalized bbox at the page's BAKED orientation. */
   rect: { x: number; y: number; w: number; h: number };
+  /** The raw device/user-space bbox [x0,y0,x1,y1] — D2 builds the transform's
+   * unit-square placement matrix [w,0,0,h,x0,y0] from it. */
+  userRect: [number, number, number, number];
   /** How the path is painted — drives the selection affordance's honesty. */
   kind: 'fill' | 'stroke' | 'fillstroke';
   /** Best-effort fill colour [r,g,b] 0-1 (device spaces only), else null. */
@@ -50,6 +53,7 @@ export async function fetchEditVectors(
   return (listing.vectors ?? []).map((v) => ({
     index: v.index,
     rect: pdfRectToDisplay(v.rect, geometry.box, geometry.bakedRotate),
+    userRect: v.rect,
     kind: v.kind === 'stroke' ? 'stroke' : v.kind === 'fillstroke' ? 'fillstroke' : 'fill',
     fill: clampRgb(v.fill),
     stroke: clampRgb(v.stroke),

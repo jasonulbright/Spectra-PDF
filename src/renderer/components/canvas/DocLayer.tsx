@@ -37,6 +37,8 @@ interface DocLayerProps {
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
+  vectorTransform: EditImageTransformCtx | null;
+  onCommitVectorTransform: (pageId: string, index: number, matrix: number[]) => void;
   /** 9.C3 crop mode: armed flag + unit-space rect commit. */
   imageCropArmed: boolean;
   onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
@@ -150,6 +152,8 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               selectedVector={props.selectedVector}
               editImageTransform={props.editImageTransform}
               onCommitImageTransform={props.onCommitImageTransform}
+              vectorTransform={props.vectorTransform}
+              onCommitVectorTransform={props.onCommitVectorTransform}
               imageCropArmed={props.imageCropArmed}
               onCommitImageCrop={props.onCommitImageCrop}
               editTextByPage={props.editTextByPage}
