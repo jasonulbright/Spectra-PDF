@@ -12,6 +12,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation, PageRef } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
+import type { EditVectorObject } from '../../lib/edit-vectors';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
@@ -77,6 +78,8 @@ export interface DocumentViewProps {
   stampPreset?: StampPreset | null;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
+  editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
+  selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
   /** 9.C3 crop mode: armed flag + unit-space rect commit. */
@@ -86,6 +89,8 @@ export interface DocumentViewProps {
   editSelection: { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
   editingText: { kind: 'text' | 'para'; pageId: string; index: number } | null;
   onSelectEditImage: (pageId: string, index: number) => void;
+  onSelectEditVector: (pageId: string, index: number) => void;
+  onDeleteVector: () => void;
   onSelectEditText: (pageId: string, index: number) => void;
   onOpenTextEditor: (pageId: string, index: number) => void;
   onCommitTextEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
@@ -495,6 +500,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           stampPreset={props.stampPreset}
           redactionMarks={props.redactionMarksByPage.get(page.id)}
           editImages={props.editImagesByPage.get(page.id)}
+          editVectors={props.editVectorsByPage.get(page.id)}
+          selectedVectorIndex={
+            props.selectedVector?.pageId === page.id ? props.selectedVector.index : null
+          }
           editImageTransform={
             props.editImageTransform?.pageId === page.id ? props.editImageTransform : null
           }
@@ -529,6 +538,8 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
               : null
           }
           onSelectEditImage={props.onSelectEditImage}
+          onSelectEditVector={props.onSelectEditVector}
+          onDeleteVector={props.onDeleteVector}
           onSelectEditText={props.onSelectEditText}
           onOpenTextEditor={props.onOpenTextEditor}
           onCommitTextEdit={props.onCommitTextEdit}

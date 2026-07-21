@@ -55,6 +55,10 @@ from engine.page_images import (
     set_image_opacity,
     transform_page_image,
 )
+from engine.page_vectors import (
+    delete_page_vector,
+    list_page_vectors,
+)
 from engine.distill import distill
 from engine.text_authoring import add_text_box, measure_text_box
 from engine.text_paragraphs import (
@@ -114,6 +118,8 @@ def main() -> None:
     server.register("transform_page_image", transform_page_image)
     server.register("add_page_image", add_page_image)
     server.register("crop_page_image", crop_page_image)
+    server.register("list_page_vectors", list_page_vectors)
+    server.register("delete_page_vector", delete_page_vector)
     server.register("set_image_opacity", set_image_opacity)
     server.register("list_text_runs", list_text_runs)
     server.register("replace_text_run", replace_text_run)

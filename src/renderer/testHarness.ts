@@ -231,6 +231,17 @@ export interface CanvasEditImagesHandlers {
     bold?: boolean;
     italic?: boolean;
   }) => Promise<void>;
+  // 9.D1 vector objects.
+  vectorPageIds: () => string[];
+  vectors: (pageId: string) => {
+    index: number;
+    kind: 'fill' | 'stroke' | 'fillstroke';
+    fill: [number, number, number] | null;
+    stroke: [number, number, number] | null;
+  }[];
+  selectVector: (pageId: string, index: number) => void;
+  selectedVector: () => { pageId: string; index: number } | null;
+  deleteSelectedVector: () => Promise<void>;
 }
 
 let canvasEditImages: CanvasEditImagesHandlers | null = null;
@@ -634,6 +645,17 @@ export interface TestHarness {
   editImageSelect: (pageId: string, index: number) => void;
   /** The live edit selection (C1-tail: proves the post-op auto-reselect). */
   editImageSelection: () => { kind: string; pageId: string; index: number } | null;
+  /** 9.D1 vector objects: list, select, delete. */
+  editVectorPageIds: () => string[];
+  editVectors: (pageId: string) => {
+    index: number;
+    kind: 'fill' | 'stroke' | 'fillstroke';
+    fill: [number, number, number] | null;
+    stroke: [number, number, number] | null;
+  }[];
+  editVectorSelect: (pageId: string, index: number) => void;
+  editVectorSelection: () => { pageId: string; index: number } | null;
+  editVectorDelete: () => Promise<void>;
   /** Transform (9.C1) an image placement to an absolute user-space matrix. */
   editImageTransform: (pageId: string, index: number, matrix: number[]) => Promise<void>;
   editImageAct: (
@@ -1115,6 +1137,18 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     editImagePlacements: (pageId) => canvasEditImages?.placements(pageId) ?? [],
     editImageSelect: (pageId, index) => canvasEditImages?.select(pageId, index),
     editImageSelection: () => canvasEditImages?.selection() ?? null,
+    editVectorPageIds: () => canvasEditImages?.vectorPageIds() ?? [],
+    editVectors: (pageId) => canvasEditImages?.vectors(pageId) ?? [],
+    editVectorSelect: (pageId, index) => canvasEditImages?.selectVector(pageId, index),
+    editVectorSelection: () => canvasEditImages?.selectedVector() ?? null,
+    editVectorDelete: async () => {
+      if (!canvasEditImages) {
+        const msg = 'editVectorDelete: canvas edit mode not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      await canvasEditImages.deleteSelectedVector();
+    },
     editImageAct: async (kind, opts) => {
       if (!canvasEditImages) {
         const msg = 'editImageAct: canvas edit mode not mounted';

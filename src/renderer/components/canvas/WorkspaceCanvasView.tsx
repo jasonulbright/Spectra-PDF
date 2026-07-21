@@ -23,6 +23,7 @@ import { buildOcrApplyPayload } from '../../lib/ocr-apply';
 import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
 import { fetchEditPlacements } from '../../lib/edit-images';
+import { fetchEditVectors, type EditVectorObject } from '../../lib/edit-vectors';
 import type { EditImagePlacement } from '../../lib/edit-images';
 import { EDIT_DECLINED } from '../../lib/edit-text';
 import { pageIdAtSourceIndex } from '../../lib/durable-identity';
@@ -84,6 +85,10 @@ interface WorkspaceCanvasViewProps {
       opacity?: number;
     },
   ) => Promise<string | void>;
+  // Edit ▸ Vectors (9.D1): delete one vector path object — same undoable App
+  // routing (engine delete_page_vector). EDIT_DECLINED on a refused signed-doc
+  // warning, like the image/text handlers.
+  onEditVector: (path: string, page: number, index: number) => Promise<string | void>;
   // Edit ▸ Text (7.2+7.3): replace one run's text — same one-snapshot,
   // undoable App routing (engine replace_text_run). Resolves EDIT_DECLINED
   // when the signed-doc warning was refused (the canvas restores its
@@ -170,6 +175,7 @@ const HAND_SUPPRESSES_PICKUP = (): void => {};
 const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
 const NO_EDIT_IMAGES: ReadonlyMap<string, EditImagePlacement[]> = new Map();
+const NO_EDIT_VECTORS: ReadonlyMap<string, EditVectorObject[]> = new Map();
 const NO_EDIT_GEOM: ReadonlyMap<string, PageGeometry> = new Map();
 const NO_EDIT_TEXT: ReadonlyMap<string, EditTextListing> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
@@ -185,6 +191,7 @@ export function WorkspaceCanvasView({
   onRedactFile,
   onApplyOcrLayer,
   onEditImage,
+  onEditVector,
   onEditText,
   onEditParagraph,
   onMergeParagraph,
@@ -1155,6 +1162,14 @@ export function WorkspaceCanvasView({
   // the start. Buffer identity in the deps refetches after every edit/undo.
   const [editImagesByPage, setEditImagesByPage] =
     useState<ReadonlyMap<string, EditImagePlacement[]>>(NO_EDIT_IMAGES);
+  // 9.D1: per-page vector path objects, filled by the same edit-listing pass.
+  const [editVectorsByPage, setEditVectorsByPage] =
+    useState<ReadonlyMap<string, EditVectorObject[]>>(NO_EDIT_VECTORS);
+  // The selected vector object (one at a time), or null. Its own state —
+  // decoupled from the image transform selection (`editSel`).
+  const [selectedVector, setSelectedVector] = useState<{ pageId: string; index: number } | null>(
+    null,
+  );
   // Per-page {box, bakedRotate} for the image pages — the C1 transform gesture
   // needs it to convert pointer↔user space; filled alongside editImagesByPage.
   const [editGeomByPage, setEditGeomByPage] =
@@ -1226,10 +1241,13 @@ export function WorkspaceCanvasView({
       setEditingText(null);
       if (toolOrPathChanged) imageReselectRef.current = null;
     }
+    if (toolOrPathChanged) setSelectedVector(null);
     if (tool !== 'edit' || !focusedDoc || !editBuffer) {
       setEditImagesByPage(NO_EDIT_IMAGES);
+      setEditVectorsByPage(NO_EDIT_VECTORS);
       setEditGeomByPage(NO_EDIT_GEOM);
       setEditTextByPage(NO_EDIT_TEXT);
+      setSelectedVector(null);
       if (ctxChanged) setEditNotice(null);
       return;
     }
@@ -1264,6 +1282,9 @@ export function WorkspaceCanvasView({
       const nextImages = ctxChanged
         ? new Map<string, EditImagePlacement[]>()
         : seed(editImagesRef.current);
+      const nextVectors = ctxChanged
+        ? new Map<string, EditVectorObject[]>()
+        : seed(editVectorsRef.current);
       const nextText = ctxChanged
         ? new Map<string, EditTextListing>()
         : seed(editTextRef.current);
@@ -1285,6 +1306,8 @@ export function WorkspaceCanvasView({
             engineCall(m, params);
           const placements = await fetchEditPlacements(call, f.workingPath, pageNumber, geometry);
           if (editFetchTokenRef.current !== token) return;
+          const vectors = await fetchEditVectors(call, f.workingPath, pageNumber, geometry);
+          if (editFetchTokenRef.current !== token) return;
           const listing = await fetchEditTextListing(call, f.workingPath, pageNumber, geometry);
           if (editFetchTokenRef.current !== token) return;
           if (placements.length > 0) {
@@ -1294,7 +1317,12 @@ export function WorkspaceCanvasView({
             nextImages.delete(page.id);
             nextGeom.delete(page.id);
           }
+          if (vectors.length > 0) nextVectors.set(page.id, vectors);
+          else nextVectors.delete(page.id);
+          // Geometry is needed whenever EITHER images or vectors exist.
+          if (vectors.length > 0) nextGeom.set(page.id, geometry);
           setEditImagesByPage(new Map(nextImages)); // incremental fill
+          setEditVectorsByPage(new Map(nextVectors));
           setEditGeomByPage(new Map(nextGeom));
           // C1-tail: restore the stashed selection when ITS page's fresh
           // listing lands. Matched on sourcePageIndex, NOT the recomputed
@@ -1372,6 +1400,39 @@ export function WorkspaceCanvasView({
         : { kind: 'text', pageId, index },
     );
   }, []);
+
+  // 9.D1: select a vector object (toggle off on re-click). Its own selection
+  // state, independent of the image/text `editSel`.
+  const handleSelectEditVector = useCallback((pageId: string, index: number) => {
+    setEditNotice(null);
+    setSelectedVector((prev) =>
+      prev && prev.pageId === pageId && prev.index === index ? null : { pageId, index },
+    );
+  }, []);
+
+  // 9.D1: delete the selected vector object (undoable, App-routed). On success
+  // the selection clears — the object is gone and the surviving ordinals
+  // renumber, so a stale index must never linger.
+  const handleDeleteVector = useCallback(async () => {
+    if (!selectedVector || !focusedDoc || editBusy) return;
+    const { pageId, index } = selectedVector;
+    const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
+    if (pageNumber == null) return;
+    setEditBusy(true);
+    setEditNotice(null);
+    try {
+      const notice = await onEditVector(focusedDoc.path, pageNumber, index);
+      if (notice === EDIT_DECLINED) {
+        setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+      } else {
+        setSelectedVector(null);
+      }
+    } catch (err) {
+      setEditNotice({ text: err instanceof Error ? err.message : String(err), error: true });
+    } finally {
+      setEditBusy(false);
+    }
+  }, [selectedVector, focusedDoc, docs, onEditVector, editBusy]);
 
   const handleOpenTextEditor = useCallback(
     (pageId: string, index: number) => {
@@ -1838,6 +1899,12 @@ export function WorkspaceCanvasView({
   // Harness bridge for Edit ▸ Images + Text (7.1/7.2) — refs pattern.
   const editImagesRef = useRef(editImagesByPage);
   editImagesRef.current = editImagesByPage;
+  const editVectorsRef = useRef(editVectorsByPage);
+  editVectorsRef.current = editVectorsByPage;
+  const selectedVectorRef = useRef(selectedVector);
+  selectedVectorRef.current = selectedVector;
+  const handleDeleteVectorRef = useRef(handleDeleteVector);
+  handleDeleteVectorRef.current = handleDeleteVector;
   const editTextRef = useRef(editTextByPage);
   editTextRef.current = editTextByPage;
   const editSelRef = useRef(editSel);
@@ -1933,6 +2000,18 @@ export function WorkspaceCanvasView({
       act: (kind, opts) => runEditActionRef.current(kind, opts),
       placeAddText: (rect) => harnessPlaceAddTextRef.current(rect),
       commitAddText: (params) => commitAddTextRef.current(params),
+      // 9.D1 vector objects.
+      vectorPageIds: () => [...editVectorsRef.current.keys()],
+      vectors: (pageId) =>
+        (editVectorsRef.current.get(pageId) ?? []).map((v) => ({
+          index: v.index,
+          kind: v.kind,
+          fill: v.fill ? [...v.fill] : null,
+          stroke: v.stroke ? [...v.stroke] : null,
+        })),
+      selectVector: (pageId, index) => setSelectedVector({ pageId, index }),
+      selectedVector: () => selectedVectorRef.current,
+      deleteSelectedVector: () => handleDeleteVectorRef.current(),
     });
     return () => registerCanvasEditImages(null);
   }, []);
@@ -2640,6 +2719,8 @@ export function WorkspaceCanvasView({
           stampPreset={stampPreset}
           redactionMarksByPage={redactionMarksByPage}
           editImagesByPage={editImagesByPage}
+          editVectorsByPage={editVectorsByPage}
+          selectedVector={selectedVector}
           editImageTransform={editImageTransform}
           onCommitImageTransform={commitImageTransform}
           imageCropArmed={imageCropArmed}
@@ -2648,6 +2729,8 @@ export function WorkspaceCanvasView({
           editSelection={editSel}
           editingText={editingText}
           onSelectEditImage={handleSelectEditImage}
+          onSelectEditVector={handleSelectEditVector}
+          onDeleteVector={() => void handleDeleteVector()}
           onSelectEditText={handleSelectEditText}
           onOpenTextEditor={handleOpenTextEditor}
           onCommitTextEdit={(pageId, index, text, opts) =>
@@ -2723,6 +2806,8 @@ export function WorkspaceCanvasView({
           stampPreset={stampPreset}
           redactionMarksByPage={redactionMarksByPage}
           editImagesByPage={editImagesByPage}
+          editVectorsByPage={editVectorsByPage}
+          selectedVector={selectedVector}
           editImageTransform={editImageTransform}
           onCommitImageTransform={commitImageTransform}
           imageCropArmed={imageCropArmed}
@@ -2731,6 +2816,8 @@ export function WorkspaceCanvasView({
           editSelection={editSel}
           editingText={editingText}
           onSelectEditImage={handleSelectEditImage}
+          onSelectEditVector={handleSelectEditVector}
+          onDeleteVector={() => void handleDeleteVector()}
           onSelectEditText={handleSelectEditText}
           onOpenTextEditor={handleOpenTextEditor}
           onCommitTextEdit={(pageId, index, text, opts) =>

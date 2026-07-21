@@ -7,6 +7,7 @@ import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '.
 import type { RedactionMark } from '../../lib/redaction';
 import type { OcrWord } from '../../ocr/types';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
+import type { EditVectorObject } from '../../lib/edit-vectors';
 import ImageTransformOverlay from './ImageTransformOverlay';
 import type { EditTextRun } from '../../lib/edit-text';
 import { unencodableChars } from '../../lib/edit-text';
@@ -335,6 +336,12 @@ interface PageCellProps {
   editImages?: EditImagePlacement[];
   editSelectedIndex?: number | null;
   onSelectEditImage?: (pageId: string, index: number) => void;
+  /** 9.D1: this page's vector path objects + the selected index (pre-filtered
+   * by pageId upstream) + select/delete callbacks. */
+  editVectors?: EditVectorObject[];
+  selectedVectorIndex?: number | null;
+  onSelectEditVector?: (pageId: string, index: number) => void;
+  onDeleteVector?: () => void;
   /** Transform context for THIS page's selected image (9.C1), pre-filtered by
    * pageId upstream — non-null only on the page whose image is selected. */
   editImageTransform?: EditImageTransformCtx | null;
@@ -464,6 +471,10 @@ function PageCellImpl({
   redactionMarks,
   editImages,
   editSelectedIndex,
+  editVectors,
+  selectedVectorIndex,
+  onSelectEditVector,
+  onDeleteVector,
   editImageTransform,
   onCommitImageTransform,
   imageCropArmed,
@@ -1007,6 +1018,65 @@ function PageCellImpl({
           </div>
         );
       })}
+      {/* 9.D1 vector objects — rendered FIRST (before paragraphs/text/images)
+          so those inner-content overlays paint on top and win a click where
+          they overlap a vector's bbox (a coloured rect behind a heading, a
+          table-cell fill under text — the text stays selectable). A thin
+          line/rule has a near-zero-extent bbox; the hit box inflates to a
+          minimum clickable thickness (render-only — the object's real rect,
+          for a later transform, is unchanged). */}
+      {tool === 'edit' &&
+        (editVectors ?? []).map((vec) => {
+          const r0 = rotateNormalizedRect(vec.rect, page.rotation);
+          const MIN_HIT = 0.012;
+          const r = {
+            x: r0.w < MIN_HIT ? r0.x - (MIN_HIT - r0.w) / 2 : r0.x,
+            y: r0.h < MIN_HIT ? r0.y - (MIN_HIT - r0.h) / 2 : r0.y,
+            w: Math.max(r0.w, MIN_HIT),
+            h: Math.max(r0.h, MIN_HIT),
+          };
+          const selected = selectedVectorIndex === vec.index;
+          return (
+            <div
+              key={`ev-${vec.index}`}
+              className={'page-editvec' + (selected ? ' selected' : '')}
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+            >
+              <button
+                type="button"
+                data-testid={`edit-vector-${vec.index}`}
+                className="page-editvec-hit"
+                title={`Vector object (${vec.kind})`}
+                aria-pressed={selected}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectEditVector?.(page.id, vec.index);
+                }}
+              />
+              {selected && onDeleteVector && (
+                <button
+                  type="button"
+                  data-testid={`edit-vector-delete-${vec.index}`}
+                  className="page-editvec-del"
+                  title="Delete this vector object"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteVector();
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          );
+        })}
       {tool === 'edit' &&
         (editParagraphs ?? []).map((para) => {
           const r = rotateNormalizedRect(para.rect, page.rotation);

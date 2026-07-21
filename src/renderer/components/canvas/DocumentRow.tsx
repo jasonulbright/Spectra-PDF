@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
+import type { EditVectorObject } from '../../lib/edit-vectors';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OcrWord } from '../../ocr/types';
@@ -37,6 +38,8 @@ interface DocumentRowProps {
   // survives unrelated re-renders.
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
+  editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
+  selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
   /** 9.C3 crop mode: armed flag + unit-space rect commit. */
@@ -47,6 +50,8 @@ interface DocumentRowProps {
   /** The ONE open inline editor — a run's (kind 'text') or a paragraph's. */
   editingText: { kind: 'text' | 'para'; pageId: string; index: number } | null;
   onSelectEditImage: (pageId: string, index: number) => void;
+  onSelectEditVector: (pageId: string, index: number) => void;
+  onDeleteVector: () => void;
   onSelectEditText: (pageId: string, index: number) => void;
   onOpenTextEditor: (pageId: string, index: number) => void;
   onCommitTextEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
@@ -125,6 +130,8 @@ function DocumentRowImpl({
   stampPreset,
   redactionMarksByPage,
   editImagesByPage,
+  editVectorsByPage,
+  selectedVector,
   editImageTransform,
   onCommitImageTransform,
   imageCropArmed,
@@ -133,6 +140,8 @@ function DocumentRowImpl({
   editSelection,
   editingText,
   onSelectEditImage,
+  onSelectEditVector,
+  onDeleteVector,
   onSelectEditText,
   onOpenTextEditor,
   onCommitTextEdit,
@@ -198,6 +207,8 @@ function DocumentRowImpl({
         stampPreset={stampPreset}
         redactionMarks={redactionMarksByPage.get(page.id)}
         editImages={editImagesByPage.get(page.id)}
+        editVectors={editVectorsByPage.get(page.id)}
+        selectedVectorIndex={selectedVector?.pageId === page.id ? selectedVector.index : null}
         editImageTransform={editImageTransform?.pageId === page.id ? editImageTransform : null}
         onCommitImageTransform={onCommitImageTransform}
         imageCropArmed={imageCropArmed}
@@ -230,6 +241,8 @@ function DocumentRowImpl({
             : null
         }
         onSelectEditImage={onSelectEditImage}
+        onSelectEditVector={onSelectEditVector}
+        onDeleteVector={onDeleteVector}
         onSelectEditText={onSelectEditText}
         onOpenTextEditor={onOpenTextEditor}
         onCommitTextEdit={onCommitTextEdit}

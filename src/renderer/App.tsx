@@ -846,6 +846,18 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
+  // 9.D1: delete one vector path object. Same undoable snapshot/commit-gate
+  // flow as an image delete (signed-doc-guarded), just a different engine op.
+  const handleEditVector = useCallback(
+    async (path: string, page: number, index: number): Promise<string | void> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      await performOperation(path, 'delete_page_vector', { page, index });
+    },
+    [state.files, performOperation, confirmEditOfSignedDoc],
+  );
+
   const handleEditImage = useCallback(
     async (
       kind: 'delete' | 'replace' | 'extract' | 'transform' | 'crop' | 'opacity',
@@ -1620,6 +1632,7 @@ function AppContent(): React.ReactElement {
                   onRedactFile={handleRedactFile}
                   onApplyOcrLayer={handleApplyOcrLayer}
                   onEditImage={handleEditImage}
+                  onEditVector={handleEditVector}
                   onEditText={handleEditText}
                   onEditParagraph={handleEditParagraph}
                   onMergeParagraph={handleMergeParagraph}
