@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.7.0 — Style a selection, edit the shapes
+
+### Rich text — style a SELECTION, not just the whole box
+- **Colour, bold, italic, font family, and size now apply to a selected
+  range** inside a paragraph: highlight a word and recolour it, embolden a
+  single term, or resize a heading fragment — the rest of the paragraph keeps
+  its own style. (The whole-paragraph controls are still there when nothing
+  is selected.)
+
+### Vector graphics — the drawn lines and shapes are editable
+- **Select a drawn line, rectangle, or shape** on the page in the Edit tool
+- **Move, resize, and rotate** it with direct-manipulation handles
+- **Recolour** its fill and stroke, **set its line width**, or **delete** it
+  — every change undoable, like the rest of the editor
+- Shapes **inside a form/group** are selectable and editable too; editing one
+  leaves the group's other uses untouched
+
 ## 2.6.0 — Author, arrange, and restyle: the editor grows up
 
 ### Put NEW things on the page
