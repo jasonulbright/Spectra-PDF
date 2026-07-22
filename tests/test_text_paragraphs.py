@@ -359,6 +359,33 @@ class TestGrouping:
         assert listing["runs"][0]["clipped"] is False
         assert listing["paragraphs"][0]["clipped"] is False
 
+    def test_mixed_visibility_paragraph_refused(self, tmp_dir):
+        # 9-§I.0-S8 (gauntlet): a clip cutting THROUGH a paragraph — some
+        # members visible, one clipped away — must NOT list as a single
+        # editable paragraph (its whole-para `clipped` flag is all-members, so
+        # False here, but reflow would re-lay text INTO the clipped region).
+        # It refuses (editable False, RTL/vertical-rise refusal family) and
+        # decomposes to run boxes, where each run's OWN clip flag hides the
+        # invisible member and keeps the visible ones editable.
+        src = _build(
+            tmp_dir,
+            b"q 0 230 300 70 re W n "  # clip y in [230,300]
+            b"BT /F1 12 Tf 1 0 0 1 20 250 Tm (Sample) Tj ET "  # visible
+            b"BT /F1 12 Tf 1 0 0 1 20 236 Tm (Sample) Tj ET "  # visible
+            b"BT /F1 12 Tf 1 0 0 1 20 222 Tm (Sample) Tj ET "  # straddles → visible
+            b"BT /F1 12 Tf 1 0 0 1 20 208 Tm (Sample) Tj ET "  # fully clipped
+            b"Q",
+        )
+        listing = list_text_paragraphs(src, 1)
+        # The four same-width, consistent-leading lines group into ONE paragraph.
+        assert [r["clipped"] for r in listing["runs"]] == [False, False, False, True]
+        assert len(listing["paragraphs"]) == 1
+        p = listing["paragraphs"][0]
+        assert p["editable"] is False
+        assert "clipped" in p["reason"]
+        # Not wholly clipped (has visible members) → the whole-para flag is False.
+        assert p["clipped"] is False
+
     def test_rotated_text_never_groups(self, tmp_dir):
         src = _build(
             tmp_dir,

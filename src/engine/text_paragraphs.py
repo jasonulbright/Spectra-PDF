@@ -543,6 +543,18 @@ def _analyze(paras: list[list[_Line]], stream: tuple, lkey: tuple) -> list[_Para
             # runs stay individually editable on the 7.2 surface.
             p.editable = False
             p.reason = "vertical text with raised characters does not reflow"
+        elif any(m.clipped for m in p.members) and not all(m.clipped for m in p.members):
+            # 9-§I.0-S8 (gauntlet): a clip boundary cutting THROUGH a paragraph
+            # leaves some members visible and some clipped away. The whole-para
+            # `clipped` flag (all-members) is False, so it would list as a
+            # single editable paragraph whose `text`/`box` include the invisible
+            # member and whose reflow (`replace_paragraph_text`) would re-lay
+            # text INTO the clipped region — silently. Refuse the paragraph edit
+            # (the RTL/vertical-rise refusal family): it decomposes to run boxes,
+            # where each run's OWN `clipped` flag already hides the invisible
+            # members and keeps the visible ones individually editable.
+            p.editable = False
+            p.reason = "part of this paragraph is clipped away on the page"
         out.append(p)
     return out
 
