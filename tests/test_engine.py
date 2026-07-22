@@ -1157,6 +1157,46 @@ class TestWatermark:
         r = watermark(file=src, output=out, text="Привет\tмир", font_dir=_WM_FONTS_DIR)
         assert r["pages_watermarked"] == 1
 
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_broad_control_chars_fill(self, tmp_dir):
+        # Gauntlet MEDIUM: control/separator chars beyond \n\r\t (VT, form-feed,
+        # Unicode LINE/PARAGRAPH separators) must ALSO flatten to space, not
+        # crash build_fallback_font with a non-printable "cannot express" error.
+        src = os.path.join(tmp_dir, "wb_in.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        for i, bad in enumerate(("\x0b", "\x0c", " ", " ", "\x00")):
+            out = os.path.join(tmp_dir, f"wb_out{i}.pdf")
+            r = watermark(file=src, output=out, text=f"При{bad}вет", font_dir=_WM_FONTS_DIR)
+            assert r["pages_watermarked"] == 1
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_zero_pages_with_uncoverable_text_is_noop(self, tmp_dir):
+        # Gauntlet LOW: pages=[] (documented "zero pages") must be a true no-op —
+        # it must NOT fail on the font coverage of text it will never draw (the
+        # embed is built lazily, only on a page that is actually stamped).
+        src = os.path.join(tmp_dir, "wz_in.pdf")
+        out = os.path.join(tmp_dir, "wz_out.pdf")
+        _make_watermark_fixture(src, page_count=2)
+        r = watermark(file=src, output=out, text="日本語", font_dir=_WM_FONTS_DIR, pages=[])
+        assert r["pages_watermarked"] == 0
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_unicode_auto_size_respects_real_font_height(self, tmp_dir):
+        # Gauntlet MEDIUM/HIGH: the auto-size must use the EMBEDDED face's real
+        # ascent+descent (Liberation Sans ~1.117 em), not Helvetica's 0.925 —
+        # else a height-axis-bound (banner) Cyrillic stamp overshoots the design
+        # margin. On a 1500×200 page at angle 0 the height axis binds; the drawn
+        # text height (size × real gh) must stay within the design fraction.
+        from engine.pdf_metrics import GLYPH_HEIGHT_EM
+        from engine.watermark import AUTO_FIT_FRACTION, _auto_font_size, _face_glyph_height_em
+
+        gh = _face_glyph_height_em(os.path.join(_WM_FONTS_DIR, "LiberationSans-Regular.ttf"))
+        assert gh > GLYPH_HEIGHT_EM  # Liberation Sans is taller than Helvetica
+        size = _auto_font_size("Привет", 1500, 200, 0, 0, em_width=3.5, glyph_height_em=gh)
+        assert size * gh <= AUTO_FIT_FRACTION * 200 + 0.5  # within the box margin
+        # And smaller than the buggy Helvetica-height sizing would have given.
+        assert size < _auto_font_size("Привет", 1500, 200, 0, 0, em_width=3.5)
+
 
 # ── Compare ───────────────────────────────────────────────────────────────
 

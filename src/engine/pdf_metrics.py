@@ -28,6 +28,26 @@ HELVETICA_DESCENT_EM = 0.207
 GLYPH_HEIGHT_EM = HELVETICA_ASCENT_EM + HELVETICA_DESCENT_EM  # 0.925
 
 
+import re
+
+# Layout-only characters that are NEVER glyphs — an embedded subset font's
+# coverage check rejects them, so any drawn-text path that embeds a font must
+# flatten them to spaces first (the FC1/S4 gauntlet class: a stray control char
+# in otherwise-renderable text must not crash/refuse the whole value). Covers
+# C0 controls, DEL, and the Unicode LINE/PARAGRAPH separators.
+_CONTROL_ALL_RE = re.compile("[\x00-\x1f\x7f  ]")
+_CONTROL_KEEP_NL_RE = re.compile("[\x00-\x09\x0b-\x1f\x7f  ]")  # keeps \n
+
+
+def flatten_control_chars(text: str, keep_newline: bool = False) -> str:
+    """Replace layout-only control/separator chars with spaces so an embedded
+    font's glyph subset never has to express them. `keep_newline` preserves
+    `\\n` (after normalising `\\r\\n`/`\\r` → `\\n`) for multi-line wrapping;
+    otherwise everything — newlines included — flattens (a single-line stamp)."""
+    t = text.replace("\r\n", "\n").replace("\r", "\n")
+    return (_CONTROL_KEEP_NL_RE if keep_newline else _CONTROL_ALL_RE).sub(" ", t)
+
+
 def text_width_em(text: str) -> float:
     """Helvetica advance width of `text` in em units."""
     total = 0.0

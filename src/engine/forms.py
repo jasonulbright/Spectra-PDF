@@ -38,6 +38,7 @@ from pikepdf import Dictionary, Name
 from engine.pdf_metrics import (
     GLYPH_HEIGHT_EM,
     HELVETICA_DESCENT_EM,
+    flatten_control_chars,
     text_width_em,
 )
 
@@ -637,11 +638,12 @@ def _text_appearance(
 
         # The embedded font is SUBSET to the drawn glyphs, and `build_fallback_
         # font`/`encode`/`width_1000` all reject a character not in that subset.
-        # `\n`/`\r`/`\t` are layout-only (never glyphs), and `_face_missing`
-        # excluded them at validation — so normalise them AWAY of the glyph set
-        # here (CR→LF, tab→space; LF kept for multiline wrapping) or a validated
-        # multi-paragraph value would crash inside the fill (gauntlet HIGH).
-        layout_value = value.replace("\r\n", "\n").replace("\r", "\n").replace("\t", " ")
+        # Layout-only control/separator chars are never glyphs; validation
+        # excluded them from coverage, so flatten them AWAY of the glyph set
+        # here (LF kept for multiline wrapping) or a validated multi-paragraph
+        # value would crash inside the fill (gauntlet HIGH — broadened to all
+        # control chars, not just \n/\r/\t, matching S4).
+        layout_value = flatten_control_chars(value, keep_newline=True)
         font_obj, encode, width_1000 = build_fallback_font(
             pdf, unicode_face, layout_value.replace("\n", " ")
         )
@@ -747,7 +749,11 @@ def _text_value_problem(name: str, text: str, da: str | None, font_dir: str) -> 
             f"value for {name} contains characters outside the form font's "
             f"encoding (WinAnsi) and no fallback font is available"
         )
-    missing = _face_missing(face, text)
+    # Layout control chars (\t/\x0b/U+2028/…) are flattened to spaces before the
+    # appearance embeds the font (below), so they must NOT count as "missing"
+    # here — else a value the king renders fine would be refused (S4 gauntlet's
+    # broad-control-char lesson, applied to the shared form path too).
+    missing = _face_missing(face, flatten_control_chars(text, keep_newline=True))
     if missing:
         pretty = " ".join(f"'{c}'" for c in sorted(set(missing)))
         return f"value for {name} contains characters no available font can render ({pretty})"

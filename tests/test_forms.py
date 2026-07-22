@@ -388,6 +388,17 @@ class TestFillFormFields:
         )
         assert r["filled"] == 1
 
+    @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_fc1_broad_control_chars_render(self, tmp_dir):
+        # S4-gauntlet analog for forms: a Unicode value with a control char
+        # beyond \n\r\t (VT, Unicode LINE SEPARATOR) now FILLS (flattened to
+        # space) instead of being refused in validation.
+        out = os.path.join(tmp_dir, "ctlbroad.pdf")
+        r = fill_form_fields(
+            PDFLIB_FORM, out, {"applicant.name": "При\x0bвет" + chr(0x2028) + "мир"}, font_dir=FONTS_DIR
+        )
+        assert r["filled"] == 1
+
     def test_auto_size_and_inherited_da(self, tmp_dir):
         # The raw fixture's AcroForm /DA is "/Helv 0 Tf" — auto-size. The
         # appearance stream must carry a concrete positive size.

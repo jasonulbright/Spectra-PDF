@@ -51,6 +51,7 @@ from engine.pdf_metrics import (
     GLYPH_HEIGHT_EM as _GLYPH_HEIGHT_EM,
     HELVETICA_ASCII_WIDTHS as _HELVETICA_ASCII_WIDTHS,
     NON_ASCII_ADVANCE_EM as _NON_ASCII_ADVANCE_EM,
+    flatten_control_chars as _flatten_control_chars,
     text_width_em as _text_width_em,
 )
 
@@ -106,7 +107,13 @@ def _resolve_box(page: pikepdf.Page) -> tuple[float, float, float, float]:
 
 
 def _auto_font_size(
-    text: str, width: float, height: float, rotate: int, angle: float, em_width: float | None = None
+    text: str,
+    width: float,
+    height: float,
+    rotate: int,
+    angle: float,
+    em_width: float | None = None,
+    glyph_height_em: float | None = None,
 ) -> float:
     """Size the text so that BOTH of its axes fit the box.
 
@@ -141,11 +148,15 @@ def _auto_font_size(
         disp_h / cos_a if cos_a > 1e-9 else math.inf,
     )
     # S4: on the embedded-Unicode path the caller passes the run's own em
-    # advance; WinAnsi keeps the Helvetica metric (byte-identical auto-size).
+    # advance AND its real ascent+descent extent; WinAnsi keeps the Helvetica
+    # metrics (byte-identical auto-size). Using Helvetica's 0.925-em height for
+    # a taller embedded face (Liberation Sans is ~1.117 em) silently shrank the
+    # perpendicular-axis margin from 35% to ~21.5% (gauntlet).
     advance = max(em_width if em_width is not None else _text_width_em(text), 0.1)
+    gh = glyph_height_em if glyph_height_em is not None else _GLYPH_HEIGHT_EM
     fit = min(
         AUTO_FIT_FRACTION * baseline_crossing / advance,
-        AUTO_FIT_FRACTION * perp_crossing / _GLYPH_HEIGHT_EM,
+        AUTO_FIT_FRACTION * perp_crossing / gh,
     )
     return max(MIN_AUTO_FONT_SIZE, min(MAX_AUTO_FONT_SIZE, fit))
 
@@ -167,6 +178,26 @@ def _unicode_watermark_face(font_dir: str) -> str | None:
         return resolve_fallback_font(font_dir)  # original=None → sans
     except (ValueError, OSError):
         return None
+
+
+def _face_glyph_height_em(face_path: str) -> float:
+    """The embedded face's ascender+descender extent in em — the perpendicular-
+    axis metric `_auto_font_size` needs (Helvetica's `_GLYPH_HEIGHT_EM` is wrong
+    for a taller face). Best-effort: any read error falls back to the Helvetica
+    value (the auto-size is a fit heuristic, never load-bearing)."""
+    try:
+        from fontTools.ttLib import TTFont
+
+        from engine.font_fallback import _font_metrics
+
+        ttf = TTFont(face_path, fontNumber=0, lazy=True)
+        try:
+            m = _font_metrics(ttf)
+        finally:
+            ttf.close()
+        return max((m["ascent"] - m["descent"]) / 1000.0, 0.1)
+    except Exception:
+        return _GLYPH_HEIGHT_EM
 
 
 def _make_watermark_form(
@@ -279,34 +310,37 @@ def watermark(
     pages_watermarked = 0
     font_size_applied = 0.0
     with pikepdf.open(file) as pdf:
-        # S4: resolve the embedded-Unicode drawing ONCE (the text is the same
-        # for every page) — a non-Latin-1 value gets a subsetted Type0 font
-        # SHARED across pages, else the WinAnsi Helvetica path (uni=None,
-        # byte-identical). Built here (before the page loop, so build_fallback_
-        # font's uncoverable-char raise leaves NOTHING saved = atomic).
-        uni: tuple | None = None
-        auto_em: float | None = None
+        # S4: a non-Latin-1 stamp is drawn with a subsetted Type0 font SHARED
+        # across pages (the text is constant), else the WinAnsi Helvetica path
+        # (uni=None, byte-identical). Resolve the FACE upfront (cheap, no
+        # mutation) so a bad font_dir refuses before touching pages; the embed
+        # itself is built LAZILY on the first stamped page, so pages=[] / an
+        # all-out-of-range selection is a true no-op that never fails on
+        # coverage (gauntlet LOW). The build's uncoverable-char raise still
+        # happens before any add_overlay/save = atomic.
+        needs_unicode = False
+        face = ""
+        draw_text = ""
+        glyph_height: float | None = None
         try:
             text.encode("latin-1")
         except UnicodeEncodeError:
-            face = _unicode_watermark_face(font_dir)
-            if face is None:
+            needs_unicode = True
+            face = _unicode_watermark_face(font_dir) or ""
+            if not face:
                 raise ValueError(
                     "watermark text contains characters outside Latin-1 and no "
                     "fallback font is available"
                 )
-            # A stamp is single-line: layout-only control chars flatten to
-            # spaces so the drawn glyph set matches the embedded subset (the
-            # FC1 gauntlet lesson — build_fallback_font rejects \n/\r/\t).
-            draw_text = (
-                text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ").replace("\t", " ")
-            )
-            from engine.font_fallback import build_fallback_font
+            # A stamp is single-line: EVERY layout control/separator char (not
+            # just \n/\r/\t — gauntlet: \x0b/\x0c/U+2028/… crashed the subset)
+            # flattens to space so the drawn glyph set matches the embed.
+            draw_text = _flatten_control_chars(text, keep_newline=False)
+            glyph_height = _face_glyph_height_em(face)
 
-            font_obj, encode, width_1000 = build_fallback_font(pdf, face, draw_text)
-            auto_em = width_1000(draw_text) / 1000.0
-            show = b"<" + encode(draw_text).hex().encode("ascii") + b"> Tj"
-            uni = (font_obj, auto_em, show)
+        uni: tuple | None = None
+        auto_em: float | None = None
+        auto_gh: float | None = None
         for index, page in enumerate(pdf.pages, start=1):
             if wanted is not None and index not in wanted:
                 continue
@@ -315,8 +349,16 @@ def watermark(
             width, height = x1 - x0, y1 - y0
             if width <= 0 or height <= 0:
                 continue
+            if needs_unicode and uni is None:
+                from engine.font_fallback import build_fallback_font
+
+                font_obj, encode, width_1000 = build_fallback_font(pdf, face, draw_text)
+                auto_em = width_1000(draw_text) / 1000.0
+                auto_gh = glyph_height
+                show = b"<" + encode(draw_text).hex().encode("ascii") + b"> Tj"
+                uni = (font_obj, auto_em, show)
             size = float(font_size) if float(font_size) > 0 else _auto_font_size(
-                text, width, height, rotate, angle, em_width=auto_em
+                text, width, height, rotate, angle, em_width=auto_em, glyph_height_em=auto_gh
             )
             # Drawn angle composes the requested display angle with /Rotate —
             # viewers rotate the page clockwise by /Rotate, the text matrix
