@@ -8,10 +8,14 @@ import { ensureGsPath } from './SettingsPanel';
 // Phase 9.S5 — ICC-managed CMYK conversion for prepress (Ghostscript). Like
 // grayscale/pdfa it writes a new file (the "Optimize" tool group's pattern);
 // the render intent maps to Ghostscript's ICC transform.
+// Only intents that produce a DISTINCT result with the bundled default CMYK
+// profile are offered — that profile carries no Saturation table, so
+// "saturation" would render identically to "perceptual" (a control that does
+// nothing, the § I.0 silent-degradation class). It returns to the picker when
+// a profile that defines it is bundled (the destination-profile follow-on).
 const RENDER_INTENTS: { value: string; label: string }[] = [
   { value: 'relative', label: 'Relative colorimetric (print default)' },
   { value: 'perceptual', label: 'Perceptual (photographic)' },
-  { value: 'saturation', label: 'Saturation (business graphics)' },
   { value: 'absolute', label: 'Absolute colorimetric (proofing)' },
 ];
 

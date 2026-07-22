@@ -24,6 +24,11 @@ from .validate import validate_pdf
 # (1) is the prepress default — it maps in-gamut colours exactly and clips the
 # rest, which is what a print house expects; perceptual (0) would shift every
 # colour to compress the gamut. 0=perceptual 1=relative 2=saturation 3=absolute.
+# NB: with the BUILT-IN default CMYK profile "saturation" renders IDENTICALLY to
+# perceptual — that profile has no Saturation (AToB2) table, so LittleCMS falls
+# back to perceptual per the ICC spec. It stays a valid value (a bundled
+# destination profile that defines it would make it distinct), but the UI does
+# not offer it while it would be a no-op (round-42 gauntlet, § I.0).
 _RENDER_INTENTS = {"perceptual": 0, "relative": 1, "saturation": 2, "absolute": 3}
 
 
