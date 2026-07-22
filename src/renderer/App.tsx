@@ -43,7 +43,7 @@ import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
 import { setCommitGate, runCommitGate } from './lib/commit-gate';
-import { fillFormFields, readFormFields } from './lib/forms';
+import { readFormFields } from './lib/forms';
 import type { FormFieldValue } from './lib/forms';
 import { resolveFillTargets } from './lib/form-overlay';
 import { addFormField } from './lib/form-authoring';
@@ -619,8 +619,18 @@ function AppContent(): React.ReactElement {
       if (skipped.length > 0) {
         throw new Error(skipped.map((s) => `"${s.name}": ${s.reason}`).join('; '));
       }
-      const filled = await fillFormFields(bytes, resolved);
-      await file.writeBuffer(f.workingPath, filled);
+      // FC4 (§I.0 S1/S3): route the fill through the ENGINE — Unicode-capable
+      // (embeds a font for non-WinAnsi values) and multi-select-optionlist
+      // aware — instead of renderer-side pdf-lib. The renderer READ above stays
+      // pdf-lib, so `resolveFillTargets`' fingerprint/rename-family machinery is
+      // untouched; the snapshot already flushed pending edits, and `call` is
+      // commit-gated (never callRaw), so the engine reads the committed bytes.
+      await call('fill_form_fields', {
+        file: f.workingPath,
+        output: f.workingPath,
+        edits: resolved,
+        font_dir: await app.getEditFontPath(),
+      });
       const result = await reloadFile(path);
       if (!result) throw new Error('The file is no longer open.');
       dispatch({
@@ -631,7 +641,7 @@ function AppContent(): React.ReactElement {
         snapshotPath,
       });
     },
-    [state.files, reloadFile, dispatch],
+    [state.files, reloadFile, dispatch, call],
   );
 
   const handleAddFormField = useCallback(

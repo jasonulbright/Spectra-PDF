@@ -50,6 +50,13 @@ FF_RADIO = 1 << 15
 FF_PUSHBUTTON = 1 << 16
 FF_COMBO = 1 << 17
 FF_EDIT = 1 << 18
+FF_MULTISELECT = 1 << 21  # choice fields: a list box may select several items
+
+# Sentinel: an EMPTY value on a choice field (radio/dropdown/optionlist) means
+# "clear the selection" (pdf-lib's field.clear()), NOT an invalid option — else
+# a deliberate clear (or the on-canvas "—" option) would be refused. Text fields
+# treat "" as a legitimate empty value, so they never use this.
+_CLEAR = object()
 
 # Widget annotation flags.
 AF_HIDDEN = 1 << 1
@@ -235,6 +242,27 @@ def _option_export(field: _Field, wanted: str) -> str | None:
     return None
 
 
+def _option_export_index(field: _Field, wanted: str) -> tuple[str, int] | None:
+    """(export string, 0-based /Opt index) for `wanted` (display or export), or
+    None if /Opt exists and nothing matches. A field without /Opt has no index
+    (-1). Used for multi-select list boxes, whose /I holds the selected /Opt
+    indices (FC4)."""
+    opt = field.attr("/Opt")
+    if opt is None:
+        return (wanted, -1)
+    for i, entry in enumerate(opt):
+        try:
+            if isinstance(entry, pikepdf.Array) and len(entry) >= 2:
+                export, display = str(entry[0]), str(entry[1])
+            else:
+                export = display = str(entry)
+        except Exception:
+            continue
+        if wanted == display or wanted == export:
+            return (export, i)
+    return None
+
+
 def _radio_on_states(field: _Field) -> list[str]:
     """The non-/Off appearance-state names across the field's widgets, in
     widget order (the names /V must take to select each option)."""
@@ -320,7 +348,9 @@ def _field_value(field: _Field, ftype: str):
         if v is None:
             return ""
         if isinstance(v, pikepdf.Array):
-            return str(v[0]) if len(v) > 0 else ""
+            # FC4: a multi-select list box reports its FULL selection as a list
+            # (was silently truncated to the first item).
+            return [str(x) for x in v]
         return str(v)
     return None
 
@@ -817,15 +847,47 @@ def fill_form_fields(
                 else:
                     plan.append((field, ftype, b))
             elif ftype == "radio":
-                state = _radio_state_for(field, str(value))
-                if state is None:
-                    opts = ", ".join(_radio_display_options(field))
-                    problems.append(f"radio {name} has no option {value!r} (options: {opts})")
+                if str(value) == "":
+                    plan.append((field, ftype, _CLEAR))  # deliberate de-selection
                 else:
-                    plan.append((field, ftype, state))
+                    state = _radio_state_for(field, str(value))
+                    if state is None:
+                        opts = ", ".join(_radio_display_options(field))
+                        problems.append(f"radio {name} has no option {value!r} (options: {opts})")
+                    else:
+                        plan.append((field, ftype, state))
+            elif ftype == "optionlist" and isinstance(value, (list, tuple)):
+                # FC4: a multi-select list box — every element must be an option;
+                # store /V as the export array + /I as the selected indices.
+                if len(value) == 0:
+                    plan.append((field, ftype, _CLEAR))  # nothing selected
+                    continue
+                pairs: list[tuple[str, int]] = []
+                bad: list[str] = []
+                for v in value:
+                    ei = _option_export_index(field, str(v))
+                    if ei is None:
+                        bad.append(str(v))
+                    else:
+                        pairs.append(ei)
+                if bad:
+                    opts = ", ".join(_options(field))
+                    problems.append(f"optionlist {name} has no option(s) {bad} (options: {opts})")
+                else:
+                    # The appearance draws the selected exports (one per line);
+                    # coverage-check that combined text.
+                    joined = "\n".join(e for e, _i in pairs)
+                    prob = _text_value_problem(name, joined, _field_da(field, acro), font_dir)
+                    if prob is not None:
+                        problems.append(prob)
+                    else:
+                        plan.append((field, ftype, pairs))
             elif ftype in ("dropdown", "optionlist"):
-                export = _option_export(field, str(value))
                 editable = bool(field.flags & FF_EDIT) and ftype == "dropdown"
+                if str(value) == "" and not editable:
+                    plan.append((field, ftype, _CLEAR))  # de-select a fixed choice
+                    continue
+                export = _option_export(field, str(value))
                 if export is None and not editable:
                     opts = ", ".join(_options(field))
                     problems.append(f"{ftype} {name} has no option {value!r} (options: {opts})")
@@ -876,22 +938,53 @@ def fill_form_fields(
                     else:
                         widget["/AS"] = Name("/Off")
             elif ftype == "radio":
-                field.obj["/V"] = Name("/" + str(value))
-                for widget in field.widgets:
-                    widget["/AS"] = (
-                        Name("/" + str(value))
-                        if _widget_on_state(widget) == str(value)
-                        else Name("/Off")
-                    )
+                if value is _CLEAR:
+                    field.obj["/V"] = Name("/Off")
+                    for widget in field.widgets:
+                        widget["/AS"] = Name("/Off")
+                else:
+                    field.obj["/V"] = Name("/" + str(value))
+                    for widget in field.widgets:
+                        widget["/AS"] = (
+                            Name("/" + str(value))
+                            if _widget_on_state(widget) == str(value)
+                            else Name("/Off")
+                        )
             else:  # text / dropdown / optionlist
-                text = str(value)
-                field.obj["/V"] = pikepdf.String(text)
-                if "/I" in field.obj:
-                    del field.obj["/I"]
-                multiline = ftype == "text" and bool(field.flags & FF_MULTILINE)
+                if value is _CLEAR:
+                    # De-select: drop /V and /I, blank the appearance.
+                    if "/V" in field.obj:
+                        del field.obj["/V"]
+                    if "/I" in field.obj:
+                        del field.obj["/I"]
+                    appearance_text = ""
+                    multiline = False
+                elif isinstance(value, list):
+                    # FC4 multi-select list box: value = [(export, /Opt index)].
+                    exports = [e for e, _i in value]
+                    indices = sorted(i for _e, i in value if i >= 0)
+                    # A multi-value /V REQUIRES the MultiSelect flag or the field
+                    # is spec-non-conformant (pdf-lib auto-promotes; gauntlet).
+                    if len(exports) > 1 and not (field.flags & FF_MULTISELECT):
+                        field.obj["/Ff"] = int(field.flags) | FF_MULTISELECT
+                    field.obj["/V"] = pikepdf.Array([pikepdf.String(e) for e in exports])
+                    if indices:
+                        field.obj["/I"] = pikepdf.Array(indices)
+                    elif "/I" in field.obj:
+                        del field.obj["/I"]
+                    appearance_text = "\n".join(exports)  # one selected item per line
+                    multiline = True
+                else:
+                    appearance_text = str(value)
+                    field.obj["/V"] = pikepdf.String(appearance_text)
+                    if "/I" in field.obj:
+                        del field.obj["/I"]
+                    multiline = ftype == "text" and bool(field.flags & FF_MULTILINE)
                 try:
                     for widget in field.widgets:
-                        if _text_appearance(pdf, widget, text, da, multiline, quadding, font_dir):
+                        if _text_appearance(
+                            pdf, widget, appearance_text, da, multiline, quadding, font_dir
+                        ):
                             if field.name not in fonts_substituted:
                                 fonts_substituted.append(field.name)
                 except ValueError as exc:

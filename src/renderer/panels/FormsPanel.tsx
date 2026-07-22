@@ -1,13 +1,31 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
-import { file } from '../lib/tauri-bridge';
+import { useEngine } from '../hooks/useEngine';
+import { file, app } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { readFormFields, fillFormFields } from '../lib/forms';
+import { readFormFields } from '../lib/forms';
 import type { FormField, FormFieldValue } from '../lib/forms';
+
+/** Value equality across the FormFieldValue union (arrays compared element-wise). */
+function valueEquals(a: FormFieldValue | undefined, b: FormFieldValue | undefined): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    const aa = Array.isArray(a) ? a : [];
+    const bb = Array.isArray(b) ? b : [];
+    return aa.length === bb.length && aa.every((x, i) => x === bb[i]);
+  }
+  return a === b;
+}
 
 export function FormsPanel(): React.ReactElement {
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
+  const { call } = useEngine();
+  // The values as first read — Apply sends only the fields the user CHANGED
+  // (a diff), never the full current-state snapshot: the engine validates every
+  // edit as authoritative, so resending an untouched read-only/button/unselected
+  // field would abort the whole fill (gauntlet CRITICAL). pdf-lib's per-field
+  // no-op tolerated the full snapshot; the engine does not.
+  const initialValues = useRef<Record<string, FormFieldValue>>({});
   const [fields, setFields] = useState<FormField[]>([]);
   const [hasXFA, setHasXFA] = useState(false);
   const [values, setValues] = useState<Record<string, FormFieldValue>>({});
@@ -38,6 +56,7 @@ export function FormsPanel(): React.ReactElement {
         const seed: Record<string, FormFieldValue> = {};
         for (const f of result.fields) seed[f.name] = f.value;
         setValues(seed);
+        initialValues.current = seed;
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -61,35 +80,55 @@ export function FormsPanel(): React.ReactElement {
 
   const handleApply = useCallback(async () => {
     if (!activeFile) return;
+    // Only the editable fields the user actually CHANGED — never read-only /
+    // button / signature / untouched fields (the engine would reject them and
+    // abort the whole fill). Flatten still runs on an empty diff (it bakes the
+    // existing values), but a plain fill with no changes is a no-op.
+    const edits: Record<string, FormFieldValue> = {};
+    for (const f of fields) {
+      if (f.editable && !valueEquals(values[f.name], initialValues.current[f.name])) {
+        edits[f.name] = values[f.name];
+      }
+    }
+    const changedCount = Object.keys(edits).length;
+    if (changedCount === 0 && !flatten) {
+      setStatus('No changes to apply');
+      return;
+    }
     setBusy(true);
     setStatus(flatten ? 'Filling and flattening…' : 'Filling form…');
     try {
-      // Renderer-side whole-file op: snapshot (runs the commit gate, so
-      // pending page edits are on disk first) → read the committed bytes →
-      // fill with pdf-lib → write back → UPDATE_FILE (undoable via the
-      // snapshot, marks dirty). Page count is unchanged by a fill.
+      // FC4 (§I.0 S1/S3): snapshot (runs the commit gate) → fill through the
+      // ENGINE (Unicode-capable + multi-select optionlist) → reload → UPDATE_
+      // FILE (undoable via the snapshot). `call` is commit-gated (never
+      // callRaw). Page count is unchanged by a fill/flatten.
       const snapshotPath = await file.snapshot(activeFile.workingPath);
-      const bytes = await file.readBuffer(activeFile.workingPath);
-      const filled = await fillFormFields(bytes, values, { flatten });
-      await file.writeBuffer(activeFile.workingPath, filled);
+      await call('fill_form_fields', {
+        file: activeFile.workingPath,
+        output: activeFile.workingPath,
+        edits,
+        flatten,
+        font_dir: await app.getEditFontPath(),
+      });
+      const buffer = await file.readBuffer(activeFile.workingPath);
       dispatch({
         type: 'UPDATE_FILE',
         path: activeFile.path,
         pageCount: activeFile.pageCount,
-        buffer: filled,
+        buffer,
         snapshotPath,
       });
       setStatus(
         flatten
           ? 'Form filled and flattened (fields locked)'
-          : `Filled ${editableCount} field${editableCount === 1 ? '' : 's'}`,
+          : `Filled ${changedCount} field${changedCount === 1 ? '' : 's'}`,
       );
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
-  }, [activeFile, values, flatten, editableCount, dispatch]);
+  }, [activeFile, fields, values, flatten, dispatch, call]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to fill its form fields" />;
 
