@@ -135,6 +135,8 @@ const GLYPHS: Record<Operation, React.JSX.Element> = {
       <path d="M15 8l4 4-4 4" />
     </>
   ),
+  // Ink droplet — CMYK prepress conversion (9.S5).
+  convert_cmyk: <path d="M12 2.5s6 6.5 6 10.5a6 6 0 0 1-12 0c0-4 6-10.5 6-10.5z" />,
   // Wrench.
   repair: (
     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />

@@ -135,8 +135,8 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'optimize',
     title: 'Optimize',
-    description: 'Reduce file size, convert to grayscale or PDF/A.',
-    ops: ['compress', 'optimize', 'grayscale', 'pdfa', 'pdf_version'],
+    description: 'Reduce file size, convert to grayscale, CMYK, or PDF/A.',
+    ops: ['compress', 'optimize', 'grayscale', 'convert_cmyk', 'pdfa', 'pdf_version'],
   },
   {
     id: 'repair',

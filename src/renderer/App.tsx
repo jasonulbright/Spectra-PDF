@@ -31,6 +31,7 @@ import { FormsPanel } from './panels/FormsPanel';
 import { ComparePanel } from './panels/ComparePanel';
 import { SignaturesPanel } from './panels/SignaturesPanel';
 import { DocumentJsPanel } from './panels/DocumentJsPanel';
+import { PrepressPanel } from './panels/PrepressPanel';
 import { useEngine } from './hooks/useEngine';
 import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
 import { indexOpenFile } from './lib/workspace';
@@ -125,6 +126,7 @@ const panels: Record<Operation, React.ComponentType> = {
   extract_text: ExtractTextPanel,
   watermark: WatermarkPanel, forms: FormsPanel, compare: ComparePanel,
   signatures: SignaturesPanel, document_js: DocumentJsPanel,
+  convert_cmyk: PrepressPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
 };
 

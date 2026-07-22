@@ -28,6 +28,7 @@ from engine.rotate import rotate
 from engine.delete import delete
 from engine.compress import compress
 from engine.grayscale import grayscale
+from engine.prepress import convert_cmyk
 from engine.optimize import optimize
 from engine.pdfa import convert_pdfa
 from engine.encrypt import encrypt, decrypt
@@ -87,6 +88,7 @@ def main() -> None:
     server.register("delete", delete)
     server.register("compress", compress)
     server.register("grayscale", grayscale)
+    server.register("convert_cmyk", convert_cmyk)
     server.register("optimize", optimize)
     server.register("convert_pdfa", convert_pdfa)
     server.register("encrypt", encrypt)
