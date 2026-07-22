@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { readFormFields } from '../lib/forms';
 import type { FormField } from '../lib/forms';
+import type { EngineCall } from '../lib/engine-call';
 import { projectFieldWidgets } from '../lib/form-overlay';
 import type { OverlayWidget, PageBox } from '../lib/form-overlay';
 import { requestDocumentProxy } from '../lib/pdfDocCache';
@@ -37,7 +38,10 @@ interface CacheEntry {
 // refires this effect, so a hung run is always superseded, never
 // load-bearing. It also pins fields and page boxes to the SAME bytes: a
 // post-commit read must not project new widgets through old geometry.
-export function useWorkspaceForms(files: Map<string, OpenFile>): ReadonlyMap<string, FileFormInfo> {
+export function useWorkspaceForms(
+  files: Map<string, OpenFile>,
+  call: EngineCall,
+): ReadonlyMap<string, FileFormInfo> {
   const [published, setPublished] = useState<ReadonlyMap<string, FileFormInfo>>(new Map());
   const cacheRef = useRef(new Map<string, CacheEntry>());
   const genRef = useRef(0);
@@ -69,7 +73,13 @@ export function useWorkspaceForms(files: Map<string, OpenFile>): ReadonlyMap<str
           (async () => {
             let info: FileFormInfo;
             try {
-              const { fields } = await readFormFields(buffer);
+              // Read fields through the engine (FC4b) from the working copy on
+              // disk — its bytes equal `buffer` (page-tier edits touch neither
+              // until commit), so fields stay consistent with geometry resolved
+              // from `buffer`'s proxy below. `read_form_fields` is INTERNAL, so
+              // this never runs the commit gate (a passive overlay read must
+              // not flush pending page edits).
+              const { fields } = await readFormFields(call, f.workingPath);
               const pageIndexes = new Set<number>();
               for (const field of fields) {
                 for (const w of field.widgets) pageIndexes.add(w.pageIndex);
@@ -156,7 +166,7 @@ export function useWorkspaceForms(files: Map<string, OpenFile>): ReadonlyMap<str
       alive = false;
       if (retryTimer !== null) clearTimeout(retryTimer);
     };
-  }, [files]);
+  }, [files, call]);
 
   return published;
 }

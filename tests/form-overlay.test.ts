@@ -9,7 +9,7 @@ import {
   resolveFillTargets,
   valueShapeMatches,
 } from '../src/renderer/lib/form-overlay';
-import { readFormFields } from '../src/renderer/lib/forms';
+import { readFormFields } from './helpers/pdflib-forms';
 import { buildPdf } from '../src/renderer/lib/pdfx-build';
 import type { FormField, FormFieldValue } from '../src/renderer/lib/forms';
 

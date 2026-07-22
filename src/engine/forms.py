@@ -394,12 +394,22 @@ def _page_index_maps(pdf) -> tuple[dict, dict]:
     return annot_map, page_map
 
 
-def _widget_geometry(field, annot_map: dict, page_map: dict) -> list:
+def _widget_geometry(
+    field, ftype: str, options: list[str], annot_map: dict, page_map: dict
+) -> list:
     """Per-widget placement — `{page (0-based, or None if unplaced), rect
-    [x0,y0,x1,y1] normalized}`. FC3 (§I.0 S6/FC4): the geometry the on-canvas
-    overlay needs to project each widget; `_Field.widgets` already collects a
-    typed terminal's nested widgets, so this surfaces S6 to the GUI once the
-    read routes through the engine."""
+    [x0,y0,x1,y1] normalized, hidden, option?}`. FC3/FC4 (§I.0 S6): the geometry
+    the on-canvas overlay needs to project each widget; `_Field.widgets` already
+    collects a typed terminal's nested widgets, so this surfaces S6 to the GUI
+    once the read routes through the engine.
+
+    `hidden` mirrors the renderer's old pdf-lib read: a /F Hidden or NoView
+    widget shows nothing on the raster, so the overlay must offer no input over
+    it. `option` (radio only) is the DISPLAY option this widget's on-state
+    selects — the overlay uses it to know which radio a widget commits — mapped
+    through /Opt and included only when it is one of the field's fillable
+    options (an on-state with no matching option leaves the widget inert, the
+    same honest posture as the pdf-lib read)."""
     out = []
     for w in field.widgets:
         try:
@@ -424,12 +434,22 @@ def _widget_geometry(field, annot_map: dict, page_map: dict) -> list:
                         page = page_map.get(pog)
                 except Exception:
                     page = None
-        out.append(
-            {
-                "page": page,
-                "rect": [min(r[0], r[2]), min(r[1], r[3]), max(r[0], r[2]), max(r[1], r[3])],
-            }
-        )
+        try:
+            flags = int(w.get("/F", 0))
+        except (TypeError, ValueError):
+            flags = 0
+        entry = {
+            "page": page,
+            "rect": [min(r[0], r[2]), min(r[1], r[3]), max(r[0], r[2]), max(r[1], r[3])],
+            "hidden": bool(flags & (AF_HIDDEN | AF_NOVIEW)),
+        }
+        if ftype == "radio":
+            on = _widget_on_state(w)
+            if on is not None:
+                display = _radio_display_value(field, on)
+                if display in options:
+                    entry["option"] = display
+        out.append(entry)
     return out
 
 
@@ -440,23 +460,30 @@ def read_form_fields(file: str) -> dict:
         fields = []
         for field in _all_fields(pdf):
             ftype = _classify(field)
+            if ftype == "radio":
+                options = _radio_display_options(field)
+            elif ftype in ("dropdown", "optionlist"):
+                options = _options(field)
+            else:
+                options = []
             entry = {
                 "name": field.name,
                 "type": ftype,
                 "value": _field_value(field, ftype),
                 "read_only": bool(field.flags & FF_READ_ONLY),
                 "required": bool(field.flags & FF_REQUIRED),
-                # FC3: per-widget page+rect so the engine read can drive the
-                # on-canvas overlay (the S1 re-route, FC4) and nested widgets
-                # (S6) list with geometry.
-                "widgets": _widget_geometry(field, annot_map, page_map),
+                # FC3/FC4: per-widget page+rect (+hidden, +radio option) so the
+                # engine read can drive the on-canvas overlay (the S1 re-route)
+                # and nested widgets (S6) list with geometry.
+                "widgets": _widget_geometry(field, ftype, options, annot_map, page_map),
             }
             if ftype == "text":
                 entry["multiline"] = bool(field.flags & FF_MULTILINE)
-            if ftype == "radio":
-                entry["options"] = _radio_display_options(field)
-            elif ftype in ("dropdown", "optionlist"):
-                entry["options"] = _options(field)
+            if ftype in ("radio", "dropdown", "optionlist"):
+                entry["options"] = options
+            if ftype == "signature":
+                # The overlay badges a signed vs empty signature field.
+                entry["filled"] = field.attr("/V") is not None
             fields.append(entry)
         return {"has_xfa": _has_xfa(pdf), "fields": fields, "count": len(fields)}
 

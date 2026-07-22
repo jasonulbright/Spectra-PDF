@@ -169,8 +169,8 @@ interface WorkspaceCanvasViewProps {
   // at an index (byte-only import machinery, undoable via the page tier).
   onAddPages: (docId: string, toIndex: number) => void;
   // Bake pending on-canvas form values into one file (2n.4b) — App implements
-  // the FormsPanel shape (snapshot(gate) → readBuffer → fillFormFields →
-  // writeBuffer → UPDATE_FILE), so it lands on the snapshot-undo chain.
+  // the FormsPanel shape (snapshot(gate) → engine fill_form_fields → reload →
+  // UPDATE_FILE), so it lands on the snapshot-undo chain.
   onFillFormValues: (path: string, values: Record<string, FormFieldValue>) => Promise<void>;
   // Author a new form field into one file (2n.4c) — same whole-file-op shape.
   onAddFormField: (path: string, spec: NewFieldSpec) => Promise<void>;
@@ -436,7 +436,7 @@ export function WorkspaceCanvasView({
   // name survives page edits and commits, so half-typed values survive an
   // Apply-changes; they are PRUNED against every settled re-read instead
   // (name gone / no longer editable / shape mismatch / file closed).
-  const workspaceForms = useWorkspaceForms(state.files);
+  const workspaceForms = useWorkspaceForms(state.files, engineCall);
   const [pendingFormValues, setPendingFormValues] =
     useState<ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>>(NO_FORM_VALUES);
   const [fillingForms, setFillingForms] = useState(false);

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { addFormField } from '../src/renderer/lib/form-authoring';
-import { readFormFields, fillFormFields } from '../src/renderer/lib/forms';
+import { readFormFields, fillFormFields } from './helpers/pdflib-forms';
 import { buildPdf } from '../src/renderer/lib/pdfx-build';
 
 const require = createRequire(import.meta.url);

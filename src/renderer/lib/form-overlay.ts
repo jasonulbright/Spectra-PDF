@@ -88,7 +88,7 @@ export function projectFieldWidgets(
 
 // Whether a pending value's SHAPE is still compatible with the field it
 // names — the type-level half of pruning (a text field swapped for a radio
-// of the same name must not receive the old string blindly; fillFormFields
+// of the same name must not receive the old string blindly; the engine fill
 // would route it through the wrong setter).
 export function valueShapeMatches(type: FormFieldType, value: FormFieldValue): boolean {
   switch (type) {

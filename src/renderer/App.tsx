@@ -611,20 +611,25 @@ function AppContent(): React.ReactElement {
     async (path: string, values: Record<string, FormFieldValue>) => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
-      const preFields = f.buffer ? (await readFormFields(f.buffer)).fields : [];
+      // Pre/post reads route through the engine (FC4b) — `read_form_fields` is
+      // INTERNAL, so neither read runs the commit gate. The pre-read sees the
+      // current working copy (== buffer); `file.snapshot` then flushes pending
+      // page edits, and the post-read sees those committed bytes, so the
+      // fingerprint/rename-family re-resolution below still detects an import
+      // carry's field rename exactly as with the old pdf-lib read.
+      const preFields = f.buffer ? (await readFormFields(call, f.workingPath)).fields : [];
       const snapshotPath = await file.snapshot(f.workingPath);
-      const bytes = await file.readBuffer(f.workingPath);
-      const postFields = (await readFormFields(bytes)).fields;
+      const postFields = (await readFormFields(call, f.workingPath)).fields;
       const { resolved, skipped } = resolveFillTargets(preFields, postFields, values);
       if (skipped.length > 0) {
         throw new Error(skipped.map((s) => `"${s.name}": ${s.reason}`).join('; '));
       }
       // FC4 (§I.0 S1/S3): route the fill through the ENGINE — Unicode-capable
       // (embeds a font for non-WinAnsi values) and multi-select-optionlist
-      // aware — instead of renderer-side pdf-lib. The renderer READ above stays
-      // pdf-lib, so `resolveFillTargets`' fingerprint/rename-family machinery is
-      // untouched; the snapshot already flushed pending edits, and `call` is
-      // commit-gated (never callRaw), so the engine reads the committed bytes.
+      // aware. Read (above) and fill are now one engine implementation (FC4b);
+      // `resolveFillTargets`' fingerprint/rename-family machinery is unchanged.
+      // The snapshot already flushed pending edits, and `call` is commit-gated
+      // for `fill_form_fields`, so the engine reads the committed bytes.
       await call('fill_form_fields', {
         file: f.workingPath,
         output: f.workingPath,

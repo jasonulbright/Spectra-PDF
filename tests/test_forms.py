@@ -125,8 +125,12 @@ class TestReadFormFields:
         src = os.path.join(tmp_dir, "raw.pdf")
         _make_raw_form(src)
         by = {f["name"]: f for f in read_form_fields(src)["fields"]}
-        assert by["person.first"]["widgets"] == [{"page": 0, "rect": [40.0, 340.0, 200.0, 364.0]}]
-        assert by["person.last"]["widgets"] == [{"page": 0, "rect": [40.0, 300.0, 200.0, 324.0]}]
+        assert by["person.first"]["widgets"] == [
+            {"page": 0, "rect": [40.0, 340.0, 200.0, 364.0], "hidden": False}
+        ]
+        assert by["person.last"]["widgets"] == [
+            {"page": 0, "rect": [40.0, 300.0, 200.0, 324.0], "hidden": False}
+        ]
         assert all("widgets" in f for f in by.values())
 
     def test_fc3_widget_page_index_across_pages(self, tmp_dir):
@@ -147,7 +151,7 @@ class TestReadFormFields:
         pdf.save(out)
         pdf.close()
         f2 = next(f for f in read_form_fields(out)["fields"] if f["name"] == "f2")
-        assert f2["widgets"] == [{"page": 1, "rect": [10.0, 20.0, 110.0, 44.0]}]
+        assert f2["widgets"] == [{"page": 1, "rect": [10.0, 20.0, 110.0, 44.0], "hidden": False}]
 
     def test_fc4_multiselect_optionlist(self, tmp_dir):
         # FC4: a LIST value on a multi-select list box stores /V as the export
@@ -268,7 +272,7 @@ class TestReadFormFields:
         pdf.save(out)
         pdf.close()
         dup = next(f for f in read_form_fields(out)["fields"] if f["name"] == "dup")
-        assert dup["widgets"] == [{"page": None, "rect": [1.0, 2.0, 3.0, 4.0]}]
+        assert dup["widgets"] == [{"page": None, "rect": [1.0, 2.0, 3.0, 4.0], "hidden": False}]
 
     def test_fc3_ambiguous_widget_resolves_via_P(self, tmp_dir):
         # The ambiguous (two-/Annots) widget's spec-authoritative /P disambiguates
@@ -289,7 +293,7 @@ class TestReadFormFields:
         pdf.save(out)
         pdf.close()
         dup = next(f for f in read_form_fields(out)["fields"] if f["name"] == "dup")
-        assert dup["widgets"] == [{"page": 1, "rect": [1.0, 2.0, 3.0, 4.0]}]
+        assert dup["widgets"] == [{"page": 1, "rect": [1.0, 2.0, 3.0, 4.0], "hidden": False}]
 
     def test_fc3_rect_normalized(self, tmp_dir):
         # A /Rect in a non-standard corner order normalizes to [x0,y0,x1,y1].
@@ -307,8 +311,90 @@ class TestReadFormFields:
         pdf.save(out)
         pdf.close()
         assert read_form_fields(out)["fields"][0]["widgets"] == [
-            {"page": 0, "rect": [10.0, 20.0, 110.0, 44.0]}
+            {"page": 0, "rect": [10.0, 20.0, 110.0, 44.0], "hidden": False}
         ]
+
+    def test_fc4b_widget_hidden_flag(self, tmp_dir):
+        # FC4b: a widget with /F Hidden (bit 2) or NoView (bit 6) reports
+        # hidden=True — the overlay offers no input where the raster shows
+        # nothing. AF_HIDDEN = 1<<1 = 2.
+        out = os.path.join(tmp_dir, "hid.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        w = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, Rect=[10, 20, 110, 44],
+                FT=Name.Tx, T=pikepdf.String("h"), F=2, P=page.obj,
+            )
+        )
+        page.obj["/Annots"] = pikepdf.Array([w])
+        pdf.Root["/AcroForm"] = Dictionary(Fields=pikepdf.Array([w]))
+        pdf.save(out)
+        pdf.close()
+        assert read_form_fields(out)["fields"][0]["widgets"][0]["hidden"] is True
+
+    def test_fc4b_radio_widget_maps_to_its_option(self, tmp_dir):
+        # FC4b: each radio widget reports the DISPLAY option its on-state
+        # selects — /Opt-indexed on-states ('0'/'1') map through /Opt, so the
+        # overlay knows which option a widget commits.
+        out = os.path.join(tmp_dir, "radio.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+
+        def _w(state, rect):
+            n = Dictionary()
+            n[state] = Dictionary()
+            n["/Off"] = Dictionary()
+            return pdf.make_indirect(
+                Dictionary(
+                    Type=Name.Annot, Subtype=Name.Widget, Rect=rect, P=page.obj,
+                    AP=Dictionary(N=n), AS=Name("/Off"),
+                )
+            )
+
+        w0 = _w("/0", [10, 200, 25, 215])
+        w1 = _w("/1", [10, 170, 25, 185])
+        field = pdf.make_indirect(
+            Dictionary(
+                FT=Name.Btn, Ff=(1 << 15), T=pikepdf.String("color"),
+                Kids=pikepdf.Array([w0, w1]),
+                Opt=pikepdf.Array([pikepdf.String("Red"), pikepdf.String("Blue")]),
+            )
+        )
+        w0["/Parent"] = field
+        w1["/Parent"] = field
+        page.obj["/Annots"] = pikepdf.Array([w0, w1])
+        pdf.Root["/AcroForm"] = Dictionary(Fields=pikepdf.Array([field]))
+        pdf.save(out)
+        pdf.close()
+        f = next(f for f in read_form_fields(out)["fields"] if f["name"] == "color")
+        assert f["type"] == "radio"
+        assert [w.get("option") for w in f["widgets"]] == ["Red", "Blue"]
+
+    def test_fc4b_signature_filled_flag(self, tmp_dir):
+        # FC4b: a signature field reports filled=True only when /V is present.
+        out = os.path.join(tmp_dir, "sig.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        empty = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, Rect=[10, 200, 110, 240],
+                FT=Name.Sig, T=pikepdf.String("sig-empty"), P=page.obj,
+            )
+        )
+        done = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, Rect=[10, 100, 110, 140],
+                FT=Name.Sig, T=pikepdf.String("sig-done"), V=Dictionary(), P=page.obj,
+            )
+        )
+        page.obj["/Annots"] = pikepdf.Array([empty, done])
+        pdf.Root["/AcroForm"] = Dictionary(Fields=pikepdf.Array([empty, done]))
+        pdf.save(out)
+        pdf.close()
+        by = {f["name"]: f for f in read_form_fields(out)["fields"]}
+        assert by["sig-empty"]["type"] == "signature" and by["sig-empty"]["filled"] is False
+        assert by["sig-done"]["filled"] is True
 
 
 class TestFillFormFields:

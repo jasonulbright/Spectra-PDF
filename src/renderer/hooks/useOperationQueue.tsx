@@ -69,6 +69,12 @@ const INTERNAL_METHODS = new Set([
   // gating it would force-commit unrelated pending page edits on every
   // keystroke pause in the Add Text card (the exact get_pdf_version bug).
   'measure_text_box',
+  // FC4b: the GUI form read routes through the engine (`lib/forms.ts`). It is a
+  // pure lookup that drives the FormsPanel + the on-canvas overlay on every
+  // buffer change — gating it would flush the user's pending page edits to disk
+  // just for showing a form's fields (the get_pdf_version/measure_text_box
+  // hazard). Fills still go through the gated `fill_form_fields`.
+  'read_form_fields',
 ]);
 
 export function isTrackableMethod(method: string): boolean {

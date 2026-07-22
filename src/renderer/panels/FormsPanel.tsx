@@ -20,6 +20,7 @@ function valueEquals(a: FormFieldValue | undefined, b: FormFieldValue | undefine
 export function FormsPanel(): React.ReactElement {
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
+  const workingPath = activeFile?.workingPath ?? null;
   // The values as first read — Apply sends only the fields the user CHANGED
   // (a diff), never the full current-state snapshot: the engine validates every
   // edit as authoritative, so resending an untouched read-only/button/unselected
@@ -41,14 +42,18 @@ export function FormsPanel(): React.ReactElement {
   // (UPDATE_FILE swaps the buffer), after any whole-file op, and after undo.
   useEffect(() => {
     let cancelled = false;
-    if (!buffer) {
+    if (!buffer || !workingPath) {
       setFields([]);
       setHasXFA(false);
       setValues({});
       return;
     }
     setReading(true);
-    readFormFields(buffer)
+    // Read through the engine (FC4b). Keyed on `buffer` identity — the same
+    // content-change signal as before — but read from the working copy on
+    // disk, whose bytes equal `buffer` (page-tier edits touch neither until
+    // commit). `call` never gates `read_form_fields` (it is INTERNAL).
+    readFormFields(call, workingPath)
       .then((result) => {
         if (cancelled) return;
         setFields(result.fields);
@@ -70,7 +75,7 @@ export function FormsPanel(): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [buffer]);
+  }, [buffer, workingPath, call]);
 
   const setValue = useCallback((name: string, value: FormFieldValue) => {
     setValues((prev) => ({ ...prev, [name]: value }));

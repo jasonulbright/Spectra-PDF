@@ -22,7 +22,7 @@ import {
 } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { buildPdf, buildPdfx } from '../src/renderer/lib/pdfx-build';
-import { readFormFields, fillFormFields } from '../src/renderer/lib/forms';
+import { readFormFields, fillFormFields } from './helpers/pdflib-forms';
 import type { ExportPage } from '../src/renderer/lib/pdfx-format';
 
 const require = createRequire(import.meta.url);
