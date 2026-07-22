@@ -60,6 +60,20 @@ _FACE_FILES = {
     },
 }
 
+# 9.K2: the feature-bearing family (Libertinus Serif OTF, SIL OFL). OPT-IN
+# ONLY — deliberately NOT in `_FACE_FILES`, so `classify_font_family` /
+# `resolve_fallback_font`'s automatic ladder can never land here. It is
+# reached solely by an explicit feature request (small caps / alternates),
+# because Liberation carries none of those features and swapping a document's
+# body font into Libertinus (which is NOT metric-compatible) must never
+# happen silently.
+_LIBERTINUS_SERIF = {
+    "regular": "LibertinusSerif-Regular.otf",
+    "bold": "LibertinusSerif-Bold.otf",
+    "italic": "LibertinusSerif-Italic.otf",
+    "bolditalic": "LibertinusSerif-BoldItalic.otf",
+}
+
 # PDF FontDescriptor /Flags bits (PDF spec Table 121, 1-based in the spec).
 _FLAG_FIXED_PITCH = 1 << 0
 _FLAG_SERIF = 1 << 1
@@ -206,15 +220,38 @@ def resolve_fallback_font(font_path: str, original_font=None, style: str = "regu
     raise ValueError(f"no fallback font found in {font_path}")
 
 
-def _subset_font(font_path: str, text: str) -> tuple[bytes, "TTFont"]:
-    """Subset the fallback font to `text`'s characters; returns (ttf bytes,
-    the loaded subset TTFont for metrics/cmap reads)."""
+def resolve_feature_font(font_path: str, style: str = "regular") -> str:
+    """The bundled FEATURE-BEARING face (Libertinus Serif OTF) for `style`.
+    9.K2 — opt-in only; never returned by the automatic ladder above, so it
+    can't become a silent substitution of a document's body font."""
+    if not os.path.isdir(font_path):
+        return font_path
+    st = style if style in _LIBERTINUS_SERIF else "regular"
+    for name in (_LIBERTINUS_SERIF[st], _LIBERTINUS_SERIF["regular"]):
+        candidate = os.path.join(font_path, name)
+        if os.path.isfile(candidate):
+            return candidate
+    raise ValueError(f"Libertinus Serif (feature font) not found in {font_path}")
+
+
+def _subset_font(font_path: str, text: str, glyphs=None) -> tuple[bytes, "TTFont"]:
+    """Subset the fallback font; returns (ttf bytes, the loaded subset TTFont
+    for metrics/cmap reads).
+
+    9.K2: when `glyphs` (a set of glyph NAMES) is given, subset to those
+    glyphs directly instead of by character. Feature-substituted glyphs
+    (`a.sc`, a stylistic alternate) are not reachable through the cmap, so a
+    text-driven subset would drop them; a glyph-driven subset keeps exactly
+    what will be drawn."""
     options = ft_subset.Options()
     options.retain_gids = False
     options.name_IDs = [1, 2]  # family + subfamily are plenty
     options.notdef_outline = True
     subsetter = ft_subset.Subsetter(options=options)
-    subsetter.populate(text=text or " ")
+    if glyphs:
+        subsetter.populate(glyphs=sorted(glyphs))
+    else:
+        subsetter.populate(text=text or " ")
     font = TTFont(font_path)
     subsetter.subset(font)
     buf = io.BytesIO()
@@ -246,20 +283,40 @@ def _font_metrics(font: "TTFont") -> dict:
     }
 
 
-def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
+def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for=None):
     """Embed a subset of the fallback font for `text`. Returns
-    (font_dict [indirect], encode(str)->bytes, width_1000(str)->float)."""
+    (font_dict [indirect], encode(str)->bytes, width_1000(str)->float).
+
+    9.K2: `glyph_for` (a `{char: glyph_name}` map from `font_features.
+    resolve_glyphs`) overrides the cmap lookup so a FEATURE-substituted glyph
+    (small cap, alternate) is what gets embedded and drawn. ToUnicode still
+    maps back to the original character, so small-caps text stays searchable
+    and re-editable as its plain letters. `glyph_for=None` keeps the shipped
+    cmap-driven path byte-for-byte."""
     if not Path(font_path).is_file():
         raise ValueError(f"bundled fallback font not found: {font_path}")
-    ttf_bytes, font = _subset_font(font_path, text)
-    # getBestCmap() is NONE when the subset kept no unicode cmap at all
-    # (every requested char missing) — treat as an empty map so the refusal
-    # below names the characters instead of TypeError-ing.
-    cmap = font.getBestCmap() or {}
-    missing = [ch for ch in set(text) if ord(ch) not in cmap]
-    if missing:
-        pretty = " ".join(f"'{c}'" for c in sorted(missing))
-        raise ValueError(f"the fallback font cannot express {pretty}")
+
+    if glyph_for is not None:
+        # Feature path: subset to the RESOLVED glyphs (unreachable via cmap).
+        missing = [ch for ch in set(text) if not glyph_for.get(ch)]
+        if missing:
+            pretty = " ".join(f"'{c}'" for c in sorted(missing))
+            raise ValueError(f"the fallback font cannot express {pretty}")
+        want_glyphs = {glyph_for[ch] for ch in set(text)}
+        ttf_bytes, font = _subset_font(font_path, text, glyphs=want_glyphs)
+        glyph_of_char = {ch: glyph_for[ch] for ch in set(text)}
+    else:
+        ttf_bytes, font = _subset_font(font_path, text)
+        # getBestCmap() is NONE when the subset kept no unicode cmap at all
+        # (every requested char missing) — treat as an empty map so the
+        # refusal below names the characters instead of TypeError-ing.
+        cmap = font.getBestCmap() or {}
+        missing = [ch for ch in set(text) if ord(ch) not in cmap]
+        if missing:
+            pretty = " ".join(f"'{c}'" for c in sorted(missing))
+            raise ValueError(f"the fallback font cannot express {pretty}")
+        glyph_of_char = {ch: cmap[ord(ch)] for ch in set(text)}
+
     hmtx = font["hmtx"]
     metrics = _font_metrics(font)
     scale = metrics["scale"]
@@ -269,7 +326,7 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
     used: dict[str, int] = {}  # char -> gid
     widths: dict[int, float] = {}  # gid -> width (1000/em)
     for ch in sorted(set(text)):
-        glyph_name = cmap[ord(ch)]
+        glyph_name = glyph_of_char[ch]
         gid = gid_of[glyph_name]
         used[ch] = gid
         widths[gid] = round(hmtx[glyph_name][0] * scale, 2)
@@ -294,21 +351,37 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
     if stem.endswith("-Regular"):
         stem = stem[: -len("-Regular")]
     base_name = f"ABCDEF+{stem or 'FallbackFont'}"
-    file2 = pdf.make_stream(ttf_bytes)
-    file2["/Length1"] = len(ttf_bytes)
+    # 9.K2: the face may be CFF-flavoured (an .otf). That matters because the
+    # OpenType FEATURES this slice exists for live only in the OTF builds of
+    # some families — Libertinus ships `smcp`/`salt` in its .otf faces and
+    # strips them from its .ttf ones — so a TrueType-only embedder would make
+    # a small-caps toggle that silently did nothing.
+    #
+    # CFF outlines go in FontFile3 `/OpenType` with a CIDFontType0 descendant;
+    # TrueType keeps the shipped FontFile2 + CIDFontType2 path byte-for-byte.
+    is_cff = getattr(font, "sfntVersion", "") == "OTTO"
+    prog = pdf.make_stream(ttf_bytes)
+    if is_cff:
+        prog["/Subtype"] = Name("/OpenType")
+        font_file_key = "FontFile3"
+    else:
+        prog["/Length1"] = len(ttf_bytes)
+        font_file_key = "FontFile2"
 
     descriptor = pdf.make_indirect(
         Dictionary(
-            Type=Name("/FontDescriptor"),
-            FontName=Name("/" + base_name),
-            Flags=32,  # non-symbolic
-            FontBBox=Array(metrics["bbox"]),
-            ItalicAngle=0,
-            Ascent=metrics["ascent"],
-            Descent=metrics["descent"],
-            CapHeight=metrics["cap_height"],
-            StemV=80,
-            FontFile2=file2,
+            **{
+                "Type": Name("/FontDescriptor"),
+                "FontName": Name("/" + base_name),
+                "Flags": 32,  # non-symbolic
+                "FontBBox": Array(metrics["bbox"]),
+                "ItalicAngle": 0,
+                "Ascent": metrics["ascent"],
+                "Descent": metrics["descent"],
+                "CapHeight": metrics["cap_height"],
+                "StemV": 80,
+                font_file_key: prog,
+            }
         )
     )
     # /W: one [gid [w]] pair per used glyph — compact enough at edit scale.
@@ -319,13 +392,18 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
     descendant = pdf.make_indirect(
         Dictionary(
             Type=Name("/Font"),
-            Subtype=Name("/CIDFontType2"),
+            # CIDFontType0 = CFF outlines, CIDFontType2 = TrueType glyf.
+            Subtype=Name("/CIDFontType0" if is_cff else "/CIDFontType2"),
             BaseFont=Name("/" + base_name),
             CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
             FontDescriptor=descriptor,
             DW=1000,
             W=Array(w_array),
-            CIDToGIDMap=Name("/Identity"),
+            # /CIDToGIDMap is defined for CIDFontType2 ONLY; for a CFF
+            # descendant the CID-to-glyph mapping comes from the embedded
+            # font, so emitting it here would be meaningless (and is what
+            # trips strict validators).
+            **({} if is_cff else {"CIDToGIDMap": Name("/Identity")}),
         )
     )
 

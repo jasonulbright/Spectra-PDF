@@ -758,6 +758,12 @@ function AppContent(): React.ReactElement {
       // A4 split: a code-point offset — the engine lays out two blocks.
       if (opts?.split_at !== undefined) params.split_at = opts.split_at;
       if (opts?.convert) params.convert = true;
+      // 9.K2 whole-paragraph OpenType features (small caps / alternates). The
+      // engine applies them in place when the paragraph's own font carries the
+      // feature, else switches to Libertinus Serif. Per-span features ride
+      // span_styles below.
+      if (opts?.features !== undefined) params.features = opts.features;
+      if (opts?.alt_index !== undefined) params.alt_index = opts.alt_index;
       // A5a/A5b/A5c: per-span overrides ride ONE span_styles list (colour,
       // face, and size fold independently in the engine). Forward it verbatim
       // — dropping it silently reverts a per-span edit to a plain re-typeset.
@@ -824,6 +830,11 @@ function AppContent(): React.ReactElement {
         /** 9.K1: pair kerning. Defaults ON engine-side, so only an explicit
          * opt-OUT is ever sent. */
         kern?: boolean;
+        /** 9.K2: OpenType features — ['small_caps'] and/or ['salt']. Authoring
+         * always renders in a bundled face, so a feature switches to Libertinus
+         * Serif (Liberation has none); alt_index picks the salt alternate. */
+        features?: string[];
+        alt_index?: number;
       },
     ): Promise<string | void> => {
       const f = state.files.get(path);
@@ -842,6 +853,8 @@ function AppContent(): React.ReactElement {
       if (opts?.bold !== undefined) params.bold = opts.bold;
       if (opts?.italic !== undefined) params.italic = opts.italic;
       if (opts?.kern === false) params.kern = false;
+      if (opts?.features !== undefined && opts.features.length > 0) params.features = opts.features;
+      if (opts?.alt_index !== undefined) params.alt_index = opts.alt_index;
       await performOperation(path, 'add_text_box', params);
     },
     [state.files, performOperation, confirmEditOfSignedDoc],

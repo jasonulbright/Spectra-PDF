@@ -49,6 +49,25 @@ $Faces = @(
     @{ Name = 'LiberationMono-BoldItalic.ttf';  Sha256 = '79451f3c09fe25116098853b7a2ca6e2436220ccc11af022979adbcf195be130' }
 )
 
+# 9.K2 OpenType features: Libertinus Serif (SIL OFL 1.1) as a SECOND, feature-
+# bearing family. The four Serif OTF faces carry smcp/c2sc/salt/onum/liga/dlig
+# in their GSUB - Liberation has NONE of those, and Libertinus's own TTF builds
+# STRIP the features (only 'kern' survives), so the CFF-flavoured OTF is
+# REQUIRED (the engine embeds it via FontFile3 /OpenType). Libertinus is NOT a
+# metric-compatible drop-in for Liberation and NEVER a silent/automatic
+# fallback - it is an explicit opt-in family for small-caps/alternate authoring
+# (owner-approved 2026-07-21). Libertinus has no Sans BoldItalic face, so Serif
+# only. THIRD-PARTY-LICENSES.md carries the OFL pointer.
+$LibVersion = '7.051'
+$LibUrl = "https://github.com/alerque/libertinus/releases/download/v$LibVersion/Libertinus-$LibVersion.zip"
+$LibSha256 = '4d9be29b5cb380c35af8ba967abcc752ad1e07be1f738a9789c33e0dd7478c92'
+$LibFaces = @(
+    @{ Name = 'LibertinusSerif-Regular.otf';    Sha256 = 'fcf06307a77367394fcb0ccb241e59eea70dba3d732be309647611224679c733' }
+    @{ Name = 'LibertinusSerif-Bold.otf';       Sha256 = '0264914210ed51b3231ebc92ce529e9f2e166ba9eebf0cd4a579558690a27b64' }
+    @{ Name = 'LibertinusSerif-Italic.otf';     Sha256 = '9a393d63d6e05f620d3dc0190dfd35a8ede58c0808cf0fc9de7fcb9c723e4c24' }
+    @{ Name = 'LibertinusSerif-BoldItalic.otf'; Sha256 = '47a665259f09f554f5d133d7718cdad43ff462c6a6b2328f38023465e62d57ce' }
+)
+
 $Root = Split-Path -Parent $PSScriptRoot
 $Dest = Join-Path $Root 'resources\fonts'
 
@@ -56,7 +75,7 @@ $Dest = Join-Path $Root 'resources\fonts'
 # (the bundle-ghostscript re-check precedent: a corrupted/wrong file must
 # not silently satisfy the skip).
 $allPresent = $true
-foreach ($face in $Faces) {
+foreach ($face in ($Faces + $LibFaces)) {
     $t = Join-Path $Dest $face.Name
     if (-not (Test-Path $t)) { $allPresent = $false; break }
     $h = (Get-FileHash -Algorithm SHA256 $t).Hash.ToLowerInvariant()
@@ -99,3 +118,28 @@ foreach ($face in $Faces) {
 
 Remove-Item $Tmp -Force
 Remove-Item $Extract -Recurse -Force
+
+# --- Libertinus Serif OTF (9.K2 OpenType features) ---
+$LibTmp = Join-Path $env:TEMP "libertinus-$LibVersion.zip"
+Write-Host "Downloading Libertinus $LibVersion..."
+Invoke-WebRequest -Uri $LibUrl -OutFile $LibTmp -UseBasicParsing
+$libActual = (Get-FileHash -Algorithm SHA256 $LibTmp).Hash.ToLowerInvariant()
+if ($libActual -ne $LibSha256) {
+    Remove-Item $LibTmp -Force
+    throw "sha256 mismatch for $LibUrl`n  expected $LibSha256`n  actual   $libActual"
+}
+$LibExtract = Join-Path $env:TEMP "libertinus-$LibVersion"
+if (Test-Path $LibExtract) { Remove-Item $LibExtract -Recurse -Force }
+# A .zip, not a .tar.gz - Expand-Archive is native and needs no bsdtar dance.
+Expand-Archive -Path $LibTmp -DestinationPath $LibExtract -Force
+foreach ($face in $LibFaces) {
+    $otf = Get-ChildItem -Recurse $LibExtract -Filter $face.Name | Select-Object -First 1
+    if (-not $otf) { throw "$($face.Name) not found in the Libertinus archive" }
+    $Target = Join-Path $Dest $face.Name
+    Copy-Item $otf.FullName $Target -Force
+    $h = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
+    if ($h -ne $face.Sha256) { throw "sha256 mismatch for $($face.Name): $h" }
+    Write-Host "Vendored: $Target"
+}
+Remove-Item $LibTmp -Force
+Remove-Item $LibExtract -Recurse -Force

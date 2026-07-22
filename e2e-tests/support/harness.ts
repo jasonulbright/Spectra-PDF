@@ -708,6 +708,10 @@ export async function commitAddText(params: {
   rotate?: 0 | 90 | 180 | 270;
   bold?: boolean;
   italic?: boolean;
+  // 9.K2 OpenType features.
+  smallCaps?: boolean;
+  alternates?: boolean;
+  altIndex?: number;
 }): Promise<void> {
   const result = await browser.executeAsync<string | null, [typeof params]>(
     function (p, done) {

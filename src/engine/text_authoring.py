@@ -39,6 +39,34 @@ from engine.page_images import _save
 _LEADING_EM = 1.2
 _MAX_SIZE = 1638.0
 
+# 9.K2: the OpenType features we can honestly apply (small caps + stylistic
+# alternates). "small_caps" expands to smcp+c2sc so mixed-case text becomes
+# uniform small caps. Anything else is ignored (never a silent wrong result).
+_SMALL_CAPS = ("smcp", "c2sc")
+
+
+def _normalize_features(features) -> list:
+    """A caller's feature request -> the concrete GSUB tags to apply. Accepts
+    the convenience token "small_caps" (=> smcp+c2sc) and raw tags."""
+    if not features:
+        return []
+    from engine.font_features import SUPPORTED
+
+    out: list = []
+    for f in features:
+        f = str(f).strip().lower()
+        if f in ("small_caps", "smallcaps"):
+            out.extend(_SMALL_CAPS)
+        elif f in SUPPORTED:
+            out.append(f)
+    # de-dup, preserve order
+    seen, uniq = set(), []
+    for f in out:
+        if f not in seen:
+            seen.add(f); uniq.append(f)
+    return uniq
+
+
 
 def _fresh_font_name(fonts) -> str:
     taken = {str(k) for k in fonts.keys()} if fonts is not None else set()
@@ -132,7 +160,8 @@ class _BoxLayout(NamedTuple):
     kern_pairs: dict
 
 
-def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern=True) -> _BoxLayout:
+def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern=True,
+                features=None, alt_index=0) -> _BoxLayout:
     """The ONE layout pass shared by `add_text_box` and `measure_text_box`
     — validation, box geometry (incl. the A2-tail rotation transposition),
     face resolution (family + A3b bold/italic style), subset-font build,
@@ -200,7 +229,18 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # face seats). style_key(False, False) == "regular" == the shipped
     # default, so the no-style path stays byte-identical.
     sk = style_key(bold, italic)
-    if family in ("serif", "mono", "sans"):
+    # 9.K2: an OpenType feature request (small caps / alternates) forces the
+    # bundled feature-bearing face — Libertinus Serif — because Liberation
+    # carries none of these features. This is the owner's "explicit switch to
+    # Libertinus Serif" for authoring: the author asked for small caps, and
+    # this is the only bundled face that can do it. No feature => the shipped
+    # Liberation path, byte-identical.
+    feats = _normalize_features(features)
+    if feats:
+        from engine.font_fallback import resolve_feature_font
+
+        face = resolve_feature_font(str(font_path), style=sk)
+    elif family in ("serif", "mono", "sans"):
         face = resolve_fallback_font(str(font_path), synthetic_family_font(family), style=sk)
     else:
         face = resolve_fallback_font(str(font_path), None, style=sk)
@@ -209,7 +249,22 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # breaks handled just below), never a glyph, so it stays out of the
     # embedded subset.
     unique = "".join(sorted(set(body) - {"\n", "\r", "\t"}))
-    font_dict, encode, width_1000 = build_fallback_font(pdf, face, unique)
+    # 9.K2: resolve each char to its FEATURE-substituted glyph so the small
+    # cap / alternate is what embeds and draws; ToUnicode keeps the plain
+    # letter, so it stays searchable and re-editable.
+    glyph_for = None
+    if feats:
+        from fontTools.ttLib import TTFont as _TTFont
+
+        from engine.font_features import resolve_glyphs
+
+        _ff = _TTFont(str(face), fontNumber=0, lazy=True)
+        try:
+            names = resolve_glyphs(_ff, unique, feats, alt_index=int(alt_index or 0))
+        finally:
+            _ff.close()
+        glyph_for = {ch: nm for ch, nm in zip(unique, names) if nm is not None}
+    font_dict, encode, width_1000 = build_fallback_font(pdf, face, unique, glyph_for=glyph_for)
 
     # 9.K1: pair kerning from the resolved face. Wrapping, centring and
     # justification all read `width_1000`, so folding the kern INTO it is what
@@ -265,6 +320,8 @@ def add_text_box(
     bold: bool = False,
     italic: bool = False,
     kern: bool = True,
+    features: list | None = None,
+    alt_index: int = 0,
 ) -> dict:
     """Author a new text box on `page`.
 
@@ -298,7 +355,8 @@ def add_text_box(
         # Input-shape validation (text/rect/rotate/style) runs FIRST, before
         # the page-range check — the pre-refactor precedence (a doubly-invalid
         # call surfaces the input error, not the page error).
-        lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern)
+        lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern,
+                          features, alt_index)
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
@@ -423,6 +481,8 @@ def measure_text_box(
     bold: bool = False,
     italic: bool = False,
     kern: bool = True,
+    features: list | None = None,
+    alt_index: int = 0,
 ) -> dict:
     """A2-tail-2: report how `text` would lay out in the box WITHOUT
     writing — the card's live fit indicator. Runs the exact `_layout_box`
@@ -439,7 +499,8 @@ def measure_text_box(
     try:
         # Same precedence as add_text_box: input-shape checks (inside
         # _layout_box) before the page range.
-        lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern)
+        lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern,
+                          features, alt_index)
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")

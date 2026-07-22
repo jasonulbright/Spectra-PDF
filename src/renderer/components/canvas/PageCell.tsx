@@ -31,6 +31,7 @@ import {
   seedSpanFaces,
   seedSpanSizes,
   setSpanFaceFamily,
+  setSpanFaceFeature,
   toggleSpanFaceAxis,
   spanColorsToStyles,
   spanFacesToStyles,
@@ -1714,6 +1715,13 @@ function ParagraphEditor({
   // face (same honesty as the family swap).
   const [bold, setBold] = useState(para.bold);
   const [italic, setItalic] = useState(para.italic);
+  // 9.K2 whole-paragraph OpenType features (the caret / whole-text case).
+  // No seed: the listing does not report a paragraph's existing features
+  // (detecting them would need reverse glyph analysis), so these start OFF
+  // and a press is always an explicit request to apply.
+  const [smallCaps, setSmallCaps] = useState(false);
+  const [alternates, setAlternates] = useState(false);
+  const [altIndex, setAltIndex] = useState(0);
   const areaRef = useRef<HTMLDivElement>(null);
   // 9.A5-tails-b: a contentEditable DROPS its selection when it loses focus,
   // where a textarea kept selectionStart/End. The dual-role controls (swatch,
@@ -1781,9 +1789,25 @@ function ParagraphEditor({
   });
   // The face covering a code-point position (for a per-span toggle to flip
   // one axis while keeping the others), or the plain default.
-  const faceAt = (pos: number): { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | 'mono' } => {
+  const faceAt = (
+    pos: number,
+  ): {
+    bold: boolean;
+    italic: boolean;
+    family?: 'serif' | 'sans' | 'mono';
+    smallCaps: boolean;
+    alternates: boolean;
+  } => {
     const hit = shownFaces.find((f) => pos >= f.start && pos < f.end);
-    return hit ? { bold: hit.bold, italic: hit.italic, family: hit.family } : { bold: false, italic: false };
+    return hit
+      ? {
+          bold: hit.bold,
+          italic: hit.italic,
+          family: hit.family,
+          smallCaps: Boolean(hit.smallCaps),
+          alternates: Boolean(hit.alternates),
+        }
+      : { bold: false, italic: false, smallCaps: false, alternates: false };
   };
   // A5c: the size field's displayed value (a string so a clear-and-retype
   // works), driven by typing and by the current selection's per-span size.
@@ -1798,7 +1822,12 @@ function ParagraphEditor({
   // already-bold text shows B pressed and the click un-bolds); a caret or
   // select-all shows the whole-paragraph override, which is what those target.
   // null = "use the paragraph state", mirroring sizeField/colorField.
-  const [faceField, setFaceField] = useState<{ bold: boolean; italic: boolean } | null>(null);
+  const [faceField, setFaceField] = useState<{
+    bold: boolean;
+    italic: boolean;
+    smallCaps: boolean;
+    alternates: boolean;
+  } | null>(null);
   // The editor's LIVE selection in code points, read at the instant a
   // dual-role control fires — and, unlike an onSelect capture, it works when a
   // test drives the DOM selection directly (no synthetic `select` event
@@ -1847,9 +1876,13 @@ function ParagraphEditor({
       // Stable identity — this runs on every `selectionchange`, so allocating
       // a fresh object each tick would re-render the editor continuously.
       setFaceField((prev) =>
-        prev && prev.bold === f.bold && prev.italic === f.italic
+        prev &&
+        prev.bold === f.bold &&
+        prev.italic === f.italic &&
+        prev.smallCaps === f.smallCaps &&
+        prev.alternates === f.alternates
           ? prev
-          : { bold: f.bold, italic: f.italic },
+          : { bold: f.bold, italic: f.italic, smallCaps: f.smallCaps, alternates: f.alternates },
       );
     } else {
       setSizeField(String(Math.round(size)));
@@ -1971,9 +2004,18 @@ function ParagraphEditor({
   // engine-side with a stated reason, surfaced as the standard edit
   // notice — the same honest boundary as convert.
   const substituting = familyChanged || styleChanged;
-  const missing = substituting
-    ? []
-    : paragraphUnencodable(value, spans, para.encodableByRun, para.sequencesByRun);
+  // 9.K2 whole-paragraph features (caret case). Applying one re-renders every
+  // character through the feature source — in place if the paragraph's own
+  // font carries the feature, else the Libertinus switch — so, like a
+  // substitution, the original run inventory no longer governs and the live
+  // check would wrongly block (the Libertinus switch may encode a character
+  // the original subset lacked). The engine refuses a genuinely unencodable
+  // char with a stated reason, the same honest boundary as convert.
+  const featuresChanged = smallCaps || alternates;
+  const missing =
+    substituting || featuresChanged
+      ? []
+      : paragraphUnencodable(value, spans, para.encodableByRun, para.sequencesByRun);
   const valid = missing.length === 0;
   const sizeChanged = Math.abs(size - para.fontSize) > 0.01;
   const colorChanged = color.toLowerCase() !== para.color.toLowerCase();
@@ -1986,6 +2028,7 @@ function ParagraphEditor({
     sizeChanged ||
     colorChanged ||
     substituting ||
+    featuresChanged ||
     spanColorsChanged ||
     spanFaces.length > 0 ||
     spanSizes.length > 0;
@@ -2006,9 +2049,18 @@ function ParagraphEditor({
       o.bold = bold;
       o.italic = italic;
     }
+    // 9.K2 whole-paragraph features ride their OWN param, NOT the substitution
+    // path: the engine applies them in place when it can, so forcing a
+    // bold/italic pair here would needlessly collapse the paragraph into a
+    // Liberation weight. `alt_index` travels only with alternates.
+    if (featuresChanged) {
+      o.features = [...(smallCaps ? ['small_caps'] : []), ...(alternates ? ['salt'] : [])];
+      if (alternates) o.alt_index = altIndex;
+    }
     // A5a/A5b/A5c: send per-span colour, face, AND size entries (the engine
     // folds each field independently, so they ride the one span_styles list
-    // with possibly-unaligned ranges).
+    // with possibly-unaligned ranges). 9.K2 per-span features ride the face
+    // entry (spanFacesToStyles emits small_caps/alternates on it).
     const perSpan = [
       ...spanColorsToStyles(spanColors),
       ...spanFacesToStyles(spanFaces),
@@ -2213,8 +2265,14 @@ function ParagraphEditor({
                 toggleSpanFaceAxis(prev, shownFaces, sel.start, sel.end, 'bold', target),
               );
               // The selection does not change, so captureSelection will not
-              // re-fire — refresh the pressed look here.
-              setFaceField((f) => ({ bold: target, italic: f ? f.italic : italic }));
+              // re-fire — refresh the pressed look here (keeping the feature
+              // axes, which this toggle does not touch).
+              setFaceField((f) => ({
+                bold: target,
+                italic: f ? f.italic : italic,
+                smallCaps: f ? f.smallCaps : smallCaps,
+                alternates: f ? f.alternates : alternates,
+              }));
             } else {
               setBold((b) => !b);
             }
@@ -2243,7 +2301,12 @@ function ParagraphEditor({
               setSpanFaces((prev) =>
                 toggleSpanFaceAxis(prev, shownFaces, sel.start, sel.end, 'italic', target),
               );
-              setFaceField((f) => ({ bold: f ? f.bold : bold, italic: target }));
+              setFaceField((f) => ({
+                bold: f ? f.bold : bold,
+                italic: target,
+                smallCaps: f ? f.smallCaps : smallCaps,
+                alternates: f ? f.alternates : alternates,
+              }));
             } else {
               setItalic((i) => !i);
             }
@@ -2251,6 +2314,113 @@ function ParagraphEditor({
         >
           I
         </button>
+        {/* 9.K2 OpenType features — dual role like B/I. A partial selection
+            applies the feature to that range (per span, riding the face
+            entry); a caret or whole-text selection applies it to the whole
+            paragraph. Disabled for vertical text: applying a feature switches
+            to a horizontal bundled face, which the engine refuses. */}
+        <button
+          type="button"
+          data-testid="edit-para-smallcaps"
+          className={`page-editpara-style${
+            (faceField ? faceField.smallCaps : smallCaps) ? ' pressed' : ''
+          }`}
+          aria-pressed={faceField ? faceField.smallCaps : smallCaps}
+          disabled={para.vertical}
+          title={
+            para.vertical
+              ? 'Vertical text keeps its font — the bundled faces are horizontal'
+              : 'Small caps — uses the font’s own if it has them, else Libertinus Serif'
+          }
+          onClick={() => {
+            const sel = spanTarget();
+            if (sel) {
+              const target = !faceAt(sel.start).smallCaps;
+              setSpanFaces((prev) =>
+                setSpanFaceFeature(prev, shownFaces, sel.start, sel.end, 'smallCaps', target),
+              );
+              setFaceField((f) => ({
+                bold: f ? f.bold : bold,
+                italic: f ? f.italic : italic,
+                smallCaps: target,
+                alternates: f ? f.alternates : alternates,
+              }));
+            } else {
+              setSmallCaps((s) => !s);
+            }
+          }}
+        >
+          SC
+        </button>
+        <button
+          type="button"
+          data-testid="edit-para-alternates"
+          className={`page-editpara-style${
+            (faceField ? faceField.alternates : alternates) ? ' pressed' : ''
+          }`}
+          aria-pressed={faceField ? faceField.alternates : alternates}
+          disabled={para.vertical}
+          title={
+            para.vertical
+              ? 'Vertical text keeps its font — the bundled faces are horizontal'
+              : 'Stylistic alternates (salt) — uses the font’s own if it has them, else Libertinus Serif'
+          }
+          onClick={() => {
+            const sel = spanTarget();
+            if (sel) {
+              const target = !faceAt(sel.start).alternates;
+              setSpanFaces((prev) =>
+                setSpanFaceFeature(
+                  prev,
+                  shownFaces,
+                  sel.start,
+                  sel.end,
+                  'alternates',
+                  target,
+                  altIndex,
+                ),
+              );
+              setFaceField((f) => ({
+                bold: f ? f.bold : bold,
+                italic: f ? f.italic : italic,
+                smallCaps: f ? f.smallCaps : smallCaps,
+                alternates: target,
+              }));
+            } else {
+              setAlternates((a) => !a);
+            }
+          }}
+        >
+          Alt
+        </button>
+        {(faceField ? faceField.alternates : alternates) && (
+          <label className="page-editpara-ctl">
+            #
+            <input
+              type="number"
+              data-testid="edit-para-altindex"
+              min={0}
+              max={99}
+              step={1}
+              value={altIndex}
+              title="Which stylistic alternate to use, when the font offers several"
+              onChange={(e) => {
+                const v = Math.max(0, Math.min(99, Math.trunc(parseFloat(e.target.value) || 0)));
+                setAltIndex(v);
+                // Per-span: re-apply the alternate at the new index over a
+                // selection that already has alternates on (leave a plain
+                // selection untouched — the index picker is not a way to turn
+                // the feature on).
+                const sel = spanTarget();
+                if (sel && faceAt(sel.start).alternates) {
+                  setSpanFaces((prev) =>
+                    setSpanFaceFeature(prev, shownFaces, sel.start, sel.end, 'alternates', true, v),
+                  );
+                }
+              }}
+            />
+          </label>
+        )}
       </div>
       {/* 9.A5-tails-b RICH SURFACE. One contentEditable: the styled text the
           user sees IS the input, so the caret, the selection and the line

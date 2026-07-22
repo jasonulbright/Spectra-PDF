@@ -230,6 +230,9 @@ export interface CanvasEditImagesHandlers {
     rotate?: 0 | 90 | 180 | 270;
     bold?: boolean;
     italic?: boolean;
+    smallCaps?: boolean;
+    alternates?: boolean;
+    altIndex?: number;
   }) => Promise<void>;
   // 9.D1 vector objects.
   vectorPageIds: () => string[];
@@ -711,6 +714,9 @@ export interface TestHarness {
     rotate?: 0 | 90 | 180 | 270;
     bold?: boolean;
     italic?: boolean;
+    smallCaps?: boolean;
+    alternates?: boolean;
+    altIndex?: number;
   }) => Promise<void>;
 }
 

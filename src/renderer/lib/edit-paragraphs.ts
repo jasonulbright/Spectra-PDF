@@ -97,10 +97,22 @@ export interface ParagraphEditOpts {
   /** A4: split the paragraph at this CODE-POINT offset (strictly inside
    * the text) — the engine lays the halves out as two paragraphs. */
   split_at?: number;
+  /** 9.K2: whole-paragraph OpenType features (the caret / whole-text case,
+   * the sibling of the uniform A1 size/colour). `['small_caps']` and/or
+   * `['salt']`; `alt_index` picks the salt alternate. The engine applies a
+   * feature IN PLACE when the paragraph's own font carries it, else switches
+   * to bundled Libertinus Serif — either way ToUnicode keeps the plain
+   * letters, so the text stays searchable. */
+  features?: string[];
+  alt_index?: number;
   /** A5a/A5b: per-span overrides over CODE-POINT ranges of the new text.
    * An entry carries a `color` (A5a) and/or a face (`bold`/`italic`/
-   * `family`, A5b); the engine folds each field independently, so colour
-   * entries and face entries can be sent together with unaligned ranges. */
+   * `family`, A5b) and/or a 9.K2 OpenType feature (`small_caps`/
+   * `alternates`+`alt_index`); the engine folds colour and size
+   * independently but the face AND its features share ONE face key per
+   * position (last-writer-wins), so a feature MUST ride the same entry as
+   * its range's bold/italic/family — `spanFacesToStyles` emits them
+   * together for exactly that reason. */
   span_styles?: Array<{
     start: number;
     end: number;
@@ -109,6 +121,9 @@ export interface ParagraphEditOpts {
     italic?: boolean;
     family?: 'serif' | 'sans' | 'mono';
     size?: number;
+    small_caps?: boolean;
+    alternates?: boolean;
+    alt_index?: number;
   }>;
 }
 
@@ -300,13 +315,26 @@ export interface SpanColor {
 
 /** 9.A5b: one per-span FACE override — a CODE-POINT range substituted into
  * a bundled Liberation weight/slant/family. `family` undefined = keep the
- * char's own family, apply the weight/slant (the A3b style-only swap). */
+ * char's own family, apply the weight/slant (the A3b style-only swap).
+ *
+ * 9.K2: a face override can ALSO carry OpenType features (`smallCaps` =>
+ * smcp+c2sc, `alternates` => salt at `altIndex`). Features live on the face
+ * entry, not a parallel list, because the engine folds face + features into
+ * ONE face key per position (last-writer-wins): a separate feature entry
+ * overlapping a bold entry would clobber the bold. `segmentedFaceApply`
+ * therefore preserves the feature axes when a B/I/family toggle re-faces a
+ * segment, so "select word → Small Caps → Bold" composes to bold small
+ * caps. Applying a feature can force a font switch (Liberation has none), so
+ * — like bold/italic — it is a user override never seeded from the listing. */
 export interface SpanFace {
   start: number;
   end: number;
   bold: boolean;
   italic: boolean;
   family?: 'serif' | 'sans' | 'mono';
+  smallCaps?: boolean;
+  alternates?: boolean;
+  altIndex?: number;
 }
 
 /** Flatten CODE-POINT ranges into DISJOINT, coalesced runs. On an overlap
@@ -370,7 +398,14 @@ export function applyInterval<T extends { start: number; end: number }>(
 }
 
 const colorKey = (r: SpanColor): string => r.color.toLowerCase();
-const faceKey = (r: SpanFace): string => `${r.bold}|${r.italic}|${r.family ?? ''}`;
+// 9.K2: features are part of the identity so a small-caps / alternate range
+// never coalesces with a plain-face one. altIndex only distinguishes when
+// alternates is on (a stray index on a non-alternate entry must not fork the
+// key, or `applyText`'s remap could leave two "equal" ranges that won't merge).
+const faceKey = (r: SpanFace): string =>
+  `${r.bold}|${r.italic}|${r.family ?? ''}|${r.smallCaps ? 1 : 0}|${r.alternates ? 1 : 0}|${
+    r.alternates ? (r.altIndex ?? 0) : 0
+  }`;
 
 export const mergeSpanColors = (ranges: SpanColor[]): SpanColor[] =>
   flattenIntervals(ranges, colorKey);
@@ -387,7 +422,14 @@ export const applySpanFace = (
   existing: SpanFace[],
   start: number,
   end: number,
-  face: { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | 'mono' },
+  face: {
+    bold: boolean;
+    italic: boolean;
+    family?: 'serif' | 'sans' | 'mono';
+    smallCaps?: boolean;
+    alternates?: boolean;
+    altIndex?: number;
+  },
 ): SpanFace[] => applyInterval(existing, { start, end, ...face }, faceKey);
 
 /** 9.A5-tails-a: flip ONE axis of a face across a range, PER SEGMENT.
@@ -404,7 +446,14 @@ export const applySpanFace = (
  * over seeded-but-not-yet-overridden text flips from what the user can
  * actually see. The result is written into the user-override list: an
  * explicit toggle is exactly when a substitution is intended. */
-type FaceValue = { bold: boolean; italic: boolean; family?: 'serif' | 'sans' | 'mono' };
+type FaceValue = {
+  bold: boolean;
+  italic: boolean;
+  family?: 'serif' | 'sans' | 'mono';
+  smallCaps?: boolean;
+  alternates?: boolean;
+  altIndex?: number;
+};
 
 /** Re-face [start,end) SEGMENT BY SEGMENT: split the range at every existing
  * face boundary and rebuild each piece from its OWN current face via `make`.
@@ -445,7 +494,14 @@ function segmentedFaceApply(
     if (segEnd <= segStart) continue;
     const covering = seen.find((r) => segStart >= r.start && segStart < r.end);
     const base: FaceValue = covering
-      ? { bold: covering.bold, italic: covering.italic, family: covering.family }
+      ? {
+          bold: covering.bold,
+          italic: covering.italic,
+          family: covering.family,
+          smallCaps: covering.smallCaps,
+          alternates: covering.alternates,
+          altIndex: covering.altIndex,
+        }
       : { bold: false, italic: false, family: undefined };
     out = applySpanFace(out, segStart, segEnd, make(base));
   }
@@ -468,6 +524,28 @@ export function toggleSpanFaceAxis(
     ...base,
     [axis]: value !== undefined ? value : !base[axis],
   }));
+}
+
+/** 9.K2: set an OpenType FEATURE axis (small caps / alternates) across a
+ * selection PER SEGMENT — each piece keeps its own weight, slant and family.
+ * The sibling of `toggleSpanFaceAxis`; separate only because `alternates`
+ * carries an `altIndex` the boolean toggle has no slot for. Turning
+ * `alternates` off clears the index so the face key coalesces cleanly with a
+ * neighbouring plain range. */
+export function setSpanFaceFeature(
+  preserve: SpanFace[],
+  view: SpanFace[],
+  start: number,
+  end: number,
+  feature: 'smallCaps' | 'alternates',
+  value: boolean,
+  altIndex = 0,
+): SpanFace[] {
+  return segmentedFaceApply(preserve, view, start, end, (base) => {
+    const next: FaceValue = { ...base, [feature]: value };
+    if (feature === 'alternates') next.altIndex = value ? altIndex : undefined;
+    return next;
+  });
 }
 
 /** Set the FAMILY across a selection per segment — each piece keeps its own
@@ -497,6 +575,11 @@ export const composeSpanFaces = (seed: SpanFace[], overrides: SpanFace[]): SpanF
       bold: r.bold,
       italic: r.italic,
       family: r.family,
+      // 9.K2: carry the feature axes, or a composed view would drop small
+      // caps / alternates and the toggle's pressed look would flicker off.
+      smallCaps: r.smallCaps,
+      alternates: r.alternates,
+      altIndex: r.altIndex,
     });
   }
   return mergeSpanFaces(out);
@@ -605,6 +688,7 @@ export function styledSegments(
   italic: boolean;
   family?: 'serif' | 'sans' | 'mono';
   size: number | null;
+  smallCaps: boolean;
 }> {
   const chars = Array.from(text);
   const n = chars.length;
@@ -615,11 +699,17 @@ export function styledSegments(
   const boldAt: boolean[] = new Array(n).fill(false);
   const italicAt: boolean[] = new Array(n).fill(false);
   const familyAt: (('serif' | 'sans' | 'mono') | undefined)[] = new Array(n).fill(undefined);
+  // 9.K2: small caps renders in the preview (alternates cannot — no CSS
+  // reaches an arbitrary salt index without the loaded font — so they show as
+  // base glyphs and the committed page is the authority, exactly as family/
+  // size already state).
+  const smcpAt: boolean[] = new Array(n).fill(false);
   for (const r of mergeSpanFaces(faces)) {
     for (let k = Math.max(0, r.start); k < Math.min(r.end, n); k++) {
       boldAt[k] = r.bold;
       italicAt[k] = r.italic;
       familyAt[k] = r.family;
+      smcpAt[k] = Boolean(r.smallCaps);
     }
   }
   const sizeAt: (number | null)[] = new Array(n).fill(null);
@@ -633,6 +723,7 @@ export function styledSegments(
     italic: boolean;
     family?: 'serif' | 'sans' | 'mono';
     size: number | null;
+    smallCaps: boolean;
   }> = [];
   for (let k = 0; k < n; k++) {
     const last = segs[segs.length - 1];
@@ -642,7 +733,8 @@ export function styledSegments(
       last.bold === boldAt[k] &&
       last.italic === italicAt[k] &&
       last.family === familyAt[k] &&
-      last.size === sizeAt[k]
+      last.size === sizeAt[k] &&
+      last.smallCaps === smcpAt[k]
     ) {
       last.text += chars[k];
     } else {
@@ -653,6 +745,7 @@ export function styledSegments(
         italic: italicAt[k],
         ...(familyAt[k] ? { family: familyAt[k] } : {}),
         size: sizeAt[k],
+        smallCaps: smcpAt[k],
       });
     }
   }
@@ -704,6 +797,7 @@ export function segmentsToHtml(
     italic: boolean;
     family?: 'serif' | 'sans' | 'mono';
     size: number | null;
+    smallCaps?: boolean;
   }>,
   opts: { basePx: number; baseSize: number; rev: number },
 ): string {
@@ -719,6 +813,11 @@ export function segmentsToHtml(
       const px = (seg.size / baseSize) * basePx;
       if (Number.isFinite(px) && px > 0) style.push(`font-size:${px.toFixed(2)}px`);
     }
+    // 9.K2: preview small caps. `all-small-caps` lowercases capitals to small
+    // caps too, matching smcp+c2sc; the browser synthesises it from its
+    // Liberation stand-in (a close approximation — the committed Libertinus
+    // page is the fidelity authority, like the family/size preview).
+    if (seg.smallCaps) style.push('font-variant-caps:all-small-caps');
     parts.push(
       `<span data-seg="${i}" data-r="${rev}"${
         style.length ? ` style="${style.join(';')}"` : ''
@@ -781,7 +880,9 @@ export function spanColorsToStyles(
   return out;
 }
 
-/** Convert per-span faces to `span_styles` face entries. */
+/** Convert per-span faces to `span_styles` face entries. 9.K2 emits the
+ * OpenType feature flags on the SAME entry as the face — the engine reads
+ * `small_caps`/`alternates`/`alt_index` into the position's one face key. */
 export function spanFacesToStyles(
   ranges: SpanFace[],
 ): Array<{
@@ -790,6 +891,9 @@ export function spanFacesToStyles(
   bold: boolean;
   italic: boolean;
   family?: 'serif' | 'sans' | 'mono';
+  small_caps?: boolean;
+  alternates?: boolean;
+  alt_index?: number;
 }> {
   return mergeSpanFaces(ranges).map((r) => ({
     start: r.start,
@@ -797,6 +901,8 @@ export function spanFacesToStyles(
     bold: r.bold,
     italic: r.italic,
     ...(r.family ? { family: r.family } : {}),
+    ...(r.smallCaps ? { small_caps: true } : {}),
+    ...(r.alternates ? { alternates: true, alt_index: r.altIndex ?? 0 } : {}),
   }));
 }
 

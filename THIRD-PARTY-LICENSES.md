@@ -48,6 +48,19 @@ style (serif documents convert in serif, monospaced in monospaced). All
 three are metric-compatible with the corresponding Microsoft core fonts.
 License text: https://github.com/liberationfonts/liberation-fonts/blob/main/LICENSE
 
+**Libertinus Serif** (Regular, Bold, Italic, Bold Italic) —
+© The Libertinus Project (Philipp H. Poll and contributors), licensed
+under the **SIL Open Font License 1.1**. Bundled (vendored by
+`scripts/sync-edit-fonts.ps1`, hash-pinned) as the Edit tool's
+**feature-bearing** family (Phase 9.K2): unlike Liberation, these OTF
+(CFF) faces carry real OpenType features — small caps (`smcp`/`c2sc`) and
+stylistic alternates (`salt`). They are an explicit opt-in, never an
+automatic substitution: Liberation remains the sole metric-compatible
+fallback, and Libertinus Serif is used only when a document's own font
+lacks a requested feature and the user asks to apply small caps or
+alternates (or authors new text with them).
+License text: https://github.com/alerque/libertinus/blob/master/OFL.txt
+
 ## Frontend / runtime libraries
 
 Bundled into the WebView2 renderer (see `package.json` for exact versions):

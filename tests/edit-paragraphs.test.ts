@@ -24,6 +24,7 @@ import {
   utf16ToCodePointIndex,
   toggleSpanFaceAxis,
   setSpanFaceFamily,
+  setSpanFaceFeature,
   composeSpanFaces,
   composeSpanSizes,
   seedSpanFaces,
@@ -342,9 +343,9 @@ describe('seedSpanColors / styledSegments / spanColorsToStyles (9.A5a)', () => {
 
   it('splits text into base + coloured backdrop segments (with face flags)', () => {
     expect(styledSegments('Hello colored world', [{ start: 6, end: 13, color: '#ff0000' }])).toEqual([
-      { text: 'Hello ', color: null, bold: false, italic: false, size: null },
-      { text: 'colored', color: '#ff0000', bold: false, italic: false, size: null },
-      { text: ' world', color: null, bold: false, italic: false, size: null },
+      { text: 'Hello ', color: null, bold: false, italic: false, size: null, smallCaps: false },
+      { text: 'colored', color: '#ff0000', bold: false, italic: false, size: null, smallCaps: false },
+      { text: ' world', color: null, bold: false, italic: false, size: null, smallCaps: false },
     ]);
   });
 
@@ -357,10 +358,10 @@ describe('seedSpanColors / styledSegments / spanColorsToStyles (9.A5a)', () => {
         [{ start: 0, end: 5, bold: true, italic: false }],
       ),
     ).toEqual([
-      { text: 'Hel', color: null, bold: true, italic: false, size: null },
-      { text: 'lo', color: '#ff0000', bold: true, italic: false, size: null },
-      { text: ' wo', color: '#ff0000', bold: false, italic: false, size: null },
-      { text: 'rld', color: null, bold: false, italic: false, size: null },
+      { text: 'Hel', color: null, bold: true, italic: false, size: null, smallCaps: false },
+      { text: 'lo', color: '#ff0000', bold: true, italic: false, size: null, smallCaps: false },
+      { text: ' wo', color: '#ff0000', bold: false, italic: false, size: null, smallCaps: false },
+      { text: 'rld', color: null, bold: false, italic: false, size: null, smallCaps: false },
     ]);
   });
 
@@ -388,8 +389,15 @@ describe('mergeSpanColors overlap flattening (9.A5a round-32 HIGH)', () => {
     // describe the SAME per-position colours (no silent mismatch).
     const segs = styledSegments('Hi folks everyone', overlapping);
     expect(segs).toEqual([
-      { text: 'H', color: '#ff0000', bold: false, italic: false, size: null },
-      { text: 'i folks everyone', color: '#0000ff', bold: false, italic: false, size: null },
+      { text: 'H', color: '#ff0000', bold: false, italic: false, size: null, smallCaps: false },
+      {
+        text: 'i folks everyone',
+        color: '#0000ff',
+        bold: false,
+        italic: false,
+        size: null,
+        smallCaps: false,
+      },
     ]);
     expect(spanColorsToStyles(overlapping)).toEqual([
       { start: 0, end: 1, color: [1, 0, 0] },
@@ -485,9 +493,9 @@ describe('per-span SIZE helpers (9.A5c)', () => {
     // textarea's caret. The contentEditable surface renders the size itself.
     const segs = styledSegments('Big word here', [], [], [{ start: 4, end: 8, size: 24 }]);
     expect(segs).toEqual([
-      { text: 'Big ', color: null, bold: false, italic: false, size: null },
-      { text: 'word', color: null, bold: false, italic: false, size: 24 },
-      { text: ' here', color: null, bold: false, italic: false, size: null },
+      { text: 'Big ', color: null, bold: false, italic: false, size: null, smallCaps: false },
+      { text: 'word', color: null, bold: false, italic: false, size: 24, smallCaps: false },
+      { text: ' here', color: null, bold: false, italic: false, size: null, smallCaps: false },
     ]);
   });
 
@@ -499,9 +507,17 @@ describe('per-span SIZE helpers (9.A5c)', () => {
       [],
     );
     expect(segs).toEqual([
-      { text: 'plain ', color: null, bold: false, italic: false, size: null },
-      { text: 'serif', color: null, bold: false, italic: false, family: 'serif', size: null },
-      { text: ' plain', color: null, bold: false, italic: false, size: null },
+      { text: 'plain ', color: null, bold: false, italic: false, size: null, smallCaps: false },
+      {
+        text: 'serif',
+        color: null,
+        bold: false,
+        italic: false,
+        family: 'serif',
+        size: null,
+        smallCaps: false,
+      },
+      { text: ' plain', color: null, bold: false, italic: false, size: null, smallCaps: false },
     ]);
   });
 });
@@ -799,5 +815,101 @@ describe('9.A5-tails-a — display seeds must NEVER leak into sent overrides (ro
     expect(out).toContainEqual({ start: 12, end: 16, bold: false, italic: true });
     expect(out).toContainEqual({ start: 0, end: 6, bold: true, italic: false });
     expect(out.some((r) => r.start === 6 && r.end === 10)).toBe(false);
+  });
+});
+
+describe('9.K2 OpenType features (small caps / alternates)', () => {
+  it('spanFacesToStyles emits small_caps on the face entry', () => {
+    const out = spanFacesToStyles([{ start: 0, end: 5, bold: false, italic: false, smallCaps: true }]);
+    expect(out).toEqual([{ start: 0, end: 5, bold: false, italic: false, small_caps: true }]);
+  });
+
+  it('spanFacesToStyles emits alternates + alt_index, and omits index without alternates', () => {
+    expect(
+      spanFacesToStyles([
+        { start: 0, end: 3, bold: false, italic: false, alternates: true, altIndex: 2 },
+      ]),
+    ).toEqual([{ start: 0, end: 3, bold: false, italic: false, alternates: true, alt_index: 2 }]);
+    // altIndex on a NON-alternate entry never travels (it would be meaningless
+    // and could fork the face key — see faceKey's index gating).
+    expect(
+      spanFacesToStyles([{ start: 0, end: 3, bold: true, italic: false, altIndex: 5 }]),
+    ).toEqual([{ start: 0, end: 3, bold: true, italic: false }]);
+  });
+
+  it('a feature and a face on the SAME entry ride ONE span_styles entry', () => {
+    // The engine folds face + features into one face key per position
+    // (last-writer-wins); emitting a bold entry and a small-caps entry over
+    // the same range would clobber. So bold+smallCaps must be ONE entry.
+    const out = spanFacesToStyles([
+      { start: 0, end: 5, bold: true, italic: false, smallCaps: true },
+    ]);
+    expect(out).toEqual([{ start: 0, end: 5, bold: true, italic: false, small_caps: true }]);
+  });
+
+  it('setSpanFaceFeature applies small caps per segment, preserving other axes', () => {
+    // "select word → Bold, then → Small Caps" must compose to bold small caps,
+    // not replace the bold. segmentedFaceApply reads the composed view.
+    const bolded = applySpanFace([], 0, 5, { bold: true, italic: false });
+    const view = composeSpanFaces([], bolded);
+    const out = setSpanFaceFeature(bolded, view, 0, 5, 'smallCaps', true);
+    expect(out).toEqual([{ start: 0, end: 5, bold: true, italic: false, smallCaps: true }]);
+  });
+
+  it('setSpanFaceFeature carries the alt index, and clears it when turned off', () => {
+    const on = setSpanFaceFeature([], [], 2, 6, 'alternates', true, 3);
+    expect(on).toEqual([{ start: 2, end: 6, bold: false, italic: false, alternates: true, altIndex: 3 }]);
+    const off = setSpanFaceFeature(on, composeSpanFaces([], on), 2, 6, 'alternates', false);
+    // alternates off with no other axis set → an all-default face; the index
+    // is gone so it coalesces cleanly with a neighbouring plain range.
+    expect(off).toEqual([{ start: 2, end: 6, bold: false, italic: false, alternates: false }]);
+  });
+
+  it('a small-caps range never coalesces with a plain-face neighbour (faceKey)', () => {
+    // Two adjacent ranges differing only in small caps stay distinct.
+    let faces = applySpanFace([], 0, 3, { bold: false, italic: false, smallCaps: true });
+    faces = applySpanFace(faces, 3, 6, { bold: false, italic: false });
+    expect(mergeSpanFaces(faces)).toEqual([
+      { start: 0, end: 3, bold: false, italic: false, smallCaps: true },
+      { start: 3, end: 6, bold: false, italic: false },
+    ]);
+  });
+
+  it('styledSegments renders small caps as its own segment', () => {
+    const segs = styledSegments(
+      'abcdef',
+      [],
+      [{ start: 0, end: 3, bold: false, italic: false, smallCaps: true }],
+      [],
+    );
+    expect(segs).toEqual([
+      { text: 'abc', color: null, bold: false, italic: false, size: null, smallCaps: true },
+      { text: 'def', color: null, bold: false, italic: false, size: null, smallCaps: false },
+    ]);
+  });
+
+  it('segmentsToHtml sets font-variant-caps for a small-caps segment', () => {
+    const html = segmentsToHtml(
+      [{ text: 'abc', color: null, bold: false, italic: false, size: null, smallCaps: true }],
+      { basePx: 14, baseSize: 12, rev: 0 },
+    );
+    expect(html).toContain('font-variant-caps:all-small-caps');
+  });
+
+  it('composeSpanFaces preserves the feature axes of overrides', () => {
+    const overrides = [
+      { start: 0, end: 4, bold: false, italic: false, smallCaps: true, alternates: true, altIndex: 1 },
+    ];
+    const out = composeSpanFaces([], overrides);
+    expect(out).toEqual([
+      { start: 0, end: 4, bold: false, italic: false, smallCaps: true, alternates: true, altIndex: 1 },
+    ]);
+  });
+
+  it('features survive a text remap (they ride the SpanFace like every field)', () => {
+    // A range wholly AFTER an insertion shifts by the delta, keeping small caps.
+    const faces = [{ start: 6, end: 11, bold: false, italic: false, smallCaps: true }];
+    const out = remapRanges('Hello world', 'XXHello world', faces);
+    expect(out).toEqual([{ start: 8, end: 13, bold: false, italic: false, smallCaps: true }]);
   });
 });

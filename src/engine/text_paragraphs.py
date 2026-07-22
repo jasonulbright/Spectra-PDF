@@ -44,6 +44,7 @@ kept show renders at an identical matrix with identical state) is
 asserted directly by the test suite's dual-walk harness.
 """
 
+import os
 import re
 import statistics
 import unicodedata
@@ -822,9 +823,9 @@ class _Fallback:
     the target stream's resources (deterministic sorted-face order, so the
     single-subset A3 case keeps its shipped `/EditFb0`)."""
 
-    __slots__ = ("name", "font_dict", "encode", "width_1000", "used", "face_path")
+    __slots__ = ("name", "font_dict", "encode", "width_1000", "used", "face_path", "kern_pairs")
 
-    def __init__(self, name, font_dict, encode, width_1000, face_path=None):
+    def __init__(self, name, font_dict, encode, width_1000, face_path=None, kern_pairs=None):
         self.name = name
         self.font_dict = font_dict
         self.encode = encode
@@ -833,14 +834,129 @@ class _Fallback:
         # 9.K1b: the resolved face file, so the kern source can read this
         # face's own pair table rather than guessing from the family.
         self.face_path = face_path
+        # 9.K2: pre-captured kern pairs for an IN-PLACE feature face, whose
+        # temp program is unlinked before the emission pass runs — reading
+        # face_path then would find nothing and silently un-kern the run.
+        self.kern_pairs = kern_pairs
+
+
+def _feature_source(font_path, member, resources, chars, feats, alt, style):
+    """9.K2: the (face_path, glyph_for, tmp_to_delete) for a feature key.
+
+    IN PLACE when the member's OWN embedded font both advertises the feature
+    AND actually contains the substituted glyphs — an aggressively subsetted
+    embed frequently drops the unused `.sc`/alternate glyphs even while
+    keeping the GSUB table, so presence must be CHECKED, not assumed.
+    Otherwise the explicit switch to bundled Libertinus Serif. `member` is
+    None when the caller has already decided in-place is inapplicable (an
+    explicit family + feature — only Libertinus carries features), forcing the
+    switch. The temp file (the extracted embedded program) is the caller's to
+    delete after the subset build reads it."""
+    import io
+    import tempfile
+
+    from fontTools.ttLib import TTFont
+
+    from engine.font_fallback import resolve_feature_font
+    from engine.font_features import available_features, resolve_glyphs
+    from engine.font_kerning import _embedded_program
+    from engine.text_runs import _lookup_font
+
+    raw = None
+    if member is not None:
+        try:
+            fd = _lookup_font(member.style["font_name"], member.resources or resources, resources)
+            raw = _embedded_program(fd) if fd is not None else None
+        except Exception:
+            raw = None
+    if raw:
+        try:
+            ff = TTFont(io.BytesIO(raw), fontNumber=0, lazy=True)
+            try:
+                # ALL requested feature tags must be present, not just one:
+                # "small caps" expands to smcp+c2sc, and a font carrying only
+                # smcp would small-cap the lowercase and leave capitals plain
+                # (a silent non-uniform result). Require the full set, else
+                # switch to Libertinus (which has both) for uniform output.
+                if set(feats) <= available_features(ff):
+                    names = resolve_glyphs(ff, chars, feats, alt_index=alt)
+                    present = set(ff.getGlyphOrder())
+                    if names and all(n is not None and n in present for n in names):
+                        glyph_for = {ch: n for ch, n in zip(chars, names)}
+                        suffix = ".otf" if getattr(ff, "sfntVersion", "") == "OTTO" else ".ttf"
+                        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+                        tmp.write(raw)
+                        tmp.close()
+                        return tmp.name, glyph_for, tmp.name
+            finally:
+                ff.close()
+        except Exception:
+            pass  # any hiccup reading the embed -> the Libertinus switch
+    face = resolve_feature_font(str(font_path), style=style)
+    ff = TTFont(str(face), fontNumber=0, lazy=True)
+    try:
+        names = resolve_glyphs(ff, chars, feats, alt_index=alt)
+    finally:
+        ff.close()
+    glyph_for = {ch: n for ch, n in zip(chars, names) if n is not None}
+    return face, glyph_for, None
+
+
+def _normalize_para_features(features) -> tuple:
+    """The op-level `features` list -> a concrete GSUB tag tuple. Accepts the
+    convenience token "small_caps" (=> smcp+c2sc) and raw tags; unknown tags
+    are ignored (never a silent wrong result). `()` when nothing applies."""
+    if not features:
+        return ()
+    from engine.font_features import SUPPORTED
+
+    out: list = []
+    for f in features:
+        f = str(f).strip().lower()
+        if f in ("small_caps", "smallcaps"):
+            out.extend(("smcp", "c2sc"))
+        elif f in SUPPORTED:
+            out.append(f)
+    seen, uniq = set(), []
+    for f in out:
+        if f not in seen:
+            seen.add(f)
+            uniq.append(f)
+    return tuple(uniq)
+
+
+def _span_features(entry: dict) -> tuple:
+    """9.K2: (features_tuple, alt_index) from a span/paragraph style entry.
+    `small_caps: true` -> (smcp, c2sc); `alternates: true` -> (salt,) with an
+    optional `alt_index`. Returns `((), 0)` when no feature is requested, so a
+    plain restyle key is byte-identical to A5b."""
+    feats: list = []
+    if entry.get("small_caps"):
+        feats.extend(("smcp", "c2sc"))
+    if entry.get("alternates"):
+        feats.append("salt")
+    try:
+        alt = int(entry.get("alt_index", 0) or 0)
+    except (TypeError, ValueError):
+        alt = 0
+    return (tuple(feats), alt if feats else 0)
 
 
 def _face_sort_key(key: tuple) -> tuple:
-    """Total order over face keys `(family_or_None, bold, italic)` — None
-    family sorts as "" so the sort never compares NoneType to str. Pins the
-    per-subset name allocation + build order (deterministic bytes)."""
-    fam, bold, italic = key
-    return (fam or "", bold, italic)
+    """Total order over face keys `(family_or_None, bold, italic, features,
+    alt_index)` — None family sorts as "" so the sort never compares NoneType
+    to str. Pins the per-subset name allocation + build order (deterministic
+    bytes). 9.K2 added the trailing (features, alt_index); a no-feature key
+    carries `((), 0)`, so its sort position is unchanged from A5b.
+
+    9.K2 also allows `fam` to be a member INDEX int on a per-span feature key
+    (baked so each run re-embeds the feature from its own font). Map it to a
+    high-codepoint-prefixed string so int/str/None never compare across types
+    and int keys sort AFTER every family string — leaving the family/None
+    order (and its byte pins) exactly as before."""
+    fam, bold, italic, feats, alt = key
+    fam_sort = f"￿{fam:08d}" if isinstance(fam, int) else (fam or "")
+    return (fam_sort, bold, italic, feats, alt)
 
 
 def _styled_chars(
@@ -949,8 +1065,8 @@ def _styled_chars(
         if face_by_pos is not None:
             k = face_by_pos[pos] if 0 <= pos < len(face_by_pos) else None
             if k is not None:
-                fam, kb, ki = k
-                if fam is None and member_family is not None:
+                fam, kb, ki, kfeats, kalt = k
+                if fam is None and not kfeats and member_family is not None:
                     # Round-33 HIGH: a per-span face with NO explicit family
                     # keeps THIS char's own member family (a bolded mono word
                     # in a serif paragraph → LiberationMono-Bold, not the
@@ -960,7 +1076,21 @@ def _styled_chars(
                     # the right typeface. `whole_para_face` (the true
                     # whole-paragraph A3b key) is returned untouched below —
                     # it resolves from the DOMINANT member, byte-identical.
-                    k = (member_family.get(member.index), kb, ki)
+                    k = (member_family.get(member.index), kb, ki, kfeats, kalt)
+                elif kfeats and fam is None:
+                    # 9.K2 (round-42 CRITICAL fix): a per-span feature with no
+                    # explicit family applies IN PLACE from THIS char's own
+                    # member. Bake the member INDEX so a feature on one run of
+                    # a mixed-font paragraph re-embeds from THAT run's font
+                    # (the build step resolves the member back), not the
+                    # paragraph's first run. Before this, every per-span
+                    # feature key collapsed to fam=None and the build resolved
+                    # it from `first` — a small-caps edit on a later run whose
+                    # own font had no feature borrowed the first run's font.
+                    # (fam a str = an explicit family + feature: only Libertinus
+                    # carries features, so it never applies in place — handled
+                    # at the build step, where the member is forced to None.)
+                    k = (member.index, kb, ki, kfeats, kalt)
                 return k
         return whole_para_face
 
@@ -1024,8 +1154,9 @@ def _styled_chars(
                     )
                 # B1 dominant/convert face: family resolves from the first
                 # member (the build step), style regular — byte-identical to
-                # the shipped single convert subset.
-                ck = (None, False, False)
+                # the shipped single convert subset. 9.K2: no feature ⇒
+                # `((), 0)`, so the convert key is unchanged in effect.
+                ck = (None, False, False, (), 0)
                 fb_by_face.setdefault(ck, set()).add(ch)
                 styled.append((ch, ref(member, ck, col, siz)))
             else:
@@ -1082,9 +1213,16 @@ class _KernSource:
 
             if st.fallback is not None:
                 fb = self._fallbacks.get(st.fallback)
-                face = getattr(fb, "face_path", None) if fb is not None else None
-                if face:
-                    pairs = kern_pairs(str(face))
+                # 9.K2: an in-place feature face captured its kerning at build
+                # time (its temp program is already unlinked), so use that;
+                # otherwise read the (bundled, still-present) face's table.
+                captured = getattr(fb, "kern_pairs", None) if fb is not None else None
+                if captured is not None:
+                    pairs = captured
+                else:
+                    face = getattr(fb, "face_path", None) if fb is not None else None
+                    if face:
+                        pairs = kern_pairs(str(face))
             else:
                 from engine.text_runs import _lookup_font
 
@@ -2064,6 +2202,8 @@ def replace_paragraph_text(
     italic: bool | None = None,
     split_at: int | None = None,
     span_styles: list | None = None,
+    features: list | None = None,
+    alt_index: int = 0,
 ) -> dict:
     """Replace a paragraph's text and re-lay-out inside its box (7.5).
 
@@ -2189,7 +2329,19 @@ def replace_paragraph_text(
         style_override = None
         if bold is not None or italic is not None:
             style_override = (bool(bold), bool(italic))
-        substituting = family_override is not None or style_override is not None
+        # 9.K2 whole-paragraph OpenType features (small caps / alternates).
+        # `features` accepts the tokens "small_caps"/"smcp"/"c2sc"/"salt"; a
+        # feature forces the Libertinus-Serif switch (Liberation has none) and
+        # substitutes the whole paragraph. `((), 0)` when absent, so the
+        # no-feature path is byte-identical.
+        para_feats = _normalize_para_features(features)
+        try:
+            para_alt = int(alt_index or 0) if para_feats else 0
+        except (TypeError, ValueError):
+            para_alt = 0
+        substituting = (
+            family_override is not None or style_override is not None or bool(para_feats)
+        )
         # 9.B4b: the bundled Liberation faces are horizontal — substituted
         # into a column their glyphs would lay out on the wrong axis.
         # Refuse outright (the B4a convert-refusal honesty; v1 boundary).
@@ -2230,7 +2382,9 @@ def replace_paragraph_text(
                     raise ValueError("span style range out of bounds")
                 if st == en:
                     continue  # empty range: harmless no-op
-                has_face = any(f in entry for f in ("family", "bold", "italic"))
+                has_face = any(
+                    f in entry for f in ("family", "bold", "italic", "small_caps", "alternates")
+                )
                 has_color = entry.get("color") is not None
                 has_size = entry.get("size") is not None
                 if not has_face and not has_color and not has_size:
@@ -2257,7 +2411,13 @@ def replace_paragraph_text(
                         fam = str(fam).strip().lower()
                         if fam not in ("serif", "sans", "mono"):
                             raise ValueError("span style family must be serif, sans, or mono")
-                    facekey = (fam, bool(entry.get("bold")), bool(entry.get("italic")))
+                    # 9.K2: a per-span OpenType feature request (small caps /
+                    # alternates) rides the SAME face key. small_caps expands
+                    # to smcp+c2sc; a feature forces a feature-bearing face
+                    # (Libertinus Serif) in the build below, because Liberation
+                    # has none. No feature => `((), 0)`, byte-identical to A5b.
+                    feats, alt = _span_features(entry)
+                    facekey = (fam, bool(entry.get("bold")), bool(entry.get("italic")), feats, alt)
                     if face_by_pos is None:
                         face_by_pos = [None] * n_cp
                     for k in range(st, en):
@@ -2285,7 +2445,7 @@ def replace_paragraph_text(
         if substituting:
             wb = style_override[0] if style_override is not None else False
             wi = style_override[1] if style_override is not None else False
-            whole_para_face = (family_override, wb, wi)
+            whole_para_face = (family_override, wb, wi, para_feats, para_alt)
 
         members_by_index = {m.index: m for m in para.members}
         # 9.A5b (round-33 HIGH): each member's OWN classified family, so a
@@ -2334,7 +2494,52 @@ def replace_paragraph_text(
             # a synthetic /Flags dict (the A2 trick).
             first = min(para.members, key=lambda m: m.index)
             for key in sorted(fb_by_face, key=_face_sort_key):
-                fam, kbold, kitalic = key
+                fam, kbold, kitalic, kfeats, kalt = key
+                chars = "".join(sorted(fb_by_face[key]))
+                if kfeats:
+                    # 9.K2: apply the OpenType feature. IN PLACE using the
+                    # OWNING member's font when it carries the feature AND the
+                    # substituted glyphs; otherwise the explicit switch to
+                    # bundled Libertinus Serif (Liberation has no features).
+                    # ToUnicode keeps the plain letters (searchable) either way.
+                    # The in-place source member (round-42 CRITICAL fix): a
+                    # per-span key baked its own member index into `fam`; a
+                    # whole-paragraph key (None) resolves from the dominant
+                    # `first`; an explicit family + feature (str) can only get
+                    # features from Libertinus, so it never applies in place.
+                    if isinstance(fam, int):
+                        src_member = members_by_index.get(fam)
+                    elif fam is None:
+                        src_member = first
+                    else:
+                        src_member = None
+                    face, glyph_for, tmp = _feature_source(
+                        font_path, src_member, resources, chars, kfeats, kalt,
+                        style_key(kbold, kitalic),
+                    )
+                    feat_kern = None
+                    try:
+                        font_dict, encode, width_1000 = build_fallback_font(
+                            pdf, face, chars, glyph_for=glyph_for
+                        )
+                        # Capture the IN-PLACE face's kerning while its temp
+                        # program still exists — the emission pass reads it
+                        # later (by which point `tmp` is unlinked), so reading
+                        # the path then would silently un-kern the run (K1b).
+                        if tmp:
+                            from engine.font_kerning import kern_pairs as _kp
+
+                            feat_kern = _kp(str(face))
+                    finally:
+                        if tmp:
+                            try:
+                                os.unlink(tmp)
+                            except OSError:
+                                pass
+                    fallbacks[key] = _Fallback(
+                        None, font_dict, encode, width_1000, face, kern_pairs=feat_kern
+                    )
+                    continue
                 if fam is not None:
                     original = synthetic_family_font(fam)
                 else:
@@ -2344,7 +2549,6 @@ def replace_paragraph_text(
                 face = resolve_fallback_font(
                     str(font_path), original, style=style_key(kbold, kitalic)
                 )
-                chars = "".join(sorted(fb_by_face[key]))
                 font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars)
                 fallbacks[key] = _Fallback(None, font_dict, encode, width_1000, face)
 

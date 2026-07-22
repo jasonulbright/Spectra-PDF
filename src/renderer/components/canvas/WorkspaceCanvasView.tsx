@@ -141,7 +141,19 @@ interface WorkspaceCanvasViewProps {
     page: number,
     rect: [number, number, number, number],
     text: string,
-    opts?: { size?: number; color?: [number, number, number]; family?: 'serif' | 'sans' | 'mono' },
+    opts?: {
+      size?: number;
+      color?: [number, number, number];
+      family?: 'serif' | 'sans' | 'mono';
+      rotate?: 0 | 90 | 180 | 270;
+      bold?: boolean;
+      italic?: boolean;
+      kern?: boolean;
+      // 9.K2 OpenType features — ['small_caps'] and/or ['salt']; alt_index
+      // picks the salt alternate.
+      features?: string[];
+      alt_index?: number;
+    },
   ) => Promise<string | void>;
   // Embed a NEW image (9.C2) at a user-space rect. `source` is optional — the
   // App handler PICKS the file when it's absent; the harness injects it (the
@@ -610,6 +622,12 @@ export function WorkspaceCanvasView({
   // (null = unknown/measuring; the notice shows only on a definite no).
   const [atBold, setAtBold] = useState(false);
   const [atItalic, setAtItalic] = useState(false);
+  // 9.K2 OpenType features (sticky like the other style toggles). Authoring
+  // renders in a bundled face, so a feature switches to Libertinus Serif;
+  // alternates picks its glyph by index.
+  const [atSmallCaps, setAtSmallCaps] = useState(false);
+  const [atAlternates, setAtAlternates] = useState(false);
+  const [atAltIndex, setAtAltIndex] = useState(0);
   // 9.K1: pair kerning, ON by default (correct typography is the right
   // default and is what the fit measurement assumes); the toggle is an
   // opt-OUT, and only that opt-out is ever sent.
@@ -678,6 +696,10 @@ export function WorkspaceCanvasView({
       /** 9.K1: pair kerning — ON by default engine-side, so only `false`
        * travels. */
       kern?: boolean;
+      /** 9.K2 OpenType features. */
+      smallCaps?: boolean;
+      alternates?: boolean;
+      altIndex?: number;
     }): Promise<void> => {
       if (creatingTextRef.current) return; // re-entry: the button is disabled while creating
       const placement = liveAddTextPlacement;
@@ -727,6 +749,17 @@ export function WorkspaceCanvasView({
             // 9.K1 inverts the send-nothing rule: kerning is ON by default,
             // so only an explicit opt-OUT travels.
             ...(params.kern === false ? { kern: false } : {}),
+            // 9.K2 features (send-nothing when off, byte-identical no-feature
+            // path). alt_index travels only with alternates.
+            ...(params.smallCaps || params.alternates
+              ? {
+                  features: [
+                    ...(params.smallCaps ? ['small_caps'] : []),
+                    ...(params.alternates ? ['salt'] : []),
+                  ],
+                  ...(params.alternates ? { alt_index: params.altIndex ?? 0 } : {}),
+                }
+              : {}),
           },
         );
         // Signed-doc refusal — keep the card open (the user can cancel).
@@ -786,6 +819,18 @@ export function WorkspaceCanvasView({
             // The fit indicator MUST measure with the same kerning the commit
             // will use, or the card could promise a fit the commit breaks.
             ...(atKern ? {} : { kern: false }),
+            // 9.K2: measure with the SAME features the commit applies — small
+            // caps change advances, so a plain measurement could promise a fit
+            // the small-caps commit then breaks (the K1 kerning discipline).
+            ...(atSmallCaps || atAlternates
+              ? {
+                  features: [
+                    ...(atSmallCaps ? ['small_caps'] : []),
+                    ...(atAlternates ? ['salt'] : []),
+                  ],
+                  ...(atAlternates ? { alt_index: atAltIndex } : {}),
+                }
+              : {}),
           })) as { fits?: boolean };
           if (!stale) setAtFits(typeof res?.fits === 'boolean' ? res.fits : null);
         } catch {
@@ -806,6 +851,9 @@ export function WorkspaceCanvasView({
     atBold,
     atItalic,
     atKern,
+    atSmallCaps,
+    atAlternates,
+    atAltIndex,
     docs,
     state.files,
     engineCall,
@@ -821,8 +869,24 @@ export function WorkspaceCanvasView({
       bold: atBold,
       italic: atItalic,
       kern: atKern,
+      smallCaps: atSmallCaps,
+      alternates: atAlternates,
+      altIndex: atAltIndex,
     }).catch(() => undefined); // surfaced via atError; the card stays open
-  }, [commitAddText, atText, atSize, atColor, atFamily, atRotate, atBold, atItalic, atKern]);
+  }, [
+    commitAddText,
+    atText,
+    atSize,
+    atColor,
+    atFamily,
+    atRotate,
+    atBold,
+    atItalic,
+    atKern,
+    atSmallCaps,
+    atAlternates,
+    atAltIndex,
+  ]);
 
   // Bake pending values file by file through App's fill op. Reentrancy-ref'd
   // like applyMarks (two clicks in one tick both read a stale busy flag).
@@ -3526,6 +3590,52 @@ export function WorkspaceCanvasView({
             >
               I
             </button>
+            {/* 9.K2 OpenType features. Authoring always renders a bundled face,
+                so a feature switches to Libertinus Serif (Liberation has none). */}
+            <button
+              type="button"
+              data-testid="add-text-smallcaps"
+              aria-pressed={atSmallCaps}
+              title="Small caps — authors in Libertinus Serif (carries real small caps)"
+              onClick={() => setAtSmallCaps((s) => !s)}
+              className={`px-2 py-1 text-xs border rounded ${
+                atSmallCaps
+                  ? 'bg-emerald-700/40 border-emerald-500'
+                  : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
+              }`}
+              style={{ fontVariantCaps: 'all-small-caps' }}
+            >
+              Sc
+            </button>
+            <button
+              type="button"
+              data-testid="add-text-alternates"
+              aria-pressed={atAlternates}
+              title="Stylistic alternates (salt) — authors in Libertinus Serif"
+              onClick={() => setAtAlternates((a) => !a)}
+              className={`px-2 py-1 text-xs border rounded ${
+                atAlternates
+                  ? 'bg-emerald-700/40 border-emerald-500'
+                  : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
+              }`}
+            >
+              Alt
+            </button>
+            {atAlternates && (
+              <input
+                type="number"
+                data-testid="add-text-altindex"
+                min={0}
+                max={99}
+                step={1}
+                value={atAltIndex}
+                title="Which stylistic alternate to use, when the face offers several"
+                onChange={(e) =>
+                  setAtAltIndex(Math.max(0, Math.min(99, Math.trunc(parseFloat(e.target.value) || 0))))
+                }
+                className="w-12 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
+              />
+            )}
             <span className="text-xs text-neutral-400 flex-1 text-right shrink-0">Colour</span>
             <input
               data-testid="add-text-color"
