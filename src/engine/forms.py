@@ -345,7 +345,18 @@ def _page_index_maps(pdf) -> tuple[dict, dict]:
         for a in annots:
             try:
                 og = a.objgen
-                if og[0] != 0:
+                if og[0] == 0:
+                    continue
+                if og in annot_map:
+                    # The SAME widget object listed in ≥2 pages' /Annots is
+                    # malformed (reachable via arbitrary third-party input the
+                    # CLI reader must tolerate — gauntlet MEDIUM). Never silently
+                    # pick a page: mark it ambiguous (None) so `_widget_geometry`
+                    # falls back to the spec-authoritative /P, else reports
+                    # unplaced — no silent misattribution.
+                    if annot_map[og] != i:
+                        annot_map[og] = None
+                else:
                     annot_map[og] = i
             except Exception:
                 continue

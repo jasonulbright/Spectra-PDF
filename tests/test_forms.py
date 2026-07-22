@@ -149,6 +149,49 @@ class TestReadFormFields:
         f2 = next(f for f in read_form_fields(out)["fields"] if f["name"] == "f2")
         assert f2["widgets"] == [{"page": 1, "rect": [10.0, 20.0, 110.0, 44.0]}]
 
+    def test_fc3_widget_in_two_pages_annots_not_misattributed(self, tmp_dir):
+        # Gauntlet MEDIUM: the SAME widget object listed in TWO pages' /Annots
+        # (malformed third-party input) must NOT be silently pinned to one page.
+        # With no /P it reports page None (unplaced) — the scan never guesses.
+        out = os.path.join(tmp_dir, "dup.pdf")
+        pdf = pikepdf.new()
+        p0 = pdf.add_blank_page(page_size=(300, 300))
+        p1 = pdf.add_blank_page(page_size=(300, 300))
+        w = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, Rect=[1, 2, 3, 4],
+                FT=Name.Tx, T=pikepdf.String("dup"),
+            )
+        )
+        p0.obj["/Annots"] = pikepdf.Array([w])
+        p1.obj["/Annots"] = pikepdf.Array([w])
+        pdf.Root["/AcroForm"] = Dictionary(Fields=pikepdf.Array([w]))
+        pdf.save(out)
+        pdf.close()
+        dup = next(f for f in read_form_fields(out)["fields"] if f["name"] == "dup")
+        assert dup["widgets"] == [{"page": None, "rect": [1.0, 2.0, 3.0, 4.0]}]
+
+    def test_fc3_ambiguous_widget_resolves_via_P(self, tmp_dir):
+        # The ambiguous (two-/Annots) widget's spec-authoritative /P disambiguates
+        # to page 1 rather than falling to None.
+        out = os.path.join(tmp_dir, "dupP.pdf")
+        pdf = pikepdf.new()
+        p0 = pdf.add_blank_page(page_size=(300, 300))
+        p1 = pdf.add_blank_page(page_size=(300, 300))
+        w = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, Rect=[1, 2, 3, 4],
+                FT=Name.Tx, T=pikepdf.String("dup"), P=p1.obj,
+            )
+        )
+        p0.obj["/Annots"] = pikepdf.Array([w])
+        p1.obj["/Annots"] = pikepdf.Array([w])
+        pdf.Root["/AcroForm"] = Dictionary(Fields=pikepdf.Array([w]))
+        pdf.save(out)
+        pdf.close()
+        dup = next(f for f in read_form_fields(out)["fields"] if f["name"] == "dup")
+        assert dup["widgets"] == [{"page": 1, "rect": [1.0, 2.0, 3.0, 4.0]}]
+
     def test_fc3_rect_normalized(self, tmp_dir):
         # A /Rect in a non-standard corner order normalizes to [x0,y0,x1,y1].
         out = os.path.join(tmp_dir, "rot.pdf")
