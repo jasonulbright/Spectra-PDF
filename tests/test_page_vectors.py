@@ -153,6 +153,39 @@ class TestListVectors:
         assert vs[1]["stroke"] == [0.0, 1.0, 0.0]
         assert vs[2]["fill"] == [1.0, 1.0, 1.0]  # k=(0,0,0,0) → white
 
+    def test_non_device_colours_resolved(self, tmp_dir):
+        # § I.0 S5: a Separation (Type-2 tint → CMYK), an Indexed lookup, and an
+        # ICCBased (N=3) fill now resolve to a swatch colour through the walk —
+        # before S5 they were None. Built with indirect objects the plain _pdf
+        # helper can't express.
+        import os
+
+        path = os.path.join(tmp_dir, "s5.pdf")
+        pdf = pikepdf.new()
+        pg = pdf.add_blank_page(page_size=(400, 400))
+        tint = pdf.make_indirect(Dictionary(
+            FunctionType=2, Domain=[0.0, 1.0], N=1.0,
+            C0=[0.0, 0.0, 0.0, 0.0], C1=[0.0, 1.0, 1.0, 0.0]))
+        sep = pdf.make_indirect(pikepdf.Array(
+            [Name("/Separation"), Name("/Spot"), Name("/DeviceCMYK"), tint]))
+        idx = pdf.make_indirect(pikepdf.Array(
+            [Name("/Indexed"), Name("/DeviceRGB"), 1, pikepdf.String(bytes([0, 255, 0, 0, 0, 255]))]))
+        icc_stream = pdf.make_stream(b"\x00")
+        icc_stream["/N"] = 3
+        icc = pdf.make_indirect(pikepdf.Array([Name("/ICCBased"), icc_stream]))
+        pg.Resources = Dictionary(ColorSpace=Dictionary(SEP=sep, IDX=idx, ICC=icc))
+        pg.Contents = pdf.make_stream(
+            b"/SEP cs 1 scn 10 10 20 20 re f\n"      # spot full tint → red-ish
+            b"/IDX cs 1 scn 40 10 20 20 re f\n"      # palette index 1 → blue
+            b"/ICC cs 0.1 0.5 0.9 scn 70 10 20 20 re f\n"  # ICC N=3 → rgb passthrough
+        )
+        pdf.save(path)
+        pdf.close()
+        vs = _vecs(path)
+        assert vs[0]["fill"] == [1.0, 0.0, 0.0]
+        assert vs[1]["fill"] == [0.0, 0.0, 1.0]
+        assert vs[2]["fill"] == [0.1, 0.5, 0.9]
+
     def test_pattern_fill_colour_is_none_not_wrong(self, tmp_dir):
         # A /Pattern scn fill lists (the geometry is real) but its colour is an
         # honest None — never a guessed rgb.

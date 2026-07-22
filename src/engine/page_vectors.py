@@ -42,6 +42,7 @@ from pathlib import Path
 
 import pikepdf
 
+from engine import color_spaces
 from engine.content_walk import ClipTracker, DEFAULT_COLOR, GraphicsTextState, mat_mult, transform_point
 from engine.page_images import (
     _do_instruction,
@@ -94,10 +95,17 @@ def _points_of(operator: str, operands: list) -> list:
     return []
 
 
-def _color_rgb(color_state):
+def _color_rgb(color_state, resources=None, pdf=None):
     """Best-effort [r, g, b] (0-1) for a captured fill/stroke color, or None
-    when the space isn't a plain device one (sc/scn/pattern/ICC — never
-    guessed). `color_state` is content_walk's (space_op, value_op)."""
+    when it can't be resolved (a pattern, or a space with no evaluable tint).
+    `color_state` is content_walk's (space_op, value_op).
+
+    Device colours (`g`/`rg`/`k`, and stroke `G`/`RG`/`K`) resolve inline. A
+    `cs`/`scn` in a NON-device space (ICCBased, Indexed, Separation, DeviceN,
+    Cal*, Lab) is resolved against `resources`'s `/ColorSpace` by
+    `color_spaces.resolve_color` (§ I.0 S5) — before S5 these returned None and
+    showed no swatch. Anything still unresolvable stays None (honest unknown,
+    never a wrong colour)."""
     if color_state is None:
         return None
     space_op, value_op = color_state
@@ -107,22 +115,25 @@ def _color_rgb(color_state):
         # scn yet) is not device-plain → unknown.
         return [0.0, 0.0, 0.0] if space_op is None else None
     op, vals = value_op
-    try:
-        nums = [float(v) for v in vals]
-    except (TypeError, ValueError):
-        return None
     # Stroke ops (G/RG/K) share the fill ops' operand shapes — normalize so a
     # stroked path's colour is captured too (the blue-line case).
-    op = op.lower()
-    if op == "g" and len(nums) == 1:
-        v = max(0.0, min(1.0, nums[0]))
-        return [v, v, v]
-    if op == "rg" and len(nums) == 3:
-        return [max(0.0, min(1.0, c)) for c in nums]
-    if op == "k" and len(nums) == 4:
-        c, m, y, k = (max(0.0, min(1.0, n)) for n in nums)
-        return [(1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k)]
-    return None  # sc/scn/pattern/shading — honest unknown, never a wrong colour
+    opl = op.lower()
+    if opl in ("g", "rg", "k"):
+        try:
+            nums = [float(v) for v in vals]
+        except (TypeError, ValueError):
+            return None
+        if opl == "g" and len(nums) == 1:
+            v = max(0.0, min(1.0, nums[0]))
+            return [v, v, v]
+        if opl == "rg" and len(nums) == 3:
+            return [max(0.0, min(1.0, c)) for c in nums]
+        if opl == "k" and len(nums) == 4:
+            c, m, y, k = (max(0.0, min(1.0, n)) for n in nums)
+            return [(1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k)]
+        return None
+    # sc/scn in a named space — resolve via /Resources /ColorSpace (S5).
+    return color_spaces.resolve_color(space_op, value_op, resources, pdf)
 
 
 def _walk_vectors(
@@ -222,10 +233,10 @@ def _walk_vectors(
                         "rect": [vrect[0], vrect[1], vrect[2], vrect[3]],
                         "matrix": list(state.ctm),
                         "kind": kind,
-                        "fill": _color_rgb(state.fill_color)
+                        "fill": _color_rgb(state.fill_color, resources, pdf)
                         if operator not in _PAINT_STROKE
                         else None,
-                        "stroke": _color_rgb(state.stroke_color)
+                        "stroke": _color_rgb(state.stroke_color, resources, pdf)
                         if operator not in _PAINT_FILL
                         else None,
                         # D3: the effective line width (the width control's seed);

@@ -18,9 +18,11 @@ export interface EditVectorObject {
   userRect: [number, number, number, number];
   /** How the path is painted — drives the selection affordance's honesty. */
   kind: 'fill' | 'stroke' | 'fillstroke';
-  /** Best-effort fill colour [r,g,b] 0-1 (device spaces only), else null. */
+  /** Best-effort fill colour [r,g,b] 0-1. Device colours plus ICCBased,
+   *  Indexed, Separation, DeviceN, CalGray/CalRGB and Lab are resolved
+   *  engine-side (S5); a pattern or an unevaluable tint stays null. */
   fill: [number, number, number] | null;
-  /** Best-effort stroke colour [r,g,b] 0-1 (device spaces only), else null. */
+  /** Best-effort stroke colour [r,g,b] 0-1 (same resolution as fill), else null. */
   stroke: [number, number, number] | null;
   /** The effective line width (D3's width control seed). */
   lineWidth: number;
