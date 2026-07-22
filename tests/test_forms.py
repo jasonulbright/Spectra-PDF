@@ -267,6 +267,33 @@ class TestFillFormFields:
             # More than one show → the text wrapped onto multiple lines.
             assert body.count(b"> Tj") >= 2
 
+    @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_fc1_unicode_with_control_chars_fills(self, tmp_dir):
+        # Gauntlet HIGH regression: a non-WinAnsi value containing layout-only
+        # control chars (\n, \r\n, \t) is validated OK (they're excluded from
+        # coverage) and must FILL — not crash inside build_fallback_font, whose
+        # own coverage gate would reject the control chars. All variants the
+        # reviewer reproduced:
+        cases = {
+            "notes": "Привет\nмир",        # multiline field + LF
+            "applicant.name": "Привет\tмир",  # single-line field + TAB
+        }
+        for field, val in cases.items():
+            out = os.path.join(tmp_dir, f"ctl_{field.replace('.', '_')}.pdf")
+            r = fill_form_fields(PDFLIB_FORM, out, {field: val}, font_dir=FONTS_DIR)
+            assert r["filled"] == 1
+            # The value round-trips through /V verbatim (unchanged by the
+            # appearance normalisation, which is display-only).
+            back = {f["name"]: f["value"] for f in read_form_fields(out)["fields"]}
+            assert back[field] == val
+        # A CRLF multi-paragraph value in the multiline field respects the break
+        # (two baselines) and doesn't leave a stray CR in the drawn glyphs.
+        out = os.path.join(tmp_dir, "crlf.pdf")
+        r = fill_form_fields(
+            PDFLIB_FORM, out, {"notes": "Привет\r\nмир земной"}, font_dir=FONTS_DIR
+        )
+        assert r["filled"] == 1
+
     def test_auto_size_and_inherited_da(self, tmp_dir):
         # The raw fixture's AcroForm /DA is "/Helv 0 Tf" — auto-size. The
         # appearance stream must carry a concrete positive size.

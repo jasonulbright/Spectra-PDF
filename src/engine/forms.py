@@ -541,6 +541,9 @@ def _text_appearance(
         unicode_face = _unicode_face(font_dir, da)
 
     if unicode_face is None:
+        # WinAnsi — byte-identical: everything below runs on the raw value
+        # (Helvetica metrics + `_escape_pdf_text` both tolerate control bytes).
+        layout_value = value
         font_name, font_obj, substituted = _dr_font(pdf, requested_font)
         width_em = text_width_em
 
@@ -549,7 +552,16 @@ def _text_appearance(
     else:
         from engine.font_fallback import build_fallback_font
 
-        font_obj, encode, width_1000 = build_fallback_font(pdf, unicode_face, value)
+        # The embedded font is SUBSET to the drawn glyphs, and `build_fallback_
+        # font`/`encode`/`width_1000` all reject a character not in that subset.
+        # `\n`/`\r`/`\t` are layout-only (never glyphs), and `_face_missing`
+        # excluded them at validation — so normalise them AWAY of the glyph set
+        # here (CR→LF, tab→space; LF kept for multiline wrapping) or a validated
+        # multi-paragraph value would crash inside the fill (gauntlet HIGH).
+        layout_value = value.replace("\r\n", "\n").replace("\r", "\n").replace("\t", " ")
+        font_obj, encode, width_1000 = build_fallback_font(
+            pdf, unicode_face, layout_value.replace("\n", " ")
+        )
         font_name = "TxU"  # one font per appearance stream, in its own /Resources
         substituted = False  # an intentional embed, not a /DR-missing fallback
 
@@ -560,14 +572,17 @@ def _text_appearance(
             return b"<" + _e(line).hex().encode("ascii") + b"> Tj"
 
     if size <= 0:
-        size = _fit_font_size(value, multiline, w, h, width_em)
+        # Single-line width is measured on the flattened text (no `\n`); the
+        # WinAnsi path keeps `value` verbatim so its auto-size is byte-identical.
+        fit_value = layout_value if (multiline or unicode_face is None) else layout_value.replace("\n", " ")
+        size = _fit_font_size(fit_value, multiline, w, h, width_em)
 
     if multiline:
-        lines = _wrap_lines(value, size, w - 2 * TEXT_PAD, width_em)
+        lines = _wrap_lines(layout_value, size, w - 2 * TEXT_PAD, width_em)
         # Top-aligned like pdf-lib: first baseline one line down from the top.
         y = h - TEXT_PAD - size * GLYPH_HEIGHT_EM + size * HELVETICA_DESCENT_EM
     else:
-        lines = [value.replace("\n", " ")]
+        lines = [layout_value.replace("\n", " ")]
         y = (h - size * GLYPH_HEIGHT_EM) / 2 + size * HELVETICA_DESCENT_EM
 
     parts = [b"/Tx BMC", b"q", f"1 1 {_fmt(w - 2)} {_fmt(h - 2)} re W n".encode("ascii"), b"BT"]
