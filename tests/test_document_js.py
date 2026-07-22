@@ -117,6 +117,36 @@ class TestDocumentJs:
                 [{"name": "  ", "js": "1"}],
             )
 
+    def test_malformed_js_tree_degrades_gracefully(self, tmp_dir):
+        # Round-42 gauntlet: a hostile/corrupt `/Names << /JavaScript 42 >>`
+        # (a scalar where a name tree belongs) must read as "no scripts", not
+        # raise a raw TypeError out of pikepdf.NameTree.
+        src = _blank(tmp_dir)
+        bad = os.path.join(tmp_dir, "bad.pdf")
+        with pikepdf.open(src) as pdf:
+            pdf.Root.Names = pikepdf.Dictionary(JavaScript=42)
+            pdf.save(bad)
+        assert list_document_js(bad) == {"scripts": [], "count": 0}
+
+    def test_reads_a_bom_less_utf8_js_stream(self, tmp_dir):
+        # Round-42 gauntlet: some producers write /JS as UTF-8 WITHOUT a BOM;
+        # decoding it as Latin-1/PDFDocEncoding mojibakes non-ASCII text, and a
+        # later save would bake that corruption in. Strict-UTF-8-first recovers.
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "utf8.pdf")
+        js = 'app.alert("café déjà vu");'
+        with pikepdf.open(src) as pdf:
+            action = pdf.make_indirect(
+                pikepdf.Dictionary(
+                    S=pikepdf.Name("/JavaScript"),
+                    JS=pdf.make_stream(js.encode("utf-8")),  # no BOM
+                )
+            )
+            tree = pdf.make_indirect(pikepdf.Dictionary(Names=pikepdf.Array(["S1", action])))
+            pdf.Root.Names = pikepdf.Dictionary(JavaScript=tree)
+            pdf.save(out)
+        assert list_document_js(out)["scripts"] == [{"name": "S1", "js": js}]
+
     def test_in_place_output_equals_input(self, tmp_dir):
         # The renderer routes through the undoable workspace flow, which passes
         # the working copy as BOTH file and output. pikepdf refuses to overwrite

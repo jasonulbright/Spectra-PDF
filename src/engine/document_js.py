@@ -43,8 +43,16 @@ def _decode_js(action) -> str | None:
             return raw[2:].decode("utf-16-be", "replace")
         if raw.startswith(_BOM_LE):
             return raw[2:].decode("utf-16-le", "replace")
-        # No BOM: PDFDocEncoding is Latin-1-compatible for the ASCII range that
-        # covers essentially all real JavaScript; fall back permissively.
+        # No BOM. Try strict UTF-8 first: some third-party producers write /JS
+        # as UTF-8 without a BOM, and genuine PDFDocEncoding text carrying a
+        # non-ASCII byte essentially never ALSO decodes as valid multi-byte
+        # UTF-8 — so this recovers that common interop case without mangling the
+        # spec case (round-42 gauntlet). Fall back to PDFDocEncoding, then a
+        # permissive Latin-1.
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
         try:
             return raw.decode("pdfdoc")  # type: ignore[arg-type]
         except (LookupError, UnicodeDecodeError):
@@ -67,7 +75,13 @@ def list_document_js(file: str) -> dict:
     with pikepdf.open(file) as pdf:
         names = pdf.Root.get("/Names")
         tree = names.get("/JavaScript") if isinstance(names, pikepdf.Dictionary) else None
-        if tree is not None:
+        # A hostile/corrupt file can carry `/Names << /JavaScript 42 >>` (any
+        # scalar), which pikepdf auto-unwraps to a native int/bool/Decimal and
+        # `NameTree(...)` then rejects with a TypeError. Treat a non-dict tree
+        # as "no scripts" instead of surfacing a raw exception (round-42
+        # gauntlet) — matching how a non-dict /Names and a non-dict action are
+        # already skipped.
+        if isinstance(tree, pikepdf.Dictionary):
             for name, action in pikepdf.NameTree(tree).items():
                 if not isinstance(action, pikepdf.Dictionary):
                     continue
