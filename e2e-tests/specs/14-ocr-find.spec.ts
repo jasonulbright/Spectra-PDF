@@ -84,6 +84,54 @@ describe('find + OCR (2m)', () => {
     );
   });
 
+  it('advanced Find modes: match-case, whole-word, regex, and invalid-pattern (P4)', async () => {
+    const p = resolve(tmp, 'modes.pdf');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([500, 300]);
+    // "cat" appears as: Cat, cats, CAT, concatenate  → 4 substring hits;
+    // 2 case-sensitive ("cats","concatenate"); 2 whole-word ("Cat","CAT").
+    page.drawText('Cat cats CAT concatenate 2024', { x: 30, y: 200, size: 14, font });
+    writeFileSync(p, await doc.save());
+
+    await waitForHarness();
+    await openByPaths([p]);
+    await setView('canvas');
+    await ensureFindOpen();
+
+    const countHas = (needle: string, msg: string) =>
+      browser.waitUntil(
+        async () => (await $('[data-testid="find-count"]').getText()).includes(needle),
+        { timeout: 20_000, timeoutMsg: msg },
+      );
+
+    await setReactInputValue('[data-testid="find-input"]', 'cat');
+    await countHas('4 match', 'default case-insensitive substring should find 4');
+
+    // Match case → "cats", "concatenate" (lowercase "cat") = 2.
+    await $('[data-testid="find-case"]').click();
+    await countHas('2 match', 'match-case should narrow to 2');
+    await $('[data-testid="find-case"]').click(); // off
+
+    // Whole word → "Cat", "CAT" = 2 (not "cats"/"concatenate").
+    await $('[data-testid="find-word"]').click();
+    await countHas('2 match', 'whole-word should find 2');
+    await $('[data-testid="find-word"]').click(); // off
+
+    // Regex → a 4-digit run matches "2024".
+    await $('[data-testid="find-regex"]').click();
+    await setReactInputValue('[data-testid="find-input"]', '\\d{4}');
+    await countHas('1 match', 'regex \\d{4} should find 2024');
+
+    // Invalid regex surfaces a clear label instead of a bare "No results".
+    await setReactInputValue('[data-testid="find-input"]', 'inv(');
+    await countHas('Invalid pattern', 'invalid regex should report Invalid pattern');
+
+    // Reset modes + query so the shared find session doesn't leak into later specs.
+    await $('[data-testid="find-regex"]').click(); // off
+    await setReactInputValue('[data-testid="find-input"]', '');
+  });
+
   it('OCRs a scanned document in-app, finds the text, and "Make searchable" persists it (2m acceptance)', async function () {
     this.timeout(180_000); // real in-webview OCR (first run loads core+lang)
     await waitForHarness();

@@ -124,9 +124,10 @@ export interface CanvasServices {
   find: {
     isOpen(): boolean;
     open(): void;
-    /** Open seeded with a query and jump to a page — the Search nav panel's
-     * result click (Phase 4 M3.3). */
-    openWith(query: string, pageId?: string): void;
+    /** Open seeded with a query, optional page jump, and optional advanced
+     * modes — the Search nav panel's result click (Phase 4 M3.3; P4 carries the
+     * panel's regex/case/whole-word modes so the highlight agrees). */
+    openWith(query: string, pageId?: string, options?: import('../search/normalize').SearchOptions): void;
     close(): void;
     /** Step the match cursor (F3 / Shift+F3, M6.3). Only meaningful while
      * open — the commands open the bar first when it isn't. */

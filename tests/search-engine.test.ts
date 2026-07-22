@@ -21,7 +21,15 @@ vi.mock('../src/renderer/ocr/ocr-client', () => ({
 }));
 
 import { createSearchEngine, sourceKeyOf } from '../src/renderer/search/engine';
-import { normalizeText, countOccurrences, highlightWords } from '../src/renderer/search/normalize';
+import {
+  normalizeText,
+  normalizeIndexText,
+  countOccurrences,
+  highlightWords,
+  compileMatcher,
+  countMatches,
+  firstMatch,
+} from '../src/renderer/search/normalize';
 import { buildOcrApplyPayload } from '../src/renderer/lib/ocr-apply';
 import { displayRectToPdf } from '../src/renderer/lib/pdfx-build';
 import type { OpenDocument, PageRef } from '../src/renderer/state/types';
@@ -94,6 +102,77 @@ describe('highlightWords (review #2 — multi-word queries)', () => {
   it('empty query highlights nothing', () => {
     expect(highlightWords(words, '   ')).toEqual([]);
   });
+
+  it('regex mode highlights words matching the pattern', () => {
+    const ws = [{ text: 'Total' }, { text: 'total' }, { text: '2024' }, { text: 'due' }];
+    expect(highlightWords(ws, '\\d+', { regex: true }).map((w) => w.text)).toEqual(['2024']);
+  });
+
+  it('case-sensitive mode highlights only the exact case', () => {
+    const ws = [{ text: 'Total' }, { text: 'total' }];
+    expect(highlightWords(ws, 'Total', { caseSensitive: true }).map((w) => w.text)).toEqual(['Total']);
+  });
+});
+
+describe('search matcher (P4 — regex / case / whole-word)', () => {
+  it('normalizeIndexText preserves case (NFKC + soft-hyphen + whitespace only)', () => {
+    expect(normalizeIndexText('Ｉｎｖｏｉｃｅ')).toBe('Invoice'); // fullwidth → NFKC, case kept
+    expect(normalizeIndexText('  Total\n\tDue ')).toBe('Total Due');
+    expect(normalizeIndexText('in­voice')).toBe('invoice'); // soft hyphen dropped
+  });
+
+  it('default mode is case-insensitive literal substring', () => {
+    const { regex } = compileMatcher('total', {});
+    expect(countMatches('Total the total TOTAL', regex!)).toBe(3);
+  });
+
+  it('case-sensitive matches only the exact case', () => {
+    const { regex } = compileMatcher('Total', { caseSensitive: true });
+    expect(countMatches('Total total TOTAL', regex!)).toBe(1);
+  });
+
+  it('whole-word does not match a substring inside a longer word', () => {
+    const { regex } = compileMatcher('cat', { wholeWord: true });
+    expect(countMatches('cat category concatenate cat.', regex!)).toBe(2); // "cat" and "cat."
+  });
+
+  it('regex mode compiles the query as a pattern', () => {
+    const { regex, error } = compileMatcher('inv\\w+', { regex: true });
+    expect(error).toBeNull();
+    expect(countMatches('invoice and invalid but not xyz', regex!)).toBe(2);
+  });
+
+  it('regex mode honors case-insensitivity by default and case-sensitivity when set', () => {
+    expect(countMatches('ABC abc', compileMatcher('abc', { regex: true }).regex!)).toBe(2);
+    expect(countMatches('ABC abc', compileMatcher('abc', { regex: true, caseSensitive: true }).regex!)).toBe(1);
+  });
+
+  it('literal query escapes regex metacharacters', () => {
+    const { regex } = compileMatcher('a.b', {});
+    expect(countMatches('a.b axb aXb', regex!)).toBe(1); // the dot is literal, not "any char"
+  });
+
+  it('an invalid regex returns an error, not a throw', () => {
+    const { regex, error } = compileMatcher('inv(', { regex: true });
+    expect(regex).toBeNull();
+    expect(error).toBeTruthy();
+  });
+
+  it('a zero-width-capable regex neither loops nor inflates the count', () => {
+    const { regex } = compileMatcher('a*', { regex: true });
+    expect(countMatches('aa b aaa', regex!)).toBe(2); // two non-empty runs of "a"
+  });
+
+  it('firstMatch returns the first non-empty hit position', () => {
+    const { regex } = compileMatcher('secret', {});
+    const hit = firstMatch('the SECRET is here', regex!);
+    expect(hit).toEqual({ index: 4, length: 6 });
+  });
+
+  it('empty query yields a null matcher (no error)', () => {
+    expect(compileMatcher('', {})).toEqual({ regex: null, error: null });
+    expect(compileMatcher('   ', {})).toEqual({ regex: null, error: null });
+  });
 });
 
 describe('search engine', () => {
@@ -128,6 +207,32 @@ describe('search engine', () => {
     expect(r.occurrences).toBe(1);
   });
 
+  it('advanced modes: case-sensitive, whole-word, and regex over the index (P4)', async () => {
+    const doc = makeDoc('d1', 'C:/a.pdf', [pageRef('C:/a.pdf', 0), pageRef('C:/a.pdf', 1)]);
+    const docsRef = { current: [doc] };
+    extractMock
+      .mockResolvedValueOnce({ text: 'Cat cats CAT concatenate Invoice-2024', needsOcr: false })
+      .mockResolvedValueOnce({ text: 'nothing relevant', needsOcr: false });
+    const { engine } = build(docsRef);
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    await flush();
+
+    // Case-sensitive: only the exact-case "Cat" (not "cats"/"CAT"/"concatenate").
+    expect(engine.search('Cat', { caseSensitive: true }).occurrences).toBe(1);
+    // Case-insensitive default: Cat, cats, CAT, concatenate → 4 substring hits.
+    expect(engine.search('cat').occurrences).toBe(4);
+    // Whole-word: "Cat", "cats"? no — "cats" isn't the word "cat". Only "Cat"/"CAT".
+    expect(engine.search('cat', { wholeWord: true }).occurrences).toBe(2);
+    // Regex: a 4-digit run.
+    const rx = engine.search('\\d{4}', { regex: true });
+    expect(rx.occurrences).toBe(1);
+    expect(rx.pageIds.has('C:/a.pdf#p0')).toBe(true);
+    // Invalid regex surfaces an error instead of throwing.
+    const bad = engine.search('inv(', { regex: true });
+    expect(bad.error).toBeTruthy();
+    expect(bad.pages).toBe(0);
+  });
+
   it('snippetsFor returns a per-page context window, only for matching pages', async () => {
     const doc = makeDoc('d1', 'C:/a.pdf', [pageRef('C:/a.pdf', 0), pageRef('C:/a.pdf', 1)]);
     const docsRef = { current: [doc] };
@@ -139,7 +244,7 @@ describe('search engine', () => {
     await flush();
     const snips = engine.snippetsFor('invoice');
     expect(snips.size).toBe(1);
-    expect(snips.get('C:/a.pdf#p0')).toContain('invoice'); // normalized (lowercased)
+    expect(snips.get('C:/a.pdf#p0')).toContain('invoice'); // case-preserving (P4); fixture is lowercase here
     expect(snips.has('C:/a.pdf#p1')).toBe(false); // no match → absent
     expect(engine.snippetsFor('   ').size).toBe(0); // empty query → empty
   });
@@ -156,7 +261,9 @@ describe('search engine', () => {
     expect(snip).toBeDefined();
     expect(snip!.startsWith('…')).toBe(true);
     expect(snip!.endsWith('…')).toBe(true);
-    expect(snip).toContain('secret');
+    // Snippets now preserve the ORIGINAL case (P4) — the fixture wrote SECRET,
+    // and the case-insensitive query still matched it.
+    expect(snip).toContain('SECRET');
   });
 
   it('queues OCR for scanned pages and merges results into search', async () => {

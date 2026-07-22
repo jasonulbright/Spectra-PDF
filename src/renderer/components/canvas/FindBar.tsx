@@ -4,6 +4,8 @@
 // (persist OCR text via the engine — the 2m addition PDFx doesn't have).
 import React, { useEffect, useRef } from 'react';
 import type { SearchResult } from '../../search/engine';
+import type { SearchOptions } from '../../search/normalize';
+import { FindModeToggles } from '../../search/FindModeToggles';
 import { OCR_LANGUAGES } from '../../ocr/languages';
 
 interface FindBarProps {
@@ -11,6 +13,8 @@ interface FindBarProps {
   result: SearchResult;
   matchCount: number;
   current: number;
+  options: SearchOptions;
+  onToggleOption: (key: keyof SearchOptions) => void;
   ocrRemaining: number;
   hasScanned: boolean;
   ocrLanguage: string;
@@ -26,6 +30,7 @@ interface FindBarProps {
 
 function countLabel(query: string, result: SearchResult): string {
   if (query.trim().length === 0) return '';
+  if (result.error) return 'Invalid pattern';
   if (result.pages === 0) return 'No results';
   const occ = result.occurrences;
   return `${occ} match${occ === 1 ? '' : 'es'} on ${result.pages} page${result.pages === 1 ? '' : 's'}`;
@@ -36,6 +41,8 @@ export function FindBar({
   result,
   matchCount,
   current,
+  options,
+  onToggleOption,
   ocrRemaining,
   hasScanned,
   ocrLanguage,
@@ -66,7 +73,9 @@ export function FindBar({
       <input
         ref={inputRef}
         data-testid="find-input"
-        className="w-56 px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+        className={`w-56 px-2 py-1 bg-neutral-900 border rounded text-sm focus:outline-none ${
+          result.error ? 'border-red-500 focus:border-red-500' : 'border-neutral-700 focus:border-blue-500'
+        }`}
         type="text"
         placeholder="Find in documents"
         spellCheck={false}
@@ -85,7 +94,13 @@ export function FindBar({
           }
         }}
       />
-      <span data-testid="find-count" className="text-xs text-neutral-400 whitespace-nowrap" aria-live="polite">
+      <FindModeToggles options={options} onToggle={onToggleOption} testIdPrefix="find" />
+      <span
+        data-testid="find-count"
+        className={`text-xs whitespace-nowrap ${result.error ? 'text-red-400' : 'text-neutral-400'}`}
+        title={result.error ?? undefined}
+        aria-live="polite"
+      >
         {countLabel(query, result)}
       </span>
       {matchCount > 0 && (

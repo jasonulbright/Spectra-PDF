@@ -968,7 +968,7 @@ export function WorkspaceCanvasView({
       find: {
         isOpen: () => findRef.current.open,
         open: () => findRef.current.openFind(),
-        openWith: (q, pageId) => findRef.current.openWith(q, pageId),
+        openWith: (q, pageId, options) => findRef.current.openWith(q, pageId, options),
         close: () => findRef.current.closeFind(),
         next: () => findRef.current.next(),
         prev: () => findRef.current.prev(),
@@ -1180,12 +1180,12 @@ export function WorkspaceCanvasView({
         if (!words) continue;
         // Per-token match (multi-word queries would never match a single
         // whitespace-free OCR word otherwise).
-        const hits = highlightWords(words, find.matchedQuery);
+        const hits = highlightWords(words, find.matchedQuery, find.matchedOptions);
         if (hits.length > 0) map.set(page.id, hits);
       }
     }
     return map.size > 0 ? map : NO_WORDS_BY_PAGE;
-  }, [find.active, find.result, find.matchedQuery, docs, searchIndex]);
+  }, [find.active, find.result, find.matchedQuery, find.matchedOptions, docs, searchIndex]);
 
   const ocrReady = searchIndex.ocrReadySources();
 
@@ -3276,6 +3276,8 @@ export function WorkspaceCanvasView({
           result={find.result}
           matchCount={find.matchPages.length}
           current={find.current}
+          options={find.options}
+          onToggleOption={find.toggleOption}
           ocrRemaining={searchIndex.ocrRemaining}
           hasScanned={searchIndex.hasScanned}
           ocrLanguage={searchIndex.ocrLanguage}

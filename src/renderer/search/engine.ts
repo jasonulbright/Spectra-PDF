@@ -11,7 +11,13 @@
 // Everything else — born-digital extraction, needsOcr detection, OCR
 // queueing/concurrency, per-source caching that survives page moves,
 // normalized occurrence counting — is PDFx's proven logic, unchanged.
-import { countOccurrences, normalizeQuery, normalizeText } from './normalize';
+import {
+  compileMatcher,
+  countMatches,
+  firstMatch,
+  normalizeIndexText,
+  type SearchOptions,
+} from './normalize';
 import { extractPageText } from './extract';
 import { createOcrClient, type OcrClient } from '../ocr/ocr-client';
 import { DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
@@ -24,6 +30,9 @@ export interface SearchResult {
   docIds: Set<string>;
   pages: number;
   occurrences: number;
+  /** Set when regex mode is on and the pattern is invalid — the UI surfaces
+   * it instead of showing a bare "No results". Null for a valid search. */
+  error: string | null;
 }
 
 export const EMPTY_RESULT: SearchResult = {
@@ -31,15 +40,16 @@ export const EMPTY_RESULT: SearchResult = {
   docIds: new Set(),
   pages: 0,
   occurrences: 0,
+  error: null,
 };
 
 export interface SearchEngine {
   reconcile: (docs: OpenDocument[], proxies: Map<string, PDFDocumentProxy>) => void;
-  search: (query: string) => SearchResult;
+  search: (query: string, options?: SearchOptions) => SearchResult;
   /** Per matching page, a short context window around the FIRST match — over
    * the retained normalized page text (Phase 4 § 5.4, the Search panel). Keyed
-   * by page id; lowercase (the index stores normalized text). */
-  snippetsFor: (query: string) => Map<string, string>;
+   * by page id; original case (the index preserves case since P4). */
+  snippetsFor: (query: string, options?: SearchOptions) => Map<string, string>;
   setLanguage: (lang: string) => void;
   getOcrWords: (sourceKey: string) => OcrWord[] | undefined;
   /** Source keys (path:pageIndex) that were detected as scanned AND have OCR
@@ -130,7 +140,7 @@ export function createSearchEngine({ onChange, onProgress, getDocs }: EngineCall
           // Discard if the page closed OR the file's bytes changed under this
           // in-flight pass (stale raster — see sourceGen).
           if (!pagesBySource.has(job.key) || genOf(job.key) !== jobGen) return;
-          sourceOcr.set(job.key, normalizeText(text));
+          sourceOcr.set(job.key, normalizeIndexText(text));
           sourceOcrWords.set(job.key, words);
           applySource(job.key);
           onChange();
@@ -163,7 +173,7 @@ export function createSearchEngine({ onChange, onProgress, getDocs }: EngineCall
       }
       try {
         const { text, needsOcr } = await extractPageText(job.pdf, job.pageIndex);
-        sourceBorn.set(job.key, normalizeText(text));
+        sourceBorn.set(job.key, normalizeIndexText(text));
         if (needsOcr) {
           scanned.add(job.key);
           reportProgress();
@@ -245,13 +255,14 @@ export function createSearchEngine({ onChange, onProgress, getDocs }: EngineCall
       if (toExtract.length > 0) void runExtraction(toExtract, token);
     },
 
-    search(query) {
-      const q = normalizeQuery(query);
-      if (!q) return EMPTY_RESULT;
+    search(query, options = {}) {
+      const { regex, error } = compileMatcher(query, options);
+      if (error) return { ...EMPTY_RESULT, pageIds: new Set(), docIds: new Set(), error };
+      if (!regex) return EMPTY_RESULT;
       const pageIds = new Set<string>();
       let occurrences = 0;
       for (const [pageId, text] of pageText) {
-        const count = countOccurrences(text, q);
+        const count = countMatches(text, regex);
         if (count > 0) {
           pageIds.add(pageId);
           occurrences += count;
@@ -261,19 +272,19 @@ export function createSearchEngine({ onChange, onProgress, getDocs }: EngineCall
       for (const doc of getDocs()) {
         if (doc.pages.some((p) => pageIds.has(p.id))) docIds.add(doc.id);
       }
-      return { pageIds, docIds, pages: pageIds.size, occurrences };
+      return { pageIds, docIds, pages: pageIds.size, occurrences, error: null };
     },
 
-    snippetsFor(query) {
-      const q = normalizeQuery(query);
+    snippetsFor(query, options = {}) {
+      const { regex } = compileMatcher(query, options);
       const out = new Map<string, string>();
-      if (!q) return out;
+      if (!regex) return out;
       const RADIUS = 40;
       for (const [pageId, text] of pageText) {
-        const at = text.indexOf(q);
-        if (at === -1) continue;
-        const start = Math.max(0, at - RADIUS);
-        const end = Math.min(text.length, at + q.length + RADIUS);
+        const hit = firstMatch(text, regex);
+        if (!hit) continue;
+        const start = Math.max(0, hit.index - RADIUS);
+        const end = Math.min(text.length, hit.index + hit.length + RADIUS);
         out.set(pageId, (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : ''));
       }
       return out;

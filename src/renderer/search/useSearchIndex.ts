@@ -5,17 +5,19 @@
 // signal redaction marks and signature placements key on.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSearchEngine, type SearchEngine, type SearchResult } from './engine';
+import type { SearchOptions } from './normalize';
 import { DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import type { OcrWord } from '../ocr/types';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, OpenFile, PdfBuffer } from '../state/types';
 
 export type { SearchResult } from './engine';
+export type { SearchOptions } from './normalize';
 export { sourceKeyOf } from './engine';
 
 export interface SearchIndex {
-  search: (query: string) => SearchResult;
-  snippetsFor: (query: string) => Map<string, string>;
+  search: (query: string, options?: SearchOptions) => SearchResult;
+  snippetsFor: (query: string, options?: SearchOptions) => Map<string, string>;
   version: number;
   ocrRemaining: number;
   hasScanned: boolean;
@@ -78,8 +80,14 @@ export function useSearchIndex(
     };
   }, [engine]);
 
-  const search = useCallback((query: string) => engine.search(query), [engine]);
-  const snippetsFor = useCallback((query: string) => engine.snippetsFor(query), [engine]);
+  const search = useCallback(
+    (query: string, options?: SearchOptions) => engine.search(query, options),
+    [engine],
+  );
+  const snippetsFor = useCallback(
+    (query: string, options?: SearchOptions) => engine.snippetsFor(query, options),
+    [engine],
+  );
   const getOcrWords = useCallback((sourceKey: string) => engine.getOcrWords(sourceKey), [engine]);
   const ocrReadySources = useCallback(() => engine.ocrReadySources(), [engine]);
 

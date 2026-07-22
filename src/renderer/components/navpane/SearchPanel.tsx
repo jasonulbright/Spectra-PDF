@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState } from '../../state/AppStateProvider';
 import { getCanvasServices } from '../../commands/context';
 import { useSearchContext } from '../../search/SearchProvider';
+import { FindModeToggles } from '../../search/FindModeToggles';
+import type { SearchOptions } from '../../search/normalize';
 import type { NavPanelComponentProps } from './types';
 
 // Search nav panel (Phase 4 M3.3, § 5.4) — a result-list view over the ONE
@@ -32,7 +34,12 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
   const { search, snippetsFor, version } = useSearchContext();
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
+  const [options, setOptions] = useState<SearchOptions>({});
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const toggleOption = useCallback((key: keyof SearchOptions) => {
+    setOptions((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -50,12 +57,13 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
   // id from position — the engine and this panel agree on identity by
   // construction, so a reorder/reindex can't misalign a hit with the wrong
   // page. `version` re-runs this when the index grows (OCR results landing).
-  const { groups, totalHits } = useMemo(() => {
+  const { groups, totalHits, error } = useMemo(() => {
     const q = debounced.trim();
-    if (q.length === 0) return { groups: [] as FileGroup[], totalHits: 0 };
-    const result = search(debounced);
-    if (result.pageIds.size === 0) return { groups: [] as FileGroup[], totalHits: 0 };
-    const snippets = snippetsFor(debounced);
+    if (q.length === 0) return { groups: [] as FileGroup[], totalHits: 0, error: null as string | null };
+    const result = search(debounced, options);
+    if (result.error) return { groups: [] as FileGroup[], totalHits: 0, error: result.error };
+    if (result.pageIds.size === 0) return { groups: [] as FileGroup[], totalHits: 0, error: null };
+    const snippets = snippetsFor(debounced, options);
     const out: FileGroup[] = [];
     let total = 0;
     for (const doc of docs) {
@@ -69,14 +77,14 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
         total += hits.length;
       }
     }
-    return { groups: out, totalHits: total };
+    return { groups: out, totalHits: total, error: null };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced, search, snippetsFor, docs, version]);
+  }, [debounced, options, search, snippetsFor, docs, version]);
 
   const openHit = (pageId: string) => {
-    // Reuse the FindBar's find session: seed the query, jump to the page, and
-    // let the existing highlight overlay do the rest.
-    getCanvasServices()?.find.openWith(debounced, pageId);
+    // Reuse the FindBar's find session: seed the query + the SAME modes, jump to
+    // the page, and let the existing highlight overlay do the rest.
+    getCanvasServices()?.find.openWith(debounced, pageId, options);
   };
 
   const hasQuery = debounced.trim().length > 0;
@@ -98,13 +106,19 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
             if (e.key === 'Escape') setQuery('');
           }}
         />
+        <FindModeToggles options={options} onToggle={toggleOption} testIdPrefix="search" />
       </div>
       <div className="navpanel-scroll search-results flex-1" data-testid="search-results">
         {!activeFile && <p className="navpanel-empty">No document open.</p>}
         {activeFile && !hasQuery && (
           <p className="navpanel-empty">Type to search the open documents.</p>
         )}
-        {activeFile && hasQuery && totalHits === 0 && (
+        {activeFile && hasQuery && error && (
+          <p className="navpanel-empty" data-testid="search-error" style={{ color: '#f87171' }}>
+            Invalid regular expression: {error}
+          </p>
+        )}
+        {activeFile && hasQuery && !error && totalHits === 0 && (
           <p className="navpanel-empty" data-testid="search-no-results">
             No matches for “{debounced.trim()}”.
           </p>
