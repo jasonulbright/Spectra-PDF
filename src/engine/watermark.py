@@ -105,7 +105,9 @@ def _resolve_box(page: pikepdf.Page) -> tuple[float, float, float, float]:
     return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 
 
-def _auto_font_size(text: str, width: float, height: float, rotate: int, angle: float) -> float:
+def _auto_font_size(
+    text: str, width: float, height: float, rotate: int, angle: float, em_width: float | None = None
+) -> float:
     """Size the text so that BOTH of its axes fit the box.
 
     Baseline axis: span ~AUTO_FIT_FRACTION of the box's crossing length along
@@ -138,7 +140,9 @@ def _auto_font_size(text: str, width: float, height: float, rotate: int, angle: 
         disp_w / sin_a if sin_a > 1e-9 else math.inf,
         disp_h / cos_a if cos_a > 1e-9 else math.inf,
     )
-    advance = max(_text_width_em(text), 0.1)
+    # S4: on the embedded-Unicode path the caller passes the run's own em
+    # advance; WinAnsi keeps the Helvetica metric (byte-identical auto-size).
+    advance = max(em_width if em_width is not None else _text_width_em(text), 0.1)
     fit = min(
         AUTO_FIT_FRACTION * baseline_crossing / advance,
         AUTO_FIT_FRACTION * perp_crossing / _GLYPH_HEIGHT_EM,
@@ -151,6 +155,20 @@ def _n(v: float) -> str:
     return f"{v:.4f}".rstrip("0").rstrip(".") or "0"
 
 
+def _unicode_watermark_face(font_dir: str) -> str | None:
+    """The bundled fallback .ttf to embed for a non-Latin-1 watermark (sans,
+    matching the WinAnsi Helvetica shape). None when no fonts DIR is available
+    → the text is refused (never crashed on a bogus path)."""
+    if not font_dir or not Path(font_dir).is_dir():
+        return None
+    from engine.font_fallback import resolve_fallback_font
+
+    try:
+        return resolve_fallback_font(font_dir)  # original=None → sans
+    except (ValueError, OSError):
+        return None
+
+
 def _make_watermark_form(
     pdf: pikepdf.Pdf,
     text: str,
@@ -160,12 +178,31 @@ def _make_watermark_form(
     theta: float,
     width: float,
     height: float,
+    uni: tuple | None = None,
 ) -> pikepdf.Object:
     """Form XObject with the stamp drawn about the center of a [0 0 W H] box,
-    baseline direction rotated by theta (radians, user space)."""
+    baseline direction rotated by theta (radians, user space).
+
+    S4: `uni=(font_obj, em_width, show_bytes)` draws the text with a SHARED
+    embedded Type0/Identity-H font (built once per `watermark` call, since the
+    text is constant for every page); `uni=None` keeps the byte-identical
+    standard-14 Helvetica/WinAnsi path (the `?`-for-non-Latin-1 fallback)."""
     cx, cy = width / 2.0, height / 2.0
-    est_width = _text_width_em(text) * size
     cos_t, sin_t = math.cos(theta), math.sin(theta)
+    if uni is None:
+        em_width = _text_width_em(text)
+        show = b"(" + _escape_pdf_text(text).encode("latin-1") + b") Tj"
+        font_obj = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Font,
+                Subtype=Name.Type1,
+                BaseFont=Name.Helvetica,
+                Encoding=Name.WinAnsiEncoding,
+            )
+        )
+    else:
+        font_obj, em_width, show = uni
+    est_width = em_width * size
     # Start of the baseline: back from center by half the text width along
     # the baseline direction, and down by ~half the cap height along the
     # rotated up-vector so the text is vertically centered too.
@@ -176,17 +213,8 @@ def _make_watermark_form(
         f"q /GS0 gs {_n(r)} {_n(g)} {_n(b)} rg "
         f"BT /F0 {_n(size)} Tf "
         f"{_n(cos_t)} {_n(sin_t)} {_n(-sin_t)} {_n(cos_t)} {_n(tx)} {_n(ty)} Tm "
-        f"({_escape_pdf_text(text)}) Tj ET Q"
-    ).encode("latin-1")
+    ).encode("latin-1") + show + b" ET Q"
 
-    font = pdf.make_indirect(
-        Dictionary(
-            Type=Name.Font,
-            Subtype=Name.Type1,
-            BaseFont=Name.Helvetica,
-            Encoding=Name.WinAnsiEncoding,
-        )
-    )
     gs = pdf.make_indirect(Dictionary(Type=Name.ExtGState, ca=opacity, CA=opacity))
     form = pdf.make_stream(content)
     form.Type = Name.XObject
@@ -194,7 +222,7 @@ def _make_watermark_form(
     form.FormType = 1
     form.BBox = pikepdf.Array([0, 0, width, height])
     form.Resources = Dictionary(
-        Font=Dictionary(F0=font),
+        Font=Dictionary(F0=font_obj),
         ExtGState=Dictionary(GS0=gs),
     )
     return form
@@ -210,6 +238,7 @@ def watermark(
     font_size: float = 0.0,
     layer: str = "over",
     pages: list | None = None,
+    font_dir: str = "",
 ) -> dict:
     """Stamp translucent text across pages.
 
@@ -250,6 +279,34 @@ def watermark(
     pages_watermarked = 0
     font_size_applied = 0.0
     with pikepdf.open(file) as pdf:
+        # S4: resolve the embedded-Unicode drawing ONCE (the text is the same
+        # for every page) — a non-Latin-1 value gets a subsetted Type0 font
+        # SHARED across pages, else the WinAnsi Helvetica path (uni=None,
+        # byte-identical). Built here (before the page loop, so build_fallback_
+        # font's uncoverable-char raise leaves NOTHING saved = atomic).
+        uni: tuple | None = None
+        auto_em: float | None = None
+        try:
+            text.encode("latin-1")
+        except UnicodeEncodeError:
+            face = _unicode_watermark_face(font_dir)
+            if face is None:
+                raise ValueError(
+                    "watermark text contains characters outside Latin-1 and no "
+                    "fallback font is available"
+                )
+            # A stamp is single-line: layout-only control chars flatten to
+            # spaces so the drawn glyph set matches the embedded subset (the
+            # FC1 gauntlet lesson — build_fallback_font rejects \n/\r/\t).
+            draw_text = (
+                text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ").replace("\t", " ")
+            )
+            from engine.font_fallback import build_fallback_font
+
+            font_obj, encode, width_1000 = build_fallback_font(pdf, face, draw_text)
+            auto_em = width_1000(draw_text) / 1000.0
+            show = b"<" + encode(draw_text).hex().encode("ascii") + b"> Tj"
+            uni = (font_obj, auto_em, show)
         for index, page in enumerate(pdf.pages, start=1):
             if wanted is not None and index not in wanted:
                 continue
@@ -259,13 +316,13 @@ def watermark(
             if width <= 0 or height <= 0:
                 continue
             size = float(font_size) if float(font_size) > 0 else _auto_font_size(
-                text, width, height, rotate, angle
+                text, width, height, rotate, angle, em_width=auto_em
             )
             # Drawn angle composes the requested display angle with /Rotate —
             # viewers rotate the page clockwise by /Rotate, the text matrix
             # rotates counter-clockwise, so they add.
             theta = math.radians(angle + rotate)
-            form = _make_watermark_form(pdf, text, size, rgb, float(opacity), theta, width, height)
+            form = _make_watermark_form(pdf, text, size, rgb, float(opacity), theta, width, height, uni)
             rect = pikepdf.Rectangle(x0, y0, x1, y1)
             if layer == "over":
                 page.add_overlay(form, rect)

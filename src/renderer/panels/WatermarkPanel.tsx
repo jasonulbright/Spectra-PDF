@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file } from '../lib/tauri-bridge';
+import { file, app } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 
@@ -53,6 +53,10 @@ export function WatermarkPanel(): React.ReactElement {
         angle,
         color,
         layer,
+        // S4: the bundled fonts dir lets the engine embed a Unicode font for
+        // non-Latin-1 stamps instead of rendering "?" (CJK still refuses — the
+        // B2 fallback-face boundary — with a surfaced error).
+        font_dir: await app.getEditFontPath(),
         ...(pages ? { pages } : {}),
       });
       const buffer = await file.readBuffer(activeFile.workingPath);
@@ -84,7 +88,9 @@ export function WatermarkPanel(): React.ReactElement {
           onChange={(e) => setText(e.target.value)}
           className="w-64 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
         />
-        <p className="text-xs text-neutral-500 mt-1">Latin characters only — others render as "?"</p>
+        <p className="text-xs text-neutral-500 mt-1">
+          Latin, Cyrillic, and Greek supported; other scripts (e.g. CJK) aren't yet.
+        </p>
       </div>
       <div className="flex gap-6 items-end flex-wrap">
         <div>

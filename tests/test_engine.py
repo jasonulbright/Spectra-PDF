@@ -872,6 +872,12 @@ def _tm_operands(form) -> list[float]:
     raise AssertionError("no Tm operator found in watermark form")
 
 
+_WM_FONTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources", "fonts"
+)
+_WM_HAS_FONTS = os.path.isfile(os.path.join(_WM_FONTS_DIR, "LiberationSans-Regular.ttf"))
+
+
 class TestWatermark:
     def test_watermark_stamps_every_page_and_keeps_content(self, tmp_dir):
         src = os.path.join(tmp_dir, "wm_in.pdf")
@@ -1089,6 +1095,67 @@ class TestWatermark:
         with pytest.raises(ValueError):
             watermark(file=src, output=out, text="X", layer="sideways")
 
+    def test_watermark_latin1_stays_winansi_even_with_font_dir(self, tmp_dir):
+        # S4: a Latin-1 value keeps the byte-identical WinAnsi Helvetica path —
+        # a `(...) Tj` show and a Type1 Helvetica font — even when font_dir is
+        # passed (the embedded path is ONLY for non-Latin-1 text).
+        src = os.path.join(tmp_dir, "wl_in.pdf")
+        out = os.path.join(tmp_dir, "wl_out.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        watermark(file=src, output=out, text="CONFIDENTIAL", font_dir=_WM_FONTS_DIR)
+        with pikepdf.open(out) as pdf:
+            xo = pdf.pages[0].obj["/Resources"]["/XObject"]
+            form = next(xo[k] for k in xo.keys())
+            assert b") Tj" in form.read_bytes()  # WinAnsi literal-string show
+            assert str(form["/Resources"]["/Font"]["/F0"]["/Subtype"]) == "/Type1"
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_unicode_embeds_font_and_is_searchable(self, tmp_dir):
+        # S4 (§I.0 S4): a Cyrillic/Greek watermark (outside Latin-1) embeds a
+        # Type0/Identity-H font and stays SEARCHABLE (pdfminer decodes it via
+        # ToUnicode) instead of rendering as "?".
+        src = os.path.join(tmp_dir, "wu_in.pdf")
+        out = os.path.join(tmp_dir, "wu_out.pdf")
+        _make_watermark_fixture(src, page_count=2)
+        r = watermark(file=src, output=out, text="Привет Ελλάδα", font_dir=_WM_FONTS_DIR)
+        assert r["pages_watermarked"] == 2
+        assert extract_text(out)["text"].count("Привет Ελλάδα") == 2
+        with pikepdf.open(out) as pdf:
+            xo = pdf.pages[0].obj["/Resources"]["/XObject"]
+            form = next(xo[k] for k in xo.keys())
+            assert str(form["/Resources"]["/Font"]["/F0"]["/Subtype"]) == "/Type0"
+            assert b"> Tj" in form.read_bytes()  # hex-string show
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_cjk_refused_atomically(self, tmp_dir):
+        # Liberation covers Latin/Cyrillic/Greek but not CJK — a CJK watermark
+        # is refused (the B2 boundary), nothing written, even WITH font_dir.
+        src = os.path.join(tmp_dir, "wc_in.pdf")
+        out = os.path.join(tmp_dir, "wc_out.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        with pytest.raises(ValueError, match="cannot express|no available|not found"):
+            watermark(file=src, output=out, text="日本語", font_dir=_WM_FONTS_DIR)
+        assert not os.path.exists(out)
+
+    def test_watermark_unicode_without_font_dir_refused(self, tmp_dir):
+        # Without a fonts dir, a non-Latin-1 watermark is refused (not silently
+        # "?"-mapped) — the §I.0 silent-degradation this slice closes.
+        src = os.path.join(tmp_dir, "wn_in.pdf")
+        out = os.path.join(tmp_dir, "wn_out.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        with pytest.raises(ValueError, match="no fallback font is available"):
+            watermark(file=src, output=out, text="Привет", font_dir="")
+        assert not os.path.exists(out)
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_unicode_with_control_char_fills(self, tmp_dir):
+        # A tab in a non-Latin-1 stamp flattens to a space (single-line) rather
+        # than crashing build_fallback_font (the FC1 gauntlet lesson).
+        src = os.path.join(tmp_dir, "wt_in.pdf")
+        out = os.path.join(tmp_dir, "wt_out.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        r = watermark(file=src, output=out, text="Привет\tмир", font_dir=_WM_FONTS_DIR)
+        assert r["pages_watermarked"] == 1
 
 
 # ── Compare ───────────────────────────────────────────────────────────────

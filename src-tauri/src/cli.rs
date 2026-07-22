@@ -944,6 +944,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "color": args.color,
                 "font_size": args.font_size,
                 "layer": args.layer,
+                // S4: the vendored fonts dir lets the engine embed a Unicode
+                // font for non-Latin-1 stamps (else refused, never "?"-mapped).
+                "font_dir": resolve_fonts().to_string_lossy().to_string(),
             });
             if let Some(pages) = &args.pages {
                 // Strict parse (like --rect): silently dropping bad tokens
