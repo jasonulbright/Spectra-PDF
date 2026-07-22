@@ -47,6 +47,7 @@ import { resolveFillTargets } from './lib/form-overlay';
 import { addFormField } from './lib/form-authoring';
 import type { NewFieldSpec } from './lib/form-authoring';
 import { DropZone } from './components/DropZone';
+import { OperationsProvider } from './hooks/useOperations';
 import { OperationQueue } from './components/OperationQueue';
 import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
 import { SearchProvider } from './search/SearchProvider';
@@ -1516,6 +1517,7 @@ function AppContent(): React.ReactElement {
   const Panel = panels[activeOp];
 
   return (
+    <OperationsProvider performOperation={performOperation}>
     <DropZone onFilesDropped={handleFilesDropped}>
     <div className="app-shell h-screen bg-neutral-900 text-neutral-100 flex flex-col overflow-hidden">
       <MenuBar />
@@ -1720,6 +1722,7 @@ function AppContent(): React.ReactElement {
       />
     </div>
     </DropZone>
+    </OperationsProvider>
   );
 }
 

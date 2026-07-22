@@ -396,6 +396,19 @@ export interface SignHandler {
     intact: boolean;
     covers_whole_document: boolean;
   }>;
+  // 9.F5: sign the ACTIVE document in place (undoable performOperation flow);
+  // no output path. Returns the post-sign verification summary.
+  signInPlace: (params: {
+    pfxPath?: string;
+    keyPath?: string;
+    certPath?: string;
+    password: string;
+    reason?: string;
+    location?: string;
+  }) => Promise<{ signature_count: number; all_valid: boolean }>;
+  // 9.F5: verify the active working copy's signatures (read-only) — lets an
+  // e2e confirm an undo restored the pre-sign, unsigned state.
+  verifyActive: () => Promise<{ signature_count: number; all_valid: boolean }>;
 }
 
 let signHandler: SignHandler | null = null;
@@ -621,6 +634,17 @@ export interface TestHarness {
     intact: boolean;
     covers_whole_document: boolean;
   }>;
+  /** 9.F5: sign the active document IN PLACE (undoable); no output path. */
+  signActiveFileInPlace: (params: {
+    pfxPath?: string;
+    keyPath?: string;
+    certPath?: string;
+    password: string;
+    reason?: string;
+    location?: string;
+  }) => Promise<{ signature_count: number; all_valid: boolean }>;
+  /** 9.F5: read-only signature verify of the active working copy. */
+  verifyActiveSignatures: () => Promise<{ signature_count: number; all_valid: boolean }>;
   /** Batch OCR dialog injectors (dialog must be open — `tools.batchOcr`). */
   batchOcrSetFolders: (source: string, dest: string) => Promise<void>;
   batchOcrStart: () => Promise<void>;
@@ -1123,6 +1147,32 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         return await signHandler.sign(params);
       } catch (err) {
         captureError('signActiveFile', err);
+        throw err;
+      }
+    },
+    signActiveFileInPlace: async (params) => {
+      if (!signHandler) {
+        const msg = 'signActiveFileInPlace: Signatures panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await signHandler.signInPlace(params);
+      } catch (err) {
+        captureError('signActiveFileInPlace', err);
+        throw err;
+      }
+    },
+    verifyActiveSignatures: async () => {
+      if (!signHandler) {
+        const msg = 'verifyActiveSignatures: Signatures panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await signHandler.verifyActive();
+      } catch (err) {
+        captureError('verifyActiveSignatures', err);
         throw err;
       }
     },

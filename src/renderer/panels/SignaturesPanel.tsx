@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
+import { useOperations } from '../hooks/useOperations';
 import { dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -27,6 +28,9 @@ interface SignResult {
 export function SignaturesPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  // 9.F5: the SAME undoable in-place flow the canvas edits use, so signing in
+  // place snapshots for undo and only touches the on-disk file on Save.
+  const { performOperation } = useOperations();
   const [result, setResult] = useState<VerifyResult | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -143,10 +147,74 @@ export function SignaturesPanel(): React.ReactElement {
     }
   }, [activeFile, source, password, reason, location, doSign]);
 
+  // 9.F5: the core in-place sign, shared by the UI handler and the e2e harness
+  // hook (the native .pfx picker is not WebDriver-drivable, exactly as doSign).
+  // Routes through the workspace's undoable performOperation (snapshot → sign
+  // the working copy → UPDATE_FILE), so the signature becomes part of the open
+  // document (Ctrl+Z reverts it) and the file on disk is written only on Save.
+  // The password is passed straight to the engine and never retained (the op
+  // log records only params.file). Returns the post-sign verification.
+  const doSignInPlace = useCallback(
+    async (
+      sourceParams: Record<string, string>,
+      pw: string,
+      rsn?: string,
+      loc?: string,
+    ): Promise<VerifyResult> => {
+      if (!activeFile) throw new Error('No active file to sign.');
+      await performOperation(activeFile.path, 'sign_pdf', {
+        ...sourceParams,
+        password: pw,
+        ...(rsn && rsn.trim() ? { reason: rsn.trim() } : {}),
+        ...(loc && loc.trim() ? { location: loc.trim() } : {}),
+      });
+      // The now-signed working copy (same path, new bytes) re-verifies.
+      return (await call('verify_signatures', {
+        file: activeFile.workingPath,
+      })) as unknown as VerifyResult;
+    },
+    [activeFile, performOperation, call],
+  );
+
+  const signInPlaceRef = useRef(false);
+  const handleSignInPlace = useCallback(async () => {
+    if (!activeFile || signInPlaceRef.current) return;
+    const resolved = signerSourceParams(source);
+    if (resolved.error) {
+      setSignError(resolved.error);
+      return;
+    }
+    if (!password && source.mode === 'pfx') {
+      setSignError('Enter the signer password.');
+      return;
+    }
+    signInPlaceRef.current = true;
+    setSigning(true);
+    setSignError(null);
+    setSignResult(null);
+    try {
+      const v = await doSignInPlace(resolved.params!, password, reason, location);
+      setResult(v); // the new signature lists immediately
+      setShowSign(false);
+    } catch (e: unknown) {
+      setSignError(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPassword('');
+      signInPlaceRef.current = false;
+      setSigning(false);
+    }
+  }, [activeFile, source, password, reason, location, doSignInPlace]);
+
   // e2e-only: register the real sign call so the harness can drive it with
   // injected paths (the native dialogs can't be driven by WebDriver).
   const doSignRef = useRef(doSign);
   doSignRef.current = doSign;
+  const doSignInPlaceRef = useRef(doSignInPlace);
+  doSignInPlaceRef.current = doSignInPlace;
+  // The current working copy path, for the read-only verify hook (the effect
+  // below registers once, so it must read a ref, not a stale closure).
+  const workingPathRef = useRef(workingPath);
+  workingPathRef.current = workingPath;
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerSignHandler({
@@ -161,9 +229,29 @@ export function SignaturesPanel(): React.ReactElement {
           p.location,
           p.appearance,
         ),
+      signInPlace: (p) =>
+        doSignInPlaceRef
+          .current(
+            p.pfxPath
+              ? { pfx_path: p.pfxPath }
+              : { key_path: p.keyPath ?? '', cert_path: p.certPath ?? '' },
+            p.password,
+            p.reason,
+            p.location,
+          )
+          .then((v) => ({
+            signature_count: v.signature_count,
+            all_valid: v.summary.all_valid,
+          })),
+      verifyActive: async () => {
+        const wp = workingPathRef.current;
+        if (!wp) return { signature_count: 0, all_valid: false };
+        const v = (await call('verify_signatures', { file: wp })) as unknown as VerifyResult;
+        return { signature_count: v.signature_count, all_valid: v.summary.all_valid };
+      },
     });
     return () => registerSignHandler(null);
-  }, []);
+  }, [call]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to check its signatures" />;
 
@@ -232,8 +320,10 @@ export function SignaturesPanel(): React.ReactElement {
         >
           <div className="text-sm text-neutral-300 font-medium">Sign this document</div>
           <p className="text-xs text-neutral-500 -mt-1">
-            Applies an invisible signature and writes a new signed file — the current file is left
-            unchanged. Any later edit to a signed file invalidates its signature.
+            Applies an invisible signature. <strong>Sign in place</strong> signs the open document
+            (undoable; written to disk on Save); <strong>Sign &amp; Save a copy</strong> writes a new
+            signed file and leaves the current one unchanged. Any later edit to a signed document
+            invalidates its signature.
           </p>
           <SignerSourceFields value={source} onChange={setSource} idPrefix="sign" />
           <div className="flex items-center gap-2">
@@ -281,12 +371,20 @@ export function SignaturesPanel(): React.ReactElement {
               Cancel
             </button>
             <button
-              data-testid="sign-apply"
-              onClick={() => void handleSign()}
+              data-testid="sign-in-place"
+              onClick={() => void handleSignInPlace()}
               disabled={signing}
               className="px-3 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
             >
-              {signing ? 'Signing…' : 'Sign & Save…'}
+              {signing ? 'Signing…' : 'Sign in place'}
+            </button>
+            <button
+              data-testid="sign-apply"
+              onClick={() => void handleSign()}
+              disabled={signing}
+              className="px-3 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
+            >
+              {signing ? 'Signing…' : 'Sign & Save a copy…'}
             </button>
           </div>
         </div>

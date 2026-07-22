@@ -468,6 +468,53 @@ export async function signActiveFile(params: SignParams): Promise<SignSummary> {
   return result;
 }
 
+export interface SignInPlaceParams {
+  pfxPath?: string;
+  keyPath?: string;
+  certPath?: string;
+  password: string;
+  reason?: string;
+  location?: string;
+}
+
+/** 9.F5: sign the ACTIVE document in place (no output path) via the undoable
+ * workspace flow. Returns the post-sign verification summary. */
+export async function signActiveFileInPlace(
+  params: SignInPlaceParams,
+): Promise<{ signature_count: number; all_valid: boolean }> {
+  const result = await browser.executeAsync<
+    { signature_count: number; all_valid: boolean } | string,
+    [SignInPlaceParams]
+  >(function (p, done) {
+    (window as any).__SPECTRA_TEST__.signActiveFileInPlace(p)
+      .then((res: unknown) => done(res as any))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  }, params);
+  if (typeof result === 'string') {
+    throw new Error(`signActiveFileInPlace failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
+/** 9.F5: read-only verify of the active working copy's signatures. */
+export async function verifyActiveSignatures(): Promise<{
+  signature_count: number;
+  all_valid: boolean;
+}> {
+  const result = await browser.executeAsync<
+    { signature_count: number; all_valid: boolean } | string,
+    []
+  >(function (done) {
+    (window as any).__SPECTRA_TEST__.verifyActiveSignatures()
+      .then((res: unknown) => done(res as any))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  });
+  if (typeof result === 'string') {
+    throw new Error(`verifyActiveSignatures failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
 /** Place a visible-signature box on the active file's first canvas page
  * (display-normalized rect). Canvas view must be mounted. */
 export async function placeSignature(rect: { x: number; y: number; w: number; h: number }): Promise<void> {

@@ -313,9 +313,11 @@ def sign_pdf(
     appearance: dict | None = None,
     existing_field: str | None = None,
 ) -> dict:
-    """Apply a digital signature, written to a NEW file (signing appends an
-    incremental revision — see docs/architecture/11-phase2h-signing.md and
-    13-phase2k-signature-completeness.md).
+    """Apply a digital signature (signing APPENDS an incremental revision — see
+    docs/architecture/11-phase2h-signing.md and
+    13-phase2k-signature-completeness.md). ``output`` may be a new file OR the
+    same path as ``file`` (9.F5 in-place signing — the append is byte-safe over
+    the original, and the write is atomic).
 
     Signer source: EXACTLY ONE of a PKCS#12 file (``pfx_path``) or a PEM/DER
     key + certificate pair (``key_path`` + ``cert_path``; ``cert_path`` may be
@@ -342,7 +344,7 @@ def sign_pdf(
 
     Args:
         file: Input PDF path.
-        output: Output path for the signed PDF (MUST differ from ``file``).
+        output: Output path for the signed PDF; may equal ``file`` (in place).
         pfx_path: PKCS#12 (.pfx/.p12) signer file.
         password: Passphrase for the signer (empty string if none).
         field_name: NEW signature field name (default "Signature1"); ignored
@@ -354,10 +356,14 @@ def sign_pdf(
     """
     input_path = Path(file)
     output_path = Path(output)
-    if input_path.resolve() == output_path.resolve():
-        # Signing appends a revision; an in-place write would be ambiguous and
-        # invites re-serialization that breaks the signature.
-        raise ValueError("The signed output must be a different file from the input.")
+    # 9.F5: IN-PLACE signing is allowed (output == input). pyHanko's
+    # IncrementalPdfFileWriter APPENDS a revision — `signed.getvalue()` is the
+    # original bytes verbatim + the signature revision, never a re-serialization
+    # — and the input read handle is closed before the write below, so writing
+    # back over the input is byte-safe (the signed byte range is intact). The
+    # write is atomic (temp + os.replace) so a failed in-place write can never
+    # leave a half-written file where the original was. Verified: signing an
+    # already-signed file counter-signs it, preserving the prior signature.
 
     if existing_field is not None and appearance is not None:
         raise ValueError(
@@ -407,9 +413,24 @@ def sign_pdf(
             signed = pdf_signer.sign_pdf(writer)
         else:
             signed = signers.sign_pdf(writer, meta, signer=signer)
-    # Fail closed: only write the output once signing has fully succeeded.
-    with open(output_path, "wb") as f:
-        f.write(signed.getvalue())
+    # Fail closed + atomic: write to a temp beside the output, then replace.
+    # For an in-place sign this guarantees the original is either its old self
+    # or the fully-signed new file, never a truncated half-write.
+    import os
+    import tempfile
+
+    out_dir = output_path.parent
+    fd, tmp_name = tempfile.mkstemp(suffix=".pdf", dir=str(out_dir))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(signed.getvalue())
+        os.replace(tmp_name, output_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
     # Immediately self-verify the freshly-signed file (read-only, empty trust
     # context like all verification). The returned dict carries NO secret.

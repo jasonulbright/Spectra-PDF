@@ -1873,11 +1873,44 @@ class TestSignPdf:
         # Fail closed — no partial/omit-the-signature output.
         assert not os.path.exists(out)
 
-    def test_in_place_output_is_rejected(self, tmp_dir):
+    def test_in_place_signing_appends_and_stays_valid(self, tmp_dir):
+        # 9.F5: signing IN PLACE (output == input) is allowed — pyHanko appends
+        # an incremental revision, so the signed file is the original bytes
+        # VERBATIM + the signature, and it verifies as covering the whole doc.
         pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
         src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        orig = open(src, "rb").read()
+        r = sign_pdf(file=src, output=src, pfx_path=pfx, password="pw")
+        after = open(src, "rb").read()
+        assert r["valid"] is True and r["intact"] is True
+        assert r["covers_whole_document"] is True
+        # Incremental append: the original bytes are preserved as a prefix.
+        assert after.startswith(orig) and len(after) > len(orig)
+        assert verify_signatures(src)["summary"]["all_valid"] is True
+
+    def test_in_place_sign_failure_leaves_the_original_intact(self, tmp_dir):
+        # The atomic write (temp + os.replace) means a signing failure never
+        # truncates the in-place target — a wrong password must leave the file
+        # byte-identical.
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "correct")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        orig = open(src, "rb").read()
         with pytest.raises(ValueError):
-            sign_pdf(file=src, output=src, pfx_path=pfx, password="pw")
+            sign_pdf(file=src, output=src, pfx_path=pfx, password="wrong")
+        assert open(src, "rb").read() == orig
+
+    def test_counter_sign_in_place_preserves_the_prior_signature(self, tmp_dir):
+        # Signing an already-signed file (in place) appends a SECOND signature
+        # as its own revision; the first signature's covered bytes are untouched
+        # so it stays intact. This is the multi-signature / incremental-update
+        # property (roadmap § I O5b) the same machinery already provides.
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        sign_pdf(file=src, output=src, pfx_path=pfx, password="pw", field_name="Sig1")
+        sign_pdf(file=src, output=src, pfx_path=pfx, password="pw", field_name="Sig2")
+        v = verify_signatures(src)
+        assert v["signature_count"] == 2
+        assert all(s["intact"] and s["valid"] for s in v["signatures"])
 
     def test_result_never_contains_the_password(self, tmp_dir):
         token = "unique-secret-9f3a2b"
