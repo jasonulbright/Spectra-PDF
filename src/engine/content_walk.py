@@ -74,6 +74,13 @@ def as_matrix(arr) -> Optional[Matrix]:
     return (vals[0], vals[1], vals[2], vals[3], vals[4], vals[5])
 
 
+def rects_intersect(a: Rect, b: Rect) -> bool:
+    """True when two axis-aligned rects overlap. Edge-touch (zero-area) counts
+    as NON-overlapping (`<=`), matching redact.py's long-standing predicate so
+    every clip/region test in the walkers agrees on the boundary case."""
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
 class TextStateSnapshot(NamedTuple):
     """The text-state values a form inherits at its invoking Do."""
 
@@ -323,3 +330,100 @@ class GraphicsTextState:
             self.next_line()
             return True
         return False
+
+
+class ClipTracker:
+    """Track the active clip region across one instruction stream, ADDITIVELY
+    alongside `GraphicsTextState` (never inside its `feed()` — the state machine
+    5 walkers depend on stays byte-for-byte untouched).
+
+    Extracted at 9-§I.0-S8 from the local tracker `redact.py` grew for its `sh`
+    leak fix (§ I.-1 R3): every content walker that lists or strips content
+    needs to know whether a bbox is CLIPPED AWAY (invisible), not just where it
+    sits. Before this, clipped-invisible text/images/vectors still listed as
+    editable everywhere the shared walk is used.
+
+    The clip is approximated by the clip PATH'S BOUNDING BOX, which is always a
+    SUPERSET of the true clip region (the path itself ⊆ its bbox). So
+    `clips_away(bbox)` returning True — the content's bbox is fully outside the
+    clip bbox — means the content is DEFINITELY invisible; a False can still be
+    clipped by the true (non-rectangular) path, so callers err toward KEEPING
+    content, the safe direction for a listing and for redaction alike.
+
+    `feed(operator, operands, ctm)` mirrors redact's original inline tracker:
+    q pushes / Q pops the clip (it is graphics state), W|W* arm a pending clip,
+    the path-construction ops accumulate device-space points under `ctm`, and a
+    path-ending op intersects the accumulated path's bbox into the clip. `ctm`
+    is the CTM in effect at THIS operator — path-point ops never change the CTM,
+    so passing the current `GraphicsTextState.ctm` (fed BEFORE its own `feed`)
+    is correct. The clip is stored in DEVICE space, so q/Q save/restore need no
+    re-transformation (the clip on the physical page does not move when the CTM
+    is popped).
+
+    `base_clip` seeds the clip a nested Form XObject INHERITS from its invoking
+    `Do` (a form runs in the caller's graphics state, ISO 32000 §8.10.2). The
+    listers pass the parent's device-space clip so a form drawn wholly outside
+    it flags its content clipped; redaction keeps the default None (unbounded)
+    per stream — its `sh` then "covers everything" and is removed, redaction's
+    safe over-removal direction and its long-pinned behaviour.
+    """
+
+    _PATH_PT_OPS = ("m", "l", "c", "v", "y", "re", "h")
+    _PATH_END_OPS = ("n", "f", "F", "f*", "S", "s", "B", "B*", "b", "b*")
+
+    def __init__(self, base_clip: Optional[Rect] = None):
+        self.clip: Optional[Rect] = base_clip  # None = unbounded (no clip set)
+        self._stack: list = []
+        self._pending = False  # a W/W* seen, awaiting the path-ending op
+        self._pts: list = []  # path construction points, device space
+
+    @staticmethod
+    def _pts_under_ctm(op: str, operands: list, ctm: Matrix) -> list:
+        """Device-space points contributed by a path-construction operator."""
+        try:
+            nums = [float(v) for v in operands]
+        except (TypeError, ValueError):
+            return []
+        if op == "re" and len(nums) >= 4:
+            x, y, w, h = nums[:4]
+            corners = ((x, y), (x + w, y), (x + w, y + h), (x, y + h))
+        else:
+            corners = tuple(zip(nums[0::2], nums[1::2]))
+        a, b, c, d, e, f = ctm
+        return [(a * px + c * py + e, b * px + d * py + f) for px, py in corners]
+
+    def feed(self, operator: str, operands: list, ctm: Matrix) -> None:
+        if operator == "q":
+            self._stack.append(self.clip)
+        elif operator == "Q":
+            self.clip = self._stack.pop() if self._stack else None
+        elif operator in self._PATH_PT_OPS:
+            self._pts.extend(self._pts_under_ctm(operator, operands, ctm))
+        elif operator in ("W", "W*"):
+            self._pending = True
+        elif operator in self._PATH_END_OPS:
+            if self._pending and self._pts:
+                xs = [p[0] for p in self._pts]
+                ys = [p[1] for p in self._pts]
+                path_box = (min(xs), min(ys), max(xs), max(ys))
+                self.clip = (
+                    path_box
+                    if self.clip is None
+                    else (
+                        max(self.clip[0], path_box[0]),
+                        max(self.clip[1], path_box[1]),
+                        min(self.clip[2], path_box[2]),
+                        min(self.clip[3], path_box[3]),
+                    )
+                )
+            self._pending = False
+            self._pts = []
+
+    def clips_away(self, bbox: Rect) -> bool:
+        """True iff `bbox` is fully outside the current clip, i.e. the content is
+        DEFINITELY invisible. An unbounded clip (None) never clips anything
+        away. Uses the shared `rects_intersect` predicate so the boundary case
+        agrees with every other clip/region test."""
+        if self.clip is None:
+            return False
+        return not rects_intersect(bbox, self.clip)

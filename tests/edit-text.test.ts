@@ -48,6 +48,24 @@ describe('fetchTextRuns projection', () => {
     expect(runs[1].editable).toBe(false);
     expect(runs[1].reason).toMatch(/Type3/);
   });
+
+  it('9-§I.0-S8: filters out clipped-away runs, preserving engine index', async () => {
+    const runs = await fetchTextRuns(
+      async () => ({
+        runs: [
+          { index: 0, text: 'In', rect: [10, 700, 30, 712], nested: false, editable: true, reason: null, encodable: 'In' },
+          { index: 1, text: 'Out', rect: [400, 700, 430, 712], nested: false, editable: true, reason: null, encodable: 'Out', clipped: true },
+          { index: 2, text: 'Two', rect: [10, 680, 40, 692], nested: false, editable: true, reason: null, encodable: 'Two' },
+        ],
+      }),
+      'C:\\w.pdf',
+      1,
+      { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+    );
+    // The clipped run (index 1) is gone; survivors keep their engine indices.
+    expect(runs.map((r) => r.index)).toEqual([0, 2]);
+    expect(runs.map((r) => r.text)).toEqual(['In', 'Two']);
+  });
 });
 
 describe('ligature-aware validation (9.B5)', () => {

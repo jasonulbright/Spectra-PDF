@@ -133,6 +133,7 @@ class _Member:
         "resources",
         "fallback",
         "vertical",
+        "clipped",
     )
 
 
@@ -220,6 +221,10 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.rect = det["rect"]
         mem.ptext, mem.gaps_1000 = _ptext_and_gaps(det)
         mem.editable = bool(run["editable"])
+        # 9-§I.0-S8: the run's clip flag rides through so a paragraph whose
+        # every member is clipped away lists as invisible (aggregated in
+        # _listing). Additive — never affects grouping.
+        mem.clipped = bool(run.get("clipped", False))
         # Whitespace-only runs ("nothing to edit") don't block a paragraph —
         # generators emit standalone space runs constantly; blocking is a
         # FONT refusal on visible text.
@@ -668,6 +673,11 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
                 "color": _fill_color_hex(first.style["fill_color"]),
                 "bold": b,
                 "italic": it,
+                # 9-§I.0-S8, additive: the paragraph is invisible only when
+                # EVERY member is clipped away — a paragraph with any visible
+                # run stays offered (the safe direction). The renderer filters
+                # clipped paragraphs (and their decomposed run boxes) out.
+                "clipped": bool(p.members) and all(m.clipped for m in p.members),
             }
         )
     return out

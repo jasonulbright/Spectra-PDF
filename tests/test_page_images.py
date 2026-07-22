@@ -105,6 +105,50 @@ class TestListPageImages:
         with pytest.raises(ValueError, match="out of range"):
             list_page_images(src, 9)
 
+    def test_clipped_away_placement_flagged(self, tmp_dir):
+        # 9-§I.0-S8: a placement drawn wholly OUTSIDE a page-level clip lists
+        # (index space unchanged) with clipped=True; one inside → clipped=False.
+        path = os.path.join(tmp_dir, "clip.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        im = _rgb_image(pdf, 255, 0, 0)
+        page.obj["/Resources"] = Dictionary(XObject=Dictionary(Im=im))
+        page.Contents = pdf.make_stream(
+            b"0 0 100 100 re W n "
+            b"q 40 0 0 40 10 10 cm /Im Do Q "    # [10,10,50,50] inside the clip
+            b"q 40 0 0 40 400 400 cm /Im Do Q"   # [400,440] outside the clip
+        )
+        pdf.save(path)
+        pdf.close()
+        r = list_page_images(path, 1)
+        assert [i["index"] for i in r["images"]] == [0, 1]
+        assert [i["clipped"] for i in r["images"]] == [False, True]
+
+    def test_clip_propagates_into_nested_form(self, tmp_dir):
+        # A form drawn wholly outside a page clip → its NESTED image is flagged
+        # clipped (base_clip propagation into the form walk, §8.10.2). Without
+        # propagation the nested walk would start unbounded and miss it.
+        path = os.path.join(tmp_dir, "nestclip.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        im = _rgb_image(pdf, 0, 255, 0)
+        form = pdf.make_stream(b"q 50 0 0 50 0 0 cm /ImF Do Q")
+        form["/Type"] = Name("/XObject")
+        form["/Subtype"] = Name("/Form")
+        form["/BBox"] = pikepdf.Array([0, 0, 50, 50])
+        form["/Resources"] = Dictionary(XObject=Dictionary(ImF=im))
+        form_i = pdf.make_indirect(form)
+        page.obj["/Resources"] = Dictionary(XObject=Dictionary(Fm1=form_i))
+        page.Contents = pdf.make_stream(
+            b"0 0 100 100 re W n q 1 0 0 1 400 400 cm /Fm1 Do Q"
+        )
+        pdf.save(path)
+        pdf.close()
+        r = list_page_images(path, 1)
+        assert len(r["images"]) == 1
+        assert r["images"][0]["nested"] is True
+        assert r["images"][0]["clipped"] is True
+
 
 class TestDeletePageImage:
     def test_deletes_one_placement_of_a_shared_image(self, tmp_dir):

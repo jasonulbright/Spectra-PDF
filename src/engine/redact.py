@@ -56,6 +56,7 @@ from pikepdf import Name
 from engine.pdf_tree import walk_inheritable
 from engine.content_walk import (
     IDENTITY,
+    ClipTracker,
     GraphicsTextState,
     Matrix,
     Rect,
@@ -208,32 +209,14 @@ def _walk(
     # an `sh` fell through to the final `else` and was kept, the third leak of
     # the same family as the inline-image one.
     #
-    # `None` means "unbounded" (no clip set): the shading then covers the
-    # whole page, so it genuinely does cover any region and MUST go — that is
-    # correctness, not over-removal.
-    clip = None  # Rect, or None = unbounded (no clip set)
-    clip_stack: list = []
-    pending_clip = False          # a W/W* seen, awaiting the path-ending op
-    clip_pts: list = []           # path construction points, in device space
-    _PATH_PT_OPS = ("m", "l", "c", "v", "y", "re", "h")
-    _PATH_END_OPS = ("n", "f", "F", "f*", "S", "s", "B", "B*", "b", "b*")
-
-    def _pts_under_ctm(op: str, ops_: list) -> list:
-        """Device-space points contributed by a path-construction operator."""
-        try:
-            nums = [float(v) for v in ops_]
-        except (TypeError, ValueError):
-            return []
-        out_pts = []
-        if op == "re" and len(nums) >= 4:
-            x, y, w, h = nums[:4]
-            corners = ((x, y), (x + w, y), (x + w, y + h), (x, y + h))
-        else:
-            corners = tuple(zip(nums[0::2], nums[1::2]))
-        a, b, c_, d, e, f = state.ctm
-        for px, py in corners:
-            out_pts.append((a * px + c_ * py + e, b * px + d * py + f))
-        return out_pts
+    # The tracker (originally local here) is now the shared
+    # `content_walk.ClipTracker` (9-§I.0-S8) — this module is its regression
+    # harness. FRESH per stream (base_clip default None = unbounded): a form's
+    # `sh` then "covers everything" and is removed, redaction's safe
+    # over-removal direction. `clips.clip is None` means the shading covers the
+    # whole page, so it genuinely covers any region and MUST go — correctness,
+    # not over-removal.
+    clips = ClipTracker()
 
     kept: list = []
     text_runs_removed = 0
@@ -249,34 +232,18 @@ def _walk(
         operator = str(instruction.operator)
         operands = list(instruction.operands)
 
-        # Clip bookkeeping rides alongside the shared state machine: q/Q also
-        # save/restore the clip, and W/W* arm it until the path-ending op.
-        if operator == "q":
-            clip_stack.append(clip)
-        elif operator == "Q":
-            clip = clip_stack.pop() if clip_stack else None
-        elif operator in _PATH_PT_OPS:
-            clip_pts.extend(_pts_under_ctm(operator, operands))
-        elif operator in ("W", "W*"):
-            pending_clip = True
-        elif operator in _PATH_END_OPS:
-            if pending_clip and clip_pts:
-                xs = [p[0] for p in clip_pts]
-                ys = [p[1] for p in clip_pts]
-                path_box = (min(xs), min(ys), max(xs), max(ys))
-                clip = path_box if clip is None else (
-                    max(clip[0], path_box[0]), max(clip[1], path_box[1]),
-                    min(clip[2], path_box[2]), min(clip[3], path_box[3]),
-                )
-            pending_clip = False
-            clip_pts = []
+        # Clip bookkeeping rides alongside the shared state machine (fed with
+        # the CURRENT ctm, BEFORE state.feed applies this op's own effect —
+        # path-point ops never move the CTM, so pre-feed ctm is correct): q/Q
+        # save/restore the clip, W/W* arm it until the path-ending op.
+        clips.feed(operator, operands, state.ctm)
 
         if state.feed(operator, operands):
             kept.append(instruction)
         elif operator == "sh":
             # A shading paints the current clip. Unclipped (`clip is None`) it
             # covers the page, so it covers every region — remove it.
-            if clip is None or _intersects_any(clip, regions):
+            if clips.clip is None or _intersects_any(clips.clip, regions):
                 images_removed += 1
             else:
                 kept.append(instruction)

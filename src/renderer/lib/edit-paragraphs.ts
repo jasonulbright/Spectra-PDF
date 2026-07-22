@@ -152,6 +152,8 @@ interface EngineParagraphListing {
     sequences?: string[];
     vertical?: boolean;
     font_size?: number;
+    /** 9-§I.0-S8: run wholly outside the active clip (invisible). */
+    clipped?: boolean;
   }[];
   paragraphs: {
     index: number;
@@ -178,6 +180,10 @@ interface EngineParagraphListing {
     bold: boolean;
     italic: boolean;
     vertical?: boolean;
+    /** 9-§I.0-S8: EVERY member clipped away → the paragraph is invisible.
+     * Skipped below (not offered as editable); its runs, all clipped, are
+     * filtered from the run-box fallback too. */
+    clipped?: boolean;
   }[];
 }
 
@@ -216,6 +222,7 @@ export async function fetchEditTextListing(
   const paragraphs: EditParagraph[] = [];
   for (const p of listing.paragraphs ?? []) {
     if (!p.editable) continue; // refused paragraphs decompose to run boxes
+    if (p.clipped) continue; // 9-§I.0-S8: invisible — its runs are clipped too
     for (const r of p.runs) covered.add(r);
     paragraphs.push({
       index: p.index,
@@ -256,7 +263,13 @@ export async function fetchEditTextListing(
       ),
     });
   }
-  return { runBoxes: runs.filter((r) => !covered.has(r.index)), paragraphs };
+  // 9-§I.0-S8: a run box is shown only if it is neither covered by an editable
+  // paragraph NOR clipped away. `rawRuns` stays UNFILTERED (it is index-keyed —
+  // `rawRuns[r]` above), so the clip check reads the raw flag by index.
+  return {
+    runBoxes: runs.filter((r) => !covered.has(r.index) && !rawRuns[r.index]?.clipped),
+    paragraphs,
+  };
 }
 
 /** Pasted newlines become spaces — Enter is the COMMIT key (7.2 parity),

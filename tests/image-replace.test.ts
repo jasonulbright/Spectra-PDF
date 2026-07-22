@@ -90,6 +90,24 @@ describe('fetchEditPlacements (7.1)', () => {
     ]);
   });
 
+  it('9-§I.0-S8: filters out clipped-away placements, preserving engine index', async () => {
+    const placements = await fetchEditPlacements(
+      async () => ({
+        images: [
+          { index: 0, rect: [0, 0, 100, 100], nested: false },
+          { index: 1, rect: [500, 500, 540, 540], nested: false, clipped: true },
+          { index: 2, rect: [10, 10, 50, 50], nested: false },
+        ],
+      }),
+      'C:\\w.pdf',
+      1,
+      { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+    );
+    // The clipped placement (engine index 1) is gone; survivors keep their
+    // engine indices so a mutator still targets the right draw.
+    expect(placements.map((p) => p.index)).toEqual([0, 2]);
+  });
+
   it('crop threads through; degenerate/inverted intersections null out (C3-tail)', async () => {
     const fetch = (crop: unknown): ReturnType<typeof fetchEditPlacements> =>
       fetchEditPlacements(

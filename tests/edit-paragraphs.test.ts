@@ -201,6 +201,32 @@ describe('fetchEditTextListing projection', () => {
     expect(out.paragraphs[0].rect.x).toBeCloseTo(72 / 612);
   });
 
+  it('9-§I.0-S8: skips clipped paragraphs and filters clipped run boxes', async () => {
+    const withClipped = {
+      runs: [
+        { index: 0, text: 'Hello', rect: [72, 700, 100, 712] as [number, number, number, number], nested: false, editable: true, reason: null, encodable: 'Helo' },
+        { index: 1, text: 'Rotated', rect: [200, 300, 212, 340] as [number, number, number, number], nested: false, editable: true, reason: null, encodable: 'Rotated' },
+        { index: 2, text: 'Ghost', rect: [900, 700, 930, 712] as [number, number, number, number], nested: false, editable: true, reason: null, encodable: 'Ghost', clipped: true },
+        { index: 3, text: 'Invisible', rect: [900, 680, 960, 692] as [number, number, number, number], nested: false, editable: true, reason: null, encodable: 'Invisible', clipped: true },
+      ],
+      paragraphs: [
+        { index: 0, runs: [0], box: [72, 700, 100, 712] as [number, number, number, number], text: 'Hello', spans: [{ start: 0, end: 5, run: 0 }], alignment: 'left', line_count: 1, editable: true, reason: null },
+        { index: 1, runs: [3], box: [900, 680, 960, 692] as [number, number, number, number], text: 'Invisible', spans: [{ start: 0, end: 9, run: 3 }], alignment: 'left', line_count: 1, editable: true, reason: null, clipped: true },
+      ],
+    };
+    const out = await fetchEditTextListing(
+      async () => withClipped,
+      'C:\\w.pdf',
+      1,
+      { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+    );
+    // The clipped paragraph (index 1) is dropped; only the visible one remains.
+    expect(out.paragraphs.map((p) => p.index)).toEqual([0]);
+    // Run boxes: run 0 is covered by para 0; runs 2 and 3 are clipped away;
+    // only the uncovered, visible run 1 survives.
+    expect(out.runBoxes.map((r) => r.index)).toEqual([1]);
+  });
+
   it('threads the writing mode; absent means horizontal (9.B4b)', async () => {
     const vertical = {
       ...listing,

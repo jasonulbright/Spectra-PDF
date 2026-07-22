@@ -42,7 +42,7 @@ from pathlib import Path
 
 import pikepdf
 
-from engine.content_walk import DEFAULT_COLOR, GraphicsTextState, mat_mult, transform_point
+from engine.content_walk import ClipTracker, DEFAULT_COLOR, GraphicsTextState, mat_mult, transform_point
 from engine.page_images import (
     _do_instruction,
     _finalize_page_rewrite,
@@ -137,6 +137,7 @@ def _walk_vectors(
     base_fill=DEFAULT_COLOR,
     base_stroke=DEFAULT_COLOR,
     out=None,
+    base_clip=None,
 ) -> list:
     """One dict per PAINTED, non-clip path in depth-first encounter order.
     Recurses into Form XObjects (9.D4) when `pdf`/`resources` are supplied, so
@@ -151,6 +152,12 @@ def _walk_vectors(
     if out is None:
         out = []
     state = GraphicsTextState(base_ctm, fill_color=base_fill, stroke_color=base_stroke)
+    # 9-§I.0-S8: ambient clip tracking beside the state machine. page_vectors
+    # already EXCLUDES a path that itself sets a clip (`has_clip`); this catches
+    # the other half — a PAINTED path drawn wholly outside an EARLIER clip lists
+    # as `clipped` (invisible). `base_clip` is the parent form's device-space
+    # clip (§8.10.2).
+    clips = ClipTracker(base_clip)
     path_start = None  # instruction index of the current path's first construct op
     construct_idxs: list = []  # EXACT indices of this path's construction ops
     pts: list = []  # device-space points accumulated for the bbox
@@ -160,6 +167,9 @@ def _walk_vectors(
     for idx, instruction in enumerate(instructions):
         operator = str(instruction.operator)
         operands = list(instruction.operands)
+        # Ambient clip fed with the CURRENT ctm BEFORE state.feed (which
+        # consumes q/Q/cm). Its own path buffer is independent of `pts` below.
+        clips.feed(operator, operands, state.ctm)
         # Line width is graphics state; GraphicsTextState doesn't track it, so
         # save/restore it in lockstep with q/Q here (round-37 HIGH: a `w` set
         # inside a q…Q otherwise leaked forward and mis-inflated later strokes).
@@ -205,10 +215,11 @@ def _walk_vectors(
                     c = state.ctm
                     scale = math.sqrt(abs(c[0] * c[3] - c[1] * c[2]))
                     hw = max(0.0, line_width) / 2.0 * scale
+                vrect = (min(xs) - hw, min(ys) - hw, max(xs) + hw, max(ys) + hw)
                 out.append(
                     {
                         "index": len(out),
-                        "rect": [min(xs) - hw, min(ys) - hw, max(xs) + hw, max(ys) + hw],
+                        "rect": [vrect[0], vrect[1], vrect[2], vrect[3]],
                         "matrix": list(state.ctm),
                         "kind": kind,
                         "fill": _color_rgb(state.fill_color)
@@ -225,6 +236,8 @@ def _walk_vectors(
                         "_form_name": form_name,
                         "_root_do_idx": root_do_idx,
                         "_edit_depth": depth,
+                        # 9-§I.0-S8: True when wholly outside the ambient clip.
+                        "clipped": clips.clips_away(vrect),
                     }
                 )
             path_start, construct_idxs, pts, has_clip = None, [], [], False
@@ -257,6 +270,7 @@ def _walk_vectors(
                     base_fill=state.fill_color,
                     base_stroke=state.stroke_color,
                     out=out,
+                    base_clip=clips.clip,
                 )
         # Any other operator (a show, Do, sh, inline image, w/d/gs line-state):
         # not part of a path. A path left unpainted before other content is

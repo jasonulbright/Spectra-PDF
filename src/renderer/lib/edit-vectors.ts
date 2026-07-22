@@ -55,6 +55,9 @@ interface EngineListing {
     stroke?: [number, number, number] | null;
     line_width?: number;
     nested?: boolean;
+    /** 9-§I.0-S8: the path is wholly outside the active clip (invisible).
+     * Filtered out below; surviving vectors keep their engine `index`. */
+    clipped?: boolean;
   }[];
 }
 
@@ -74,7 +77,9 @@ export async function fetchEditVectors(
     file: workingPath,
     page: pageNumber,
   })) as unknown as EngineListing;
-  return (listing.vectors ?? []).map((v) => ({
+  // 9-§I.0-S8: drop clipped-away (invisible) paths — never offered as editable.
+  const visible = (listing.vectors ?? []).filter((v) => !v.clipped);
+  return visible.map((v) => ({
     index: v.index,
     rect: pdfRectToDisplay(v.rect, geometry.box, geometry.bakedRotate),
     userRect: v.rect,

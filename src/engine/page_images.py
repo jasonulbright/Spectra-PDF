@@ -59,7 +59,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
-from engine.content_walk import GraphicsTextState
+from engine.content_walk import ClipTracker, GraphicsTextState
 from engine.redact import (
     IDENTITY,
     MAX_FORM_DEPTH,
@@ -135,7 +135,7 @@ def _listed_crop(instructions, t, enclosing):
 
 
 def _walk_placements(
-    pdf, instructions, resources, base_ctm, depth, fallback_resources, out, nested, base_alpha=1.0
+    pdf, instructions, resources, base_ctm, depth, fallback_resources, out, nested, base_alpha=1.0, base_clip=None
 ):
     """Append one dict per image `Do` to `out`, in encounter order. State
     tracking is the shared GraphicsTextState (7.2 consolidation) — the same
@@ -150,12 +150,19 @@ def _walk_placements(
     the form copy), so per-level recognition sees every tool frame."""
     instructions = list(instructions)
     state = GraphicsTextState(base_ctm)
+    # 9-§I.0-S8: clip tracking beside the state machine — a placement wholly
+    # outside the active clip lists as `clipped` (invisible) so the renderer
+    # stops offering it as editable. `base_clip` is the parent's device-space
+    # clip a nested form inherits (§8.10.2).
+    clips = ClipTracker(base_clip)
     alpha = float(base_alpha)
     alpha_stack: list[float] = []
     q_open: list[int] = []
     for idx, instruction in enumerate(instructions):
         operator = str(instruction.operator)
         operands = list(instruction.operands)
+        # Fed with the CURRENT ctm BEFORE state.feed (which consumes q/Q/cm).
+        clips.feed(operator, operands, state.ctm)
         if operator == "q":
             alpha_stack.append(alpha)
             q_open.append(idx)
@@ -204,6 +211,10 @@ def _walk_placements(
                     "native_height": nh,
                     "opacity": round(alpha, 4),
                     "crop": _listed_crop(instructions, idx, q_open),
+                    # 9-§I.0-S8: True when this placement is wholly outside the
+                    # active clip (invisible); renderer filters it out. Index
+                    # space unchanged (mutator count agreement untouched).
+                    "clipped": clips.clips_away((x0, y0, x1, y1)),
                 }
             )
             continue
@@ -231,6 +242,8 @@ def _walk_placements(
                         "opacity": round(alpha, 4),
                         # C3-tail: the tool crop rect (crop-handle seed).
                         "crop": _listed_crop(instructions, idx, q_open),
+                        # 9-§I.0-S8: True when wholly outside the active clip.
+                        "clipped": clips.clips_away((x0, y0, x1, y1)),
                     }
                 )
             elif xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
@@ -246,6 +259,7 @@ def _walk_placements(
                     out,
                     True,
                     base_alpha=alpha,
+                    base_clip=clips.clip,
                 )
     return out
 

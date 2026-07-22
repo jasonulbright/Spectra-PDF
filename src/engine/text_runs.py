@@ -41,7 +41,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
-from engine.content_walk import GraphicsTextState
+from engine.content_walk import ClipTracker, GraphicsTextState
 from engine.pdf_fonts import FontCapability, font_capability
 from engine.page_images import (
     _finalize_page_rewrite,
@@ -217,8 +217,13 @@ def _plain_segments(operator: str, operands: list) -> list:
     return out
 
 
-def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None, detail=None, stream_path=()):
+def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None, detail=None, stream_path=(), base_clip=None):
     state = _child_state(base_ctm, parent_state)
+    # 9-§I.0-S8: clip tracking rides ADDITIVELY beside the state machine so a
+    # run wholly outside the active clip lists as `clipped` (invisible) and the
+    # renderer stops offering it as editable. `base_clip` is the parent stream's
+    # device-space clip a nested form inherits (§8.10.2).
+    clips = ClipTracker(base_clip)
     # Stream identity for 7.5: the path of LOCAL form ordinals (the nth
     # qualifying Do within its parent stream) from the page down. Local —
     # not a global DFS id — so a rewriter can NAVIGATE to one stream and
@@ -227,6 +232,9 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
     for instruction in instructions:
         operator = str(instruction.operator)
         operands = list(instruction.operands)
+        # Fed with the CURRENT ctm BEFORE state.feed (which consumes-and-
+        # continues past q/Q/cm) — path-point ops never move the CTM.
+        clips.feed(operator, operands, state.ctm)
         if state.feed(operator, operands):
             continue
         if operator in SHOW_OPS:
@@ -282,6 +290,12 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     # reads it). A refused vertical font reports False —
                     # the field describes the geometry actually computed.
                     "vertical": vertical,
+                    # 9-§I.0-S8, additive: True when the run's bbox is fully
+                    # outside the active clip (invisible). The renderer filters
+                    # these out so clipped-away text is never offered as
+                    # editable; the index space is UNCHANGED (the mutators'
+                    # count agreement is untouched).
+                    "clipped": clips.clips_away((x0, y0, x1, y1)),
                 }
             )
             if detail is not None:
@@ -332,6 +346,7 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     parent_state=state,
                     detail=detail,
                     stream_path=child_path,
+                    base_clip=clips.clip,
                 )
     return out
 

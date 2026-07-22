@@ -54,6 +54,11 @@ interface EngineListing {
     opacity: number;
     kind: 'inline' | 'xobject';
     crop?: [number, number, number, number] | null;
+    /** 9-§I.0-S8: the placement is wholly outside the active clip (invisible).
+     * Filtered out below so clipped-away images are never offered as editable.
+     * Each surviving item keeps its ENGINE index, so filtering never desyncs a
+     * mutator target. */
+    clipped?: boolean;
   }[];
 }
 
@@ -67,7 +72,11 @@ export async function fetchEditPlacements(
     file: workingPath,
     page: pageNumber,
   })) as unknown as EngineListing;
-  return (listing.images ?? []).map((image) => ({
+  // 9-§I.0-S8: drop clipped-away (invisible) placements — never offered as
+  // editable. Surviving items keep their engine `index`, so a mutator target
+  // is never desynced by the filter.
+  const visible = (listing.images ?? []).filter((image) => !image.clipped);
+  return visible.map((image) => ({
     index: image.index,
     nested: Boolean(image.nested),
     rect: pdfRectToDisplay(image.rect, geometry.box, geometry.bakedRotate),

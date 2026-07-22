@@ -68,4 +68,20 @@ describe('fetchEditVectors (9.D1)', () => {
     const out = await fetchEditVectors(async () => ({}), '/w.pdf', 1, GEO);
     expect(out).toEqual([]);
   });
+
+  it('9-§I.0-S8: filters out clipped-away vectors, preserving engine index', async () => {
+    const out = await fetchEditVectors(
+      mockCall([
+        { index: 0, rect: [40, 40, 140, 100], kind: 'fill', fill: [1, 0, 0], stroke: null },
+        { index: 1, rect: [0, 0, 10, 10], kind: 'fill', fill: [0, 1, 0], stroke: null, clipped: true },
+        { index: 2, rect: [10, 10, 20, 20], kind: 'stroke', fill: null, stroke: [0, 0, 1] },
+      ]),
+      '/w.pdf',
+      1,
+      GEO,
+    );
+    // The clipped item (engine index 1) is gone; the survivors KEEP their
+    // engine indices so a mutator still targets the right object.
+    expect(out.map((v) => v.index)).toEqual([0, 2]);
+  });
 });

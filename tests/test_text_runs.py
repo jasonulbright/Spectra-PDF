@@ -69,6 +69,32 @@ class TestListTextRuns:
         w = r["runs"][1]
         assert w["rect"][0] == pytest.approx(112, abs=0.01)  # 72 + Td 40
 
+    def test_clipped_away_run_flagged(self, tmp_dir):
+        # 9-§I.0-S8: a run whose bbox is wholly outside the active clip lists
+        # (index space unchanged) with clipped=True; one inside → clipped=False.
+        src = os.path.join(tmp_dir, "clip.pdf")
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            b"0 0 100 720 re W n "  # clip to the left strip [0,0,100,720]
+            b"BT /F1 12 Tf 10 700 Td (In) Tj 200 0 Td (Out) Tj ET",
+            {"/F1": _helv(pdf)},
+        )
+        pdf.save(src)
+        pdf.close()
+        runs = list_text_runs(src, 1)["runs"]
+        assert [run["text"] for run in runs] == ["In", "Out"]
+        assert [run["clipped"] for run in runs] == [False, True]
+        assert [run["index"] for run in runs] == [0, 1]
+
+    def test_no_clip_runs_never_clipped(self, tmp_dir):
+        src = os.path.join(tmp_dir, "t.pdf")
+        pdf = pikepdf.new()
+        _page(pdf, b"BT /F1 12 Tf 72 700 Td (Hello) Tj ET", {"/F1": _helv(pdf)})
+        pdf.save(src)
+        pdf.close()
+        assert list_text_runs(src, 1)["runs"][0]["clipped"] is False
+
     def test_tj_kerning_narrows_the_width(self, tmp_dir):
         src = os.path.join(tmp_dir, "t.pdf")
         pdf = pikepdf.new()

@@ -47,6 +47,10 @@ interface EngineRunListing {
     sequences?: string[];
     vertical?: boolean;
     font_size?: number;
+    /** 9-§I.0-S8: the run is wholly outside the active clip (invisible).
+     * Filtered out below so clipped-away text is never offered as editable;
+     * surviving runs keep their engine `index` (mutator targets unaffected). */
+    clipped?: boolean;
   }[];
 }
 
@@ -60,7 +64,9 @@ export async function fetchTextRuns(
     file: workingPath,
     page: pageNumber,
   })) as unknown as EngineRunListing;
-  return (listing.runs ?? []).map((run) => ({
+  // 9-§I.0-S8: drop clipped-away (invisible) runs — never offered as editable.
+  const visible = (listing.runs ?? []).filter((run) => !run.clipped);
+  return visible.map((run) => ({
     index: run.index,
     text: run.text,
     nested: Boolean(run.nested),

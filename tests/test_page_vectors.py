@@ -74,6 +74,28 @@ class TestListVectors:
         assert len(vs) == 1
         assert vs[0]["rect"] == [40.0, 40.0, 100.0, 100.0]
 
+    def test_clipped_away_vector_flagged(self, tmp_dir):
+        # 9-§I.0-S8: a painted path drawn wholly OUTSIDE an earlier clip lists
+        # (index space unchanged) but carries clipped=True; one inside the clip
+        # carries clipped=False. Both are real objects (no W of their own).
+        src = _pdf(
+            tmp_dir,
+            b"10 10 50 50 re W n\n"      # clip to [10,10,60,60]
+            b"40 40 10 10 re f\n"        # inside  → clipped False, [40,40,50,50]
+            b"100 100 40 40 re f\n",     # outside → clipped True,  [100,100,140,140]
+        )
+        vs = _vecs(src)
+        assert [v["rect"] for v in vs] == [[40.0, 40.0, 50.0, 50.0], [100.0, 100.0, 140.0, 140.0]]
+        assert [v["clipped"] for v in vs] == [False, True]
+        # The index space is intact — the clipped object keeps its DFS index so
+        # a mutator still targets it.
+        assert [v["index"] for v in vs] == [0, 1]
+
+    def test_no_clip_means_never_clipped(self, tmp_dir):
+        src = _pdf(tmp_dir, b"50 50 100 80 re f\n")
+        vs = _vecs(src)
+        assert vs[0]["clipped"] is False
+
     def test_text_and_image_not_listed(self, tmp_dir):
         fd = Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica)
         pdf = pikepdf.new()

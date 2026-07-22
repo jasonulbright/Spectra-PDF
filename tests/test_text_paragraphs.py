@@ -326,6 +326,39 @@ class TestGrouping:
         assert p["line_count"] == 2
         assert p["text"].startswith("Hello1")
 
+    def test_clipped_away_paragraph_flagged(self, tmp_dir):
+        # 9-§I.0-S8: a paragraph whose EVERY member is clipped away lists with
+        # clipped=True; a visible paragraph with clipped=False. The runs channel
+        # carries the per-run flag too. Order-robust: map by text.
+        src = _build(
+            tmp_dir,
+            b"0 400 200 392 re W n "                    # clip to top-left region
+            b"BT /F1 12 Tf 20 700 Td (Visible) Tj ET "  # inside the clip
+            b"BT /F1 12 Tf 400 100 Td (Hidden) Tj ET",  # outside the clip
+        )
+        listing = list_text_paragraphs(src, 1)
+        assert {p["text"]: p["clipped"] for p in listing["paragraphs"]} == {
+            "Visible": False,
+            "Hidden": True,
+        }
+        assert {r["text"]: r["clipped"] for r in listing["runs"]} == {
+            "Visible": False,
+            "Hidden": True,
+        }
+
+    def test_straddling_run_not_clipped(self, tmp_dir):
+        # A run PARTLY inside the clip (bbox intersects the clip) is NOT flagged
+        # — the safe direction, never hide content that may be visible.
+        src = _build(
+            tmp_dir,
+            b"0 0 60 792 re W n "  # clip left strip x∈[0,60]
+            b"BT /F1 12 Tf 40 700 Td (Wide) Tj ET",  # [40,~67] straddles x=60
+        )
+        listing = list_text_paragraphs(src, 1)
+        assert len(listing["runs"]) == 1
+        assert listing["runs"][0]["clipped"] is False
+        assert listing["paragraphs"][0]["clipped"] is False
+
     def test_rotated_text_never_groups(self, tmp_dir):
         src = _build(
             tmp_dir,
