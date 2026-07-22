@@ -286,6 +286,32 @@ def _validated_existing_field(file: str, field_name: str) -> None:
     raise ValueError(f'No empty signature field named "{field_name}" exists in this PDF.')
 
 
+def _free_field_name(file: str, requested: str) -> str:
+    """A signature-field name not already present in the file: `requested` if
+    free, else the lowest free ``Signature{N}``.
+
+    9.F5 (round-42 gauntlet, HIGH): the default is "Signature1", and the in-place
+    flow re-reads the SAME working copy — so a second sign would collide on that
+    name and pyHanko refuses ("field appears to be filled already"), breaking
+    in-place signing after one use AND the Save-a-copy flow on that document.
+    Rotating to the next free name makes counter-signing Just Work with no UI
+    change. A read-only pre-scan; a lookup failure degrades to `requested`."""
+    used: set[str] = set()
+    try:
+        with open(file, "rb") as f:
+            reader = PdfFileReader(f)
+            for name, _value, _ref in fields.enumerate_sig_fields(reader):
+                used.add(name)
+    except Exception:
+        return requested
+    if requested not in used:
+        return requested
+    n = 1
+    while f"Signature{n}" in used:
+        n += 1
+    return f"Signature{n}"
+
+
 def _stamp_style(reason: str | None, location: str | None) -> "stamp.TextStampStyle":
     """Visible-stamp style: signer + timestamp via pyHanko's built-in
     interpolation, plus optional reason/location lines. USER TEXT IS
@@ -312,6 +338,7 @@ def sign_pdf(
     cert_path: str | None = None,
     appearance: dict | None = None,
     existing_field: str | None = None,
+    allow_in_place: bool = False,
 ) -> dict:
     """Apply a digital signature (signing APPENDS an incremental revision — see
     docs/architecture/11-phase2h-signing.md and
@@ -356,14 +383,19 @@ def sign_pdf(
     """
     input_path = Path(file)
     output_path = Path(output)
-    # 9.F5: IN-PLACE signing is allowed (output == input). pyHanko's
-    # IncrementalPdfFileWriter APPENDS a revision — `signed.getvalue()` is the
-    # original bytes verbatim + the signature revision, never a re-serialization
-    # — and the input read handle is closed before the write below, so writing
-    # back over the input is byte-safe (the signed byte range is intact). The
-    # write is atomic (temp + os.replace) so a failed in-place write can never
-    # leave a half-written file where the original was. Verified: signing an
-    # already-signed file counter-signs it, preserving the prior signature.
+    # 9.F5: IN-PLACE signing (output == input) is allowed ONLY when the caller
+    # explicitly opts in (`allow_in_place`, set by the undoable in-place flow).
+    # Left global, removing the refusal would silently exempt the Save-a-copy
+    # and canvas sign flows too, letting a save-dialog path that happens to
+    # equal the working copy overwrite it outside the snapshot/undo flow
+    # (round-42 gauntlet, LOW). pyHanko's IncrementalPdfFileWriter APPENDS a
+    # revision — `signed.getvalue()` is the original bytes verbatim + the
+    # signature, never a re-serialization — and the input read handle is closed
+    # before the write below, so writing back is byte-safe. The write is atomic
+    # (temp → verify → os.replace), so a failed write OR a failed self-verify
+    # can never leave a half-written or reported-failed-but-signed file.
+    if input_path.resolve() == output_path.resolve() and not allow_in_place:
+        raise ValueError("The signed output must be a different file from the input.")
 
     if existing_field is not None and appearance is not None:
         raise ValueError(
@@ -388,6 +420,12 @@ def sign_pdf(
     if existing_field is not None:
         _validated_existing_field(file, existing_field)
         field_name = existing_field
+    else:
+        # A NEW signature field — rotate the name off any already-present field
+        # so signing a document that already carries "Signature1" (the default)
+        # cannot collide (round-42 gauntlet). Does not touch the existing-field
+        # path, which targets a specific named field on purpose.
+        field_name = _free_field_name(file, field_name)
 
     meta = signers.PdfSignatureMetadata(field_name=field_name, reason=reason, location=location)
     with open(file, "rb") as inf:
@@ -413,9 +451,13 @@ def sign_pdf(
             signed = pdf_signer.sign_pdf(writer)
         else:
             signed = signers.sign_pdf(writer, meta, signer=signer)
-    # Fail closed + atomic: write to a temp beside the output, then replace.
-    # For an in-place sign this guarantees the original is either its old self
-    # or the fully-signed new file, never a truncated half-write.
+    # Fail closed + atomic: write the signed bytes to a temp beside the output,
+    # SELF-VERIFY the temp, and only then replace. Verifying BEFORE the replace
+    # (round-42 gauntlet, HIGH) keeps the in-place case honest: a transient
+    # verify failure (e.g. an AV scanner briefly locking the just-written file)
+    # discards the temp and leaves the original untouched — never "reported
+    # failure while the working copy is already signed". The returned dict
+    # carries NO secret.
     import os
     import tempfile
 
@@ -424,6 +466,10 @@ def sign_pdf(
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(signed.getvalue())
+        # The temp holds exactly the bytes that will land at output_path, so its
+        # verification is the output's — computed while a failure is still fully
+        # recoverable.
+        verification = verify_signatures(tmp_name)
         os.replace(tmp_name, output_path)
     except BaseException:
         try:
@@ -432,9 +478,6 @@ def sign_pdf(
             pass
         raise
 
-    # Immediately self-verify the freshly-signed file (read-only, empty trust
-    # context like all verification). The returned dict carries NO secret.
-    verification = verify_signatures(str(output_path))
     sig = next(
         (s for s in verification["signatures"] if s.get("field") == field_name),
         verification["signatures"][-1] if verification["signatures"] else None,

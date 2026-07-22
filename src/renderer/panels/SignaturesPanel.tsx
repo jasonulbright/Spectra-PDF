@@ -165,6 +165,9 @@ export function SignaturesPanel(): React.ReactElement {
       await performOperation(activeFile.path, 'sign_pdf', {
         ...sourceParams,
         password: pw,
+        // The engine refuses output == input UNLESS this opt-in is set — the
+        // in-place flow is the one caller that intends it (round-42 gauntlet).
+        allow_in_place: true,
         ...(rsn && rsn.trim() ? { reason: rsn.trim() } : {}),
         ...(loc && loc.trim() ? { location: loc.trim() } : {}),
       });

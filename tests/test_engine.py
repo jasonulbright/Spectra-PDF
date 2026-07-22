@@ -1874,13 +1874,13 @@ class TestSignPdf:
         assert not os.path.exists(out)
 
     def test_in_place_signing_appends_and_stays_valid(self, tmp_dir):
-        # 9.F5: signing IN PLACE (output == input) is allowed — pyHanko appends
-        # an incremental revision, so the signed file is the original bytes
-        # VERBATIM + the signature, and it verifies as covering the whole doc.
+        # 9.F5: signing IN PLACE (output == input, opt-in) is allowed — pyHanko
+        # appends an incremental revision, so the signed file is the original
+        # bytes VERBATIM + the signature, covering the whole doc.
         pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
         src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
         orig = open(src, "rb").read()
-        r = sign_pdf(file=src, output=src, pfx_path=pfx, password="pw")
+        r = sign_pdf(file=src, output=src, pfx_path=pfx, password="pw", allow_in_place=True)
         after = open(src, "rb").read()
         assert r["valid"] is True and r["intact"] is True
         assert r["covers_whole_document"] is True
@@ -1888,29 +1888,62 @@ class TestSignPdf:
         assert after.startswith(orig) and len(after) > len(orig)
         assert verify_signatures(src)["summary"]["all_valid"] is True
 
+    def test_in_place_requires_the_opt_in(self, tmp_dir):
+        # Round-42 gauntlet (LOW): without allow_in_place the same-path refusal
+        # stands, so Save-a-copy / canvas flows can't silently overwrite the
+        # working copy outside the snapshot/undo flow.
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        orig = open(src, "rb").read()
+        with pytest.raises(ValueError, match="different file"):
+            sign_pdf(file=src, output=src, pfx_path=pfx, password="pw")
+        assert open(src, "rb").read() == orig
+
     def test_in_place_sign_failure_leaves_the_original_intact(self, tmp_dir):
-        # The atomic write (temp + os.replace) means a signing failure never
-        # truncates the in-place target — a wrong password must leave the file
+        # The atomic write (temp → verify → os.replace) means a signing failure
+        # never truncates the in-place target — a wrong password leaves it
         # byte-identical.
         pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "correct")
         src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
         orig = open(src, "rb").read()
         with pytest.raises(ValueError):
-            sign_pdf(file=src, output=src, pfx_path=pfx, password="wrong")
+            sign_pdf(file=src, output=src, pfx_path=pfx, password="wrong", allow_in_place=True)
         assert open(src, "rb").read() == orig
 
-    def test_counter_sign_in_place_preserves_the_prior_signature(self, tmp_dir):
-        # Signing an already-signed file (in place) appends a SECOND signature
-        # as its own revision; the first signature's covered bytes are untouched
-        # so it stays intact. This is the multi-signature / incremental-update
-        # property (roadmap § I O5b) the same machinery already provides.
+    def test_in_place_verify_failure_leaves_the_original_intact(self, tmp_dir, monkeypatch):
+        # Round-42 gauntlet (HIGH): the self-verify runs BEFORE the replace, so
+        # a transient verify failure (an AV lock, say) must NOT leave the working
+        # copy signed-on-disk-but-reported-failed. Force verify to raise and
+        # assert the original is untouched and the error propagates.
+        import engine.signatures as sigmod
+
         pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
         src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
-        sign_pdf(file=src, output=src, pfx_path=pfx, password="pw", field_name="Sig1")
-        sign_pdf(file=src, output=src, pfx_path=pfx, password="pw", field_name="Sig2")
+        orig = open(src, "rb").read()
+
+        def _boom(_path):
+            raise OSError("simulated transient lock during verify")
+
+        monkeypatch.setattr(sigmod, "verify_signatures", _boom)
+        with pytest.raises(OSError):
+            sign_pdf(file=src, output=src, pfx_path=pfx, password="pw", allow_in_place=True)
+        assert open(src, "rb").read() == orig
+
+    def test_counter_sign_in_place_auto_rotates_the_field_name(self, tmp_dir):
+        # Round-42 gauntlet (HIGH): the default field name is "Signature1"; the
+        # in-place flow passes NO explicit name, so a second sign must not
+        # collide. The engine rotates to the next free name — two valid,
+        # distinctly-named signatures, first still intact.
+        pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
+        src = _blank_pdf(os.path.join(tmp_dir, "in.pdf"))
+        r1 = sign_pdf(file=src, output=src, pfx_path=pfx, password="pw", allow_in_place=True)
+        r2 = sign_pdf(file=src, output=src, pfx_path=pfx, password="pw", allow_in_place=True)
+        assert r1["field"] == "Signature1"
+        assert r2["field"] == "Signature2"
         v = verify_signatures(src)
         assert v["signature_count"] == 2
         assert all(s["intact"] and s["valid"] for s in v["signatures"])
+        assert {s["field"] for s in v["signatures"]} == {"Signature1", "Signature2"}
 
     def test_result_never_contains_the_password(self, tmp_dir):
         token = "unique-secret-9f3a2b"
