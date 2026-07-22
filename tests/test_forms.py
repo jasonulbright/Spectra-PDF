@@ -16,6 +16,13 @@ FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 # radio group, dropdown. Cross-tool input for the engine implementation.
 PDFLIB_FORM = os.path.join(FIXTURES_DIR, "form-pdflib.pdf")
 
+# The vendored fallback fonts (Rust `get_edit_font_path` at runtime); FC1's
+# Unicode-appearance tests need them and skip when the bundle isn't provisioned.
+FONTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources", "fonts"
+)
+_HAS_FONTS = os.path.isfile(os.path.join(FONTS_DIR, "LiberationSans-Regular.ttf"))
+
 
 def _make_raw_form(path: str) -> None:
     """A form built with raw pikepdf objects: inherited /FT via a parent
@@ -184,11 +191,81 @@ class TestFillFormFields:
 
     def test_non_winansi_value_fails_closed(self, tmp_dir):
         # Caught at VALIDATION time now (review round: the all-problems
-        # contract includes encodability), with the WinAnsi message.
+        # contract includes encodability), with the WinAnsi message. Without a
+        # font_dir there is no fallback, so a non-WinAnsi value is still refused.
         out = os.path.join(tmp_dir, "nope.pdf")
         with pytest.raises(ValueError, match="WinAnsi"):
             fill_form_fields(PDFLIB_FORM, out, {"applicant.name": "日本語テキスト"})
         assert not os.path.exists(out)
+
+    @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_fc1_unicode_value_embeds_font_and_round_trips(self, tmp_dir):
+        # FC1 (§I.0 S3): a Cyrillic+Greek value (outside WinAnsi) fills via an
+        # EMBEDDED Type0/Identity-H font when font_dir is given, instead of
+        # being refused; the value round-trips and the appearance shows a
+        # hex-encoded string against the embedded font.
+        out = os.path.join(tmp_dir, "uni.pdf")
+        val = "Привет Ελληνικά мир"
+        r = fill_form_fields(PDFLIB_FORM, out, {"applicant.name": val}, font_dir=FONTS_DIR)
+        assert r["filled"] == 1
+        back = {f["name"]: f["value"] for f in read_form_fields(out)["fields"]}
+        assert back["applicant.name"] == val
+        with pikepdf.open(out) as pdf:
+            uni_streams = []
+            for a in pdf.pages[0].obj["/Annots"]:
+                ap = a.get("/AP")
+                n = ap.get("/N") if ap is not None else None
+                if not isinstance(n, pikepdf.Stream):
+                    continue
+                res = n.get("/Resources")
+                fonts = res.get("/Font") if res is not None else None
+                if fonts is None:
+                    continue
+                if any(str(fonts[k].get("/Subtype")) == "/Type0" for k in fonts.keys()):
+                    uni_streams.append(n)
+            assert len(uni_streams) == 1  # exactly applicant.name's appearance
+            body = uni_streams[0].read_bytes()
+            assert b"/TxU" in body  # the embedded-font resource name
+            assert b"> Tj" in body  # a hex string show, not a WinAnsi (...) Tj
+
+    @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_fc1_cjk_refused_even_with_font_dir(self, tmp_dir):
+        # Liberation covers Latin/Cyrillic/Greek but NOT CJK — a CJK value is
+        # refused with the coverage message (the B2 fallback-face boundary),
+        # atomically, even WITH a font_dir. Checked in validation.
+        out = os.path.join(tmp_dir, "cjk.pdf")
+        with pytest.raises(ValueError, match="no available font can render"):
+            fill_form_fields(PDFLIB_FORM, out, {"applicant.name": "日本語"}, font_dir=FONTS_DIR)
+        assert not os.path.exists(out)
+
+    def test_fc1_unicode_without_font_dir_refused(self, tmp_dir):
+        # Without a font_dir the non-WinAnsi value is refused with the
+        # no-fallback message (not a silent partial).
+        out = os.path.join(tmp_dir, "no.pdf")
+        with pytest.raises(ValueError, match="no fallback font is available"):
+            fill_form_fields(PDFLIB_FORM, out, {"applicant.name": "Привет"}, font_dir="")
+        assert not os.path.exists(out)
+
+    @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_fc1_multiline_unicode_wraps(self, tmp_dir):
+        # The multiline 'notes' field wraps a long Cyrillic value using the
+        # embedded font's OWN metrics (width_em) — multiple baselines emitted.
+        out = os.path.join(tmp_dir, "ml.pdf")
+        r = fill_form_fields(PDFLIB_FORM, out, {"notes": ("Привет мир " * 10).strip()}, font_dir=FONTS_DIR)
+        assert r["filled"] == 1
+        with pikepdf.open(out) as pdf:
+            body = next(
+                a["/AP"]["/N"].read_bytes()
+                for a in pdf.pages[0].obj["/Annots"]
+                if a.get("/AP") is not None and isinstance(a["/AP"].get("/N"), pikepdf.Stream)
+                and (a["/AP"]["/N"].get("/Resources") or {}).get("/Font") is not None
+                and any(
+                    str(a["/AP"]["/N"]["/Resources"]["/Font"][k].get("/Subtype")) == "/Type0"
+                    for k in a["/AP"]["/N"]["/Resources"]["/Font"].keys()
+                )
+            )
+            # More than one show → the text wrapped onto multiple lines.
+            assert body.count(b"> Tj") >= 2
 
     def test_auto_size_and_inherited_da(self, tmp_dir):
         # The raw fixture's AcroForm /DA is "/Helv 0 Tf" — auto-size. The

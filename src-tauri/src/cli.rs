@@ -561,6 +561,15 @@ fn resolve_gs() -> PathBuf {
     exe_dir().join("ghostscript").join("gswin64c.exe")
 }
 
+/// The vendored fallback-fonts DIRECTORY (mirrors `engine::get_edit_font_path`
+/// for the GUI). FC1: passed to `fill_form_fields` so the CLI can render form
+/// values outside WinAnsi with an embedded Unicode font. Missing (e.g. a dev
+/// build without provisioned resources) is handled engine-side — the value is
+/// then refused, never crashed.
+fn resolve_fonts() -> PathBuf {
+    exe_dir().join("fonts")
+}
+
 // ── Engine communication ────────────────────────────────────────────────────
 
 struct CliEngine {
@@ -1082,6 +1091,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "output": output,
                     "edits": edits,
                     "flatten": args.flatten,
+                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             )
         }

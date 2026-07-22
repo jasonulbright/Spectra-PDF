@@ -418,8 +418,10 @@ def _escape_pdf_text(value: str) -> bytes:
     return raw.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
 
 
-def _wrap_lines(text: str, size: float, max_width: float) -> list[str]:
-    """Greedy word wrap using Helvetica advances; explicit newlines respected."""
+def _wrap_lines(text: str, size: float, max_width: float, width_em=text_width_em) -> list[str]:
+    """Greedy word wrap; explicit newlines respected. `width_em(s)` is the em
+    advance of `s` — Helvetica by default (byte-identical WinAnsi path), or an
+    embedded font's own metric on the Unicode path (FC1)."""
     lines: list[str] = []
     for para in text.split("\n"):
         if not para:
@@ -428,7 +430,7 @@ def _wrap_lines(text: str, size: float, max_width: float) -> list[str]:
         current = ""
         for word in para.split(" "):
             candidate = word if not current else current + " " + word
-            if text_width_em(candidate) * size <= max_width or not current:
+            if width_em(candidate) * size <= max_width or not current:
                 current = candidate
             else:
                 lines.append(current)
@@ -437,26 +439,73 @@ def _wrap_lines(text: str, size: float, max_width: float) -> list[str]:
     return lines
 
 
-def _fit_font_size(text: str, multiline: bool, w: float, h: float) -> float:
+def _fit_font_size(text: str, multiline: bool, w: float, h: float, width_em=text_width_em) -> float:
     """Auto-size (DA size 0): largest size that fits the box, pdf-lib-style
-    downward scan, floored at MIN_FONT_SIZE."""
+    downward scan, floored at MIN_FONT_SIZE. `width_em` as in `_wrap_lines`."""
     size = min(DEFAULT_FONT_SIZE * 2, h - 2 * TEXT_PAD)
     size = max(size, MIN_FONT_SIZE)
     while size > MIN_FONT_SIZE:
         if multiline:
-            lines = _wrap_lines(text, size, w - 2 * TEXT_PAD)
+            lines = _wrap_lines(text, size, w - 2 * TEXT_PAD, width_em)
             needed = len(lines) * size * LINE_SPACING
-            widest = max((text_width_em(ln) * size for ln in lines), default=0.0)
+            widest = max((width_em(ln) * size for ln in lines), default=0.0)
             if needed <= h - 2 * TEXT_PAD and widest <= w - 2 * TEXT_PAD:
                 return size
         else:
             if (
-                text_width_em(text) * size <= w - 2 * TEXT_PAD
+                width_em(text) * size <= w - 2 * TEXT_PAD
                 and size * GLYPH_HEIGHT_EM <= h - 2 * TEXT_PAD
             ):
                 return size
         size -= 0.5
     return MIN_FONT_SIZE
+
+
+def _family_for_da(da: str | None) -> str:
+    """Map the /DA font to a fallback FAMILY for an embedded Unicode appearance
+    (Helvetica→sans default, Times→serif, Courier→mono). Liberation covers
+    Latin/Cyrillic/Greek in all three; the family only picks the shape."""
+    req, _sz, _c = _parse_da(da)
+    low = req.lower()
+    if any(k in low for k in ("times", "tiro", "serif", "georgia", "roman")):
+        return "serif"
+    if any(k in low for k in ("cour", "mono")):
+        return "mono"
+    return "sans"
+
+
+def _unicode_face(font_dir: str, da: str | None) -> str | None:
+    """The bundled fallback .ttf to embed for a non-WinAnsi value, by the /DA
+    family. None when no fonts DIR is available (→ the value is refused, never
+    crashed): a missing/non-directory path fails safe here rather than letting
+    `_face_missing`/`build_fallback_font` raise on a bogus path later."""
+    if not font_dir or not Path(font_dir).is_dir():
+        return None
+    from engine.font_fallback import resolve_fallback_font, synthetic_family_font
+
+    try:
+        return resolve_fallback_font(font_dir, synthetic_family_font(_family_for_da(da)))
+    except (ValueError, OSError):
+        return None
+
+
+def _face_missing(face_path: str, text: str) -> list[str]:
+    """Characters `face_path` cannot map through its cmap — the CJK/uncovered
+    boundary. Checked in VALIDATION so an unrenderable value is reported with
+    the rest and the fill stays atomic (it never half-writes then raises).
+    Layout-only chars (newline/tab/CR) are not glyphs and never missing."""
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(face_path, fontNumber=0, lazy=True)
+    try:
+        cmap = font.getBestCmap() or {}
+    finally:
+        font.close()
+    return [
+        ch
+        for ch in dict.fromkeys(text)
+        if ch not in "\n\r\t" and ord(ch) not in cmap
+    ]
 
 
 def _text_appearance(
@@ -466,20 +515,55 @@ def _text_appearance(
     da: str | None,
     multiline: bool,
     quadding: int,
+    font_dir: str = "",
 ) -> bool:
     """Regenerate the widget's /AP /N form XObject for a text-ish value.
     Returns True when the /DA-requested font was missing from /DR and
-    Helvetica was substituted (honestly — named as itself, locally only)."""
+    Helvetica was substituted (honestly — named as itself, locally only).
+
+    FC1 (§I.0 S3): a value outside WinAnsi is drawn with an EMBEDDED subsetted
+    Unicode font (Identity-H, via `build_fallback_font`) when `font_dir` is
+    available — validation has already confirmed the face can render it. A
+    pure-WinAnsi value keeps the byte-identical standard-14 path. The ONLY axes
+    that differ are the font resource, the width metric, and the show-string
+    encoding; wrapping, quadding and vertical placement are shared (Liberation
+    is metric-compatible with Helvetica, so the Helvetica descent/height keep
+    the baseline consistent)."""
     rect = [float(v) for v in widget["/Rect"]]
     w = abs(rect[2] - rect[0])
     h = abs(rect[3] - rect[1])
     requested_font, size, color = _parse_da(da)
-    font_name, font_obj, substituted = _dr_font(pdf, requested_font)
+
+    try:
+        value.encode("cp1252")
+        unicode_face = None
+    except UnicodeEncodeError:
+        unicode_face = _unicode_face(font_dir, da)
+
+    if unicode_face is None:
+        font_name, font_obj, substituted = _dr_font(pdf, requested_font)
+        width_em = text_width_em
+
+        def emit(line: str) -> bytes:
+            return b"(" + _escape_pdf_text(line) + b") Tj"
+    else:
+        from engine.font_fallback import build_fallback_font
+
+        font_obj, encode, width_1000 = build_fallback_font(pdf, unicode_face, value)
+        font_name = "TxU"  # one font per appearance stream, in its own /Resources
+        substituted = False  # an intentional embed, not a /DR-missing fallback
+
+        def width_em(s: str, _w=width_1000) -> float:
+            return _w(s) / 1000.0
+
+        def emit(line: str, _e=encode) -> bytes:
+            return b"<" + _e(line).hex().encode("ascii") + b"> Tj"
+
     if size <= 0:
-        size = _fit_font_size(value, multiline, w, h)
+        size = _fit_font_size(value, multiline, w, h, width_em)
 
     if multiline:
-        lines = _wrap_lines(value, size, w - 2 * TEXT_PAD)
+        lines = _wrap_lines(value, size, w - 2 * TEXT_PAD, width_em)
         # Top-aligned like pdf-lib: first baseline one line down from the top.
         y = h - TEXT_PAD - size * GLYPH_HEIGHT_EM + size * HELVETICA_DESCENT_EM
     else:
@@ -491,7 +575,7 @@ def _text_appearance(
     parts.append(f"/{font_name} {_fmt(size)} Tf".encode("ascii"))
     first = True
     for line in lines:
-        tw = text_width_em(line) * size
+        tw = width_em(line) * size
         if quadding == 1:
             x = (w - tw) / 2
         elif quadding == 2:
@@ -506,7 +590,7 @@ def _text_appearance(
         else:
             parts.append(f"{_fmt(x - last_x)} {_fmt(-size * LINE_SPACING)} Td".encode("ascii"))
             last_x = x
-        parts.append(b"(" + _escape_pdf_text(line) + b") Tj")
+        parts.append(emit(line))
     parts.extend([b"ET", b"Q", b"EMC"])
 
     stream = pdf.make_stream(b"\n".join(parts))
@@ -539,7 +623,42 @@ def _coerce_bool(value) -> bool | None:
     return None
 
 
-def fill_form_fields(file: str, output: str, edits: dict, flatten: bool = False) -> dict:
+def _field_da(field, acro) -> str | None:
+    """The /DA in effect for a field: its own, else the AcroForm default."""
+    da = field.attr("/DA")
+    if da is None and acro is not None:
+        da = acro.get("/DA")
+    return str(da) if da is not None else None
+
+
+def _text_value_problem(name: str, text: str, da: str | None, font_dir: str) -> str | None:
+    """None when `text` can be DRAWN into `name`'s appearance — WinAnsi
+    directly, or (FC1) via an embedded Unicode font when `font_dir` provides a
+    face that covers every glyph. Else the problem string. Doing the coverage
+    check HERE keeps the fill's 'list ALL problems, then mutate nothing on
+    failure' atomicity for the Unicode path too (the appearance writer never
+    half-fills then raises)."""
+    try:
+        text.encode("cp1252")
+        return None
+    except UnicodeEncodeError:
+        pass
+    face = _unicode_face(font_dir, da)
+    if face is None:
+        return (
+            f"value for {name} contains characters outside the form font's "
+            f"encoding (WinAnsi) and no fallback font is available"
+        )
+    missing = _face_missing(face, text)
+    if missing:
+        pretty = " ".join(f"'{c}'" for c in sorted(set(missing)))
+        return f"value for {name} contains characters no available font can render ({pretty})"
+    return None
+
+
+def fill_form_fields(
+    file: str, output: str, edits: dict, flatten: bool = False, font_dir: str = ""
+) -> dict:
     """Fill AcroForm fields and regenerate appearances; optionally flatten.
 
     Args:
@@ -548,6 +667,11 @@ def fill_form_fields(file: str, output: str, edits: dict, flatten: bool = False)
         edits: {fully-qualified field name: value} — str for text/choice,
             bool (or true/false/yes/no/on/off strings) for checkboxes.
         flatten: Bake appearances into page content and remove all fields.
+        font_dir: the bundled fallback-fonts directory (FC1, §I.0 S3). When
+            given, a value outside WinAnsi is drawn with an embedded subsetted
+            Unicode font instead of being refused; empty keeps the WinAnsi-only
+            behaviour. Callers pass the same dir as the text-editing ops
+            (Rust `get_edit_font_path`).
     """
     input_path = Path(file)
     output_path = Path(output)
@@ -555,6 +679,7 @@ def fill_form_fields(file: str, output: str, edits: dict, flatten: bool = False)
 
     with pikepdf.open(file) as pdf:
         fields = {f.name: f for f in _all_fields(pdf)}
+        acro = _acroform(pdf)
 
         # Validate EVERYTHING before mutating ANYTHING — report all problems.
         problems: list[str] = []
@@ -573,14 +698,12 @@ def fill_form_fields(file: str, output: str, edits: dict, flatten: bool = False)
                 # Encodability is part of validation, not a mutation-time
                 # surprise: the "list ALL problems" contract must include the
                 # appearance-encoding failures (review-caught: two bad fields
-                # reported one problem at a time across two attempts).
-                try:
-                    text.encode("cp1252")
-                except UnicodeEncodeError:
-                    problems.append(
-                        f"value for {name} contains characters outside the form "
-                        f"font's encoding (WinAnsi)"
-                    )
+                # reported one problem at a time across two attempts). FC1: a
+                # non-WinAnsi value is fillable via an embedded Unicode font
+                # when `font_dir` covers it, else refused here.
+                prob = _text_value_problem(name, text, _field_da(field, acro), font_dir)
+                if prob is not None:
+                    problems.append(prob)
                 else:
                     plan.append((field, ftype, text))
             elif ftype == "checkbox":
@@ -604,13 +727,9 @@ def fill_form_fields(file: str, output: str, edits: dict, flatten: bool = False)
                     problems.append(f"{ftype} {name} has no option {value!r} (options: {opts})")
                 else:
                     chosen = export if export is not None else str(value)
-                    try:
-                        chosen.encode("cp1252")
-                    except UnicodeEncodeError:
-                        problems.append(
-                            f"value for {name} contains characters outside the form "
-                            f"font's encoding (WinAnsi)"
-                        )
+                    prob = _text_value_problem(name, chosen, _field_da(field, acro), font_dir)
+                    if prob is not None:
+                        problems.append(prob)
                     else:
                         plan.append((field, ftype, chosen))
             else:
@@ -618,7 +737,6 @@ def fill_form_fields(file: str, output: str, edits: dict, flatten: bool = False)
         if problems:
             raise ValueError("; ".join(problems))
 
-        acro = _acroform(pdf)
         xfa_stripped = False
         if acro is not None and "/XFA" in acro:
             # Parity with the GUI's pdf-lib path, which auto-deletes /XFA on
@@ -629,10 +747,7 @@ def fill_form_fields(file: str, output: str, edits: dict, flatten: bool = False)
         filled = 0
         fonts_substituted: list[str] = []
         for field, ftype, value in plan:
-            da = field.attr("/DA")
-            if da is None and acro is not None:
-                da = acro.get("/DA")
-            da = str(da) if da is not None else None
+            da = _field_da(field, acro)
             q = field.attr("/Q")
             try:
                 quadding = int(q) if q is not None else 0
@@ -672,7 +787,7 @@ def fill_form_fields(file: str, output: str, edits: dict, flatten: bool = False)
                 multiline = ftype == "text" and bool(field.flags & FF_MULTILINE)
                 try:
                     for widget in field.widgets:
-                        if _text_appearance(pdf, widget, text, da, multiline, quadding):
+                        if _text_appearance(pdf, widget, text, da, multiline, quadding, font_dir):
                             if field.name not in fonts_substituted:
                                 fonts_substituted.append(field.name)
                 except ValueError as exc:
