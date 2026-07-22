@@ -417,6 +417,19 @@ export function registerSignHandler(handler: SignHandler | null): void {
   signHandler = handler;
 }
 
+/** 9.S6: the Document JavaScript panel's harness hooks (set in place via the
+ * undoable flow; read the active working copy). */
+export interface DocumentJsHandler {
+  set: (scripts: { name: string; js: string }[]) => Promise<void>;
+  list: () => Promise<{ name: string; js: string }[]>;
+}
+
+let documentJsHandler: DocumentJsHandler | null = null;
+
+export function registerDocumentJsHandler(handler: DocumentJsHandler | null): void {
+  documentJsHandler = handler;
+}
+
 export interface TestHarness {
   /** Open one or more PDFs by absolute path, bypassing the OS dialog. */
   openByPaths: (paths: string[]) => Promise<void>;
@@ -645,6 +658,9 @@ export interface TestHarness {
   }) => Promise<{ signature_count: number; all_valid: boolean }>;
   /** 9.F5: read-only signature verify of the active working copy. */
   verifyActiveSignatures: () => Promise<{ signature_count: number; all_valid: boolean }>;
+  /** 9.S6: set the active document's JavaScript (undoable), and read it back. */
+  documentJsSet: (scripts: { name: string; js: string }[]) => Promise<void>;
+  documentJsList: () => Promise<{ name: string; js: string }[]>;
   /** Batch OCR dialog injectors (dialog must be open — `tools.batchOcr`). */
   batchOcrSetFolders: (source: string, dest: string) => Promise<void>;
   batchOcrStart: () => Promise<void>;
@@ -1173,6 +1189,32 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         return await signHandler.verifyActive();
       } catch (err) {
         captureError('verifyActiveSignatures', err);
+        throw err;
+      }
+    },
+    documentJsSet: async (scripts) => {
+      if (!documentJsHandler) {
+        const msg = 'documentJsSet: Document JavaScript panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await documentJsHandler.set(scripts);
+      } catch (err) {
+        captureError('documentJsSet', err);
+        throw err;
+      }
+    },
+    documentJsList: async () => {
+      if (!documentJsHandler) {
+        const msg = 'documentJsList: Document JavaScript panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await documentJsHandler.list();
+      } catch (err) {
+        captureError('documentJsList', err);
         throw err;
       }
     },

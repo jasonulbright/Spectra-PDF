@@ -41,6 +41,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   // Same property: no param besides the (non-secret) name ever reaches the
   // queue label; the .pfx password stays out of every sink.
   generate_signer: 'Create Signer',
+  set_document_js: 'Edit Document JavaScript',
 };
 
 /** Methods that are internal lookups, not user-facing operations. */
@@ -59,6 +60,10 @@ const INTERNAL_METHODS = new Set([
   'get_metadata',
   'get_pdf_version',
   'get_outline',
+  // 9.S6: reading the document's JavaScript is a pure lookup — trackable would
+  // route it through the commit gate and flush pending page edits just for
+  // opening the panel (the get_pdf_version/get_outline hazard).
+  'list_document_js',
   // 9.A2-tail-2 fit indicator (round 31): a pure read despite taking a file
   // — it measures how NEW text would wrap, independent of page content, so
   // gating it would force-commit unrelated pending page edits on every

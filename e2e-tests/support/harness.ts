@@ -515,6 +515,36 @@ export async function verifyActiveSignatures(): Promise<{
   return result;
 }
 
+export interface DocScript {
+  name: string;
+  js: string;
+}
+
+/** 9.S6: set the active document's JavaScript (undoable) via the panel flow. */
+export async function documentJsSet(scripts: DocScript[]): Promise<void> {
+  const result = await browser.executeAsync<string | null, [DocScript[]]>(function (s, done) {
+    (window as any).__SPECTRA_TEST__.documentJsSet(s)
+      .then(() => done(null))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  }, scripts);
+  if (typeof result === 'string') {
+    throw new Error(`documentJsSet failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+/** 9.S6: read the active working copy's document JavaScript. */
+export async function documentJsList(): Promise<DocScript[]> {
+  const result = await browser.executeAsync<DocScript[] | string, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.documentJsList()
+      .then((res: unknown) => done(res as any))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  });
+  if (typeof result === 'string') {
+    throw new Error(`documentJsList failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
 /** Place a visible-signature box on the active file's first canvas page
  * (display-normalized rect). Canvas view must be mounted. */
 export async function placeSignature(rect: { x: number; y: number; w: number; h: number }): Promise<void> {

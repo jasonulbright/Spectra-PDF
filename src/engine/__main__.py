@@ -40,6 +40,7 @@ from engine.rebuild import rebuild
 from engine.recover import recover
 from engine.check import check
 from engine.outline import get_outline, set_outline
+from engine.document_js import list_document_js, set_document_js
 from engine.redact import redact
 from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
@@ -106,6 +107,8 @@ def main() -> None:
     server.register("check", check)
     server.register("get_outline", get_outline)
     server.register("set_outline", set_outline)
+    server.register("list_document_js", list_document_js)
+    server.register("set_document_js", set_document_js)
     server.register("redact", redact)
     server.register("watermark", watermark)
     server.register("compare_text", compare_text)
