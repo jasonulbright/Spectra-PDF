@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.8.0 — Fine typography, in-place signing, and a press-ready path
+
+### Typography — kerning and OpenType features
+- **Kerning** — text you add or edit is now properly kerned, so pairs like
+  "AV" and "To" tighten the way a typesetter would, instead of sitting loose.
+  The spacing comes from the font's own metrics: the document's embedded font
+  where it has them, a non-embedded standard font's metrics where it doesn't,
+  or a metric-compatible stand-in. Editing text no longer un-kerns it.
+- **Small caps and stylistic alternates** — apply real OpenType small caps
+  (the font's own, not shrunken capitals) and a font's stylistic alternates to
+  text you add or edit — the whole box, a whole paragraph, or just a selected
+  range. When the document's own font carries the feature it is used in place;
+  otherwise the text switches to a bundled feature-rich serif, and stays
+  searchable either way.
+
+### Signing — sign the open document, in place
+- **Sign in place** — a signature can now become part of the document you have
+  open, and the change is undoable, instead of only ever producing a separate
+  signed file. "Sign & save a copy" is still there when you want a separate
+  artifact. The file on disk is written only when you save.
+- **Counter-signing** — signing an already-signed document adds your signature
+  as a new revision and leaves the existing signatures intact and valid.
+
+### Document JavaScript
+- **View and edit document-level JavaScript** — the scripts a PDF runs when it
+  is opened in a reader. Add, rename, edit, and remove them from a dedicated
+  editor. It only reads and writes the script text — it never runs it.
+
+### Prepress
+- **Convert to CMYK** — a colour-managed conversion of the document's colours
+  to CMYK for commercial printing, honouring embedded colour profiles and
+  preserving spot colours, with a choice of rendering intent (relative
+  colorimetric, perceptual, or absolute).
+
+### Editing polish
+- **Per-span face and size, rendered faithfully** — bold, italic, family, and
+  size applied to a selected range now render exactly as they will commit,
+  each part of a mixed selection keeping its own style instead of collapsing
+  to one, with the caret and selection tracking the styled text precisely.
+
 ## 2.7.1 — Redaction fix (recommended update)
 
 ### Redaction now removes everything under a mark
