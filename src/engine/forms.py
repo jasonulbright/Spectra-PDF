@@ -324,9 +324,77 @@ def _field_value(field: _Field, ftype: str):
     return None
 
 
+def _page_index_maps(pdf) -> tuple[dict, dict]:
+    """(annot-objgen → 0-based page index, page-objgen → 0-based page index).
+    A widget's page is authoritatively where it appears in a page's /Annots
+    (a widget's own /P can be absent or stale); the page map is the /P fallback.
+    Only INDIRECT objects (objid ≠ 0) are keyed — direct objects all share
+    (0,0) and would false-match, so they map to None (unplaced)."""
+    annot_map: dict = {}
+    page_map: dict = {}
+    for i, page in enumerate(pdf.pages):
+        try:
+            og = page.obj.objgen
+            if og[0] != 0:
+                page_map[og] = i
+        except Exception:
+            pass
+        annots = page.obj.get("/Annots")
+        if annots is None:
+            continue
+        for a in annots:
+            try:
+                og = a.objgen
+                if og[0] != 0:
+                    annot_map[og] = i
+            except Exception:
+                continue
+    return annot_map, page_map
+
+
+def _widget_geometry(field, annot_map: dict, page_map: dict) -> list:
+    """Per-widget placement — `{page (0-based, or None if unplaced), rect
+    [x0,y0,x1,y1] normalized}`. FC3 (§I.0 S6/FC4): the geometry the on-canvas
+    overlay needs to project each widget; `_Field.widgets` already collects a
+    typed terminal's nested widgets, so this surfaces S6 to the GUI once the
+    read routes through the engine."""
+    out = []
+    for w in field.widgets:
+        try:
+            r = [float(v) for v in w.get("/Rect")]
+        except (TypeError, ValueError):
+            continue
+        if len(r) != 4:
+            continue
+        page = None
+        try:
+            og = w.objgen
+            if og[0] != 0:
+                page = annot_map.get(og)
+        except Exception:
+            page = None
+        if page is None:
+            p = w.get("/P")
+            if p is not None:
+                try:
+                    pog = p.objgen
+                    if pog[0] != 0:
+                        page = page_map.get(pog)
+                except Exception:
+                    page = None
+        out.append(
+            {
+                "page": page,
+                "rect": [min(r[0], r[2]), min(r[1], r[3]), max(r[0], r[2]), max(r[1], r[3])],
+            }
+        )
+    return out
+
+
 def read_form_fields(file: str) -> dict:
     """Enumerate AcroForm fields (read-only)."""
     with pikepdf.open(file) as pdf:
+        annot_map, page_map = _page_index_maps(pdf)
         fields = []
         for field in _all_fields(pdf):
             ftype = _classify(field)
@@ -336,6 +404,10 @@ def read_form_fields(file: str) -> dict:
                 "value": _field_value(field, ftype),
                 "read_only": bool(field.flags & FF_READ_ONLY),
                 "required": bool(field.flags & FF_REQUIRED),
+                # FC3: per-widget page+rect so the engine read can drive the
+                # on-canvas overlay (the S1 re-route, FC4) and nested widgets
+                # (S6) list with geometry.
+                "widgets": _widget_geometry(field, annot_map, page_map),
             }
             if ftype == "text":
                 entry["multiline"] = bool(field.flags & FF_MULTILINE)

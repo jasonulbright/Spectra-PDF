@@ -117,6 +117,57 @@ class TestReadFormFields:
         r = read_form_fields(sample_pdf)
         assert r["fields"] == [] and r["count"] == 0
 
+    def test_fc3_widgets_carry_page_and_rect(self, tmp_dir):
+        # FC3: each field reports its widgets' 0-based page + normalized rect —
+        # incl. the NESTED typed-terminal kids (person.first/last), which the
+        # engine already enumerates (S6) and now list WITH geometry (the shape
+        # the on-canvas overlay needs when the read routes through the engine).
+        src = os.path.join(tmp_dir, "raw.pdf")
+        _make_raw_form(src)
+        by = {f["name"]: f for f in read_form_fields(src)["fields"]}
+        assert by["person.first"]["widgets"] == [{"page": 0, "rect": [40.0, 340.0, 200.0, 364.0]}]
+        assert by["person.last"]["widgets"] == [{"page": 0, "rect": [40.0, 300.0, 200.0, 324.0]}]
+        assert all("widgets" in f for f in by.values())
+
+    def test_fc3_widget_page_index_across_pages(self, tmp_dir):
+        # A widget on the SECOND page reports page index 1 — resolved via the
+        # page's /Annots even though the widget carries no /P.
+        out = os.path.join(tmp_dir, "multi.pdf")
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(300, 300))
+        p1 = pdf.add_blank_page(page_size=(300, 300))
+        w = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, Rect=[10, 20, 110, 44],
+                FT=Name.Tx, T=pikepdf.String("f2"),
+            )
+        )
+        p1.obj["/Annots"] = pikepdf.Array([w])
+        pdf.Root["/AcroForm"] = Dictionary(Fields=pikepdf.Array([w]))
+        pdf.save(out)
+        pdf.close()
+        f2 = next(f for f in read_form_fields(out)["fields"] if f["name"] == "f2")
+        assert f2["widgets"] == [{"page": 1, "rect": [10.0, 20.0, 110.0, 44.0]}]
+
+    def test_fc3_rect_normalized(self, tmp_dir):
+        # A /Rect in a non-standard corner order normalizes to [x0,y0,x1,y1].
+        out = os.path.join(tmp_dir, "rot.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        w = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, Rect=[110, 44, 10, 20],
+                FT=Name.Tx, T=pikepdf.String("r"),
+            )
+        )
+        page.obj["/Annots"] = pikepdf.Array([w])
+        pdf.Root["/AcroForm"] = Dictionary(Fields=pikepdf.Array([w]))
+        pdf.save(out)
+        pdf.close()
+        assert read_form_fields(out)["fields"][0]["widgets"] == [
+            {"page": 0, "rect": [10.0, 20.0, 110.0, 44.0]}
+        ]
+
 
 class TestFillFormFields:
     def test_fill_every_type_and_reread(self, tmp_dir):
