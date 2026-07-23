@@ -71,6 +71,8 @@ pub enum CliCommand {
     LayerList(LayerListArgs),
     /// Show or hide a layer by index
     LayerSet(LayerSetArgs),
+    /// Run the accessibility checker (JSON report)
+    Accessibility(AccessibilityArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -317,6 +319,12 @@ pub struct AttachListArgs {
 
 #[derive(Args)]
 pub struct LayerListArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct AccessibilityArgs {
     /// Input PDF file
     pub input: PathBuf,
 }
@@ -1286,6 +1294,11 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
 
         CliCommand::LayerList(args) => engine.call(
             "list_layers",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::Accessibility(args) => engine.call(
+            "check_accessibility",
             json!({ "file": abs(&args.input).to_string_lossy() }),
         ),
 

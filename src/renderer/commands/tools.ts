@@ -34,6 +34,7 @@ export type ToolId =
   | 'pagelabels'
   | 'attachments'
   | 'layers'
+  | 'accessibility'
   | 'export';
 
 export interface ToolDef {
@@ -184,6 +185,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Layers',
     description: 'Show or hide the document’s optional-content layers.',
     ops: ['layers'],
+  },
+  {
+    id: 'accessibility',
+    title: 'Accessibility',
+    description: 'Check the document against baseline accessibility requirements.',
+    ops: ['accessibility'],
   },
   {
     id: 'export',

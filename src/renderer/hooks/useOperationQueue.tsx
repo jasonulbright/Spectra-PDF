@@ -87,6 +87,8 @@ const INTERNAL_METHODS = new Set([
   // Listing optional-content groups to seed the Layers panel — a read;
   // set_layer_visibility (mutation) stays gated.
   'list_layers',
+  // The accessibility checker is pure analysis — no mutation.
+  'check_accessibility',
 ]);
 
 export function isTrackableMethod(method: string): boolean {
