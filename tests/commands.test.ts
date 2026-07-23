@@ -53,6 +53,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   openFiles: vi.fn(async () => true),
   openFilesInPlace: vi.fn(async () => {}),
   openPath: vi.fn(async () => {}),
+  openPathAtPage: vi.fn(async () => {}),
   save: vi.fn(async () => {}),
   saveAs: vi.fn(async () => {}),
   closeFile: vi.fn(async () => {}),

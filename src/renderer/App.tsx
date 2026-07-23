@@ -1266,6 +1266,17 @@ function AppContent(): React.ReactElement {
       if (paths.length > 0) await openByPaths(paths, { focus: false });
     },
     openPath: (path) => openByPaths([path]),
+    openPathAtPage: async (path, pageNumber) => {
+      await openByPaths([path], { focus: true });
+      // The OPEN_FILE dispatch + index update land over the next renders, so
+      // poll jumpToFilePage (idempotent, no-ops until the page resolves) and
+      // stop on the first success. Bounded so a page that never indexes
+      // (e.g. the file failed to open) doesn't loop forever.
+      for (let i = 0; i < 15; i++) {
+        if (getCanvasServices()?.jumpToFilePage(path, pageNumber)) return;
+        await new Promise((r) => setTimeout(r, 120));
+      }
+    },
     save: handleSave,
     saveAs: handleSaveAs,
     closeFile: handleCloseFile,
@@ -1295,6 +1306,7 @@ function AppContent(): React.ReactElement {
       openFiles: () => h.current.openFiles(),
       openFilesInPlace: () => h.current.openFilesInPlace(),
       openPath: (path) => h.current.openPath(path),
+      openPathAtPage: (path, pageNumber) => h.current.openPathAtPage(path, pageNumber),
       save: () => h.current.save(),
       saveAs: () => h.current.saveAs(),
       closeFile: (path) => h.current.closeFile(path),

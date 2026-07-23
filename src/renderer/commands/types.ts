@@ -38,6 +38,9 @@ export interface AppCommandHandlers {
   /** Open specific path(s) and focus the (last) opened document's tab — the
    * File ▸ Open Recent and Home-tab recent/open flows. */
   openPath(path: string): Promise<void>;
+  /** Open a path (if not already open) and reveal a 1-based page — the
+   * cross-file search hit click (P4 part 2). Polls for the doc to index. */
+  openPathAtPage(path: string, pageNumber: number): Promise<void>;
   /** Save active file to its original path (commit-gated). */
   save(): Promise<void>;
   /** Save active file via the native save dialog (commit-gated). */
@@ -113,7 +116,7 @@ export interface CanvasServices {
    * tagged when positional, historic when adopted — so callers that know
    * only a page NUMBER (bookmarks) must resolve here, never string-build
    * an id. */
-  jumpToFilePage(path: string, pageNumber: number): void;
+  jumpToFilePage(path: string, pageNumber: number): boolean;
   /** READ this page (M6.2): switch to the reading view (focusing the owning
    * document if needed) and land on the page — the PageInspector's
    * replacement. Uses the pending-jump slot, so it is safe to call from any

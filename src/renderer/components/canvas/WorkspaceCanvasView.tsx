@@ -963,6 +963,7 @@ export function WorkspaceCanvasView({
       jumpToFilePage: (path, pageNumber) => {
         const id = pageIdAtSourceIndex(docsForJumpRef.current, path, pageNumber);
         if (id) jumpToPageRef.current(id);
+        return !!id;
       },
       openPageForReading: (pageId) => openPageForReadingRef.current(pageId),
       find: {
