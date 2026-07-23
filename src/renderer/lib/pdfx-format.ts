@@ -30,7 +30,7 @@ export interface PagePartition {
 // orientation); the builder maps it into PDF user space. Open PDF Studio extension —
 // absent keeps PDFx-identical output.
 export interface ExportAnnotation {
-  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup';
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note';
   x: number;
   y: number;
   w: number;
@@ -46,7 +46,7 @@ export interface ExportAnnotation {
   // copied page before re-appending this (possibly edited) annotation, so
   // imported-but-unedited annotations don't end up duplicated in the output.
   importedOriginal?: {
-    subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut' | 'Squiggly';
+    subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut' | 'Squiggly' | 'Text';
     rect: [number, number, number, number];
     contents?: string;
   };

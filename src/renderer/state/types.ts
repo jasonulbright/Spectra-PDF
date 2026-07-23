@@ -35,7 +35,7 @@ export interface OpenFile {
 // docs/architecture/05-phase2c-annotations.md, "importing existing
 // annotations safely".
 export interface ImportedAnnotationFingerprint {
-  subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut' | 'Squiggly';
+  subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut' | 'Squiggly' | 'Text';
   rect: [number, number, number, number];
   contents?: string;
   // Color at import time — NOT used for the commit-time fingerprint match
@@ -65,7 +65,9 @@ export type TextMarkupType = 'highlight' | 'underline' | 'strikeout' | 'squiggly
 
 export interface PageAnnotation {
   id: string;
-  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup';
+  // 'note' is a native /Text sticky note — a comment icon at a point, with its
+  // text in `note`. Rect-based like the box kinds (no quads/points).
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note';
   x: number;
   y: number;
   w: number;

@@ -18,6 +18,8 @@ const RECOGNIZED_SUBTYPES = new Set([
   'Square', 'FreeText', 'Ink', 'Stamp',
   // N1 — native quad-based text markup, imported as `kind: 'textmarkup'`.
   'Highlight', 'Underline', 'StrikeOut', 'Squiggly',
+  // N1 — native /Text sticky note, imported as `kind: 'note'`.
+  'Text',
 ]);
 
 // The four text-markup subtypes and the style each renders/round-trips as.
@@ -37,6 +39,7 @@ const DEFAULT_COLOR: Record<string, string> = {
   Underline: '#2f6fed',
   StrikeOut: '#e0393e',
   Squiggly: '#2fbf71',
+  Text: '#ffd54a',
 };
 
 function colorToHex(color: unknown): string | null {
@@ -50,6 +53,7 @@ function kindFor(subtype: string): PageAnnotation['kind'] {
   if (subtype === 'FreeText') return 'freetext';
   if (subtype === 'Ink') return 'ink';
   if (subtype === 'Stamp') return 'stamp';
+  if (subtype === 'Text') return 'note';
   return 'highlight';
 }
 
@@ -220,6 +224,15 @@ export async function importPageAnnotations(page: PDFPageProxy): Promise<PageAnn
     }
 
     const { x, y, w, h } = pdfRectToDisplay(a.rect, box, rotation);
+    if (kind === 'note') {
+      // A /Text sticky note is a fixed-size icon at a point; some tools give it
+      // a zero-size /Rect. Synthesize a small icon box (~18pt) so it's always
+      // visible/editable, anchored at the rect's top-left in display space.
+      const iw = w > 0 ? w : 18 / box.width;
+      const ih = h > 0 ? h : 18 / box.height;
+      imported.push({ id: crypto.randomUUID(), kind, x, y, w: iw, h: ih, color, note: contents, importedOriginal });
+      continue;
+    }
     if (w <= 0 || h <= 0) continue; // degenerate box — nothing sensible to render/edit
     imported.push({ id: crypto.randomUUID(), kind, x, y, w, h, color, note: contents, importedOriginal });
   }

@@ -72,6 +72,24 @@ describe('native text markup imported inline (N1)', () => {
     expect(first!.note).toBe('inline markup');
   });
 
+  it('imports a native /Text sticky note as an editable note annotation', async () => {
+    const notePath = resolve(tmp, 'note.pdf');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const annot = ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [40, 300, 58, 318], Name: 'Note', C: [1, 0.85, 0.2] });
+    annot.set(PDFName.of('Contents'), PDFHexString.fromText('a sticky comment'));
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(annot)]));
+    writeFileSync(notePath, await doc.save());
+
+    await openByPaths([notePath]);
+    await setView('canvas');
+    const first = await getFirstAnnotation(15_000);
+    expect(first).not.toBeNull();
+    expect(first!.kind).toBe('note');
+    expect(first!.note).toBe('a sticky comment');
+  });
+
   it('deleting it inline and committing removes the original (no duplicate)', async () => {
     await openByPaths([source]);
     await setView('canvas');

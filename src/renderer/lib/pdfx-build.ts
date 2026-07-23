@@ -193,7 +193,7 @@ function stripImportedOriginals(
       continue; // not a dict (shouldn't happen for a valid /Annots entry) — leave it
     }
     const subtype = dict.lookupMaybe(PDFName.of('Subtype'), PDFName)?.decodeText();
-    const STRIPPABLE = new Set(['Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly']);
+    const STRIPPABLE = new Set(['Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Text']);
     if (!subtype || !STRIPPABLE.has(subtype)) continue;
     const rectArr = dict.lookupMaybe(PDFName.of('Rect'), PDFArray);
     if (!rectArr || rectArr.size() !== 4) continue;
@@ -205,7 +205,10 @@ function stripImportedOriginals(
         !consumed.has(idx) &&
         fp.subtype === subtype &&
         (fp.contents ?? '') === (contents ?? '') &&
-        fp.rect.every((v, k) => Math.abs(v - rect[k]) <= 0.5),
+        // /Text sticky-note rects are REWRITTEN by pdf.js to a fixed icon size
+        // (import reads pdf.js's rect, not the file's /Rect), so a rect compare
+        // would never match — match those on subtype+contents alone.
+        (subtype === 'Text' || fp.rect.every((v, k) => Math.abs(v - rect[k]) <= 0.5)),
     );
     if (matchIndex === -1) continue; // no positive match — never guess-remove
     consumed.add(matchIndex);
@@ -365,6 +368,19 @@ function addAnnotations(
         AP: { N: ap },
       });
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(label));
+    } else if (a.kind === 'note') {
+      // Native /Text sticky note: a comment icon at the rect with its text in
+      // /Contents. Viewers draw the /Name icon; /C tints it. No /AP needed.
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: 'Text',
+        Rect: [x0, y0, x1, y1],
+        Name: 'Note',
+        C: [r, g, b],
+        Open: false,
+        F: 4, // print
+      });
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note ?? ''));
     } else if (a.kind === 'textmarkup') {
       // N1 native text markup — round-trips as the real /Highlight, /Underline,
       // /StrikeOut, or /Squiggly with /QuadPoints (one quad per marked run) and

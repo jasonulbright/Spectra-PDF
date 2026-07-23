@@ -481,3 +481,79 @@ describe('N1 — native text markup', () => {
     await rebuilt.loadingTask.destroy();
   });
 });
+
+// N1 tail — native /Text sticky notes as editable annotations.
+async function makeStickyNotePdf(rect: [number, number, number, number] = [40, 300, 58, 318]): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([300, 400]);
+  const ctx = doc.context;
+  const annot = ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: rect, Name: 'Note', C: [1, 0.85, 0.2] });
+  annot.set(PDFName.of('Contents'), PDFHexString.fromText('a sticky note'));
+  page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(annot)]));
+  return doc.save();
+}
+
+describe('N1 — native /Text sticky notes', () => {
+  it('imports a /Text as an editable note with its text', async () => {
+    const pdf = await loadPdf(await makeStickyNotePdf());
+    const imported = await importPageAnnotations(await pdf.getPage(1));
+    expect(imported).toHaveLength(1);
+    expect(imported[0].kind).toBe('note');
+    expect(imported[0].note).toBe('a sticky note');
+    expect(imported[0].importedOriginal).toMatchObject({ subtype: 'Text' });
+    await pdf.loadingTask.destroy();
+  });
+
+  it('gives a zero-size /Text rect a visible icon box', async () => {
+    const pdf = await loadPdf(await makeStickyNotePdf([40, 300, 40, 300])); // degenerate
+    const imported = await importPageAnnotations(await pdf.getPage(1));
+    expect(imported).toHaveLength(1); // NOT dropped
+    expect(imported[0].w).toBeGreaterThan(0);
+    expect(imported[0].h).toBeGreaterThan(0);
+    await pdf.loadingTask.destroy();
+  });
+
+  it('round-trips a note through commit as one /Text, not a duplicate', async () => {
+    const bytes = await makeStickyNotePdf();
+    const pdf = await loadPdf(bytes);
+    const imported = await importPageAnnotations(await pdf.getPage(1));
+    await pdf.loadingTask.destroy();
+    const file = makeFile('a.pdf', bytes);
+    const files = new Map([['a.pdf', file]]);
+    const workspace: Workspace = {
+      documents: [makeDoc('a#0', file, [{ ...pageRef('a.pdf'), annotations: imported }])],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const rebuilt = await loadPdf(await buildCommitBytes(plan));
+    const annots = (await (await rebuilt.getPage(1)).getAnnotations()) as {
+      subtype: string;
+      contentsObj?: { str: string };
+    }[];
+    expect(annots).toHaveLength(1);
+    expect(annots[0].subtype).toBe('Text');
+    expect(annots[0].contentsObj?.str).toBe('a sticky note');
+    await rebuilt.loadingTask.destroy();
+  });
+
+  it('editing a note commits the edited text without duplicating', async () => {
+    const bytes = await makeStickyNotePdf();
+    const pdf = await loadPdf(bytes);
+    const imported = await importPageAnnotations(await pdf.getPage(1));
+    await pdf.loadingTask.destroy();
+    const edited = { ...imported[0], note: 'edited sticky' };
+    const file = makeFile('a.pdf', bytes);
+    const files = new Map([['a.pdf', file]]);
+    const workspace: Workspace = {
+      documents: [makeDoc('a#0', file, [{ ...pageRef('a.pdf'), annotations: [edited] }])],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const rebuilt = await loadPdf(await buildCommitBytes(plan));
+    const annots = (await (await rebuilt.getPage(1)).getAnnotations()) as {
+      subtype: string;
+      contentsObj?: { str: string };
+    }[];
+    expect(annots).toHaveLength(1);
+    expect(annots[0].contentsObj?.str).toBe('edited sticky');
+    await rebuilt.loadingTask.destroy();
+  });
+});

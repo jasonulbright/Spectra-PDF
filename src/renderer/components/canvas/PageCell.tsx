@@ -1063,7 +1063,7 @@ function PageCellImpl({
             (a.kind === 'textmarkup' ? ' page-annot-ink' : '') + // SVG body, no default border
             (a.kind === 'stamp' ? ' page-annot-stamp' : '')
           }
-          title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'textmarkup' ? a.note : undefined}
+          title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'textmarkup' || a.kind === 'note' ? a.note : undefined}
           style={{
             left: `${da.x * 100}%`,
             top: `${da.y * 100}%`,
@@ -1075,9 +1075,11 @@ function PageCellImpl({
                 ? { backgroundColor: `${a.color}66`, borderColor: a.color }
                 : a.kind === 'ink' || a.kind === 'textmarkup'
                   ? {}
-                  : a.kind === 'stamp'
-                    ? { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
-                    : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
+                  : a.kind === 'note'
+                    ? { backgroundColor: `${a.color}dd`, borderColor: a.color, borderRadius: 2 }
+                    : a.kind === 'stamp'
+                      ? { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
+                      : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
             ...(a.kind === 'freetext' && tool === 'select' ? { pointerEvents: 'auto' } : {}),
           }}
           onPointerDown={a.kind === 'freetext' ? (e) => e.stopPropagation() : undefined}
@@ -1178,7 +1180,9 @@ function PageCellImpl({
                           ? 'Remove stamp'
                           : a.kind === 'textmarkup'
                             ? `Remove ${a.markupType ?? 'highlight'}`
-                            : 'Remove highlight'
+                            : a.kind === 'note'
+                              ? 'Remove note'
+                              : 'Remove highlight'
                   }
                   onClick={(e) => {
                     e.stopPropagation();
