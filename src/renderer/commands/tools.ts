@@ -33,6 +33,7 @@ export type ToolId =
   | 'pagebox'
   | 'pagelabels'
   | 'attachments'
+  | 'layers'
   | 'export';
 
 export interface ToolDef {
@@ -177,6 +178,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Attachments',
     description: 'Embed, extract, and remove attached files.',
     ops: ['attachments'],
+  },
+  {
+    id: 'layers',
+    title: 'Layers',
+    description: 'Show or hide the document’s optional-content layers.',
+    ops: ['layers'],
   },
   {
     id: 'export',

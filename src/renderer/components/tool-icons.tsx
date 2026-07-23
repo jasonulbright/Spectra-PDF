@@ -165,6 +165,14 @@ const GLYPHS: Record<Operation, React.JSX.Element> = {
   attachments: (
     <path d="M21 8.5l-9.2 9.2a4 4 0 0 1-5.66-5.66l8.5-8.5a2.5 2.5 0 0 1 3.54 3.54l-8.5 8.5a1 1 0 0 1-1.42-1.42l7.8-7.8" />
   ),
+  // Stacked sheets (layers).
+  layers: (
+    <>
+      <path d="M12 2l9 5-9 5-9-5 9-5z" />
+      <path d="M3 12l9 5 9-5" />
+      <path d="M3 17l9 5 9-5" />
+    </>
+  ),
   // Wrench.
   repair: (
     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />

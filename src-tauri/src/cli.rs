@@ -67,6 +67,10 @@ pub enum CliCommand {
     AttachExtract(AttachExtractArgs),
     /// Remove an embedded attachment
     AttachRemove(AttachRemoveArgs),
+    /// List optional-content layers (JSON)
+    LayerList(LayerListArgs),
+    /// Show or hide a layer by index
+    LayerSet(LayerSetArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -309,6 +313,27 @@ pub struct PageLabelsArgs {
 pub struct AttachListArgs {
     /// Input PDF file
     pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct LayerListArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct LayerSetArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// 0-based layer index (from layer-list)
+    #[arg(long)]
+    pub index: i64,
+    /// Show the layer (default hides it)
+    #[arg(long)]
+    pub show: bool,
 }
 
 #[derive(Args)]
@@ -1256,6 +1281,21 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "file": abs(&args.input).to_string_lossy(),
                 "output": abs(&args.output).to_string_lossy(),
                 "name": args.name,
+            }),
+        ),
+
+        CliCommand::LayerList(args) => engine.call(
+            "list_layers",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::LayerSet(args) => engine.call(
+            "set_layer_visibility",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "index": args.index,
+                "visible": args.show,
             }),
         ),
 

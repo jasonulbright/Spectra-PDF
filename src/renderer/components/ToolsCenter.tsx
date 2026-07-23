@@ -75,5 +75,6 @@ const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = {
   pagebox: 'pagebox',
   pagelabels: 'pagelabels',
   attachments: 'attachments',
+  layers: 'layers',
   export: 'extract_text',
 };

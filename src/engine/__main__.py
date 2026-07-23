@@ -37,6 +37,7 @@ from engine.search_in_files import search_in_files
 from engine.headers import add_header_footer
 from engine.page_boxes import set_page_boxes
 from engine.page_labels import get_page_labels, set_page_labels
+from engine.layers import list_layers, set_layer_visibility
 from engine.attachments import (
     add_attachment,
     extract_attachment,
@@ -113,6 +114,8 @@ def main() -> None:
     server.register("add_attachment", add_attachment)
     server.register("extract_attachment", extract_attachment)
     server.register("remove_attachment", remove_attachment)
+    server.register("list_layers", list_layers)
+    server.register("set_layer_visibility", set_layer_visibility)
     server.register("get_metadata", get_metadata)
     server.register("set_metadata", set_metadata)
     server.register("strip_metadata", strip_metadata)

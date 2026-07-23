@@ -84,6 +84,9 @@ const INTERNAL_METHODS = new Set([
   // Extracting an attachment writes it OUT to a user path; it never mutates the
   // document, so it must not gate/flush pending page edits.
   'extract_attachment',
+  // Listing optional-content groups to seed the Layers panel — a read;
+  // set_layer_visibility (mutation) stays gated.
+  'list_layers',
 ]);
 
 export function isTrackableMethod(method: string): boolean {
