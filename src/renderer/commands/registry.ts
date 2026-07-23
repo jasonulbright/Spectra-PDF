@@ -257,6 +257,7 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   headerfooter: [],
   pagebox: [],
   pagelabels: [],
+  attachments: [],
   export: [],
 };
 

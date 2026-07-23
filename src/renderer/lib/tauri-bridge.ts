@@ -71,6 +71,8 @@ export const dialog = {
     return psDialogInflight;
   },
   pickPemFile: () => invoke<string | null>('pick_pem_file'),
+  /** Pick ANY file to embed as a PDF attachment (no extension filter). */
+  pickAnyFile: () => invoke<string | null>('pick_any_file'),
   /** Pick a folder (Batch OCR source/destination). Returns null if cancelled. */
   pickFolder: (title?: string) => invoke<string | null>('pick_folder_dialog', { title }),
   /** Pick a replacement image (Edit ▸ Replace Image). Null if cancelled. */

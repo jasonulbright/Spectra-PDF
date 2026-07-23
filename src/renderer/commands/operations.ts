@@ -25,7 +25,7 @@ export const OPERATIONS = [
   'repair', 'rebuild', 'recover',
   'encrypt', 'decrypt',
   'extract_text', 'watermark', 'forms', 'compare', 'signatures',
-  'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels',
+  'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels', 'attachments',
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];
@@ -45,5 +45,6 @@ export const OPERATION_TITLES: Record<Operation, string> = {
   headerfooter: 'Header & Footer',
   pagebox: 'Crop & Page Boxes',
   pagelabels: 'Page Labels',
+  attachments: 'Attachments',
   repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',
 };

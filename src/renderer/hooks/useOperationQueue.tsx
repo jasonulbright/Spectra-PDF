@@ -78,6 +78,12 @@ const INTERNAL_METHODS = new Set([
   // Reading /PageLabels to seed the editor panel — a lookup, not an edit;
   // set_page_labels stays gated.
   'get_page_labels',
+  // Listing embedded attachments to seed the panel — a read; add/remove
+  // (mutations) stay gated.
+  'list_attachments',
+  // Extracting an attachment writes it OUT to a user path; it never mutates the
+  // document, so it must not gate/flush pending page edits.
+  'extract_attachment',
 ]);
 
 export function isTrackableMethod(method: string): boolean {

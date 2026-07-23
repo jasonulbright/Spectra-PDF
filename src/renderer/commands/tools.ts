@@ -32,6 +32,7 @@ export type ToolId =
   | 'headerfooter'
   | 'pagebox'
   | 'pagelabels'
+  | 'attachments'
   | 'export';
 
 export interface ToolDef {
@@ -170,6 +171,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Page Labels',
     description: 'Number pages as i/ii/iii, 1/2/3, A/B/C, with prefixes.',
     ops: ['pagelabels'],
+  },
+  {
+    id: 'attachments',
+    title: 'Attachments',
+    description: 'Embed, extract, and remove attached files.',
+    ops: ['attachments'],
   },
   {
     id: 'export',

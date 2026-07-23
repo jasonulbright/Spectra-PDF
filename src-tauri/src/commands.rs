@@ -133,6 +133,28 @@ pub async fn pick_certificate_file(
     }
 }
 
+/// Pick ANY file to embed as a PDF attachment — no extension filter (a
+/// document can carry a file of any type beside it).
+#[tauri::command]
+pub async fn pick_any_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("All files", &["*"])
+        .blocking_pick_file();
+    match result {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
 /// Pick a PEM/DER signer component (private key or certificate) — the PEM
 /// signer source's two file inputs. Loose filter: key/cert files wear many
 /// extensions in the wild, so "all files" stays one click away.

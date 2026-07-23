@@ -79,6 +79,7 @@ pub fn run() {
             commands::pick_certificate_file,
             commands::pick_postscript_file,
             commands::pick_pem_file,
+            commands::pick_any_file,
             commands::pick_folder_dialog,
             commands::list_pdfs_recursive,
             commands::copy_file_creating_dirs,

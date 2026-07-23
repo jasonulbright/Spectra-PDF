@@ -30,6 +30,7 @@ import { WatermarkPanel } from './panels/WatermarkPanel';
 import { HeaderFooterPanel } from './panels/HeaderFooterPanel';
 import { PageBoxesPanel } from './panels/PageBoxesPanel';
 import { PageLabelsPanel } from './panels/PageLabelsPanel';
+import { AttachmentsPanel } from './panels/AttachmentsPanel';
 import { FormsPanel } from './panels/FormsPanel';
 import { ComparePanel } from './panels/ComparePanel';
 import { SignaturesPanel } from './panels/SignaturesPanel';
@@ -130,7 +131,7 @@ const panels: Record<Operation, React.ComponentType> = {
   watermark: WatermarkPanel, forms: FormsPanel, compare: ComparePanel,
   signatures: SignaturesPanel, document_js: DocumentJsPanel,
   convert_cmyk: PrepressPanel, headerfooter: HeaderFooterPanel, pagebox: PageBoxesPanel,
-  pagelabels: PageLabelsPanel,
+  pagelabels: PageLabelsPanel, attachments: AttachmentsPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
 };
 

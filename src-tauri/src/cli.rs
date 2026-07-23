@@ -59,6 +59,14 @@ pub enum CliCommand {
     PageBox(PageBoxArgs),
     /// Set page-number labels (/PageLabels) — front matter as i/ii/iii, etc.
     PageLabels(PageLabelsArgs),
+    /// List embedded file attachments (JSON)
+    AttachList(AttachListArgs),
+    /// Embed a file as an attachment
+    AttachAdd(AttachAddArgs),
+    /// Extract an embedded attachment to disk
+    AttachExtract(AttachExtractArgs),
+    /// Remove an embedded attachment
+    AttachRemove(AttachRemoveArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -295,6 +303,54 @@ pub struct PageLabelsArgs {
     /// D r R a A none. Repeatable. Omit all to CLEAR the labels.
     #[arg(long = "range")]
     pub ranges: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct AttachListArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct AttachAddArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Path of the file to embed
+    #[arg(short, long)]
+    pub source: PathBuf,
+    /// Embedded name (defaults to the source's base name)
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Optional description
+    #[arg(long)]
+    pub description: Option<String>,
+}
+
+#[derive(Args)]
+pub struct AttachExtractArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Attachment name to extract
+    #[arg(long)]
+    pub name: String,
+    /// Output path for the extracted file
+    #[arg(short, long)]
+    pub output: PathBuf,
+}
+
+#[derive(Args)]
+pub struct AttachRemoveArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Attachment name to remove
+    #[arg(long)]
+    pub name: String,
 }
 
 #[derive(Args)]
@@ -1164,6 +1220,44 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 }),
             )
         }
+
+        CliCommand::AttachList(args) => engine.call(
+            "list_attachments",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::AttachAdd(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "source": abs(&args.source).to_string_lossy(),
+            });
+            if let Some(name) = &args.name {
+                params["name"] = json!(name);
+            }
+            if let Some(desc) = &args.description {
+                params["description"] = json!(desc);
+            }
+            engine.call("add_attachment", params)
+        }
+
+        CliCommand::AttachExtract(args) => engine.call(
+            "extract_attachment",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "name": args.name,
+                "output": abs(&args.output).to_string_lossy(),
+            }),
+        ),
+
+        CliCommand::AttachRemove(args) => engine.call(
+            "remove_attachment",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "name": args.name,
+            }),
+        ),
 
         CliCommand::Compare(args) => {
             if args.visual {

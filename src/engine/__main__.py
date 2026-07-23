@@ -37,6 +37,12 @@ from engine.search_in_files import search_in_files
 from engine.headers import add_header_footer
 from engine.page_boxes import set_page_boxes
 from engine.page_labels import get_page_labels, set_page_labels
+from engine.attachments import (
+    add_attachment,
+    extract_attachment,
+    list_attachments,
+    remove_attachment,
+)
 from engine.metadata import get_metadata, set_metadata, strip_metadata
 from engine.reversion import get_pdf_version, set_pdf_version
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
@@ -103,6 +109,10 @@ def main() -> None:
     server.register("set_page_boxes", set_page_boxes)
     server.register("get_page_labels", get_page_labels)
     server.register("set_page_labels", set_page_labels)
+    server.register("list_attachments", list_attachments)
+    server.register("add_attachment", add_attachment)
+    server.register("extract_attachment", extract_attachment)
+    server.register("remove_attachment", remove_attachment)
     server.register("get_metadata", get_metadata)
     server.register("set_metadata", set_metadata)
     server.register("strip_metadata", strip_metadata)
