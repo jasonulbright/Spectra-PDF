@@ -75,6 +75,9 @@ const INTERNAL_METHODS = new Set([
   // just for showing a form's fields (the get_pdf_version/measure_text_box
   // hazard). Fills still go through the gated `fill_form_fields`.
   'read_form_fields',
+  // Reading /PageLabels to seed the editor panel — a lookup, not an edit;
+  // set_page_labels stays gated.
+  'get_page_labels',
 ]);
 
 export function isTrackableMethod(method: string): boolean {

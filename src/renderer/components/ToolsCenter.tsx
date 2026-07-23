@@ -73,5 +73,6 @@ const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = {
   watermark: 'watermark',
   headerfooter: 'headerfooter',
   pagebox: 'pagebox',
+  pagelabels: 'pagelabels',
   export: 'extract_text',
 };

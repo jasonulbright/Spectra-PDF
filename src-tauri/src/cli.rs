@@ -57,6 +57,8 @@ pub enum CliCommand {
     HeaderFooter(HeaderFooterArgs),
     /// Crop pages / edit the crop/bleed/trim/art boxes (per-edge insets)
     PageBox(PageBoxArgs),
+    /// Set page-number labels (/PageLabels) — front matter as i/ii/iii, etc.
+    PageLabels(PageLabelsArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -268,6 +270,19 @@ pub struct WatermarkArgs {
     /// Comma-separated 1-based page numbers (omit for all pages)
     #[arg(long)]
     pub pages: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PageLabelsArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// A label range as "startPage:style[:prefix[:startAt]]" — style is one of
+    /// D r R a A none. Repeatable. Omit all to CLEAR the labels.
+    #[arg(long = "range")]
+    pub ranges: Vec<String>,
 }
 
 #[derive(Args)]
@@ -1101,6 +1116,35 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 params["pages"] = json!(parsed);
             }
             engine.call("set_page_boxes", params)
+        }
+
+        CliCommand::PageLabels(args) => {
+            let mut ranges: Vec<serde_json::Value> = Vec::new();
+            for spec in &args.ranges {
+                let parts: Vec<&str> = spec.split(':').collect();
+                let start = parts
+                    .first()
+                    .and_then(|s| s.trim().parse::<i64>().ok())
+                    .filter(|n| *n >= 1)
+                    .ok_or_else(|| format!("--range needs a 1-based start page, got: {spec}"))?;
+                let style = parts.get(1).map(|s| s.trim()).filter(|s| !s.is_empty()).unwrap_or("D");
+                let prefix = parts.get(2).map(|s| s.to_string()).unwrap_or_default();
+                let start_at = parts.get(3).and_then(|s| s.trim().parse::<i64>().ok()).unwrap_or(1);
+                ranges.push(json!({
+                    "start": start - 1, // engine takes 0-based
+                    "style": style,
+                    "prefix": prefix,
+                    "start_at": start_at,
+                }));
+            }
+            engine.call(
+                "set_page_labels",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "ranges": ranges,
+                }),
+            )
         }
 
         CliCommand::Compare(args) => {

@@ -31,6 +31,7 @@ export type ToolId =
   | 'watermark'
   | 'headerfooter'
   | 'pagebox'
+  | 'pagelabels'
   | 'export';
 
 export interface ToolDef {
@@ -163,6 +164,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Crop & Page Boxes',
     description: 'Crop pages and edit the crop/bleed/trim/art boxes.',
     ops: ['pagebox'],
+  },
+  {
+    id: 'pagelabels',
+    title: 'Page Labels',
+    description: 'Number pages as i/ii/iii, 1/2/3, A/B/C, with prefixes.',
+    ops: ['pagelabels'],
   },
   {
     id: 'export',
