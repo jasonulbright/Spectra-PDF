@@ -26,6 +26,7 @@ export const OPERATIONS = [
   'encrypt', 'decrypt',
   'extract_text', 'watermark', 'forms', 'compare', 'signatures',
   'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels', 'attachments', 'layers', 'accessibility',
+  'comments',
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];
@@ -48,5 +49,6 @@ export const OPERATION_TITLES: Record<Operation, string> = {
   attachments: 'Attachments',
   layers: 'Layers',
   accessibility: 'Accessibility Check',
+  comments: 'Comments',
   repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',
 };

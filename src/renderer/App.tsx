@@ -33,6 +33,7 @@ import { PageLabelsPanel } from './panels/PageLabelsPanel';
 import { AttachmentsPanel } from './panels/AttachmentsPanel';
 import { LayersPanel } from './panels/LayersPanel';
 import { AccessibilityPanel } from './panels/AccessibilityPanel';
+import { CommentsPanel } from './panels/CommentsPanel';
 import { FormsPanel } from './panels/FormsPanel';
 import { ComparePanel } from './panels/ComparePanel';
 import { SignaturesPanel } from './panels/SignaturesPanel';
@@ -134,7 +135,7 @@ const panels: Record<Operation, React.ComponentType> = {
   signatures: SignaturesPanel, document_js: DocumentJsPanel,
   convert_cmyk: PrepressPanel, headerfooter: HeaderFooterPanel, pagebox: PageBoxesPanel,
   pagelabels: PageLabelsPanel, attachments: AttachmentsPanel, layers: LayersPanel,
-  accessibility: AccessibilityPanel,
+  accessibility: AccessibilityPanel, comments: CommentsPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
 };
 

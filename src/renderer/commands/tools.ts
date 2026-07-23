@@ -35,6 +35,7 @@ export type ToolId =
   | 'attachments'
   | 'layers'
   | 'accessibility'
+  | 'comments'
   | 'export';
 
 export interface ToolDef {
@@ -191,6 +192,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Accessibility',
     description: 'Check the document against baseline accessibility requirements.',
     ops: ['accessibility'],
+  },
+  {
+    id: 'comments',
+    title: 'Comments',
+    description: 'Review every comment in the document, or delete them all.',
+    ops: ['comments'],
   },
   {
     id: 'export',

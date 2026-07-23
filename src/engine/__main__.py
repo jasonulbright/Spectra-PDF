@@ -39,6 +39,7 @@ from engine.page_boxes import set_page_boxes
 from engine.page_labels import get_page_labels, set_page_labels
 from engine.layers import list_layers, set_layer_visibility
 from engine.accessibility import check_accessibility
+from engine.annotations import delete_all_annotations, list_annotations
 from engine.attachments import (
     add_attachment,
     extract_attachment,
@@ -118,6 +119,8 @@ def main() -> None:
     server.register("list_layers", list_layers)
     server.register("set_layer_visibility", set_layer_visibility)
     server.register("check_accessibility", check_accessibility)
+    server.register("list_annotations", list_annotations)
+    server.register("delete_all_annotations", delete_all_annotations)
     server.register("get_metadata", get_metadata)
     server.register("set_metadata", set_metadata)
     server.register("strip_metadata", strip_metadata)

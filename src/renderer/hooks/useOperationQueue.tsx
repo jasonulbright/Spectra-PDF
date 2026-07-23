@@ -89,6 +89,9 @@ const INTERNAL_METHODS = new Set([
   'list_layers',
   // The accessibility checker is pure analysis — no mutation.
   'check_accessibility',
+  // Listing markup annotations for the Comments overview — a read;
+  // delete_all_annotations (mutation) stays gated.
+  'list_annotations',
 ]);
 
 export function isTrackableMethod(method: string): boolean {

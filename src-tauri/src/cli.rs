@@ -73,6 +73,10 @@ pub enum CliCommand {
     LayerSet(LayerSetArgs),
     /// Run the accessibility checker (JSON report)
     Accessibility(AccessibilityArgs),
+    /// List every markup comment in the document (JSON)
+    CommentsList(AccessibilityArgs),
+    /// Delete all markup comments (keeps links and form fields)
+    CommentsDeleteAll(CommentsDeleteArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -327,6 +331,15 @@ pub struct LayerListArgs {
 pub struct AccessibilityArgs {
     /// Input PDF file
     pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct CommentsDeleteArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
 }
 
 #[derive(Args)]
@@ -1300,6 +1313,19 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         CliCommand::Accessibility(args) => engine.call(
             "check_accessibility",
             json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::CommentsList(args) => engine.call(
+            "list_annotations",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::CommentsDeleteAll(args) => engine.call(
+            "delete_all_annotations",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+            }),
         ),
 
         CliCommand::LayerSet(args) => engine.call(
