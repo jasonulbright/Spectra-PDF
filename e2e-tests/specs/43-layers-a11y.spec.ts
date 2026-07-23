@@ -48,4 +48,15 @@ describe('layers + accessibility panels', () => {
     // The extractable-text check passes (the fixture has real text).
     expect(await $('[data-testid="a11y-check-text"]').isDisplayed()).toBe(true);
   });
+
+  it('preflight flags a non-embedded standard font', async () => {
+    // pdf-lib draws with a base-14 StandardFont, which is NOT embedded.
+    await openByPaths([source]);
+    await setView('operations');
+    await setActiveOp('preflight');
+    await $('[data-testid="preflight-check-fonts_embedded"]').waitForDisplayed({ timeout: 20_000 });
+    const summary = await $('[data-testid="preflight-summary"]').getText();
+    expect(summary.toLowerCase()).toContain('failed');
+    expect(await $('[data-testid="preflight-check-fonts_embedded"]').getText()).toContain('embedded');
+  });
 });
