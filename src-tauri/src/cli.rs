@@ -55,6 +55,8 @@ pub enum CliCommand {
     Watermark(WatermarkArgs),
     /// Add headers, footers, page numbers, and Bates numbering
     HeaderFooter(HeaderFooterArgs),
+    /// Crop pages / edit the crop/bleed/trim/art boxes (per-edge insets)
+    PageBox(PageBoxArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -314,6 +316,33 @@ pub struct HeaderFooterArgs {
     /// Zero-pad width of the {bates} counter
     #[arg(long, default_value_t = 6)]
     pub bates_digits: i64,
+}
+
+#[derive(Args)]
+pub struct PageBoxArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Which box to edit: crop, bleed, trim, or art
+    #[arg(long = "box", default_value = "crop")]
+    pub box_: String,
+    /// Points to trim from the top edge (negative expands)
+    #[arg(long, default_value_t = 0.0)]
+    pub top: f64,
+    /// Points to trim from the bottom edge
+    #[arg(long, default_value_t = 0.0)]
+    pub bottom: f64,
+    /// Points to trim from the left edge
+    #[arg(long, default_value_t = 0.0)]
+    pub left: f64,
+    /// Points to trim from the right edge
+    #[arg(long, default_value_t = 0.0)]
+    pub right: f64,
+    /// Comma-separated 1-based page numbers (omit for all pages)
+    #[arg(long)]
+    pub pages: Option<String>,
 }
 
 #[derive(Args)]
@@ -1048,6 +1077,30 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 params["last_page"] = json!(last);
             }
             engine.call("add_header_footer", params)
+        }
+
+        CliCommand::PageBox(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "box": args.box_,
+                "top": args.top,
+                "bottom": args.bottom,
+                "left": args.left,
+                "right": args.right,
+            });
+            if let Some(pages) = &args.pages {
+                let parsed: Vec<i64> = pages
+                    .split(',')
+                    .map(|s| s.trim().parse::<i64>())
+                    .collect::<Result<Vec<i64>, _>>()
+                    .map_err(|_| format!("--pages requires comma-separated page numbers, got: {pages}"))?;
+                if parsed.is_empty() {
+                    return Err("--pages requires at least one page number".to_string());
+                }
+                params["pages"] = json!(parsed);
+            }
+            engine.call("set_page_boxes", params)
         }
 
         CliCommand::Compare(args) => {

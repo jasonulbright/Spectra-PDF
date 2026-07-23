@@ -30,6 +30,7 @@ export type ToolId =
   | 'repair'
   | 'watermark'
   | 'headerfooter'
+  | 'pagebox'
   | 'export';
 
 export interface ToolDef {
@@ -156,6 +157,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Header & Footer',
     description: 'Add headers, footers, page numbers, and Bates numbering.',
     ops: ['headerfooter'],
+  },
+  {
+    id: 'pagebox',
+    title: 'Crop & Page Boxes',
+    description: 'Crop pages and edit the crop/bleed/trim/art boxes.',
+    ops: ['pagebox'],
   },
   {
     id: 'export',
