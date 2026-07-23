@@ -91,6 +91,63 @@ function defaultColorFor(kind: PageAnnotation['kind']): string {
   return HIGHLIGHT_COLOR;
 }
 
+/** Draw native text-markup quads (N1) inside the annotation's bbox. `quads` and
+ * `box` share the page-normalized 0..1 space; each quad is normalized into the
+ * 0..1 SVG viewBox and drawn per style: highlight = translucent fill, underline
+ * = line at the quad bottom, strikeout = mid-line, squiggly = a wave at the
+ * bottom. Non-scaling strokes keep line weight constant under zoom. */
+function TextMarkupSvg({
+  quads,
+  box,
+  markupType,
+  color,
+}: {
+  quads: number[];
+  box: { x: number; y: number; w: number; h: number };
+  markupType: 'highlight' | 'underline' | 'strikeout' | 'squiggly';
+  color: string;
+}): React.ReactElement {
+  const nx = (v: number) => (box.w > 0 ? (v - box.x) / box.w : 0);
+  const ny = (v: number) => (box.h > 0 ? (v - box.y) / box.h : 0);
+  const rects: { x0: number; y0: number; x1: number; y1: number }[] = [];
+  for (let i = 0; i + 3 < quads.length; i += 4) {
+    const x0 = nx(quads[i]);
+    const y0 = ny(quads[i + 1]);
+    const x1 = nx(quads[i + 2]);
+    const y1 = ny(quads[i + 3]);
+    rects.push({ x0: Math.min(x0, x1), y0: Math.min(y0, y1), x1: Math.max(x0, x1), y1: Math.max(y0, y1) });
+  }
+  return (
+    <svg className="page-annot-ink-svg" viewBox="0 0 1 1" preserveAspectRatio="none">
+      {rects.map((r, i) => {
+        if (markupType === 'highlight') {
+          return (
+            <rect key={i} x={r.x0} y={r.y0} width={r.x1 - r.x0} height={r.y1 - r.y0} fill={color} opacity={0.4} />
+          );
+        }
+        const yLine = markupType === 'strikeout' ? (r.y0 + r.y1) / 2 : r.y1;
+        if (markupType === 'squiggly') {
+          // A small zigzag along the baseline.
+          const steps = Math.max(2, Math.round((r.x1 - r.x0) / 0.04));
+          const amp = Math.min(0.12, (r.y1 - r.y0) * 0.25);
+          const pts: string[] = [];
+          for (let s = 0; s <= steps; s++) {
+            const x = r.x0 + ((r.x1 - r.x0) * s) / steps;
+            const y = r.y1 - (s % 2 === 0 ? 0 : amp);
+            pts.push(`${x},${y}`);
+          }
+          return (
+            <polyline key={i} points={pts.join(' ')} fill="none" stroke={color} vectorEffect="non-scaling-stroke" />
+          );
+        }
+        return (
+          <line key={i} x1={r.x0} y1={yLine} x2={r.x1} y2={yLine} stroke={color} vectorEffect="non-scaling-stroke" />
+        );
+      })}
+    </svg>
+  );
+}
+
 /** Rotate View's content wrapper: children turn with the page when a style
  * is supplied (freetext/stamp text, the inline editor), pass through
  * untouched when not — so the flat path renders byte-identical JSX. */
@@ -976,6 +1033,9 @@ function PageCellImpl({
                 ...a,
                 ...rotateNormalizedRect(a, viewRotation),
                 points: a.points ? rotateNormalizedPoints(a.points, viewRotation) : a.points,
+                // quads are corner pairs — rotating each (x,y) then min/max-ing
+                // per quad in the SVG below reprojects them into the view frame.
+                quads: a.quads ? rotateNormalizedPoints(a.quads, viewRotation) : a.quads,
               };
         // Text bodies (freetext/stamp + the inline editor) turn WITH the page
         // — a counter-sized wrapper rotated about its center, the PageView
@@ -1000,9 +1060,10 @@ function PageCellImpl({
             'page-annot' +
             (a.kind === 'freetext' ? ' page-annot-text' : '') +
             (a.kind === 'ink' ? ' page-annot-ink' : '') +
+            (a.kind === 'textmarkup' ? ' page-annot-ink' : '') + // SVG body, no default border
             (a.kind === 'stamp' ? ' page-annot-stamp' : '')
           }
-          title={a.kind === 'highlight' || a.kind === 'ink' ? a.note : undefined}
+          title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'textmarkup' ? a.note : undefined}
           style={{
             left: `${da.x * 100}%`,
             top: `${da.y * 100}%`,
@@ -1012,7 +1073,7 @@ function PageCellImpl({
               ? {}
               : a.kind === 'highlight'
                 ? { backgroundColor: `${a.color}66`, borderColor: a.color }
-                : a.kind === 'ink'
+                : a.kind === 'ink' || a.kind === 'textmarkup'
                   ? {}
                   : a.kind === 'stamp'
                     ? { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
@@ -1047,6 +1108,14 @@ function PageCellImpl({
                 vectorEffect="non-scaling-stroke"
               />
             </svg>
+          )}
+          {a.kind === 'textmarkup' && !pristineImport && (
+            <TextMarkupSvg
+              quads={da.quads ?? []}
+              box={{ x: da.x, y: da.y, w: da.w, h: da.h }}
+              markupType={a.markupType ?? 'highlight'}
+              color={a.color}
+            />
           )}
           <MaybeTurn style={turnStyle}>
             {a.kind === 'freetext' && editing !== a.id && !pristineImport && (
@@ -1107,7 +1176,9 @@ function PageCellImpl({
                         ? 'Remove drawing'
                         : a.kind === 'stamp'
                           ? 'Remove stamp'
-                          : 'Remove highlight'
+                          : a.kind === 'textmarkup'
+                            ? `Remove ${a.markupType ?? 'highlight'}`
+                            : 'Remove highlight'
                   }
                   onClick={(e) => {
                     e.stopPropagation();

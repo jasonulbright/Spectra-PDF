@@ -30,9 +30,21 @@ export function rotateAnnotationRect(a: PageAnnotation, delta: number): PageAnno
       points.push(px, py);
     }
   }
-  if (d === 90) return { ...a, x: 1 - (a.y + a.h), y: a.x, w: a.h, h: a.w, ...(points ? { points } : {}) };
-  if (d === 180) return { ...a, x: 1 - (a.x + a.w), y: 1 - (a.y + a.h), ...(points ? { points } : {}) };
-  return { ...a, x: a.y, y: 1 - (a.x + a.w), w: a.h, h: a.w, ...(points ? { points } : {}) }; // 270
+  // textmarkup quads are per-quad [x0,y0,x1,y1] rects: reproject each quad's two
+  // corners and re-derive min/max, exactly as the bbox does below.
+  let quads: number[] | undefined;
+  if (a.quads) {
+    quads = [];
+    for (let i = 0; i + 3 < a.quads.length; i += 4) {
+      const [ax, ay] = rotatePoint(a.quads[i], a.quads[i + 1], d);
+      const [bx, by] = rotatePoint(a.quads[i + 2], a.quads[i + 3], d);
+      quads.push(Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by));
+    }
+  }
+  const extra = { ...(points ? { points } : {}), ...(quads ? { quads } : {}) };
+  if (d === 90) return { ...a, x: 1 - (a.y + a.h), y: a.x, w: a.h, h: a.w, ...extra };
+  if (d === 180) return { ...a, x: 1 - (a.x + a.w), y: 1 - (a.y + a.h), ...extra };
+  return { ...a, x: a.y, y: 1 - (a.x + a.w), w: a.h, h: a.w, ...extra }; // 270
 }
 
 const NO_SELECTION: ReadonlySet<string> = new Set();

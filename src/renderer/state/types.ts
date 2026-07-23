@@ -35,7 +35,7 @@ export interface OpenFile {
 // docs/architecture/05-phase2c-annotations.md, "importing existing
 // annotations safely".
 export interface ImportedAnnotationFingerprint {
-  subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp';
+  subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut' | 'Squiggly';
   rect: [number, number, number, number];
   contents?: string;
   // Color at import time — NOT used for the commit-time fingerprint match
@@ -57,13 +57,25 @@ export interface ImportedAnnotationFingerprint {
   hasAppearance: boolean;
 }
 
+// Native PDF text-markup subtypes (quad-based) — imported from a foreign PDF as
+// first-class editable annotations (N1). Distinct from `kind: 'highlight'`,
+// which authors a /Square rectangle; a native /Highlight must round-trip as
+// /Highlight + /QuadPoints, never be converted to a Square.
+export type TextMarkupType = 'highlight' | 'underline' | 'strikeout' | 'squiggly';
+
 export interface PageAnnotation {
   id: string;
-  kind: 'highlight' | 'freetext' | 'ink' | 'stamp';
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup';
   x: number;
   y: number;
   w: number;
   h: number;
+  // textmarkup only: which markup style, and the quads it covers. `quads` is a
+  // flat [x0,y0,x1,y1,...] list of AXIS-ALIGNED rects (one per marked text run),
+  // display-normalized in the same 0..1 space as x/y/w/h and re-projected on
+  // rotation point-by-point like `points`. x/y/w/h hold the quads' bounding box.
+  markupType?: TextMarkupType;
+  quads?: number[];
   // highlight: fill color. freetext: text color. ink: stroke color.
   // stamp: border/text color (fixed per preset — see STAMP_PRESETS).
   color: string; // #rrggbb

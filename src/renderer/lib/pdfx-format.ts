@@ -30,7 +30,7 @@ export interface PagePartition {
 // orientation); the builder maps it into PDF user space. Open PDF Studio extension —
 // absent keeps PDFx-identical output.
 export interface ExportAnnotation {
-  kind: 'highlight' | 'freetext' | 'ink' | 'stamp';
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup';
   x: number;
   y: number;
   w: number;
@@ -38,13 +38,15 @@ export interface ExportAnnotation {
   color: string; // #rrggbb
   note?: string;
   points?: number[]; // ink only: flat [x0,y0,x1,y1,...] in the same space as x/y/w/h
+  markupType?: 'highlight' | 'underline' | 'strikeout' | 'squiggly'; // textmarkup only
+  quads?: number[]; // textmarkup only: flat [x0,y0,x1,y1,...] per quad, in x/y/w/h space
   // Present for imported annotations only — see PageAnnotation.importedOriginal
   // and the "importing existing annotations safely" design note. The builder
   // uses this to positively match and strip the ORIGINAL object from the
   // copied page before re-appending this (possibly edited) annotation, so
   // imported-but-unedited annotations don't end up duplicated in the output.
   importedOriginal?: {
-    subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp';
+    subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut' | 'Squiggly';
     rect: [number, number, number, number];
     contents?: string;
   };

@@ -356,3 +356,128 @@ describe('imported annotation commit round trip', () => {
     await rebuilt.loadingTask.destroy();
   });
 });
+
+// N1 — native quad-based text markup (Highlight/Underline/StrikeOut/Squiggly).
+// Authored raw (as a foreign tool would), with /QuadPoints over two text runs.
+async function makeMarkupPdf(
+  subtype: 'Highlight' | 'Underline' | 'StrikeOut' | 'Squiggly',
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([300, 400]);
+  const ctx = doc.context;
+  // Two quads (two lines of marked text), Acrobat order UL,UR,LL,LR.
+  const q1 = [50, 350, 150, 350, 50, 340, 150, 340];
+  const q2 = [50, 330, 120, 330, 50, 320, 120, 320];
+  const annot = ctx.obj({
+    Type: 'Annot',
+    Subtype: subtype,
+    Rect: [50, 320, 150, 350],
+    QuadPoints: [...q1, ...q2],
+    C: [1, 0.9, 0.3],
+    F: 4,
+  });
+  annot.set(PDFName.of('Contents'), PDFHexString.fromText('marked text'));
+  page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(annot)]));
+  return doc.save();
+}
+
+describe('N1 — native text markup', () => {
+  it('imports a foreign /Highlight as an editable textmarkup with quads', async () => {
+    const bytes = await makeMarkupPdf('Highlight');
+    const pdf = await loadPdf(bytes);
+    const imported = await importPageAnnotations(await pdf.getPage(1));
+    expect(imported).toHaveLength(1);
+    expect(imported[0].kind).toBe('textmarkup');
+    expect(imported[0].markupType).toBe('highlight');
+    expect(imported[0].note).toBe('marked text');
+    // Two quads → 8 numbers.
+    expect(imported[0].quads).toHaveLength(8);
+    expect(imported[0].importedOriginal).toMatchObject({ subtype: 'Highlight' });
+    // bbox spans y from 320..350 in PDF → normalized from the top.
+    expect(imported[0].x).toBeCloseTo(50 / 300, 4);
+    expect(imported[0].w).toBeCloseTo(100 / 300, 4);
+    await pdf.loadingTask.destroy();
+  });
+
+  it('maps each markup subtype to its style', async () => {
+    for (const [sub, mt] of [
+      ['Underline', 'underline'],
+      ['StrikeOut', 'strikeout'],
+      ['Squiggly', 'squiggly'],
+    ] as const) {
+      const pdf = await loadPdf(await makeMarkupPdf(sub));
+      const imported = await importPageAnnotations(await pdf.getPage(1));
+      expect(imported[0].markupType).toBe(mt);
+      await pdf.loadingTask.destroy();
+    }
+  });
+
+  it('round-trips a /Highlight through commit — one native annotation with QuadPoints, no duplicate', async () => {
+    const bytes = await makeMarkupPdf('Highlight');
+    const pdf = await loadPdf(bytes);
+    const imported = await importPageAnnotations(await pdf.getPage(1));
+    await pdf.loadingTask.destroy();
+
+    const file = makeFile('a.pdf', bytes);
+    const files = new Map([['a.pdf', file]]);
+    const workspace: Workspace = {
+      documents: [makeDoc('a#0', file, [{ ...pageRef('a.pdf'), annotations: imported }])],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const rebuilt = await loadPdf(await buildCommitBytes(plan));
+    const annots = (await (await rebuilt.getPage(1)).getAnnotations()) as {
+      subtype: string;
+      quadPoints?: unknown;
+      contentsObj?: { str: string };
+    }[];
+    expect(annots).toHaveLength(1); // original stripped, not duplicated
+    expect(annots[0].subtype).toBe('Highlight');
+    expect(annots[0].quadPoints).toBeTruthy(); // QuadPoints survived
+    expect(annots[0].contentsObj?.str).toBe('marked text');
+    await rebuilt.loadingTask.destroy();
+  });
+
+  it('reprojects quads on page rotation (via rotateAnnotationRect)', async () => {
+    const { rotateAnnotationRect } = await import('../src/renderer/state/reducer');
+    const a = {
+      id: 'm',
+      kind: 'textmarkup' as const,
+      markupType: 'highlight' as const,
+      x: 0.1,
+      y: 0.2,
+      w: 0.3,
+      h: 0.05,
+      color: '#ffe14a',
+      quads: [0.1, 0.2, 0.4, 0.25],
+    };
+    const r = rotateAnnotationRect(a, 90);
+    expect(r.quads).toHaveLength(4);
+    // A 90° turn swaps axes; the quad's new bbox matches the annotation's.
+    const [qx0, qy0, qx1, qy1] = r.quads!;
+    expect(Math.min(qx0, qx1)).toBeCloseTo(r.x, 5);
+    expect(Math.min(qy0, qy1)).toBeCloseTo(r.y, 5);
+  });
+
+  it('deleting an imported markup strips the original (via removedImportedOriginals)', async () => {
+    const bytes = await makeMarkupPdf('Underline');
+    const pdf = await loadPdf(bytes);
+    const imported = await importPageAnnotations(await pdf.getPage(1));
+    await pdf.loadingTask.destroy();
+
+    const file = makeFile('a.pdf', bytes);
+    const files = new Map([['a.pdf', file]]);
+    // The user removed it: no live annotation, but its fingerprint tombstoned.
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', file, [
+          { ...pageRef('a.pdf'), annotations: [], removedImportedOriginals: [imported[0].importedOriginal!] },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const rebuilt = await loadPdf(await buildCommitBytes(plan));
+    const annots = await (await rebuilt.getPage(1)).getAnnotations();
+    expect(annots).toHaveLength(0); // the native underline is gone
+    await rebuilt.loadingTask.destroy();
+  });
+});

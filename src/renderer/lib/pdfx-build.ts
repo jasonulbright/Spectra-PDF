@@ -193,7 +193,8 @@ function stripImportedOriginals(
       continue; // not a dict (shouldn't happen for a valid /Annots entry) — leave it
     }
     const subtype = dict.lookupMaybe(PDFName.of('Subtype'), PDFName)?.decodeText();
-    if (subtype !== 'Square' && subtype !== 'FreeText' && subtype !== 'Ink' && subtype !== 'Stamp') continue;
+    const STRIPPABLE = new Set(['Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly']);
+    if (!subtype || !STRIPPABLE.has(subtype)) continue;
     const rectArr = dict.lookupMaybe(PDFName.of('Rect'), PDFArray);
     if (!rectArr || rectArr.size() !== 4) continue;
     const rect = [0, 1, 2, 3].map((j) => rectArr.lookup(j) as import('pdf-lib').PDFNumber).map((n) => n.asNumber());
@@ -364,6 +365,74 @@ function addAnnotations(
         AP: { N: ap },
       });
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(label));
+    } else if (a.kind === 'textmarkup') {
+      // N1 native text markup — round-trips as the real /Highlight, /Underline,
+      // /StrikeOut, or /Squiggly with /QuadPoints (one quad per marked run) and
+      // an /AP authored in PDF space relative to the annot origin (like ink,
+      // no counter-rotation matrix).
+      const mt = a.markupType ?? 'highlight';
+      const SUBTYPE = ({ highlight: 'Highlight', underline: 'Underline', strikeout: 'StrikeOut', squiggly: 'Squiggly' } as const)[mt];
+      const pdfQuads: [number, number, number, number][] = [];
+      const quadPoints: number[] = [];
+      const qs = a.quads ?? [];
+      for (let i = 0; i + 3 < qs.length; i += 4) {
+        const [qx0, qy0, qx1, qy1] = displayRectToPdf(
+          { x: qs[i], y: qs[i + 1], w: qs[i + 2] - qs[i], h: qs[i + 3] - qs[i + 1] },
+          { x, y, width, height },
+          rotation,
+        );
+        pdfQuads.push([qx0, qy0, qx1, qy1]);
+        // /QuadPoints in the widely-used Acrobat order: UL, UR, LL, LR.
+        quadPoints.push(qx0, qy1, qx1, qy1, qx0, qy0, qx1, qy0);
+      }
+      let content: string;
+      let apResources: { ExtGState: { GS0: import('pdf-lib').PDFRef } } | undefined;
+      if (mt === 'highlight') {
+        const gsRef = context.register(context.obj({ Type: 'ExtGState', ca: HIGHLIGHT_ALPHA, CA: HIGHLIGHT_ALPHA }));
+        apResources = { ExtGState: { GS0: gsRef } };
+        content = `q /GS0 gs ${r} ${g} ${b} rg `;
+        for (const [qx0, qy0, qx1, qy1] of pdfQuads) {
+          content += `${qx0 - x0} ${qy0 - y0} ${qx1 - qx0} ${qy1 - qy0} re f `;
+        }
+        content += 'Q';
+      } else {
+        content = `${r} ${g} ${b} RG 1 w `;
+        for (const [qx0, qy0, qx1, qy1] of pdfQuads) {
+          if (mt === 'squiggly') {
+            const steps = Math.max(2, Math.round((qx1 - qx0) / 6));
+            const amp = Math.min(2, (qy1 - qy0) * 0.25);
+            for (let s = 0; s <= steps; s++) {
+              const px = qx0 - x0 + ((qx1 - qx0) * s) / steps;
+              const py = qy0 - y0 + (s % 2 === 0 ? 0 : amp);
+              content += s === 0 ? `${px} ${py} m ` : `${px} ${py} l `;
+            }
+            content += 'S ';
+          } else {
+            const yl = (mt === 'strikeout' ? (qy0 + qy1) / 2 : qy0) - y0;
+            content += `${qx0 - x0} ${yl} m ${qx1 - x0} ${yl} l S `;
+          }
+        }
+      }
+      const ap = context.register(
+        context.stream(content, {
+          Type: 'XObject',
+          Subtype: 'Form',
+          FormType: 1,
+          BBox: [0, 0, w, h],
+          ...(apResources ? { Resources: apResources } : {}),
+        }),
+      );
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: SUBTYPE,
+        Rect: [x0, y0, x1, y1],
+        QuadPoints: quadPoints,
+        C: [r, g, b],
+        F: 4, // print
+        AP: { N: ap },
+      });
+      if (mt === 'highlight') annot.set(PDFName.of('CA'), context.obj(HIGHLIGHT_ALPHA));
+      if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     } else {
       // Appearance stream — pdf.js and friends render /AP, not bare dicts.
       const gsRef = context.register(
