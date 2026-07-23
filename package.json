@@ -1,6 +1,6 @@
 {
   "name": "openpdfstudio",
-  "version": "2.8.0",
+  "version": "2.8.1",
   "description": "Modern open-source PDF manipulation studio that vendors upstream Ghostscript",
   "scripts": {
     "dev": "cargo tauri dev",

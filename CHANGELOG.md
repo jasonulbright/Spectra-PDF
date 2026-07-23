@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.8.1 — Search, pagination, and document tools
+
+### Search
+- **Advanced find** — the Find bar and Search panel gain **match case**,
+  **whole word**, and **regular expression** modes, with a clear "invalid
+  pattern" indication for a malformed expression.
+- **Search across files on disk** — search every PDF in a folder without
+  opening them; results list each file and page, and a click opens the match.
+
+### Pages and pagination
+- **Headers, footers & Bates numbering** — stamp text at any of six positions
+  with page-number, total, and auto-incrementing Bates tokens, across a page
+  range, correctly placed even on rotated pages.
+- **Crop & page boxes** — trim the crop, bleed, trim, or art box by page.
+- **Page number labels** — number pages independently of their order (front
+  matter as i, ii, iii; the body as 1, 2, 3; appendices with a prefix).
+
+### Documents and security
+- **Attachments** — embed, extract, and remove attached files.
+- **Encryption permissions** — restrict printing, copying, changing, and
+  commenting; screen-reader access is always preserved.
+
+### Under the hood
+- Vector fill and stroke colours now read correctly for ICC, Indexed,
+  Separation, and DeviceN colour spaces, so more objects show an accurate
+  swatch and recolour precisely.
+- Form fields read through the same engine as filling, so nested fields that
+  were previously invisible now appear.
+
 ## 2.8.0 — Fine typography, in-place signing, and a press-ready path
 
 ### Typography — kerning and OpenType features
