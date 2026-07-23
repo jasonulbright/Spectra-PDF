@@ -53,6 +53,8 @@ pub enum CliCommand {
     Redact(RedactArgs),
     /// Stamp a translucent text watermark across pages
     Watermark(WatermarkArgs),
+    /// Add headers, footers, page numbers, and Bates numbering
+    HeaderFooter(HeaderFooterArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -264,6 +266,54 @@ pub struct WatermarkArgs {
     /// Comma-separated 1-based page numbers (omit for all pages)
     #[arg(long)]
     pub pages: Option<String>,
+}
+
+#[derive(Args)]
+pub struct HeaderFooterArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Top-left text (tokens: {page} {pages} {bates})
+    #[arg(long)]
+    pub tl: Option<String>,
+    /// Top-center text
+    #[arg(long)]
+    pub tc: Option<String>,
+    /// Top-right text
+    #[arg(long)]
+    pub tr: Option<String>,
+    /// Bottom-left text
+    #[arg(long)]
+    pub bl: Option<String>,
+    /// Bottom-center text
+    #[arg(long)]
+    pub bc: Option<String>,
+    /// Bottom-right text
+    #[arg(long)]
+    pub br: Option<String>,
+    /// First 1-based page to stamp
+    #[arg(long, default_value_t = 1)]
+    pub first_page: i64,
+    /// Last 1-based page to stamp (omit for the last page)
+    #[arg(long)]
+    pub last_page: Option<i64>,
+    /// Font size in points
+    #[arg(long, default_value_t = 10.0)]
+    pub font_size: f64,
+    /// Inset from the page edges, points
+    #[arg(long, default_value_t = 24.0)]
+    pub margin: f64,
+    /// Text color as #rrggbb
+    #[arg(long, default_value = "#000000")]
+    pub color: String,
+    /// First value of the {bates} counter
+    #[arg(long, default_value_t = 1)]
+    pub bates_start: i64,
+    /// Zero-pad width of the {bates} counter
+    #[arg(long, default_value_t = 6)]
+    pub bates_digits: i64,
 }
 
 #[derive(Args)]
@@ -966,6 +1016,38 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 params["pages"] = json!(parsed);
             }
             engine.call("watermark", params)
+        }
+
+        CliCommand::HeaderFooter(args) => {
+            let mut placements: Vec<serde_json::Value> = Vec::new();
+            for (pos, text) in [
+                ("tl", &args.tl), ("tc", &args.tc), ("tr", &args.tr),
+                ("bl", &args.bl), ("bc", &args.bc), ("br", &args.br),
+            ] {
+                if let Some(t) = text {
+                    placements.push(json!({ "position": pos, "text": t }));
+                }
+            }
+            if placements.is_empty() {
+                return Err("at least one of --tl/--tc/--tr/--bl/--bc/--br is required".to_string());
+            }
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "placements": placements,
+                "first_page": args.first_page,
+                "font_size": args.font_size,
+                "margin": args.margin,
+                "color": args.color,
+                "bates_start": args.bates_start,
+                "bates_digits": args.bates_digits,
+                // Embed a Unicode font for non-Latin-1 text (S4), as watermark does.
+                "font_dir": resolve_fonts().to_string_lossy().to_string(),
+            });
+            if let Some(last) = args.last_page {
+                params["last_page"] = json!(last);
+            }
+            engine.call("add_header_footer", params)
         }
 
         CliCommand::Compare(args) => {

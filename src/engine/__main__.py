@@ -34,6 +34,7 @@ from engine.pdfa import convert_pdfa
 from engine.encrypt import encrypt, decrypt
 from engine.extract_text import extract_text
 from engine.search_in_files import search_in_files
+from engine.headers import add_header_footer
 from engine.metadata import get_metadata, set_metadata, strip_metadata
 from engine.reversion import get_pdf_version, set_pdf_version
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
@@ -96,6 +97,7 @@ def main() -> None:
     server.register("decrypt", decrypt)
     server.register("extract_text", extract_text)
     server.register("search_in_files", search_in_files)
+    server.register("add_header_footer", add_header_footer)
     server.register("get_metadata", get_metadata)
     server.register("set_metadata", set_metadata)
     server.register("strip_metadata", strip_metadata)

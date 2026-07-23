@@ -71,5 +71,6 @@ const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = {
   optimize: 'compress',
   repair: 'repair',
   watermark: 'watermark',
+  headerfooter: 'headerfooter',
   export: 'extract_text',
 };

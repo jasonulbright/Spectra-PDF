@@ -254,6 +254,7 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   optimize: [],
   repair: [],
   watermark: [],
+  headerfooter: [],
   export: [],
 };
 

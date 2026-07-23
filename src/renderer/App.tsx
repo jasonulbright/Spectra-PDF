@@ -27,6 +27,7 @@ import { GrayscalePanel } from './panels/GrayscalePanel';
 import { OptimizePanel } from './panels/OptimizePanel';
 import { PdfVersionPanel } from './panels/PdfVersionPanel';
 import { WatermarkPanel } from './panels/WatermarkPanel';
+import { HeaderFooterPanel } from './panels/HeaderFooterPanel';
 import { FormsPanel } from './panels/FormsPanel';
 import { ComparePanel } from './panels/ComparePanel';
 import { SignaturesPanel } from './panels/SignaturesPanel';
@@ -126,7 +127,7 @@ const panels: Record<Operation, React.ComponentType> = {
   extract_text: ExtractTextPanel,
   watermark: WatermarkPanel, forms: FormsPanel, compare: ComparePanel,
   signatures: SignaturesPanel, document_js: DocumentJsPanel,
-  convert_cmyk: PrepressPanel,
+  convert_cmyk: PrepressPanel, headerfooter: HeaderFooterPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
 };
 

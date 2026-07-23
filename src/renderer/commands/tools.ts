@@ -29,6 +29,7 @@ export type ToolId =
   | 'optimize'
   | 'repair'
   | 'watermark'
+  | 'headerfooter'
   | 'export';
 
 export interface ToolDef {
@@ -149,6 +150,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Watermark',
     description: 'Stamp text across every page.',
     ops: ['watermark'],
+  },
+  {
+    id: 'headerfooter',
+    title: 'Header & Footer',
+    description: 'Add headers, footers, page numbers, and Bates numbering.',
+    ops: ['headerfooter'],
   },
   {
     id: 'export',
