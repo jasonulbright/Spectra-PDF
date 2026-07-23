@@ -78,5 +78,6 @@ const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = {
   layers: 'layers',
   accessibility: 'accessibility',
   comments: 'comments',
+  preflight: 'preflight',
   export: 'extract_text',
 };

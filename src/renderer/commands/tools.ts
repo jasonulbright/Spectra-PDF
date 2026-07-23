@@ -36,6 +36,7 @@ export type ToolId =
   | 'layers'
   | 'accessibility'
   | 'comments'
+  | 'preflight'
   | 'export';
 
 export interface ToolDef {
@@ -198,6 +199,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Comments',
     description: 'Review every comment in the document, or delete them all.',
     ops: ['comments'],
+  },
+  {
+    id: 'preflight',
+    title: 'Preflight',
+    description: 'Check fonts, colour, and transparency for print production.',
+    ops: ['preflight'],
   },
   {
     id: 'export',

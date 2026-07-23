@@ -73,6 +73,8 @@ pub enum CliCommand {
     LayerSet(LayerSetArgs),
     /// Run the accessibility checker (JSON report)
     Accessibility(AccessibilityArgs),
+    /// Run print-production preflight (JSON report)
+    Preflight(AccessibilityArgs),
     /// List every markup comment in the document (JSON)
     CommentsList(AccessibilityArgs),
     /// Delete all markup comments (keeps links and form fields)
@@ -1312,6 +1314,11 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
 
         CliCommand::Accessibility(args) => engine.call(
             "check_accessibility",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::Preflight(args) => engine.call(
+            "preflight",
             json!({ "file": abs(&args.input).to_string_lossy() }),
         ),
 

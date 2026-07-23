@@ -261,6 +261,7 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   layers: [],
   accessibility: [],
   comments: [],
+  preflight: [],
   export: [],
 };
 

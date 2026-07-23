@@ -92,6 +92,8 @@ const INTERNAL_METHODS = new Set([
   // Listing markup annotations for the Comments overview — a read;
   // delete_all_annotations (mutation) stays gated.
   'list_annotations',
+  // Preflight is pure print-production analysis — no mutation.
+  'preflight',
 ]);
 
 export function isTrackableMethod(method: string): boolean {
