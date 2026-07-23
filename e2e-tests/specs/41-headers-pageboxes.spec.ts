@@ -102,4 +102,28 @@ describe('header/footer + page-box panels (P5)', () => {
     expect(Math.round(box[3] - box[1])).toBe(692);
     expect(Math.round(box[2] - box[0])).toBe(612);
   });
+
+  it('sets a page label range through the page-labels panel', async () => {
+    await openByPaths([source]);
+    await setView('operations');
+    await setActiveOp('pagelabels');
+    // Add one range starting at page 1, roman lower-case.
+    await $('[data-testid="pagelabel-add"]').click();
+    await $('[data-testid="pagelabel-style-0"]').waitForDisplayed({ timeout: 10_000 });
+    await browser.execute(() => {
+      const sel = document.querySelector('[data-testid="pagelabel-style-0"]') as HTMLSelectElement;
+      if (sel) {
+        sel.value = 'r';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await $('[data-testid="pagelabel-apply"]').click();
+    const dest = resolve(tmp, 'labeled.pdf');
+    await applyAndSave(dest);
+    // Verify the /PageLabels tree via pdf.js (getPageLabels returns per-page).
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(dest)), isEvalSupported: false }).promise;
+    const labels = await pdf.getPageLabels();
+    await pdf.loadingTask.destroy();
+    expect(labels).toEqual(['i', 'ii']);
+  });
 });
