@@ -179,6 +179,18 @@ pub struct EncryptArgs {
     /// Owner password (defaults to user password)
     #[arg(long)]
     pub owner_password: Option<String>,
+    /// Disallow printing (owner permission)
+    #[arg(long)]
+    pub no_print: bool,
+    /// Disallow copying text/graphics
+    #[arg(long)]
+    pub no_copy: bool,
+    /// Disallow changing the document
+    #[arg(long)]
+    pub no_modify: bool,
+    /// Disallow commenting and form filling
+    #[arg(long)]
+    pub no_annotate: bool,
 }
 
 #[derive(Args)]
@@ -947,15 +959,21 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 .owner_password
                 .as_deref()
                 .unwrap_or(&args.password);
-            engine.call(
-                "encrypt",
-                json!({
-                    "file": abs(&args.input).to_string_lossy(),
-                    "output": abs(&args.output).to_string_lossy(),
-                    "user_password": args.password,
-                    "owner_password": owner,
-                }),
-            )
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "user_password": args.password,
+                "owner_password": owner,
+            });
+            if args.no_print || args.no_copy || args.no_modify || args.no_annotate {
+                params["permissions"] = json!({
+                    "print": !args.no_print,
+                    "copy": !args.no_copy,
+                    "modify": !args.no_modify,
+                    "annotate": !args.no_annotate,
+                });
+            }
+            engine.call("encrypt", params)
         }
 
         CliCommand::Decrypt(args) => {

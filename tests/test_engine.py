@@ -201,6 +201,48 @@ class TestEncryptDecrypt:
         with pytest.raises(Exception):
             decrypt(file=enc, output=dec, password="wrong")
 
+    def test_encrypt_default_permissions_allow_everything(self, tmp_pdf, tmp_dir):
+        import pikepdf
+
+        out = os.path.join(tmp_dir, "e.pdf")
+        r = encrypt(file=tmp_pdf, output=out, owner_password="owner")
+        assert r["restricted"] is False
+        with pikepdf.open(out, password="owner") as pdf:
+            assert pdf.allow.print_highres and pdf.allow.extract and pdf.allow.modify_other
+
+    def test_encrypt_permissions_matrix_enforced(self, tmp_pdf, tmp_dir):
+        import pikepdf
+
+        out = os.path.join(tmp_dir, "e.pdf")
+        r = encrypt(
+            file=tmp_pdf, output=out, owner_password="owner",
+            permissions={"print": False, "copy": False, "modify": True, "annotate": True},
+        )
+        assert r["restricted"] is True
+        with pikepdf.open(out, password="owner") as pdf:
+            assert pdf.allow.print_highres is False and pdf.allow.print_lowres is False
+            assert pdf.allow.extract is False
+            assert pdf.allow.modify_other is True  # modify still allowed
+            assert pdf.allow.modify_annotation is True
+            # Accessibility extraction is NEVER blocked.
+            assert pdf.allow.accessibility is True
+
+    def test_encrypt_restrict_modify_and_annotate(self, tmp_pdf, tmp_dir):
+        import pikepdf
+
+        out = os.path.join(tmp_dir, "e.pdf")
+        encrypt(
+            file=tmp_pdf, output=out, owner_password="owner",
+            permissions={"modify": False, "annotate": False},
+        )
+        with pikepdf.open(out, password="owner") as pdf:
+            assert pdf.allow.modify_other is False
+            assert pdf.allow.modify_assembly is False
+            assert pdf.allow.modify_annotation is False
+            assert pdf.allow.modify_form is False
+            assert pdf.allow.print_highres is True  # printing still allowed
+            assert pdf.allow.extract is True
+
 
 # ── Extract Text ──────────────────────────────────────────────────────────
 
