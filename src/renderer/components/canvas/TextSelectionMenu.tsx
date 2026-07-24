@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   buildTextMarkupAnnotations,
+  selectionQuadsByPage,
   type PageBox,
+  type PageQuads,
   type RectLike,
 } from '../../lib/text-selection-markup';
 import type { PageAnnotation, TextMarkupType } from '../../state/types';
@@ -36,6 +38,9 @@ export interface TextSelectionMenuProps {
   viewRotation?: 0 | 90 | 180 | 270;
   annotationColor?: string;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
+  /** Author link regions over the selection. Engine-tier (links are not
+   *  annotations here), so the canvas owns the geometry + call. */
+  onCreateLinks?: (selection: PageQuads[], url: string) => Promise<void>;
 }
 
 interface Anchor {
@@ -51,8 +56,19 @@ export function TextSelectionMenu({
   viewRotation,
   annotationColor,
   onAddAnnotation,
+  onCreateLinks,
 }: TextSelectionMenuProps): React.JSX.Element | null {
   const [anchor, setAnchor] = useState<Anchor | null>(null);
+  // The link editor replaces the buttons in place; `pending` holds the quads
+  // captured when it opened, because typing a URL destroys the selection they
+  // came from (focus moves to the input).
+  const [pending, setPending] = useState<PageQuads[] | null>(null);
+  const [url, setUrl] = useState('');
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const busyRef = useRef(false);
+  // Read inside window-level listeners, which close over the first render.
+  const pendingRef = useRef<PageQuads[] | null>(null);
+  pendingRef.current = pending;
 
   // Read the live selection rather than caching it: the browser owns it, and a
   // cached Range goes stale on any scroll, zoom or text-layer rebuild.
@@ -73,12 +89,39 @@ export function TextSelectionMenu({
     return out;
   }, [scrollerRef]);
 
+  const pageBoxes = useCallback((): PageBox[] => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return [];
+    const out: PageBox[] = [];
+    for (const el of scroller.querySelectorAll<HTMLElement>('[data-page-id]')) {
+      const pageId = el.dataset.pageId;
+      if (!pageId) continue;
+      const r = el.getBoundingClientRect();
+      out.push({
+        docId,
+        pageId,
+        rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
+      });
+    }
+    return out;
+  }, [docId, scrollerRef]);
+
+  const closeAll = useCallback((): void => {
+    setPending(null);
+    setUrl('');
+    setLinkError(null);
+    setAnchor(null);
+  }, []);
+
   useEffect(() => {
     if (!active) {
-      setAnchor(null);
+      closeAll();
       return;
     }
     const update = (): void => {
+      // While the link editor is open the selection is gone (focus is in the
+      // input) — its quads are already captured, so leave the bar alone.
+      if (pendingRef.current) return;
       const rects = currentRects();
       if (rects.length === 0) {
         setAnchor(null);
@@ -92,7 +135,7 @@ export function TextSelectionMenu({
     // release (pointerup) and on keyboard selection (keyup), and cleared
     // immediately whenever the selection empties.
     const onSelectionChange = (): void => {
-      if (currentRects().length === 0) setAnchor(null);
+      if (!pendingRef.current && currentRects().length === 0) setAnchor(null);
     };
     document.addEventListener('selectionchange', onSelectionChange);
     document.addEventListener('pointerup', update);
@@ -102,40 +145,26 @@ export function TextSelectionMenu({
       document.removeEventListener('pointerup', update);
       document.removeEventListener('keyup', update);
     };
-  }, [active, currentRects]);
+  }, [active, currentRects, closeAll]);
 
   // Scrolling or zooming moves the pages out from under a viewport-anchored
   // bar; drop it rather than leave it pointing at nothing.
   useEffect(() => {
     if (!anchor) return;
     const scroller = scrollerRef.current;
-    const drop = (): void => setAnchor(null);
+    const drop = (): void => closeAll();
     scroller?.addEventListener('scroll', drop, { passive: true });
     window.addEventListener('resize', drop);
     return () => {
       scroller?.removeEventListener('scroll', drop);
       window.removeEventListener('resize', drop);
     };
-  }, [anchor, scrollerRef]);
+  }, [anchor, scrollerRef, closeAll]);
 
   const apply = (markupType: TextMarkupType): void => {
-    const scroller = scrollerRef.current;
-    if (!scroller) return;
-    const rects = currentRects();
-    const pages: PageBox[] = [];
-    for (const el of scroller.querySelectorAll<HTMLElement>('[data-page-id]')) {
-      const pageId = el.dataset.pageId;
-      if (!pageId) continue;
-      const r = el.getBoundingClientRect();
-      pages.push({
-        docId,
-        pageId,
-        rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
-      });
-    }
     const built = buildTextMarkupAnnotations({
-      rects,
-      pages,
+      rects: currentRects(),
+      pages: pageBoxes(),
       markupType,
       color: annotationColor ?? MARKUP_DEFAULT_COLOR,
       viewRotation,
@@ -144,7 +173,36 @@ export function TextSelectionMenu({
     // The markup now stands in for the selection; leaving it up would let a
     // second click double-apply to text that already looks marked.
     window.getSelection()?.removeAllRanges();
-    setAnchor(null);
+    closeAll();
+  };
+
+  // Capture the selection's quads NOW: focusing the URL input destroys it.
+  const startLink = (): void => {
+    const quads = selectionQuadsByPage(currentRects(), pageBoxes(), viewRotation);
+    if (quads.length === 0) return;
+    setPending(quads);
+    setLinkError(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const submitLink = async (): Promise<void> => {
+    const target = url.trim();
+    if (!pending || !onCreateLinks || busyRef.current) return;
+    if (!target) {
+      setLinkError('Enter a URL.');
+      return;
+    }
+    // Reentrancy taken before the first await — the double-click class the
+    // punchlist's tripwire note records.
+    busyRef.current = true;
+    try {
+      await onCreateLinks(pending, target);
+      closeAll();
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : String(err));
+    } finally {
+      busyRef.current = false;
+    }
   };
 
   if (!anchor) return null;
@@ -158,18 +216,64 @@ export function TextSelectionMenu({
       // A press inside the bar must not clear the selection it acts on.
       onPointerDown={(e) => e.preventDefault()}
     >
-      {STYLES.map((s) => (
-        <button
-          key={s.type}
-          type="button"
-          data-testid={`markup-${s.type}`}
-          title={s.label}
-          aria-label={s.label}
-          onClick={() => apply(s.type)}
-        >
-          <span aria-hidden="true">{s.glyph}</span>
-        </button>
-      ))}
+      {pending ? (
+        <>
+          <input
+            autoFocus
+            data-testid="markup-link-url"
+            className="text-selection-url"
+            type="text"
+            placeholder="https://…"
+            spellCheck={false}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void submitLink();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation(); // Escape here cancels the editor, not the view
+                closeAll();
+              }
+            }}
+          />
+          <button type="button" data-testid="markup-link-apply" onClick={() => void submitLink()}>
+            Link
+          </button>
+          {linkError && (
+            <span className="text-selection-error" data-testid="markup-link-error" role="alert">
+              {linkError}
+            </span>
+          )}
+        </>
+      ) : (
+        <>
+          {STYLES.map((s) => (
+            <button
+              key={s.type}
+              type="button"
+              data-testid={`markup-${s.type}`}
+              title={s.label}
+              aria-label={s.label}
+              onClick={() => apply(s.type)}
+            >
+              <span aria-hidden="true">{s.glyph}</span>
+            </button>
+          ))}
+          {onCreateLinks && (
+            <button
+              type="button"
+              data-testid="markup-link"
+              title="Link to a URL"
+              aria-label="Link to a URL"
+              onClick={startLink}
+            >
+              <span aria-hidden="true">🔗</span>
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }

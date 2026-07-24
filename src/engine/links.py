@@ -120,6 +120,54 @@ def set_link_url(file: str, output: str, page: int, index: int, url: str) -> dic
     return {"output": str(output_path), "page": int(page), "index": int(index), "url": str(url)}
 
 
+def add_links(file: str, output: str, links: list) -> dict:
+    """Create /Link annotations with URI actions.
+
+    `links` is a list of {page (1-based), rect [x0,y0,x1,y1] in PDF user space,
+    url}. Authored from a text selection in the reading view: one link per line
+    box of the selection, so a wrapped phrase links every line it covers rather
+    than a single box swallowing the space between them.
+
+    /Border [0 0 0] — an invisible border, the convention every mainstream
+    authoring tool uses; a visible ring around linked text is not what the
+    gesture asked for.
+    """
+    if not links:
+        raise ValueError("no links to add")
+    input_path, output_path = Path(file), Path(output)
+    same_file = input_path.resolve() == output_path.resolve()
+    with pikepdf.open(file) as pdf:
+        added = 0
+        for spec in links:
+            page_no = int(spec["page"])
+            if not (1 <= page_no <= len(pdf.pages)):
+                raise ValueError(f"page {page_no} is out of range (1-{len(pdf.pages)})")
+            url = str(spec.get("url", "")).strip()
+            if not url:
+                raise ValueError("url must not be empty")
+            raw = [float(v) for v in spec["rect"]]
+            if len(raw) != 4:
+                raise ValueError("rect must be [x0, y0, x1, y1]")
+            x0, y0, x1, y1 = min(raw[0], raw[2]), min(raw[1], raw[3]), max(raw[0], raw[2]), max(raw[1], raw[3])
+            if x1 - x0 <= 0 or y1 - y0 <= 0:
+                raise ValueError("rect must have a positive width and height")
+            pg = pdf.pages[page_no - 1]
+            annot = pdf.make_indirect(
+                Dictionary(
+                    Type=Name.Annot,
+                    Subtype=Name.Link,
+                    Rect=pikepdf.Array([x0, y0, x1, y1]),
+                    Border=pikepdf.Array([0, 0, 0]),
+                    A=Dictionary(Type=Name.Action, S=Name.URI, URI=String(url)),
+                )
+            )
+            existing = pg.obj.get("/Annots")
+            pg.obj["/Annots"] = pikepdf.Array([*existing, annot]) if existing is not None else pikepdf.Array([annot])
+            added += 1
+        _save(pdf, input_path, output_path, same_file)
+    return {"output": str(output_path), "added": added}
+
+
 def delete_link(file: str, output: str, page: int, index: int) -> dict:
     """Remove one link annotation from a page."""
     input_path, output_path = Path(file), Path(output)

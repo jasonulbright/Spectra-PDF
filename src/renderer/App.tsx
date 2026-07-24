@@ -619,6 +619,13 @@ function AppContent(): React.ReactElement {
     [performOperation],
   );
 
+  const handleAddLinks = useCallback(
+    async (path: string, links: { page: number; rect: [number, number, number, number]; url: string }[]) => {
+      await performOperation(path, 'add_links', { links });
+    },
+    [performOperation],
+  );
+
   const handleFillFormValues = useCallback(
     async (path: string, values: Record<string, FormFieldValue>) => {
       const f = state.files.get(path);
@@ -1724,6 +1731,7 @@ function AppContent(): React.ReactElement {
                   onCloseFile={(path) => void handleCloseFile(path)}
                   onExtractText={handleExtractFromCanvas}
                   onRedactFile={handleRedactFile}
+                  onAddLinks={handleAddLinks}
                   onApplyOcrLayer={handleApplyOcrLayer}
                   onEditImage={handleEditImage}
                   onEditVector={handleEditVector}

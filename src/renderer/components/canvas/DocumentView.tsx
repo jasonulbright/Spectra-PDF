@@ -38,6 +38,7 @@ import {
 } from '../../canvas/reading-page';
 import { PageCell } from './PageCell';
 import { TextSelectionMenu } from './TextSelectionMenu';
+import type { PageQuads } from '../../lib/text-selection-markup';
 
 // The continuous reading view (Phase 4 M4, § 6): one document, a single
 // vertical column of the SAME PageCells the board uses (§ 6.2 — the reuse
@@ -65,6 +66,8 @@ const NO_PAGE_POINTER = (): void => {};
 
 export interface DocumentViewProps {
   doc: OpenDocument;
+  /** Author link regions over a text selection (reading view only). */
+  onCreateLinks?: (selection: PageQuads[], url: string) => Promise<void>;
   /** Rotate View's render-only quarter-turn for this file (M6.1); composed
    * with each page's own pending rotation for every display/capture read. */
   viewRotation?: 0 | 90 | 180 | 270;
@@ -622,6 +625,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
         viewRotation={viewRotation}
         annotationColor={props.annotationColor}
         onAddAnnotation={props.onAddAnnotation}
+        onCreateLinks={props.onCreateLinks}
       />
     </div>
   );

@@ -2387,3 +2387,15 @@
 [data-theme="light"] .text-selection-menu { border-color: #d1d5db; background: #ffffff; }
 [data-theme="light"] .text-selection-menu button { color: #111827; }
 [data-theme="light"] .text-selection-menu button:hover { background: #f3f4f6; }
+.text-selection-url {
+  width: 190px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid #404040;
+  background: #141414;
+  color: #e5e5e5;
+  font-size: 12px;
+}
+.text-selection-error { align-self: center; padding: 0 4px; font-size: 11px; color: #f87171; }
+[data-theme="light"] .text-selection-url { border-color: #d1d5db; background: #ffffff; color: #111827; }

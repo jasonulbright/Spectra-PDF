@@ -15,6 +15,7 @@ import {
   getFirstAnnotation,
   commitPendingEdits,
   saveActiveAs,
+  setReactInputValue,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -57,6 +58,7 @@ async function selectFirstTextSpan(): Promise<string> {
 interface AnnotOnDisk {
   subtype: string;
   quadPoints?: number[];
+  url?: string;
 }
 async function annotationsOf(path: string): Promise<AnnotOnDisk[]> {
   const pdf = await pdfjs.getDocument({
@@ -113,6 +115,28 @@ describe('authoring text markup from a selection', () => {
     });
   });
 
+  it('links the same selection to a URL', async () => {
+    await browser.waitUntil(
+      async () => (await $$('[data-testid="text-layer"] span')).length > 0,
+      { timeout: 20_000, timeoutMsg: 'the text layer never rendered' },
+    );
+    await selectFirstTextSpan();
+    await $('[data-testid="text-selection-menu"]').waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="markup-link"]').click();
+    // The URL editor replaces the buttons; typing destroys the selection, which
+    // is exactly why the quads are captured when it opens.
+    const input = $('[data-testid="markup-link-url"]');
+    await input.waitForDisplayed({ timeout: 5_000 });
+    await setReactInputValue('[data-testid="markup-link-url"]', 'https://example.com/linked');
+    await $('[data-testid="markup-link-apply"]').click();
+    // The link is written by the engine (not the page tier), so the file itself
+    // now carries it — the bar closes once that lands.
+    await browser.waitUntil(
+      async () => !(await $('[data-testid="markup-link-url"]').isExisting()),
+      { timeout: 30_000, timeoutMsg: 'the link editor never closed (create failed?)' },
+    );
+  });
+
   it('commits to a native /Highlight with /QuadPoints on disk', async () => {
     await commitPendingEdits();
     const dest = resolve(tmp, 'marked.pdf');
@@ -120,6 +144,10 @@ describe('authoring text markup from a selection', () => {
     const annots = await annotationsOf(dest);
     const highlights = annots.filter((a) => a.subtype === 'Highlight');
     expect(highlights).toHaveLength(1);
+    // The authored link rides along in the same file.
+    const links = annots.filter((a) => a.subtype === 'Link');
+    expect(links.length).toBeGreaterThan(0);
+    expect(links.some((l) => (l as { url?: string }).url?.includes('example.com/linked'))).toBe(true);
     // 8 numbers per quad (UL, UR, LL, LR) — the marker of real text markup
     // rather than a rectangle pretending to be one.
     expect(highlights[0].quadPoints?.length ?? 0).toBeGreaterThanOrEqual(4);

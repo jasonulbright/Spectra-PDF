@@ -85,6 +85,8 @@ pub enum CliCommand {
     LinkSet(LinkSetArgs),
     /// Delete a link (by page + index)
     LinkDelete(LinkDeleteArgs),
+    /// Create a URL link over a rectangle (PDF user space)
+    LinkAdd(LinkAddArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -364,6 +366,24 @@ pub struct LinkSetArgs {
     #[arg(long)]
     pub index: i64,
     /// The URL to target
+    #[arg(long)]
+    pub url: String,
+}
+
+#[derive(Args)]
+pub struct LinkAddArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// 1-based page
+    #[arg(long)]
+    pub page: i64,
+    /// Link rectangle in PDF user space: x0 y0 x1 y1
+    #[arg(long, num_args = 4, value_names = ["X0", "Y0", "X1", "Y1"])]
+    pub rect: Vec<f64>,
+    /// The URL the link opens
     #[arg(long)]
     pub url: String,
 }
@@ -1379,6 +1399,15 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "page": args.page,
                 "index": args.index,
                 "url": args.url,
+            }),
+        ),
+
+        CliCommand::LinkAdd(args) => engine.call(
+            "add_links",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "links": [{ "page": args.page, "rect": args.rect, "url": args.url }],
             }),
         ),
 

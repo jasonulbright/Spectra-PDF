@@ -6,6 +6,7 @@ import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
 import { getDocumentProxy } from '../../lib/pdfDocCache';
 import { buildRedactionRegions } from '../../lib/redaction';
+import { buildLinkPayloads, type LinkSpec, type PageQuads } from '../../lib/text-selection-markup';
 import type { PageGeometry, RedactionMark, RedactionRegion } from '../../lib/redaction';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
@@ -65,6 +66,9 @@ interface WorkspaceCanvasViewProps {
   // performOperation, so the commit gate flushes pending page edits, a
   // snapshot lands on the undo chain, and the buffer reloads after.
   onRedactFile: (path: string, regions: RedactionRegion[]) => Promise<void>;
+  // Author link regions from a text selection (same performOperation shape:
+  // gate flush -> snapshot -> engine add_links -> reload, so it undoes).
+  onAddLinks: (path: string, links: LinkSpec[]) => Promise<void>;
   // Persist OCR text layers into one file — same performOperation routing as
   // onRedactFile (gate flush -> snapshot -> engine apply_ocr_layer -> reload).
   onApplyOcrLayer: (path: string, pages: OcrApplyPage[]) => Promise<void>;
@@ -212,6 +216,7 @@ export function WorkspaceCanvasView({
 
   onExtractText,
   onRedactFile,
+  onAddLinks,
   onApplyOcrLayer,
   onEditImage,
   onEditVector,
@@ -2376,6 +2381,39 @@ export function WorkspaceCanvasView({
   // Ref, not just state: two clicks in the same tick both read a stale
   // `redacting === false` (same failure mode as the commit-race double-click,
   // see the punchlist's reentrancy tripwire note).
+  // Selection -> link regions. Geometry comes from the CURRENT buffer's proxy
+  // (the same contract as applyMarks), and the engine call is commit-gated, so
+  // the page numbers and user space line up with what lands on disk.
+  const createLinks = useCallback(
+    async (selection: PageQuads[], url: string): Promise<void> => {
+      const { files: payloads, skippedPageIds } = await buildLinkPayloads(
+        docs,
+        selection,
+        url,
+        async (page) => {
+          const f = state.files.get(page.sourceDocId);
+          if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+          const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+          const p = await proxy.getPage(page.sourcePageIndex + 1);
+          const [vx0, vy0, vx1, vy1] = p.view;
+          return {
+            box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+            bakedRotate: p.rotate,
+          };
+        },
+      );
+      if (payloads.length === 0) {
+        throw new Error(
+          skippedPageIds.length > 0
+            ? 'Those pages are no longer in the document.'
+            : 'Nothing selected to link.',
+        );
+      }
+      for (const payload of payloads) await onAddLinks(payload.path, payload.links);
+    },
+    [docs, state.files, onAddLinks],
+  );
+
   const applyingRef = useRef(false);
   const applyMarks = useCallback(async (): Promise<string[]> => {
     const toApply = liveMarks;
@@ -2919,6 +2957,7 @@ export function WorkspaceCanvasView({
       />
       {docViewMode === 'document' && focusedDoc ? (
         <DocumentView
+          onCreateLinks={createLinks}
           key={focusedDoc.id}
           ref={documentViewRef}
           doc={focusedDoc}

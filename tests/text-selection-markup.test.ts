@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { displayRectToPdf } from '../src/renderer/lib/pdfx-build';
+import type { OpenDocument } from '../src/renderer/state/types';
 import {
+  buildLinkPayloads,
   buildTextMarkupAnnotations,
   quadFromRect,
   quadsBBox,
@@ -149,5 +152,75 @@ describe('buildTextMarkupAnnotations', () => {
     expect(unprojectQuads(a.quads!, 90)).toEqual([0.25, 0.1, 0.75, 0.15]);
     // And the stored bbox is derived from the stored quads, not the display ones.
     expect({ x: a.x, y: a.y, w: a.w, h: a.h }).toEqual(quadsBBox(a.quads!));
+  });
+});
+
+describe('buildLinkPayloads', () => {
+  const GEOMETRY = { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 };
+  const doc = (id: string, path: string, pageIds: string[]): OpenDocument =>
+    ({
+      id,
+      path,
+      workingPath: `${path}.working`,
+      name: id,
+      pageCount: pageIds.length,
+      buffer: null,
+      dirty: false,
+      undoStack: [],
+      redoStack: [],
+      pages: pageIds.map((pid, i) => ({
+        id: pid,
+        sourceDocId: path,
+        sourcePageIndex: i,
+        rotation: 0 as const,
+        width: 612,
+        height: 792,
+      })),
+    }) as OpenDocument;
+
+  it('emits ONE link per quad, in the file’s committed page numbering', async () => {
+    const d = doc('d1', 'C:/a.pdf', ['p0', 'p1']);
+    const { files, skippedPageIds } = await buildLinkPayloads(
+      [d],
+      [{ docId: 'd1', pageId: 'p1', quads: [0.1, 0.2, 0.5, 0.25, 0.1, 0.3, 0.4, 0.35] }],
+      'https://example.com',
+      async () => GEOMETRY,
+    );
+    expect(skippedPageIds).toEqual([]);
+    expect(files).toHaveLength(1);
+    expect(files[0].path).toBe('C:/a.pdf');
+    expect(files[0].links).toHaveLength(2); // a wrapped phrase links each line
+    expect(files[0].links.every((l) => l.page === 2)).toBe(true);
+    expect(files[0].links[0].rect).toEqual(
+      displayRectToPdf({ x: 0.1, y: 0.2, w: 0.4, h: 0.05 }, GEOMETRY.box, 0),
+    );
+    expect(files[0].links[0].url).toBe('https://example.com');
+  });
+
+  it('skips a page that left the workspace instead of guessing', async () => {
+    const d = doc('d1', 'C:/a.pdf', ['p0']);
+    const { files, skippedPageIds } = await buildLinkPayloads(
+      [d],
+      [{ docId: 'd1', pageId: 'gone', quads: [0.1, 0.2, 0.5, 0.25] }],
+      'https://example.com',
+      async () => GEOMETRY,
+    );
+    expect(files).toEqual([]);
+    expect(skippedPageIds).toEqual(['gone']);
+  });
+
+  it('composes the page’s pending rotation into the conversion', async () => {
+    const d = doc('d1', 'C:/a.pdf', ['p0']);
+    d.pages[0].rotation = 90;
+    const quad = [0.1, 0.2, 0.5, 0.25];
+    const { files } = await buildLinkPayloads(
+      [d],
+      [{ docId: 'd1', pageId: 'p0', quads: quad }],
+      'https://example.com',
+      async () => GEOMETRY,
+    );
+    expect(files[0].links[0].rect).toEqual(
+      displayRectToPdf({ x: 0.1, y: 0.2, w: 0.4, h: 0.05 }, GEOMETRY.box, 90),
+    );
   });
 });
