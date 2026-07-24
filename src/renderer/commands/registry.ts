@@ -158,6 +158,7 @@ export const COMMAND_IDS = [
   'view.presentation',
   'view.readingMode',
   'view.propertiesBar',
+  'view.customizeToolbar',
   'view.singlePage',
   'view.twoUp',
   'view.twoUpCover',
@@ -558,6 +559,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Properties Bar',
     when: inCanvas,
     run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_PROPERTIES_BAR' }),
+  },
+  // Toolbar customization (I.6): per-item show/hide over the catalog. The
+  // toolbar exists on every tab, so no canvas gate.
+  'view.customizeToolbar': {
+    title: 'Customize Toolbar…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openCustomizeToolbar(),
   },
   // Page Display (I.6): single-page column vs two-up facing spreads, and the
   // cover convention. Layout is a reading-view property, so they gate on the

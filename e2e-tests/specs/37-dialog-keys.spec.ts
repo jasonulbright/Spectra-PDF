@@ -87,8 +87,16 @@ describe('dialog keyboard model (M6.5)', () => {
 
   it('reload keys never reach the webview — the app state SURVIVES F5 and Ctrl+R', async () => {
     expect((await getState()).fileCount).toBe(1);
+    // F5 is Presentation now (I.6) — with a document open it opens the
+    // overlay INSTEAD of reloading. Survival + the overlay appearing are
+    // both part of the contract; Escape puts the view back.
     await browser.keys(['F5']);
-    await browser.pause(400);
+    await $('[data-testid="presentation-view"]').waitForDisplayed({
+      timeout: 5_000,
+      timeoutMsg: 'F5 with a document open should present, not reload',
+    });
+    await browser.keys(['Escape']);
+    await $('[data-testid="presentation-view"]').waitForDisplayed({ reverse: true, timeout: 5_000 });
     await browser.keys(['Control', 'r']);
     await browser.pause(400);
     // A real reload would boot a fresh renderer: harness re-installed,
@@ -98,12 +106,15 @@ describe('dialog keyboard model (M6.5)', () => {
 
   it('…and survives F5 pressed while a MENU is open (the step-aside path)', async () => {
     // The Radix-menu branch stepped aside without suppression — F5 over an
-    // open File menu reloaded the whole app (review-caught HIGH).
+    // open File menu reloaded the whole app (review-caught HIGH). Post-I.6
+    // the suppressed key DISPATCHES (presentation opens); the reload-survival
+    // discriminator is unchanged.
     await $('[data-testid="menu-file"]').click();
     await $('[data-testid="menuitem-file-open"]').waitForDisplayed();
     await browser.keys(['F5']);
     await browser.pause(400);
     await browser.keys(['Escape']);
+    await $('[data-testid="presentation-view"]').waitForDisplayed({ reverse: true, timeout: 5_000 });
     expect((await getState()).fileCount).toBe(1);
   });
 

@@ -90,6 +90,8 @@ export interface AppCommandHandlers {
   openLicenses(): void;
   /** Open the About dialog (name/version/repo). */
   openAbout(): void;
+  /** Open the Customize Toolbar dialog (I.6 — per-item show/hide). */
+  openCustomizeToolbar(): void;
   /** Manual update check (Help ▸ Check for Updates) — surfaces the
    * available-flow / up-to-date / enterprise-disabled states on the UpdateBar. */
   checkForUpdates(): void;

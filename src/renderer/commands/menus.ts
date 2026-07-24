@@ -218,6 +218,7 @@ export const MENUS: MenuDef[] = [
       },
       cmd('view.readingMode', 'menuitem-view-reading-mode'),
       cmd('view.propertiesBar', 'menuitem-view-properties-bar'),
+      cmd('view.customizeToolbar', 'menuitem-view-customize-toolbar'),
       cmd('view.presentation', 'menuitem-view-presentation'),
       cmd('tools.open.organize', 'menuitem-view-organize'),
       cmd('view.organizeAll', 'menuitem-view-organize-all'),

@@ -74,6 +74,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   combineFiles: vi.fn(async () => {}),
   openLicenses: vi.fn(),
   openAbout: vi.fn(),
+  openCustomizeToolbar: vi.fn(),
   checkForUpdates: vi.fn(),
   exit: vi.fn(async () => {}),
   minimizeToTray: vi.fn(async () => {}),

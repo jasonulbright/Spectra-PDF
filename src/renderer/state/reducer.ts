@@ -1,5 +1,6 @@
 import { AppState, AppAction, CanvasTool, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_DEFAULT_WIDTH } from './types';
 import { carriesManifest } from '../lib/doc-names';
+import { NO_OVERRIDES } from '../lib/toolbar-layout';
 // Safe from the reducer: commands/tools has type-only imports, so it carries no
 // runtime dependency back into the state or component layers.
 import { toolById, toolForOp, armedModeOf, type ToolDef } from '../commands/tools';
@@ -69,6 +70,7 @@ export const initialUiState: UiState = {
   twoUpCover: true,
   readingMode: false,
   propertiesBar: false,
+  toolbarOverrides: NO_OVERRIDES,
   focusedDocId: null,
   currentPageId: null,
   viewRotationByPath: {},
@@ -1209,6 +1211,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, ui: { ...state.ui, readingMode: !state.ui.readingMode } };
     case 'UI_TOGGLE_PROPERTIES_BAR':
       return { ...state, ui: { ...state.ui, propertiesBar: !state.ui.propertiesBar } };
+    case 'UI_SET_TOOLBAR_OVERRIDES':
+      return { ...state, ui: { ...state.ui, toolbarOverrides: action.overrides } };
     case 'UI_ROTATE_VIEW': {
       // Render-only quarter-turn of the reading display (M6.1). Only real,
       // showable files can be rotated — a view state for a ghost would be

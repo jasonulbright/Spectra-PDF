@@ -3,6 +3,7 @@ import { AppState, AppAction } from './types';
 import { appReducer, initialState } from './reducer';
 import { readRecent } from '../lib/recent-files';
 import { readWorkbenchUi } from '../lib/workbench-ui';
+import { readToolbarOverrides } from '../lib/toolbar-layout';
 
 const StateContext = createContext<AppState>(initialState);
 const DispatchContext = createContext<Dispatch<AppAction>>(() => {});
@@ -19,7 +20,8 @@ function bootState(base: AppState): AppState {
   // readRecent (spectra-recent) and readWorkbenchUi (workbench-ui, M3 nav pane).
   const recentFiles = readRecent();
   const { navPane } = readWorkbenchUi({ navPane: base.ui.navPane });
-  return { ...base, ui: { ...base.ui, recentFiles, navPane } };
+  const toolbarOverrides = readToolbarOverrides();
+  return { ...base, ui: { ...base.ui, recentFiles, navPane, toolbarOverrides } };
 }
 
 export function AppStateProvider({ children }: { children: React.ReactNode }): React.ReactElement {

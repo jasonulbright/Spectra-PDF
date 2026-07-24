@@ -72,6 +72,8 @@ import { MainToolbar } from './components/MainToolbar';
 import { TabStrip } from './components/TabStrip';
 import { HomeTab } from './components/HomeTab';
 import { AboutDialog } from './components/AboutDialog';
+import { CustomizeToolbarDialog } from './components/CustomizeToolbarDialog';
+import { persistToolbarOverrides } from './lib/toolbar-layout';
 import { PropertiesDialog } from './components/PropertiesDialog';
 import { PrintDialog } from './components/PrintDialog';
 import { BatchOcrDialog } from './components/BatchOcrDialog';
@@ -179,6 +181,7 @@ function AppContent(): React.ReactElement {
   const [showBatchOcr, setShowBatchOcr] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
   const [showExportImages, setShowExportImages] = useState(false);
+  const [showCustomizeToolbar, setShowCustomizeToolbar] = useState(false);
   // Full-screen presentation mode (I.6): a transient overlay; `startIndex`
   // is the page to open on, resolved from the page being read.
   const [presentation, setPresentation] = useState<{ startIndex: number } | null>(null);
@@ -254,6 +257,11 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     localStorage.setItem('spectra-recent', JSON.stringify(recentFiles));
   }, [recentFiles]);
+
+  // Mirror the toolbar overrides (I.6 customization) the same way.
+  useEffect(() => {
+    persistToolbarOverrides(state.ui.toolbarOverrides);
+  }, [state.ui.toolbarOverrides]);
 
   // Mirror the nav-pane state (M3) to the workbench-ui key. Debounced: a resize
   // drag dispatches a new width per pointermove, and an unthrottled synchronous
@@ -1369,6 +1377,7 @@ function AppContent(): React.ReactElement {
     combineFiles,
     openLicenses: () => setShowSettings('licenses'),
     openAbout: () => setShowAbout(true),
+    openCustomizeToolbar: () => setShowCustomizeToolbar(true),
     checkForUpdates: () => setUpdateCheckSignal((n) => n + 1),
     exit: handleExit,
     minimizeToTray: async () => { await app.hideToTray(); },
@@ -1402,6 +1411,7 @@ function AppContent(): React.ReactElement {
       combineFiles: () => h.current.combineFiles(),
       openLicenses: () => h.current.openLicenses(),
       openAbout: () => h.current.openAbout(),
+      openCustomizeToolbar: () => h.current.openCustomizeToolbar(),
       checkForUpdates: () => h.current.checkForUpdates(),
       exit: () => h.current.exit(),
       minimizeToTray: () => h.current.minimizeToTray(),
@@ -1860,6 +1870,9 @@ function AppContent(): React.ReactElement {
         );
       })()}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
+      {showCustomizeToolbar && (
+        <CustomizeToolbarDialog onClose={() => setShowCustomizeToolbar(false)} />
+      )}
       <ConfirmDialog
         open={confirmState !== null}
         message={confirmState?.message ?? ''}

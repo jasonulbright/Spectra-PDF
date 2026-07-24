@@ -1,10 +1,11 @@
 import React, { useRef, useState } from 'react';
 import { useAppState } from '../state/AppStateProvider';
-import { MAIN_TOOLBAR, type ToolbarNode } from '../commands/toolbars';
+import { visibleToolbarNodes, type ToolbarNode } from '../commands/toolbars';
 import { COMMANDS, type CommandId } from '../commands/registry';
 import { shortcutForCommand } from '../commands/keymap';
 import { invokeCommand, isCommandEnabled } from '../commands/context';
 import { ChromeIcon, type ChromeIconId } from './chrome-icons';
+import { ContextMenu } from './ContextMenu';
 
 // The main toolbar (Phase 4 M2) — icon buttons driven by the command
 // registry over commands/toolbars data. Enablement comes from each command's
@@ -20,6 +21,10 @@ const TESTID_FOR: Partial<Record<CommandId, string>> = {
   'tools.hand': 'toolbar-hand',
   'tools.select': 'toolbar-select',
   'edit.find': 'toolbar-find',
+  'view.navPanel.pages': 'toolbar-nav-pages',
+  'view.navPanel.bookmarks': 'toolbar-nav-bookmarks',
+  'view.navPanel.signatures': 'toolbar-nav-signatures',
+  'view.toolsPane': 'toolbar-tools-pane',
 };
 
 function ToolbarButton({
@@ -73,10 +78,16 @@ export function MainToolbar(): React.ReactElement {
     if (command === 'tools.select') return state.ui.tool === 'select';
     return undefined;
   };
+  // The rendered layout: the catalog filtered by the user's show/hide
+  // overrides (I.6 toolbar customization) — reactive, so the customize
+  // dialog's checkboxes apply live.
+  const nodes = visibleToolbarNodes(state.ui.toolbarOverrides);
+  // Right-click anywhere on the strip opens the customize entry point.
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   // Roving tabindex (§ 10.5, M6.5): the toolbar is ONE Tab stop; arrows move
   // within it, skipping disabled buttons. The roving index follows real focus
   // (mouse clicks included), so Tab always leaves from where the user was.
-  const buttons = MAIN_TOOLBAR.filter(
+  const buttons = nodes.filter(
     (n): n is Extract<ToolbarNode, { kind: 'command' }> => n.kind === 'command',
   );
   const [rovingIdx, setRovingIdx] = useState(0);
@@ -87,7 +98,11 @@ export function MainToolbar(): React.ReactElement {
   // is excluded from Tab regardless of tabIndex, which left the whole
   // toolbar Tab-unreachable (review-caught). The tab stop is re-derived
   // against live enablement every render.
-  const effectiveIdx = isCommandEnabled(buttons[rovingIdx]?.command)
+  // (Customization can SHRINK the list, so the remembered index may now be
+  // past the end — an out-of-range command must read as "not enabled", not
+  // crash the lookup.)
+  const rovingCommand = buttons[rovingIdx]?.command;
+  const effectiveIdx = rovingCommand !== undefined && isCommandEnabled(rovingCommand)
     ? rovingIdx
     : buttons.findIndex((b) => isCommandEnabled(b.command));
   const moveFocus = (from: number, delta: 1 | -1 | 'home' | 'end'): void => {
@@ -118,9 +133,13 @@ export function MainToolbar(): React.ReactElement {
       role="toolbar"
       aria-label="Main toolbar"
       onKeyDown={onToolbarKeyDown}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenuAt({ x: e.clientX, y: e.clientY });
+      }}
       className="app-shell-bar app-toolbar flex items-center gap-0.5 px-1.5 h-9 border-b border-neutral-800 shrink-0"
     >
-      {MAIN_TOOLBAR.map((node, i) => {
+      {nodes.map((node, i) => {
         if (node.kind === 'separator') {
           return <div key={i} className="w-px h-5 bg-neutral-700 mx-1" />;
         }
@@ -128,7 +147,7 @@ export function MainToolbar(): React.ReactElement {
         const idx = commandIdx;
         return (
           <ToolbarButton
-            key={i}
+            key={node.command}
             command={node.command}
             icon={node.icon}
             pressed={pressedFor(node.command)}
@@ -138,6 +157,19 @@ export function MainToolbar(): React.ReactElement {
           />
         );
       })}
+      {menuAt && (
+        <ContextMenu
+          x={menuAt.x}
+          y={menuAt.y}
+          items={[
+            {
+              label: 'Customize Toolbar…',
+              onClick: () => invokeCommand('view.customizeToolbar'),
+            },
+          ]}
+          onClose={() => setMenuAt(null)}
+        />
+      )}
     </div>
   );
 }

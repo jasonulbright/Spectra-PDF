@@ -1,41 +1,88 @@
-// The main toolbar as DATA (19-phase4 § 3.1). A flat list of registered
-// command ids (each with its glyph) plus separators; the MainToolbar
-// component renders each as an icon button driven by the command
-// (title→tooltip, when→disabled). Zoom and Find need the board's canvas
-// services, so their commands self-disable off the board (canvas() === null)
-// — no toolbar-side view gating needed. The icon rides on the node (not a
-// side map) so a new entry can't compile without one (the GLYPHS precedent).
+// The main toolbar as DATA (19-phase4 § 3.1), now a CATALOG (I.6 toolbar
+// customization). Groups of registered command ids (each with its glyph and a
+// default-visibility flag); the user's show/hide overrides select which render
+// (`visibleToolbarNodes`), with a separator between groups that kept at least
+// one item. The MainToolbar component renders each as an icon button driven by
+// the command (title→tooltip, when→disabled). Zoom and Find need the board's
+// canvas services, so their commands self-disable off the board — no
+// toolbar-side view gating needed. The icon rides on the item (not a side map)
+// so a new entry can't compile without one (the GLYPHS precedent).
+//
+// Customization is per-item VISIBILITY over this fixed grouped order — the
+// king's own classic-toolbar model (show/hide toolbar items; order stays).
+// Offering an item costs a registered command + a glyph; the optional
+// nav-panel/tools entries below ship default-off, so the shipped look is
+// unchanged until the user opts in.
 import type { CommandId } from './registry';
 import type { ChromeIconId } from '../components/chrome-icons';
+import type { ToolbarOverrides } from '../lib/toolbar-layout';
+import { isToolbarItemVisible } from '../lib/toolbar-layout';
 
 export type ToolbarNode =
   | { kind: 'command'; command: CommandId; icon: ChromeIconId }
   | { kind: 'separator' };
 
-const c = (command: CommandId, icon: ChromeIconId): ToolbarNode => ({ kind: 'command', command, icon });
-const sep: ToolbarNode = { kind: 'separator' };
+export interface ToolbarCatalogItem {
+  command: CommandId;
+  icon: ChromeIconId;
+  /** Visible with no user override — the shipped default toolbar. */
+  byDefault: boolean;
+}
 
-export const MAIN_TOOLBAR: ToolbarNode[] = [
-  c('file.open', 'open'),
-  c('file.save', 'save'),
-  sep,
-  c('edit.undo', 'undo'),
-  c('edit.redo', 'redo'),
-  sep,
-  // Hand / Select (M6.2): how you hold vs. touch the page — § 3.1's pair.
-  c('tools.hand', 'hand'),
-  c('tools.select', 'cursor'),
-  sep,
-  c('view.zoomOut', 'zoomOut'),
-  c('view.fit', 'fit'),
-  c('view.zoomIn', 'zoomIn'),
-  sep,
-  c('edit.find', 'find'),
+export interface ToolbarCatalogGroup {
+  id: string;
+  /** Heading in the customize dialog. */
+  label: string;
+  items: ToolbarCatalogItem[];
+}
+
+const item = (command: CommandId, icon: ChromeIconId, byDefault = true): ToolbarCatalogItem => ({
+  command,
+  icon,
+  byDefault,
+});
+
+export const TOOLBAR_CATALOG: readonly ToolbarCatalogGroup[] = [
+  { id: 'file', label: 'File', items: [item('file.open', 'open'), item('file.save', 'save')] },
+  { id: 'history', label: 'Undo & redo', items: [item('edit.undo', 'undo'), item('edit.redo', 'redo')] },
+  {
+    id: 'modes',
+    label: 'Hand & select',
+    // Hand / Select (M6.2): how you hold vs. touch the page — § 3.1's pair.
+    items: [item('tools.hand', 'hand'), item('tools.select', 'cursor')],
+  },
+  {
+    id: 'zoom',
+    label: 'Zoom',
+    items: [item('view.zoomOut', 'zoomOut'), item('view.fit', 'fit'), item('view.zoomIn', 'zoomIn')],
+  },
+  { id: 'find', label: 'Find', items: [item('edit.find', 'find')] },
+  {
+    id: 'panels',
+    label: 'Panes (hidden by default)',
+    items: [
+      item('view.navPanel.pages', 'pages', false),
+      item('view.navPanel.bookmarks', 'bookmarks', false),
+      item('view.navPanel.signatures', 'signatures', false),
+      item('view.toolsPane', 'tools', false),
+    ],
+  },
 ];
 
-/** Registered ids the toolbar references (integrity test). */
+/** The toolbar the overrides produce: visible items in catalog order, one
+ * separator between groups that kept anything. */
+export function visibleToolbarNodes(overrides: ToolbarOverrides): ToolbarNode[] {
+  const nodes: ToolbarNode[] = [];
+  for (const group of TOOLBAR_CATALOG) {
+    const kept = group.items.filter((i) => isToolbarItemVisible(i.command, i.byDefault, overrides));
+    if (kept.length === 0) continue;
+    if (nodes.length > 0) nodes.push({ kind: 'separator' });
+    for (const i of kept) nodes.push({ kind: 'command', command: i.command, icon: i.icon });
+  }
+  return nodes;
+}
+
+/** Every registered id the catalog can offer (integrity test). */
 export function toolbarCommandIds(): CommandId[] {
-  return MAIN_TOOLBAR.filter(
-    (n): n is Extract<ToolbarNode, { kind: 'command' }> => n.kind === 'command',
-  ).map((n) => n.command);
+  return TOOLBAR_CATALOG.flatMap((g) => g.items.map((i) => i.command));
 }

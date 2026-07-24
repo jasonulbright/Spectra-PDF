@@ -1,3 +1,5 @@
+import type { ToolbarOverrides } from '../lib/toolbar-layout';
+
 // Bytes read over Tauri IPC arrive as a JSON number[] (read_file_buffer),
 // but may also be an ArrayBuffer/Uint8Array depending on the source. pdf.js
 // accepts any of these; this union avoids unsafe ArrayBuffer casts.
@@ -249,6 +251,10 @@ export interface UiState {
   // secondary toolbar showing the selected annotation's properties (or the
   // armed comment tool's defaults). Session-scoped like navPane.open.
   propertiesBar: boolean;
+  // Toolbar customization (I.6): the user's show/hide overrides against the
+  // toolbar catalog. Persisted — App mirrors it to localStorage, the
+  // recent-files pattern (lib/toolbar-layout.ts).
+  toolbarOverrides: ToolbarOverrides;
   // WHICH document the reading view shows (M4.1c), as an `OpenDocument.id`.
   // The board renders every doc at once, but the reading view renders exactly
   // one — and a tab addresses a FILE, while a `.pdfx` partitions one file into
@@ -400,4 +406,5 @@ export type AppAction =
   | { type: 'UI_OPEN_NAV_PANEL'; panel: NavPanelId }
   | { type: 'UI_TOGGLE_NAV_PANE' }
   | { type: 'UI_TOGGLE_PROPERTIES_BAR' }
+  | { type: 'UI_SET_TOOLBAR_OVERRIDES'; overrides: ToolbarOverrides }
   | { type: 'UI_SET_NAV_PANE_WIDTH'; width: number };
