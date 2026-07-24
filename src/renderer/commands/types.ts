@@ -49,6 +49,8 @@ export interface AppCommandHandlers {
    * bundled LibreOffice — docx/rtf/odt/html/xhtml. Commit-gated (the export
    * reflects pending page edits); writes a NEW external file. */
   exportDocument(format: string): Promise<void>;
+  /** Open the Export Pages as Images dialog (O1, image half). */
+  openExportImages(): void;
   /** Close one open file, with the unsaved-changes prompt. */
   closeFile(path: string): Promise<void>;
   /** Close every open file, with the unsaved-changes prompt. */

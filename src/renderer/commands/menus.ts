@@ -132,6 +132,8 @@ export const MENUS: MenuDef[] = [
           cmd('file.exportOdt', 'menuitem-file-export-odt'),
           cmd('file.exportHtml', 'menuitem-file-export-html'),
           cmd('file.exportXhtml', 'menuitem-file-export-xhtml'),
+          sep,
+          cmd('file.exportImages', 'menuitem-file-export-images'),
         ],
       },
       sep,

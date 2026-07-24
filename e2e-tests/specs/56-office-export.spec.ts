@@ -9,6 +9,8 @@ import {
   openByPaths,
   closeAllFiles,
   exportActiveAs,
+  exportImagesRun,
+  invokeAppCommand,
 } from '../support/harness.js';
 
 // O1 — export the active document to editable Office / web formats via the
@@ -68,6 +70,32 @@ describe('export to Office / web formats (O1)', () => {
     // here we prove the app's wired path produces a valid Word file on disk.)
     const head = readFileSync(dest).subarray(0, 2).toString('latin1');
     expect(head).toBe('PK');
+  });
+
+  it('exports pages as images through the Export Images dialog (gs raster)', async function () {
+    this.timeout(60_000);
+    // Open the dialog via its registered command (the menu path), then drive
+    // the REAL gated export with an injected destination (native save dialog).
+    expect(await invokeAppCommand('file.exportImages')).toBe(true);
+    await $('[data-testid="export-images-dialog"]').waitForDisplayed({ timeout: 10_000 });
+
+    const dest = resolve(tmp, 'page.png');
+    const r = (await exportImagesRun(dest, { format: 'png', dpi: 72 })) as {
+      outputs?: string[];
+      pages_rendered?: number;
+    } | null;
+    expect(r && typeof r === 'object').toBe(true);
+    expect(r!.pages_rendered).toBe(1); // the fixture is one page → exact name
+    expect(r!.outputs).toEqual([dest]);
+    expect(existsSync(dest)).toBe(true);
+    const head = readFileSync(dest).subarray(0, 4);
+    expect([...head]).toEqual([0x89, 0x50, 0x4e, 0x47]); // PNG magic
+
+    await $('[data-testid="export-images-close"]').click();
+    await browser.waitUntil(
+      async () => !(await $('[data-testid="export-images-dialog"]').isExisting()),
+      { timeout: 5_000, timeoutMsg: 'the Export Images dialog never closed' },
+    );
   });
 
   it('exports an HTML file carrying the real text', async function () {

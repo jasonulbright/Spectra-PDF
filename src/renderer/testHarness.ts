@@ -160,6 +160,23 @@ export function registerCreatePdf(handlers: CreatePdfHandlers | null): void {
 }
 
 /**
+ * Export Pages as Images (O1): the save dialog is native — e2e injects the
+ * destination and runs the REAL gated export path the Export button runs.
+ */
+export interface ExportImagesHandlers {
+  run: (
+    out: string,
+    opts?: { format?: string; dpi?: number; pages?: string; gray?: boolean },
+  ) => Promise<unknown>;
+}
+
+let exportImages: ExportImagesHandlers | null = null;
+
+export function registerExportImages(handlers: ExportImagesHandlers | null): void {
+  exportImages = handlers;
+}
+
+/**
  * Edit ▸ Images (7.1): placements live in transformed canvas space and the
  * Replace/Extract actions pop NATIVE dialogs — both undrivable by WebDriver.
  * The canvas registers its real selection + action paths; `act`'s opts
@@ -700,6 +717,12 @@ export interface TestHarness {
   editParagraphOpen: (pageId: string, index: number) => void;
   /** Create PDF from PostScript (Phase 8; dialog must be open). */
   createPdfRun: (source: string, output: string, preset?: string) => Promise<boolean>;
+  /** Export pages as images (O1; dialog must be open). Null result = failed
+   *  (the dialog shows the error); non-null = the engine result. */
+  exportImagesRun: (
+    out: string,
+    opts?: { format?: string; dpi?: number; pages?: string; gray?: boolean },
+  ) => Promise<unknown>;
   editImagePageIds: () => string[];
   editImagePlacements: (
     pageId: string,
@@ -1289,6 +1312,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return createPdf.run(source, output, preset);
+    },
+    exportImagesRun: async (out, opts) => {
+      if (!exportImages) {
+        const msg = 'exportImagesRun: dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return exportImages.run(out, opts);
     },
     editImagePageIds: () => canvasEditImages?.pageIds() ?? [],
     editImagePlacements: (pageId) => canvasEditImages?.placements(pageId) ?? [],

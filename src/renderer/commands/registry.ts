@@ -133,6 +133,7 @@ export const COMMAND_IDS = [
   'file.exportOdt',
   'file.exportHtml',
   'file.exportXhtml',
+  'file.exportImages',
   'file.close',
   'file.closeAll',
   'edit.undo',
@@ -356,6 +357,11 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'XHTML (.xhtml)…',
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.exportDocument('xhtml'),
+  },
+  'file.exportImages': {
+    title: 'Images (PNG/JPEG/TIFF)…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.openExportImages(),
   },
   'file.close': {
     title: 'Close',

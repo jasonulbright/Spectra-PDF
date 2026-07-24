@@ -89,6 +89,8 @@ pub enum CliCommand {
     LinkAdd(LinkAddArgs),
     /// Export a PDF to Word/HTML/RTF/ODT via bundled LibreOffice
     Export(ExportArgs),
+    /// Export PDF pages as raster images (PNG/JPEG per page, or multi-page TIFF)
+    ExportImages(ExportImagesArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -382,6 +384,30 @@ pub struct ExportArgs {
     /// Target format: docx, rtf, odt, html, xhtml
     #[arg(short, long, default_value = "docx")]
     pub format: String,
+}
+
+#[derive(Args)]
+pub struct ExportImagesArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output name (png/jpeg: the per-page naming template; tiff: the one file)
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Image format: png, jpeg, tiff
+    #[arg(short, long, default_value = "png")]
+    pub format: String,
+    /// Render resolution in dpi (18-1200)
+    #[arg(long, default_value_t = 150)]
+    pub dpi: u32,
+    /// Page range like "1-3,5" (default: all pages)
+    #[arg(long, default_value = "")]
+    pub pages: String,
+    /// Render in grayscale
+    #[arg(long)]
+    pub gray: bool,
+    /// JPEG quality 1-100
+    #[arg(long, default_value_t = 90)]
+    pub quality: u32,
 }
 
 #[derive(Args)]
@@ -1456,6 +1482,23 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "soffice_path": resolve_soffice(),
             }),
         ),
+
+        CliCommand::ExportImages(args) => {
+            let gs = resolve_gs();
+            engine.call(
+                "export_images",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "fmt": args.format,
+                    "dpi": args.dpi,
+                    "pages": args.pages,
+                    "gray": args.gray,
+                    "quality": args.quality,
+                    "gs_path": gs.to_string_lossy(),
+                }),
+            )
+        }
 
         CliCommand::LinkAdd(args) => engine.call(
             "add_links",

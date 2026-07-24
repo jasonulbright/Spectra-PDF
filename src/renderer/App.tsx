@@ -72,6 +72,7 @@ import { PropertiesDialog } from './components/PropertiesDialog';
 import { PrintDialog } from './components/PrintDialog';
 import { BatchOcrDialog } from './components/BatchOcrDialog';
 import { CreatePdfDialog } from './components/CreatePdfDialog';
+import { ExportImagesDialog } from './components/ExportImagesDialog';
 import { buildBlankPagePdf } from './lib/blank-page';
 import { insertAnchor } from './state/selectors';
 import { UpdateBar } from './components/UpdateBar';
@@ -172,6 +173,7 @@ function AppContent(): React.ReactElement {
   const [showPrint, setShowPrint] = useState(false);
   const [showBatchOcr, setShowBatchOcr] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
+  const [showExportImages, setShowExportImages] = useState(false);
   // Manual "Check for Updates" (Help menu): bump a signal the UpdateBar
   // watches, so the banner surfaces the available / up-to-date / disabled state.
   const [updateCheckSignal, setUpdateCheckSignal] = useState(0);
@@ -1328,6 +1330,7 @@ function AppContent(): React.ReactElement {
     openPrint: () => setShowPrint(true),
     openBatchOcr: () => setShowBatchOcr(true),
     openCreatePdf: () => setShowCreatePdf(true),
+    openExportImages: () => setShowExportImages(true),
     insertBlankPage,
     insertPagesFromFile,
     combineFiles,
@@ -1359,6 +1362,7 @@ function AppContent(): React.ReactElement {
       openPrint: () => h.current.openPrint(),
       openBatchOcr: () => h.current.openBatchOcr(),
       openCreatePdf: () => h.current.openCreatePdf(),
+      openExportImages: () => h.current.openExportImages(),
       insertBlankPage: () => h.current.insertBlankPage(),
       insertPagesFromFile: () => h.current.insertPagesFromFile(),
       combineFiles: () => h.current.combineFiles(),
@@ -1794,6 +1798,12 @@ function AppContent(): React.ReactElement {
         <CreatePdfDialog
           onClose={() => setShowCreatePdf(false)}
           onOpenResult={(path) => openByPaths([path])}
+        />
+      )}
+      {showExportImages && activeFile && (
+        <ExportImagesDialog
+          file={{ workingPath: activeFile.workingPath, name: activeFile.name }}
+          onClose={() => setShowExportImages(false)}
         />
       )}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}

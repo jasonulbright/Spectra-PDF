@@ -120,6 +120,22 @@ export async function saveActiveAs(destPath: string): Promise<void> {
   );
 }
 
+/** O1 image export via the dialog's harness bridge (dialog must be open). */
+export async function exportImagesRun(
+  out: string,
+  opts?: { format?: string; dpi?: number; pages?: string; gray?: boolean },
+): Promise<unknown> {
+  return await browser.executeAsync<unknown, [string, object | undefined]>(
+    function (dest, options, done) {
+      (window as any).__SPECTRA_TEST__.exportImagesRun(dest, options)
+        .then((r: unknown) => done(r as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    out,
+    opts,
+  );
+}
+
 /** O1 export via the engine (bypasses the native save dialog). Returns the
  *  string '__SPECTRA_E2E_ERROR__:…' on failure so the spec can assert on it. */
 export async function exportActiveAs(destPath: string, format: string): Promise<unknown> {

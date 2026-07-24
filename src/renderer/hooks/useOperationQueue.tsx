@@ -35,6 +35,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   convert_text_run: 'Edit Text',
   print: 'Print',
   export_document: 'Export',
+  export_images: 'Export Images',
   verify_signatures: 'Verify Signatures',
   // NB: the default getFriendlyName path uses only params.file — the signing
   // password is never referenced, so it can't reach the operation log.
@@ -155,6 +156,8 @@ export function getFriendlyName(method: string, params: Record<string, unknown> 
       return `${base}: ${fileName(params.file_a)} ↔ ${fileName(params.file_b)}`;
     case 'export_document':
       return `${base} ${String(params.fmt ?? '').toUpperCase()} — ${file}`;
+    case 'export_images':
+      return `${base} ${String(params.fmt ?? '').toUpperCase()} ${params.dpi ?? ''}dpi — ${file}`;
     default:
       return file ? `${base} — ${file}` : base;
   }
