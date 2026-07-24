@@ -192,8 +192,8 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'accessibility',
     title: 'Accessibility',
-    description: 'Check the document against baseline accessibility requirements.',
-    ops: ['accessibility'],
+    description: 'Check the document, edit its structure tags, and fix the reading order.',
+    ops: ['accessibility', 'tags', 'readingorder'],
   },
   {
     id: 'comments',

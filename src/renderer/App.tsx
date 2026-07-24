@@ -36,6 +36,8 @@ import { AccessibilityPanel } from './panels/AccessibilityPanel';
 import { CommentsPanel } from './panels/CommentsPanel';
 import { PreflightPanel } from './panels/PreflightPanel';
 import { LinksPanel } from './panels/LinksPanel';
+import { TagsPanel } from './panels/TagsPanel';
+import { ReadingOrderPanel } from './panels/ReadingOrderPanel';
 import { FormsPanel } from './panels/FormsPanel';
 import { ComparePanel } from './panels/ComparePanel';
 import { SignaturesPanel } from './panels/SignaturesPanel';
@@ -142,7 +144,7 @@ const panels: Record<Operation, React.ComponentType> = {
   convert_cmyk: PrepressPanel, headerfooter: HeaderFooterPanel, pagebox: PageBoxesPanel,
   pagelabels: PageLabelsPanel, attachments: AttachmentsPanel, layers: LayersPanel,
   accessibility: AccessibilityPanel, comments: CommentsPanel, preflight: PreflightPanel,
-  links: LinksPanel,
+  links: LinksPanel, tags: TagsPanel, readingorder: ReadingOrderPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
 };
 

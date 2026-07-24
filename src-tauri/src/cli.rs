@@ -87,6 +87,16 @@ pub enum CliCommand {
     LinkDelete(LinkDeleteArgs),
     /// Create a URL link over a rectangle (PDF user space)
     LinkAdd(LinkAddArgs),
+    /// List the structure-tag tree (JSON; paths address tags for tags-*)
+    TagsList(AccessibilityArgs),
+    /// Set a tag's type / title / alt text / actual text / language
+    TagsSet(TagsSetArgs),
+    /// Move a tag: up, down, indent, outdent, or to a sibling index
+    TagsMove(TagsMoveArgs),
+    /// Delete a tag and its child tags (content stays, untagged)
+    TagsDelete(TagsDeleteArgs),
+    /// Create an empty structure tag under a parent
+    TagsAdd(TagsAddArgs),
     /// Export a PDF to Word/HTML/RTF/ODT via bundled LibreOffice
     Export(ExportArgs),
     /// Export PDF pages as raster images (PNG/JPEG per page, or multi-page TIFF)
@@ -372,6 +382,98 @@ pub struct LinkSetArgs {
     /// The URL to target
     #[arg(long)]
     pub url: String,
+}
+
+/// Tag paths are the comma-separated child indexes tags-list reports,
+/// e.g. "0,2,1". An empty string names the tree root (tags-add only).
+fn parse_tag_path(spec: &str) -> Result<Vec<u64>, String> {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    trimmed
+        .split(',')
+        .map(|part| {
+            part.trim()
+                .parse::<u64>()
+                .map_err(|_| format!("invalid tag path component '{}'", part.trim()))
+        })
+        .collect()
+}
+
+#[derive(Args)]
+pub struct TagsSetArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Tag path from tags-list, e.g. "0,2,1"
+    #[arg(long)]
+    pub path: String,
+    /// New tag type (e.g. P, H1, Figure)
+    #[arg(long = "type")]
+    pub tag_type: Option<String>,
+    /// Title (empty string clears)
+    #[arg(long)]
+    pub title: Option<String>,
+    /// Alt text (empty string clears)
+    #[arg(long)]
+    pub alt: Option<String>,
+    /// Actual text (empty string clears)
+    #[arg(long)]
+    pub actual_text: Option<String>,
+    /// Language, e.g. en-US (empty string clears)
+    #[arg(long)]
+    pub lang: Option<String>,
+}
+
+#[derive(Args)]
+pub struct TagsMoveArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Tag path from tags-list, e.g. "0,2,1"
+    #[arg(long)]
+    pub path: String,
+    /// Direction: up, down, indent, outdent, to
+    #[arg(long)]
+    pub direction: String,
+    /// Target sibling index (direction "to" only)
+    #[arg(long)]
+    pub index: Option<u64>,
+}
+
+#[derive(Args)]
+pub struct TagsDeleteArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Tag path from tags-list, e.g. "0,2,1"
+    #[arg(long)]
+    pub path: String,
+}
+
+#[derive(Args)]
+pub struct TagsAddArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Parent tag path ("" = the tree root)
+    #[arg(long, default_value = "")]
+    pub parent: String,
+    /// The new tag's type (e.g. Sect, P, Figure)
+    #[arg(long = "type")]
+    pub tag_type: String,
+    /// Child position under the parent (default: last)
+    #[arg(long)]
+    pub index: Option<u64>,
 }
 
 #[derive(Args)]
@@ -1492,6 +1594,74 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "url": args.url,
             }),
         ),
+
+        CliCommand::TagsList(args) => engine.call(
+            "get_struct_tree",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::TagsSet(args) => {
+            let mut props = serde_json::Map::new();
+            if let Some(v) = &args.tag_type {
+                props.insert("type".into(), json!(v));
+            }
+            if let Some(v) = &args.title {
+                props.insert("title".into(), json!(v));
+            }
+            if let Some(v) = &args.alt {
+                props.insert("alt".into(), json!(v));
+            }
+            if let Some(v) = &args.actual_text {
+                props.insert("actual_text".into(), json!(v));
+            }
+            if let Some(v) = &args.lang {
+                props.insert("lang".into(), json!(v));
+            }
+            engine.call(
+                "set_struct_props",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "path": parse_tag_path(&args.path)?,
+                    "props": props,
+                }),
+            )
+        }
+
+        CliCommand::TagsMove(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "path": parse_tag_path(&args.path)?,
+                "direction": args.direction,
+            });
+            if let Some(index) = args.index {
+                params["index"] = json!(index);
+            }
+            engine.call("move_struct_node", params)
+        }
+
+        CliCommand::TagsDelete(args) => engine.call(
+            "delete_struct_node",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "path": parse_tag_path(&args.path)?,
+            }),
+        ),
+
+        CliCommand::TagsAdd(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "parent_path": parse_tag_path(&args.parent)?,
+                "stype": args.tag_type,
+            });
+            if let Some(index) = args.index {
+                params["index"] = json!(index);
+            }
+            engine.call("add_struct_node", params)
+        }
 
         CliCommand::Export(args) => engine.call(
             "export_document",

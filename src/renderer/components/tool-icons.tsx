@@ -196,6 +196,21 @@ const GLYPHS: Record<Operation, React.JSX.Element> = {
       <path d="M7.5 10.5l2 2 3.5-3.5" />
     </>
   ),
+  // A luggage tag (structure tags).
+  tags: (
+    <>
+      <path d="M12.6 3h6.9a1.5 1.5 0 0 1 1.5 1.5v6.9a1.5 1.5 0 0 1-.44 1.06l-8.1 8.1a1.5 1.5 0 0 1-2.12 0l-6.9-6.9a1.5 1.5 0 0 1 0-2.12l8.1-8.1A1.5 1.5 0 0 1 12.6 3z" />
+      <circle cx="16.5" cy="7.5" r="1.3" />
+    </>
+  ),
+  // List rows with a downward flow arrow (reading order).
+  readingorder: (
+    <>
+      <path d="M9.5 5h11M9.5 12h11M9.5 19h11" />
+      <path d="M4.5 3.5v13" />
+      <path d="M2 14l2.5 2.5L7 14" />
+    </>
+  ),
   // Chain link.
   links: (
     <>

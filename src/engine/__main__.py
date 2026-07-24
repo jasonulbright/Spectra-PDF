@@ -90,6 +90,13 @@ from engine.text_paragraphs import (
 from engine.text_runs import convert_text_run, list_text_runs, replace_text_run
 from engine.printer import print_pdf
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
+from engine.struct_tree import (
+    add_struct_node,
+    delete_struct_node,
+    get_struct_tree,
+    move_struct_node,
+    set_struct_props,
+)
 
 
 def ping() -> dict:
@@ -126,6 +133,11 @@ def main() -> None:
     server.register("list_annotations", list_annotations)
     server.register("delete_all_annotations", delete_all_annotations)
     server.register("preflight", preflight)
+    server.register("get_struct_tree", get_struct_tree)
+    server.register("set_struct_props", set_struct_props)
+    server.register("move_struct_node", move_struct_node)
+    server.register("delete_struct_node", delete_struct_node)
+    server.register("add_struct_node", add_struct_node)
     server.register("list_links", list_links)
     server.register("set_link_url", set_link_url)
     server.register("delete_link", delete_link)

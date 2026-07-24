@@ -44,6 +44,10 @@ const FRIENDLY_NAMES: Record<string, string> = {
   // queue label; the .pfx password stays out of every sink.
   generate_signer: 'Create Signer',
   set_document_js: 'Edit Document JavaScript',
+  set_struct_props: 'Edit Tag',
+  move_struct_node: 'Move Tag',
+  delete_struct_node: 'Delete Tag',
+  add_struct_node: 'New Tag',
 };
 
 /** Methods that are internal lookups, not user-facing operations. */
@@ -99,6 +103,9 @@ const INTERNAL_METHODS = new Set([
   // Listing link regions to seed the Links panel — a read; set_link_url /
   // delete_link (mutations) stay gated.
   'list_links',
+  // Reading the structure tree to seed the Tags + Reading Order panels — a
+  // read; the set/move/delete/add tag mutations stay gated.
+  'get_struct_tree',
 ]);
 
 export function isTrackableMethod(method: string): boolean {

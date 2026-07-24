@@ -26,7 +26,7 @@ export const OPERATIONS = [
   'encrypt', 'decrypt',
   'extract_text', 'watermark', 'forms', 'compare', 'signatures',
   'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels', 'attachments', 'layers', 'accessibility',
-  'comments', 'preflight', 'links',
+  'comments', 'preflight', 'links', 'tags', 'readingorder',
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];
@@ -52,5 +52,7 @@ export const OPERATION_TITLES: Record<Operation, string> = {
   comments: 'Comments',
   preflight: 'Preflight',
   links: 'Links',
+  tags: 'Tags',
+  readingorder: 'Reading Order',
   repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',
 };
