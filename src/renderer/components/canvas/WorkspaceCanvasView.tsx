@@ -2958,6 +2958,8 @@ export function WorkspaceCanvasView({
       {docViewMode === 'document' && focusedDoc ? (
         <DocumentView
           onCreateLinks={createLinks}
+          pageLayout={state.ui.pageLayout}
+          twoUpCover={state.ui.twoUpCover}
           key={focusedDoc.id}
           ref={documentViewRef}
           doc={focusedDoc}

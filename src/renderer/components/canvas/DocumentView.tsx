@@ -37,6 +37,7 @@ import {
   type JumpAnchor,
 } from '../../canvas/reading-page';
 import { PageCell } from './PageCell';
+import { pagesInRow, rowCountOf, rowOfPage, type PageLayout } from '../../canvas/spread-layout';
 import { TextSelectionMenu } from './TextSelectionMenu';
 import type { PageQuads } from '../../lib/text-selection-markup';
 
@@ -68,6 +69,10 @@ export interface DocumentViewProps {
   doc: OpenDocument;
   /** Author link regions over a text selection (reading view only). */
   onCreateLinks?: (selection: PageQuads[], url: string) => Promise<void>;
+  /** Page layout (I.6): one page per row, or two-up facing spreads. */
+  pageLayout?: PageLayout;
+  /** Two-up only: show the first page alone (the book/cover convention). */
+  twoUpCover?: boolean;
   /** Rotate View's render-only quarter-turn for this file (M6.1); composed
    * with each page's own pending rotation for every display/capture read. */
   viewRotation?: 0 | 90 | 180 | 270;
@@ -179,7 +184,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   props,
   ref,
 ): React.JSX.Element {
-  const { doc, proxies, viewRotation = 0 } = props;
+  const { doc, proxies, viewRotation = 0, pageLayout = 'single', twoUpCover = false } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [zoomState, setZoom] = useState(1);
   const [scrollTop, setScrollTop] = useState(0);
@@ -215,12 +220,26 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // The widest page's rendered width AT ZOOM 1 — a property of the document, so
   // memoised on the page list. Feeds BOTH the zoom ceiling (the spacer's width
   // can blow the element cap just as its height can) and the spacer's own width.
+  // Two-up (I.6): pages tile into uniform-height ROWS — one per page in
+  // single layout (identity: every formula below reduces to the shipped
+  // math), two facing pages per row in two-up. All row↔page mapping is the
+  // pure, tested spread-layout module.
+  const rowCount = rowCountOf(pageCount, pageLayout, twoUpCover);
+  // The widest ROW's rendered width at zoom 1 (single: the widest page; two-up:
+  // the widest PAIR incl. the inner gap). Feeds the zoom ceiling AND the
+  // spacer width — both axes must see the true row extent.
   const widestAtBase = useMemo(() => {
     let w = 0;
-    for (const p of viewPages) w = Math.max(w, displayWidthAt(p, READING_BASE_HEIGHT));
+    for (let r = 0; r < rowCount; r++) {
+      const idxs = pagesInRow(r, pageLayout, twoUpCover, viewPages.length);
+      let rowW = 0;
+      for (const i of idxs) rowW += displayWidthAt(viewPages[i], READING_BASE_HEIGHT);
+      if (idxs.length > 1) rowW += PAGE_GAP * (idxs.length - 1);
+      w = Math.max(w, rowW);
+    }
     return w;
-  }, [viewPages]);
-  const zoom = clampZoom(zoomState, pageCount, widestAtBase);
+  }, [viewPages, rowCount, pageLayout, twoUpCover]);
+  const zoom = clampZoom(zoomState, rowCount, widestAtBase);
   const pageHeight = pageHeightAt(zoom);
   const gap = PAGE_GAP * zoom;
   const rowH = pageHeight + gap;
@@ -238,10 +257,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     return () => clearTimeout(t);
   }, [zoom]);
 
-  // Cumulative Y offset of each page (top of its row). Pages are uniform-height
-  // (widths vary by aspect), so offsets are a simple arithmetic series — the
-  // virtualizer needs only counts, and centerOn/current-page are O(1).
-  const contentHeight = pageCount * rowH;
+  // Cumulative Y offset of each row. Rows are uniform-height (widths vary by
+  // aspect), so offsets are a simple arithmetic series — the virtualizer needs
+  // only counts, and centerOn/current-page are O(1).
+  const contentHeight = rowCount * rowH;
 
   // The scrollable WIDTH (M4.1f). Without a real width the spacer is only as
   // wide as the pane, and a page wider than it — routine at Actual Size on
@@ -289,14 +308,31 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // Visible page range [first, last], padded by OVERSCAN — pure + tested
   // (canvas/reading-page.ts), because an unclamped `first` could exceed `last`
   // after a page-tier delete and the row loop would emit no cells at all.
+  // visibleRange/currentPageFor are pure ROW math — `pageCount` in their
+  // metrics is the row count (single layout: rows == pages, so the shipped
+  // inputs are bit-identical).
   const { first, last } = visibleRange(
-    { scrollTop, viewportH, rowH, pageHeight, pageCount, contentHeight },
+    { scrollTop, viewportH, rowH, pageHeight, pageCount: rowCount, contentHeight },
     OVERSCAN,
   );
 
   // A jump's recorded intent — see JumpAnchor's header for why scroll position
   // alone cannot answer this at the extremes.
   const jumpAnchorRef = useRef<JumpAnchor | null>(null);
+  // A page-layout switch remaps rows under a STATIONARY scrollTop — rowH and
+  // viewportH both survive it, so anchorHolds' geometry checks cannot see the
+  // change and a pre-switch anchor would keep reporting a page the pane no
+  // longer shows (review-caught HIGH: jump to 5, switch two-up → the box said
+  // "5" over pages 8-9, durably, and fitWidth sized the wrong spread). Treat a
+  // layout change exactly like a resize: drop the anchor. Render-time ref
+  // write, so it lands before the reporter effect (whose deps include the
+  // layout) re-runs and lets the view speak for itself.
+  const layoutKey = `${pageLayout}:${twoUpCover}`;
+  const prevLayoutKeyRef = useRef(layoutKey);
+  if (prevLayoutKeyRef.current !== layoutKey) {
+    prevLayoutKeyRef.current = layoutKey;
+    jumpAnchorRef.current = null;
+  }
   // The page the reader is on, mirrored for the zoom presets: Acrobat's Actual
   // Size / Fit Width act on the CURRENT page (pages in one file can differ in
   // size and rotation), and the presets are imperative-handle calls, not
@@ -310,7 +346,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   onCurrentPageChangeRef.current = onCurrentPageChange;
   useEffect(() => {
     if (!onCurrentPageChange || pageCount === 0 || viewportH === 0) return;
-    const m = { scrollTop, viewportH, rowH, pageHeight, pageCount, contentHeight };
+    // Row metrics for the geometric half; the anchor's bounds check needs the
+    // REAL page count (anchor.page is a PAGE number, which in two-up exceeds
+    // the row count for most of the document).
+    const mRows = { scrollTop, viewportH, rowH, pageHeight, pageCount: rowCount, contentHeight };
+    const mAnchor = { ...mRows, pageCount };
     // A jump wins until the user scrolls away from where it landed; then the
     // anchor is dropped and the view speaks for itself. Both halves are pure
     // (canvas/reading-page.ts) — the tie-break and the extremes are subtle
@@ -319,13 +359,17 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     // `doc.pages` is the composition guard: a page-tier edit renumbers pages
     // without remounting this view, so the anchor must re-prove that the page it
     // meant still sits in that slot.
-    if (anchorHolds(a, m, a ? doc.pages[a.page - 1]?.id : null)) {
+    if (anchorHolds(a, mAnchor, a ? doc.pages[a.page - 1]?.id : null)) {
       currentPageRef.current = a!.page;
       onCurrentPageChange(a!.page);
       return;
     }
     jumpAnchorRef.current = null;
-    const p = currentPageFor(m);
+    // Current ROW → its first page (a spread reports its leading page, the
+    // usual normalization for facing-page readers).
+    const row = currentPageFor(mRows);
+    const rowPages = pagesInRow(row - 1, pageLayout, twoUpCover, pageCount);
+    const p = rowPages.length > 0 ? rowPages[0] + 1 : 1;
     currentPageRef.current = p;
     onCurrentPageChange(p);
   }, [
@@ -333,6 +377,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     rowH,
     pageHeight,
     pageCount,
+    rowCount,
+    pageLayout,
+    twoUpCover,
     viewportH,
     contentHeight,
     doc.pages,
@@ -345,9 +392,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       const idx = doc.pages.findIndex((p) => p.id === pageId);
       const el = scrollRef.current;
       if (idx < 0 || !el) return;
-      // Center the page in the viewport when it's shorter than the pane;
+      // Center the page's ROW in the viewport when it's shorter than the pane;
       // otherwise align its top.
-      const top = idx * rowH;
+      const top = rowOfPage(idx, pageLayout, twoUpCover) * rowH;
       const offset = Math.max(0, (el.clientHeight - pageHeight) / 2);
       el.scrollTo({ top: Math.max(0, top - offset), behavior: 'auto' });
       // Record where it actually LANDED (behavior:'auto' settles scrollTop
@@ -363,7 +410,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       currentPageRef.current = idx + 1;
       onCurrentPageChangeRef.current?.(idx + 1);
     },
-    [doc.pages, rowH, pageHeight, viewportH],
+    [doc.pages, rowH, pageHeight, viewportH, pageLayout, twoUpCover],
   );
 
   // Both presets act on the CURRENT page — pages within one file can differ in
@@ -377,8 +424,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // handle's zoom calls are imperative, so they read it off a ref.
   const widestAtBaseRef = useRef(widestAtBase);
   widestAtBaseRef.current = widestAtBase;
-  const pageCountRef = useRef(pageCount);
-  pageCountRef.current = pageCount;
+  const rowCountRef = useRef(rowCount);
+  rowCountRef.current = rowCount;
+  const layoutRef = useRef({ pageLayout, twoUpCover });
+  layoutRef.current = { pageLayout, twoUpCover };
   // The steppers must step from the EFFECTIVE zoom, not the raw state: stepping
   // from a state the derivation has already clamped down would move the wrong
   // way (or not at all).
@@ -443,7 +492,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   const actualSize = useCallback(() => {
     const page = currentPage();
     if (!page) return;
-    setZoom(clampZoom(actualSizeZoom(page, READING_BASE_HEIGHT), pageCountRef.current, widestAtBaseRef.current));
+    setZoom(clampZoom(actualSizeZoom(page, READING_BASE_HEIGHT), rowCountRef.current, widestAtBaseRef.current));
   }, [currentPage]);
 
   const fitWidth = useCallback(() => {
@@ -451,11 +500,23 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     const el = scrollRef.current;
     if (!page || !el) return;
     // clientWidth already excludes a vertical scrollbar; the gutter keeps the
-    // page off the pane's edges the way Acrobat's Fit Width does.
+    // page off the pane's edges the way Acrobat's Fit Width does. In two-up the
+    // unit being fitted is the current SPREAD (both widths + the inner gap).
     const available = el.clientWidth - FIT_WIDTH_GUTTER;
-    const z = fitWidthZoom(available, displayWidthAt(page, READING_BASE_HEIGHT));
+    const { pageLayout: lay, twoUpCover: cover } = layoutRef.current;
+    const pages = pagesRef.current;
+    // Clamp like currentPage() does — after a page-tier delete the ref can
+    // briefly exceed the list; pagesInRow would answer [] (safe fallback), but
+    // fitting the page's ACTUAL row is strictly better than degrading.
+    const pageIdx = Math.min(pages.length, Math.max(1, currentPageRef.current)) - 1;
+    const row = rowOfPage(pageIdx, lay, cover);
+    const idxs = pagesInRow(row, lay, cover, pages.length);
+    let rowW = 0;
+    for (const i of idxs) rowW += displayWidthAt(pages[i], READING_BASE_HEIGHT);
+    if (idxs.length > 1) rowW += PAGE_GAP * (idxs.length - 1);
+    const z = fitWidthZoom(available, rowW > 0 ? rowW : displayWidthAt(page, READING_BASE_HEIGHT));
     if (z <= 0) return; // pane not measured yet — leave the zoom alone
-    setZoom(clampZoom(z, pageCountRef.current, widestAtBaseRef.current));
+    setZoom(clampZoom(z, rowCountRef.current, widestAtBaseRef.current));
   }, [currentPage]);
 
   useImperativeHandle(
@@ -466,9 +527,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       // browser's element-height limit and the tail of the doc would stop being
       // reachable (see maxZoomFor). That includes `reset`: a document long
       // enough that even zoom 1 overflows must not be forced back to it.
-      zoomIn: () => setZoom(clampZoom(zoomRef.current * ZOOM_STEP, pageCountRef.current, widestAtBaseRef.current)),
-      zoomOut: () => setZoom(clampZoom(zoomRef.current / ZOOM_STEP, pageCountRef.current, widestAtBaseRef.current)),
-      reset: () => setZoom(clampZoom(1, pageCountRef.current, widestAtBaseRef.current)),
+      zoomIn: () => setZoom(clampZoom(zoomRef.current * ZOOM_STEP, rowCountRef.current, widestAtBaseRef.current)),
+      zoomOut: () => setZoom(clampZoom(zoomRef.current / ZOOM_STEP, rowCountRef.current, widestAtBaseRef.current)),
+      reset: () => setZoom(clampZoom(1, rowCountRef.current, widestAtBaseRef.current)),
       actualSize,
       fitWidth,
       // The reading view has no world transform; tools resolve coordinates
@@ -484,21 +545,23 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // Rows are computed inline each render (PageCell is memo'd, so unchanged
   // cells skip re-render; the per-page overlay maps come pre-grouped from WCV).
   const rows: React.JSX.Element[] = [];
-  for (let i = first; i <= last; i++) {
-    const page = viewPages[i];
-    if (!page) continue;
-    // MUST be the same width PageCell renders (it uses the exact aspect here —
-    // `textLayer` is set below). This row is what CENTRES the page, so a
-    // divergent formula offsets it in the pane and over-reports the scrollable
-    // width — the round-2 drift, relocated one level up (review-caught).
-    const width = displayWidthAt(page, pageHeight);
-    rows.push(
-      <div
-        key={page.id}
-        className="docview-row"
-        style={{ position: 'absolute', top: i * rowH, height: pageHeight, width, left: '50%', marginLeft: -width / 2 }}
-      >
+  const innerGap = PAGE_GAP * zoom; // between facing pages of a spread
+  for (let r = first; r <= last; r++) {
+    const rowPageIdxs = pagesInRow(r, pageLayout, twoUpCover, viewPages.length);
+    if (rowPageIdxs.length === 0) continue;
+    // MUST be the same widths PageCell renders (exact aspect — `textLayer` is
+    // set below). This row is what CENTRES its content, so a divergent formula
+    // offsets it in the pane and over-reports the scrollable width — the
+    // round-2 drift, relocated one level up (review-caught). Two-up: the row
+    // width is both cells + the inner gap; cells sit flex-side-by-side inside.
+    const width =
+      rowPageIdxs.reduce((acc, i) => acc + displayWidthAt(viewPages[i], pageHeight), 0) +
+      innerGap * (rowPageIdxs.length - 1);
+    const cells = rowPageIdxs.map((i) => {
+      const page = viewPages[i];
+      return (
         <PageCell
+          key={page.id}
           docId={doc.id}
           page={page}
           viewRotation={viewRotation}
@@ -595,6 +658,25 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onSetSignaturePlacement={props.onSetSignaturePlacement}
           onClearSignaturePlacement={props.onClearSignaturePlacement}
         />
+      );
+    });
+    rows.push(
+      <div
+        key={`row-${viewPages[rowPageIdxs[0]].id}`}
+        className="docview-row"
+        style={{
+          position: 'absolute',
+          top: r * rowH,
+          height: pageHeight,
+          width,
+          left: '50%',
+          marginLeft: -width / 2,
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: innerGap,
+        }}
+      >
+        {cells}
       </div>,
     );
   }

@@ -65,6 +65,8 @@ export const initialUiState: UiState = {
   // sync, horizontal reach, e2e) — the flip is the moment the reading view
   // becomes the experience, so the completeness rule binds here at the latest.
   docViewMode: 'document',
+  pageLayout: 'single',
+  twoUpCover: true,
   focusedDocId: null,
   currentPageId: null,
   viewRotationByPath: {},
@@ -1194,6 +1196,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_DOC_VIEW_MODE':
       if (action.mode === state.ui.docViewMode) return state;
       return { ...state, ui: { ...state.ui, docViewMode: action.mode } };
+    case 'UI_SET_PAGE_LAYOUT':
+      if (action.layout === state.ui.pageLayout) return state;
+      return { ...state, ui: { ...state.ui, pageLayout: action.layout } };
+    case 'UI_TOGGLE_TWOUP_COVER':
+      return { ...state, ui: { ...state.ui, twoUpCover: !state.ui.twoUpCover } };
     case 'UI_ROTATE_VIEW': {
       // Render-only quarter-turn of the reading display (M6.1). Only real,
       // showable files can be rotated — a view state for a ghost would be

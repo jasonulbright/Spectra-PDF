@@ -156,6 +156,9 @@ export const COMMAND_IDS = [
   'view.fitWidth',
   'view.documentView',
   'view.presentation',
+  'view.singlePage',
+  'view.twoUp',
+  'view.twoUpCover',
   'view.organizeAll',
   'view.goToPage',
   'view.rotateCW',
@@ -539,6 +542,24 @@ export const COMMANDS: Record<CommandId, Command> = {
     // it opens its own full-screen surface regardless of the current mode).
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.openPresentation(),
+  },
+  // Page Display (I.6): single-page column vs two-up facing spreads, and the
+  // cover convention. Layout is a reading-view property, so they gate on the
+  // canvas exactly like Rotate View does.
+  'view.singlePage': {
+    title: 'Single Page',
+    when: inCanvas,
+    run: ({ dispatch }) => dispatch({ type: 'UI_SET_PAGE_LAYOUT', layout: 'single' }),
+  },
+  'view.twoUp': {
+    title: 'Two-Page Spread',
+    when: inCanvas,
+    run: ({ dispatch }) => dispatch({ type: 'UI_SET_PAGE_LAYOUT', layout: 'two' }),
+  },
+  'view.twoUpCover': {
+    title: 'Show Cover Page Separately',
+    when: (ctx) => inCanvas(ctx) && ctx.state.ui.pageLayout === 'two',
+    run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_TWOUP_COVER' }),
   },
   'view.organizeAll': {
     title: 'Organize All Documents',

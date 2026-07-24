@@ -205,6 +205,17 @@ export const MENUS: MenuDef[] = [
       },
       sep,
       cmd('view.documentView', 'menuitem-view-document'),
+      {
+        kind: 'submenu',
+        id: 'view-page-display',
+        label: 'Page Display',
+        items: [
+          cmd('view.singlePage', 'menuitem-view-single-page'),
+          cmd('view.twoUp', 'menuitem-view-two-up'),
+          sep,
+          cmd('view.twoUpCover', 'menuitem-view-two-up-cover'),
+        ],
+      },
       cmd('view.presentation', 'menuitem-view-presentation'),
       cmd('tools.open.organize', 'menuitem-view-organize'),
       cmd('view.organizeAll', 'menuitem-view-organize-all'),

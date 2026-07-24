@@ -214,6 +214,9 @@ export interface NavPaneState {
 // tool; `View ▸ Organize All Documents` forces the board.
 export type DocViewMode = 'document' | 'organize';
 
+// Reading-view page layout (I.6): one page per row, or two-up facing spreads.
+export type PageLayoutMode = 'single' | 'two';
+
 export const NAV_PANE_MIN_WIDTH = 180;
 export const NAV_PANE_MAX_WIDTH = 520;
 export const NAV_PANE_DEFAULT_WIDTH = 240;
@@ -234,6 +237,10 @@ export interface UiState {
   // Document-pane view mode (M4). The board and the reading view are two
   // renders of the same per-page cells (§ 6.2); commands/toolbar read this.
   docViewMode: DocViewMode;
+  // Reading-view page layout (I.6). `twoUpCover` = first page alone (the book
+  // convention); only meaningful while pageLayout === 'two'.
+  pageLayout: PageLayoutMode;
+  twoUpCover: boolean;
   // WHICH document the reading view shows (M4.1c), as an `OpenDocument.id`.
   // The board renders every doc at once, but the reading view renders exactly
   // one — and a tab addresses a FILE, while a `.pdfx` partitions one file into
@@ -364,6 +371,8 @@ export type AppAction =
   | { type: 'UI_OPEN_TOOL'; toolId: string | null }
   | { type: 'UI_SET_TOOL'; tool: CanvasTool }
   | { type: 'UI_SET_DOC_VIEW_MODE'; mode: DocViewMode }
+  | { type: 'UI_SET_PAGE_LAYOUT'; layout: PageLayoutMode }
+  | { type: 'UI_TOGGLE_TWOUP_COVER' }
   | { type: 'UI_ROTATE_VIEW'; path: string; delta: 90 | 270 }
   | { type: 'UI_FOCUS_DOC'; docId: string | null }
   | { type: 'UI_SET_CURRENT_PAGE'; pageId: string | null }

@@ -180,6 +180,181 @@ describe('reading view: a Find match in another open file (M4.1c)', () => {
   });
 });
 
+describe('two-up spread layout (I.6 page display)', () => {
+  const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
+
+  before(async () => {
+    await waitForHarness();
+    await closeAllFiles();
+    await openByPaths([SAMPLE]);
+    await browser.waitUntil(async () => (await getState()).activeFile !== null, {
+      timeoutMsg: 'sample.pdf did not open',
+    });
+    await setView('canvas');
+    await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
+  });
+
+  after(async () => {
+    // Leave the shared session in the default layout for later specs.
+    await invokeAppCommand('view.singlePage');
+  });
+
+  /** [top, left] of every mounted page cell, sorted by top then left. */
+  async function cellBoxes(): Promise<{ id: string; top: number; left: number }[]> {
+    return await browser.execute(() => {
+      const cells = Array.from(
+        document.querySelectorAll('[data-testid="document-view"] .docview-row [data-page-id]'),
+      ) as HTMLElement[];
+      return cells
+        .map((c) => {
+          const r = c.getBoundingClientRect();
+          return { id: c.dataset.pageId as string, top: Math.round(r.top), left: Math.round(r.left) };
+        })
+        .sort((a, b) => a.top - b.top || a.left - b.left);
+    });
+  }
+
+  it('two-up pairs pages side by side, cover alone (the book convention)', async () => {
+    expect(await invokeAppCommand('view.twoUp')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const boxes = await cellBoxes();
+        if (boxes.length < 3) return false;
+        // Cover row: page 1 alone (no cell sharing its top). Next row: two
+        // cells at the SAME top with DIFFERENT lefts — a real spread.
+        const tops = boxes.map((b) => b.top);
+        const coverAlone = tops.filter((t) => t === tops[0]).length === 1;
+        const second = boxes.filter((b) => b.top === boxes[1].top);
+        return coverAlone && second.length === 2 && second[0].left !== second[1].left;
+      },
+      { timeout: 10_000, timeoutMsg: 'two-up spread never laid out as cover + facing pair' },
+    );
+  });
+
+  // NOTE: runs while twoUpCover is still ON (the default) — cover-off has one
+  // row fewer, the stale scrollTop then exceeds the new max, the browser clamp
+  // moves it, and the anchor drops for the WRONG reason (geometry, not the
+  // fix), leaving the mutation invisible. Order is load-bearing.
+  it('a jump anchor does not survive a layout switch (review-caught HIGH)', async () => {
+    // Repro (reviewer's shape, needs a doc long enough that the stale page's
+    // row falls OUT of the viewport): jump to page 5 of 10 in single layout,
+    // switch to two-up without scrolling. The layout remaps rows under the
+    // unchanged scrollTop; a surviving anchor kept the box saying "5" while
+    // the pane showed pages 8-9 and page 5's cell wasn't even mounted. After
+    // the fix the box must name a page whose cell is actually on screen.
+    const tmp = mkdtempSync(resolve(tmpdir(), 'opds-e2e-anchor-'));
+    try {
+      const long = resolve(tmp, 'ten.pdf');
+      const doc10 = await PDFDocument.create();
+      for (let i = 0; i < 10; i++) doc10.addPage([612, 792]);
+      writeFileSync(long, await doc10.save());
+      await closeAllFiles();
+      await openByPaths([long]);
+      await setView('canvas');
+      await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
+      await invokeAppCommand('view.singlePage');
+      // Zoom out so the two-up SPREAD will fit the pane width. Without this the
+      // spread overflows, a horizontal scrollbar appears, clientHeight shrinks,
+      // and the anchor's viewportH check drops it BY ACCIDENT — masking the bug
+      // (the mutation check caught exactly that: the pin passed with the fix
+      // disabled). The real-world exposure is any window wide enough for the
+      // spread — this makes the pin that window.
+      await invokeAppCommand('view.zoomOut');
+      await invokeAppCommand('view.zoomOut');
+      await invokeAppCommand('view.zoomOut');
+      await browser.pause(300); // let the zoom settle before the jump records rowH
+
+      await $('[data-testid="page-nav-box"]').click();
+      await setReactInputValue('[data-testid="page-nav-box"]', '5');
+      await browser.keys(['Enter']);
+      await browser.waitUntil(
+        async () => (await $('[data-testid="page-nav-box"]').getValue()) === '5',
+        { timeout: 10_000, timeoutMsg: 'jump to page 5 never registered' },
+      );
+
+      await invokeAppCommand('view.twoUp');
+      // FIRST wait for the two-up DOM to actually land — polling before the
+      // re-render sees the old single-page frame, where the stale answer is
+      // still legitimately visible and the assertion passes vacuously (the
+      // mutation check caught exactly this race).
+      await browser.waitUntil(
+        async () =>
+          await browser.execute(() => {
+            const view = document.querySelector('[data-testid="document-view"]') as HTMLElement | null;
+            if (!view) return false;
+            const cells = Array.from(view.querySelectorAll('.docview-row [data-page-id]')) as HTMLElement[];
+            const tops = cells.map((c) => Math.round(c.getBoundingClientRect().top));
+            return tops.some((t, i) => tops.indexOf(t) !== i); // some row holds TWO cells
+          }),
+        { timeout: 10_000, timeoutMsg: 'two-up layout never rendered' },
+      );
+      // The honest post-switch readout is a page whose cell the pane actually
+      // shows. Under the bug ui.currentPageId durably stayed page 5 while page
+      // 5's cell sat far off-screen. Assert on the STATE (the anchor's actual
+      // output), not the page box — the box keeps a local draft while focused,
+      // which would mask both outcomes.
+      await browser.waitUntil(
+        async () => {
+          const currentPageId = (await getState()).currentPageId;
+          if (!currentPageId) return false;
+          return await browser.execute((id: string) => {
+            const view = document.querySelector('[data-testid="document-view"]') as HTMLElement | null;
+            if (!view) return false;
+            const vr = view.getBoundingClientRect();
+            // Match by dataset, NOT a CSS attribute selector — page ids are
+            // Windows paths and their backslashes are CSS escape characters.
+            const cell = (Array.from(view.querySelectorAll('.docview-row [data-page-id]')) as HTMLElement[])
+              .find((c) => c.dataset.pageId === id);
+            if (!cell) return false; // reported page isn't even mounted → stale
+            const r = cell.getBoundingClientRect();
+            return r.bottom > vr.top + 1 && r.top < vr.bottom - 1;
+          }, currentPageId);
+        },
+        {
+          timeout: 10_000,
+          timeoutMsg: 'after the layout switch the current page is not on screen (stale anchor)',
+        },
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+      // Restore the suite's shared fixture + default layout for later tests.
+      await invokeAppCommand('view.singlePage');
+      await closeAllFiles();
+      await openByPaths([SAMPLE]);
+      await setView('canvas');
+      await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
+    }
+  });
+
+  it('facing pairs without the cover option pair (1,2)(3,4)…', async () => {
+    // Self-sufficient: the anchor test above restores single-page layout, and
+    // the cover toggle is gated on two-up being active.
+    expect(await invokeAppCommand('view.twoUp')).toBe(true);
+    expect(await invokeAppCommand('view.twoUpCover')).toBe(true); // toggle cover OFF
+    await browser.waitUntil(
+      async () => {
+        const boxes = await cellBoxes();
+        if (boxes.length < 2) return false;
+        const firstRow = boxes.filter((b) => b.top === boxes[0].top);
+        return firstRow.length === 2; // pages 1+2 now share the first row
+      },
+      { timeout: 10_000, timeoutMsg: 'cover toggle did not re-pair the first row' },
+    );
+  });
+
+  it('single page restores the one-per-row column', async () => {
+    expect(await invokeAppCommand('view.singlePage')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const boxes = await cellBoxes();
+        const tops = new Set(boxes.map((b) => b.top));
+        return boxes.length >= 2 && tops.size === boxes.length; // every cell on its own row
+      },
+      { timeout: 10_000, timeoutMsg: 'single-page layout did not restore' },
+    );
+  });
+});
+
 describe('presentation mode (I.6 full-screen view)', () => {
   const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
