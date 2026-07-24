@@ -473,6 +473,8 @@ export interface SignParams {
   location?: string;
   // Visible-stamp placement (engine convention: 1-based page, PDF points).
   appearance?: { page: number; rect: [number, number, number, number] };
+  /** PAdES (ETSI.CAdES.detached) profile (F2/F4). */
+  pades?: boolean;
 }
 
 export interface SignSummary {

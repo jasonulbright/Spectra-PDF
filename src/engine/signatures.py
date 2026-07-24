@@ -53,6 +53,8 @@ from pathlib import Path
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields, signers
+from pyhanko.sign.fields import SigSeedSubFilter
+from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko.sign.validation import validate_pdf_signature
 from pyhanko import stamp
 from pyhanko.keys import load_certs_from_pemder_data, load_private_key_from_pemder_data
@@ -68,6 +70,47 @@ def _empty_trust_context() -> ValidationContext:
     return ValidationContext(trust_roots=[], allow_fetching=False)
 
 
+def _load_trust_roots(paths: list) -> list:
+    """Load CA certificates (PEM or DER) to act as trust anchors.
+
+    F4's trust management: the USER supplies the anchors (a company CA, a
+    public root they choose to trust). The OS store is deliberately never
+    consulted — same explicit-trust posture as _empty_trust_context, just
+    with the user's own anchors instead of none.
+    """
+    roots = []
+    for p in paths or []:
+        path = Path(str(p))
+        if not path.is_file():
+            raise ValueError(f"trust root not found: {p}")
+        certs = list(load_certs_from_pemder_data(path.read_bytes()))
+        if not certs:
+            raise ValueError(f"no certificates found in trust root: {p}")
+        roots.extend(certs)
+    return roots
+
+
+def _trust_context(trust_roots: list | None, allow_fetching: bool = False) -> ValidationContext:
+    """A validation context anchored on user-supplied roots ('' state = empty).
+
+    ``retroactive_revinfo`` matters for LTV verification: revocation data
+    embedded in the DSS was necessarily fetched BEFORE the moment of
+    validation, and without this flag fresh-signature checks reject it as
+    stale-relative-to-now.
+    """
+    return ValidationContext(
+        trust_roots=_load_trust_roots(trust_roots or []),
+        allow_fetching=allow_fetching,
+        retroactive_revinfo=True,
+    )
+
+
+def _make_timestamper(tsa_url: str):
+    """RFC 3161 client for the user's chosen TSA. A seam so tests can swap in
+    an offline timestamper without network."""
+    return HTTPTimeStamper(tsa_url)
+
+
 def _signer_name(status) -> str | None:
     cert = getattr(status, "signing_cert", None)
     if cert is None:
@@ -81,14 +124,25 @@ def _signer_name(status) -> str | None:
         return None
 
 
-def _verify_one(embedded) -> dict:
+def _subfilter_of(embedded) -> str | None:
+    try:
+        return str(embedded.sig_object.get("/SubFilter"))
+    except Exception:
+        return None
+
+
+def _verify_one(embedded, context: ValidationContext | None = None) -> dict:
     field = getattr(embedded, "field_name", None)
     ts = getattr(embedded, "self_reported_timestamp", None)
+    subfilter = _subfilter_of(embedded)
+    is_pades = subfilter == "/ETSI.CAdES.detached"
     try:
-        # Explicit empty trust context — see the module docstring for why NOT
-        # None (which would consult the OS certificate store).
+        # Explicit empty trust context by default — see the module docstring
+        # for why NOT None (which would consult the OS certificate store). A
+        # caller-supplied context carries the USER'S chosen anchors (F4).
+        ctx = context if context is not None else _empty_trust_context()
         status = validate_pdf_signature(
-            embedded, signer_validation_context=_empty_trust_context()
+            embedded, signer_validation_context=ctx, ts_validation_context=ctx
         )
     except Exception as exc:
         # A signature we can't validate at all (malformed CMS, unsupported
@@ -105,9 +159,15 @@ def _verify_one(embedded) -> dict:
             "modified_after_signing": True,
             "digest_algorithm": None,
             "signing_time": ts.isoformat() if ts is not None else None,
+            "subfilter": subfilter,
+            "pades": is_pades,
+            "timestamped": False,
+            "timestamp_time": None,
+            "timestamp_valid": False,
             "error": str(exc),
         }
     coverage = status.coverage.name if status.coverage is not None else "UNKNOWN"
+    tsv = getattr(status, "timestamp_validity", None)
     return {
         "field": field,
         "signer": _signer_name(status),
@@ -126,29 +186,57 @@ def _verify_one(embedded) -> dict:
         "digest_algorithm": status.md_algorithm,
         # Claimed by the signer, NOT cryptographically anchored to a real time.
         "signing_time": ts.isoformat() if ts is not None else None,
+        "subfilter": subfilter,
+        "pades": is_pades,
+        # An RFC 3161 timestamp token (TSA-backed time), unlike signing_time.
+        "timestamped": tsv is not None,
+        "timestamp_time": (
+            tsv.timestamp.isoformat() if tsv is not None and tsv.timestamp is not None else None
+        ),
+        "timestamp_valid": bool(tsv.valid and tsv.intact) if tsv is not None else False,
     }
 
 
-def verify_signatures(file: str) -> dict:
+def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
     """Verify every embedded signature in a PDF (read-only).
 
     Args:
         file: PDF path.
+        trust_roots: optional CA certificate files (PEM/DER) the USER trusts.
+            When given, ``trusted`` is validated against exactly these anchors
+            (never the OS store); without them it stays deterministically
+            False, the original explicit-trust posture.
     """
+    context = _trust_context(trust_roots) if trust_roots else None
     with open(file, "rb") as f:
         reader = PdfFileReader(f)
-        signatures = [_verify_one(esig) for esig in reader.embedded_signatures]
+        # Regular signatures only — a PAdES B-LTA document timestamp is a
+        # different animal (it seals the DSS, it doesn't sign content) and
+        # validate_pdf_signature would misreport it as a broken signature.
+        signatures = [_verify_one(esig, context) for esig in reader.embedded_regular_signatures]
+        doc_timestamps = len(reader.embedded_timestamp_signatures)
+        # Document Security Store (/DSS) — the PAdES B-LT container for
+        # embedded certs + revocation data. Its presence is what makes a
+        # signature verifiable long after the CA endpoints go dark.
+        try:
+            has_dss = "/DSS" in reader.root
+        except Exception:
+            has_dss = False
 
     return {
         "signed": len(signatures) > 0,
         "signature_count": len(signatures),
         "signatures": signatures,
+        "ltv_info_present": has_dss,
+        # PAdES B-LTA document timestamps sealing the file (0 = none).
+        "document_timestamps": doc_timestamps,
         "summary": {
             # Every signature is both crypto-valid AND covers intact bytes.
             "all_valid": bool(signatures) and all(s["valid"] and s["intact"] for s in signatures),
             "any_modified_after_signing": any(s["modified_after_signing"] for s in signatures),
-            # This slice never verifies signer identity against a trust store.
-            "trust_verified": False,
+            # True only when validated against user-supplied anchors.
+            "trust_verified": bool(trust_roots) and bool(signatures)
+            and all(s["trusted"] for s in signatures),
         },
     }
 
@@ -339,6 +427,11 @@ def sign_pdf(
     appearance: dict | None = None,
     existing_field: str | None = None,
     allow_in_place: bool = False,
+    pades: bool = False,
+    tsa_url: str | None = None,
+    embed_revocation: bool = False,
+    lta: bool = False,
+    trust_roots: list | None = None,
 ) -> dict:
     """Apply a digital signature (signing APPENDS an incremental revision — see
     docs/architecture/11-phase2h-signing.md and
@@ -427,7 +520,40 @@ def sign_pdf(
         # path, which targets a specific named field on purpose.
         field_name = _free_field_name(file, field_name)
 
-    meta = signers.PdfSignatureMetadata(field_name=field_name, reason=reason, location=location)
+    # ── PAdES / TSA / LTV (F2/F4) ────────────────────────────────────────
+    # B-B  = pades (ETSI.CAdES.detached subfilter)
+    # B-T  = + tsa_url (RFC 3161 timestamp from the user's chosen TSA)
+    # B-LT = + embed_revocation (certs + revocation data into the /DSS)
+    # B-LTA= + lta (a document timestamp sealing the DSS; needs the TSA)
+    # The TSA and any revocation fetching are network calls to endpoints the
+    # USER configured — inherent to the capability (Acrobat does the same),
+    # never a bundled service (DECISIONS 2026-07-24).
+    tsa_url = (tsa_url or "").strip() or None
+    if lta and not pades:
+        raise ValueError("PAdES B-LTA requires PAdES mode.")
+    if lta and not tsa_url:
+        raise ValueError("PAdES B-LTA requires a timestamp server (TSA URL).")
+    if embed_revocation and not pades:
+        raise ValueError("Embedding revocation info (LTV) requires PAdES mode.")
+    timestamper = _make_timestamper(tsa_url) if tsa_url else None
+
+    meta_kwargs: dict = {"field_name": field_name, "reason": reason, "location": location}
+    if pades:
+        meta_kwargs["subfilter"] = SigSeedSubFilter.PADES
+    if embed_revocation:
+        # Validating the signer's own chain is a precondition for gathering
+        # the revinfo that goes into the DSS. Anchors: the user's roots, or —
+        # for a self-signed signer — its own certificate.
+        anchors = _load_trust_roots(trust_roots or [])
+        if not anchors:
+            anchors = [signer.signing_cert, *signer.cert_registry]
+        meta_kwargs["embed_validation_info"] = True
+        meta_kwargs["validation_context"] = ValidationContext(
+            trust_roots=anchors, allow_fetching=True, retroactive_revinfo=True
+        )
+    if lta:
+        meta_kwargs["use_pades_lta"] = True
+    meta = signers.PdfSignatureMetadata(**meta_kwargs)
     with open(file, "rb") as inf:
         writer = IncrementalPdfFileWriter(inf)
         if existing_field is not None:
@@ -436,7 +562,8 @@ def sign_pdf(
             # silently turn into a new invisible signature. The stamp style
             # draws in the field's own widget rect (zero-size -> invisible).
             pdf_signer = signers.PdfSigner(
-                meta, signer=signer, stamp_style=_stamp_style(reason, location)
+                meta, signer=signer, stamp_style=_stamp_style(reason, location),
+                timestamper=timestamper,
             )
             signed = pdf_signer.sign_pdf(writer, existing_fields_only=True)
         elif placement is not None:
@@ -446,11 +573,12 @@ def sign_pdf(
                 sig_field_spec=fields.SigFieldSpec(field_name, on_page=page_ix, box=box),
             )
             pdf_signer = signers.PdfSigner(
-                meta, signer=signer, stamp_style=_stamp_style(reason, location)
+                meta, signer=signer, stamp_style=_stamp_style(reason, location),
+                timestamper=timestamper,
             )
             signed = pdf_signer.sign_pdf(writer)
         else:
-            signed = signers.sign_pdf(writer, meta, signer=signer)
+            signed = signers.sign_pdf(writer, meta, signer=signer, timestamper=timestamper)
     # Fail closed + atomic: write the signed bytes to a temp beside the output,
     # SELF-VERIFY the temp, and only then replace. Verifying BEFORE the replace
     # (round-42 gauntlet, HIGH) keeps the in-place case honest: a transient

@@ -149,4 +149,43 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     expect(widget!.rect[2]).toBeCloseTo(ex1, 0);
     expect(widget!.rect[3]).toBeCloseTo(ey1, 0);
   });
+
+  it('signs with the PAdES profile and the CLI verifies subfilter + user trust anchor (F2/F4)', async () => {
+    await setView('operations');
+    await setActiveOp('signatures');
+    const padesOut = resolve(tmp, 'signed-pades.pdf');
+    // The PEM pair, so the SAME certificate can serve as the trust anchor
+    // below (the .pfx fixture is a different identity).
+    const summary = await signActiveFile({
+      keyPath: TEST_PEM_KEY,
+      certPath: TEST_PEM_CERT,
+      password: '',
+      output: padesOut,
+      pades: true,
+    });
+    expect(summary.valid).toBe(true);
+    expect(summary.intact).toBe(true);
+
+    // Independent verification through the REAL CLI arm: the subfilter is
+    // ETSI.CAdES.detached, and `trusted` flips true ONLY with the signer's
+    // own cert supplied as a user trust anchor (self-signed → its own root).
+    const { execFileSync } = await import('node:child_process');
+    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'openpdfstudio.exe');
+    const bare = JSON.parse(
+      execFileSync(binary, ['verify-signatures', padesOut], { encoding: 'utf-8' }),
+    ) as { signatures: { pades: boolean; subfilter: string; trusted: boolean }[] };
+    expect(bare.signatures[0].pades).toBe(true);
+    expect(bare.signatures[0].subfilter).toBe('/ETSI.CAdES.detached');
+    expect(bare.signatures[0].trusted).toBe(false); // no anchors → deterministic false
+
+    const anchored = JSON.parse(
+      execFileSync(
+        binary,
+        ['verify-signatures', padesOut, '--trust-root', TEST_PEM_CERT],
+        { encoding: 'utf-8' },
+      ),
+    ) as { signatures: { trusted: boolean }[]; summary: { trust_verified: boolean } };
+    expect(anchored.signatures[0].trusted).toBe(true);
+    expect(anchored.summary.trust_verified).toBe(true);
+  });
 });

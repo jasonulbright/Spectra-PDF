@@ -406,6 +406,8 @@ export interface SignHandler {
     // Visible-stamp placement (2k) — engine convention: 1-based page, PDF
     // user-space rect.
     appearance?: { page: number; rect: [number, number, number, number] };
+    /** PAdES (ETSI.CAdES.detached) profile (F2/F4). */
+    pades?: boolean;
   }) => Promise<{
     output: string;
     signer: string | null;
@@ -670,6 +672,7 @@ export interface TestHarness {
     reason?: string;
     location?: string;
     appearance?: { page: number; rect: [number, number, number, number] };
+    pades?: boolean;
   }) => Promise<{
     output: string;
     signer: string | null;

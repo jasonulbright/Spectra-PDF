@@ -44,6 +44,32 @@ export function SignaturesPanel(): React.ReactElement {
   const [signing, setSigning] = useState(false);
   const [signResult, setSignResult] = useState<SignResult | null>(null);
   const [signError, setSignError] = useState<string | null>(null);
+  // PAdES / TSA / LTV (F2/F4). TSA + LTV are network calls to endpoints the
+  // USER configures — inherent to the capability, never a bundled service.
+  const [pades, setPades] = useState(false);
+  const [tsaUrl, setTsaUrl] = useState('');
+  const [ltv, setLtv] = useState(false);
+
+  // F4 trust management: user-chosen CA anchors, persisted. The OS store is
+  // deliberately never consulted (the panel's standing explicit-trust rule);
+  // these are the ONLY anchors `trusted` can chain to.
+  const [trustRoots, setTrustRoots] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('spectra.trustAnchors');
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const saveTrustRoots = useCallback((roots: string[]) => {
+    setTrustRoots(roots);
+    try {
+      localStorage.setItem('spectra.trustAnchors', JSON.stringify(roots));
+    } catch {
+      // persistence is best-effort; the session state still holds them
+    }
+  }, []);
 
   const path = activeFile?.path ?? null;
   const workingPath = activeFile?.workingPath ?? null;
@@ -54,7 +80,10 @@ export function SignaturesPanel(): React.ReactElement {
     setStatus('Verifying signatures…');
     setResult(null);
     try {
-      const res = (await call('verify_signatures', { file: workingPath })) as unknown as VerifyResult;
+      const res = (await call('verify_signatures', {
+        file: workingPath,
+        ...(trustRoots.length > 0 ? { trust_roots: trustRoots } : {}),
+      })) as unknown as VerifyResult;
       setResult(res);
       setStatus('');
     } catch (e: unknown) {
@@ -62,14 +91,14 @@ export function SignaturesPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [workingPath, call]);
+  }, [workingPath, call, trustRoots]);
 
-  // Auto-verify when the active file changes (mount + switch).
+  // Auto-verify when the active file OR the trust anchors change.
   useEffect(() => {
     if (path) void runVerify();
     else setResult(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path]);
+  }, [path, trustRoots]);
 
   // Reset the sign form when the active file changes — never carry a typed
   // password or a previous file's result across a switch.
@@ -94,6 +123,7 @@ export function SignaturesPanel(): React.ReactElement {
       rsn?: string,
       loc?: string,
       appearance?: { page: number; rect: [number, number, number, number] },
+      profile?: { pades?: boolean; tsaUrl?: string; ltv?: boolean },
     ): Promise<SignResult> => {
       if (!activeFile) throw new Error('No active file to sign.');
       return (await call('sign_pdf', {
@@ -104,9 +134,12 @@ export function SignaturesPanel(): React.ReactElement {
         ...(rsn && rsn.trim() ? { reason: rsn.trim() } : {}),
         ...(loc && loc.trim() ? { location: loc.trim() } : {}),
         ...(appearance ? { appearance } : {}),
+        ...(profile?.pades ? { pades: true } : {}),
+        ...(profile?.tsaUrl?.trim() ? { tsa_url: profile.tsaUrl.trim() } : {}),
+        ...(profile?.ltv ? { embed_revocation: true, ...(trustRoots.length > 0 ? { trust_roots: trustRoots } : {}) } : {}),
       })) as unknown as SignResult;
     },
-    [activeFile, call],
+    [activeFile, call, trustRoots],
   );
 
   // Ref, not just state: two clicks in the same tick both read a stale
@@ -132,7 +165,11 @@ export function SignaturesPanel(): React.ReactElement {
     try {
       const dest = await dialog.saveFile({ defaultPath: suggested });
       if (!dest) return; // cancelled — the finally still clears the password
-      const res = await doSign(resolved.params!, password, dest, reason, location);
+      const res = await doSign(resolved.params!, password, dest, reason, location, undefined, {
+        pades,
+        tsaUrl,
+        ltv,
+      });
       setSignResult(res);
       setShowSign(false);
     } catch (e: unknown) {
@@ -145,7 +182,7 @@ export function SignaturesPanel(): React.ReactElement {
       signingRef.current = false;
       setSigning(false);
     }
-  }, [activeFile, source, password, reason, location, doSign]);
+  }, [activeFile, source, password, reason, location, doSign, pades, tsaUrl, ltv]);
 
   // 9.F5: the core in-place sign, shared by the UI handler and the e2e harness
   // hook (the native .pfx picker is not WebDriver-drivable, exactly as doSign).
@@ -170,13 +207,16 @@ export function SignaturesPanel(): React.ReactElement {
         allow_in_place: true,
         ...(rsn && rsn.trim() ? { reason: rsn.trim() } : {}),
         ...(loc && loc.trim() ? { location: loc.trim() } : {}),
+        ...(pades ? { pades: true } : {}),
+        ...(tsaUrl.trim() ? { tsa_url: tsaUrl.trim() } : {}),
+        ...(ltv ? { embed_revocation: true, ...(trustRoots.length > 0 ? { trust_roots: trustRoots } : {}) } : {}),
       });
       // The now-signed working copy (same path, new bytes) re-verifies.
       return (await call('verify_signatures', {
         file: activeFile.workingPath,
       })) as unknown as VerifyResult;
     },
-    [activeFile, performOperation, call],
+    [activeFile, performOperation, call, pades, tsaUrl, ltv, trustRoots],
   );
 
   const signInPlaceRef = useRef(false);
@@ -231,6 +271,7 @@ export function SignaturesPanel(): React.ReactElement {
           p.reason,
           p.location,
           p.appearance,
+          p.pades ? { pades: true } : undefined,
         ),
       signInPlace: (p) =>
         doSignInPlaceRef
@@ -303,18 +344,68 @@ export function SignaturesPanel(): React.ReactElement {
               <SignatureCard key={sig.field ?? i} sig={sig} />
             ))}
           </div>
-          {/* Standing trust caveat — this slice verifies cryptography and
-              document integrity, NOT signer identity against a trust store. */}
-          <div
-            data-testid="trust-caveat"
-            className="shrink-0 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded text-xs text-amber-200/90"
-          >
-            Signer identity is <strong>not verified against a trusted authority</strong> — these
-            results confirm cryptographic validity and whether the document was changed after
-            signing, not who the signer really is.
-          </div>
+          {/* Trust posture (F4): with no anchors, identity is explicitly
+              unverified (never the OS store); with user anchors, `trusted`
+              is validated against exactly those. */}
+          {trustRoots.length === 0 ? (
+            <div
+              data-testid="trust-caveat"
+              className="shrink-0 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded text-xs text-amber-200/90"
+            >
+              Signer identity is <strong>not verified against a trusted authority</strong> — these
+              results confirm cryptographic validity and whether the document was changed after
+              signing, not who the signer really is. Add a trust anchor below to verify identity
+              against a CA you trust.
+            </div>
+          ) : (
+            <div
+              data-testid="trust-status"
+              className={`shrink-0 px-3 py-2 rounded text-xs border ${
+                result.summary.trust_verified
+                  ? 'bg-green-600/10 border-green-600/30 text-green-200/90'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-200/90'
+              }`}
+            >
+              {result.summary.trust_verified
+                ? `Signer identity verified against your ${trustRoots.length} trust anchor${trustRoots.length === 1 ? '' : 's'}.`
+                : 'The signer does not chain to any of your trust anchors.'}
+            </div>
+          )}
         </>
       )}
+
+      <div className="shrink-0 flex flex-col gap-1" data-testid="trust-anchors">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-neutral-400">Trust anchors</span>
+          <button
+            data-testid="trust-anchor-add"
+            onClick={() => {
+              void (async () => {
+                const p = await dialog.pickPemFile();
+                if (p && !trustRoots.includes(p)) saveTrustRoots([...trustRoots, p]);
+              })();
+            }}
+            className="px-2 py-0.5 text-[11px] bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded"
+          >
+            Add CA certificate…
+          </button>
+        </div>
+        {trustRoots.map((p) => (
+          <div key={p} className="flex items-center gap-2 text-xs text-neutral-500">
+            <span className="truncate" title={p}>
+              {p.split(/[\\/]/).pop()}
+            </span>
+            <button
+              data-testid="trust-anchor-remove"
+              onClick={() => saveTrustRoots(trustRoots.filter((r) => r !== p))}
+              className="text-neutral-600 hover:text-red-400"
+              aria-label={`Remove trust anchor ${p}`}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
 
       {showSign && (
         <div
@@ -361,6 +452,40 @@ export function SignaturesPanel(): React.ReactElement {
               className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
+          <label className="flex items-center gap-2 text-xs text-neutral-300">
+            <input
+              data-testid="sign-pades"
+              type="checkbox"
+              checked={pades}
+              onChange={(e) => {
+                setPades(e.target.checked);
+                if (!e.target.checked) setLtv(false);
+              }}
+            />
+            PAdES (ETSI) signature profile
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">TSA URL</span>
+            <input
+              data-testid="sign-tsa-url"
+              type="text"
+              value={tsaUrl}
+              placeholder="optional — RFC 3161 timestamp server (e.g. http://timestamp.digicert.com)"
+              onChange={(e) => setTsaUrl(e.target.value)}
+              className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <label className={`flex items-center gap-2 text-xs ${pades ? 'text-neutral-300' : 'text-neutral-600'}`}>
+            <input
+              data-testid="sign-ltv"
+              type="checkbox"
+              checked={ltv}
+              disabled={!pades}
+              onChange={(e) => setLtv(e.target.checked)}
+            />
+            Embed validation info for long-term validation (LTV — requires PAdES; fetches
+            revocation data from the certificate&apos;s own endpoints)
+          </label>
           {signError && <div className="text-xs text-red-400">{signError}</div>}
           <div className="flex justify-end gap-2">
             <button
@@ -439,7 +564,16 @@ function SignatureCard({ sig }: { sig: SignatureEntry }): React.ReactElement {
           {sig.covers_whole_document ? 'covers whole document' : 'does not cover whole document'}
         </span>
         {sig.digest_algorithm && <span>digest: {sig.digest_algorithm}</span>}
-        {sig.signing_time && <span>claimed time: {sig.signing_time}</span>}
+        {sig.pades && <span data-testid="signature-pades">PAdES</span>}
+        {sig.timestamped ? (
+          <span data-testid="signature-timestamp">
+            TSA time: {sig.timestamp_time ?? '(unreadable)'}
+            {sig.timestamp_valid ? '' : ' (timestamp not verified)'}
+          </span>
+        ) : (
+          sig.signing_time && <span>claimed time: {sig.signing_time}</span>
+        )}
+        {sig.trusted && <span data-testid="signature-trusted">identity trusted</span>}
       </div>
       {sig.error && <div className="text-xs text-red-400">error: {sig.error}</div>}
     </div>

@@ -598,6 +598,11 @@ pub struct CompareArgs {
 pub struct VerifySignaturesArgs {
     /// PDF file to verify
     pub input: PathBuf,
+    /// Trust anchor certificate file(s) (PEM/DER) the signer chain must reach
+    /// (repeatable). Without any, `trusted` is deterministically false — the
+    /// OS certificate store is never consulted.
+    #[arg(long = "trust-root")]
+    pub trust_roots: Vec<PathBuf>,
 }
 
 #[derive(Args)]
@@ -639,6 +644,21 @@ pub struct SignArgs {
     /// already-signed fields.
     #[arg(long, conflicts_with_all = ["visible_page", "visible_rect"])]
     pub existing_field: Option<String>,
+    /// Sign with the PAdES (ETSI.CAdES.detached) profile — B-B baseline
+    #[arg(long)]
+    pub pades: bool,
+    /// RFC 3161 timestamp server URL (PAdES B-T when combined with --pades)
+    #[arg(long)]
+    pub tsa_url: Option<String>,
+    /// Embed certificates + revocation info into the /DSS (PAdES B-LT; requires --pades)
+    #[arg(long, requires = "pades")]
+    pub embed_revocation: bool,
+    /// Add a PAdES B-LTA document timestamp sealing the DSS (requires --pades and --tsa-url)
+    #[arg(long, requires_all = ["pades", "tsa_url"])]
+    pub lta: bool,
+    /// Trust anchor certificate file(s) (PEM/DER) for revocation gathering (repeatable)
+    #[arg(long = "trust-root")]
+    pub trust_roots: Vec<PathBuf>,
 }
 
 #[derive(Args)]
@@ -1561,10 +1581,18 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
         }
 
-        CliCommand::VerifySignatures(args) => engine.call(
-            "verify_signatures",
-            json!({ "file": abs(&args.input).to_string_lossy() }),
-        ),
+        CliCommand::VerifySignatures(args) => {
+            let mut params = json!({ "file": abs(&args.input).to_string_lossy() });
+            if !args.trust_roots.is_empty() {
+                let roots: Vec<String> = args
+                    .trust_roots
+                    .iter()
+                    .map(|p| abs(p).to_string_lossy().to_string())
+                    .collect();
+                params["trust_roots"] = json!(roots);
+            }
+            engine.call("verify_signatures", params)
+        }
 
         CliCommand::Sign(args) => {
             // Password from --password, else read one line from stdin (so a
@@ -1624,6 +1652,26 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             // forbids combining this with the visible-stamp flags.
             if let Some(field) = &args.existing_field {
                 params["existing_field"] = json!(field);
+            }
+            if args.pades {
+                params["pades"] = json!(true);
+            }
+            if let Some(tsa) = &args.tsa_url {
+                params["tsa_url"] = json!(tsa);
+            }
+            if args.embed_revocation {
+                params["embed_revocation"] = json!(true);
+            }
+            if args.lta {
+                params["lta"] = json!(true);
+            }
+            if !args.trust_roots.is_empty() {
+                let roots: Vec<String> = args
+                    .trust_roots
+                    .iter()
+                    .map(|p| abs(p).to_string_lossy().to_string())
+                    .collect();
+                params["trust_roots"] = json!(roots);
             }
             engine.call("sign_pdf", params)
         }

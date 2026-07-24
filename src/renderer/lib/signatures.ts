@@ -16,6 +16,14 @@ export interface SignatureEntry {
   modified_after_signing: boolean;
   digest_algorithm: string | null;
   signing_time: string | null;
+  /** /SubFilter as written (e.g. '/ETSI.CAdES.detached'). */
+  subfilter?: string | null;
+  /** True for a PAdES (ETSI.CAdES.detached) signature. */
+  pades?: boolean;
+  /** RFC 3161 TSA timestamp present (TSA-backed time, unlike signing_time). */
+  timestamped?: boolean;
+  timestamp_time?: string | null;
+  timestamp_valid?: boolean;
   error?: string;
 }
 
@@ -23,6 +31,10 @@ export interface VerifyResult {
   signed: boolean;
   signature_count: number;
   signatures: SignatureEntry[];
+  /** A /DSS is present (PAdES B-LT long-term-validation material). */
+  ltv_info_present?: boolean;
+  /** PAdES B-LTA document timestamps sealing the file. */
+  document_timestamps?: number;
   summary: { all_valid: boolean; any_modified_after_signing: boolean; trust_verified: boolean };
 }
 
