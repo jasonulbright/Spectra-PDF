@@ -37,6 +37,7 @@ export type ToolId =
   | 'accessibility'
   | 'comments'
   | 'preflight'
+  | 'links'
   | 'export';
 
 export interface ToolDef {
@@ -205,6 +206,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Preflight',
     description: 'Check fonts, colour, and transparency for print production.',
     ops: ['preflight'],
+  },
+  {
+    id: 'links',
+    title: 'Links',
+    description: 'Review, retarget, or delete the document’s link regions.',
+    ops: ['links'],
   },
   {
     id: 'export',

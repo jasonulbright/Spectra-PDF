@@ -79,6 +79,12 @@ pub enum CliCommand {
     CommentsList(AccessibilityArgs),
     /// Delete all markup comments (keeps links and form fields)
     CommentsDeleteAll(CommentsDeleteArgs),
+    /// List link regions (JSON)
+    LinkList(AccessibilityArgs),
+    /// Retarget a link to a URL (by page + index from link-list)
+    LinkSet(LinkSetArgs),
+    /// Delete a link (by page + index)
+    LinkDelete(LinkDeleteArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -342,6 +348,39 @@ pub struct CommentsDeleteArgs {
     /// Output PDF file
     #[arg(short, long)]
     pub output: PathBuf,
+}
+
+#[derive(Args)]
+pub struct LinkSetArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// 1-based page
+    #[arg(long)]
+    pub page: i64,
+    /// 0-based link index on the page (from link-list)
+    #[arg(long)]
+    pub index: i64,
+    /// The URL to target
+    #[arg(long)]
+    pub url: String,
+}
+
+#[derive(Args)]
+pub struct LinkDeleteArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// 1-based page
+    #[arg(long)]
+    pub page: i64,
+    /// 0-based link index on the page
+    #[arg(long)]
+    pub index: i64,
 }
 
 #[derive(Args)]
@@ -1325,6 +1364,32 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         CliCommand::CommentsList(args) => engine.call(
             "list_annotations",
             json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::LinkList(args) => engine.call(
+            "list_links",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::LinkSet(args) => engine.call(
+            "set_link_url",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "page": args.page,
+                "index": args.index,
+                "url": args.url,
+            }),
+        ),
+
+        CliCommand::LinkDelete(args) => engine.call(
+            "delete_link",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "page": args.page,
+                "index": args.index,
+            }),
         ),
 
         CliCommand::CommentsDeleteAll(args) => engine.call(

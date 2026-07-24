@@ -94,6 +94,9 @@ const INTERNAL_METHODS = new Set([
   'list_annotations',
   // Preflight is pure print-production analysis — no mutation.
   'preflight',
+  // Listing link regions to seed the Links panel — a read; set_link_url /
+  // delete_link (mutations) stay gated.
+  'list_links',
 ]);
 
 export function isTrackableMethod(method: string): boolean {

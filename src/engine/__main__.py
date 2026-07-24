@@ -41,6 +41,7 @@ from engine.layers import list_layers, set_layer_visibility
 from engine.accessibility import check_accessibility
 from engine.annotations import delete_all_annotations, list_annotations
 from engine.preflight import preflight
+from engine.links import list_links, set_link_url, delete_link
 from engine.attachments import (
     add_attachment,
     extract_attachment,
@@ -123,6 +124,9 @@ def main() -> None:
     server.register("list_annotations", list_annotations)
     server.register("delete_all_annotations", delete_all_annotations)
     server.register("preflight", preflight)
+    server.register("list_links", list_links)
+    server.register("set_link_url", set_link_url)
+    server.register("delete_link", delete_link)
     server.register("get_metadata", get_metadata)
     server.register("set_metadata", set_metadata)
     server.register("strip_metadata", strip_metadata)

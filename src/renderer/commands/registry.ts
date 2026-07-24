@@ -262,6 +262,7 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   accessibility: [],
   comments: [],
   preflight: [],
+  links: [],
   export: [],
 };
 
