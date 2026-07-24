@@ -489,7 +489,17 @@ export interface TestHarness {
    */
   getFirstAnnotation: (
     timeoutMs?: number,
-  ) => Promise<{ docId: string; pageId: string; annotationId: string; kind: string; color: string; note?: string } | null>;
+  ) => Promise<{
+    docId: string;
+    pageId: string;
+    annotationId: string;
+    kind: string;
+    color: string;
+    note?: string;
+    /** textmarkup only: the style, and how many quads it carries. */
+    markupType?: string;
+    quadCount?: number;
+  } | null>;
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
   commitPendingEdits: () => Promise<void>;
@@ -784,6 +794,8 @@ export interface TestHarnessDeps {
     kind: string;
     color: string;
     note?: string;
+    markupType?: string;
+    quadCount?: number;
   } | null;
   dispatchAddAnnotation: (docId: string, pageId: string, annotation: TestAnnotationInput & { id: string }) => void;
   dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;

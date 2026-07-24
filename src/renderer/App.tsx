@@ -1477,7 +1477,16 @@ function AppContent(): React.ReactElement {
   };
 
   const harnessFirstAnnotationRef = useRef<
-    () => { docId: string; pageId: string; annotationId: string; kind: string; color: string; note?: string } | null
+    () => {
+      docId: string;
+      pageId: string;
+      annotationId: string;
+      kind: string;
+      color: string;
+      note?: string;
+      markupType?: string;
+      quadCount?: number;
+    } | null
   >(() => null);
   harnessFirstAnnotationRef.current = () => {
     const doc = state.workspace.documents.find((d) => d.path === state.activeFileId);
@@ -1491,6 +1500,8 @@ function AppContent(): React.ReactElement {
           kind: annotation.kind,
           color: annotation.color,
           note: annotation.note,
+          markupType: annotation.markupType,
+          quadCount: annotation.quads ? annotation.quads.length / 4 : undefined,
         }
       : null;
   };

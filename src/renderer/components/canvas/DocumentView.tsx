@@ -37,6 +37,7 @@ import {
   type JumpAnchor,
 } from '../../canvas/reading-page';
 import { PageCell } from './PageCell';
+import { TextSelectionMenu } from './TextSelectionMenu';
 
 // The continuous reading view (Phase 4 M4, § 6): one document, a single
 // vertical column of the SAME PageCells the board uses (§ 6.2 — the reuse
@@ -614,6 +615,14 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       >
         {rows}
       </div>
+      <TextSelectionMenu
+        scrollerRef={scrollRef}
+        docId={doc.id}
+        active={props.tool === 'select'}
+        viewRotation={viewRotation}
+        annotationColor={props.annotationColor}
+        onAddAnnotation={props.onAddAnnotation}
+      />
     </div>
   );
 });

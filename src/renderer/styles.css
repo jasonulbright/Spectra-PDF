@@ -2354,3 +2354,36 @@
 [data-theme="light"] .prefs-cat { color: #4b5563; }
 [data-theme="light"] .prefs-cat:hover { background: #f3f4f6; color: #111827; }
 [data-theme="light"] .prefs-cat.active { background: #0078d4; color: #ffffff; }
+
+/* Floating markup bar over a text selection (reading view, Select tool).
+   Viewport-anchored (the coordinates come from the selection's client rects),
+   centred on the selection's end and nudged clear of the caret. */
+.text-selection-menu {
+  position: fixed;
+  z-index: 40;
+  transform: translate(-50%, 8px);
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid #404040;
+  background: #1f1f1f;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.text-selection-menu button {
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1;
+  color: #e5e5e5;
+  background: transparent;
+  cursor: default;
+}
+.text-selection-menu button:hover { background: #333333; }
+.text-selection-menu button:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+
+[data-theme="light"] .text-selection-menu { border-color: #d1d5db; background: #ffffff; }
+[data-theme="light"] .text-selection-menu button { color: #111827; }
+[data-theme="light"] .text-selection-menu button:hover { background: #f3f4f6; }
