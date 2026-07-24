@@ -5,24 +5,37 @@
 #
 # Two sources, tried in order:
 #   1. A local system install (C:\Program Files\LibreOffice) — copied verbatim.
-#      This is the fast path on a dev/packaging machine that already has it.
-#   2. The official upstream Windows .msi, downloaded and extracted headlessly.
+#      This is the fast path on a dev/packaging machine that already has it
+#      (e.g. cutting a release locally: it just copies your installed copy).
+#   2. The official upstream Windows .msi — downloaded, CHECKSUM-VERIFIED, and
+#      extracted headlessly. This is what makes a CI-tag release self-sufficient:
+#      the GitHub windows-latest runner has no LibreOffice, so it falls to this
+#      path — and because a real version + hash are pinned below, it needs NO
+#      repository variable and NO manual setup. Same model as bundle-ghostscript.ps1.
 #
-# Deliberately NOT version-pinned. LibreOffice releases on its own cadence; the
-# app resolves whatever soffice.exe is vendored at run time (engine.rs /
-# cli.rs), so a pinned copy would only go stale. (Same principle as the
-# never-pin-a-webview-runtime rule — resolve, don't hardcode.)
+# NOTE on the "never pin a runtime version" rule: that rule targets BROWSER /
+# WEBVIEW runtimes (WebView2, msedgedriver, Chrome) that auto-update on an
+# external schedule. LibreOffice is a third-party vendored runtime like
+# Ghostscript, which the repo DOES pin — and the app still resolves whatever
+# soffice.exe is present at RUN time (engine.rs / cli.rs), so this download pin
+# only fixes what a fresh CI box fetches, never what the app requires.
 #
 # Run before packaging:
 #   powershell -ExecutionPolicy Bypass -File scripts\bundle-libreoffice.ps1
 
 param(
     [string]$DestDir = "$PSScriptRoot\..\resources\libreoffice",
-    # Optional explicit installer URL (else the latest-stable download page's
-    # msi is used). Kept a parameter so a packaging pipeline can pin per-release
-    # without editing the script.
-    [string]$MsiUrl = ""
+    # Pinned default so a fresh CI box (no system LibreOffice) vendors a known,
+    # integrity-checked build with zero manual setup. Override -MsiUrl (and
+    # -ExpectedSha256, or "" to skip the check) only to bump the version.
+    [string]$Version = "26.2.5",
+    [string]$MsiUrl = "",
+    [string]$ExpectedSha256 = "F15BA07BFCB0186986CF3171063506F5D207C11F8CC051BA0D135209E9E915F9"
 )
+
+if (-not $MsiUrl) {
+    $MsiUrl = "https://download.documentfoundation.org/libreoffice/stable/$Version/win/x86_64/LibreOffice_${Version}_Win_x86-64.msi"
+}
 
 $ErrorActionPreference = "Stop"
 
@@ -62,25 +75,27 @@ foreach ($r in $roots) {
     }
 }
 
-# ── 2. Upstream .msi ────────────────────────────────────────────────────────
-if (-not $MsiUrl) {
-    Write-Error @"
-No local LibreOffice install found and no -MsiUrl given.
-Either install LibreOffice (https://www.libreoffice.org/download/) and re-run,
-or pass the official Windows x86-64 .msi URL:
-  scripts\bundle-libreoffice.ps1 -MsiUrl https://download.documentfoundation.org/libreoffice/stable/<ver>/win/x86_64/LibreOffice_<ver>_Win_x86-64.msi
-"@
-    exit 1
-}
-
+# ── 2. Upstream .msi (pinned default; no manual setup needed) ────────────────
 $Work = Join-Path $env:TEMP "lo-vendor"
 Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Work | Out-Null
 $Msi = Join-Path $Work "libreoffice.msi"
 $Extract = Join-Path $Work "extract"
 
-Write-Host "Downloading $MsiUrl ..."
+Write-Host "No local LibreOffice; downloading $MsiUrl ..."
 Invoke-WebRequest -Uri $MsiUrl -OutFile $Msi
+
+# Verify the pinned checksum (skip only if explicitly cleared for a version bump).
+if ($ExpectedSha256 -and $ExpectedSha256 -ne "" -and $ExpectedSha256 -ne "PLACEHOLDER_SHA256") {
+    $actual = (Get-FileHash $Msi -Algorithm SHA256).Hash
+    if ($actual -ne $ExpectedSha256.ToUpper()) {
+        Write-Error "Checksum mismatch for LibreOffice $Version msi.`n  expected: $ExpectedSha256`n  actual:   $actual"
+        exit 1
+    }
+    Write-Host "Checksum verified."
+} elseif ($ExpectedSha256 -eq "PLACEHOLDER_SHA256") {
+    Write-Warning "No pinned SHA256 for this build — download NOT integrity-checked. Set -ExpectedSha256."
+}
 
 # Administrative install extracts the payload without touching the system.
 Write-Host "Extracting (msiexec /a) ..."

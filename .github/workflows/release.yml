@@ -52,13 +52,11 @@ jobs:
         shell: pwsh
 
       - name: Vendor LibreOffice (O1 export runtime, MPL-2.0)
-        # Copies a runner-local LibreOffice if present, else extracts the MSI at
-        # the LIBREOFFICE_MSI_URL repo variable (an official x86-64 stable .msi).
-        # The shipped app MUST carry a real runtime, so this step failing is
-        # correct — better than an installer that can't export (completeness rule).
-        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1 -MsiUrl "$env:LIBREOFFICE_MSI_URL"
-        env:
-          LIBREOFFICE_MSI_URL: ${{ vars.LIBREOFFICE_MSI_URL }}
+        # Self-sufficient: the runner has no LibreOffice, so the script downloads
+        # its PINNED, checksum-verified stable .msi (default in the script, like
+        # bundle-ghostscript.ps1). No repo variable, no manual setup. To bump the
+        # version, edit $Version/$ExpectedSha256 in the script.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
         shell: pwsh
 
       - name: Build, sign, and publish release
