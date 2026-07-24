@@ -44,6 +44,7 @@ jobs:
           mkdir -p resources/python
           mkdir -p resources/ghostscript
           mkdir -p resources/fonts
+          mkdir -p resources/libreoffice
         shell: bash
 
       - name: Check Rust compilation

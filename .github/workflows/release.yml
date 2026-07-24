@@ -51,6 +51,16 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
         shell: pwsh
 
+      - name: Vendor LibreOffice (O1 export runtime, MPL-2.0)
+        # Copies a runner-local LibreOffice if present, else extracts the MSI at
+        # the LIBREOFFICE_MSI_URL repo variable (an official x86-64 stable .msi).
+        # The shipped app MUST carry a real runtime, so this step failing is
+        # correct — better than an installer that can't export (completeness rule).
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1 -MsiUrl "$env:LIBREOFFICE_MSI_URL"
+        env:
+          LIBREOFFICE_MSI_URL: ${{ vars.LIBREOFFICE_MSI_URL }}
+        shell: pwsh
+
       - name: Build, sign, and publish release
         uses: tauri-apps/tauri-action@v0
         env:
