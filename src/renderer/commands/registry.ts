@@ -155,6 +155,7 @@ export const COMMAND_IDS = [
   'view.actualSize',
   'view.fitWidth',
   'view.documentView',
+  'view.presentation',
   'view.organizeAll',
   'view.goToPage',
   'view.rotateCW',
@@ -531,6 +532,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Document View',
     when: inCanvas,
     run: ({ dispatch }) => dispatch({ type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' }),
+  },
+  'view.presentation': {
+    title: 'Presentation (Full Screen)',
+    // Only meaningful with a document to present (reading OR organize view —
+    // it opens its own full-screen surface regardless of the current mode).
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.openPresentation(),
   },
   'view.organizeAll': {
     title: 'Organize All Documents',

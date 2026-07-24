@@ -71,6 +71,11 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 't', ctrl: true, shift: true, command: 'document.insertBlankPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
   // Go to page (§ 9.2): focus the reading view's page box.
   { key: 'n', ctrl: true, shift: true, command: 'view.goToPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  // Presentation / full-screen (F5 — the universal presentation key). MUST be
+  // 'always': F5 is the browser reload key (already in suppressBrowserDefault),
+  // so it must be prevented even when presentation is disabled (no doc open) —
+  // 'whenEnabled' would let a disabled F5 fall through and reload the whole app.
+  { key: 'f5', command: 'view.presentation', scope: 'global', editableGuard: true, preventDefault: 'always' },
   // Find next/prev (§ 9.2): F3 / Shift+F3 with the Ctrl+G aliases. Global
   // scope + 'always' so the webview's own find UI can never surface off a
   // doc tab; the commands' `when` (canvas services present) gates behavior.

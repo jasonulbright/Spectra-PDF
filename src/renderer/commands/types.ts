@@ -51,6 +51,8 @@ export interface AppCommandHandlers {
   exportDocument(format: string): Promise<void>;
   /** Open the Export Pages as Images dialog (O1, image half). */
   openExportImages(): void;
+  /** Enter full-screen presentation mode on the active document (I.6). */
+  openPresentation(): void;
   /** Close one open file, with the unsaved-changes prompt. */
   closeFile(path: string): Promise<void>;
   /** Close every open file, with the unsaved-changes prompt. */

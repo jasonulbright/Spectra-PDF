@@ -49,6 +49,8 @@ import { isDocTab, viewOf } from './state/types';
 import { showableDoc, tabFiles } from './state/selectors';
 import type { CanvasTool } from './state/types';
 import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
+import { PresentationView } from './components/canvas/PresentationView';
+import { usePdfProxies } from './hooks/usePdfProxies';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
 import { setCommitGate, runCommitGate } from './lib/commit-gate';
@@ -174,6 +176,12 @@ function AppContent(): React.ReactElement {
   const [showBatchOcr, setShowBatchOcr] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
   const [showExportImages, setShowExportImages] = useState(false);
+  // Full-screen presentation mode (I.6): a transient overlay; `startIndex`
+  // is the page to open on, resolved from the page being read.
+  const [presentation, setPresentation] = useState<{ startIndex: number } | null>(null);
+  // Own proxy map (pdfDocCache dedupes against the canvas's) so the overlay
+  // renders independently of the reading column — the SearchProvider pattern.
+  const presentationProxies = usePdfProxies(state.files);
   // Manual "Check for Updates" (Help menu): bump a signal the UpdateBar
   // watches, so the banner surfaces the available / up-to-date / disabled state.
   const [updateCheckSignal, setUpdateCheckSignal] = useState(0);
@@ -1331,6 +1339,15 @@ function AppContent(): React.ReactElement {
     openBatchOcr: () => setShowBatchOcr(true),
     openCreatePdf: () => setShowCreatePdf(true),
     openExportImages: () => setShowExportImages(true),
+    openPresentation: () => {
+      const doc = stateRef.current.workspace.documents.find(
+        (d) => d.path === stateRef.current.activeFileId,
+      );
+      if (!doc || doc.pages.length === 0) return;
+      const cur = stateRef.current.ui.currentPageId;
+      const idx = cur ? doc.pages.findIndex((pg) => pg.id === cur) : 0;
+      setPresentation({ startIndex: idx < 0 ? 0 : idx });
+    },
     insertBlankPage,
     insertPagesFromFile,
     combineFiles,
@@ -1363,6 +1380,7 @@ function AppContent(): React.ReactElement {
       openBatchOcr: () => h.current.openBatchOcr(),
       openCreatePdf: () => h.current.openCreatePdf(),
       openExportImages: () => h.current.openExportImages(),
+      openPresentation: () => h.current.openPresentation(),
       insertBlankPage: () => h.current.insertBlankPage(),
       insertPagesFromFile: () => h.current.insertPagesFromFile(),
       combineFiles: () => h.current.combineFiles(),
@@ -1806,6 +1824,21 @@ function AppContent(): React.ReactElement {
           onClose={() => setShowExportImages(false)}
         />
       )}
+      {presentation && (() => {
+        const doc = state.workspace.documents.find((d) => d.path === state.activeFileId);
+        if (!doc || doc.pages.length === 0) return null;
+        return (
+          <PresentationView
+            doc={doc}
+            proxies={presentationProxies}
+            startIndex={presentation.startIndex}
+            onExit={(landedPageId) => {
+              setPresentation(null);
+              if (landedPageId) getCanvasServices()?.openPageForReading(landedPageId);
+            }}
+          />
+        );
+      })()}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
       <ConfirmDialog
         open={confirmState !== null}

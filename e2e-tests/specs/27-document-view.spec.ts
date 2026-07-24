@@ -11,6 +11,7 @@ import {
   focusTab,
   setView,
   setReactInputValue,
+  invokeAppCommand,
 } from '../support/harness.js';
 
 /** A tiny born-digital PDF with known text — so Find has something real to hit. */
@@ -176,5 +177,60 @@ describe('reading view: a Find match in another open file (M4.1c)', () => {
     });
     // ...and it is still the reading view that is showing it.
     expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
+  });
+});
+
+describe('presentation mode (I.6 full-screen view)', () => {
+  const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
+
+  before(async () => {
+    await waitForHarness();
+    await closeAllFiles();
+    await openByPaths([SAMPLE]);
+    await browser.waitUntil(async () => (await getState()).activeFile !== null, {
+      timeoutMsg: 'sample.pdf did not open',
+    });
+    await setView('canvas');
+    // Wait for the reading view to actually mount (workspace indexed) — the
+    // command reads workspace.documents, which is populated after indexing.
+    await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
+  });
+
+  it('F5 command opens a full-screen overlay, navigates, and Escape restores', async () => {
+    const before = await getState();
+    const pages = before.activeFile?.pageCount ?? 0;
+    expect(pages).toBeGreaterThan(1);
+
+    // Enable = a document is open (the command's `when`).
+    expect(await invokeAppCommand('view.presentation')).toBe(true);
+    const overlay = $('[data-testid="presentation-view"]');
+    await overlay.waitForDisplayed({ timeout: 10_000, timeoutMsg: 'presentation overlay never appeared' });
+
+    // Counter starts at 1/N; a click (projector convention) advances it.
+    const counter = $('[data-testid="presentation-counter"]');
+    expect(await counter.getText()).toBe(`1 / ${pages}`);
+    await overlay.click();
+    await browser.waitUntil(async () => (await counter.getText()) === `2 / ${pages}`, {
+      timeout: 5_000,
+      timeoutMsg: 'a click did not advance the slide',
+    });
+
+    // The exit affordance closes it, and the app is restored underneath.
+    await $('[data-testid="presentation-exit"]').click();
+    await browser.waitUntil(async () => !(await overlay.isExisting()), {
+      timeout: 5_000,
+      timeoutMsg: 'presentation overlay did not close',
+    });
+    expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
+  });
+
+  it('is disabled with no document open', async () => {
+    await closeAllFiles();
+    await browser.waitUntil(async () => (await getState()).activeFile === null, {
+      timeoutMsg: 'files did not close',
+    });
+    // Disabled → the command does not run (no overlay).
+    expect(await invokeAppCommand('view.presentation')).toBe(false);
+    expect(await $('[data-testid="presentation-view"]').isExisting()).toBe(false);
   });
 });
