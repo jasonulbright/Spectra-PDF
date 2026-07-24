@@ -78,6 +78,18 @@ lacks a requested feature and the user asks to apply small caps or
 alternates (or authors new text with them).
 License text: https://github.com/alerque/libertinus/blob/master/OFL.txt
 
+## OCR — tesseract.js + language data
+
+- **tesseract.js** and **tesseract.js-core** — Apache-2.0 — <https://github.com/naptha/tesseract.js>
+- **Tesseract traineddata** (the `@tesseract.js-data/<lang>` packages, `4.0.0_best_int`
+  models) — **Apache-2.0** — trained models from the Tesseract OCR project
+  (<https://github.com/tesseract-ocr/tessdata>).
+
+The OCR worker, WASM cores, and the language models for all vendored recognition
+languages (P1 — see `src/renderer/ocr/languages.ts` for the list) are staged into
+the app's `public/ocr` resources by `scripts/sync-ocr-assets.mjs` and served from
+the app's own origin — fully offline, no CDN fetch ever (enterprise/air-gapped).
+
 ## Frontend / runtime libraries
 
 Bundled into the WebView2 renderer (see `package.json` for exact versions):

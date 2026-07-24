@@ -224,4 +224,33 @@ describe('find + OCR (2m)', () => {
     const text = (await extractAllText(dest)).toUpperCase();
     expect(text).toContain('INVOICE');
   });
+
+  it('offers the full vendored language set, each with its traineddata staged (P1)', async () => {
+    // The FindBar picker only mounts once a scanned page is detected — the
+    // previous test leaves scanned.pdf active with hasScanned true.
+    await ensureFindOpen();
+    const picker = $('[data-testid="find-ocr-lang"]');
+    await picker.waitForExist({ timeout: 10_000 });
+    const codes = await browser.execute(() =>
+      Array.from(
+        document.querySelectorAll('[data-testid="find-ocr-lang"] option'),
+      ).map((o) => (o as HTMLOptionElement).value),
+    );
+    // The list grew from 4 to the full vendored set — a real breadth signal,
+    // not just "> 4".
+    expect(codes.length).toBeGreaterThanOrEqual(40);
+    for (const c of ['eng', 'deu', 'jpn', 'chi_sim', 'ara', 'rus', 'kor']) {
+      expect(codes).toContain(c);
+    }
+    // Every offered language must have its traineddata staged into the built
+    // app's resources — an offered-but-unstaged language OCRs to nothing (the
+    // silent-degradation class). The renderer serves them from /ocr/lang.
+    const { readFileSync } = await import('node:fs');
+    const langDir = resolve(__dirname, '..', '..', 'public', 'ocr', 'lang');
+    for (const c of codes) {
+      // Presence + non-empty is the staging proof (gz files are ~1-20 MB).
+      const buf = readFileSync(resolve(langDir, `${c}.traineddata.gz`));
+      expect(buf.length).toBeGreaterThan(1000);
+    }
+  });
 });
