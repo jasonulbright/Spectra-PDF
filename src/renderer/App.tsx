@@ -89,6 +89,7 @@ import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
 import {
   getCanvasServices,
+  pushEscapeInterceptor,
   invokeCommand,
   registerAppCommandHandlers,
   setCommandStateSource,
@@ -1306,6 +1307,19 @@ function AppContent(): React.ReactElement {
   }, [state.files, isFileDirty, showConfirm, commitOrAbort]);
 
   // --- Command layer (Phase 4 M1/M2) ------------------------------------
+  // Reading mode's Escape exit (I.6). An interceptor, not a keymap entry —
+  // in-flight drags push their own interceptors ABOVE this one (LIFO), so Esc
+  // still cancels a drag first, then leaves reading mode on the next press.
+  const readingModeOn = state.ui.readingMode;
+  useEffect(() => {
+    if (!readingModeOn) return;
+    const pop = pushEscapeInterceptor(() => {
+      dispatch({ type: 'UI_TOGGLE_READING_MODE' });
+      return true;
+    });
+    return pop;
+  }, [readingModeOn, dispatch]);
+
   const commandHandlers: AppCommandHandlers = {
     openFiles: handleOpenFile,
     // The same open, minus the tab jump — the panels' "Open a PDF" button.
@@ -1632,7 +1646,7 @@ function AppContent(): React.ReactElement {
     <DropZone onFilesDropped={handleFilesDropped}>
     <div className="app-shell h-screen bg-neutral-900 text-neutral-100 flex flex-col overflow-hidden">
       <MenuBar />
-      <MainToolbar />
+      {!(state.ui.readingMode && isDocTab(state.ui.focusedTab)) && <MainToolbar />}
 
       <UpdateBar checkSignal={updateCheckSignal} />
 
@@ -1654,7 +1668,9 @@ function AppContent(): React.ReactElement {
         </div>
       )}
 
-      <TabStrip onCloseFile={(path) => void handleCloseFile(path)} />
+      {!(state.ui.readingMode && isDocTab(state.ui.focusedTab)) && (
+        <TabStrip onCloseFile={(path) => void handleCloseFile(path)} />
+      )}
 
       <div className="flex flex-1 overflow-hidden">
           <main className="app-content flex-1 flex flex-col overflow-hidden">
@@ -1763,8 +1779,10 @@ function AppContent(): React.ReactElement {
             )
           ) : (
             <div className="flex-1 flex flex-row overflow-hidden">
-              {/* Left navigation pane (M3) — thumbnails etc. for the active doc */}
-              <NavPane
+              {/* Left navigation pane (M3) — thumbnails etc. for the active doc.
+                  Hidden entirely in reading mode (I.6); navPane.open state is
+                  untouched underneath, so exiting restores it exactly. */}
+              {!state.ui.readingMode && <NavPane
                 activeFile={activeFile ?? null}
                 onOpenPage={(_docId, pageId) =>
                   // READ the page (M6.2) — the reading pane replaced the
@@ -1775,7 +1793,7 @@ function AppContent(): React.ReactElement {
                   getCanvasServices()?.openPageForReading(pageId)
                 }
                 onExtractText={handleExtractFromCanvas}
-              />
+              />}
               <div className="flex-1 flex flex-col relative overflow-hidden">
                 <WorkspaceCanvasView
                   onOpenFiles={() => void handleOpenFile()}

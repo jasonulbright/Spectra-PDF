@@ -71,6 +71,10 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 't', ctrl: true, shift: true, command: 'document.insertBlankPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
   // Go to page (§ 9.2): focus the reading view's page box.
   { key: 'n', ctrl: true, shift: true, command: 'view.goToPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  // Reading mode (Ctrl+H — Acrobat's binding). 'always': Ctrl+H is a browser
+  // accelerator (history) already in the suppress list; a disabled press must
+  // still never reach the webview.
+  { key: 'h', ctrl: true, shift: false, command: 'view.readingMode', scope: 'global', editableGuard: true, preventDefault: 'always' },
   // Presentation / full-screen (F5 — the universal presentation key). MUST be
   // 'always': F5 is the browser reload key (already in suppressBrowserDefault),
   // so it must be prevented even when presentation is disabled (no doc open) —

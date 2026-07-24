@@ -355,6 +355,51 @@ describe('two-up spread layout (I.6 page display)', () => {
   });
 });
 
+describe('reading mode (I.6 chrome collapse)', () => {
+  const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
+
+  before(async () => {
+    await waitForHarness();
+    await closeAllFiles();
+    await openByPaths([SAMPLE]);
+    await setView('canvas');
+    await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
+  });
+
+  it('Ctrl+H collapses the chrome and Esc restores it', async () => {
+    // Chrome present before.
+    expect(await $('[data-testid="tab-strip"]').isExisting()).toBe(true);
+
+    expect(await invokeAppCommand('view.readingMode')).toBe(true);
+    await browser.waitUntil(
+      async () => !(await $('[data-testid="tab-strip"]').isExisting()),
+      { timeout: 5_000, timeoutMsg: 'reading mode did not hide the tab strip' },
+    );
+    // The document itself is still there — the mode collapses chrome, not content.
+    expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
+
+    // Escape leaves reading mode and the chrome returns.
+    await browser.keys(['Escape']);
+    await browser.waitUntil(
+      async () => await $('[data-testid="tab-strip"]').isExisting(),
+      { timeout: 5_000, timeoutMsg: 'Escape did not restore the chrome' },
+    );
+  });
+
+  it('leaving the doc tab clears reading mode (Home keeps its chrome)', async () => {
+    expect(await invokeAppCommand('view.readingMode')).toBe(true);
+    await browser.waitUntil(
+      async () => !(await $('[data-testid="tab-strip"]').isExisting()),
+      { timeout: 5_000, timeoutMsg: 'reading mode did not engage' },
+    );
+    await focusTab('home');
+    await browser.waitUntil(
+      async () => await $('[data-testid="tab-strip"]').isExisting(),
+      { timeout: 5_000, timeoutMsg: 'Home tab lost its chrome — reading mode leaked off the doc tab' },
+    );
+  });
+});
+
 describe('presentation mode (I.6 full-screen view)', () => {
   const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 

@@ -241,6 +241,10 @@ export interface UiState {
   // convention); only meaningful while pageLayout === 'two'.
   pageLayout: PageLayoutMode;
   twoUpCover: boolean;
+  // Reading mode (I.6): collapse the app chrome (toolbar, tab strip, nav pane)
+  // around the document. Menu bar stays (the discoverable exit); Esc/Ctrl+H
+  // leave; leaving the doc tab clears it (chrome must exist on Home/Tools).
+  readingMode: boolean;
   // WHICH document the reading view shows (M4.1c), as an `OpenDocument.id`.
   // The board renders every doc at once, but the reading view renders exactly
   // one — and a tab addresses a FILE, while a `.pdfx` partitions one file into
@@ -373,6 +377,7 @@ export type AppAction =
   | { type: 'UI_SET_DOC_VIEW_MODE'; mode: DocViewMode }
   | { type: 'UI_SET_PAGE_LAYOUT'; layout: PageLayoutMode }
   | { type: 'UI_TOGGLE_TWOUP_COVER' }
+  | { type: 'UI_TOGGLE_READING_MODE' }
   | { type: 'UI_ROTATE_VIEW'; path: string; delta: 90 | 270 }
   | { type: 'UI_FOCUS_DOC'; docId: string | null }
   | { type: 'UI_SET_CURRENT_PAGE'; pageId: string | null }

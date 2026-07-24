@@ -67,6 +67,7 @@ export const initialUiState: UiState = {
   docViewMode: 'document',
   pageLayout: 'single',
   twoUpCover: true,
+  readingMode: false,
   focusedDocId: null,
   currentPageId: null,
   viewRotationByPath: {},
@@ -111,6 +112,8 @@ function focusTab(state: AppState, tab: FocusedTab): AppState {
           tool: 'select',
           selectedPageIds: NO_SELECTION,
           selectionAnchor: null,
+          // Reading mode is doc-tab chrome state; Home/Tools need their chrome.
+          readingMode: false,
         }
       : { ...state.ui, focusedTab: tab, focusedDocId: null, currentPageId: null },
   };
@@ -1201,6 +1204,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, ui: { ...state.ui, pageLayout: action.layout } };
     case 'UI_TOGGLE_TWOUP_COVER':
       return { ...state, ui: { ...state.ui, twoUpCover: !state.ui.twoUpCover } };
+    case 'UI_TOGGLE_READING_MODE':
+      return { ...state, ui: { ...state.ui, readingMode: !state.ui.readingMode } };
     case 'UI_ROTATE_VIEW': {
       // Render-only quarter-turn of the reading display (M6.1). Only real,
       // showable files can be rotated — a view state for a ghost would be

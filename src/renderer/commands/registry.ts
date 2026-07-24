@@ -156,6 +156,7 @@ export const COMMAND_IDS = [
   'view.fitWidth',
   'view.documentView',
   'view.presentation',
+  'view.readingMode',
   'view.singlePage',
   'view.twoUp',
   'view.twoUpCover',
@@ -542,6 +543,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     // it opens its own full-screen surface regardless of the current mode).
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.openPresentation(),
+  },
+  // Reading mode (I.6): collapse the chrome around the document. Doc tabs
+  // only — Home/Tools NEED their chrome, and leaving the doc tab clears it.
+  'view.readingMode': {
+    title: 'Reading Mode',
+    when: inCanvas,
+    run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_READING_MODE' }),
   },
   // Page Display (I.6): single-page column vs two-up facing spreads, and the
   // cover convention. Layout is a reading-view property, so they gate on the
