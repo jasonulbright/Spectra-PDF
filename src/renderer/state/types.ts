@@ -245,6 +245,10 @@ export interface UiState {
   // around the document. Menu bar stays (the discoverable exit); Esc/Ctrl+H
   // leave; leaving the doc tab clears it (chrome must exist on Home/Tools).
   readingMode: boolean;
+  // Properties bar (I.6, Acrobat's Ctrl+E): a contextual strip under the
+  // secondary toolbar showing the selected annotation's properties (or the
+  // armed comment tool's defaults). Session-scoped like navPane.open.
+  propertiesBar: boolean;
   // WHICH document the reading view shows (M4.1c), as an `OpenDocument.id`.
   // The board renders every doc at once, but the reading view renders exactly
   // one — and a tab addresses a FILE, while a `.pdfx` partitions one file into
@@ -395,4 +399,5 @@ export type AppAction =
   // panel closes); toggle open/closed; resize.
   | { type: 'UI_OPEN_NAV_PANEL'; panel: NavPanelId }
   | { type: 'UI_TOGGLE_NAV_PANE' }
+  | { type: 'UI_TOGGLE_PROPERTIES_BAR' }
   | { type: 'UI_SET_NAV_PANE_WIDTH'; width: number };

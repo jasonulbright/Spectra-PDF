@@ -75,6 +75,9 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   // accelerator (history) already in the suppress list; a disabled press must
   // still never reach the webview.
   { key: 'h', ctrl: true, shift: false, command: 'view.readingMode', scope: 'global', editableGuard: true, preventDefault: 'always' },
+  // Acrobat's Properties Bar toggle. Not a browser accelerator, but 'always'
+  // keeps the pair with Ctrl+H/Ctrl+E semantics predictable on doc tabs.
+  { key: 'e', ctrl: true, shift: false, command: 'view.propertiesBar', scope: 'global', editableGuard: true, preventDefault: 'always' },
   // Presentation / full-screen (F5 — the universal presentation key). MUST be
   // 'always': F5 is the browser reload key (already in suppressBrowserDefault),
   // so it must be prevented even when presentation is disabled (no doc open) —

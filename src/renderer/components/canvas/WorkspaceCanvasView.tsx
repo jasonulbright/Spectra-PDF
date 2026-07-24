@@ -41,7 +41,7 @@ import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
 import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
-import { invokeCommand, registerCanvasServices } from '../../commands/context';
+import { invokeCommand, registerCanvasServices, pushEscapeInterceptor } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
@@ -54,6 +54,7 @@ import type { CanvasHandle } from '../../canvas/canvas-handle';
 import type { PageAnnotation, PdfBuffer } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { SecondaryToolbar } from './SecondaryToolbar';
+import { PropertiesBar } from './PropertiesBar';
 import { CommentSidebar } from './CommentSidebar';
 
 interface WorkspaceCanvasViewProps {
@@ -376,6 +377,15 @@ export function WorkspaceCanvasView({
   const [toolColor, setToolColor] = useState<string | null>(null);
   const [stampPreset, setStampPreset] = useState<StampPreset | null>(null);
   const [showComments, setShowComments] = useState(false);
+  // Click-selected annotation (Select tool) — the properties bar's subject.
+  // Transient view state like redaction marks: resolved against the live
+  // workspace every render, cleared the moment it stops resolving (commit
+  // bakes annotations and empties page.annotations, so no staleness class).
+  const [selectedAnnot, setSelectedAnnot] = useState<{
+    docId: string;
+    pageId: string;
+    annotationId: string;
+  } | null>(null);
   // Pending redaction marks — transient view state, deliberately NOT the
   // page-edit tier (see lib/redaction.ts for why). They survive tool
   // switches and in-memory page edits, and die when their file's buffer
@@ -1037,6 +1047,55 @@ export function WorkspaceCanvasView({
       dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId }),
     [dispatch],
   );
+
+  const onSelectAnnotation = useCallback(
+    (docId: string, pageId: string, annotationId: string | null) =>
+      setSelectedAnnot(annotationId === null ? null : { docId, pageId, annotationId }),
+    [],
+  );
+
+  // The selection resolved against the LIVE workspace — the annotation's data
+  // always comes from here, never from a captured copy, so recolors show
+  // instantly and a vanished target (commit, undo, page delete, doc close)
+  // yields null.
+  const resolvedAnnot = useMemo(() => {
+    if (!selectedAnnot) return null;
+    for (const d of docs) {
+      if (d.id !== selectedAnnot.docId) continue;
+      for (let i = 0; i < d.pages.length; i++) {
+        const p = d.pages[i];
+        if (p.id !== selectedAnnot.pageId) continue;
+        const annotation = (p.annotations ?? []).find((a) => a.id === selectedAnnot.annotationId);
+        if (!annotation) return null;
+        return {
+          docId: d.id,
+          pageId: p.id,
+          pageNumber: i + 1,
+          annotation,
+          pageWidth: p.width,
+          pageHeight: p.height,
+        };
+      }
+      return null;
+    }
+    return null;
+  }, [selectedAnnot, docs]);
+
+  // Drop the stored ids once they stop resolving, so a dead selection can't
+  // linger and rebind (the transient-view-state discipline).
+  useEffect(() => {
+    if (selectedAnnot && !resolvedAnnot) setSelectedAnnot(null);
+  }, [selectedAnnot, resolvedAnnot]);
+
+  // Escape clears the selection first (LIFO — registered while one exists, so
+  // an in-flight drag's own interceptor still wins over this one).
+  useEffect(() => {
+    if (!selectedAnnot) return;
+    return pushEscapeInterceptor(() => {
+      setSelectedAnnot(null);
+      return true;
+    });
+  }, [selectedAnnot]);
 
   // Marks whose page still exists in the workspace — a deleted page's marks
   // drop out of the count and the apply payload rather than being guessed at.
@@ -2955,6 +3014,17 @@ export function WorkspaceCanvasView({
             handleOpenParagraphEditor(editSel.pageId, editSel.index);
         }}
       />
+      {state.ui.propertiesBar && (
+        <PropertiesBar
+          selected={resolvedAnnot}
+          tool={tool}
+          toolColor={toolColor}
+          onSetToolColor={setToolColor}
+          onRecolor={onRecolorAnnotation}
+          onRemove={onRemoveAnnotation}
+          onClose={() => dispatch({ type: 'UI_TOGGLE_PROPERTIES_BAR' })}
+        />
+      )}
       {docViewMode === 'document' && focusedDoc ? (
         <DocumentView
           onCreateLinks={createLinks}
@@ -3024,6 +3094,8 @@ export function WorkspaceCanvasView({
           onUpdateAnnotation={onUpdateAnnotation}
           onRecolorAnnotation={onRecolorAnnotation}
           onRemoveAnnotation={onRemoveAnnotation}
+          selectedAnnotationId={selectedAnnot?.annotationId ?? null}
+          onSelectAnnotation={onSelectAnnotation}
           onAddRedactionMark={onAddRedactionMark}
           onRemoveRedactionMark={onRemoveRedactionMark}
           onSetSignaturePlacement={onSetSignaturePlacement}
@@ -3118,6 +3190,8 @@ export function WorkspaceCanvasView({
           onUpdateAnnotation={onUpdateAnnotation}
           onRecolorAnnotation={onRecolorAnnotation}
           onRemoveAnnotation={onRemoveAnnotation}
+          selectedAnnotationId={selectedAnnot?.annotationId ?? null}
+          onSelectAnnotation={onSelectAnnotation}
           onAddRedactionMark={onAddRedactionMark}
           onRemoveRedactionMark={onRemoveRedactionMark}
           onSetSignaturePlacement={onSetSignaturePlacement}

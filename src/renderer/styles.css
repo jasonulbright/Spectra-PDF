@@ -2255,6 +2255,89 @@
   background: #1f1f1f;
   flex-shrink: 0;
 }
+
+/* Properties bar (I.6, Ctrl+E) — the strip under the secondary toolbar. */
+.properties-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 4px 10px;
+  border-bottom: 1px solid #2e2e2e;
+  background: #1b1b1b;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.properties-bar-kind {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim, #8a8a92);
+}
+.properties-bar-meta,
+.properties-bar-empty {
+  font-size: 11px;
+  color: var(--text-dim, #8a8a92);
+}
+.properties-bar-note {
+  font-size: 11px;
+  color: #c9c9cf;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.properties-bar-swatches {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.properties-bar-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  padding: 0;
+}
+.properties-bar-swatch.active {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 1px;
+}
+.properties-bar-action {
+  font-size: 11px;
+  color: #c9c9cf;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.properties-bar-action:hover {
+  background: #333;
+  color: #f87171;
+}
+.properties-bar-close {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--text-dim, #8a8a92);
+  cursor: pointer;
+  border-radius: 3px;
+}
+.properties-bar-close:hover {
+  background: #2e2e2e;
+  color: #fff;
+}
+
+/* Click-selected annotation (Select tool) — the properties bar's target. */
+.page-annot-selected {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 1px;
+}
 .secondary-toolbar-title {
   font-size: 11px;
   font-weight: 600;

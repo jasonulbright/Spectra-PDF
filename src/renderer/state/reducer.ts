@@ -68,6 +68,7 @@ export const initialUiState: UiState = {
   pageLayout: 'single',
   twoUpCover: true,
   readingMode: false,
+  propertiesBar: false,
   focusedDocId: null,
   currentPageId: null,
   viewRotationByPath: {},
@@ -1206,6 +1207,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, ui: { ...state.ui, twoUpCover: !state.ui.twoUpCover } };
     case 'UI_TOGGLE_READING_MODE':
       return { ...state, ui: { ...state.ui, readingMode: !state.ui.readingMode } };
+    case 'UI_TOGGLE_PROPERTIES_BAR':
+      return { ...state, ui: { ...state.ui, propertiesBar: !state.ui.propertiesBar } };
     case 'UI_ROTATE_VIEW': {
       // Render-only quarter-turn of the reading display (M6.1). Only real,
       // showable files can be rotated — a view state for a ghost would be

@@ -515,6 +515,10 @@ interface PageCellProps {
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
+  // Click-selection for the properties bar (I.6). Select tool only — armed
+  // modes keep their band/stroke gestures untouched. null clears.
+  selectedAnnotationId: string | null;
+  onSelectAnnotation: (docId: string, pageId: string, annotationId: string | null) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -710,6 +714,8 @@ function PageCellImpl({
   onUpdateAnnotation,
   onRecolorAnnotation,
   onRemoveAnnotation,
+  selectedAnnotationId,
+  onSelectAnnotation,
   onAddRedactionMark,
   onRemoveRedactionMark,
   onSetSignaturePlacement,
@@ -977,6 +983,9 @@ function PageCellImpl({
       }
       onClick={(e) => {
         e.stopPropagation();
+        // A click that reached the cell (not an annotation — those stop
+        // propagation in select mode) clears the annotation selection.
+        if (tool === 'select') onSelectAnnotation(docId, page.id, null);
         onSelectPage(docId, page.id, e);
       }}
       onDoubleClick={(e) => {
@@ -1056,12 +1065,14 @@ function PageCellImpl({
         return (
         <div
           key={a.id}
+          data-annot-id={a.id}
           className={
             'page-annot' +
             (a.kind === 'freetext' ? ' page-annot-text' : '') +
             (a.kind === 'ink' ? ' page-annot-ink' : '') +
             (a.kind === 'textmarkup' ? ' page-annot-ink' : '') + // SVG body, no default border
-            (a.kind === 'stamp' ? ' page-annot-stamp' : '')
+            (a.kind === 'stamp' ? ' page-annot-stamp' : '') +
+            (a.id === selectedAnnotationId ? ' page-annot-selected' : '')
           }
           title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'textmarkup' || a.kind === 'note' ? a.note : undefined}
           style={{
@@ -1080,9 +1091,25 @@ function PageCellImpl({
                     : a.kind === 'stamp'
                       ? { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
                       : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
-            ...(a.kind === 'freetext' && tool === 'select' ? { pointerEvents: 'auto' } : {}),
+            // Select tool: every annotation body is clickable (the properties
+            // bar's selection gesture — an object on top of the page, Acrobat's
+            // model). Other modes keep pointer-events: none, so bands, strokes
+            // and page pickup behave exactly as before.
+            ...(tool === 'select' ? { pointerEvents: 'auto' } : {}),
           }}
-          onPointerDown={a.kind === 'freetext' ? (e) => e.stopPropagation() : undefined}
+          onPointerDown={
+            tool === 'select' || a.kind === 'freetext' ? (e) => e.stopPropagation() : undefined
+          }
+          onClick={
+            tool === 'select'
+              ? (e) => {
+                  // Keep the click off the cell root — it would clear this
+                  // selection (and select the page) the instant it bubbled.
+                  e.stopPropagation();
+                  onSelectAnnotation(docId, page.id, a.id);
+                }
+              : undefined
+          }
           onDoubleClick={
             a.kind === 'freetext'
               ? (e) => {

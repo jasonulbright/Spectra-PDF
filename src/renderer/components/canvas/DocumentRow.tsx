@@ -109,6 +109,9 @@ interface DocumentRowProps {
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
+  // Click-selection for the properties bar (I.6). null clears.
+  selectedAnnotationId: string | null;
+  onSelectAnnotation: (docId: string, pageId: string, annotationId: string | null) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -185,6 +188,8 @@ function DocumentRowImpl({
   onUpdateAnnotation,
   onRecolorAnnotation,
   onRemoveAnnotation,
+  selectedAnnotationId,
+  onSelectAnnotation,
   onAddRedactionMark,
   onRemoveRedactionMark,
   onSetSignaturePlacement,
@@ -289,6 +294,8 @@ function DocumentRowImpl({
         onUpdateAnnotation={onUpdateAnnotation}
         onRecolorAnnotation={onRecolorAnnotation}
         onRemoveAnnotation={onRemoveAnnotation}
+        selectedAnnotationId={selectedAnnotationId}
+        onSelectAnnotation={onSelectAnnotation}
         onAddRedactionMark={onAddRedactionMark}
         onRemoveRedactionMark={onRemoveRedactionMark}
         onSetSignaturePlacement={onSetSignaturePlacement}
