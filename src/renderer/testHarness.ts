@@ -435,6 +435,9 @@ export interface TestHarness {
   openByPaths: (paths: string[]) => Promise<void>;
   /** Save the active working copy to a known destination, no dialog. */
   saveActiveAs: (destPath: string) => Promise<void>;
+  /** O1: export the active document to `destPath` in `format` via the engine
+   *  (bypasses the native save dialog). Returns the engine result. */
+  exportActiveAs: (destPath: string, format: string) => Promise<unknown>;
   /** Switch the main view (legacy — maps onto the tab model: welcome→Home,
    * operations→Tools, canvas→the active/first document's tab). */
   setView: (view: 'welcome' | 'operations' | 'canvas') => void;
@@ -803,6 +806,8 @@ export interface TestHarnessDeps {
   commitPendingEdits: () => Promise<void>;
   closeAllFiles: () => void;
   importPagesIntoDoc: (filePath: string, toDocId: string, toIndex: number) => Promise<void>;
+  /** O1 export via the engine, with an explicit destination (no dialog). */
+  exportActiveDocument: (destPath: string, format: string) => Promise<unknown>;
 }
 
 export const TEST_HARNESS_ENABLED =
@@ -898,6 +903,20 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         await file.saveAs(snap.activeFile.workingPath, destPath);
       } catch (err) {
         captureError('saveActiveAs', err);
+        throw err;
+      }
+    },
+    exportActiveAs: async (destPath, format) => {
+      const snap = deps.getStateSnapshot();
+      if (!snap.activeFile) {
+        const msg = 'exportActiveAs: no active file';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await deps.exportActiveDocument(destPath, format);
+      } catch (err) {
+        captureError('exportActiveAs', err);
         throw err;
       }
     },

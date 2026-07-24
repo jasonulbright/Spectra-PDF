@@ -167,6 +167,9 @@ export interface PrinterList {
 
 export const app = {
   getGsPath: () => invoke<string>('get_gs_path'),
+  /** The bundled (or system-fallback) LibreOffice soffice path for O1 export.
+   *  '' when none is found — the engine then refuses with a clear message. */
+  getSofficePath: () => invoke<string>('get_soffice_path'),
   /** The bundled Edit-tool fallback font (7.4; resources/fonts). */
   getEditFontPath: () => invoke<string>('get_edit_font_path'),
   /** Installed Windows printers + the default (the Print dialog's picker). */

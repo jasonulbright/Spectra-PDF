@@ -128,6 +128,11 @@ export const COMMAND_IDS = [
   'tools.close',
   'file.save',
   'file.saveAs',
+  'file.exportWord',
+  'file.exportRtf',
+  'file.exportOdt',
+  'file.exportHtml',
+  'file.exportXhtml',
   'file.close',
   'file.closeAll',
   'edit.undo',
@@ -322,6 +327,35 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Save As…',
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.saveAs(),
+  },
+  // O1 export (bundled LibreOffice). Same enablement as Save As — an active
+  // document. LibreOffice availability is handled engine-side: a missing
+  // runtime surfaces as a clear operation-queue error, not a disabled menu, so
+  // the capability is discoverable rather than silently absent.
+  'file.exportWord': {
+    title: 'Word (.docx)…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.exportDocument('docx'),
+  },
+  'file.exportRtf': {
+    title: 'Rich Text (.rtf)…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.exportDocument('rtf'),
+  },
+  'file.exportOdt': {
+    title: 'OpenDocument (.odt)…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.exportDocument('odt'),
+  },
+  'file.exportHtml': {
+    title: 'Web Page (.html)…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.exportDocument('html'),
+  },
+  'file.exportXhtml': {
+    title: 'XHTML (.xhtml)…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.exportDocument('xhtml'),
   },
   'file.close': {
     title: 'Close',

@@ -45,6 +45,10 @@ export interface AppCommandHandlers {
   save(): Promise<void>;
   /** Save active file via the native save dialog (commit-gated). */
   saveAs(): Promise<void>;
+  /** Export the active document to an editable Office / web format (O1) via
+   * bundled LibreOffice — docx/rtf/odt/html/xhtml. Commit-gated (the export
+   * reflects pending page edits); writes a NEW external file. */
+  exportDocument(format: string): Promise<void>;
   /** Close one open file, with the unsaved-changes prompt. */
   closeFile(path: string): Promise<void>;
   /** Close every open file, with the unsaved-changes prompt. */

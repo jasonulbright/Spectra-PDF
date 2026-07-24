@@ -120,6 +120,20 @@ export async function saveActiveAs(destPath: string): Promise<void> {
   );
 }
 
+/** O1 export via the engine (bypasses the native save dialog). Returns the
+ *  string '__SPECTRA_E2E_ERROR__:…' on failure so the spec can assert on it. */
+export async function exportActiveAs(destPath: string, format: string): Promise<unknown> {
+  return await browser.executeAsync<unknown, [string, string]>(
+    function (dest, fmt, done) {
+      (window as any).__SPECTRA_TEST__.exportActiveAs(dest, fmt)
+        .then((r: unknown) => done(r as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    destPath,
+    format,
+  );
+}
+
 export async function consumeLastError(): Promise<string | null> {
   return await browser.execute<string | null, []>(function () {
     return (window as any).__SPECTRA_TEST__.consumeLastError();

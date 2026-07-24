@@ -42,6 +42,7 @@ from engine.accessibility import check_accessibility
 from engine.annotations import delete_all_annotations, list_annotations
 from engine.preflight import preflight
 from engine.links import list_links, set_link_url, delete_link, add_links
+from engine.office_export import export_document, supported_formats
 from engine.attachments import (
     add_attachment,
     extract_attachment,
@@ -128,6 +129,8 @@ def main() -> None:
     server.register("set_link_url", set_link_url)
     server.register("delete_link", delete_link)
     server.register("add_links", add_links)
+    server.register("export_document", export_document)
+    server.register("supported_export_formats", supported_formats)
     server.register("get_metadata", get_metadata)
     server.register("set_metadata", set_metadata)
     server.register("strip_metadata", strip_metadata)

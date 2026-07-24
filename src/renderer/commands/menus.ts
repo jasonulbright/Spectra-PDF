@@ -122,8 +122,17 @@ export const MENUS: MenuDef[] = [
         id: 'file-export',
         label: 'Export',
         // "Text…" is the extract-text pane — the same op the Document menu
-        // reaches; § 9.1 lists both entry points.
-        items: [cmd('tools.panel.extract_text', 'menuitem-file-export-text')],
+        // reaches; § 9.1 lists both entry points. The rest are O1's editable
+        // exports (bundled LibreOffice).
+        items: [
+          cmd('tools.panel.extract_text', 'menuitem-file-export-text'),
+          sep,
+          cmd('file.exportWord', 'menuitem-file-export-word'),
+          cmd('file.exportRtf', 'menuitem-file-export-rtf'),
+          cmd('file.exportOdt', 'menuitem-file-export-odt'),
+          cmd('file.exportHtml', 'menuitem-file-export-html'),
+          cmd('file.exportXhtml', 'menuitem-file-export-xhtml'),
+        ],
       },
       sep,
       cmd('file.print', 'menuitem-file-print'),

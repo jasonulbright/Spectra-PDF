@@ -26,6 +26,7 @@
     "resources": {
       "../resources/python": "python",
       "../resources/ghostscript": "ghostscript",
+      "../resources/libreoffice": "libreoffice",
       "../resources/fonts": "fonts",
       "../src/engine": "engine"
     },

@@ -1222,6 +1222,25 @@ function AppContent(): React.ReactElement {
     dispatch({ type: 'MARK_SAVED', path: activeFile.path });
   }, [activeFile, saveFile, dispatch, commitOrAbort]);
 
+  // O1: export the active document to an editable Office / web format via the
+  // bundled LibreOffice. The engine `call` is commit-gated, so pending page
+  // edits flush first and the export reflects what the user sees; the output is
+  // a NEW external file (never the workspace copy), so there's no reload/undo
+  // entry — like Save As, it produces a file and leaves the document as-is.
+  const handleExportDocument = useCallback(
+    async (format: string) => {
+      if (!activeFile) return;
+      const soffice_path = await app.getSofficePath();
+      const base = activeFile.name.replace(/\.pdf$/i, '');
+      const dest = await saveFile(`${base}.${format === 'xhtml' ? 'xhtml' : format}`);
+      if (!dest) return;
+      // The queue surfaces success and any LibreOffice failure (missing runtime,
+      // a corrupt PDF it can't import) — same channel as every whole-file op.
+      await call('export_document', { file: activeFile.workingPath, output: dest, fmt: format, soffice_path });
+    },
+    [activeFile, saveFile, call],
+  );
+
   // Close file with unsaved changes prompt
   const handleCloseFile = useCallback(async (filePath: string) => {
     const f = state.files.get(filePath);
@@ -1298,6 +1317,7 @@ function AppContent(): React.ReactElement {
     },
     save: handleSave,
     saveAs: handleSaveAs,
+    exportDocument: handleExportDocument,
     closeFile: handleCloseFile,
     closeAll: handleCloseAll,
     undo: handleUndo,
@@ -1328,6 +1348,7 @@ function AppContent(): React.ReactElement {
       openPathAtPage: (path, pageNumber) => h.current.openPathAtPage(path, pageNumber),
       save: () => h.current.save(),
       saveAs: () => h.current.saveAs(),
+      exportDocument: (format) => h.current.exportDocument(format),
       closeFile: (path) => h.current.closeFile(path),
       closeAll: () => h.current.closeAll(),
       undo: () => h.current.undo(),
@@ -1564,8 +1585,16 @@ function AppContent(): React.ReactElement {
       },
       importPagesIntoDoc: (filePath, toDocId, toIndex) =>
         importFilesIntoDoc([filePath], toDocId, toIndex),
+      exportActiveDocument: async (destPath, format) => {
+        const af = stateRef.current.activeFileId
+          ? stateRef.current.files.get(stateRef.current.activeFileId)
+          : null;
+        if (!af) throw new Error('exportActiveDocument: no active file');
+        const soffice_path = await app.getSofficePath();
+        return call('export_document', { file: af.workingPath, output: destPath, fmt: format, soffice_path });
+      },
     });
-  }, [openByPaths, dispatch, importFilesIntoDoc, harnessSetView, setActiveOp]);
+  }, [openByPaths, dispatch, importFilesIntoDoc, harnessSetView, setActiveOp, call]);
 
   // Notify harness subscribers on every state-relevant change.
   useEffect(() => {

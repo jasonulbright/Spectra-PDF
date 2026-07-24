@@ -56,6 +56,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   openPathAtPage: vi.fn(async () => {}),
   save: vi.fn(async () => {}),
   saveAs: vi.fn(async () => {}),
+  exportDocument: vi.fn(async () => {}),
   closeFile: vi.fn(async () => {}),
   closeAll: vi.fn(async () => {}),
   undo: vi.fn(async () => {}),

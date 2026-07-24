@@ -70,3 +70,7 @@ docs/PUNCHLIST.md
 docs/architecture/
 docs/reviews/
 *.local.*
+
+# LibreOffice runtime for O1 export (assembled by scripts/bundle-libreoffice.ps1;
+# large, gitignored like resources/python & resources/ghostscript).
+resources/libreoffice/

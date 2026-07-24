@@ -95,6 +95,7 @@ pub fn run() {
             commands::restore_snapshot,
             commands::save_as,
             commands::get_gs_path,
+            commands::get_soffice_path,
             commands::get_edit_font_path,
             commands::list_printers,
             commands::canonicalize_paths,

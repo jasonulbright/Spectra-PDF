@@ -87,6 +87,8 @@ pub enum CliCommand {
     LinkDelete(LinkDeleteArgs),
     /// Create a URL link over a rectangle (PDF user space)
     LinkAdd(LinkAddArgs),
+    /// Export a PDF to Word/HTML/RTF/ODT via bundled LibreOffice
+    Export(ExportArgs),
     /// Compare the text of two PDFs (JSON diff report)
     Compare(CompareArgs),
     /// Verify the digital signatures in a PDF (JSON report; read-only)
@@ -368,6 +370,18 @@ pub struct LinkSetArgs {
     /// The URL to target
     #[arg(long)]
     pub url: String,
+}
+
+#[derive(Args)]
+pub struct ExportArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output file (extension should match the format)
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Target format: docx, rtf, odt, html, xhtml
+    #[arg(short, long, default_value = "docx")]
+    pub format: String,
 }
 
 #[derive(Args)]
@@ -837,6 +851,37 @@ fn resolve_gs() -> PathBuf {
 /// then refused, never crashed.
 fn resolve_fonts() -> PathBuf {
     exe_dir().join("fonts")
+}
+
+/// LibreOffice's `soffice` for O1 export. Prefers the vendored copy
+/// (resources/libreoffice) and falls back to a standard system install — the
+/// runtime is large and assembled by a setup script (gitignored like the gs /
+/// python runtimes), so a dev machine without the bundle still exports against
+/// an installed LibreOffice. Returns "" when none is found; the engine then
+/// refuses the export with a clear message rather than crashing.
+fn resolve_soffice() -> String {
+    let bundled = exe_dir().join("libreoffice").join("program").join("soffice.exe");
+    if bundled.is_file() {
+        return bundled.to_string_lossy().to_string();
+    }
+    soffice_system_fallback()
+}
+
+/// Probe the standard LibreOffice install locations. Shared by the CLI and the
+/// GUI resolver so both agree on where a system install lives.
+pub fn soffice_system_fallback() -> String {
+    for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Ok(base) = std::env::var(var) {
+            let cand = PathBuf::from(base)
+                .join("LibreOffice")
+                .join("program")
+                .join("soffice.exe");
+            if cand.is_file() {
+                return cand.to_string_lossy().to_string();
+            }
+        }
+    }
+    String::new()
 }
 
 // ── Engine communication ────────────────────────────────────────────────────
@@ -1399,6 +1444,16 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "page": args.page,
                 "index": args.index,
                 "url": args.url,
+            }),
+        ),
+
+        CliCommand::Export(args) => engine.call(
+            "export_document",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "fmt": args.format,
+                "soffice_path": resolve_soffice(),
             }),
         ),
 

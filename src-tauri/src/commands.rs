@@ -498,6 +498,11 @@ pub async fn get_gs_path(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub async fn get_soffice_path(app: AppHandle) -> Result<String, String> {
+    Ok(engine::get_soffice_path(&app))
+}
+
+#[tauri::command]
 pub async fn get_edit_font_path(app: AppHandle) -> Result<String, String> {
     Ok(engine::get_edit_font_path(&app))
 }

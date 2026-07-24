@@ -51,3 +51,30 @@ def gs_path():
     if not os.path.isfile(GS_PATH):
         pytest.skip("Ghostscript not available")
     return GS_PATH
+
+
+def _resolve_soffice():
+    """Bundled LibreOffice first (resources/libreoffice), else a system install."""
+    bundled = os.path.join(
+        os.path.dirname(__file__), "..", "resources", "libreoffice",
+        "program", "soffice.exe",
+    )
+    if os.path.isfile(bundled):
+        return bundled
+    for base in (
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+    ):
+        cand = os.path.join(base, "LibreOffice", "program", "soffice.exe")
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
+@pytest.fixture
+def soffice_path():
+    """Path to LibreOffice's soffice (bundled or system); skip if unavailable."""
+    p = _resolve_soffice()
+    if not p:
+        pytest.skip("LibreOffice not available")
+    return p

@@ -21,6 +21,23 @@ program (mere aggregation), the two may be distributed together. Ghostscript
 remains under the AGPL-3.0; its complete corresponding source is available at the
 link above.
 
+## LibreOffice
+
+- **Version:** current stable (unmodified upstream; not version-pinned — the
+  bundling script vendors whatever stable release it downloads)
+- **License:** Mozilla Public License v2.0 (MPL-2.0)
+- **Role:** Invoked by Open PDF Studio as a separate process (`soffice
+  --headless`, no linking) to export a PDF to editable Word (.docx), RTF, ODT,
+  HTML, and XHTML (the O1 export feature).
+- **Binary source:** <https://www.libreoffice.org/download/download/>
+- **Corresponding source:** <https://www.libreoffice.org/about-us/source-code/>
+- **License text shipped at:** `resources/libreoffice/LICENSE` (from the
+  upstream install; the bundling script copies it in)
+
+LibreOffice is invoked as an independent program (mere aggregation), so the two
+may be distributed together. LibreOffice remains under the MPL-2.0; its complete
+corresponding source is available at the link above.
+
 ## Embedded Python runtime
 
 - **CPython 3.14.5** — Python Software Foundation License (PSF) — <https://www.python.org/>

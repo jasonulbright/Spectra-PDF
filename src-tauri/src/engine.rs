@@ -73,6 +73,24 @@ pub fn get_edit_font_path(app: &AppHandle) -> String {
         .to_string()
 }
 
+/// Resolves LibreOffice's `soffice` for O1 export. Prefers the vendored copy
+/// (resources/libreoffice, assembled by a setup script and gitignored like the
+/// gs / python runtimes) and falls back to a standard system install, so a dev
+/// build without the bundle still exports. "" when none is found — the engine
+/// then refuses the export with a clear message rather than crashing.
+pub fn get_soffice_path(app: &AppHandle) -> String {
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir
+            .join("libreoffice")
+            .join("program")
+            .join("soffice.exe");
+        if bundled.is_file() {
+            return bundled.to_string_lossy().to_string();
+        }
+    }
+    crate::cli::soffice_system_fallback()
+}
+
 /// Starts the Python engine sidecar and wires stdout to the webview.
 /// Idempotent — if the engine is already running, returns immediately.
 pub async fn start(app: &AppHandle) -> Result<(), String> {
