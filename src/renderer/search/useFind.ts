@@ -37,7 +37,7 @@ export interface Find {
 }
 
 export function useFind(
-  search: (query: string, options?: SearchOptions) => SearchResult,
+  search: (query: string, options?: SearchOptions) => Promise<SearchResult>,
   version: number,
   docs: OpenDocument[],
   onNavigate: (pageId: string) => void,
@@ -65,25 +65,41 @@ export function useFind(
       setCurrent(-1);
       return;
     }
+    // A superseded run must never land: the scan is async (regex mode round-
+    // trips to the worker), so a fast retype can resolve out of order.
+    let alive = true;
     const timer = setTimeout(() => {
-      setResult(search(query, options));
-      setMatchedQuery(query);
-      setMatchedOptions(options);
-      setCurrent(-1);
+      void search(query, options).then((next) => {
+        if (!alive) return;
+        setResult(next);
+        setMatchedQuery(query);
+        setMatchedOptions(options);
+        setCurrent(-1);
+      });
     }, DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
   }, [active, query, options, search]);
 
   // Re-run when the index grows (OCR results landing) without resetting the
   // user's navigation position.
   useEffect(() => {
     if (!active) return;
+    let alive = true;
     const timer = setTimeout(() => {
-      setResult(search(query, options));
-      setMatchedQuery(query);
-      setMatchedOptions(options);
+      void search(query, options).then((next) => {
+        if (!alive) return;
+        setResult(next);
+        setMatchedQuery(query);
+        setMatchedOptions(options);
+      });
     }, DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);
 

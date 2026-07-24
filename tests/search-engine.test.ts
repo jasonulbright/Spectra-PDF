@@ -30,6 +30,9 @@ import {
   countMatches,
   firstMatch,
 } from '../src/renderer/search/normalize';
+import { runCorpusSearch } from '../src/renderer/search/search-core';
+import { REGEX_TIMEOUT_MS } from '../src/renderer/search/search-worker-client';
+import type { SearchWorkerLike, SearchWorkerRequest } from '../src/renderer/search/search-protocol';
 import { buildOcrApplyPayload } from '../src/renderer/lib/ocr-apply';
 import { displayRectToPdf } from '../src/renderer/lib/pdfx-build';
 import type { OpenDocument, PageRef } from '../src/renderer/state/types';
@@ -201,7 +204,7 @@ describe('search engine', () => {
     const { engine } = build(docsRef);
     engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
     await flush();
-    const r = engine.search('total');
+    const r = await engine.search('total');
     expect(r.pages).toBe(1);
     expect(r.pageIds.has('C:/a.pdf#p0')).toBe(true);
     expect(r.occurrences).toBe(1);
@@ -218,17 +221,17 @@ describe('search engine', () => {
     await flush();
 
     // Case-sensitive: only the exact-case "Cat" (not "cats"/"CAT"/"concatenate").
-    expect(engine.search('Cat', { caseSensitive: true }).occurrences).toBe(1);
+    expect((await engine.search('Cat', { caseSensitive: true })).occurrences).toBe(1);
     // Case-insensitive default: Cat, cats, CAT, concatenate → 4 substring hits.
-    expect(engine.search('cat').occurrences).toBe(4);
+    expect((await engine.search('cat')).occurrences).toBe(4);
     // Whole-word: "Cat", "cats"? no — "cats" isn't the word "cat". Only "Cat"/"CAT".
-    expect(engine.search('cat', { wholeWord: true }).occurrences).toBe(2);
+    expect((await engine.search('cat', { wholeWord: true })).occurrences).toBe(2);
     // Regex: a 4-digit run.
-    const rx = engine.search('\\d{4}', { regex: true });
+    const rx = await engine.search('\\d{4}', { regex: true });
     expect(rx.occurrences).toBe(1);
     expect(rx.pageIds.has('C:/a.pdf#p0')).toBe(true);
     // Invalid regex surfaces an error instead of throwing.
-    const bad = engine.search('inv(', { regex: true });
+    const bad = await engine.search('inv(', { regex: true });
     expect(bad.error).toBeTruthy();
     expect(bad.pages).toBe(0);
   });
@@ -242,11 +245,11 @@ describe('search engine', () => {
     const { engine } = build(docsRef);
     engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
     await flush();
-    const snips = engine.snippetsFor('invoice');
+    const snips = await engine.snippetsFor('invoice');
     expect(snips.size).toBe(1);
     expect(snips.get('C:/a.pdf#p0')).toContain('invoice'); // case-preserving (P4); fixture is lowercase here
     expect(snips.has('C:/a.pdf#p1')).toBe(false); // no match → absent
-    expect(engine.snippetsFor('   ').size).toBe(0); // empty query → empty
+    expect((await engine.snippetsFor('   ')).size).toBe(0); // empty query → empty
   });
 
   it('snippetsFor ellipsizes when the match is deep inside long text', async () => {
@@ -257,7 +260,7 @@ describe('search engine', () => {
     const { engine } = build(docsRef);
     engine.reconcile(docsRef.current, proxiesFor('C:/b.pdf'));
     await flush();
-    const snip = engine.snippetsFor('secret').get('C:/b.pdf#p0');
+    const snip = (await engine.snippetsFor('secret')).get('C:/b.pdf#p0');
     expect(snip).toBeDefined();
     expect(snip!.startsWith('…')).toBe(true);
     expect(snip!.endsWith('…')).toBe(true);
@@ -278,10 +281,10 @@ describe('search engine', () => {
     engine.reconcile(docsRef.current, proxiesFor('C:/scan.pdf'));
     await flush();
     expect(recognizeMock).toHaveBeenCalledTimes(1);
-    expect(engine.search('invoice').pages).toBe(0);
+    expect((await engine.search('invoice')).pages).toBe(0);
     resolveOcr!({ text: 'Scanned INVOICE text', words: [{ text: 'INVOICE', x: 0.1, y: 0.1, w: 0.2, h: 0.05 }] });
     await flush();
-    expect(engine.search('invoice').pages).toBe(1);
+    expect((await engine.search('invoice')).pages).toBe(1);
     const key = sourceKeyOf(doc.pages[0]);
     expect(engine.getOcrWords(key)?.[0].text).toBe('INVOICE');
     expect(engine.ocrReadySources()).toEqual([key]);
@@ -314,7 +317,7 @@ describe('search engine', () => {
     await flush();
 
     // The stale words are discarded — not searchable, not ready to persist.
-    expect(engine.search('secret').pages).toBe(0);
+    expect((await engine.search('secret')).pages).toBe(0);
     expect(engine.getOcrWords(key)).toBeUndefined();
     expect(engine.ocrReadySources()).toEqual([]);
   });
@@ -326,15 +329,15 @@ describe('search engine', () => {
     const { engine } = build(docsRef);
     engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
     await flush();
-    expect(engine.search('first').pages).toBe(1);
+    expect((await engine.search('first')).pages).toBe(1);
 
     engine.invalidatePath('C:/a.pdf');
-    expect(engine.search('first').pages).toBe(0); // stale text dropped
+    expect((await engine.search('first')).pages).toBe(0); // stale text dropped
     extractMock.mockResolvedValue({ text: 'second version', needsOcr: false });
     engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
     await flush();
-    expect(engine.search('second').pages).toBe(1);
-    expect(engine.search('first').pages).toBe(0);
+    expect((await engine.search('second')).pages).toBe(1);
+    expect((await engine.search('first')).pages).toBe(0);
   });
 
   it('a moved page keeps its cached text (source-keyed cache)', async () => {
@@ -352,7 +355,139 @@ describe('search engine', () => {
     engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
     await flush();
     expect(extractMock).toHaveBeenCalledTimes(1); // no re-extraction
-    expect(engine.search('cached').pages).toBe(1);
+    expect((await engine.search('cached')).pages).toBe(1);
+  });
+});
+
+describe('regex search runs off the render thread (ReDoS hardening)', () => {
+  // A fake worker standing in for search.worker.ts. `answer` decides what (if
+  // anything) comes back — a worker that never answers is the pathological
+  // backtrack this hardening exists for.
+  function fakeWorker(answer: 'sync' | 'never') {
+    const sent: SearchWorkerRequest[] = [];
+    const corpus = new Map<string, string>();
+    let terminated = 0;
+    const w: SearchWorkerLike = {
+      onmessage: null,
+      postMessage(message) {
+        sent.push(message);
+        if (message.type === 'seed') {
+          corpus.clear();
+          for (const [id, text] of message.entries) corpus.set(id, text);
+          return;
+        }
+        if (answer === 'never') return;
+        // The worker's own body, run inline: same core the render thread uses.
+        const { hits, error } = runCorpusSearch(corpus, message.query, message.options);
+        w.onmessage?.({ data: { type: 'result', id: message.id, hits, error } });
+      },
+      terminate() {
+        terminated++;
+      },
+    };
+    return {
+      worker: w,
+      sent,
+      seeds: () => sent.filter((m) => m.type === 'seed').length,
+      terminations: () => terminated,
+    };
+  }
+
+  async function indexed(answer: 'sync' | 'never', text = 'Invoice 2024 total aaaaaaaaaa') {
+    const doc = makeDoc('d1', 'C:/a.pdf', [pageRef('C:/a.pdf', 0)]);
+    const docsRef = { current: [doc] };
+    extractMock.mockReset();
+    extractMock.mockResolvedValue({ text, needsOcr: false });
+    const fake = fakeWorker(answer);
+    const engine = createSearchEngine({
+      onChange: vi.fn(),
+      onProgress: vi.fn(),
+      getDocs: () => docsRef.current,
+      createSearchWorker: () => fake.worker,
+    });
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    await flush();
+    return { engine, fake, docsRef };
+  }
+
+  it('sends regex queries to the worker and maps the hits back', async () => {
+    const { engine, fake } = await indexed('sync');
+    const r = await engine.search('\\d{4}', { regex: true });
+    expect(r.pages).toBe(1);
+    expect(r.occurrences).toBe(1);
+    expect(fake.sent.some((m) => m.type === 'search')).toBe(true);
+  });
+
+  it('LITERAL queries never reach the worker (the sync path is unchanged)', async () => {
+    const { engine, fake } = await indexed('sync');
+    expect((await engine.search('invoice')).pages).toBe(1);
+    expect((await engine.search('total', { caseSensitive: false, wholeWord: true })).pages).toBe(1);
+    expect(fake.sent).toEqual([]);
+  });
+
+  it('seeds the corpus once, and again only after the index changes', async () => {
+    const { engine, fake, docsRef } = await indexed('sync');
+    await engine.search('total', { regex: true });
+    await engine.search('invoice', { regex: true });
+    expect(fake.seeds()).toBe(1); // corpus unchanged between the two queries
+
+    engine.invalidatePath('C:/a.pdf'); // bytes changed under the index
+    extractMock.mockResolvedValue({ text: 'replacement text', needsOcr: false });
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    await flush();
+    expect((await engine.search('replacement', { regex: true })).pages).toBe(1);
+    expect(fake.seeds()).toBe(2);
+  });
+
+  it('kills the worker when a scan blows the time budget, and re-seeds the next one', async () => {
+    const { engine, fake } = await indexed('never');
+    vi.useFakeTimers();
+    try {
+      const pending = engine.search('(a+)+$', { regex: true });
+      await vi.advanceTimersByTimeAsync(REGEX_TIMEOUT_MS);
+      const r = await pending;
+      expect(r.errorKind).toBe('timeout');
+      expect(r.error).toBeTruthy();
+      expect(r.pages).toBe(0);
+      expect(fake.terminations()).toBe(1); // terminate is the ONLY way to stop it
+    } finally {
+      vi.useRealTimers();
+    }
+    // The replacement worker starts empty — it must be re-seeded, or every
+    // later regex search would silently report zero hits. (The seed posts
+    // synchronously; this fake never answers, so don't await the scan.)
+    const next = engine.search('total', { regex: true });
+    expect(fake.seeds()).toBe(2);
+    engine.dispose(); // drops the pending time budget
+    void next.catch(() => undefined);
+  });
+
+  it('falls back to a synchronous scan when no worker can be created', async () => {
+    const doc = makeDoc('d1', 'C:/a.pdf', [pageRef('C:/a.pdf', 0)]);
+    const docsRef = { current: [doc] };
+    extractMock.mockReset();
+    extractMock.mockResolvedValue({ text: 'Invoice 2024', needsOcr: false });
+    const engine = createSearchEngine({
+      onChange: vi.fn(),
+      onProgress: vi.fn(),
+      getDocs: () => docsRef.current,
+      createSearchWorker: () => null,
+    });
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    await flush();
+    expect((await engine.search('\\d{4}', { regex: true })).occurrences).toBe(1);
+  });
+
+  it('runCorpusSearch reports counts and first-match snippets in one pass', () => {
+    const corpus = new Map([
+      ['p0', 'total and total again'],
+      ['p1', 'nothing'],
+    ]);
+    const { hits, error } = runCorpusSearch(corpus, 'total', {});
+    expect(error).toBeNull();
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ pageId: 'p0', count: 2 });
+    expect(hits[0].snippet).toContain('total');
   });
 });
 

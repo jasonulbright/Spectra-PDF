@@ -16,8 +16,9 @@ export type { SearchOptions } from './normalize';
 export { sourceKeyOf } from './engine';
 
 export interface SearchIndex {
-  search: (query: string, options?: SearchOptions) => SearchResult;
-  snippetsFor: (query: string, options?: SearchOptions) => Map<string, string>;
+  /** Async: regex-mode scans run in a time-budgeted worker (see engine.ts). */
+  search: (query: string, options?: SearchOptions) => Promise<SearchResult>;
+  snippetsFor: (query: string, options?: SearchOptions) => Promise<Map<string, string>>;
   version: number;
   ocrRemaining: number;
   hasScanned: boolean;

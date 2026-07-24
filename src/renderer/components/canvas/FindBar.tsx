@@ -30,7 +30,7 @@ interface FindBarProps {
 
 function countLabel(query: string, result: SearchResult): string {
   if (query.trim().length === 0) return '';
-  if (result.error) return 'Invalid pattern';
+  if (result.error) return result.errorKind === 'timeout' ? 'Pattern too slow' : 'Invalid pattern';
   if (result.pages === 0) return 'No results';
   const occ = result.occurrences;
   return `${occ} match${occ === 1 ? '' : 'es'} on ${result.pages} page${result.pages === 1 ? '' : 's'}`;

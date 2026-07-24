@@ -92,6 +92,8 @@ describe('find + OCR (2m)', () => {
     // "cat" appears as: Cat, cats, CAT, concatenate  → 4 substring hits;
     // 2 case-sensitive ("cats","concatenate"); 2 whole-word ("Cat","CAT").
     page.drawText('Cat cats CAT concatenate 2024', { x: 30, y: 200, size: 14, font });
+    // A long run of one letter, for the catastrophic-backtracking leg below.
+    page.drawText('a'.repeat(40), { x: 30, y: 160, size: 14, font });
     writeFileSync(p, await doc.save());
 
     await waitForHarness();
@@ -128,6 +130,45 @@ describe('find + OCR (2m)', () => {
     await countHas('Invalid pattern', 'invalid regex should report Invalid pattern');
 
     // Reset modes + query so the shared find session doesn't leak into later specs.
+    await $('[data-testid="find-regex"]').click(); // off
+    await setReactInputValue('[data-testid="find-input"]', '');
+  });
+
+  it('a catastrophically backtracking regex is killed, not allowed to freeze the app', async () => {
+    // ReDoS hardening: regex-mode scans run in a worker under a time budget.
+    // `(a+)+b` over a 40-character run of "a" with no "b" is the classic
+    // exponential backtrack — on the render thread it was an unrecoverable
+    // hang. Here it must report a timeout AND leave the app fully usable.
+    const p = resolve(tmp, 'redos.pdf');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([500, 300]);
+    page.drawText('a'.repeat(40), { x: 30, y: 200, size: 14, font });
+    page.drawText('invoice 2024', { x: 30, y: 160, size: 14, font });
+    writeFileSync(p, await doc.save());
+
+    await waitForHarness();
+    await openByPaths([p]);
+    await setView('canvas');
+    await ensureFindOpen();
+
+    const countHas = (needle: string, msg: string) =>
+      browser.waitUntil(
+        async () => (await $('[data-testid="find-count"]').getText()).includes(needle),
+        { timeout: 30_000, timeoutMsg: msg },
+      );
+
+    await $('[data-testid="find-regex"]').click();
+    await setReactInputValue('[data-testid="find-input"]', '(a+)+b');
+    await countHas('Pattern too slow', 'the pathological regex should time out, not hang');
+
+    // The render thread was never blocked and the replacement worker gets
+    // re-seeded: a normal regex still answers correctly right afterwards.
+    // (A token unique to THIS fixture — earlier specs' documents stay open in
+    // the same shared workspace index.)
+    await setReactInputValue('[data-testid="find-input"]', 'invoi\\w+');
+    await countHas('1 match', 'regex search must still work after a timeout');
+
     await $('[data-testid="find-regex"]').click(); // off
     await setReactInputValue('[data-testid="find-input"]', '');
   });

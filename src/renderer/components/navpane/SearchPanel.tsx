@@ -48,6 +48,14 @@ interface DiskResult {
 
 type Scope = 'open' | 'disk';
 
+interface OpenScopeResult {
+  groups: FileGroup[];
+  totalHits: number;
+  error: string | null;
+  errorKind: 'invalid' | 'timeout' | null;
+}
+const EMPTY_OPEN_RESULT: OpenScopeResult = { groups: [], totalHits: 0, error: null, errorKind: null };
+
 const baseName = (p: string): string => p.split(/[\\/]/).pop() || p;
 
 export function SearchPanel({ activeFile }: NavPanelComponentProps): React.ReactElement {
@@ -80,31 +88,52 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
   const docs = state.workspace.documents;
 
   // ── Open-documents scope (in-memory index) ───────────────────────────────
-  const { groups, totalHits, error } = useMemo(() => {
+  // Async since P4's ReDoS hardening: a regex-mode scan runs in a worker under
+  // a time budget, so this is an effect with a liveness guard rather than a
+  // useMemo. Literal queries still resolve in the same tick.
+  const [openResult, setOpenResult] = useState<OpenScopeResult>(EMPTY_OPEN_RESULT);
+  useEffect(() => {
     const q = debounced.trim();
     if (scope !== 'open' || q.length === 0) {
-      return { groups: [] as FileGroup[], totalHits: 0, error: null as string | null };
+      setOpenResult(EMPTY_OPEN_RESULT);
+      return;
     }
-    const result = search(debounced, options);
-    if (result.error) return { groups: [] as FileGroup[], totalHits: 0, error: result.error };
-    if (result.pageIds.size === 0) return { groups: [] as FileGroup[], totalHits: 0, error: null };
-    const snippets = snippetsFor(debounced, options);
-    const out: FileGroup[] = [];
-    let total = 0;
-    for (const doc of docs) {
-      const hits: Hit[] = [];
-      doc.pages.forEach((page, i) => {
-        if (!result.pageIds.has(page.id)) return;
-        hits.push({ pageId: page.id, pageNumber: i + 1, snippet: snippets.get(page.id) ?? '' });
-      });
-      if (hits.length > 0) {
-        out.push({ docId: doc.id, name: doc.name, hits });
-        total += hits.length;
+    let alive = true;
+    void (async () => {
+      const result = await search(debounced, options);
+      if (!alive) return;
+      if (result.error) {
+        setOpenResult({ groups: [], totalHits: 0, error: result.error, errorKind: result.errorKind });
+        return;
       }
-    }
-    return { groups: out, totalHits: total, error: null };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (result.pageIds.size === 0) {
+        setOpenResult(EMPTY_OPEN_RESULT);
+        return;
+      }
+      const snippets = await snippetsFor(debounced, options);
+      if (!alive) return;
+      const out: FileGroup[] = [];
+      let total = 0;
+      for (const doc of docs) {
+        const hits: Hit[] = [];
+        doc.pages.forEach((page, i) => {
+          if (!result.pageIds.has(page.id)) return;
+          hits.push({ pageId: page.id, pageNumber: i + 1, snippet: snippets.get(page.id) ?? '' });
+        });
+        if (hits.length > 0) {
+          out.push({ docId: doc.id, name: doc.name, hits });
+          total += hits.length;
+        }
+      }
+      setOpenResult({ groups: out, totalHits: total, error: null, errorKind: null });
+    })();
+    return () => {
+      alive = false;
+    };
+    // `version` is deliberately a dependency without being read: it is the
+    // index's change signal (OCR text landing), and a bump must re-run the scan.
   }, [scope, debounced, options, search, snippetsFor, docs, version]);
+  const { groups, totalHits, error, errorKind } = openResult;
 
   // ── On-disk scope (engine cross-file search) ─────────────────────────────
   useEffect(() => {
@@ -230,7 +259,7 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
             )}
             {activeFile && hasQuery && error && (
               <p className="navpanel-empty" data-testid="search-error" style={{ color: '#f87171' }}>
-                Invalid regular expression: {error}
+                {errorKind === 'timeout' ? error : `Invalid regular expression: ${error}`}
               </p>
             )}
             {activeFile && hasQuery && !error && totalHits === 0 && (
