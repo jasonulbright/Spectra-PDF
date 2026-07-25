@@ -54,13 +54,13 @@ updates:
   # inside the installer. Easy to forget because they are not npm or cargo, and
   # they are the highest-value manifest in the repo to keep current.
   #
-  # Root `requirements.txt` is the loose dev/test pin list.
-  - package-ecosystem: pip
-    directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
-
+  # NOTE: there is deliberately no `directory: /` pip entry. The root
+  # `requirements.txt` was DELETED (2026-07-25) -- nothing referenced it, and
+  # it listed only pikepdf + pdfminer.six, so a contributor who followed it got
+  # an environment where `test_engine.py` fails to COLLECT (the signatures
+  # handler imports pyHanko at module load). The venv recipe in the punchlist's
+  # dev notes is the one true dev-environment flow.
+  #
   # `scripts/python-requirements.{in,txt}` are the shipped engine's pins and
   # its GENERATED hash-pinned lockfile. Two caveats when a PR appears here:
   #   1. Dependabot's pip fetcher expects conventional requirements filenames,
