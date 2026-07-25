@@ -512,6 +512,24 @@ pub async fn get_app_version() -> Result<String, String> {
     Ok(env!("CARGO_PKG_VERSION").to_string())
 }
 
+/// Opens the project's releases page in the user's browser.
+///
+/// Takes NO argument on purpose. The update check is notify-only (owner
+/// ruling 2026-07-25): the app never downloads or installs a release itself,
+/// and the destination is compiled in rather than read from the update
+/// manifest. So even a forged `latest.json` can only lie about a version
+/// NUMBER — it cannot point a user anywhere, and there is no install path for
+/// it to reach. That is the whole security argument for this design.
+#[tauri::command]
+pub async fn open_releases_page(app: AppHandle) -> Result<(), String> {
+    const RELEASES_URL: &str = "https://github.com/jasonulbright/Open-PDF-Studio/releases/latest";
+    use tauri_plugin_shell::ShellExt;
+    #[allow(deprecated)]
+    app.shell()
+        .open(RELEASES_URL, None)
+        .map_err(|e| e.to_string())
+}
+
 /// Opens one of the SHIPPED third-party license notice files with the OS
 /// default handler. Allowlisted names only — this is a licenses opener, not
 /// a general path opener, and the webview has no shell-open capability.

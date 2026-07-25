@@ -103,6 +103,7 @@ pub fn run() {
             commands::detect_external_gs,
             commands::get_app_version,
             commands::open_third_party_licenses,
+            commands::open_releases_page,
             commands::get_system_accent_color,
             commands::get_window_backdrop,
             commands::append_operation_log,
