@@ -2811,14 +2811,26 @@ export function WorkspaceCanvasView({
   // consuming effect centers once the new view's handle is live.
   const openPageForReading = useCallback(
     (pageId: string) => {
-      pendingJumpRef.current = pageId;
-      dispatch({ type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' });
       const owner = docsRef.current.find((d) => d.pages.some((p) => p.id === pageId));
-      if (owner && owner.id !== focusedDocRef.current?.id) {
-        dispatch({ type: 'UI_FOCUS_DOC', docId: owner.id });
+      if (!owner) return;
+      const needsMode = docViewModeRef.current !== 'document';
+      const needsFocus = owner.id !== focusedDocRef.current?.id;
+      if (needsMode) dispatch({ type: 'UI_SET_DOC_VIEW_MODE', mode: 'document' });
+      if (needsFocus) dispatch({ type: 'UI_FOCUS_DOC', docId: owner.id });
+      if (needsMode || needsFocus) {
+        // Park it: the flush effect centres once that doc's view has mounted.
+        pendingJumpRef.current = pageId;
+        return;
       }
+      // ALREADY reading that document — centre NOW. Parking here instead was a
+      // silent no-op: neither dispatch changes state, so the flush effect's
+      // deps (focusedDoc, docViewMode) never change and it never re-runs. Every
+      // jump from a surface that lists pages of the doc you are already reading
+      // — the comment list, and now omnisearch text hits — did nothing at all.
+      // `jumpToPage` above has always had this branch; this one was missing it.
+      activeCanvasHandle()?.centerOn(pageId);
     },
-    [dispatch],
+    [dispatch, activeCanvasHandle],
   );
   openPageForReadingRef.current = openPageForReading;
   const onOpenPage = useCallback(

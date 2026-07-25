@@ -6,6 +6,7 @@ import { shortcutForCommand } from '../commands/keymap';
 import { invokeCommand, isCommandEnabled } from '../commands/context';
 import { ChromeIcon, type ChromeIconId } from './chrome-icons';
 import { ContextMenu } from './ContextMenu';
+import { OmniSearch } from './OmniSearch';
 
 // The main toolbar (Phase 4 M2) — icon buttons driven by the command
 // registry over commands/toolbars data. Enablement comes from each command's
@@ -157,6 +158,12 @@ export function MainToolbar(): React.ReactElement {
           />
         );
       })}
+      {/* U2: the universal search box lives in this row, pushed right — it is
+          fixed chrome, NOT a catalog item, because the customizable catalog is
+          a set of glyph buttons and a text field is not one of those. */}
+      <div className="ml-auto pl-2">
+        <OmniSearch />
+      </div>
       {menuAt && (
         <ContextMenu
           x={menuAt.x}

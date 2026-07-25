@@ -68,7 +68,9 @@ export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.J
 
 // Which glyph fronts each tile. A tool with ops borrows its first op's glyph; a
 // canvas-mode tool (no ops) names the op whose glyph best says what it does.
-const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = {
+// Exported so the omnisearch (U2) shows a tool with the SAME glyph as its
+// tile — two surfaces naming one tool must not draw it differently.
+export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = {
   organize: 'rotate',
   comment: 'watermark',
   edit: 'watermark',
