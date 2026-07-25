@@ -1,5 +1,8 @@
+import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { waitForHarness, getState } from '../support/harness.js';
+import { waitForHarness, getState, openByPaths } from '../support/harness.js';
+
+const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
 // Phase 4 M2: the menu bar is a real Radix Menubar rendered from the command
 // registry. This smoke drives it through the actual DOM: open a menu, invoke
@@ -21,16 +24,37 @@ describe('menu bar', () => {
   });
 
   it('drives a command through a menu item (Document ▸ Watermark)', async () => {
-    await $('[data-testid="menu-document"]').click();
-    await $('[data-testid="menuitem-document-watermark"]').waitForDisplayed();
-    await $('[data-testid="menuitem-document-watermark"]').click();
-    // tools.panel.watermark focuses the Tools tab and arms the watermark op.
+    // Slice C: a doc-targeted panel item with NO document runs the
+    // picker-first flow (a native dialog no test can drive) — so exercise the
+    // documented flow: with a doc open, the item docks its panel beside it.
+    await openByPaths([SAMPLE_PDF]);
+    await browser.waitUntil(async () => (await getState()).view === 'canvas', {
+      timeoutMsg: 'opening the sample never focused its doc tab',
+    });
+    // The doc tab's mount flurry (proxy load, canvas focus) can dismiss a
+    // just-opened Radix menu — retry until the menu is OBSERVED open, checking
+    // before clicking so the trigger's toggle can't oscillate it shut.
     await browser.waitUntil(
       async () => {
-        const s = await getState();
-        return s.focusedTab === 'tools' && s.activeOp === 'watermark';
+        if (await $('[data-testid="menuitem-document-watermark"]').isDisplayed().catch(() => false)) {
+          return true;
+        }
+        await $('[data-testid="menu-document"]').click();
+        await browser.pause(150);
+        return $('[data-testid="menuitem-document-watermark"]').isDisplayed().catch(() => false);
       },
-      { timeoutMsg: 'menu item did not focus Tools with the watermark op armed' },
+      { timeout: 15_000, timeoutMsg: 'the Document menu never opened' },
+    );
+    await $('[data-testid="menuitem-document-watermark"]').click();
+    // Slice C: tools.panel.watermark opens the DOCK on the doc tab with the
+    // watermark op armed — the document never leaves the screen.
+    await $('[data-testid="tool-dock"]').waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: 'menu item did not open the tool dock',
+    });
+    await browser.waitUntil(
+      async () => (await getState()).activeOp === 'watermark',
+      { timeoutMsg: 'menu item did not arm the watermark op' },
     );
   });
 });
