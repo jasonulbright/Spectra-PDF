@@ -17,6 +17,13 @@ export interface Settings {
    * Default OFF, Acrobat's own posture: bare letters arming tools surprise
    * anyone who doesn't know the preset exists. */
   singleKeyAccelerators: boolean;
+  /** Check GitHub for a newer release shortly after launch. Default ON, and
+   * safe to leave on: the check only ever SHOWS a banner — the app never
+   * downloads or installs anything itself (owner ruling 2026-07-25, "no self
+   * respecting enterprise allows auto-updates"). Turn it off for air-gapped
+   * deployments, or suppress it machine-wide with the DisableAutoUpdate
+   * policy, which still wins over this preference. */
+  checkUpdatesOnLaunch: boolean;
 }
 
 export const DEFAULTS: Settings = {
@@ -28,6 +35,7 @@ export const DEFAULTS: Settings = {
   minimizeToTray: false,
   startMinimized: false,
   singleKeyAccelerators: false,
+  checkUpdatesOnLaunch: true,
 };
 
 export function loadSettings(): Settings {
