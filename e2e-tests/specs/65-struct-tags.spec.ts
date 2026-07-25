@@ -186,7 +186,17 @@ describe('structure tags + reading order (I.6)', () => {
     const first = $('[data-testid="order-item-0"]');
     await first.waitForDisplayed({ timeout: 20_000 });
     expect(await first.getText()).toContain('H1');
-    expect(await first.getText()).toContain('StructTagHeading');
+    // The content preview is a SECOND, async pdf.js round trip: the panel
+    // renders rows from the struct tree immediately and fills previews in
+    // afterwards (ReadingOrderPanel's texts effect, where previews are
+    // explicitly "a nicety"). So the row being displayed does NOT mean its
+    // preview has landed — under full-suite load it lands later, which took
+    // this leg red twice in the v2.8.3 release gate while every isolated run
+    // passed. Wait for the preview rather than racing it.
+    await browser.waitUntil(async () => (await first.getText()).includes('StructTagHeading'), {
+      timeout: 20_000,
+      timeoutMsg: 'the MCID content preview never rendered on the first row',
+    });
     expect((await $$('[data-testid^="order-item-"]')).length).toBe(3);
 
     await $('[data-testid="order-down-0"]').click();

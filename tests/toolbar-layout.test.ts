@@ -64,18 +64,22 @@ describe('visibleToolbarNodes', () => {
       'tools.hand', 'tools.select',
       'view.zoomOut', 'view.fit', 'view.zoomIn',
       'edit.find',
+      // The tool-pane toggle ships visible; the nav-panel three stay opt-in.
+      'view.toolsPane',
     ]);
   });
 
   it('separators sit between kept groups only — a fully hidden group leaves none', () => {
+    // Six groups ship non-empty (the panels group now keeps the tool-pane
+    // toggle), so five separators sit between them.
     const defaults = visibleToolbarNodes(NO_OVERRIDES);
-    expect(defaults.filter((n) => n.kind === 'separator')).toHaveLength(4);
+    expect(defaults.filter((n) => n.kind === 'separator')).toHaveLength(5);
     // Hide the whole zoom group: its separator goes with it.
     const noZoom = parseToolbarOverrides(
       '{"hidden":["view.zoomOut","view.fit","view.zoomIn"]}',
     );
     const nodes = visibleToolbarNodes(noZoom);
-    expect(nodes.filter((n) => n.kind === 'separator')).toHaveLength(3);
+    expect(nodes.filter((n) => n.kind === 'separator')).toHaveLength(4);
     expect(nodes[0].kind).toBe('command'); // never leads with a separator
   });
 

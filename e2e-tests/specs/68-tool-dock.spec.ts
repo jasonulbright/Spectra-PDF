@@ -109,4 +109,34 @@ describe('right tool dock (Phase 10 B1)', () => {
     await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
     expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
   });
+
+  // The dock shipped with a close X and no visible way back: closing it was a
+  // one-way door unless you knew Shift+F4 or the View menu. The toolbar entry
+  // existed all along but defaulted OFF — this pins it SHOWN, because the
+  // regression is invisible (a boolean flip) and costs the user the pane.
+  it('the toolbar Tools button ships visible and toggles the dock both ways', async () => {
+    const btn = $('[data-testid="toolbar-tools-pane"]');
+    await btn.waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: 'the tool-pane toggle is not on the default toolbar',
+    });
+
+    if (!(await $('[data-testid="tool-dock"]').isExisting())) {
+      await btn.click();
+      await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
+    }
+    // Closes it...
+    await btn.click();
+    await browser.waitUntil(async () => !(await $('[data-testid="tool-dock"]').isExisting()), {
+      timeout: 5_000,
+      timeoutMsg: 'the toolbar button did not close the dock',
+    });
+    // ...and brings it back, which is the whole point of the fix.
+    await btn.click();
+    await $('[data-testid="tool-dock"]').waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: 'the toolbar button did not re-open the dock',
+    });
+    expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
+  });
 });

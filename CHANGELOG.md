@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.8.3 — License notices in the box
+
+Mainly a compliance release: the third-party notices now travel with the
+application instead of living only in the source repository. One interface
+fix rides along.
+
+### The tool pane has a visible switch again
+- **A Tools button now sits in the toolbar**, so the right-hand tool pane can
+  be shown and hidden from the top row. Previously the pane could be closed
+  with its own ✕ but only reopened from the View menu or `Shift+F4` — easy to
+  close and hard to get back. (If you had already added this button yourself
+  from View ▸ Customize Toolbar…, nothing changes for you.)
+
+### Licensing
+- **The full third-party notices now ship with the app**, so they are
+  available offline, in the box, without an internet connection: the
+  aggregate list of every bundled component with its license and source, and
+  a complete per-component listing for the compiled application binary.
+- **Font licenses ship beside the fonts** — the SIL Open Font License text
+  for the bundled Liberation and Libertinus families is now installed
+  alongside the font files themselves.
+- **Every bundled Python component keeps its own license text** inside the
+  embedded runtime, where previously the packaging step stripped it.
+- **Settings ▸ Updates & Licenses** now lists the complete set of bundled
+  components and opens either notices file directly.
+- The notices themselves were audited and corrected against what actually
+  ships.
+
 ## 2.8.2 — The workbench
 
 The interface has been rebuilt around one rule: **your document never leaves

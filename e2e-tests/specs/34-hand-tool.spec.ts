@@ -29,15 +29,24 @@ async function dragBy(dx: number, dy: number): Promise<void> {
     const r = el.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   })) as { x: number; y: number };
-  await browser
+  // Interpolated, not one jump: the canvas drag runs on window-level native
+  // pointer listeners, and a single large pointermove is both the least
+  // realistic input and the most load-fragile (this leg went red in a
+  // v2.8.3 release-gate run and passed isolated). Several stepped moves give
+  // the listeners the event stream a real drag produces. The assertion is
+  // unchanged — the drag still has to actually scroll the view.
+  const STEPS = 5;
+  let act = browser
     .action('pointer', { parameters: { pointerType: 'mouse' } })
     .move({ x: Math.round(box.x), y: Math.round(box.y) })
     .down()
-    .pause(60)
-    .move({ x: Math.round(box.x + dx), y: Math.round(box.y + dy) })
-    .pause(60)
-    .up()
-    .perform();
+    .pause(60);
+  for (let i = 1; i <= STEPS; i++) {
+    act = act
+      .move({ x: Math.round(box.x + (dx * i) / STEPS), y: Math.round(box.y + (dy * i) / STEPS) })
+      .pause(30);
+  }
+  await act.pause(60).up().perform();
 }
 
 describe('hand tool (M6.2)', () => {

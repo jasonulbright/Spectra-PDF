@@ -76,6 +76,8 @@ docs/README.md
 docs/archive/
 docs/reference/
 *.local.*
+# Owner's scratch input file (instructions dropped in for a session).
+userinput.md
 
 # LibreOffice runtime for O1 export (assembled by scripts/bundle-libreoffice.ps1;
 # large, gitignored like resources/python & resources/ghostscript).

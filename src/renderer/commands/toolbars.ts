@@ -59,12 +59,17 @@ export const TOOLBAR_CATALOG: readonly ToolbarCatalogGroup[] = [
   { id: 'find', label: 'Find', items: [item('edit.find', 'find')] },
   {
     id: 'panels',
-    label: 'Panes (hidden by default)',
+    label: 'Panes',
     items: [
       item('view.navPanel.pages', 'pages', false),
       item('view.navPanel.bookmarks', 'bookmarks', false),
       item('view.navPanel.signatures', 'signatures', false),
-      item('view.toolsPane', 'tools', false),
+      // Ships VISIBLE (2026-07-25, owner-directed): the tool dock's header has
+      // a close X and nothing visible reopened it — a one-way door out of the
+      // pane, reachable back only by knowing Shift+F4 or the View menu. The
+      // top icon row is where a pane toggle belongs, and the catalog entry
+      // already existed; only this default was hiding it.
+      item('view.toolsPane', 'tools'),
     ],
   },
 ];

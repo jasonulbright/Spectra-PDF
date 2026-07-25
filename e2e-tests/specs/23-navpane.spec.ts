@@ -86,17 +86,30 @@ describe('navigation pane — Pages panel', () => {
 
     // Trusted pointer events through the panel's window listeners (the
     // 20-release-gates canvas-drag mechanism).
-    await browser
+    // Interpolated from the threshold point to the drop, rather than one jump:
+    // a single large pointermove is the most load-fragile input for the
+    // window-level drag listeners (this leg went red in a v2.8.3 release-gate
+    // run and passed isolated). The assertion is unchanged — the pages still
+    // have to actually reorder.
+    const x0 = Math.round(rects.a.x);
+    const y0 = Math.round(rects.a.y) + 12; // cross the 6px threshold
+    const STEPS = 5;
+    let act = browser
       .action('pointer', { parameters: { pointerType: 'mouse' } })
       .move({ x: Math.round(rects.a.x), y: Math.round(rects.a.y) })
       .down()
       .pause(80)
-      .move({ x: Math.round(rects.a.x), y: Math.round(rects.a.y) + 12 }) // cross the 6px threshold
-      .pause(80)
-      .move({ x: Math.round(rects.drop.x), y: Math.round(rects.drop.y) })
-      .pause(120)
-      .up()
-      .perform();
+      .move({ x: x0, y: y0 })
+      .pause(80);
+    for (let i = 1; i <= STEPS; i++) {
+      act = act
+        .move({
+          x: Math.round(x0 + ((rects.drop.x - x0) * i) / STEPS),
+          y: Math.round(y0 + ((rects.drop.y - y0) * i) / STEPS),
+        })
+        .pause(40);
+    }
+    await act.pause(120).up().perform();
 
     // Page 0 is no longer first — it moved down (page tier; robust to the exact
     // landing index).
