@@ -42,4 +42,35 @@ describe('preferences dialog', () => {
     await expect($('[data-testid="licenses-open-rust"]')).toBeDisplayed();
     await $('[data-testid="prefs-close"]').click();
   });
+
+  // Updates are NOTIFY-ONLY (owner ruling): the app never installs anything
+  // itself. The launch check is the only part that runs unprompted, so it gets
+  // a switch — and that switch shipping ON is what makes the feature exist at
+  // all for people who never open Preferences.
+  it('the update preference is present, defaults ON, and persists an opt-out', async () => {
+    expect(await invokeAppCommand('help.licenses')).toBe(true);
+    const box = $('[data-testid="pref-check-updates"]');
+    await box.waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: 'the check-for-updates preference is missing',
+    });
+    expect(await box.isSelected()).toBe(true);
+
+    await box.click();
+    await browser.waitUntil(async () => !(await box.isSelected()), {
+      timeout: 5_000,
+      timeoutMsg: 'unchecking the update preference did not take',
+    });
+    // It reached storage, not just component state — the launch check reads
+    // settings cold on the next start.
+    const stored = await browser.execute(
+      () => JSON.parse(localStorage.getItem('spectra-settings') ?? '{}').checkUpdatesOnLaunch,
+    );
+    expect(stored).toBe(false);
+
+    // Put it back so the shared workspace isn't left opted out.
+    await box.click();
+    await browser.waitUntil(async () => await box.isSelected(), { timeout: 5_000 });
+    await $('[data-testid="prefs-close"]').click();
+  });
 });

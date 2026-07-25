@@ -380,6 +380,25 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       )}
 
       {category === 'licenses' && (
+      <>
+      <div data-testid="updates-pref" className="mb-4">
+        <label className="block text-sm text-neutral-400 mb-2">Updates</label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            data-testid="pref-check-updates"
+            checked={settings.checkUpdatesOnLaunch}
+            onChange={() => update('checkUpdatesOnLaunch', !settings.checkUpdatesOnLaunch)}
+            className="rounded bg-neutral-800 border-neutral-700"
+          />
+          <span className="text-sm text-neutral-400">Check for updates on launch</span>
+        </label>
+        <p className="text-xs text-neutral-500 mt-1.5">
+          Open PDF Studio never installs updates itself. When a newer release exists it
+          shows a notice, and opening it takes you to the download page. You can always
+          check manually with Help ▸ Check for Updates.
+        </p>
+      </div>
       <div data-testid="licenses-note">
         <label className="block text-sm text-neutral-400 mb-2">Third-party components</label>
         <div className="text-xs text-neutral-500 space-y-1.5">
@@ -433,6 +452,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           </button>
         </div>
       </div>
+      </>
       )}
 
       <StatusBar message={status} />

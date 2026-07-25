@@ -189,6 +189,9 @@ export const app = {
    *  OS default handler — resolved against the app's resource dir in Rust. */
   openThirdPartyLicenses: (file: 'THIRD-PARTY-LICENSES.md' | 'THIRD-PARTY-LICENSES-RUST.html') =>
     invoke('open_third_party_licenses', { file }),
+  /** Open the releases page in the browser. Destination is compiled into the
+   *  Rust command — nothing about it comes from the update manifest. */
+  openReleasesPage: () => invoke('open_releases_page'),
   getSystemAccentColor: () => invoke<string | null>('get_system_accent_color'),
   /** Which backdrop the window was created with: "mica" or "none". */
   getWindowBackdrop: () => invoke<string>('get_window_backdrop'),
