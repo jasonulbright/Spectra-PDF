@@ -96,6 +96,22 @@ jobs:
           cargo install cargo-audit
           cd src-tauri && cargo audit
 
+      # The third dependency graph. npm audit and cargo audit between them
+      # cover the renderer and the Rust backend, but the PYTHON engine ships
+      # inside the installer and is the code that parses untrusted PDFs
+      # (pikepdf/qpdf, pdfminer.six, Pillow, lxml, cryptography) -- until now
+      # nothing checked it. Audited against the hash-pinned lockfile, which is
+      # exactly what setup-python-embed.ps1 installs into the shipped runtime.
+      - name: Setup Python (for pip-audit)
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: pip audit (bundled engine runtime)
+        run: |
+          pip install pip-audit
+          pip-audit -r scripts/python-requirements.txt --no-deps
+
   e2e:
     name: E2E (WebdriverIO + tauri-driver)
     # DISABLED (owner call, 2026-07-16) until the WebView2 v150 elevated-

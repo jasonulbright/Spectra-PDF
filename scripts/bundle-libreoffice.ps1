@@ -82,8 +82,29 @@ New-Item -ItemType Directory -Force $Work | Out-Null
 $Msi = Join-Path $Work "libreoffice.msi"
 $Extract = Join-Path $Work "extract"
 
+# RETRY, because the default host is a REDIRECTOR, not a server: it hands out
+# a different volunteer mirror per request, and drawing a dead one fails the
+# whole release. That is exactly what killed the v2.8.4 tag build ("Unable to
+# connect to the remote server") two hours after the identical URL had served
+# v2.8.3 fine. Retrying re-rolls the mirror, so a single bad draw costs seconds
+# instead of a release. Safe to retry blindly: the SHA-256 check below runs on
+# whatever any mirror served, so a corrupt or substituted file still fails.
 Write-Host "No local LibreOffice; downloading $MsiUrl ..."
-Invoke-WebRequest -Uri $MsiUrl -OutFile $Msi
+$Attempts = 4
+for ($i = 1; $i -le $Attempts; $i++) {
+    try {
+        Invoke-WebRequest -Uri $MsiUrl -OutFile $Msi -UseBasicParsing
+        break
+    } catch {
+        Remove-Item $Msi -Force -ErrorAction SilentlyContinue
+        if ($i -eq $Attempts) {
+            throw "LibreOffice download failed after $Attempts attempts: $($_.Exception.Message)"
+        }
+        $wait = 5 * $i
+        Write-Host "  attempt $i/$Attempts failed ($($_.Exception.Message)); retrying in ${wait}s..."
+        Start-Sleep -Seconds $wait
+    }
+}
 
 # Verify the pinned checksum (skip only if explicitly cleared for a version bump).
 if ($ExpectedSha256 -and $ExpectedSha256 -ne "" -and $ExpectedSha256 -ne "PLACEHOLDER_SHA256") {
