@@ -21,7 +21,10 @@ export interface ToolsCenterProps {
 
 export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.JSX.Element {
   return (
-    <div className="tools-center" data-testid="tools-center">
+    <div
+      className={'tools-center' + (embedded ? ' tools-center-embedded' : '')}
+      data-testid="tools-center"
+    >
       {!embedded && <h2 className="tools-center-heading">Tools</h2>}
       {!embedded && <p className="tools-center-sub">Choose what you want to do with your document.</p>}
       <div className="tools-grid">

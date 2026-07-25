@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
+import { TOOL_DOCK_LIST_WIDTH } from '../state/types';
 import { OPERATION_TITLES, type Operation } from '../commands/operations';
 import { toolForOp } from '../commands/tools';
 import { invokeCommand } from '../commands/context';
@@ -31,6 +32,10 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
   const activeOp = state.ui.activeOp as Operation;
   const owner = toolForOp(activeOp);
   const [showGrid, setShowGrid] = useState(false);
+  // Width animates between the list and a panel, but must NOT animate while a
+  // drag is driving it — a transition on a pointer-tracked width lags behind
+  // the cursor.
+  const [resizing, setResizing] = useState(false);
 
   // Anchored at the RIGHT edge: width = right − pointerX (the NavPane drag
   // mirrored). Window-level listeners, detached on unmount mid-drag.
@@ -40,6 +45,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
   const onResizeDown = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
+      setResizing(true);
       const right = bodyRef.current?.getBoundingClientRect().right ?? window.innerWidth;
       const onMove = (ev: PointerEvent) => {
         dispatch({ type: 'UI_SET_TOOL_DOCK_WIDTH', width: right - ev.clientX });
@@ -48,6 +54,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         resizeCleanup.current = null;
+        setResizing(false);
       };
       const onUp = () => detach();
       window.addEventListener('pointermove', onMove);
@@ -59,27 +66,44 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
 
   const Panel = panels[activeOp];
   const view = state.ui.toolDock.view;
+  // The dock is sized to what it currently HOLDS (U1): the all-tools list is a
+  // fixed-width index of names, so it contracts to TOOL_DOCK_LIST_WIDTH, and
+  // opening a tool expands back to the user's own width. Comments is a working
+  // surface like a panel, so it keeps the user's width.
+  const listView = view !== 'comments' && showGrid;
+  const effectiveWidth = listView ? TOOL_DOCK_LIST_WIDTH : width;
 
   return (
     <div
       ref={bodyRef}
-      className="tool-dock app-content"
-      style={{ width }}
+      className={'tool-dock app-content' + (resizing ? '' : ' tool-dock-animated')}
+      style={{ width: effectiveWidth }}
       data-testid="tool-dock"
+      data-dock-view={listView ? 'list' : view}
       role="complementary"
       aria-label="Tool pane"
     >
-      <div className="tool-dock-resize" data-testid="tool-dock-resize" onPointerDown={onResizeDown} title="Drag to resize" />
+      {/* No resize grip on the list: its width is a constant, and a drag would
+          otherwise write a clamped (>= 300px) value into the width the TOOL
+          panels remember. */}
+      {!listView && (
+        <div className="tool-dock-resize" data-testid="tool-dock-resize" onPointerDown={onResizeDown} title="Drag to resize" />
+      )}
       <div className="tool-dock-header">
+        {/* Inside a tool this is a BACK control, and says so: a bare grid glyph
+            left "how do I get back to the list?" to guesswork (owner-raised).
+            In the list it stays the compact toggle back to the open tool.
+            Same testid and same handler in both — only the affordance changes. */}
         <button
           type="button"
           data-testid="tool-dock-grid"
-          title={showGrid ? 'Back to the open tool' : 'All tools'}
-          aria-pressed={showGrid}
+          title={listView ? 'Back to the open tool' : 'All tools'}
+          aria-label={listView ? 'Back to the open tool' : 'Back to all tools'}
+          aria-pressed={listView}
           onClick={() => setShowGrid((v) => !v)}
-          className={'tool-dock-btn' + (showGrid ? ' active' : '')}
+          className={listView ? 'tool-dock-btn active' : 'tool-dock-btn tool-dock-back'}
         >
-          ⊞
+          {listView ? '⊞' : '‹ All tools'}
         </button>
         <span className="tool-dock-title" data-testid="tool-dock-title">
           {view === 'comments'

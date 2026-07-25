@@ -2094,6 +2094,15 @@
   overflow-y: auto;
   padding: 28px 32px 40px;
 }
+/* Embedded in a HOST that already provides its own inset — Home's section
+   column and the dock body. The standalone padding above is page chrome for a
+   full-width landing surface; inside the 250px dock it was eating 64px of the
+   241px available (measured), which is what forced "Crop & Page Boxes" onto
+   two lines, and on Home it indented the grid ~32px out of alignment with its
+   own "All tools" heading. */
+.tools-center-embedded {
+  padding: 0;
+}
 .tools-center-heading {
   font-size: 20px;
   font-weight: 500;
@@ -2430,6 +2439,24 @@
 .tool-dock-btn.active {
   background: #2563eb;
   color: #fff;
+}
+/* The back-to-all-tools control inside a tool: a labelled control, not a bare
+   glyph, so leaving a tool is as discoverable as entering one. Auto width
+   because it carries text. */
+.tool-dock-back {
+  width: auto;
+  padding: 0 7px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* The dock contracts to the tools list and expands back to a panel (U1). The
+   class is dropped while a resize drag is live, so a pointer-tracked width
+   never animates behind the cursor. */
+.tool-dock-animated {
+  transition: width 140ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-dock-animated { transition: none; }
 }
 .tool-dock-ops {
   display: flex;

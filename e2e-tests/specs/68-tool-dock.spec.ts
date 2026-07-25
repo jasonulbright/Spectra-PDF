@@ -110,6 +110,57 @@ describe('right tool dock (Phase 10 B1)', () => {
     expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
   });
 
+  // U1: the dock is sized to what it HOLDS — the all-tools list contracts to
+  // TOOL_DOCK_LIST_WIDTH, a tool panel expands to the user's width. Pinned by
+  // MEASUREMENT, not by class name, because the failure mode is visual. The
+  // no-wrap assertion is the one that earned its place: the list's tiles were
+  // squeezed to 153px by a nested page-padding rule meant for Home, which
+  // wrapped the longest tool names onto two lines.
+  it('contracts for the tools list, expands for a tool, and fits the longest name', async () => {
+    const dockWidth = async (): Promise<number> =>
+      (await browser.execute(() => {
+        const el = document.querySelector('[data-testid="tool-dock"]') as HTMLElement | null;
+        return el ? Math.round(el.getBoundingClientRect().width) : -1;
+      })) as number;
+
+    // A tool panel: the resizable width.
+    expect(await invokeAppCommand('tools.open.accessibility')).toBe(true);
+    await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
+    const toolWidth = await dockWidth();
+    expect(toolWidth).toBeGreaterThan(300);
+
+    // The list: the fixed narrow width, and the header offers the way back.
+    await $('[data-testid="tool-dock-grid"]').click();
+    await $('[data-testid="tool-dock"] [data-testid="tools-center"]').waitForDisplayed({
+      timeout: 10_000,
+    });
+    await browser.waitUntil(async () => (await dockWidth()) === 250, {
+      timeout: 5_000,
+      timeoutMsg: 'the tools list did not contract to its list width',
+    });
+
+    // No tool name wraps at that width — one line each.
+    const wrapped = (await browser.execute(() => {
+      const titles = Array.from(
+        document.querySelectorAll('[data-testid="tool-dock"] .tool-tile-title'),
+      ) as HTMLElement[];
+      return titles
+        .filter((t) => {
+          const lh = parseFloat(getComputedStyle(t).lineHeight) || 18;
+          return Math.round(t.getBoundingClientRect().height / lh) > 1;
+        })
+        .map((t) => t.textContent);
+    })) as string[];
+    expect(wrapped).toEqual([]);
+
+    // Back to the tool restores the panel width.
+    await $('[data-testid="tool-dock-grid"]').click();
+    await browser.waitUntil(async () => (await dockWidth()) === toolWidth, {
+      timeout: 5_000,
+      timeoutMsg: 'returning to the tool did not restore the panel width',
+    });
+  });
+
   // The dock shipped with a close X and no visible way back: closing it was a
   // one-way door unless you knew Shift+F4 or the View menu. The toolbar entry
   // existed all along but defaulted OFF — this pins it SHOWN, because the

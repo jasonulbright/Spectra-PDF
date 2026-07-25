@@ -241,6 +241,15 @@ export interface ToolDockState {
 export const TOOL_DOCK_MIN_WIDTH = 300;
 export const TOOL_DOCK_MAX_WIDTH = 640;
 export const TOOL_DOCK_DEFAULT_WIDTH = 400;
+/**
+ * The all-tools LIST view's width — deliberately BELOW `TOOL_DOCK_MIN_WIDTH`
+ * and deliberately NOT the user's resizable width (U1, owner-directed
+ * 2026-07-25). The list is a fixed-width index of tool names; a panel is a
+ * working surface. The dock contracts to this when showing the list and
+ * expands back to the user's width when a tool opens, so the pane is sized to
+ * what it currently holds rather than to the widest thing it might hold.
+ */
+export const TOOL_DOCK_LIST_WIDTH = 250;
 
 // UI state the command registry needs to read (menus/toolbars can't read
 // component-local state — 19-phase4 § 4.3). Ephemeral interaction state
