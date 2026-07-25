@@ -5,6 +5,8 @@ import { toolForOp } from '../commands/tools';
 import { invokeCommand } from '../commands/context';
 import { ToolsCenter } from './ToolsCenter';
 import { ExtractTextPanel } from '../panels/ExtractTextPanel';
+import { CommentSidebar } from './canvas/CommentSidebar';
+import { getCanvasServices } from '../commands/context';
 import { ToolIcon } from './tool-icons';
 
 // The right tool dock (Phase 10 slice B1 — 25-workbench-relayout.md § 3.B1).
@@ -56,6 +58,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
   );
 
   const Panel = panels[activeOp];
+  const view = state.ui.toolDock.view;
 
   return (
     <div
@@ -79,7 +82,11 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
           ⊞
         </button>
         <span className="tool-dock-title" data-testid="tool-dock-title">
-          {showGrid ? 'All tools' : (owner?.title ?? OPERATION_TITLES[activeOp])}
+          {view === 'comments'
+            ? 'Comments'
+            : showGrid
+              ? 'All tools'
+              : (owner?.title ?? OPERATION_TITLES[activeOp])}
         </span>
         <button
           type="button"
@@ -92,7 +99,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
           ×
         </button>
       </div>
-      {!showGrid && owner && owner.ops.length > 1 && (
+      {view === 'tool' && !showGrid && owner && owner.ops.length > 1 && (
         <div className="tool-dock-ops" data-testid="tool-dock-ops">
           {owner.ops.map((op) => (
             <button
@@ -110,7 +117,27 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
         </div>
       )}
       <div className="tool-dock-body">
-        {showGrid ? (
+        {view === 'comments' ? (
+          // Slice D: the comment list re-homed from the floating sidebar into
+          // the dock (the constitution's right-dock-actions rule). Data and
+          // handlers come from state/dispatch; the jump rides the canvas
+          // services' one true jump (openPageForReading).
+          <CommentSidebar
+            docs={state.workspace.documents}
+            onSelectPage={() => {}}
+            onJumpToPage={(pageId) => getCanvasServices()?.openPageForReading(pageId)}
+            onUpdateAnnotation={(docId, pageId, annotationId, note) =>
+              dispatch({ type: 'UPDATE_ANNOTATION', docId, pageId, annotationId, note })
+            }
+            onRecolorAnnotation={(docId, pageId, annotationId, color) =>
+              dispatch({ type: 'RECOLOR_ANNOTATION', docId, pageId, annotationId, color })
+            }
+            onRemoveAnnotation={(docId, pageId, annotationId) =>
+              dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId })
+            }
+            onClose={() => dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: false })}
+          />
+        ) : showGrid ? (
           <ToolsCenter
             onOpenTool={(id) => {
               setShowGrid(false);

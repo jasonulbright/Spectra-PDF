@@ -2332,6 +2332,15 @@
 .tool-dock-body .tools-grid {
   grid-template-columns: 1fr;
 }
+/* Slice D: the comment list rides in the dock — static flow, dock-sized
+   (its floating-overlay geometry only applied to the retired position). */
+.tool-dock .comment-sidebar {
+  position: static;
+  width: auto;
+  height: 100%;
+  border-left: none;
+  background: transparent;
+}
 
 /* The docked status bar (Phase 10 slice A) — view state + pending commits,
    anchored under the document area. Replaces the floating bottom-right

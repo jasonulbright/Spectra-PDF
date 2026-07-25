@@ -456,7 +456,7 @@ describe('invokeCommand', () => {
     expect(dispatched).toEqual([
       { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } },
       { type: 'UI_SET_ACTIVE_OP', op: 'compress' },
-      { type: 'UI_SET_TOOL_DOCK_OPEN', open: true },
+      { type: 'UI_SET_TOOL_DOCK_OPEN', open: true, view: 'tool' },
     ]);
     // Compress lives under Optimize (M5 § 7), and arming the op must OPEN that
     // tool — otherwise the dock shows the op with no owning pane context.
@@ -468,7 +468,7 @@ describe('invokeCommand', () => {
     const { dispatched, finalState } = wire(dockedState());
     expect(invokeCommand('tools.open.protect')).toBe(true);
     expect(dispatched).toContainEqual({ type: 'UI_SET_ACTIVE_OP', op: 'encrypt' });
-    expect(dispatched).toContainEqual({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+    expect(dispatched).toContainEqual({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true, view: 'tool' });
     expect(finalState().ui.activeToolId).toBe('protect');
   });
 
@@ -480,7 +480,7 @@ describe('invokeCommand', () => {
     await new Promise((r) => setTimeout(r, 0)); // flush the openFiles() promise
     expect(handlers.openFiles).toHaveBeenCalledTimes(1);
     expect(dispatched).toContainEqual({ type: 'UI_SET_ACTIVE_OP', op: 'encrypt' });
-    expect(dispatched).toContainEqual({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+    expect(dispatched).toContainEqual({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true, view: 'tool' });
   });
 
   it('a CANCELLED docless picker seats nothing', async () => {
@@ -766,6 +766,8 @@ describe('invokeCommand', () => {
     // tab is gone) and gates on a doc tab — so toggle BEFORE leaving for Home
     // (the wire dispatch applies the reducer, and Home would gate it off).
     expect(invokeCommand('view.toolsPane')).toBe(true);
+    // Shift+F4 deliberately passes NO view — it reopens whatever the dock last
+    // showed (tool pane or comments), not a forced reset.
     expect(dispatched.at(-1)).toEqual({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
     expect(invokeCommand('view.home')).toBe(true);
     expect(dispatched.at(-1)).toEqual({ type: 'UI_FOCUS_TAB', tab: 'home' });

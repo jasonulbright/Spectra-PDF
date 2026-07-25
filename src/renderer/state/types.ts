@@ -233,6 +233,9 @@ export const NAV_PANE_DEFAULT_WIDTH = 240;
 export interface ToolDockState {
   open: boolean;
   width: number; // px, clamped to [TOOL_DOCK_MIN_WIDTH, TOOL_DOCK_MAX_WIDTH]
+  // Slice D: the dock hosts two peer views — the active tool's panel, or the
+  // comment list (the old floating sidebar, re-homed per the constitution).
+  view: 'tool' | 'comments';
 }
 
 export const TOOL_DOCK_MIN_WIDTH = 300;
@@ -426,6 +429,6 @@ export type AppAction =
   | { type: 'UI_TOGGLE_NAV_PANE' }
   | { type: 'UI_TOGGLE_PROPERTIES_BAR' }
   | { type: 'UI_SET_TOOLBAR_OVERRIDES'; overrides: ToolbarOverrides }
-  | { type: 'UI_SET_TOOL_DOCK_OPEN'; open: boolean }
+  | { type: 'UI_SET_TOOL_DOCK_OPEN'; open: boolean; view?: 'tool' | 'comments' }
   | { type: 'UI_SET_TOOL_DOCK_WIDTH'; width: number }
   | { type: 'UI_SET_NAV_PANE_WIDTH'; width: number };

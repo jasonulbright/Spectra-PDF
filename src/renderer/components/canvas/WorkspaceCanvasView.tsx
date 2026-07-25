@@ -56,7 +56,6 @@ import type { CanvasTool, StampPreset } from './PageCell';
 import { SecondaryToolbar } from './SecondaryToolbar';
 import { PropertiesBar } from './PropertiesBar';
 import { CanvasStatusBar } from './CanvasStatusBar';
-import { CommentSidebar } from './CommentSidebar';
 
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
@@ -377,7 +376,6 @@ export function WorkspaceCanvasView({
   // tool creates the next annotation, across tool switches.
   const [toolColor, setToolColor] = useState<string | null>(null);
   const [stampPreset, setStampPreset] = useState<StampPreset | null>(null);
-  const [showComments, setShowComments] = useState(false);
   // Click-selected annotation (Select tool) — the properties bar's subject.
   // Transient view state like redaction marks: resolved against the live
   // workspace every render, cleared the moment it stops resolving (commit
@@ -3237,8 +3235,12 @@ export function WorkspaceCanvasView({
               mode: docViewMode === 'document' ? 'organize' : 'document',
             })
           }
-          showComments={showComments}
-          onToggleComments={() => setShowComments((v) => !v)}
+          showComments={state.ui.toolDock.open && state.ui.toolDock.view === 'comments'}
+          onToggleComments={() => {
+            const d = state.ui.toolDock;
+            if (d.open && d.view === 'comments') dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: false });
+            else dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true, view: 'comments' });
+          }}
           pageBox={
             docViewMode === 'document' && focusedDoc
               ? {
@@ -3289,17 +3291,6 @@ export function WorkspaceCanvasView({
         />
       )}
 
-      {showComments && (
-        <CommentSidebar
-          docs={docs}
-          onSelectPage={onSelectPage}
-          onJumpToPage={jumpToPage}
-          onUpdateAnnotation={onUpdateAnnotation}
-          onRecolorAnnotation={onRecolorAnnotation}
-          onRemoveAnnotation={onRemoveAnnotation}
-          onClose={() => setShowComments(false)}
-        />
-      )}
 
       {find.open && (
         <FindBar

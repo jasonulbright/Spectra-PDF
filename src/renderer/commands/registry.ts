@@ -242,7 +242,7 @@ function panelCommand(op: Operation): Command {
       if (path) {
         ctx.dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
         ctx.dispatch({ type: 'UI_SET_ACTIVE_OP', op });
-        ctx.dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+        ctx.dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true, view: 'tool' });
       } else {
         void openThenSeat(ctx, op);
       }
@@ -259,7 +259,7 @@ function openThenSeat(ctx: CommandContext, op: Operation): Promise<void> {
   return ctx.app.openFiles().then((opened) => {
     if (!opened) return;
     ctx.dispatch({ type: 'UI_SET_ACTIVE_OP', op });
-    ctx.dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+    ctx.dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true, view: 'tool' });
   });
 }
 
@@ -814,7 +814,7 @@ export const COMMANDS: Record<CommandId, Command> = {
           if (path) {
             dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
             dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
-            dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+            dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true, view: 'tool' });
           } else {
             void openThenSeat(ctx, tool.ops[0]);
           }

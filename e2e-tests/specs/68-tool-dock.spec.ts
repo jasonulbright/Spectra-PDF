@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { waitForHarness, openByPaths, setView, invokeAppCommand } from '../support/harness.js';
+import { waitForHarness, openByPaths, setView, invokeAppCommand, addAnnotation } from '../support/harness.js';
 
 const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
@@ -72,13 +72,39 @@ describe('right tool dock (Phase 10 B1)', () => {
     await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 5_000 });
   });
 
+  it('the Comments toggle opens the dock in its comments view (slice D)', async () => {
+    // Give the list something to show, then drive the status-bar toggle.
+    await addAnnotation({
+      kind: 'highlight', x: 0.1, y: 0.1, w: 0.2, h: 0.08,
+      color: '#ffd54a', note: 'dock comments leg',
+    });
+    await $('[data-testid="toggle-comments"]').click();
+    await $('[data-testid="tool-dock"] [data-testid="comment-sidebar"]').waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: 'the Comments toggle never showed the dock comments view',
+    });
+    expect(await $('[data-testid="tool-dock-title"]').getText()).toBe('Comments');
+    expect(await $('[data-testid="tool-dock"]').getText()).toContain('dock comments leg');
+    // The document is still on screen — the sidebar no longer floats over it.
+    expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
+    // Toggle again: the dock closes.
+    await $('[data-testid="toggle-comments"]').click();
+    await browser.waitUntil(async () => !(await $('[data-testid="tool-dock"]').isExisting()), {
+      timeout: 5_000,
+      timeoutMsg: 'the Comments toggle never closed the dock',
+    });
+  });
+
   it("the harness bridge: setView('operations') opens the dock (slice C)", async () => {
     // The Tools tab is GONE; the name-compatible bridge keeps the ~30 legacy
     // panel specs mechanical — 'operations' now means "doc tab + dock open".
-    await $('[data-testid="tool-dock-close"]').click();
-    await browser.waitUntil(async () => !(await $('[data-testid="tool-dock"]').isExisting()), {
-      timeout: 5_000,
-    });
+    // (The previous leg may have left the dock closed already.)
+    if (await $('[data-testid="tool-dock"]').isExisting()) {
+      await $('[data-testid="tool-dock-close"]').click();
+      await browser.waitUntil(async () => !(await $('[data-testid="tool-dock"]').isExisting()), {
+        timeout: 5_000,
+      });
+    }
     await setView('operations');
     await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
     expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);

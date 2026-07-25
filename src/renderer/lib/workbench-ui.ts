@@ -50,6 +50,7 @@ function coerceToolDock(raw: unknown, fallback: ToolDockState): ToolDockState {
   return {
     open: typeof r.open === 'boolean' ? r.open : fallback.open,
     width,
+    view: r.view === 'comments' ? 'comments' : fallback.view,
   };
 }
 

@@ -9,7 +9,7 @@ import { NAV_PANE_DEFAULT_WIDTH, TOOL_DOCK_DEFAULT_WIDTH } from '../src/renderer
 
 const DEFAULTS = {
   navPane: { open: false, panel: 'pages' as const, width: NAV_PANE_DEFAULT_WIDTH },
-  toolDock: { open: false, width: TOOL_DOCK_DEFAULT_WIDTH },
+  toolDock: { open: false, width: TOOL_DOCK_DEFAULT_WIDTH, view: 'tool' as const },
 };
 
 const store = new Map<string, string>();
@@ -31,11 +31,11 @@ describe('readWorkbenchUi', () => {
   it('round-trips a valid value', () => {
     writeWorkbenchUi({
       navPane: { open: true, panel: 'bookmarks', width: 260 },
-      toolDock: { open: true, width: 420 },
+      toolDock: { open: true, width: 420, view: 'comments' },
     });
     const read = readWorkbenchUi(DEFAULTS);
     expect(read.navPane).toEqual({ open: true, panel: 'bookmarks', width: 260 });
-    expect(read.toolDock).toEqual({ open: true, width: 420 });
+    expect(read.toolDock).toEqual({ open: true, width: 420, view: 'comments' });
   });
 
   it('coerces each field against defaults, clamping width low and high', () => {
@@ -56,9 +56,9 @@ describe('readWorkbenchUi', () => {
     expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual(DEFAULTS.toolDock);
     // Corrupt dock fields coerce field-by-field with width clamped both ways.
     store.set('workbench-ui', JSON.stringify({ toolDock: { open: 'wide', width: 10_000 } }));
-    expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual({ open: false, width: 640 });
+    expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual({ open: false, width: 640, view: 'tool' });
     store.set('workbench-ui', JSON.stringify({ toolDock: { open: true, width: 12 } }));
-    expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual({ open: true, width: 300 });
+    expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual({ open: true, width: 300, view: 'tool' });
   });
 
   it('survives a non-object / malformed entry', () => {
