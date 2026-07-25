@@ -65,7 +65,13 @@ if ($LASTEXITCODE -ne 0) { throw "Hash-verified dependency install failed" }
 Write-Host "Cleaning up..."
 & $DestDir\python.exe -m pip uninstall pip -y 2>&1 | Out-Null
 Get-ChildItem $DestDir -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
-$Keep = '^(METADATA|LICENSE.*|COPYING.*|NOTICE.*|AUTHORS.*)$'
+# RECORD is NOT a licence file but it is REQUIRED: pip reads it to uninstall or
+# upgrade a package. Pruning it (as the first version of this cleanup did) makes
+# the runtime un-upgradable in place -- the next dependency bump dies with
+# "uninstall-no-record-file / The package's contents are unknown", and the only
+# recovery is wiping resources/python. Found the hard way on the pikepdf/pyHanko
+# bump that immediately followed the licence work.
+$Keep = '^(METADATA|RECORD|LICENSE.*|COPYING.*|NOTICE.*|AUTHORS.*)$'
 foreach ($di in (Get-ChildItem $DestDir -Recurse -Directory -Filter "*.dist-info")) {
     foreach ($f in (Get-ChildItem $di.FullName -File)) {
         if ($f.Name -notmatch $Keep) { Remove-Item $f.FullName -Force }
