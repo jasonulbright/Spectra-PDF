@@ -40,17 +40,21 @@ export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.J
             data-testid={`tool-tile-${tool.id}`}
             className="tool-tile"
             disabled={!enabled}
-            title={enabled ? undefined : 'Open a PDF first'}
+            // The description is the TOOLTIP now, not a visible line (U1): the
+            // NAME is what a user scans for, and it used to be the smallest
+            // text in a tile the description dominated. The disabled reason
+            // still wins the attribute — "why can't I click this" beats "what
+            // does this do" when the answer is that it can't run yet.
+            title={enabled ? tool.description : 'Open a PDF first'}
             onClick={() => onOpenTool(tool.id)}
           >
             <span className="tool-tile-icon" aria-hidden="true">
               {/* Reuse the established glyph set: a tile borrows the icon of its
                   first operation, so the tool and its panels read as one thing.
                   The mode-only tools (Comment/Redact) name a representative op. */}
-              <ToolIcon op={TILE_GLYPH[tool.id]} size={22} />
+              <ToolIcon op={TILE_GLYPH[tool.id]} size={15} />
             </span>
             <span className="tool-tile-title">{tool.title}</span>
-            <span className="tool-tile-desc">{tool.description}</span>
           </button>
           );
         })}

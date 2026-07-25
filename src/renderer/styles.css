@@ -2107,20 +2107,22 @@
 }
 .tools-grid {
   display: grid;
-  /* Tiles size themselves: the grid is a fluid number of ~220px columns, so
-     the Tools tab reflows with the window instead of pinning a column count
-     that only looks right at one width. */
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  /* Tiles size themselves: the grid is a fluid number of columns, so the grid
+     reflows with the window instead of pinning a column count that only looks
+     right at one width. U1 narrowed the track from 220px to 168px — with the
+     description gone the tile is a single icon+name row, so a wide track only
+     bought empty space (and fewer tools on screen). Still >= the dock's
+     single-column width, so both homes render from the one component. */
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 8px;
 }
 .tool-tile {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  column-gap: 12px;
-  row-gap: 2px;
-  align-items: start;
-  padding: 14px;
+  /* One row now (U1): icon + name, vertically centred. Was a two-row grid
+     whose second row held the description that is now the tooltip. */
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
   text-align: left;
   border: 1px solid #2e2e2e;
   border-radius: 6px;
@@ -2131,19 +2133,28 @@
 .tool-tile:hover { background: #262626; border-color: #3d3d3d; }
 .tool-tile:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
 .tool-tile-icon {
-  grid-row: 1 / span 2;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  /* 34 -> 24 (U1): the chip was competing with the name for attention. */
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
   border-radius: 5px;
   background: #2e2e2e;
   color: #cfcfcf;
 }
 .tool-tile:hover .tool-tile-icon { color: #ffffff; }
-.tool-tile-title { font-size: 13px; font-weight: 500; color: #e5e5e5; }
-.tool-tile-desc { font-size: 11px; line-height: 1.45; color: #949494; }
+/* 13 -> 14px (U1): the name is the thing being scanned for, so it is now the
+   largest text in the tile rather than the smallest. Wraps rather than
+   truncates — a clipped tool name is worse than a two-line one, and the grid
+   row stretches its tiles to match. */
+.tool-tile-title {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: #e5e5e5;
+}
 
 
 /* The within-tool operation switcher: a tool is the JOB, these are the ways of
@@ -2172,7 +2183,6 @@
 [data-theme="light"] .tool-tile-icon { background: #f3f4f6; color: #4b5563; }
 [data-theme="light"] .tool-tile:hover .tool-tile-icon { color: #111827; }
 [data-theme="light"] .tool-tile-title { color: #111827; }
-[data-theme="light"] .tool-tile-desc { color: #6b7280; }
 [data-theme="light"] .tool-op { color: #4b5563; }
 [data-theme="light"] .tool-op:hover { background: #f3f4f6; color: #111827; }
 [data-theme="light"] .tool-op.active { background: #0078d4; color: #ffffff; }

@@ -76,6 +76,9 @@ docs/README.md
 docs/archive/
 docs/reference/
 *.local.*
+# ...and scratch DIRECTORIES, which the pattern above misses: it needs a dot
+# after "local", so `u1-shots.local/` was landing in git status as untracked.
+*.local/
 # Owner's scratch input file (instructions dropped in for a session).
 userinput.md
 
