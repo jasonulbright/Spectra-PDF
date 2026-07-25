@@ -55,6 +55,7 @@ import type { PageAnnotation, PdfBuffer } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { SecondaryToolbar } from './SecondaryToolbar';
 import { PropertiesBar } from './PropertiesBar';
+import { CanvasStatusBar } from './CanvasStatusBar';
 import { CommentSidebar } from './CommentSidebar';
 
 interface WorkspaceCanvasViewProps {
@@ -3227,152 +3228,66 @@ export function WorkspaceCanvasView({
           and the PENDING-STATE buttons (Fill N / Redact N / Apply changes),
           which report queued work. The canvas invariant is that pending state is
           never invisible, so those must not vanish when a tool closes. */}
-      <div className="absolute bottom-4 right-4 flex items-center gap-2 z-30">
-        <button
-          data-testid="toggle-doc-view"
-          title={docViewMode === 'document' ? 'Switch to the page organizer' : 'Switch to the reading view'}
-          onClick={() =>
+      {(!state.ui.readingMode || dirty || pendingFormCount > 0 || liveMarks.length > 0) && (
+        <CanvasStatusBar
+          docViewMode={docViewMode}
+          onToggleView={() =>
             dispatch({
               type: 'UI_SET_DOC_VIEW_MODE',
               mode: docViewMode === 'document' ? 'organize' : 'document',
             })
           }
-          className="px-3 py-1.5 text-xs font-medium rounded-full shadow-lg border bg-neutral-800/90 text-neutral-300 border-neutral-700 hover:bg-neutral-700"
-        >
-          {docViewMode === 'document' ? 'Organize' : 'Read'}
-        </button>
-        <button
-          data-testid="toggle-find"
-          title="Find in documents (Ctrl+F)"
-          onClick={() => (find.open ? find.closeFind() : find.openFind())}
-          className={`px-3 py-1.5 text-xs font-medium rounded-full shadow-lg border ${find.open ? 'bg-blue-600 text-white border-blue-600' : 'bg-neutral-800/90 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
-        >
-          Find
-        </button>
-        <button
-          data-testid="toggle-comments"
-          title="Show annotation notes"
-          onClick={() => setShowComments((v) => !v)}
-          className={`px-3 py-1.5 text-xs font-medium rounded-full shadow-lg border ${showComments ? 'bg-blue-600 text-white border-blue-600' : 'bg-neutral-800/90 text-neutral-300 border-neutral-700 hover:bg-neutral-700'}`}
-        >
-          Comments
-        </button>
-        {pendingFormCount > 0 && (
-          <>
-            <button
-              data-testid="forms-fill-btn"
-              disabled={fillingForms}
-              onClick={() => void applyFormValues()}
-              className="px-3 py-1.5 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-full font-medium shadow-lg"
-            >
-              {fillingForms
-                ? 'Filling…'
-                : `Fill ${pendingFormCount} field${pendingFormCount === 1 ? '' : 's'}`}
-            </button>
-            <button
-              data-testid="forms-clear-btn"
-              disabled={fillingForms}
-              onClick={clearFormValues}
-              title="Discard all pending form values"
-              className="px-3 py-1.5 text-xs bg-neutral-800/90 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded-full font-medium shadow-lg"
-            >
-              Clear
-            </button>
-          </>
-        )}
-        {liveMarks.length > 0 && (
-          <>
-            <button
-              data-testid="redact-apply-btn"
-              disabled={redacting}
-              onClick={() => setConfirmRedact(true)}
-              className="px-3 py-1.5 text-xs text-white bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded-full font-medium shadow-lg"
-            >
-              {redacting
-                ? 'Redacting…'
-                : `Redact ${liveMarks.length} region${liveMarks.length === 1 ? '' : 's'}`}
-            </button>
-            <button
-              data-testid="redact-clear-btn"
-              disabled={redacting}
-              onClick={() => setMarks([])}
-              title="Clear all pending redaction marks"
-              className="px-3 py-1.5 text-xs bg-neutral-800/90 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded-full font-medium shadow-lg"
-            >
-              Clear
-            </button>
-          </>
-        )}
-        {dirty && (
-          <button
-            data-testid="apply-page-edits-btn"
-            onClick={() => invokeCommand('document.applyPageEdits')}
-            className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded-full font-medium shadow-lg"
-          >
-            Apply changes
-          </button>
-        )}
-        {docViewMode === 'document' && focusedDoc && (
-          <div className="flex items-center gap-1 px-3 py-1.5 bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg text-xs text-neutral-300">
-            <input
-              data-testid="page-nav-box"
-              ref={pageBoxRef}
-              value={pageBox}
-              onChange={(e) => {
-                setPageBox(e.target.value.replace(/[^0-9]/g, ''));
-                pageBoxDirty.current = true;
-              }}
-              onFocus={(e) => {
-                pageBoxFocused.current = true;
-                pageBoxDirty.current = false;
-                e.target.select();
-              }}
-              onBlur={() => {
-                pageBoxFocused.current = false;
-                // Only navigate if the user actually typed a new page — a blur
-                // after just focusing + scrolling must not snap back.
-                if (pageBoxDirty.current) {
-                  const max = focusedDoc.pages.length;
-                  const n = Math.max(1, Math.min(max, parseInt(pageBox, 10) || currentPage));
-                  activeCanvasHandle()?.centerOn(focusedDoc.pages[n - 1].id);
-                  setPageBox(String(n));
-                } else {
-                  setPageBox(String(currentPage));
+          showComments={showComments}
+          onToggleComments={() => setShowComments((v) => !v)}
+          pageBox={
+            docViewMode === 'document' && focusedDoc
+              ? {
+                  inputRef: pageBoxRef,
+                  value: pageBox,
+                  total: focusedDoc.pages.length,
+                  onChange: (e) => {
+                    setPageBox(e.target.value.replace(/[^0-9]/g, ''));
+                    pageBoxDirty.current = true;
+                  },
+                  onFocus: (e) => {
+                    pageBoxFocused.current = true;
+                    pageBoxDirty.current = false;
+                    e.target.select();
+                  },
+                  onBlur: () => {
+                    pageBoxFocused.current = false;
+                    // Only navigate if the user actually typed a new page — a
+                    // blur after just focusing + scrolling must not snap back.
+                    if (pageBoxDirty.current) {
+                      const max = focusedDoc.pages.length;
+                      const n = Math.max(1, Math.min(max, parseInt(pageBox, 10) || currentPage));
+                      activeCanvasHandle()?.centerOn(focusedDoc.pages[n - 1].id);
+                      setPageBox(String(n));
+                    } else {
+                      setPageBox(String(currentPage));
+                    }
+                  },
+                  onKeyDown: (e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  },
                 }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-              }}
-              className="w-9 text-center bg-neutral-900 border border-neutral-700 rounded"
-              aria-label="Current page"
-            />
-            <span data-testid="page-nav-total">/ {focusedDoc.pages.length}</span>
-          </div>
-        )}
-        <div className="flex bg-neutral-800/90 border border-neutral-700 rounded-full shadow-lg overflow-hidden">
-          <button
-            title="Zoom out"
-            onClick={() => activeCanvasHandle()?.zoomOut()}
-            className="px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-700"
-          >
-            −
-          </button>
-          <button
-            title="Fit to view"
-            onClick={() => activeCanvasHandle()?.reset()}
-            className="px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-700"
-          >
-            Fit
-          </button>
-          <button
-            title="Zoom in"
-            onClick={() => activeCanvasHandle()?.zoomIn()}
-            className="px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-700"
-          >
-            +
-          </button>
-        </div>
-      </div>
+              : null
+          }
+          onZoomOut={() => activeCanvasHandle()?.zoomOut()}
+          onFit={() => activeCanvasHandle()?.reset()}
+          onZoomIn={() => activeCanvasHandle()?.zoomIn()}
+          dirty={dirty}
+          onApplyPageEdits={() => invokeCommand('document.applyPageEdits')}
+          pendingFormCount={pendingFormCount}
+          fillingForms={fillingForms}
+          onApplyForms={() => void applyFormValues()}
+          onClearForms={clearFormValues}
+          markCount={liveMarks.length}
+          redacting={redacting}
+          onApplyRedact={() => setConfirmRedact(true)}
+          onClearRedact={() => setMarks([])}
+        />
+      )}
 
       {showComments && (
         <CommentSidebar

@@ -2256,6 +2256,73 @@
   flex-shrink: 0;
 }
 
+/* The docked status bar (Phase 10 slice A) — view state + pending commits,
+   anchored under the document area. Replaces the floating bottom-right
+   cluster (the "covering the thing being worked on" class, now law). */
+.canvas-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-top: 1px solid #2e2e2e;
+  background: #1f1f1f;
+  flex-shrink: 0;
+  font-size: 12px;
+  min-height: 28px;
+}
+.canvas-status-pending {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.canvas-status-action {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.canvas-status-action:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.canvas-status-quiet {
+  color: #c9c9cf;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+}
+.canvas-status-quiet:hover {
+  background: #333;
+  color: #fff;
+}
+.canvas-status-quiet.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.canvas-status-pages {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #c9c9cf;
+  font-size: 11px;
+}
+.canvas-status-pageinput {
+  width: 38px;
+  text-align: center;
+  background: #171717;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  color: #e5e5e5;
+  font-size: 11px;
+  padding: 1px 2px;
+}
+.canvas-status-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 /* Properties bar (I.6, Ctrl+E) — the strip under the secondary toolbar. */
 .properties-bar {
   display: flex;

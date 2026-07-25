@@ -17,6 +17,7 @@ import {
   setReactInputValue,
   ocrReadyCount,
   applyOcr,
+  invokeAppCommand,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -33,7 +34,9 @@ const SCANNED = resolve(__dirname, '..', 'fixtures', 'scanned.pdf');
 async function ensureFindOpen(): Promise<void> {
   const input = $('[data-testid="find-input"]');
   if (await input.isDisplayed().catch(() => false)) return;
-  await $('[data-testid="toggle-find"]').click();
+  // Slice A removed the floating Find toggle (duplicate of Ctrl+F / nav
+  // Search); the command is the canonical opener now.
+  await invokeAppCommand('edit.find');
   await input.waitForDisplayed({ timeout: 10_000 });
 }
 

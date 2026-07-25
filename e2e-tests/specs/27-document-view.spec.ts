@@ -159,7 +159,7 @@ describe('reading view: a Find match in another open file (M4.1c)', () => {
     });
 
     // ...then Find a term that only exists in file B, and navigate to it.
-    await $('[data-testid="toggle-find"]').click();
+    await invokeAppCommand('edit.find');
     await $('[data-testid="find-input"]').waitForDisplayed({ timeout: 10_000 });
     await setReactInputValue('[data-testid="find-input"]', NEEDLE);
     await browser.waitUntil(
