@@ -66,7 +66,7 @@ jobs:
         # so tests exercise what actually ships. pyHanko is required — the engine's
         # signatures handler imports it at module load, so test_engine.py fails to
         # collect without it (pyHanko pulls cryptography/certvalidator transitively).
-        run: pip install pikepdf==10.9.1 pdfminer.six==20260107 pyHanko==0.35.2 pytest
+        run: pip install pikepdf==10.10.0 pdfminer.six==20260107 pyHanko==0.36.0 pytest
 
       - name: Run engine + validation tests
         run: python -m pytest tests/test_engine.py tests/test_validation.py -v

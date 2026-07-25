@@ -73,7 +73,6 @@ below were read from those wheels' METADATA):
 | pycparser | BSD-3-Clause | <https://github.com/eliben/pycparser> |
 | pyHanko | MIT | <https://github.com/MatthiasValvekens/pyHanko> |
 | pyhanko-certvalidator | MIT | <https://github.com/MatthiasValvekens/pyHanko/tree/master/pkgs/pyhanko-certvalidator> |
-| PyYAML | MIT | <https://github.com/yaml/pyyaml> |
 | requests | Apache-2.0 (its NOTICE file ships in its dist-info) | <https://github.com/psf/requests> |
 | tzdata | Apache-2.0 | <https://github.com/python/tzdata> |
 | tzlocal | MIT | <https://github.com/regebro/tzlocal> |
