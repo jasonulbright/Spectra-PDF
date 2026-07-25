@@ -280,7 +280,7 @@ describe('dispatchKeyEvent', () => {
   });
 
   it('canvas-scoped bindings fall through outside the canvas view', () => {
-    const { dispatched } = wire(uiState({ focusedTab: 'tools' }));
+    const { dispatched } = wire(uiState({ focusedTab: 'home' }));
     const e = fakeEvent({ key: 'a', ctrl: true, target: DIV });
     dispatchKeyEvent(e);
     // No preventDefault: the browser's own select-all belongs to the page.
@@ -360,7 +360,7 @@ describe('the Escape chain', () => {
   });
 
   it('is inert outside the canvas view', () => {
-    const { dispatched } = wire(uiState({ focusedTab: 'tools', tool: 'select' }));
+    const { dispatched } = wire(uiState({ focusedTab: 'home', tool: 'select' }));
     dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
     expect(dispatched).toEqual([]);
   });

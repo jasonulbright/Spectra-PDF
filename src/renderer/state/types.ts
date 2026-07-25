@@ -181,7 +181,12 @@ export type CanvasTool =
 // Document view). The legacy ViewMode literals survive only as the harness
 // snapshot's derived view (home→'welcome', tools→'operations', doc→'canvas')
 // so pre-M2 e2e specs keep their assertions.
-export type FocusedTab = 'home' | 'tools' | { doc: string };
+// Phase 10 slice C: 'tools' RETIRED — the Tools tab is gone; ops panels live
+// in the right dock (ToolDock) and the tile grid lives on Home. ViewMode
+// keeps the 'operations' literal ONLY as the harness setView() INPUT
+// vocabulary (the bridge maps it to "focus the doc tab + open the dock");
+// viewOf can no longer produce it.
+export type FocusedTab = 'home' | { doc: string };
 export type ViewMode = 'welcome' | 'operations' | 'canvas';
 
 /** Doc-tab-land = a document tab is focused (the canvas board is showing). */
@@ -192,7 +197,6 @@ export function isDocTab(tab: FocusedTab): tab is { doc: string } {
 /** The harness/back-compat projection of the tab model. */
 export function viewOf(tab: FocusedTab): ViewMode {
   if (tab === 'home') return 'welcome';
-  if (tab === 'tools') return 'operations';
   return 'canvas';
 }
 

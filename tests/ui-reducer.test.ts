@@ -350,13 +350,13 @@ describe('ui per-document focus (M4.1c)', () => {
 
 describe('ui tab/tool actions (Phase 4 M2)', () => {
   it('focuses a tab', () => {
-    const next = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: 'tools' });
-    expect(next.ui.focusedTab).toBe('tools');
+    const next = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
+    expect(next.ui.focusedTab).toEqual({ doc: 'a.pdf' });
   });
 
   it('is a no-op object-wise when the tab is unchanged', () => {
-    const s = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: 'tools' });
-    expect(appReducer(s, { type: 'UI_FOCUS_TAB', tab: 'tools' })).toBe(s);
+    const s = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
+    expect(appReducer(s, { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } })).toBe(s);
   });
 
   it('focusing a doc tab activates that file', () => {
@@ -374,7 +374,7 @@ describe('ui tab/tool actions (Phase 4 M2)', () => {
     let s = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
     s = appReducer(s, { type: 'UI_SET_TOOL', tool: 'highlight' });
     s = select(s, ['a.pdf#p0', 'a.pdf#p1'], 'a.pdf#p1');
-    const next = appReducer(s, { type: 'UI_FOCUS_TAB', tab: 'tools' });
+    const next = appReducer(s, { type: 'UI_FOCUS_TAB', tab: 'home' });
     expect(next.ui.tool).toBe('select');
     expect(next.ui.selectedPageIds.size).toBe(0);
     expect(next.ui.selectionAnchor).toBeNull();
@@ -390,9 +390,11 @@ describe('ui tab/tool actions (Phase 4 M2)', () => {
     expect(next.activeFileId).toBe('b.pdf');
   });
 
-  it('home↔tools switches keep the tool (only leaving doc-land resets)', () => {
+  it('a non-doc start keeps the tool when focusing Home again (only leaving doc-land resets)', () => {
+    // (Was home↔tools before slice C retired the Tools tab; the invariant —
+    // the reset happens only on LEAVING doc-land — is unchanged.)
     let s = appReducer(twoDocState(), { type: 'UI_SET_TOOL', tool: 'redact' });
-    s = appReducer(s, { type: 'UI_FOCUS_TAB', tab: 'tools' });
+    s = appReducer(s, { type: 'UI_FOCUS_TAB', tab: 'home' });
     expect(s.ui.tool).toBe('redact');
   });
 
@@ -424,10 +426,10 @@ describe('doc-tab lifecycle', () => {
     let s = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
     s = appReducer(s, { type: 'SET_ACTIVE_FILE', path: 'b.pdf' });
     expect(s.ui.focusedTab).toEqual({ doc: 'b.pdf' });
-    // From Tools, activating a file must not yank onto the board.
-    let t = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: 'tools' });
+    // From Home, activating a file must not yank onto the board.
+    let t = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: 'home' });
     t = appReducer(t, { type: 'SET_ACTIVE_FILE', path: 'b.pdf' });
-    expect(t.ui.focusedTab).toBe('tools');
+    expect(t.ui.focusedTab).toBe('home');
   });
 
   it('closing the focused doc falls back to the next doc, else Home', () => {

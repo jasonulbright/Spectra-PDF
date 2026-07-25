@@ -72,16 +72,8 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
         <ChromeIcon icon="home" size={14} className="opacity-80" />
         Home
       </button>
-      <button
-        type="button"
-        data-testid="tab-tools"
-        onClick={() => invokeCommand('view.tools')}
-        className={`${tabBase} ${focused === 'tools' ? activeCls : idleCls}`}
-      >
-        <ChromeIcon icon="tools" size={14} className="opacity-80" />
-        Tools
-      </button>
-
+      {/* The Tools pseudo-tab retired in Phase 10 slice C: ops panels live in
+          the right dock (Shift+F4), the tile grid lives on Home. */}
       <div ref={laneRef} className="flex items-stretch overflow-x-auto app-tab-lane">
         {docPaths.map((path, i) => {
           const f = state.files.get(path);

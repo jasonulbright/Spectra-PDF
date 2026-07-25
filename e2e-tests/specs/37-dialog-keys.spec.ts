@@ -118,16 +118,20 @@ describe('dialog keyboard model (M6.5)', () => {
     expect((await getState()).fileCount).toBe(1);
   });
 
-  it('Shift+F4 toggles the Tools tab from either side', async () => {
+  it('Shift+F4 toggles the tool dock (slice C: the Tools tab is gone)', async () => {
     expect((await getState()).view).toBe('canvas');
     await browser.keys(['Shift', 'F4']);
-    await browser.waitUntil(async () => (await getState()).view === 'operations', {
-      timeoutMsg: 'Shift+F4 did not open the Tools tab',
+    await $('[data-testid="tool-dock"]').waitForDisplayed({
+      timeout: 5_000,
+      timeoutMsg: 'Shift+F4 did not open the tool dock',
     });
+    // The document never went anywhere — the whole point of the dock.
+    expect((await getState()).view).toBe('canvas');
     await browser.keys(['Shift', 'F4']);
-    await browser.waitUntil(async () => (await getState()).view === 'canvas', {
-      timeoutMsg: 'Shift+F4 did not toggle back to the document',
-    });
+    await browser.waitUntil(
+      async () => !(await $('[data-testid="tool-dock"]').isExisting()),
+      { timeoutMsg: 'Shift+F4 did not close the tool dock' },
+    );
   });
 
   it('Ctrl+Shift+T inserts a blank page (the freeze-verified chord)', async () => {

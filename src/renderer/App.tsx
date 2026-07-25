@@ -83,11 +83,8 @@ import { buildBlankPagePdf } from './lib/blank-page';
 import { insertAnchor } from './state/selectors';
 import { UpdateBar } from './components/UpdateBar';
 import { NavPane } from './components/navpane/NavPane';
-import { ToolsCenter } from './components/ToolsCenter';
 import { ToolDock } from './components/ToolDock';
-import { ToolIcon } from './components/tool-icons';
-import { toolById } from './commands/tools';
-import { OPERATION_TITLES, type Operation } from './commands/operations';
+import { type Operation } from './commands/operations';
 import { withRecent } from './lib/recent-files';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
@@ -165,9 +162,6 @@ function AppContent(): React.ReactElement {
   // tool), so an ops-less tool with nothing to act on has NOTHING to put here:
   // its pane is a fence saying "this works on the page" plus a button that
   // `when`-fails with no document open. A dead button is worse than the grid.
-  const openTool = state.ui.activeToolId ? toolById(state.ui.activeToolId) : null;
-  const activeTool =
-    openTool && (openTool.ops.length > 0 || showableDoc(state)) ? openTool : null;
   const setActiveOp = useCallback(
     (op: Operation) => dispatch({ type: 'UI_SET_ACTIVE_OP', op }),
     [dispatch],
@@ -277,15 +271,6 @@ function AppContent(): React.ReactElement {
   }, [state.ui.navPane, state.ui.toolDock]);
 
   const activeFile = state.activeFileId ? state.files.get(state.activeFileId) : null;
-  // Open, tab-bearing files (importOnly sources excluded) — the Tools-tab
-  // active-file switcher lists these so a panel can retarget without leaving
-  // the tab (a doc-tab click would move focus off Tools and unmount the panel).
-  const tabFileList = tabFiles(state);
-  // The active file, but only if it is one the picker below lists — the SAME
-  // question showableDoc answers for the menus, so it gets the same (tested)
-  // answer rather than a second implementation that could drift from it.
-  const selectableFile = showableDoc(state);
-
   // Commit-failure banner: commits triggered from gates/effects have no
   // natural place to report, so failures surface here.
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -1587,12 +1572,15 @@ function AppContent(): React.ReactElement {
   };
 
   // Map the legacy harness setView onto the tab model so pre-M2 specs keep
-  // working: welcome→Home, operations→Tools, canvas→the active (or first)
-  // document's tab (a no-op to Home when nothing is open).
+  // working: welcome→Home; canvas→the active (or first) document's tab (a
+  // no-op to Home when nothing is open); and — Phase 10 slice C — 'operations'
+  // becomes the NAME-COMPATIBLE BRIDGE: the Tools tab is gone, so it focuses
+  // the showable doc tab and opens the right dock, which is where the ~30
+  // legacy panel specs' panels actually render now. Their next setActiveOp
+  // seats the panel exactly as before.
   const harnessSetView = useCallback(
     (v: 'welcome' | 'operations' | 'canvas') => {
       if (v === 'welcome') dispatch({ type: 'UI_FOCUS_TAB', tab: 'home' });
-      else if (v === 'operations') dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
       else {
         const s = stateRef.current;
         // The shared rule, not a copy of it — the harness must answer "which
@@ -1600,6 +1588,7 @@ function AppContent(): React.ReactElement {
         // silently drift from the app they're testing.
         const target = showableDoc(s) ?? tabFiles(s)[0]?.path ?? null;
         dispatch({ type: 'UI_FOCUS_TAB', tab: target ? { doc: target } : 'home' });
+        if (v === 'operations') dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
       }
     },
     [dispatch],
@@ -1655,8 +1644,6 @@ function AppContent(): React.ReactElement {
     harnessListenersRef.current.forEach((l) => l(snap));
   }, [focusedTab, activeOp, state.ui.tool, state.ui.activeToolId, state.files, state.activeFileId, activeFile?.dirty, activeFile?.pageCount]);
 
-  const Panel = panels[activeOp];
-
   return (
     <OperationsProvider performOperation={performOperation}>
     <DropZone onFilesDropped={handleFilesDropped}>
@@ -1696,103 +1683,8 @@ function AppContent(): React.ReactElement {
               onOpen={() => invokeCommand('file.open')}
               onOpenRecent={(path) => void openByPaths([path])}
               onClearRecent={() => invokeCommand('file.clearRecent')}
+              onOpenTool={(id) => invokeCommand(`tools.open.${id}`)}
             />
-          ) : focusedTab === 'tools' ? (
-            !activeTool ? (
-            // The tab's landing state: what job are you here to do? (§ 7)
-            <ToolsCenter onOpenTool={(id) => invokeCommand(`tools.open.${id}`)} />
-          ) : (
-            <div className="flex-1 flex flex-col p-6 min-h-0">
-              <div className="tool-pane-head shrink-0">
-                <button
-                  type="button"
-                  data-testid="tool-back"
-                  className="tool-back"
-                  onClick={() => dispatch({ type: 'UI_OPEN_TOOL', toolId: null })}
-                  title="All tools"
-                >
-                  ‹ Tools
-                </button>
-                <h2 className="text-lg font-medium">{activeTool.title}</h2>
-                {/* Which document the tool acts on. The Tools tab isn't a doc
-                    tab, so the panels need a target named somewhere — this is
-                    the old rail's Active File list, as one control instead of a
-                    standing column. Hidden for a single file: a picker with one
-                    choice asks a question that has no other answer. */}
-                {tabFileList.length > 1 && (
-                  <label className="tool-pane-file">
-                    <span className="tool-pane-file-label">File</span>
-                    <select
-                      data-testid="tools-active-file"
-                      // Clamped to a file this list actually offers. React
-                      // resolves a controlled <select> whose value matches no
-                      // <option> by selecting the FIRST one — so an active file
-                      // that isn't in the list wouldn't show as "unset", it
-                      // would confidently name the wrong document while the
-                      // panels worked on another. Defence in depth — the reducer
-                      // refuses to make a ghost active, so this should be
-                      // unreachable; it stays because the failure mode it
-                      // prevents is a control that LIES rather than one that
-                      // looks broken, and that is the wrong way to degrade.
-                      value={selectableFile ?? ''}
-                      onChange={(e) => dispatch({ type: 'SET_ACTIVE_FILE', path: e.target.value })}
-                    >
-                      {selectableFile === null && <option value="">—</option>}
-                      {tabFileList.map((f) => (
-                        <option key={f.path} value={f.path}>
-                          {isFileDirty(f) ? `* ${f.name}` : f.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-              </div>
-              {/* A tool that hosts several operations lists them: the tool is the
-                  JOB, these are the ways of doing it. One-op tools show no
-                  switcher — a single-item list is noise. */}
-              {activeTool.ops.length > 1 && (
-                <div className="tool-op-switch shrink-0" data-testid="tool-op-switch">
-                  {activeTool.ops.map((op) => (
-                    <button
-                      key={op}
-                      type="button"
-                      data-testid={`tool-op-${op}`}
-                      aria-pressed={activeOp === op}
-                      className={'tool-op' + (activeOp === op ? ' active' : '')}
-                      onClick={() => invokeCommand(`tools.panel.${op}`)}
-                    >
-                      <ToolIcon op={op} />
-                      {OPERATION_TITLES[op]}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="flex-1 min-h-0">
-                {activeTool.ops.length === 0 ? (
-                  // The tool's work is on the PAGE — it has no form here. Say
-                  // that, and offer the way back. Rendering `panels[activeOp]`
-                  // would put some unrelated operation's form under this tool's
-                  // name, which is § 3.3's absence fence exactly: an empty or
-                  // borrowed shell instead of an honest statement.
-                  <div className="tool-on-canvas" data-testid="tool-on-canvas">
-                    <p>{activeTool.title} works directly on the page.</p>
-                    <button
-                      type="button"
-                      data-testid="tool-on-canvas-go"
-                      className="tool-op"
-                      onClick={() => invokeCommand(`tools.open.${activeTool.id}`)}
-                    >
-                      Go to the document
-                    </button>
-                  </div>
-                ) : activeOp === 'extract_text' ? (
-                  <ExtractTextPanel initialPage={extractPage} onConsumeInitialPage={() => setExtractPage(null)} />
-                ) : (
-                  <Panel />
-                )}
-              </div>
-            </div>
-            )
           ) : (
             <div className="flex-1 flex flex-row overflow-hidden">
               {/* Left navigation pane (M3) — thumbnails etc. for the active doc.
@@ -1835,7 +1727,13 @@ function AppContent(): React.ReactElement {
                   document. Reading mode collapses it with the rest of the
                   chrome; toolDock.open is untouched underneath, so exiting
                   restores it (the navPane precedent). */}
-              {!state.ui.readingMode && state.ui.toolDock.open && <ToolDock panels={panels} />}
+              {!state.ui.readingMode && state.ui.toolDock.open && (
+                <ToolDock
+                  panels={panels}
+                  extractPage={extractPage}
+                  onConsumeExtractPage={() => setExtractPage(null)}
+                />
+              )}
             </div>
           )}
         </main>

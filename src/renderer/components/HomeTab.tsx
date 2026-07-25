@@ -1,6 +1,8 @@
 import React from 'react';
 import { ChromeIcon } from './chrome-icons';
 import { formatOpenedAt, type RecentEntry } from '../lib/recent-files';
+import { ToolsCenter } from './ToolsCenter';
+import type { ToolId } from '../commands/tools';
 
 // The Home tab (Phase 4 M2, § 8) — the Acrobat-DC Home surface that replaces
 // WelcomeScreen. A recent-files table (name + folder + opened-when, the M2
@@ -13,6 +15,9 @@ interface HomeTabProps {
   onOpen: () => void;
   onOpenRecent: (path: string) => void;
   onClearRecent: () => void;
+  /** Phase 10 slice C: Home hosts the tile grid (the docless tools surface —
+   * the Tools tab is gone; ops tiles run the picker-first flow). */
+  onOpenTool: (id: ToolId) => void;
 }
 
 function folderOf(path: string): string {
@@ -21,7 +26,7 @@ function folderOf(path: string): string {
   return parts.join('\\') || path;
 }
 
-export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent }: HomeTabProps): React.ReactElement {
+export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOpenTool }: HomeTabProps): React.ReactElement {
   return (
     <div data-testid="home-tab" className="flex-1 overflow-y-auto p-8">
       <div className="max-w-3xl mx-auto">
@@ -85,6 +90,12 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent }: Ho
             ))}
           </div>
         )}
+
+        {/* The tile grid's home after the Tools tab's retirement (slice C).
+            Slice E's Home redesign restyles this surface wholesale. */}
+        <div className="mt-10">
+          <ToolsCenter onOpenTool={onOpenTool} />
+        </div>
       </div>
     </div>
   );

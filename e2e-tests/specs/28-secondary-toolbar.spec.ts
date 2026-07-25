@@ -148,14 +148,16 @@ describe('secondary toolbar', () => {
     await expect($('[data-testid="tool-highlight"]')).not.toBeExisting();
   });
 
-  it('the Tools tab greys a tool that needs a document, instead of a dead click', async () => {
+  it('the Home grid greys a tool that needs a document, instead of a dead click', async () => {
     // `invokeCommand` no-ops silently on a failed `when`, so an ungated tile is
     // a dead click that looks exactly like a live one. The menu bar already
     // greyed these; the grid invokes the SAME command and must agree.
+    // (Slice C: the grid lives on HOME now — the Tools tab is gone. Ops tools
+    // stay ENABLED docless: they run the picker-first flow.)
     await closeAllFiles();
-    await focusTab('tools');
+    await focusTab('home');
     await $('[data-testid="tools-center"]').waitForDisplayed({
-      timeoutMsg: 'no tile grid with nothing open',
+      timeoutMsg: 'no tile grid on Home with nothing open',
     });
     // Work-on-the-page tools: disabled. A form tool: still live (its panel
     // prompts for a file).
@@ -165,25 +167,22 @@ describe('secondary toolbar', () => {
     await expect($('[data-testid="tool-tile-protect"]')).toBeEnabled();
   });
 
-  it('an ops-less tool left open outlives its document without stranding the Tools tab', async () => {
+  it('an ops-less tool left open outlives its document without a dead end', async () => {
     // `activeToolId` deliberately outlives the document (Escape disarms the
-    // mode, not the tool). Comment's Tools-tab pane is a fence saying "this
-    // works on the page" — with no page, its only button is one that cannot
-    // run. Fall back to the grid rather than show a dead end.
+    // mode, not the tool). Slice C: with every document closed the app lands
+    // on Home — grid available, no fence, no stranded surface.
     await openByPaths([SAMPLE_PDF]);
-    // The menu path is proven above; this case is about what the Tools TAB does
-    // with a tool that outlives its document, so drive the command directly.
     expect(await invokeAppCommand('tools.open.comment')).toBe(true);
     await browser.waitUntil(async () => (await getState()).activeToolId === 'comment', {
       timeoutMsg: 'Comment did not open',
     });
     await closeAllFiles();
-    await focusTab('tools');
-    // The tool is still open in state...
+    await $('[data-testid="home-tab"]').waitForDisplayed({
+      timeoutMsg: 'closing every doc should land on Home',
+    });
+    // The tool is still open in state, and Home offers the grid — no dead end.
     expect((await getState()).activeToolId).toBe('comment');
-    // ...but the tab shows the grid, not a fence with an inert button.
     await expect($('[data-testid="tools-center"]')).toBeDisplayed();
-    await expect($('[data-testid="tool-on-canvas"]')).not.toBeExisting();
     await openByPaths([SAMPLE_PDF]);
   });
 });

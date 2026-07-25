@@ -441,25 +441,54 @@ describe('invokeCommand', () => {
     expect(invokeCommand('tools.highlight')).toBe(false);
   });
 
-  it('tools.panel.* focuses the Tools tab with the op armed, inside its owning tool', () => {
-    const { dispatched , finalState } = wire(initialState);
+  const dockedState = () =>
+    stateWith({
+      files: new Map([['a.pdf', makeFile('a.pdf')]]),
+      activeFileId: 'a.pdf',
+      ui: { ...initialState.ui, focusedTab: { doc: 'a.pdf' } },
+    });
+
+  it('tools.panel.* opens the op in the DOCK on the doc tab, inside its owning tool', () => {
+    // Phase 10 slice C: the Tools tab is gone — the panel opens beside the
+    // visible document.
+    const { dispatched, finalState } = wire(dockedState());
     expect(invokeCommand('tools.panel.compress')).toBe(true);
     expect(dispatched).toEqual([
-      { type: 'UI_FOCUS_TAB', tab: 'tools' },
+      { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } },
       { type: 'UI_SET_ACTIVE_OP', op: 'compress' },
+      { type: 'UI_SET_TOOL_DOCK_OPEN', open: true },
     ]);
     // Compress lives under Optimize (M5 § 7), and arming the op must OPEN that
-    // tool — otherwise the Tools tab renders the tile grid with the op
-    // invisibly "active" and the menu item looks like it did nothing.
+    // tool — otherwise the dock shows the op with no owning pane context.
     expect(finalState().ui.activeToolId).toBe('optimize');
+    expect(finalState().ui.toolDock.open).toBe(true);
   });
 
-  it('tools.open.* opens a form-backed tool on the Tools tab at its first op', () => {
-    const { dispatched, finalState } = wire(initialState);
+  it('tools.open.* opens a form-backed tool in the dock at its first op', () => {
+    const { dispatched, finalState } = wire(dockedState());
     expect(invokeCommand('tools.open.protect')).toBe(true);
-    expect(dispatched).toContainEqual({ type: 'UI_FOCUS_TAB', tab: 'tools' });
     expect(dispatched).toContainEqual({ type: 'UI_SET_ACTIVE_OP', op: 'encrypt' });
+    expect(dispatched).toContainEqual({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
     expect(finalState().ui.activeToolId).toBe('protect');
+  });
+
+  it('a DOCLESS ops-tool invocation runs the picker-first flow (slice C)', async () => {
+    // No document: the command opens the picker (app.openFiles focuses the
+    // new doc tab itself); the op seats and the dock opens only on success.
+    const { dispatched, handlers } = wire(initialState);
+    expect(invokeCommand('tools.open.protect')).toBe(true);
+    await new Promise((r) => setTimeout(r, 0)); // flush the openFiles() promise
+    expect(handlers.openFiles).toHaveBeenCalledTimes(1);
+    expect(dispatched).toContainEqual({ type: 'UI_SET_ACTIVE_OP', op: 'encrypt' });
+    expect(dispatched).toContainEqual({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+  });
+
+  it('a CANCELLED docless picker seats nothing', async () => {
+    const { dispatched, handlers } = wire(initialState);
+    (handlers.openFiles as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+    expect(invokeCommand('tools.panel.compress')).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(dispatched).toEqual([]);
   });
 
   it('opening a tool with no canvas mode DISARMS the last tool’s mode', () => {
@@ -642,7 +671,7 @@ describe('invokeCommand', () => {
     // The re-homing lives in the reducer precisely so it cannot be forgotten:
     // without it the Tools tab shows the tile grid while `watermark` is armed.
     const next = appReducer(
-      stateWith({ ui: { ...initialState.ui, focusedTab: 'tools' } }),
+      stateWith({ ui: { ...initialState.ui, focusedTab: 'home' } }),
       { type: 'UI_SET_ACTIVE_OP', op: 'watermark' },
     );
     expect(next.ui.activeOp).toBe('watermark');
@@ -725,19 +754,33 @@ describe('invokeCommand', () => {
     expect(dispatched.map((a) => a.type)).toEqual(['DELETE_PAGE_REFS', 'UI_CLEAR_SELECTION']);
   });
 
-  it('view.home / view.tools focus their tabs', () => {
-    const { dispatched } = wire(stateWith({ ui: { ...initialState.ui, focusedTab: 'tools' } }));
+  it('view.home focuses Home; view.toolsPane toggles the dock on a doc tab', () => {
+    const { dispatched } = wire(
+      stateWith({
+        files: new Map([['a.pdf', makeFile('a.pdf')]]),
+        activeFileId: 'a.pdf',
+        ui: { ...initialState.ui, focusedTab: { doc: 'a.pdf' } },
+      }),
+    );
+    // Phase 10 slice C: Shift+F4's command drives the RIGHT DOCK (the Tools
+    // tab is gone) and gates on a doc tab — so toggle BEFORE leaving for Home
+    // (the wire dispatch applies the reducer, and Home would gate it off).
+    expect(invokeCommand('view.toolsPane')).toBe(true);
+    expect(dispatched.at(-1)).toEqual({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
     expect(invokeCommand('view.home')).toBe(true);
     expect(dispatched.at(-1)).toEqual({ type: 'UI_FOCUS_TAB', tab: 'home' });
-    expect(invokeCommand('view.tools')).toBe(true);
-    expect(dispatched.at(-1)).toEqual({ type: 'UI_FOCUS_TAB', tab: 'tools' });
   });
 
-  it('window.nextTab / prevTab cycle Home → Tools → docs', () => {
-    // Home + Tools always present; with no docs, next from Home → Tools.
+  it('view.toolsPane refuses off doc-tab-land (nothing to dock beside)', () => {
+    wire(stateWith({ ui: { ...initialState.ui, focusedTab: 'home' } }));
+    expect(invokeCommand('view.toolsPane')).toBe(false);
+  });
+
+  it('window.nextTab / prevTab cycle Home → docs (no Tools pseudo-tab)', () => {
+    // With no docs, Home is the only tab — cycling stays put.
     const { dispatched } = wire(initialState);
     expect(invokeCommand('window.nextTab')).toBe(true);
-    expect(dispatched.at(-1)).toEqual({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+    expect(dispatched.at(-1)).toEqual({ type: 'UI_FOCUS_TAB', tab: 'home' });
     expect(invokeCommand('window.prevTab')).toBe(true);
     expect(dispatched.at(-1)).toEqual({ type: 'UI_FOCUS_TAB', tab: 'home' }); // wraps
   });
@@ -836,7 +879,7 @@ describe('getCommandContext', () => {
 // its when() didn't check.
 describe('registry smoke', () => {
   it('every command invokes or refuses without throwing, on every tab', () => {
-    const tabs = ['home', 'tools', { doc: 'x.pdf' }] as const;
+    const tabs = ['home', { doc: 'x.pdf' }] as const;
     for (const tab of tabs) {
       let current = stateWith({ ui: { ...initialState.ui, focusedTab: tab } });
       setCommandStateSource(() => ({

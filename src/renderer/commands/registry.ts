@@ -75,9 +75,10 @@ export function tabFilePaths(state: AppState): string[] {
   return tabFiles(state).map((f) => f.path);
 }
 
-/** The visible tab order: Home | Tools | one tab per open document. */
+/** The visible tab order: Home | one tab per open document. (The Tools
+ * pseudo-tab retired in Phase 10 slice C — ops panels live in the dock.) */
 export function tabOrder(state: AppState): FocusedTab[] {
-  return ['home', 'tools', ...tabFilePaths(state).map((doc) => ({ doc }))];
+  return ['home', ...tabFilePaths(state).map((doc) => ({ doc }))];
 }
 
 /** Cycle the visible strip by ±1 from the focused tab (wraps). */
@@ -146,7 +147,6 @@ export const COMMAND_IDS = [
   'edit.findPrev',
   'edit.preferences',
   'view.home',
-  'view.tools',
   'view.navPane',
   ...NAV_PANEL_IDS.map((id) => `view.navPanel.${id}` as const),
   'view.zoomIn',
@@ -227,27 +227,40 @@ function toolCommand(tool: CanvasTool): Command {
 function panelCommand(op: Operation): Command {
   return {
     title: OPERATION_TITLES[op],
-    run: ({ state, dispatch }) => {
-      // Phase 10 B1: with a document to show, the panel opens in the RIGHT
+    run: (ctx) => {
+      // Phase 10 B1/C: with a document to show, the panel opens in the RIGHT
       // DOCK on that doc tab — the document stays visible while the form is
-      // filled in. The full-page Tools tab remains the no-document fallback
-      // (a redundant-but-working legacy surface until slice C retires it).
+      // filled in. With NO document, the king's flow: picker first, then the
+      // tool opens docked on whatever was picked (slice C — the Tools tab is
+      // gone).
       //
       // UI_SET_ACTIVE_OP opens the TOOL that hosts this operation too, so a menu
       // item and a Tools Center tile land in the same place. That re-homing
       // lives in the reducer, not here, so it holds for every dispatcher (the
       // e2e harness sets activeOp directly).
-      const path = showableDoc(state);
+      const path = showableDoc(ctx.state);
       if (path) {
-        dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
-        dispatch({ type: 'UI_SET_ACTIVE_OP', op });
-        dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+        ctx.dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
+        ctx.dispatch({ type: 'UI_SET_ACTIVE_OP', op });
+        ctx.dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
       } else {
-        dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
-        dispatch({ type: 'UI_SET_ACTIVE_OP', op });
+        void openThenSeat(ctx, op);
       }
     },
   };
+}
+
+/** Shared docless-tool flow (Phase 10 slice C): open the picker via the app
+ * services; once a document lands (openFiles focuses its tab itself — the
+ * openByPaths funnel), seat the op and open the dock. A cancelled picker
+ * leaves everything untouched. */
+function openThenSeat(ctx: CommandContext, op: Operation): Promise<void> {
+  if (!ctx.app) return Promise.resolve();
+  return ctx.app.openFiles().then((opened) => {
+    if (!opened) return;
+    ctx.dispatch({ type: 'UI_SET_ACTIVE_OP', op });
+    ctx.dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+  });
 }
 
 /**
@@ -493,10 +506,6 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Home',
     run: ({ dispatch }) => dispatch({ type: 'UI_FOCUS_TAB', tab: 'home' }),
   },
-  'view.tools': {
-    title: 'Tools',
-    run: ({ dispatch }) => dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' }),
-  },
   'view.navPane': {
     title: 'Navigation Pane',
     // The pane is about the active document — only meaningful on a doc tab.
@@ -624,14 +633,11 @@ export const COMMANDS: Record<CommandId, Command> = {
   // document you were on (or Home when none).
   'view.toolsPane': {
     title: 'Tools Pane',
-    run: ({ state, dispatch }) => {
-      if (state.ui.focusedTab === 'tools') {
-        const doc = showableDoc(state);
-        dispatch({ type: 'UI_FOCUS_TAB', tab: doc ? { doc } : 'home' });
-      } else {
-        dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
-      }
-    },
+    // Phase 10 slice C: the Tools TAB is gone — Shift+F4 toggles the right
+    // dock on the document instead (the pane the panels actually live in).
+    when: inCanvas,
+    run: ({ state, dispatch }) =>
+      dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: !state.ui.toolDock.open }),
   },
   // Ctrl+Shift+N (§ 9.2): land the caret in the reading view's page box.
   'view.goToPage': {
@@ -810,8 +816,7 @@ export const COMMANDS: Record<CommandId, Command> = {
             dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
             dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
           } else {
-            dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
-            dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
+            void openThenSeat(ctx, tool.ops[0]);
           }
         },
       } satisfies Command,

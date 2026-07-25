@@ -4,6 +4,7 @@ import { OPERATION_TITLES, type Operation } from '../commands/operations';
 import { toolForOp } from '../commands/tools';
 import { invokeCommand } from '../commands/context';
 import { ToolsCenter } from './ToolsCenter';
+import { ExtractTextPanel } from '../panels/ExtractTextPanel';
 import { ToolIcon } from './tool-icons';
 
 // The right tool dock (Phase 10 slice B1 — 25-workbench-relayout.md § 3.B1).
@@ -15,9 +16,13 @@ import { ToolIcon } from './tool-icons';
 
 interface ToolDockProps {
   panels: Record<Operation, React.ComponentType>;
+  /** Extract-from-canvas hands the panel its page (slice C: the special case
+   * the Tools tab used to render — the dock carries it now). */
+  extractPage: number | null;
+  onConsumeExtractPage: () => void;
 }
 
-export function ToolDock({ panels }: ToolDockProps): React.JSX.Element {
+export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDockProps): React.JSX.Element {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const width = state.ui.toolDock.width;
@@ -112,6 +117,8 @@ export function ToolDock({ panels }: ToolDockProps): React.JSX.Element {
               invokeCommand(`tools.open.${id}`);
             }}
           />
+        ) : activeOp === 'extract_text' ? (
+          <ExtractTextPanel initialPage={extractPage} onConsumeInitialPage={onConsumeExtractPage} />
         ) : (
           <Panel />
         )}

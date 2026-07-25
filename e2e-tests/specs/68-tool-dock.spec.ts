@@ -4,10 +4,10 @@ import { waitForHarness, openByPaths, setView, invokeAppCommand } from '../suppo
 
 const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// Phase 10 slice B1: ops-tool panels open in the RIGHT DOCK beside an
-// always-visible document. The full-page Tools tab survives as the
-// no-document fallback (slice C retires it) — asserted here too, because the
-// intermediate state must be redundant-but-working, never half-broken.
+// Phase 10 slices B1+C: ops-tool panels open in the RIGHT DOCK beside an
+// always-visible document. The Tools tab is GONE (slice C); the harness
+// setView('operations') bridge — asserted in the last leg — is what keeps
+// the legacy panel specs mechanical.
 describe('right tool dock (Phase 10 B1)', () => {
   before(async () => {
     await waitForHarness();
@@ -72,14 +72,15 @@ describe('right tool dock (Phase 10 B1)', () => {
     await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 5_000 });
   });
 
-  it('the legacy Tools tab still works (redundant, complete — until slice C)', async () => {
+  it("the harness bridge: setView('operations') opens the dock (slice C)", async () => {
+    // The Tools tab is GONE; the name-compatible bridge keeps the ~30 legacy
+    // panel specs mechanical — 'operations' now means "doc tab + dock open".
+    await $('[data-testid="tool-dock-close"]').click();
+    await browser.waitUntil(async () => !(await $('[data-testid="tool-dock"]').isExisting()), {
+      timeout: 5_000,
+    });
     await setView('operations');
-    // A tool is open from the previous leg (Organize, via tools.panel.rotate),
-    // so the tab correctly shows its PANE — the op switcher proves the legacy
-    // surface still renders. (The tile grid shows only with no tool open.)
-    await $('[data-testid="tool-op-switch"]').waitForDisplayed({ timeout: 10_000 });
-    // Back to the document for later specs (shared workspace).
-    await setView('canvas');
-    await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
+    expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
   });
 });
