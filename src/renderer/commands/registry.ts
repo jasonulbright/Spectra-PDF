@@ -227,14 +227,25 @@ function toolCommand(tool: CanvasTool): Command {
 function panelCommand(op: Operation): Command {
   return {
     title: OPERATION_TITLES[op],
-    run: ({ dispatch }) => {
-      dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+    run: ({ state, dispatch }) => {
+      // Phase 10 B1: with a document to show, the panel opens in the RIGHT
+      // DOCK on that doc tab — the document stays visible while the form is
+      // filled in. The full-page Tools tab remains the no-document fallback
+      // (a redundant-but-working legacy surface until slice C retires it).
+      //
       // UI_SET_ACTIVE_OP opens the TOOL that hosts this operation too, so a menu
-      // item and a Tools Center tile land in the same place — otherwise the menu
-      // would drop the user on the tile grid with the operation invisibly
-      // "active". That re-homing lives in the reducer, not here, so it holds for
-      // every dispatcher (the e2e harness sets activeOp directly).
-      dispatch({ type: 'UI_SET_ACTIVE_OP', op });
+      // item and a Tools Center tile land in the same place. That re-homing
+      // lives in the reducer, not here, so it holds for every dispatcher (the
+      // e2e harness sets activeOp directly).
+      const path = showableDoc(state);
+      if (path) {
+        dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
+        dispatch({ type: 'UI_SET_ACTIVE_OP', op });
+        dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+      } else {
+        dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+        dispatch({ type: 'UI_SET_ACTIVE_OP', op });
+      }
     },
   };
 }
@@ -759,39 +770,49 @@ export const COMMANDS: Record<CommandId, Command> = {
           const { state, dispatch } = ctx;
           const path = showableDoc(state);
           // OPENING A TOOL GOES WHERE ITS WORK IS. One rule, and it is the whole
-          // of the destination logic:
+          // of the destination logic (Phase 10 B1 revision):
           //
-          //   owns canvas modes, or has no ops  ⇒  the DOCUMENT
-          //   otherwise (a form to fill in)     ⇒  the TOOLS tab
+          //   owns canvas modes, or has no ops  ⇒  the DOCUMENT (mode armed)
+          //   a form to fill in, with a doc     ⇒  the DOCUMENT + the RIGHT DOCK
+          //   a form to fill in, no doc open    ⇒  the legacy Tools tab
           //
-          // Fill & Sign and Prepare Form have BOTH ops and modes, and the old
-          // ops-first test sent them to the Tools tab — so picking either from a
-          // document yanked you off the page before arming, and you had to click
-          // back to use the mode it had just armed. The pill hid that, because
-          // its Fill/Sign/+Field buttons were always there to re-arm with; the
-          // pill is gone, so the detour became the only path. Their work is on
-          // the page (their panes are still one Tools-tab click away).
+          // Fill & Sign and Prepare Form have BOTH ops and modes; their work is
+          // on the page, so they arm there (their panes are one dock-click
+          // away). Ops tools used to yank the user off the document to a
+          // full-page form — the frankenstein seam the relayout exists to kill;
+          // the dock keeps the document visible. The Tools tab survives as the
+          // no-document fallback until slice C retires it.
           if (worksOnPage(tool)) {
             if (!path) return; // unreachable: `when` requires one.
             dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
-          } else {
-            dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+            // One dispatch either way, because the reducer's `openTool` owns
+            // the rule — a tool with ops goes through UI_SET_ACTIVE_OP (which
+            // seats its pane on the first op AND re-homes activeToolId AND
+            // arms the mode); a tool without goes direct. Doing any of it here
+            // too would be a second, stompable copy. The dock is NOT auto-
+            // opened for these: they arm a canvas mode, and grabbing
+            // horizontal space unbidden is the floating-pill class of mistake
+            // — their pane is one dock-click away, already seated.
+            if (tool.ops.length > 0) dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
+            else dispatch({ type: 'UI_OPEN_TOOL', toolId: tool.id });
+            // Scan & OCR's whole surface is Find's "Make searchable" (2m), so
+            // the tool opens Find rather than inventing a second entry point.
+            // Deferred, not called on ctx.canvas: the focus above has only been
+            // SCHEDULED, so the canvas is still unmounted right now.
+            if (tool.id === 'ocr') openFindWhenCanvasReady(ctx.canvas, path);
+            return;
           }
           // Focus FIRST, then open: leaving doc land resets the mode, so an arm
-          // before the focus would be stomped by its own command.
-          //
-          // One dispatch either way, because the reducer's `openTool` owns the
-          // rule — a tool with ops goes through UI_SET_ACTIVE_OP (which lands
-          // the pane on its first op AND re-homes activeToolId AND arms the
-          // mode); a tool without goes direct. Doing any of it here too would be
-          // a second, stompable copy.
-          if (tool.ops.length > 0) dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
-          else dispatch({ type: 'UI_OPEN_TOOL', toolId: tool.id });
-          // Scan & OCR's whole surface is Find's "Make searchable" (2m), so the
-          // tool opens Find rather than inventing a second entry point for it.
-          // Deferred, not called on ctx.canvas: the focus above has only been
-          // SCHEDULED, so the canvas is still unmounted right now.
-          if (tool.id === 'ocr' && path) openFindWhenCanvasReady(ctx.canvas, path);
+          // before the focus would be stomped by its own command. UI_SET_ACTIVE_OP
+          // lands the pane on the tool's first op AND re-homes activeToolId.
+          if (path) {
+            dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
+            dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
+            dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+          } else {
+            dispatch({ type: 'UI_FOCUS_TAB', tab: 'tools' });
+            dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
+          }
         },
       } satisfies Command,
     ]),

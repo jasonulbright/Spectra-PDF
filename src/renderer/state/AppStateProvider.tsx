@@ -19,9 +19,12 @@ function bootState(base: AppState): AppState {
   // entry can't propagate a bad shape into state (recent-files precedent):
   // readRecent (spectra-recent) and readWorkbenchUi (workbench-ui, M3 nav pane).
   const recentFiles = readRecent();
-  const { navPane } = readWorkbenchUi({ navPane: base.ui.navPane });
+  const { navPane, toolDock } = readWorkbenchUi({
+    navPane: base.ui.navPane,
+    toolDock: base.ui.toolDock,
+  });
   const toolbarOverrides = readToolbarOverrides();
-  return { ...base, ui: { ...base.ui, recentFiles, navPane, toolbarOverrides } };
+  return { ...base, ui: { ...base.ui, recentFiles, navPane, toolDock, toolbarOverrides } };
 }
 
 export function AppStateProvider({ children }: { children: React.ReactNode }): React.ReactElement {

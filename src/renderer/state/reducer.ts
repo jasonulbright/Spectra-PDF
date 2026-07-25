@@ -1,4 +1,4 @@
-import { AppState, AppAction, CanvasTool, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_DEFAULT_WIDTH } from './types';
+import { AppState, AppAction, CanvasTool, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_DEFAULT_WIDTH, TOOL_DOCK_MIN_WIDTH, TOOL_DOCK_MAX_WIDTH, TOOL_DOCK_DEFAULT_WIDTH } from './types';
 import { carriesManifest } from '../lib/doc-names';
 import { NO_OVERRIDES } from '../lib/toolbar-layout';
 // Safe from the reducer: commands/tools has type-only imports, so it carries no
@@ -78,6 +78,7 @@ export const initialUiState: UiState = {
   selectionAnchor: null,
   recentFiles: [],
   navPane: { open: false, panel: 'pages', width: NAV_PANE_DEFAULT_WIDTH },
+  toolDock: { open: false, width: TOOL_DOCK_DEFAULT_WIDTH },
 };
 
 // Leaving doc-tab-land re-applies the board's parked-state semantics: the
@@ -1327,6 +1328,15 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const width = Math.min(NAV_PANE_MAX_WIDTH, Math.max(NAV_PANE_MIN_WIDTH, Math.round(action.width)));
       if (width === state.ui.navPane.width) return state;
       return { ...state, ui: { ...state.ui, navPane: { ...state.ui.navPane, width } } };
+    }
+    case 'UI_SET_TOOL_DOCK_OPEN':
+      if (action.open === state.ui.toolDock.open) return state;
+      return { ...state, ui: { ...state.ui, toolDock: { ...state.ui.toolDock, open: action.open } } };
+    case 'UI_SET_TOOL_DOCK_WIDTH': {
+      // Same clamp discipline as the nav pane (the persisted-overshoot class).
+      const width = Math.min(TOOL_DOCK_MAX_WIDTH, Math.max(TOOL_DOCK_MIN_WIDTH, Math.round(action.width)));
+      if (width === state.ui.toolDock.width) return state;
+      return { ...state, ui: { ...state.ui, toolDock: { ...state.ui.toolDock, width } } };
     }
     default:
       return state;

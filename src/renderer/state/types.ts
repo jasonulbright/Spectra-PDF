@@ -223,6 +223,18 @@ export const NAV_PANE_MIN_WIDTH = 180;
 export const NAV_PANE_MAX_WIDTH = 520;
 export const NAV_PANE_DEFAULT_WIDTH = 240;
 
+// The right-hand tool dock (Phase 10 slice B1). Panels were authored around
+// ~380px of comfortable form width; the clamp keeps a drag from crushing them
+// or swallowing the document.
+export interface ToolDockState {
+  open: boolean;
+  width: number; // px, clamped to [TOOL_DOCK_MIN_WIDTH, TOOL_DOCK_MAX_WIDTH]
+}
+
+export const TOOL_DOCK_MIN_WIDTH = 300;
+export const TOOL_DOCK_MAX_WIDTH = 640;
+export const TOOL_DOCK_DEFAULT_WIDTH = 400;
+
 // UI state the command registry needs to read (menus/toolbars can't read
 // component-local state — 19-phase4 § 4.3). Ephemeral interaction state
 // (in-flight drags, rubber bands, inline edits, pending marks/placements)
@@ -255,6 +267,9 @@ export interface UiState {
   // toolbar catalog. Persisted — App mirrors it to localStorage, the
   // recent-files pattern (lib/toolbar-layout.ts).
   toolbarOverrides: ToolbarOverrides;
+  // The right-hand TOOL DOCK (Phase 10 slice B1): where ops-tool panels render
+  // over an always-visible document. Persisted with navPane in workbench-ui.
+  toolDock: ToolDockState;
   // WHICH document the reading view shows (M4.1c), as an `OpenDocument.id`.
   // The board renders every doc at once, but the reading view renders exactly
   // one — and a tab addresses a FILE, while a `.pdfx` partitions one file into
@@ -407,4 +422,6 @@ export type AppAction =
   | { type: 'UI_TOGGLE_NAV_PANE' }
   | { type: 'UI_TOGGLE_PROPERTIES_BAR' }
   | { type: 'UI_SET_TOOLBAR_OVERRIDES'; overrides: ToolbarOverrides }
+  | { type: 'UI_SET_TOOL_DOCK_OPEN'; open: boolean }
+  | { type: 'UI_SET_TOOL_DOCK_WIDTH'; width: number }
   | { type: 'UI_SET_NAV_PANE_WIDTH'; width: number };

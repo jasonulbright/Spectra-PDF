@@ -1,16 +1,26 @@
 // Persistence for workbench chrome state under the NEW `workbench-ui`
 // localStorage key (Phase 4 § 4.3 — new keys do NOT extend the legacy
-// `spectra-` prefix). M3 persists the nav-pane state (open/panel/width). App
-// mirrors ui.navPane → here in one effect; boot hydration reads it back
-// through the validated parse so a corrupt entry can't propagate a bad shape
-// into state (the recent-files precedent).
-import { NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, type NavPaneState, type NavPanelId } from '../state/types';
+// `spectra-` prefix). M3 persists the nav-pane state (open/panel/width);
+// Phase 10 slice B1 adds the right tool dock (open/width). App mirrors
+// ui.navPane + ui.toolDock → here in one debounced effect; boot hydration
+// reads them back through the validated parse so a corrupt entry can't
+// propagate a bad shape into state (the recent-files precedent).
+import {
+  NAV_PANE_MIN_WIDTH,
+  NAV_PANE_MAX_WIDTH,
+  TOOL_DOCK_MIN_WIDTH,
+  TOOL_DOCK_MAX_WIDTH,
+  type NavPaneState,
+  type NavPanelId,
+  type ToolDockState,
+} from '../state/types';
 
 const KEY = 'workbench-ui';
 const PANELS: readonly NavPanelId[] = ['pages', 'bookmarks', 'signatures', 'search'];
 
 interface WorkbenchUi {
   navPane: NavPaneState;
+  toolDock: ToolDockState;
 }
 
 /** Validate one persisted nav-pane shape against `fallback`, field by field. */
@@ -29,6 +39,20 @@ function coerceNavPane(raw: unknown, fallback: NavPaneState): NavPaneState {
   };
 }
 
+/** Same discipline for the tool dock. */
+function coerceToolDock(raw: unknown, fallback: ToolDockState): ToolDockState {
+  if (typeof raw !== 'object' || raw === null) return fallback;
+  const r = raw as Record<string, unknown>;
+  const width =
+    typeof r.width === 'number' && Number.isFinite(r.width)
+      ? Math.min(TOOL_DOCK_MAX_WIDTH, Math.max(TOOL_DOCK_MIN_WIDTH, Math.round(r.width)))
+      : fallback.width;
+  return {
+    open: typeof r.open === 'boolean' ? r.open : fallback.open,
+    width,
+  };
+}
+
 /** Read persisted workbench-ui, coercing every field against `defaults`. */
 export function readWorkbenchUi(defaults: WorkbenchUi): WorkbenchUi {
   let raw: unknown;
@@ -38,7 +62,11 @@ export function readWorkbenchUi(defaults: WorkbenchUi): WorkbenchUi {
     return defaults;
   }
   if (typeof raw !== 'object' || raw === null) return defaults;
-  return { navPane: coerceNavPane((raw as Record<string, unknown>).navPane, defaults.navPane) };
+  const r = raw as Record<string, unknown>;
+  return {
+    navPane: coerceNavPane(r.navPane, defaults.navPane),
+    toolDock: coerceToolDock(r.toolDock, defaults.toolDock),
+  };
 }
 
 export function writeWorkbenchUi(value: WorkbenchUi): void {

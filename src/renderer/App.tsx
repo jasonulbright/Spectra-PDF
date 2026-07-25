@@ -84,6 +84,7 @@ import { insertAnchor } from './state/selectors';
 import { UpdateBar } from './components/UpdateBar';
 import { NavPane } from './components/navpane/NavPane';
 import { ToolsCenter } from './components/ToolsCenter';
+import { ToolDock } from './components/ToolDock';
 import { ToolIcon } from './components/tool-icons';
 import { toolById } from './commands/tools';
 import { OPERATION_TITLES, type Operation } from './commands/operations';
@@ -268,9 +269,12 @@ function AppContent(): React.ReactElement {
   // localStorage write per event competes with the drag for main-thread time
   // (review-caught). Each change reschedules; only the settled value persists.
   useEffect(() => {
-    const t = setTimeout(() => writeWorkbenchUi({ navPane: state.ui.navPane }), 200);
+    const t = setTimeout(
+      () => writeWorkbenchUi({ navPane: state.ui.navPane, toolDock: state.ui.toolDock }),
+      200,
+    );
     return () => clearTimeout(t);
-  }, [state.ui.navPane]);
+  }, [state.ui.navPane, state.ui.toolDock]);
 
   const activeFile = state.activeFileId ? state.files.get(state.activeFileId) : null;
   // Open, tab-bearing files (importOnly sources excluded) — the Tools-tab
@@ -1827,6 +1831,11 @@ function AppContent(): React.ReactElement {
                   dropResolverRef={dropResolverRef}
                 />
               </div>
+              {/* The right tool dock (Phase 10 B1): ops panels beside the
+                  document. Reading mode collapses it with the rest of the
+                  chrome; toolDock.open is untouched underneath, so exiting
+                  restores it (the navPane precedent). */}
+              {!state.ui.readingMode && state.ui.toolDock.open && <ToolDock panels={panels} />}
             </div>
           )}
         </main>
