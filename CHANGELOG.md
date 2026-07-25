@@ -1,5 +1,64 @@
 # Changelog
 
+## 2.8.2 — The workbench
+
+The interface has been rebuilt around one rule: **your document never leaves
+the screen.**
+
+### The new layout
+- **Tools open beside the page, not instead of it** — every tool panel now
+  lives in a resizable pane on the right, with the document still in front of
+  you. Switch between a tool's operations inside the pane, or browse all
+  tools from its grid view. Your pane width is remembered.
+- **A real status bar** — page number (type to jump), zoom and Fit, the
+  Read⇄Organize switch, and Comments now sit in a slim bar under the page.
+  Pending work — unapplied page edits, form fills, redactions — shows there
+  too, always visible, never floating over your content.
+- **Pure document tabs** — every open file is a tab, and that's all tabs are
+  now. `Shift+F4` opens and closes the tool pane; `Ctrl+Tab` cycles files.
+- **A cleaner Home** — quick actions (Open, Combine, Create PDF, Batch OCR),
+  your recent files with folder and last-opened details, and the full tool
+  grid, in one tidy landing page.
+- **Pick first, tool ready** — choosing a tool with nothing open now asks for
+  a file, then opens with that document loaded, instead of showing an empty
+  form.
+- **Customizable toolbar** — show or hide any toolbar button, and add
+  optional buttons for the Pages, Bookmarks, and Signatures panes
+  (right-click the toolbar, or View ▸ Customize Toolbar…).
+- **Properties Bar** (`Ctrl+E`) — click any comment with the Select tool to
+  see its details in a context strip: kind, page, size, note — with one-click
+  recolor and delete.
+
+### Reading and presenting
+- **Two-page spreads** — read facing pages side by side, with a "cover page
+  separate" option so spreads pair the way a bound book does.
+- **Reading Mode** (`Ctrl+H`) — collapse the app chrome around the document.
+- **Presentation** (`F5`) — full-screen, one page at a time, with keyboard
+  and click navigation.
+
+### Accessibility
+- **Structure tags editor** — view and edit the document's accessibility
+  tags: retag headings and figures, set alternative text, titles, and
+  language, create and delete tags, and restructure the tree.
+- **Reading order panel** — see the exact order assistive technology reads a
+  page, with text previews, and fix it with one click.
+
+### Signing
+- **PAdES signatures** — sign to the modern European baseline profiles (B-B,
+  B-T, B-LT, B-LTA), with RFC 3161 timestamping and embedded revocation data
+  for long-term validation.
+- **Your own trust list** — verification can validate the signer's chain
+  against certificate authorities you choose, managed in the app.
+
+### Export and OCR
+- **Export to Word, RTF, ODT, and HTML** — real editable text, via a bundled
+  converter; nothing to install.
+- **Export pages as images** — PNG or JPEG per page, or a multi-page TIFF,
+  at the resolution you choose, in color or grayscale.
+- **47 OCR languages** — up from four; every language ships offline in the
+  installer, including Japanese, Chinese, Korean, Arabic, Hebrew, Russian,
+  Greek, Thai, and Vietnamese.
+
 ## 2.8.1 — Search, pagination, and document tools
 
 ### Search
