@@ -10,16 +10,16 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 
 ### Reading & navigating
 - **Reading view** — continuous, virtualized scroll; smooth with 1,000-page documents. Real text selection and copy (select text to highlight, underline, strike out, or link it), zoom presets (`Ctrl+0/1/2`), go-to-page (`Ctrl+Shift+N`), Rotate View (`Ctrl+Shift+Plus/Minus` — the page turns, the file doesn't), Hand/Select with Space as a temporary hand, two-page spreads with a cover option, Reading Mode (`Ctrl+H`), and full-screen Presentation (`F5`)
-- **A workbench that never hides your document** — tools open in a resizable side pane beside the page, a status bar carries page/zoom/view controls and any pending work, every open file is a tab, and the toolbar is customizable (per-button show/hide). A context-sensitive Properties Bar (`Ctrl+E`) shows the selected annotation's details
+- **A workbench that never hides your document** — tools open in a resizable side pane beside the page (toggle it from the toolbar or `Shift+F4`; it narrows to an index of tool names and widens for the tool you pick), a status bar carries page/zoom/view controls and any pending work, every open file is a tab, and the toolbar is customizable (per-button show/hide). A context-sensitive Properties Bar (`Ctrl+E`) shows the selected annotation's details
 - **Organize view** — every open file as a strip of live page thumbnails; drag pages within and across documents, multi-select, whole-document merge, drop files to import their pages at that spot. All of it staged in memory, committed atomically, undoable
 - **Navigation pane** (`F4`) — Pages (thumbnails with drag-reorder), Bookmarks (with editing), Search, Signatures
-- **Find & Search** — floating find (`Ctrl+F`, `F3`/`Ctrl+G` stepping) and a workspace-wide Search panel (`Ctrl+Shift+F`); scanned pages become searchable (and selectable) via OCR
+- **Find & Search** — a universal search box in the toolbar that answers with both **tools and document text** in one list (type a tool's name to launch it, or a phrase to jump to the page), plus floating find (`Ctrl+F`, `F3`/`Ctrl+G` stepping) and a workspace-wide Search panel (`Ctrl+Shift+F`) with regex, case and whole-word modes and an on-disk scope. Scanned pages become searchable (and selectable) via OCR
 - **Batch OCR** (Tools ▸ Batch OCR Folder…) — point it at a folder and get a mirrored copy of the whole tree with every scanned PDF made searchable; already-searchable files copy through unchanged, problem files are reported, and the originals are never touched. Fully offline, like all OCR here
 
 ![Organize view](docs/images/screenshot_organize.png)
 
 ### The twenty-two tools
-Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and recoloring on each, plus a comments sidebar; existing PDF annotations import as editable) · Edit (select an image, a paragraph, or a line of text on the page — move, resize, rotate, crop, dim, replace, extract or delete images and place new ones; rewrite text in place in the document's own font with live validation, kerned like a typesetter; edit whole paragraphs with true rewrap, split and merge them, restyle size, colour, family, bold and italic — plus real OpenType small caps and stylistic alternates — a whole paragraph or just a selected range; select and move, resize, rotate, recolour, re-width or delete the drawn vector shapes (lines, boxes, rules) on the page, even inside groups; add brand-new text boxes) · Fill & Sign (AcroForm fill on the page, digital signatures: verify with your own trust anchors, sign with PFX/PEM incl. PAdES baseline-through-LTA profiles with timestamping, visible stamps, sign-into-field, sign in place with counter-signing) · Prepare Form (draw new fields on the page; view and edit the document's JavaScript) · Redact (true content removal) · Scan & OCR · Compare (text + visual diff) · Protect (AES-256 encrypt/decrypt) · Optimize (compress, grayscale, convert to CMYK, linearize, PDF/A, PDF version) · Repair (three tiers up to per-page salvage) · Watermark · Header & Footer (six positions, page-number and auto-incrementing Bates tokens) · Crop & Page Boxes (crop/bleed/trim/art) · Page Labels (front matter as i, ii, iii; prefixed appendices) · Attachments (embed, extract, remove) · Layers (show/hide optional content) · Accessibility (checker, structure-tag editor, reading-order panel) · Comments (review every comment, or clear them all) · Preflight (fonts, colour, and transparency checks for print) · Links (list, retarget, or remove link regions — and create them from selected text) · Export (text extraction, Word/RTF/ODT/HTML via a bundled converter, page images as PNG/JPEG/TIFF)
+Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and recoloring on each; existing PDF annotations import as editable) · Edit (select an image, a paragraph, or a line of text on the page — move, resize, rotate, crop, dim, replace, extract or delete images and place new ones; rewrite text in place in the document's own font with live validation, kerned like a typesetter; edit whole paragraphs with true rewrap, split and merge them, restyle size, colour, family, bold and italic — plus real OpenType small caps and stylistic alternates — a whole paragraph or just a selected range; select and move, resize, rotate, recolour, re-width or delete the drawn vector shapes (lines, boxes, rules) on the page, even inside groups; add brand-new text boxes) · Fill & Sign (AcroForm fill on the page, digital signatures: verify with your own trust anchors, sign with PFX/PEM incl. PAdES baseline-through-LTA profiles with timestamping, visible stamps, sign-into-field, sign in place with counter-signing) · Prepare Form (draw new fields on the page; view and edit the document's JavaScript) · Redact (true content removal) · Scan & OCR · Compare (text + visual diff) · Protect (AES-256 encrypt/decrypt) · Optimize (compress, grayscale, convert to CMYK, linearize, PDF/A, PDF version) · Repair (three tiers up to per-page salvage) · Watermark · Header & Footer (six positions, page-number and auto-incrementing Bates tokens) · Crop & Page Boxes (crop/bleed/trim/art) · Page Labels (front matter as i, ii, iii; prefixed appendices) · Attachments (embed, extract, remove) · Layers (show/hide optional content) · Accessibility (checker, structure-tag editor, reading-order panel) · Comments (one list of every comment in the document — jump to it, edit its note, recolour or delete it, or clear them all) · Preflight (fonts, colour, and transparency checks for print) · Links (list, retarget, or remove link regions — and create them from selected text) · Export (text extraction, Word/RTF/ODT/HTML via a bundled converter, page images as PNG/JPEG/TIFF)
 
 ![Tools](docs/images/screenshot_tools.png)
 
@@ -138,7 +138,7 @@ Results are JSON on stdout. Progress and errors go to stderr. Exit codes: 0 = su
 "C:\Program Files\Open PDF Studio\uninstall.exe" /S /removeuserdata
 ```
 
-Auto-update can be disabled machine-wide via `HKLM\SOFTWARE\Open PDF Studio\DisableAutoUpdate = 1` (set automatically by the silent installer). Ghostscript and the Python runtime are bundled — nothing else to deploy. The installer's own `/?` dialog documents all switches:
+Auto-update can be disabled machine-wide via `HKLM\SOFTWARE\Open PDF Studio\DisableAutoUpdate = 1` (set automatically by the silent installer). Everything the app needs is inside the installer — the Python runtime, Ghostscript, the LibreOffice export runtime, the edit fonts, and the offline OCR language data — so there is no second deployment step and no machine needs its own copy of any of them. Third-party licence notices are installed alongside the app and open from Settings ▸ Updates & Licenses. The installer's own `/?` dialog documents all switches:
 
 <img src="docs/images/silent.png" width="376" alt="Installer switches dialog">
 
@@ -179,7 +179,7 @@ npm run dev
 npm run package
 ```
 
-This runs `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it into `resources/`), then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, produces the NSIS installer).
+This runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it), `scripts/sync-edit-fonts.ps1` (the hash-pinned Liberation + Libertinus faces and their OFL licence texts), and `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it) — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, produces the NSIS installer). Every one of those four is a `tauri.conf.json` resource, so all four must have run before a build can succeed.
 
 Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio_X.Y.Z_x64-setup.exe`
 
@@ -187,7 +187,7 @@ Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio_X.Y.Z_x64-setup.ex
 
 | Command | What it does |
 |---------|-------------|
-| `npm run prepackage` | Downloads embedded Python + bundles GS (no compile) |
+| `npm run prepackage` | Vendors all four runtimes — embedded Python, Ghostscript, edit fonts, LibreOffice (no compile) |
 | `npm run build:renderer` | Vite production build of the React frontend |
 | `npm run build` | `cargo tauri build` — Rust compile + NSIS installer (assumes prepackage already ran) |
 | `npm run package` | All of the above in sequence |
@@ -232,7 +232,7 @@ versions: [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 | OCR — single documents and batch folder mirroring | Tesseract via tesseract.js | Apache-2.0 |
 | Compress, grayscale, PDF/A, print rasterization, page-image export, repair tier 2, **Create PDF from PostScript (distilling)** | Ghostscript (vendored upstream, separate process) | AGPL-3.0 |
 | Export to Word / RTF / ODT / HTML | LibreOffice (bundled, separate process) | MPL-2.0 |
-| Compatible-font fallback for text editing | Liberation Sans + fontTools | SIL OFL 1.1 / MIT |
+| Compatible-font fallback and OpenType features for text editing | Liberation + Libertinus faces, fontTools | SIL OFL 1.1 / MIT |
 | Window shell, native dialogs, IPC, updater | Tauri v2 + Rust crates | MIT / Apache-2.0 |
 
 ## Project Structure
@@ -263,8 +263,11 @@ openpdfstudio/
 │   └── engine/                # Python PDF engine (one file per operation)
 ├── e2e-tests/                 # WDIO specs against the built binary
 ├── tests/                     # vitest (renderer) + pytest (engine)
-├── resources/                 # Embedded Python + vendored GS (built by scripts)
-└── scripts/                   # setup-python-embed.ps1, bundle-ghostscript.ps1
+├── resources/                 # Vendored runtimes: embedded Python, Ghostscript,
+│                              #   LibreOffice, edit fonts (all built by scripts)
+└── scripts/                   # setup-python-embed.ps1, bundle-ghostscript.ps1,
+                               #   bundle-libreoffice.ps1, sync-edit-fonts.ps1,
+                               #   sync-ocr-assets.mjs, gen-rust-licenses.ps1
 ```
 
 ## License
