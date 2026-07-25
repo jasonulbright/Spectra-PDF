@@ -1,2 +1,2 @@
-pikepdf>=10.7.2
+pikepdf>=10.10.0
 pdfminer.six>=20260107

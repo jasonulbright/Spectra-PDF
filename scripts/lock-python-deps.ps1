@@ -21,12 +21,24 @@ if (-not (Test-Path "$DestDir\python.exe")) {
     throw "Embedded runtime missing -- run scripts\setup-python-embed.ps1 first."
 }
 
+# The probe MUST NOT be fatal. `$ErrorActionPreference = "Stop"` above turns a
+# native command's stderr / non-zero exit into a TERMINATING error, so this
+# line used to kill the script before the exit-code check below could run --
+# and it did so precisely in the case the check exists for: no pip. Since
+# setup-python-embed.ps1 deliberately uninstalls pip, that meant the documented
+# flow ("edit the .in, run this script") failed every time on a freshly
+# provisioned runtime. try/catch keeps the probe non-fatal; $LASTEXITCODE is
+# still the real signal.
 $hadPip = $true
-& $DestDir\python.exe -m pip --version 2>&1 | Out-Null
+try {
+    & $DestDir\python.exe -m pip --version 2>&1 | Out-Null
+} catch {
+    # No pip -- expected; $LASTEXITCODE below carries the verdict.
+}
 if ($LASTEXITCODE -ne 0) {
     $hadPip = $false
     Write-Host "Bootstrapping pip into the embedded runtime (temporary)..."
-    Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEMP\get-pip.py"
+    Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEMP\get-pip.py" -UseBasicParsing
     & $DestDir\python.exe "$env:TEMP\get-pip.py" --no-warn-script-location 2>&1 | Out-Null
 }
 

@@ -5,9 +5,9 @@
 # actually installs, with --require-hashes. See docs/PUNCHLIST.md dev notes.
 # 10.9+ required: merge/split use Pdf.add_pages_from (form-aware page copy,
 # added in pikepdf 10.9) — see engine/acroform.py.
-pikepdf==10.9.1
+pikepdf==10.10.0
 pdfminer.six==20260107
-pyHanko==0.35.2
+pyHanko==0.36.0
 # 7.4 replacement-font fallback: subsetting + embedding the bundled OFL
 # font (resources/fonts) for characters a document's own font can't
 # express. Deliberate dep-bump per 21-phase7-content-editing.md.
