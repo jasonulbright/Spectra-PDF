@@ -69,6 +69,12 @@ CLAUDE.md
 docs/PUNCHLIST.md
 docs/architecture/
 docs/reviews/
+# Hygiene-pass additions (2026-07-24): the doc map, archived punchlist
+# history, and external-baseline reference material (names competitors —
+# must never reach the public repo).
+docs/README.md
+docs/archive/
+docs/reference/
 *.local.*
 
 # LibreOffice runtime for O1 export (assembled by scripts/bundle-libreoffice.ps1;
