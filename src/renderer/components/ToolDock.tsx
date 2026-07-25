@@ -139,6 +139,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
           />
         ) : showGrid ? (
           <ToolsCenter
+            embedded
             onOpenTool={(id) => {
               setShowGrid(false);
               invokeCommand(`tools.open.${id}`);

@@ -2145,32 +2145,9 @@
 .tool-tile-title { font-size: 13px; font-weight: 500; color: #e5e5e5; }
 .tool-tile-desc { font-size: 11px; line-height: 1.45; color: #949494; }
 
-.tool-pane-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.tool-back {
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  color: #a3a3a3;
-  cursor: default;
-}
-.tool-back:hover { background: #262626; color: #e5e5e5; }
-.tool-back:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
 
 /* The within-tool operation switcher: a tool is the JOB, these are the ways of
    doing it. Only rendered when a tool hosts more than one. */
-.tool-op-switch {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #2e2e2e;
-}
 .tool-op {
   display: flex;
   align-items: center;
@@ -2196,9 +2173,6 @@
 [data-theme="light"] .tool-tile:hover .tool-tile-icon { color: #111827; }
 [data-theme="light"] .tool-tile-title { color: #111827; }
 [data-theme="light"] .tool-tile-desc { color: #6b7280; }
-[data-theme="light"] .tool-back { color: #4b5563; }
-[data-theme="light"] .tool-back:hover { background: #f3f4f6; color: #111827; }
-[data-theme="light"] .tool-op-switch { border-bottom-color: #e5e7eb; }
 [data-theme="light"] .tool-op { color: #4b5563; }
 [data-theme="light"] .tool-op:hover { background: #f3f4f6; color: #111827; }
 [data-theme="light"] .tool-op.active { background: #0078d4; color: #ffffff; }
@@ -2207,36 +2181,7 @@
    "Active File" column. The Tools tab isn't a doc tab, so a tool's panels need
    their target named somewhere; one control in the pane head says it without
    spending a column on it. Only rendered with >1 file open. */
-.tool-pane-file {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-}
-.tool-pane-file-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 600;
-  color: #a3a3a3;
-}
-.tool-pane-file select {
-  max-width: 240px;
-  padding: 3px 6px;
-  border-radius: 4px;
-  border: 1px solid #2e2e2e;
-  background: #1f1f1f;
-  color: #e5e5e5;
-  font-size: 12px;
-}
-.tool-pane-file select:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
 
-[data-theme="light"] .tool-pane-file-label { color: #6b7280; }
-[data-theme="light"] .tool-pane-file select {
-  background: #ffffff;
-  border-color: #e5e7eb;
-  color: #111827;
-}
 
 /* ── Secondary toolbar (Phase 4 M5.4, § 3.1) ──────────────────────────────
    The contextual strip at the top of the document pane, present only while a
@@ -2254,6 +2199,168 @@
   border-bottom: 1px solid #2e2e2e;
   background: #1f1f1f;
   flex-shrink: 0;
+}
+
+/* Home (Phase 10 slice E) — the king's-bar redesign: quick actions, a quiet
+   drop target, recents with real hierarchy, the tools grid as a section. */
+.home-shell {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 40px 32px 56px;
+}
+.home-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.home-title {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.home-sub {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #8a8a92;
+}
+.home-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.home-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 7px;
+  color: #d9d9de;
+  background: #232327;
+  border: 1px solid #333338;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.home-action:hover {
+  background: #2b2b30;
+  border-color: #45454c;
+}
+.home-action:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.home-action-primary {
+  color: #fff;
+  background: #2563eb;
+  border-color: #2563eb;
+}
+.home-action-primary:hover {
+  background: #3b82f6;
+  border-color: #3b82f6;
+}
+.home-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 30px 0;
+  margin-bottom: 30px;
+  border: 1px dashed #37373d;
+  border-radius: 10px;
+  color: #6f6f78;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.012);
+}
+.home-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.home-tools-head {
+  margin-top: 36px;
+}
+.home-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 650;
+  color: #77777f;
+}
+.home-section-action {
+  font-size: 12px;
+  color: #8a8a92;
+  cursor: pointer;
+}
+.home-section-action:hover {
+  color: #d9d9de;
+}
+.home-empty {
+  padding: 26px 0;
+  text-align: center;
+  font-size: 13px;
+  color: #5d5d66;
+}
+.home-recents {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #2a2a2f;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.home-recent {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px 9px 10px;
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px solid #232328;
+  transition: background 100ms;
+}
+.home-recent:last-child {
+  border-bottom: none;
+}
+.home-recent:hover {
+  background: #232327;
+}
+.home-recent-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #232328;
+  color: #8a8a92;
+}
+.home-recent:hover .home-recent-icon {
+  color: #d9d9de;
+}
+.home-recent-name {
+  font-size: 13px;
+  color: #e7e7ea;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-recent-folder {
+  font-size: 12px;
+  color: #6f6f78;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-recent-when {
+  font-size: 11.5px;
+  color: #6f6f78;
+  white-space: nowrap;
 }
 
 /* The right tool dock (Phase 10 slice B1) — ops-tool panels beside an
@@ -2548,16 +2655,6 @@
 
 /* An ops-less tool's Tools-tab pane: it has no form here, so it says so rather
    than borrowing another operation's (§ 3.3, the absence fence). */
-.tool-on-canvas {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 4px 0;
-  font-size: 13px;
-  color: #a3a3a3;
-}
-[data-theme="light"] .tool-on-canvas { color: #4b5563; }
 
 /* ── Preferences (Phase 4 M5.5, § 7) ──────────────────────────────────────
    Category nav + one section at a time, replacing a flat scroll of every

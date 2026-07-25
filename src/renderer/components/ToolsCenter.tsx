@@ -14,13 +14,16 @@ import { ToolIcon } from './tool-icons';
 
 export interface ToolsCenterProps {
   onOpenTool: (id: ToolId) => void;
+  /** Rendered inside a host that provides its own section heading (Home's
+   * "All tools" head, the dock's header) — suppress the standalone one. */
+  embedded?: boolean;
 }
 
-export function ToolsCenter({ onOpenTool }: ToolsCenterProps): React.JSX.Element {
+export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.JSX.Element {
   return (
     <div className="tools-center" data-testid="tools-center">
-      <h2 className="tools-center-heading">Tools</h2>
-      <p className="tools-center-sub">Choose what you want to do with your document.</p>
+      {!embedded && <h2 className="tools-center-heading">Tools</h2>}
+      {!embedded && <p className="tools-center-sub">Choose what you want to do with your document.</p>}
       <div className="tools-grid">
         {TOOL_DEFS.map((tool) => {
           // Grey what can't run, exactly as the menu bar does for the same
