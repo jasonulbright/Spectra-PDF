@@ -13,6 +13,12 @@ describe('right tool dock (Phase 10 B1)', () => {
     await waitForHarness();
     await openByPaths([SAMPLE]);
     await setView('canvas');
+    // The suite shares one workspace and an earlier spec may leave the board
+    // (Organize) mode active; `document-view` exists only in the reading
+    // view, so pin the mode instead of assuming it (order-dependence caught
+    // by the full-suite gate — solo runs passed).
+    await invokeAppCommand('view.documentView');
+    await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
   });
 
   it('an ops tool opens in the dock with the document still visible', async () => {
