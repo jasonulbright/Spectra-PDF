@@ -12,7 +12,7 @@
 # The engine (font_fallback.resolve_fallback_font) picks the face matching
 # the run's own font family (and, since 9.A3b, the requested style) so a
 # serif document's converted text stays serif and a bold restyle lands on
-# the real Bold face. THIRD-PARTY-LICENSES.md § Fonts carries the license
+# the real Bold face. THIRD-PARTY-LICENSES.md section Fonts carries the license
 # text pointer.
 #
 # The release tarball is sha256-pinned AND each extracted face is

@@ -42,20 +42,20 @@ Write-Host "Installing pip..."
 Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEMP\get-pip.py"
 & $DestDir\python.exe "$env:TEMP\get-pip.py" --no-warn-script-location 2>&1 | Out-Null
 
-# Install the hash-pinned dependency tree. Every package — top-level AND
-# transitive (cryptography, lxml, …) — is version- and hash-verified via
+# Install the hash-pinned dependency tree. Every package -- top-level AND
+# transitive (cryptography, lxml, ...) -- is version- and hash-verified via
 # --require-hashes, so a build is reproducible and can't silently pull a
 # different transitive version. Top-level pins live in python-requirements.in;
 # the full locked tree in python-requirements.txt is regenerated deliberately
 # with lock-python-deps.ps1 (never floated automatically). pyHanko (for
-# signature verification) pulls cryptography/asn1crypto/certvalidator — see
+# signature verification) pulls cryptography/asn1crypto/certvalidator -- see
 # docs/architecture/10-phase2h-signatures.md.
 $LockFile = "$PSScriptRoot\python-requirements.txt"
 Write-Host "Installing hash-pinned dependencies from python-requirements.txt..."
 & $DestDir\python.exe -m pip install --require-hashes -r $LockFile --no-warn-script-location 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Hash-verified dependency install failed" }
 
-# Cleanup — remove pip, caches, metadata
+# Cleanup -- remove pip, caches, metadata
 Write-Host "Cleaning up..."
 & $DestDir\python.exe -m pip uninstall pip -y 2>&1 | Out-Null
 Get-ChildItem $DestDir -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force

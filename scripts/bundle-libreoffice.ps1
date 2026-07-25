@@ -1,22 +1,22 @@
 # Vendors a LibreOffice runtime into resources/libreoffice/ for the O1 export
 # feature (PDF -> Word/RTF/ODT/HTML). LibreOffice is invoked as a separate
 # headless process (soffice --headless); it is unmodified upstream, redistributed
-# under MPL-2.0 (see THIRD-PARTY-LICENSES.md § LibreOffice).
+# under MPL-2.0 (see THIRD-PARTY-LICENSES.md section LibreOffice).
 #
 # Two sources, tried in order:
-#   1. A local system install (C:\Program Files\LibreOffice) — copied verbatim.
+#   1. A local system install (C:\Program Files\LibreOffice) -- copied verbatim.
 #      This is the fast path on a dev/packaging machine that already has it
 #      (e.g. cutting a release locally: it just copies your installed copy).
-#   2. The official upstream Windows .msi — downloaded, CHECKSUM-VERIFIED, and
+#   2. The official upstream Windows .msi -- downloaded, CHECKSUM-VERIFIED, and
 #      extracted headlessly. This is what makes a CI-tag release self-sufficient:
 #      the GitHub windows-latest runner has no LibreOffice, so it falls to this
-#      path — and because a real version + hash are pinned below, it needs NO
+#      path -- and because a real version + hash are pinned below, it needs NO
 #      repository variable and NO manual setup. Same model as bundle-ghostscript.ps1.
 #
 # NOTE on the "never pin a runtime version" rule: that rule targets BROWSER /
 # WEBVIEW runtimes (WebView2, msedgedriver, Chrome) that auto-update on an
 # external schedule. LibreOffice is a third-party vendored runtime like
-# Ghostscript, which the repo DOES pin — and the app still resolves whatever
+# Ghostscript, which the repo DOES pin -- and the app still resolves whatever
 # soffice.exe is present at RUN time (engine.rs / cli.rs), so this download pin
 # only fixes what a fresh CI box fetches, never what the app requires.
 #
@@ -61,7 +61,7 @@ function Copy-Install([string]$root) {
     return $true
 }
 
-# ── 1. Local system install ─────────────────────────────────────────────────
+# -- 1. Local system install -------------------------------------------------
 $roots = @(
     "$env:ProgramFiles\LibreOffice",
     "${env:ProgramFiles(x86)}\LibreOffice"
@@ -75,7 +75,7 @@ foreach ($r in $roots) {
     }
 }
 
-# ── 2. Upstream .msi (pinned default; no manual setup needed) ────────────────
+# -- 2. Upstream .msi (pinned default; no manual setup needed) ----------------
 $Work = Join-Path $env:TEMP "lo-vendor"
 Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Work | Out-Null
@@ -94,7 +94,7 @@ if ($ExpectedSha256 -and $ExpectedSha256 -ne "" -and $ExpectedSha256 -ne "PLACEH
     }
     Write-Host "Checksum verified."
 } elseif ($ExpectedSha256 -eq "PLACEHOLDER_SHA256") {
-    Write-Warning "No pinned SHA256 for this build — download NOT integrity-checked. Set -ExpectedSha256."
+    Write-Warning "No pinned SHA256 for this build -- download NOT integrity-checked. Set -ExpectedSha256."
 }
 
 # Administrative install extracts the payload without touching the system.

@@ -13,7 +13,7 @@ param(
     [string]$DestDir = "$PSScriptRoot\..\resources\ghostscript"
 )
 
-# Pinned installer checksum — update deliberately alongside $GsVersion.
+# Pinned installer checksum -- update deliberately alongside $GsVersion.
 $ExpectedSha256 = "3A4C28D0AAC47AA7CCCD35A5932C55110376E9DBD966898DDE388B7FABA444A4"
 
 $Tag = "gs" + ($GsVersion -replace '\.', '')

@@ -3,7 +3,7 @@
 #
 # Run this after editing python-requirements.in (e.g. bumping pikepdf/pyHanko).
 # It resolves the FULL transitive tree + hashes using the exact target
-# interpreter — the embedded CPython 3.14 in resources/python — so the lock
+# interpreter -- the embedded CPython 3.14 in resources/python -- so the lock
 # matches what ships. pip is bootstrapped temporarily and removed again, so
 # this leaves resources/python as it found it (no pip).
 #
@@ -18,7 +18,7 @@ $OutFile = "$PSScriptRoot\python-requirements.txt"
 $Report = "$env:TEMP\pip-lock-report.json"
 
 if (-not (Test-Path "$DestDir\python.exe")) {
-    throw "Embedded runtime missing — run scripts\setup-python-embed.ps1 first."
+    throw "Embedded runtime missing -- run scripts\setup-python-embed.ps1 first."
 }
 
 $hadPip = $true
