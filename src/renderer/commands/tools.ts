@@ -35,7 +35,6 @@ export type ToolId =
   | 'attachments'
   | 'layers'
   | 'accessibility'
-  | 'comments'
   | 'preflight'
   | 'links'
   | 'export';
@@ -84,8 +83,17 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'comment',
     title: 'Comment',
-    description: 'Highlight, add text boxes, draw, stamp — with notes on each.',
-    ops: [],
+    description: 'Highlight, add text boxes, draw, stamp — and review every comment in the document.',
+    // U3 fold: 'comments' (the review list) was a SECOND tool sitting next to
+    // this one in the grid, one letter apart — "Comment" to make them,
+    // "Comments" to read them. That is not a distinction a user should have to
+    // infer from a plural. It is one job, so it is one tool: the modes below
+    // author the markup, and the op below is the list of what is there.
+    // Safe against the mode: `worksOnPage` is true either way (canvasTools),
+    // and the reducer arms a tool's canvas mode BEFORE it considers ops — so
+    // Comment still lands you ON the page, with its pane seated one dock-click
+    // away rather than grabbing horizontal space.
+    ops: ['comments'],
     // Four modes, one tool — the pill listed them flat and made the user infer
     // the grouping; Acrobat's Comment toolbar states it.
     canvasTools: ['highlight', 'freetext', 'ink', 'stamp'],
@@ -194,12 +202,6 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Accessibility',
     description: 'Check the document, edit its structure tags, and fix the reading order.',
     ops: ['accessibility', 'tags', 'readingorder'],
-  },
-  {
-    id: 'comments',
-    title: 'Comments',
-    description: 'Review every comment in the document, or delete them all.',
-    ops: ['comments'],
   },
   {
     id: 'preflight',

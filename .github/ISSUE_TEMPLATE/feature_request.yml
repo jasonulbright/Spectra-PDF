@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a capability or an improvement to an existing one
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Concrete suggestions grounded in real work are the most useful kind --
+        what you were trying to get done matters more than a proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task or workflow, not just the feature name.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help
+      description: How you picture it working, if you have a view.
+
+  - type: textarea
+    id: today
+    attributes:
+      label: How you handle it today
+      description: |
+        A workaround, another tool, or doing it by hand -- this says a lot
+        about how much the gap costs.
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before you post
+      options:
+        - label: I checked the README -- the app has a CLI, and many whole-file operations are scriptable there.

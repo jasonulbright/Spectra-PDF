@@ -86,18 +86,21 @@ describe('right tool dock (Phase 10 B1)', () => {
       timeout: 15_000,
       timeoutMsg: 'the Comments toggle never showed the comments panel',
     });
-    expect(await $('[data-testid="tool-dock-title"]').getText()).toBe('Comments');
+    expect(await $('[data-testid="tool-dock-title"]').getText()).toBe('Comment');
     expect(await $('[data-testid="tool-dock"]').getText()).toContain('dock comments leg');
     // The document is still on screen — this is a dock panel, not an overlay.
     expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
 
     // The TOOL route lands on the very same panel — one comments surface.
-    expect(await invokeAppCommand('tools.open.comments')).toBe(true);
+    // Note the id: the review tool was FOLDED INTO `comment` (U3), so there is
+    // no `tools.open.comments` any more. Comment authors markup AND owns the
+    // list; the grid no longer carries two tiles a plural apart.
+    expect(await invokeAppCommand('tools.open.comment')).toBe(true);
     await $('[data-testid="tool-dock"] [data-testid="comments-list"]').waitForDisplayed({
       timeout: 15_000,
       timeoutMsg: 'the Comments tool did not open the comments panel',
     });
-    expect(await $('[data-testid="tool-dock-title"]').getText()).toBe('Comments');
+    expect(await $('[data-testid="tool-dock-title"]').getText()).toBe('Comment');
 
     // Toggle again: the dock closes.
     await $('[data-testid="toggle-comments"]').click();

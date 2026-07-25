@@ -1,5 +1,42 @@
 # Changelog
 
+## 2.8.4 — Tools you can find
+
+The tool pane and search both got the pass they needed after living with the
+new layout, and the two things called "Comments" became one.
+
+### The tool pane
+- **Smaller, clearer tool buttons** — the tool's NAME is now the biggest thing
+  on the button instead of the smallest, icons are smaller, and each tool's
+  description has moved into a tooltip. More tools fit on screen at once.
+- **The pane sizes itself to what it's showing** — it narrows to a compact
+  index when you're browsing all tools, and widens back to your own chosen
+  width when you open one.
+- **A clear way back** — inside a tool, the pane header now says
+  **‹ All tools** instead of showing an unlabelled grid icon.
+
+### One search box for everything
+- **Search from the toolbar** — one box that answers with both **tools and
+  document text**. Type part of a tool's name to open it, or type a phrase to
+  see the pages it appears on and jump straight there. Arrow keys and Enter
+  work throughout.
+
+### One comments list
+- **Comments are now in a single place.** Previously two different lists were
+  both called "Comments" and could report different numbers — one could edit
+  but quietly hid any comment without a note, the other showed everything but
+  was read-only. Now there is one list: every comment in the document, with
+  jump-to-page, note editing, recolouring, delete, and delete-all.
+- **"Comment" and "Comments" are one tool, so the tool list is 21 instead of
+  22.** Having two tiles a single letter apart — one to make comments, one to
+  read them — was never a distinction worth asking you to infer. The Comment
+  tool now does both: it arms highlighting, text boxes, ink and stamps on the
+  page as before, and its pane holds the list of what's there.
+
+### Fixed
+- **Clicking a comment now always jumps to its page.** If you were already
+  reading the document it belonged to — the usual case — nothing happened.
+
 ## 2.8.3 — License notices in the box
 
 Mainly a compliance release: the third-party notices now travel with the

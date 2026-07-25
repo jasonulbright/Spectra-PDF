@@ -1,12 +1,18 @@
 # Open PDF Studio
 
+[![CI](https://github.com/jasonulbright/Open-PDF-Studio/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonulbright/Open-PDF-Studio/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/jasonulbright/Open-PDF-Studio?sort=semver)](https://github.com/jasonulbright/Open-PDF-Studio/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/jasonulbright/Open-PDF-Studio/total)](https://github.com/jasonulbright/Open-PDF-Studio/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4)](https://github.com/jasonulbright/Open-PDF-Studio/releases/latest)
+
 A modern, open-source PDF workbench for Windows. Tauri v2 + React, with an embedded Python engine and vendored upstream Ghostscript (AGPL-3.0). No ads, no telemetry, no upsells. WebView2 prerequisite (ships with Windows 10/11).
 
 ![Open PDF Studio](docs/images/screenshot_dark_clean.png)
 
 ## What it is
 
-A full-featured PDF workbench with a familiar user interface: a menu bar, customizable toolbar, and document tabs over a continuous reading view; a navigation pane on the left; twenty-two task-oriented tools that open in a resizable pane on the right — your document never leaves the screen; and a status bar carrying page, zoom, and any pending work. The keymap is verified against the industry-standard editor's published shortcut table, so your muscle memory just works. Every whole-file operation also ships as a CLI subcommand with identical results.
+A full-featured PDF workbench with a familiar user interface: a menu bar, customizable toolbar, and document tabs over a continuous reading view; a navigation pane on the left; twenty-one task-oriented tools that open in a resizable pane on the right — your document never leaves the screen; and a status bar carrying page, zoom, and any pending work. The keymap is verified against the industry-standard editor's published shortcut table, so your muscle memory just works. Every whole-file operation also ships as a CLI subcommand with identical results.
 
 ### Reading & navigating
 - **Reading view** — continuous, virtualized scroll; smooth with 1,000-page documents. Real text selection and copy (select text to highlight, underline, strike out, or link it), zoom presets (`Ctrl+0/1/2`), go-to-page (`Ctrl+Shift+N`), Rotate View (`Ctrl+Shift+Plus/Minus` — the page turns, the file doesn't), Hand/Select with Space as a temporary hand, two-page spreads with a cover option, Reading Mode (`Ctrl+H`), and full-screen Presentation (`F5`)
@@ -18,8 +24,8 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 
 ![Organize view](docs/images/screenshot_organize.png)
 
-### The twenty-two tools
-Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and recoloring on each; existing PDF annotations import as editable) · Edit (select an image, a paragraph, or a line of text on the page — move, resize, rotate, crop, dim, replace, extract or delete images and place new ones; rewrite text in place in the document's own font with live validation, kerned like a typesetter; edit whole paragraphs with true rewrap, split and merge them, restyle size, colour, family, bold and italic — plus real OpenType small caps and stylistic alternates — a whole paragraph or just a selected range; select and move, resize, rotate, recolour, re-width or delete the drawn vector shapes (lines, boxes, rules) on the page, even inside groups; add brand-new text boxes) · Fill & Sign (AcroForm fill on the page, digital signatures: verify with your own trust anchors, sign with PFX/PEM incl. PAdES baseline-through-LTA profiles with timestamping, visible stamps, sign-into-field, sign in place with counter-signing) · Prepare Form (draw new fields on the page; view and edit the document's JavaScript) · Redact (true content removal) · Scan & OCR · Compare (text + visual diff) · Protect (AES-256 encrypt/decrypt) · Optimize (compress, grayscale, convert to CMYK, linearize, PDF/A, PDF version) · Repair (three tiers up to per-page salvage) · Watermark · Header & Footer (six positions, page-number and auto-incrementing Bates tokens) · Crop & Page Boxes (crop/bleed/trim/art) · Page Labels (front matter as i, ii, iii; prefixed appendices) · Attachments (embed, extract, remove) · Layers (show/hide optional content) · Accessibility (checker, structure-tag editor, reading-order panel) · Comments (one list of every comment in the document — jump to it, edit its note, recolour or delete it, or clear them all) · Preflight (fonts, colour, and transparency checks for print) · Links (list, retarget, or remove link regions — and create them from selected text) · Export (text extraction, Word/RTF/ODT/HTML via a bundled converter, page images as PNG/JPEG/TIFF)
+### The twenty-one tools
+Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and recoloring on each; existing PDF annotations import as editable; and one list of every comment in the document — jump to it, edit its note, recolour or delete it, or clear them all) · Edit (select an image, a paragraph, or a line of text on the page — move, resize, rotate, crop, dim, replace, extract or delete images and place new ones; rewrite text in place in the document's own font with live validation, kerned like a typesetter; edit whole paragraphs with true rewrap, split and merge them, restyle size, colour, family, bold and italic — plus real OpenType small caps and stylistic alternates — a whole paragraph or just a selected range; select and move, resize, rotate, recolour, re-width or delete the drawn vector shapes (lines, boxes, rules) on the page, even inside groups; add brand-new text boxes) · Fill & Sign (AcroForm fill on the page, digital signatures: verify with your own trust anchors, sign with PFX/PEM incl. PAdES baseline-through-LTA profiles with timestamping, visible stamps, sign-into-field, sign in place with counter-signing) · Prepare Form (draw new fields on the page; view and edit the document's JavaScript) · Redact (true content removal) · Scan & OCR · Compare (text + visual diff) · Protect (AES-256 encrypt/decrypt) · Optimize (compress, grayscale, convert to CMYK, linearize, PDF/A, PDF version) · Repair (three tiers up to per-page salvage) · Watermark · Header & Footer (six positions, page-number and auto-incrementing Bates tokens) · Crop & Page Boxes (crop/bleed/trim/art) · Page Labels (front matter as i, ii, iii; prefixed appendices) · Attachments (embed, extract, remove) · Layers (show/hide optional content) · Accessibility (checker, structure-tag editor, reading-order panel) · Preflight (fonts, colour, and transparency checks for print) · Links (list, retarget, or remove link regions — and create them from selected text) · Export (text extraction, Word/RTF/ODT/HTML via a bundled converter, page images as PNG/JPEG/TIFF)
 
 ![Tools](docs/images/screenshot_tools.png)
 
@@ -206,7 +212,7 @@ Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio_X.Y.Z_x64-setup.ex
   - Reading view (virtualized)             - Printer enumeration                    - pikepdf (structural)
   - Organize board (page strips)           - Sidecar management                     - pdfminer.six (text)
   - Navigation pane                        - System tray                            - pyHanko (signatures)
-  - Tool dock (22 tools) + status bar      - Single instance                        - Ghostscript (upstream:
+  - Tool dock (21 tools) + status bar      - Single instance                        - Ghostscript (upstream:
   - Command registry + keymap              - Auto-updater                             compress, PDF/A, print,
   - pdf.js render + text layer             - Registry policy check                    distill)
 ```

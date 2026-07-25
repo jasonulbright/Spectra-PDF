@@ -72,7 +72,7 @@ export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.J
 // tile — two surfaces naming one tool must not draw it differently.
 export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = {
   organize: 'rotate',
-  comment: 'watermark',
+  comment: 'comments',
   edit: 'watermark',
   fillsign: 'signatures',
   prepareform: 'forms',
@@ -89,7 +89,6 @@ export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = 
   attachments: 'attachments',
   layers: 'layers',
   accessibility: 'accessibility',
-  comments: 'comments',
   preflight: 'preflight',
   links: 'links',
   export: 'extract_text',

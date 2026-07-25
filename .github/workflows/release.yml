@@ -63,13 +63,34 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Updater signing — store the private key as a repository secret.
+          # Updater signing -- store the private key as a repository secret.
           # The key has no password, so the password is an empty string (no secret needed).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Open PDF Studio ${{ github.ref_name }}"
-          releaseBody: "See CHANGELOG.md for details. The installer is unsigned (no code-signing certificate); SmartScreen may warn on first run."
+          releaseBody: "See CHANGELOG.md for details. The installer is unsigned (no code-signing certificate); SmartScreen may warn on first run -- verify your download against SHA256SUMS.txt, published with this release."
           releaseDraft: false
           prerelease: false
+
+      # The installer is UNSIGNED, so a published checksum is the only way a
+      # cautious user can confirm the file they downloaded is the file this
+      # workflow built. Generated after the release exists, then attached to it.
+      - name: Publish SHA-256 checksums
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $bundle = "src-tauri/target/release/bundle/nsis"
+          $files = Get-ChildItem $bundle -Filter "*-setup.exe" -ErrorAction Stop
+          if (-not $files) { throw "no installer found in $bundle to checksum" }
+          $lines = foreach ($f in $files) {
+            $h = (Get-FileHash -Algorithm SHA256 $f.FullName).Hash.ToLowerInvariant()
+            "$h  $($f.Name)"
+          }
+          $out = Join-Path $bundle "SHA256SUMS.txt"
+          # ASCII + LF: this file is consumed by `sha256sum -c` as often as by eye.
+          [System.IO.File]::WriteAllText($out, ($lines -join "`n") + "`n", [System.Text.ASCIIEncoding]::new())
+          Get-Content $out
+          gh release upload ${{ github.ref_name }} $out --clobber

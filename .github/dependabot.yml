@@ -1,0 +1,50 @@
+version: 2
+
+# Dependabot keeps the three dependency graphs current. CI already runs
+# `npm audit --production --audit-level=high` and `cargo audit` on every push,
+# which catches known-vulnerable versions at build time; these updates are the
+# other half -- they arrive as PRs rather than waiting for the next build.
+#
+# Grouped deliberately: a solo maintainer does not want one PR per package.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # The 47 @tesseract.js-data/* language packages move together or not at
+      # all -- the OCR staging script fails the build if an offered language is
+      # missing its data, so a partial bump is never wanted.
+      tesseract-language-data:
+        patterns:
+          - "@tesseract.js-data/*"
+      dev-tooling:
+        dependency-type: development
+
+  - package-ecosystem: npm
+    directory: /e2e-tests
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      wdio:
+        patterns:
+          - "@wdio/*"
+          - "webdriverio"
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      tauri:
+        patterns:
+          - "tauri"
+          - "tauri-*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
