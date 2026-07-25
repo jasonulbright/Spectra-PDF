@@ -16,6 +16,14 @@ jobs:
   release:
     name: Build & publish (Windows)
     runs-on: windows-latest
+    # Without this the job inherits GitHub's 6-hour default. The vendoring
+    # steps download large artifacts from volunteer mirrors, and a mirror that
+    # accepts the connection but never sends data would hang rather than fail
+    # -- burning hours of Actions time and reporting nothing useful. Successful
+    # releases run ~35-40 min, so 90 is generous headroom that still fails
+    # visibly. (The LibreOffice step also retries mirrors; this is the backstop
+    # for the case retrying cannot fix.)
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
 
