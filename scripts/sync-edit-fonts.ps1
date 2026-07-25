@@ -34,6 +34,13 @@ $Sha256 = '7191c669bf38899f73a2094ed00f7b800553364f90e2637010a69c0e268f25d0'
 # ASCII ONLY in this file: Windows PowerShell 5.1 reads BOM-less UTF-8 as
 # ANSI, and a multi-byte dash inside a QUOTED string mangles into a
 # parser-breaking byte (bitten live).
+# The SIL OFL 1.1 requires the license text to ACCOMPANY distributed font
+# copies, so each family's license file is vendored beside the faces (and
+# ships with them via the same tauri resources mapping). Pinned like the
+# faces: sourced from inside the SAME pinned archives, hash-verified.
+$LiberationLicense = @{ ArchiveName = 'LICENSE'; Dest = 'LICENSE-Liberation-OFL.txt'; Sha256 = '93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b' }
+$LibertinusLicense = @{ ArchiveName = 'OFL.txt'; Dest = 'LICENSE-Libertinus-OFL.txt'; Sha256 = '9aeecc8107c489ec1ec0068b0313e531a760edf3493705b32ab8ab8215a8794e' }
+
 $Faces = @(
     @{ Name = 'LiberationSans-Regular.ttf';     Sha256 = '76d04c18ea243f426b7de1f3ad208e927008f961dc5945e5aad352d0dfde8ee8' }
     @{ Name = 'LiberationSans-Bold.ttf';        Sha256 = '788abee4c806d660e8aee46689dd8540cd4bb98da03dcc9d171ce3efd99a9173' }
@@ -75,7 +82,11 @@ $Dest = Join-Path $Root 'resources\fonts'
 # (the bundle-ghostscript re-check precedent: a corrupted/wrong file must
 # not silently satisfy the skip).
 $allPresent = $true
-foreach ($face in ($Faces + $LibFaces)) {
+$Wanted = @($Faces + $LibFaces + @(
+    @{ Name = $LiberationLicense.Dest; Sha256 = $LiberationLicense.Sha256 }
+    @{ Name = $LibertinusLicense.Dest; Sha256 = $LibertinusLicense.Sha256 }
+))
+foreach ($face in $Wanted) {
     $t = Join-Path $Dest $face.Name
     if (-not (Test-Path $t)) { $allPresent = $false; break }
     $h = (Get-FileHash -Algorithm SHA256 $t).Hash.ToLowerInvariant()
@@ -116,6 +127,14 @@ foreach ($face in $Faces) {
     Write-Host "Vendored: $Target"
 }
 
+$lic = Get-ChildItem -Recurse $Extract -Filter $LiberationLicense.ArchiveName | Select-Object -First 1
+if (-not $lic) { throw "$($LiberationLicense.ArchiveName) not found in the Liberation archive" }
+$Target = Join-Path $Dest $LiberationLicense.Dest
+Copy-Item $lic.FullName $Target -Force
+$h = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
+if ($h -ne $LiberationLicense.Sha256) { throw "sha256 mismatch for $($LiberationLicense.Dest): $h" }
+Write-Host "Vendored: $Target"
+
 Remove-Item $Tmp -Force
 Remove-Item $Extract -Recurse -Force
 
@@ -141,5 +160,14 @@ foreach ($face in $LibFaces) {
     if ($h -ne $face.Sha256) { throw "sha256 mismatch for $($face.Name): $h" }
     Write-Host "Vendored: $Target"
 }
+
+$lic = Get-ChildItem -Recurse $LibExtract -Filter $LibertinusLicense.ArchiveName | Select-Object -First 1
+if (-not $lic) { throw "$($LibertinusLicense.ArchiveName) not found in the Libertinus archive" }
+$Target = Join-Path $Dest $LibertinusLicense.Dest
+Copy-Item $lic.FullName $Target -Force
+$h = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
+if ($h -ne $LibertinusLicense.Sha256) { throw "sha256 mismatch for $($LibertinusLicense.Dest): $h" }
+Write-Host "Vendored: $Target"
+
 Remove-Item $LibTmp -Force
 Remove-Item $LibExtract -Recurse -Force

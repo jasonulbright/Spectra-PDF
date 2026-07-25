@@ -35,6 +35,11 @@ describe('preferences dialog', () => {
       timeoutMsg: 'Help ▸ Licenses did not land on the licences',
     });
     expect(await $('[data-testid="prefs-cat-licenses"]').getAttribute('aria-pressed')).toBe('true');
+    // The SHIPPED notice files are reachable from here (license-compliance
+    // set): both openers render. Existence only — clicking would launch the
+    // OS default handler on the runner.
+    await expect($('[data-testid="licenses-open-aggregate"]')).toBeDisplayed();
+    await expect($('[data-testid="licenses-open-rust"]')).toBeDisplayed();
     await $('[data-testid="prefs-close"]').click();
   });
 });

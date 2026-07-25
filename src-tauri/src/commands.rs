@@ -512,6 +512,33 @@ pub async fn get_app_version() -> Result<String, String> {
     Ok(env!("CARGO_PKG_VERSION").to_string())
 }
 
+/// Opens one of the SHIPPED third-party license notice files with the OS
+/// default handler. Allowlisted names only — this is a licenses opener, not
+/// a general path opener, and the webview has no shell-open capability.
+#[tauri::command]
+pub async fn open_third_party_licenses(app: AppHandle, file: String) -> Result<(), String> {
+    const ALLOWED: [&str; 2] = ["THIRD-PARTY-LICENSES.md", "THIRD-PARTY-LICENSES-RUST.html"];
+    if !ALLOWED.contains(&file.as_str()) {
+        return Err(format!("not a shipped licenses file: {file}"));
+    }
+    let path = app
+        .path()
+        .resource_dir()
+        .map_err(|e| e.to_string())?
+        .join(&file);
+    if !path.is_file() {
+        return Err(format!("licenses file not found: {}", path.display()));
+    }
+    use tauri_plugin_shell::ShellExt;
+    // shell::open is deprecated in favor of the opener plugin, but the shell
+    // plugin is already shipped and adding a second plugin crate for this one
+    // call widens the dependency graph for no capability gain.
+    #[allow(deprecated)]
+    app.shell()
+        .open(path.to_string_lossy().to_string(), None)
+        .map_err(|e| e.to_string())
+}
+
 // ── Ghostscript detection ────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]

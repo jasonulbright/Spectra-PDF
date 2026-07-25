@@ -28,7 +28,9 @@
       "../resources/ghostscript": "ghostscript",
       "../resources/libreoffice": "libreoffice",
       "../resources/fonts": "fonts",
-      "../src/engine": "engine"
+      "../src/engine": "engine",
+      "../THIRD-PARTY-LICENSES.md": "THIRD-PARTY-LICENSES.md",
+      "THIRD-PARTY-LICENSES-RUST.html": "THIRD-PARTY-LICENSES-RUST.html"
     },
     "windows": {
       "nsis": {

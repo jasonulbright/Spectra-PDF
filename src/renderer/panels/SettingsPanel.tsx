@@ -384,18 +384,53 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         <label className="block text-sm text-neutral-400 mb-2">Third-party components</label>
         <div className="text-xs text-neutral-500 space-y-1.5">
           <p>
-            <span className="text-neutral-400">Ghostscript</span> (AGPL-3.0) is bundled unmodified
-            and invoked strictly as a separate program — it is never linked into this application.
-            Source: ghostscript.com. Used for Compress, Grayscale, PDF/A, and Rebuild.
+            <span className="text-neutral-400">Ghostscript</span> (AGPL-3.0) and{' '}
+            <span className="text-neutral-400">LibreOffice</span> (MPL-2.0) are bundled unmodified
+            and invoked strictly as separate programs — never linked into this application.
+            Ghostscript handles Compress, Grayscale, PDF/A, Rebuild, and image export;
+            LibreOffice handles export to Word and other editable formats.
           </p>
           <p>
             Also bundled or embedded: <span className="text-neutral-400">Python</span> (PSF license)
-            with <span className="text-neutral-400">pikepdf</span> (MPL-2.0) and{' '}
-            <span className="text-neutral-400">pdfminer.six</span> (MIT);{' '}
+            with <span className="text-neutral-400">pikepdf</span> (MPL-2.0),{' '}
+            <span className="text-neutral-400">pdfminer.six</span> (MIT), and{' '}
+            <span className="text-neutral-400">pyHanko</span> (MIT) among its packages;{' '}
             <span className="text-neutral-400">pdf.js</span> (Apache-2.0);{' '}
             <span className="text-neutral-400">pdf-lib</span> (MIT);{' '}
-            <span className="text-neutral-400">Tauri</span> (MIT/Apache-2.0).
+            <span className="text-neutral-400">tesseract.js</span> and its OCR language models
+            (Apache-2.0); the <span className="text-neutral-400">Liberation</span> and{' '}
+            <span className="text-neutral-400">Libertinus</span> fonts (SIL OFL 1.1);{' '}
+            <span className="text-neutral-400">Tauri</span> and the compiled Rust crates
+            (MIT/Apache-2.0 and similar).
           </p>
+          <p>
+            The complete notices ship with the app: the aggregate list (with each
+            component&apos;s license and source) and the per-crate Rust listing.
+          </p>
+        </div>
+        <div className="flex gap-2 mt-3">
+          <button
+            data-testid="licenses-open-aggregate"
+            className="text-xs px-2 py-1 rounded border border-neutral-700 text-neutral-300 hover:bg-neutral-800"
+            onClick={() => {
+              app.openThirdPartyLicenses('THIRD-PARTY-LICENSES.md')
+                .then(() => setStatus('Opened third-party licenses'))
+                .catch(() => setStatus('Could not open the licenses file'));
+            }}
+          >
+            Open third-party licenses
+          </button>
+          <button
+            data-testid="licenses-open-rust"
+            className="text-xs px-2 py-1 rounded border border-neutral-700 text-neutral-300 hover:bg-neutral-800"
+            onClick={() => {
+              app.openThirdPartyLicenses('THIRD-PARTY-LICENSES-RUST.html')
+                .then(() => setStatus('Opened Rust crate notices'))
+                .catch(() => setStatus('Could not open the licenses file'));
+            }}
+          >
+            Rust crate notices
+          </button>
         </div>
       </div>
       )}

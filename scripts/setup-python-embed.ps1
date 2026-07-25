@@ -55,11 +55,25 @@ Write-Host "Installing hash-pinned dependencies from python-requirements.txt..."
 & $DestDir\python.exe -m pip install --require-hashes -r $LockFile --no-warn-script-location 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Hash-verified dependency install failed" }
 
-# Cleanup -- remove pip, caches, metadata
+# Cleanup -- remove pip, caches, install bookkeeping. dist-info dirs are
+# PRUNED, not deleted: each wheel's METADATA (name/version/license fields)
+# and license texts (licenses/, LICENSE*, COPYING*, NOTICE*, AUTHORS*) must
+# ship with the runtime -- MIT/BSD-family licenses require their notice to
+# accompany redistributed copies, and these files are the only copy the
+# bundled runtime carries (2026-07-25 license audit; deleting them whole
+# shipped the packages with no notices at all).
 Write-Host "Cleaning up..."
 & $DestDir\python.exe -m pip uninstall pip -y 2>&1 | Out-Null
 Get-ChildItem $DestDir -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
-Get-ChildItem $DestDir -Recurse -Directory -Filter "*.dist-info" | Remove-Item -Recurse -Force
+$Keep = '^(METADATA|LICENSE.*|COPYING.*|NOTICE.*|AUTHORS.*)$'
+foreach ($di in (Get-ChildItem $DestDir -Recurse -Directory -Filter "*.dist-info")) {
+    foreach ($f in (Get-ChildItem $di.FullName -File)) {
+        if ($f.Name -notmatch $Keep) { Remove-Item $f.FullName -Force }
+    }
+    foreach ($sub in (Get-ChildItem $di.FullName -Directory)) {
+        if ($sub.Name -ne 'licenses') { Remove-Item $sub.FullName -Recurse -Force }
+    }
+}
 Get-ChildItem $DestDir -Recurse -Directory -Filter "tests" | Remove-Item -Recurse -Force
 Remove-Item "$DestDir\Scripts" -Recurse -Force -ErrorAction SilentlyContinue
 

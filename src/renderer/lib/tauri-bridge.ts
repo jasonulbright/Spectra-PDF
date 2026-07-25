@@ -185,6 +185,10 @@ export const app = {
   getBundledGsInfo: () => invoke<GsInfo>('get_bundled_gs_info'),
   detectExternalGs: () => invoke<GsInfo | null>('detect_external_gs'),
   getVersion: () => invoke<string>('get_app_version'),
+  /** Open a SHIPPED third-party licenses file (allowlisted name) with the
+   *  OS default handler — resolved against the app's resource dir in Rust. */
+  openThirdPartyLicenses: (file: 'THIRD-PARTY-LICENSES.md' | 'THIRD-PARTY-LICENSES-RUST.html') =>
+    invoke('open_third_party_licenses', { file }),
   getSystemAccentColor: () => invoke<string | null>('get_system_accent_color'),
   /** Which backdrop the window was created with: "mica" or "none". */
   getWindowBackdrop: () => invoke<string>('get_window_backdrop'),
