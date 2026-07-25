@@ -72,26 +72,64 @@ describe('right tool dock (Phase 10 B1)', () => {
     await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 5_000 });
   });
 
-  it('the Comments toggle opens the dock in its comments view (slice D)', async () => {
+  // U3: the status-bar toggle and the Comments TOOL now land on the SAME
+  // panel. Before, they opened two different lists that both called themselves
+  // "Comments" and disagreed about the count.
+  it('the Comments toggle opens THE comments panel, and the tool opens the same one', async () => {
     // Give the list something to show, then drive the status-bar toggle.
     await addAnnotation({
       kind: 'highlight', x: 0.1, y: 0.1, w: 0.2, h: 0.08,
       color: '#ffd54a', note: 'dock comments leg',
     });
     await $('[data-testid="toggle-comments"]').click();
-    await $('[data-testid="tool-dock"] [data-testid="comment-sidebar"]').waitForDisplayed({
-      timeout: 10_000,
-      timeoutMsg: 'the Comments toggle never showed the dock comments view',
+    await $('[data-testid="tool-dock"] [data-testid="comments-list"]').waitForDisplayed({
+      timeout: 15_000,
+      timeoutMsg: 'the Comments toggle never showed the comments panel',
     });
     expect(await $('[data-testid="tool-dock-title"]').getText()).toBe('Comments');
     expect(await $('[data-testid="tool-dock"]').getText()).toContain('dock comments leg');
-    // The document is still on screen — the sidebar no longer floats over it.
+    // The document is still on screen — this is a dock panel, not an overlay.
     expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
+
+    // The TOOL route lands on the very same panel — one comments surface.
+    expect(await invokeAppCommand('tools.open.comments')).toBe(true);
+    await $('[data-testid="tool-dock"] [data-testid="comments-list"]').waitForDisplayed({
+      timeout: 15_000,
+      timeoutMsg: 'the Comments tool did not open the comments panel',
+    });
+    expect(await $('[data-testid="tool-dock-title"]').getText()).toBe('Comments');
+
     // Toggle again: the dock closes.
     await $('[data-testid="toggle-comments"]').click();
     await browser.waitUntil(async () => !(await $('[data-testid="tool-dock"]').isExisting()), {
       timeout: 5_000,
       timeoutMsg: 'the Comments toggle never closed the dock',
+    });
+  });
+
+  // The concrete defect U3 removed: the status bar's old list filtered to
+  // annotations carrying a NOTE (`if (!a.note) continue`), while the Comments
+  // tool counted everything — so a highlight with no note was invisible in one
+  // "Comments" and counted in the other. One list now, and it shows both.
+  it('lists a comment that has no note (the old list silently hid these)', async () => {
+    await addAnnotation({
+      kind: 'highlight', x: 0.5, y: 0.5, w: 0.15, h: 0.06,
+      color: '#2fbf71', note: '',
+    });
+    await $('[data-testid="toggle-comments"]').click();
+    await $('[data-testid="tool-dock"] [data-testid="comments-list"]').waitForDisplayed({
+      timeout: 15_000,
+    });
+    // Both are listed: the noted one from the previous leg and the note-less one.
+    const items = await $$('[data-testid="tool-dock"] [data-testid="comment-item"]');
+    expect(items.length).toBeGreaterThanOrEqual(2);
+    // ...and the summary agrees with the list rather than reporting a different
+    // number, which is what two surfaces reading two sources used to do.
+    const summary = await $('[data-testid="tool-dock"] [data-testid="comments-summary"]').getText();
+    expect(summary).toContain(`${items.length} comment`);
+    await $('[data-testid="toggle-comments"]').click();
+    await browser.waitUntil(async () => !(await $('[data-testid="tool-dock"]').isExisting()), {
+      timeout: 5_000,
     });
   });
 

@@ -78,7 +78,7 @@ export const initialUiState: UiState = {
   selectionAnchor: null,
   recentFiles: [],
   navPane: { open: false, panel: 'pages', width: NAV_PANE_DEFAULT_WIDTH },
-  toolDock: { open: false, width: TOOL_DOCK_DEFAULT_WIDTH, view: 'tool' },
+  toolDock: { open: false, width: TOOL_DOCK_DEFAULT_WIDTH },
 };
 
 // Leaving doc-tab-land re-applies the board's parked-state semantics: the
@@ -1330,9 +1330,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, ui: { ...state.ui, navPane: { ...state.ui.navPane, width } } };
     }
     case 'UI_SET_TOOL_DOCK_OPEN': {
-      const view = action.view ?? state.ui.toolDock.view;
-      if (action.open === state.ui.toolDock.open && view === state.ui.toolDock.view) return state;
-      return { ...state, ui: { ...state.ui, toolDock: { ...state.ui.toolDock, open: action.open, view } } };
+      if (action.open === state.ui.toolDock.open) return state;
+      return { ...state, ui: { ...state.ui, toolDock: { ...state.ui.toolDock, open: action.open } } };
     }
     case 'UI_SET_TOOL_DOCK_WIDTH': {
       // Same clamp discipline as the nav pane (the persisted-overshoot class).

@@ -9,7 +9,7 @@ import { NAV_PANE_DEFAULT_WIDTH, TOOL_DOCK_DEFAULT_WIDTH } from '../src/renderer
 
 const DEFAULTS = {
   navPane: { open: false, panel: 'pages' as const, width: NAV_PANE_DEFAULT_WIDTH },
-  toolDock: { open: false, width: TOOL_DOCK_DEFAULT_WIDTH, view: 'tool' as const },
+  toolDock: { open: false, width: TOOL_DOCK_DEFAULT_WIDTH },
 };
 
 const store = new Map<string, string>();
@@ -31,11 +31,28 @@ describe('readWorkbenchUi', () => {
   it('round-trips a valid value', () => {
     writeWorkbenchUi({
       navPane: { open: true, panel: 'bookmarks', width: 260 },
-      toolDock: { open: true, width: 420, view: 'comments' },
+      toolDock: { open: true, width: 420 },
     });
     const read = readWorkbenchUi(DEFAULTS);
     expect(read.navPane).toEqual({ open: true, panel: 'bookmarks', width: 260 });
-    expect(read.toolDock).toEqual({ open: true, width: 420, view: 'comments' });
+    expect(read.toolDock).toEqual({ open: true, width: 420 });
+  });
+
+  it('drops a PRE-U3 entry\'s retired toolDock.view instead of choking on it', () => {
+    // Every existing install has one of these on disk: the dock used to carry
+    // `view: 'tool' | 'comments'` and U3 retired it (comments are a normal op
+    // panel now). The reader must keep the fields it still understands rather
+    // than fall back to defaults and lose the user's width.
+    store.set(
+      'workbench-ui',
+      JSON.stringify({
+        navPane: { open: true, panel: 'pages', width: 240 },
+        toolDock: { open: true, width: 420, view: 'comments' },
+      }),
+    );
+    const read = readWorkbenchUi(DEFAULTS);
+    expect(read.toolDock).toEqual({ open: true, width: 420 });
+    expect(read.navPane.width).toBe(240);
   });
 
   it('coerces each field against defaults, clamping width low and high', () => {
@@ -56,9 +73,9 @@ describe('readWorkbenchUi', () => {
     expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual(DEFAULTS.toolDock);
     // Corrupt dock fields coerce field-by-field with width clamped both ways.
     store.set('workbench-ui', JSON.stringify({ toolDock: { open: 'wide', width: 10_000 } }));
-    expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual({ open: false, width: 640, view: 'tool' });
+    expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual({ open: false, width: 640 });
     store.set('workbench-ui', JSON.stringify({ toolDock: { open: true, width: 12 } }));
-    expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual({ open: true, width: 300, view: 'tool' });
+    expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual({ open: true, width: 300 });
   });
 
   it('survives a non-object / malformed entry', () => {

@@ -1588,7 +1588,7 @@ function AppContent(): React.ReactElement {
         // silently drift from the app they're testing.
         const target = showableDoc(s) ?? tabFiles(s)[0]?.path ?? null;
         dispatch({ type: 'UI_FOCUS_TAB', tab: target ? { doc: target } : 'home' });
-        if (v === 'operations') dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true, view: 'tool' });
+        if (v === 'operations') dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
       }
     },
     [dispatch],

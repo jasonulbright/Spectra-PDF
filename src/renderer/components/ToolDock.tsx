@@ -6,8 +6,6 @@ import { toolForOp } from '../commands/tools';
 import { invokeCommand } from '../commands/context';
 import { ToolsCenter } from './ToolsCenter';
 import { ExtractTextPanel } from '../panels/ExtractTextPanel';
-import { CommentSidebar } from './canvas/CommentSidebar';
-import { getCanvasServices } from '../commands/context';
 import { ToolIcon } from './tool-icons';
 
 // The right tool dock (Phase 10 slice B1 — 25-workbench-relayout.md § 3.B1).
@@ -65,12 +63,10 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
   );
 
   const Panel = panels[activeOp];
-  const view = state.ui.toolDock.view;
   // The dock is sized to what it currently HOLDS (U1): the all-tools list is a
   // fixed-width index of names, so it contracts to TOOL_DOCK_LIST_WIDTH, and
-  // opening a tool expands back to the user's own width. Comments is a working
-  // surface like a panel, so it keeps the user's width.
-  const listView = view !== 'comments' && showGrid;
+  // opening a tool expands back to the user's own width.
+  const listView = showGrid;
   const effectiveWidth = listView ? TOOL_DOCK_LIST_WIDTH : width;
 
   return (
@@ -79,7 +75,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
       className={'tool-dock app-content' + (resizing ? '' : ' tool-dock-animated')}
       style={{ width: effectiveWidth }}
       data-testid="tool-dock"
-      data-dock-view={listView ? 'list' : view}
+      data-dock-view={listView ? "list" : "tool"}
       role="complementary"
       aria-label="Tool pane"
     >
@@ -106,11 +102,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
           {listView ? '⊞' : '‹ All tools'}
         </button>
         <span className="tool-dock-title" data-testid="tool-dock-title">
-          {view === 'comments'
-            ? 'Comments'
-            : showGrid
-              ? 'All tools'
-              : (owner?.title ?? OPERATION_TITLES[activeOp])}
+          {showGrid ? 'All tools' : (owner?.title ?? OPERATION_TITLES[activeOp])}
         </span>
         <button
           type="button"
@@ -123,7 +115,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
           ×
         </button>
       </div>
-      {view === 'tool' && !showGrid && owner && owner.ops.length > 1 && (
+      {!showGrid && owner && owner.ops.length > 1 && (
         <div className="tool-dock-ops" data-testid="tool-dock-ops">
           {owner.ops.map((op) => (
             <button
@@ -141,27 +133,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
         </div>
       )}
       <div className="tool-dock-body">
-        {view === 'comments' ? (
-          // Slice D: the comment list re-homed from the floating sidebar into
-          // the dock (the constitution's right-dock-actions rule). Data and
-          // handlers come from state/dispatch; the jump rides the canvas
-          // services' one true jump (openPageForReading).
-          <CommentSidebar
-            docs={state.workspace.documents}
-            onSelectPage={() => {}}
-            onJumpToPage={(pageId) => getCanvasServices()?.openPageForReading(pageId)}
-            onUpdateAnnotation={(docId, pageId, annotationId, note) =>
-              dispatch({ type: 'UPDATE_ANNOTATION', docId, pageId, annotationId, note })
-            }
-            onRecolorAnnotation={(docId, pageId, annotationId, color) =>
-              dispatch({ type: 'RECOLOR_ANNOTATION', docId, pageId, annotationId, color })
-            }
-            onRemoveAnnotation={(docId, pageId, annotationId) =>
-              dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId })
-            }
-            onClose={() => dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: false })}
-          />
-        ) : showGrid ? (
+        {showGrid ? (
           <ToolsCenter
             embedded
             onOpenTool={(id) => {

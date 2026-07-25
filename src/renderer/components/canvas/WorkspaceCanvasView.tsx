@@ -3247,11 +3247,16 @@ export function WorkspaceCanvasView({
               mode: docViewMode === 'document' ? 'organize' : 'document',
             })
           }
-          showComments={state.ui.toolDock.open && state.ui.toolDock.view === 'comments'}
+          // U3: the status bar and the Comments TOOL now open the SAME panel —
+          // there is one comments surface, seated like any other op. The dock's
+          // separate `view: 'comments'` mode is gone with the second list.
+          showComments={state.ui.toolDock.open && state.ui.activeOp === 'comments'}
           onToggleComments={() => {
-            const d = state.ui.toolDock;
-            if (d.open && d.view === 'comments') dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: false });
-            else dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true, view: 'comments' });
+            if (state.ui.toolDock.open && state.ui.activeOp === 'comments') {
+              dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: false });
+            } else {
+              invokeCommand('tools.panel.comments');
+            }
           }}
           pageBox={
             docViewMode === 'document' && focusedDoc
