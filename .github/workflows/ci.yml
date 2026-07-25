@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
 
@@ -103,7 +103,7 @@ jobs:
       # nothing checked it. Audited against the hash-pinned lockfile, which is
       # exactly what setup-python-embed.ps1 installs into the shipped runtime.
       - name: Setup Python (for pip-audit)
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
 
