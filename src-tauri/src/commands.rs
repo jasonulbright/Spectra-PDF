@@ -754,6 +754,120 @@ pub async fn append_operation_log(app: AppHandle, line: String) -> Result<(), St
     Ok(())
 }
 
+// ── Batch run logs ───────────────────────────────────────────────────────
+//
+// Phase 12 (issue #1 request 4): one log file per batch run, kept in the app's
+// own data folder, swept by age.
+//
+// The webview supplies only a FILE NAME and the text; it can never supply a
+// directory. The name is validated against the exact pattern this app writes
+// (`batch-ocr-*.log`, no separators, no `..`) before it is joined to anything,
+// so a compromised renderer cannot write outside the log folder or overwrite a
+// settings file by naming one.
+
+/// The one directory batch logs live in. Created on demand.
+fn batch_log_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("{}", e))?
+        .join("batch-logs");
+    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create log folder: {}", e))?;
+    Ok(dir)
+}
+
+/// True only for names this app itself writes. Deliberately strict: the prune
+/// below DELETES what this matches, and the standing rule after a session wiped
+/// archived installers with a glob is that a delete names exactly what it takes.
+fn is_batch_log_name(name: &str) -> bool {
+    name.starts_with("batch-ocr-")
+        && name.ends_with(".log")
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains("..")
+        && name.len() <= 64
+}
+
+/// Write one run's log. Returns the full path so the UI can show it.
+#[tauri::command]
+pub async fn write_batch_log(
+    app: AppHandle,
+    name: String,
+    contents: String,
+) -> Result<String, String> {
+    if !is_batch_log_name(&name) {
+        return Err(format!("not a batch log name: {name}"));
+    }
+    let path = batch_log_dir(&app)?.join(&name);
+    fs::write(&path, contents).map_err(|e| format!("Failed to write log: {}", e))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Delete batch logs older than `retention_days`. Returns how many went.
+///
+/// Scoped three ways on purpose — the log folder only, non-recursively, and
+/// only regular files whose names match what we write. A retention sweep is a
+/// delete loop running unattended; it gets the narrowest target that still does
+/// the job. `retention_days == 0` means keep forever and is a no-op, not a
+/// "delete everything" (the reading that would make a default value catastrophic).
+#[tauri::command]
+pub async fn prune_batch_logs(app: AppHandle, retention_days: u32) -> Result<u32, String> {
+    if retention_days == 0 {
+        return Ok(0);
+    }
+    let dir = batch_log_dir(&app)?;
+    let max_age = std::time::Duration::from_secs(u64::from(retention_days) * 24 * 60 * 60);
+    let now = std::time::SystemTime::now();
+    let mut removed = 0u32;
+    let entries = match fs::read_dir(&dir) {
+        Ok(e) => e,
+        // No folder yet is not an error — nothing has been logged.
+        Err(_) => return Ok(0),
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !is_batch_log_name(&name) {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let modified = match meta.modified() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        // A file dated in the FUTURE (clock skew, restored backup) is never
+        // expired — elapsed() errors there, and skipping is the safe read.
+        let age = match now.duration_since(modified) {
+            Ok(a) => a,
+            Err(_) => continue,
+        };
+        if age > max_age && fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+/// Open the batch log folder in the file manager.
+///
+/// Takes NO path argument, for the same reason `open_releases_page` takes no
+/// URL: the destination is derived here, so the webview cannot turn a "show me
+/// my logs" affordance into a general shell-open of an arbitrary path.
+#[tauri::command]
+pub async fn open_batch_log_folder(app: AppHandle) -> Result<(), String> {
+    let dir = batch_log_dir(&app)?;
+    use tauri_plugin_shell::ShellExt;
+    #[allow(deprecated)]
+    app.shell()
+        .open(dir.to_string_lossy().to_string(), None)
+        .map_err(|e| e.to_string())
+}
+
 // ── Engine (Python sidecar) ───────────────────────────────────────────────
 
 #[tauri::command]

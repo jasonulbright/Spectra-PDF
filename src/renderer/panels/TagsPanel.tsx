@@ -5,6 +5,7 @@ import { file } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { getDocumentProxy } from '../lib/pdfDocCache';
+import { mergeUntouched } from '../lib/late-read';
 import {
   STANDARD_STRUCT_TYPES,
   pathKey,
@@ -57,6 +58,9 @@ export function TagsPanel(): React.ReactElement {
   // swap the buffer on every edit, so buffer identity can't key the seeding.
   const seededFor = useRef<string | null>(null);
   const pendingSelect = useRef<string | null>(null);
+  // Which tag the draft was last seeded for — distinguishes "the user picked a
+  // different tag" (always reseed) from "the tree was re-read" (protect typing).
+  const seededKeyRef = useRef<string | null>(null);
 
   const buffer = activeFile?.buffer ?? null;
   const workingPath = activeFile?.workingPath ?? null;
@@ -107,9 +111,35 @@ export function TagsPanel(): React.ReactElement {
 
   const selected = tree && selectedKey !== null ? findByKey(tree.root, selectedKey) : null;
 
+  // Draft fields the user has typed into since the draft was last seeded. The
+  // tree is re-read on every buffer change, and this effect seeds the draft
+  // FROM the tree — so a refresh landing mid-edit used to silently revert the
+  // alt text (or type, or language) someone was half way through typing, after
+  // which Apply reported "No changes to apply". Same class as the page-labels
+  // data loss, one severity down: the document is safe because Apply diffs
+  // against the node, but the user's work was not. See `lib/late-read.ts`.
+  const touchedDraft = useRef<Set<string>>(new Set());
   useEffect(() => {
-    setDraft(selected ? draftOf(selected) : EMPTY_DRAFT);
+    // A NEW selection is always seeded outright — it is a different tag, so
+    // there is no in-progress edit of it to protect. Only a same-selection
+    // reseed (a tree refresh) has to respect what is being typed.
+    const keyChanged = seededKeyRef.current !== selectedKey;
+    seededKeyRef.current = selectedKey;
+    const base = selected ? draftOf(selected) : EMPTY_DRAFT;
+    if (keyChanged) {
+      touchedDraft.current.clear();
+      setDraft(base);
+      return;
+    }
+    setDraft((prev) => mergeUntouched(base, prev, touchedDraft.current));
   }, [selectedKey, tree]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Every draft input goes through this, so "touched" means exactly "the user
+  // typed here" — not "state changed", which a reseed also does.
+  const editDraft = useCallback((patch: Partial<Draft>) => {
+    for (const key of Object.keys(patch)) touchedDraft.current.add(key);
+    setDraft((d) => ({ ...d, ...patch }));
+  }, []);
 
   // Fetch MCID text for the SELECTED node's pages (bounded by its own direct
   // content — the Reading Order panel is the whole-page preview surface).
@@ -152,6 +182,9 @@ export function TagsPanel(): React.ReactElement {
       setBusy(true);
       setStatus('Working…');
       pendingSelect.current = reselect;
+      // The refresh this mutation triggers SHOULD resync the draft: the values
+      // are being written, so the tree that comes back is the new truth.
+      touchedDraft.current.clear();
       try {
         const snapshotPath = await file.snapshot(activeFile.workingPath);
         await call(method, { file: activeFile.workingPath, output: activeFile.workingPath, ...params });
@@ -404,35 +437,35 @@ export function TagsPanel(): React.ReactElement {
                 <label className="flex flex-col gap-0.5 text-xs text-neutral-400">
                   Type
                   <input data-testid="tag-type-input" type="text" list="struct-types" value={draft.type}
-                    onChange={(e) => setDraft((d) => ({ ...d, type: e.target.value }))}
+                    onChange={(e) => editDraft({ type: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyProps(); }}
                     className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm text-neutral-200" />
                 </label>
                 <label className="flex flex-col gap-0.5 text-xs text-neutral-400">
                   Title
                   <input data-testid="tag-title-input" type="text" value={draft.title}
-                    onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
+                    onChange={(e) => editDraft({ title: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyProps(); }}
                     className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm text-neutral-200" />
                 </label>
                 <label className="flex flex-col gap-0.5 text-xs text-neutral-400 col-span-2">
                   Alt text (what assistive technology reads for a figure)
                   <input data-testid="tag-alt-input" type="text" value={draft.alt}
-                    onChange={(e) => setDraft((d) => ({ ...d, alt: e.target.value }))}
+                    onChange={(e) => editDraft({ alt: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyProps(); }}
                     className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm text-neutral-200" />
                 </label>
                 <label className="flex flex-col gap-0.5 text-xs text-neutral-400">
                   Actual text
                   <input data-testid="tag-actualtext-input" type="text" value={draft.actual_text}
-                    onChange={(e) => setDraft((d) => ({ ...d, actual_text: e.target.value }))}
+                    onChange={(e) => editDraft({ actual_text: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyProps(); }}
                     className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm text-neutral-200" />
                 </label>
                 <label className="flex flex-col gap-0.5 text-xs text-neutral-400">
                   Language (e.g. en-US)
                   <input data-testid="tag-lang-input" type="text" value={draft.lang}
-                    onChange={(e) => setDraft((d) => ({ ...d, lang: e.target.value }))}
+                    onChange={(e) => editDraft({ lang: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyProps(); }}
                     className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm text-neutral-200" />
                 </label>
