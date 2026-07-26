@@ -403,6 +403,140 @@ pub async fn copy_file_creating_dirs(src: String, dest: String) -> Result<(), St
     Ok(())
 }
 
+/// Move `src` to `dest`, creating `dest`'s parents. Returns the path actually
+/// written, which may differ from `dest` (see the collision rule below).
+///
+/// This is the ONLY batch operation that mutates the user's SOURCE tree
+/// (Phase 12 requests 2/3 — the "moved" and "error" folders), so it carries the
+/// paranoia the mirror's copy does not need:
+///
+/// - **Same-file refusal, by identity.** A rename onto itself is a harmless
+///   no-op, but the cross-volume fallback below is copy-then-delete, and
+///   copy-then-delete onto itself DELETES THE FILE. String comparison cannot
+///   see a UNC-vs-mapped-letter alias; `same_file` can.
+/// - **Rename first.** Within a volume `fs::rename` is atomic, so an
+///   interrupted move leaves the file at one end or the other — never neither.
+/// - **Copy-then-delete only across volumes**, where rename cannot work
+///   (Windows: ERROR_NOT_SAME_DEVICE). That is the shape files get lost in, so
+///   the copy's length is verified BEFORE the original is removed, and a failed
+///   delete is reported rather than swallowed: a file present in both places is
+///   a mess the user can fix, a file present in neither is not.
+/// - **Never overwrites.** A colliding destination takes a ` (2)` suffix and
+///   the chosen name comes back to the caller. The mirror may legitimately
+///   contain a same-named file from an earlier run, and silently replacing a
+///   previously-moved ORIGINAL would be unreported data loss.
+#[tauri::command]
+pub async fn move_file_creating_dirs(src: String, dest: String) -> Result<String, String> {
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let dest_path = Path::new(&dest);
+    if let Some(parent) = dest_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create {}: {}", parent.display(), e))?;
+    }
+    if same_file::is_same_file(&src, &dest).unwrap_or(false) {
+        return Err("source and destination are the same file".to_string());
+    }
+    let target = unique_destination(dest_path);
+    // Same volume: atomic.
+    if fs::rename(src_path, &target).is_ok() {
+        return Ok(target.to_string_lossy().to_string());
+    }
+    // Different volume: copy, VERIFY, then delete.
+    let copied = fs::copy(src_path, &target)
+        .map_err(|e| format!("Move failed {} -> {}: {}", src, target.display(), e))?;
+    let original = fs::metadata(src_path).map(|m| m.len()).unwrap_or(0);
+    if copied != original {
+        // Do not delete the original on a short write — take the litter.
+        let _ = fs::remove_file(&target);
+        return Err(format!(
+            "Move aborted: copied {} of {} bytes to {} — the original was left in place",
+            copied,
+            original,
+            target.display()
+        ));
+    }
+    fs::remove_file(src_path).map_err(|e| {
+        format!(
+            "Copied to {} but could not remove the original {}: {} — the file now exists in BOTH places",
+            target.display(),
+            src,
+            e
+        )
+    })?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+/// First free name at or beside `dest`: `x.pdf`, then `x (2).pdf`, `x (3).pdf`…
+/// Bounded — after 999 tries it gives the caller the original path back and lets
+/// the move fail loudly rather than spinning in an unattended run.
+fn unique_destination(dest: &Path) -> std::path::PathBuf {
+    if !dest.exists() {
+        return dest.to_path_buf();
+    }
+    let parent = dest.parent().unwrap_or_else(|| Path::new(""));
+    let stem = dest.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let ext = dest.extension().map(|s| s.to_string_lossy().to_string());
+    for n in 2..1000 {
+        let name = match &ext {
+            Some(e) => format!("{stem} ({n}).{e}"),
+            None => format!("{stem} ({n})"),
+        };
+        let candidate = parent.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dest.to_path_buf()
+}
+
+/// A unique scratch path for the batch auto-repair step, under the app's own
+/// temp folder. The repaired bytes need to exist SEPARATELY from both the
+/// source and the mirror output: the mirror copy may then receive an OCR layer,
+/// and "put the repaired file back" must return the repaired original, not a
+/// searchable derivative of it.
+#[tauri::command]
+pub async fn create_batch_scratch(app: AppHandle, tag: String) -> Result<String, String> {
+    let dir = std::env::temp_dir().join("openpdfstudio").join("batch-scratch");
+    fs::create_dir_all(&dir).map_err(|e| format!("Cannot create scratch folder: {}", e))?;
+    let _ = &app; // handle kept for symmetry with the other app-scoped commands
+    let safe: String = tag
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .take(40)
+        .collect();
+    for n in 0..10_000u32 {
+        let candidate = dir.join(format!("{safe}-{n}.pdf"));
+        if !candidate.exists() {
+            return Ok(candidate.to_string_lossy().to_string());
+        }
+    }
+    Err("could not allocate a scratch file".to_string())
+}
+
+/// Delete a scratch file — and ONLY one inside the scratch folder. Same
+/// discipline as the log sweep: an unattended delete names exactly what it may
+/// take, so a caller cannot turn this into a general remove by passing a
+/// source path.
+#[tauri::command]
+pub async fn delete_batch_scratch(path: String) -> Result<(), String> {
+    let dir = std::env::temp_dir().join("openpdfstudio").join("batch-scratch");
+    let target = Path::new(&path);
+    let inside = target
+        .canonicalize()
+        .ok()
+        .zip(dir.canonicalize().ok())
+        .map(|(t, d)| t.starts_with(d))
+        .unwrap_or(false);
+    if !inside {
+        return Err(format!("not a batch scratch file: {path}"));
+    }
+    fs::remove_file(target).map_err(|e| format!("Failed to remove scratch file: {}", e))?;
+    Ok(())
+}
+
 /// Arbitrary-path binary read for the batch driver. The serde `Vec<u8>` form
 /// (`read_file_buffer`) JSON-encodes every byte as a number — fine for one
 /// open, hostile to a long unattended run over large scanned PDFs. A raw

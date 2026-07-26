@@ -901,12 +901,35 @@ export interface BatchOcrSnapshot {
   fileCount: number | null;
   report: {
     cancelled: boolean;
-    results: { rel: string; status: string; pagesOcrd?: number; reason?: string }[];
+    results: {
+      rel: string;
+      status: string;
+      pagesOcrd?: number;
+      reason?: string;
+      /** Phase 12 requests 2/3 — where the ORIGINAL ended up, and why it did
+       * not move if a move was asked for and did not happen. */
+      movedTo?: string;
+      moveError?: string;
+      repaired?: boolean;
+      repairedOriginalReplaced?: boolean;
+    }[];
     skippedDirs: string[];
   } | null;
   /** Full path of the log the run wrote (Phase 12), or null when logging is
    * off or the write failed. The spec reads the file back from disk. */
   logPath: string | null;
+}
+
+/** Inject the opt-in moved/error roots (Phase 12 requests 2/3). The native
+ * folder pickers are not WebDriver-drivable; the checkboxes beside them ARE,
+ * and the spec clicks those for real. */
+export async function batchOcrSetFiling(filing: {
+  movedRoot?: string | null;
+  errorRoot?: string | null;
+}): Promise<void> {
+  await browser.execute(function (f: { movedRoot?: string | null; errorRoot?: string | null }) {
+    (window as any).__SPECTRA_TEST__.batchOcrSetFiling(f);
+  }, filing);
 }
 
 /** Inject source+destination into the open Batch OCR dialog (native folder

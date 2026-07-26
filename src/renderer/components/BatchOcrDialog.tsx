@@ -46,6 +46,13 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const [skippedDirs, setSkippedDirs] = useState<string[]>([]);
   const [scanning, setScanning] = useState(false);
   const [langs, setLangs] = useState<string[]>([DEFAULT_OCR_LANGUAGE]);
+  // Issue #1 requests 2 and 3. Every one of these is OFF until the user acts:
+  // they invert the standing guarantee that a batch never modifies the source
+  // tree, so "off by default" is the feature, not a timidity.
+  const [movedRoot, setMovedRoot] = useState<string | null>(null);
+  const [errorRoot, setErrorRoot] = useState<string | null>(null);
+  const [repairDamaged, setRepairDamaged] = useState(false);
+  const [replaceRepaired, setReplaceRepaired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [report, setReport] = useState<BatchReport | null>(null);
@@ -147,12 +154,38 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const conflict =
     (source !== null && dest !== null && destConflictsWithSource(source, dest)) ||
     identityConflict;
+
+  // The moved/error roots get STRING-level refusals only, and that is the
+  // proportionate answer rather than a shortcut: the aliased-path hazard the
+  // source/destination pair needs an identity check for is a hazard because a
+  // COPY overwrites. A move never does — `move_file_creating_dirs` suffixes a
+  // collision and refuses a same-file move outright — so the worst an unseen
+  // alias can do here is put a file somewhere surprising, not destroy one.
+  // Inside the SOURCE is refused because it makes the enumerated tree
+  // self-referential (the next run re-processes what this one filed away);
+  // inside the DESTINATION is refused because originals would interleave with
+  // the searchable copies they correspond to.
+  const rootConflict = (root: string | null): string | null => {
+    if (root === null) return null;
+    if (source !== null && destConflictsWithSource(source, root)) {
+      return 'inside the source folder — the next run would process these files again';
+    }
+    if (dest !== null && destConflictsWithSource(dest, root)) {
+      return 'inside the destination folder — originals would be mixed in with the searchable copies';
+    }
+    return null;
+  };
+  const movedConflict = rootConflict(movedRoot);
+  const errorConflict = rootConflict(errorRoot);
+
   const canStart =
     phase === 'setup' &&
     !scanning &&
     source !== null &&
     dest !== null &&
     !conflict &&
+    movedConflict === null &&
+    errorConflict === null &&
     entries !== null &&
     entries.length > 0;
 
@@ -186,6 +219,12 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           lang: toTesseractLang(langs),
           langLabel: describeLanguages(langs),
           report: rep,
+          filing: {
+            ...(movedRoot ? { movedRoot } : {}),
+            ...(errorRoot ? { errorRoot } : {}),
+            repairDamaged,
+            replaceRepairedOriginals: repairDamaged && replaceRepaired,
+          },
           ...(fatalError ? { fatalError } : {}),
         }),
       );
@@ -221,12 +260,24 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
       client.setLanguage(toTesseractLang(langs));
       const c = client;
       cancelOcrRef.current = () => c.cancelAll();
-      const io = createBatchIo(client, async (src, out, pages) => {
-        await callRaw('apply_ocr_layer', { file: src, output: out, pages });
+      const io = createBatchIo(client, {
+        applyOcrLayer: async (src, out, pages) => {
+          await callRaw('apply_ocr_layer', { file: src, output: out, pages });
+        },
+        repair: async (src, out) => {
+          await callRaw('repair', { file: src, output: out });
+        },
       });
       const rep = await runBatchOcr(entries, dest, skippedDirs, io, {
         onProgress: setProgress,
         isCancelled: () => cancelledRef.current,
+        // All four default to off. Batch OCR's standing guarantee is that it
+        // does not modify the source tree; these are the opt-ins that invert
+        // it, and nothing turns them on but the user.
+        ...(movedRoot ? { movedRoot } : {}),
+        ...(errorRoot ? { errorRoot } : {}),
+        repairDamaged,
+        replaceRepairedOriginals: repairDamaged && replaceRepaired,
       });
       setReport(rep);
       await writeLog(startedAt, rep, source, dest);
@@ -276,7 +327,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // the buttons run (14-ocr-find/signing precedent). Registered once; every
   // read goes through refs so the snapshot stays fresh without
   // re-registration.
-  const harnessDeps = { selectSource, setDest, start };
+  const harnessDeps = { selectSource, setDest, setMovedRoot, setErrorRoot, start };
   const harnessRef = useRef(harnessDeps);
   harnessRef.current = harnessDeps;
   const entriesRef = useRef(entries);
@@ -290,6 +341,10 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     registerBatchOcr({
       setSource: (path) => harnessRef.current.selectSource(path),
       setDest: (path) => harnessRef.current.setDest(path),
+      setFiling: (filing) => {
+        if (filing.movedRoot !== undefined) harnessRef.current.setMovedRoot(filing.movedRoot);
+        if (filing.errorRoot !== undefined) harnessRef.current.setErrorRoot(filing.errorRoot);
+      },
       start: () => harnessRef.current.start(),
       snapshot: () => ({
         phase: phaseRef.current,
@@ -312,6 +367,12 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
 
   const summary = report ? summarize(report) : null;
   const skippedResults = report?.results.filter((r) => r.status === 'skipped') ?? [];
+  const movedCount = report?.results.filter((r) => r.movedTo).length ?? 0;
+  const repairedCount = report?.results.filter((r) => r.repaired).length ?? 0;
+  // A move the user asked for that did not happen. Surfaced at the TOP of the
+  // report rather than folded into a list, because it is the only outcome here
+  // where the user's own folders are not in the state they asked for.
+  const moveFailures = report?.results.filter((r) => r.moveError) ?? [];
   const notedCopies = report?.results.filter((r) => r.status === 'copied' && r.reason) ?? [];
   // 'ocr' rows carry a reason too when SOME scanned pages had no
   // recognizable text — the mixed-file honesty note (review-caught).
@@ -392,9 +453,86 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           <p className="text-xs text-neutral-500">
             Every PDF in the source folder is mirrored into the destination:
             scanned pages gain an invisible searchable text layer; already-searchable
-            files are copied unchanged. The source folder is never modified.
-            Existing destination files with the same names are overwritten.
+            files are copied unchanged. Existing destination files with the same
+            names are overwritten.
           </p>
+
+          {/* Requests 2 and 3. Presented as one clearly-fenced section because
+              everything in it BREAKS the promise stated directly above it —
+              that the source folder is never modified. Nothing here is on
+              until a folder is chosen or a box is ticked. */}
+          <details className="rounded border border-neutral-800 bg-neutral-950/40" data-testid="batch-ocr-filing">
+            <summary className="px-3 py-2 text-sm text-neutral-300 cursor-pointer select-none">
+              File the originals after processing
+              <span className="text-neutral-500"> — optional; moves your own files</span>
+            </summary>
+            <div className="px-3 pb-3 pt-1 flex flex-col gap-3">
+              <p className="text-xs text-amber-400/90">
+                Everything below MOVES files out of your source folder. Left alone, the
+                source folder is never modified — that is the default.
+              </p>
+              <OptionalFolderRow
+                label="Move processed originals to"
+                testid="batch-ocr-moved"
+                value={movedRoot}
+                conflict={movedConflict}
+                onPick={async () => {
+                  const path = await dialog.pickFolder('Choose where processed originals go');
+                  if (path) setMovedRoot(path);
+                }}
+                onClear={() => setMovedRoot(null)}
+                note="Only after the searchable copy has been read back and verified. The folder structure is preserved, and a name that already exists is never overwritten."
+              />
+              <OptionalFolderRow
+                label="Move failed originals to"
+                testid="batch-ocr-errors"
+                value={errorRoot}
+                conflict={errorConflict}
+                onPick={async () => {
+                  const path = await dialog.pickFolder('Choose where files that could not be processed go');
+                  if (path) setErrorRoot(path);
+                }}
+                onClear={() => setErrorRoot(null)}
+                note="Password-protected and damaged files, so what is left behind in the source folder is what succeeded."
+              />
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  data-testid="batch-ocr-repair"
+                  checked={repairDamaged}
+                  onChange={() => setRepairDamaged((v) => !v)}
+                  className="mt-0.5 rounded bg-neutral-900 border-neutral-600"
+                />
+                <span className="text-sm text-neutral-300">
+                  Try to repair damaged files
+                  <span className="block text-xs text-neutral-500">
+                    A file that will not open is rewritten (annotations, bookmarks and
+                    metadata are kept) and processed if that works. Password-protected
+                    files are not repairable and are left alone.
+                  </span>
+                </span>
+              </label>
+              <label
+                className={`flex items-start gap-2 ${repairDamaged ? 'cursor-pointer' : 'opacity-50'}`}
+              >
+                <input
+                  type="checkbox"
+                  data-testid="batch-ocr-replace-repaired"
+                  checked={repairDamaged && replaceRepaired}
+                  disabled={!repairDamaged}
+                  onChange={() => setReplaceRepaired((v) => !v)}
+                  className="mt-0.5 rounded bg-neutral-900 border-neutral-600"
+                />
+                <span className="text-sm text-neutral-300">
+                  Replace the damaged original with the repaired file
+                  <span className="block text-xs text-neutral-500">
+                    Writes the repaired file back over the original — the repaired
+                    document, not the searchable copy.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </details>
           {skippedDirs.length > 0 && (
             <p className="text-xs text-amber-400" data-testid="batch-ocr-skipped-dirs">
               Could not read {skippedDirs.length} subfolder{skippedDirs.length === 1 ? '' : 's'} (it
@@ -467,6 +605,30 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             <p className="text-xs text-neutral-500">
               Files finished before the stop remain in the destination.
             </p>
+          )}
+          {(movedCount > 0 || repairedCount > 0) && (
+            <p className="text-xs text-neutral-400" data-testid="batch-ocr-moved-summary">
+              {[
+                ...(movedCount > 0 ? [`${movedCount} original${movedCount === 1 ? '' : 's'} moved`] : []),
+                ...(repairedCount > 0 ? [`${repairedCount} repaired`] : []),
+              ].join(' · ')}
+            </p>
+          )}
+          {moveFailures.length > 0 && (
+            <div
+              className="border border-amber-500/40 rounded p-2 max-h-32 overflow-y-auto"
+              data-testid="batch-ocr-move-failures"
+            >
+              <p className="text-xs text-amber-400 mb-1">
+                {moveFailures.length} original{moveFailures.length === 1 ? ' is' : 's are'} still in
+                the source folder:
+              </p>
+              {moveFailures.map((r) => (
+                <p key={r.rel} className="text-xs text-amber-400/90">
+                  {r.rel} — {r.moveError}
+                </p>
+              ))}
+            </div>
           )}
           {skippedResults.length > 0 && (
             <div className="max-h-40 overflow-y-auto border border-neutral-800 rounded p-2">
@@ -649,6 +811,60 @@ function FolderRow({
         </span>
       </div>
       {note && <p className="text-xs text-neutral-500 mt-1">{note}</p>}
+    </div>
+  );
+}
+
+/** A folder row that can be UNSET — the moved/error roots, whose "not chosen"
+ * state is the default and has to stay one click away. */
+function OptionalFolderRow({
+  label,
+  testid,
+  value,
+  conflict,
+  onPick,
+  onClear,
+  note,
+}: {
+  label: string;
+  testid: string;
+  value: string | null;
+  conflict: string | null;
+  onPick: () => void;
+  onClear: () => void;
+  note: string;
+}): React.JSX.Element {
+  return (
+    <div>
+      <span className="block text-sm text-neutral-400 mb-1">{label}</span>
+      <div className="flex items-center gap-2">
+        <button
+          data-testid={`${testid}-pick`}
+          onClick={onPick}
+          className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium shrink-0"
+        >
+          Choose…
+        </button>
+        <span data-testid={testid} className="text-sm text-neutral-300 truncate" title={value ?? undefined}>
+          {value ?? 'Not moving them (default)'}
+        </span>
+        {value !== null && (
+          <button
+            data-testid={`${testid}-clear`}
+            onClick={onClear}
+            className="px-2 py-1 text-xs text-neutral-500 hover:text-neutral-300 shrink-0"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {conflict !== null ? (
+        <p className="text-xs text-red-400 mt-1" data-testid={`${testid}-conflict`}>
+          That folder is {conflict}.
+        </p>
+      ) : (
+        <p className="text-xs text-neutral-500 mt-1">{note}</p>
+      )}
     </div>
   );
 }

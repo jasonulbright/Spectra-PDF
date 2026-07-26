@@ -127,13 +127,26 @@ export function registerCanvasOcr(handlers: CanvasOcrHandlers | null): void {
 export interface BatchOcrHandlers {
   setSource: (path: string) => Promise<void>;
   setDest: (path: string) => void;
+  /** Phase 12 requests 2/3 — the opt-in filing options. Native folder pickers
+   * are not WebDriver-drivable, so the spec injects the roots the same way it
+   * injects source/dest; the checkboxes ARE drivable and the spec clicks them. */
+  setFiling: (filing: { movedRoot?: string | null; errorRoot?: string | null }) => void;
   start: () => Promise<void>;
   snapshot: () => {
     phase: 'setup' | 'running' | 'done';
     fileCount: number | null;
     report: {
       cancelled: boolean;
-      results: { rel: string; status: string; pagesOcrd?: number; reason?: string }[];
+      results: {
+        rel: string;
+        status: string;
+        pagesOcrd?: number;
+        reason?: string;
+        movedTo?: string;
+        moveError?: string;
+        repaired?: boolean;
+        repairedOriginalReplaced?: boolean;
+      }[];
       skippedDirs: string[];
     } | null;
     /** Full path of the log this run wrote, or null (logging off / write
@@ -700,6 +713,7 @@ export interface TestHarness {
   documentJsList: () => Promise<{ name: string; js: string }[]>;
   /** Batch OCR dialog injectors (dialog must be open — `tools.batchOcr`). */
   batchOcrSetFolders: (source: string, dest: string) => Promise<void>;
+  batchOcrSetFiling: (filing: { movedRoot?: string | null; errorRoot?: string | null }) => void;
   batchOcrStart: () => Promise<void>;
   batchOcrSnapshot: () => ReturnType<BatchOcrHandlers['snapshot']> | null;
   /** Edit ▸ Images (7.1; canvas must be mounted with the edit mode armed). */
@@ -1292,6 +1306,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         captureError('batchOcrSetFolders', err);
         throw err;
       }
+    },
+    batchOcrSetFiling: (filing) => {
+      if (!batchOcr) {
+        const msg = 'batchOcrSetFiling: Batch OCR dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      batchOcr.setFiling(filing);
     },
     batchOcrStart: async () => {
       if (!batchOcr) {

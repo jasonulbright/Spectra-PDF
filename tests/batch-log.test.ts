@@ -183,6 +183,86 @@ describe('formatBatchLog', () => {
     expect(text).toContain('(no files were processed)');
   });
 
+  // Phase 12 requests 2/3 — the filing half. A log that does not record what
+  // the run was ALLOWED to touch cannot be audited after the fact, and this is
+  // the one setting that moves the user's own files.
+  it('states plainly when nothing was allowed to move', () => {
+    expect(formatBatchLog(run(empty))).toContain('Filing:       none (source folder untouched)');
+    expect(
+      formatBatchLog(run(empty, { filing: { repairDamaged: false } })),
+    ).toContain('Filing:       none (source folder untouched)');
+  });
+
+  it('records every filing option that was on', () => {
+    const text = formatBatchLog(
+      run(empty, {
+        filing: {
+          movedRoot: 'D:\\done',
+          errorRoot: 'D:\\errors',
+          repairDamaged: true,
+          replaceRepairedOriginals: true,
+        },
+      }),
+    );
+    expect(text).toContain('processed originals -> D:\\done');
+    expect(text).toContain('failed originals -> D:\\errors');
+    expect(text).toContain('repair damaged files (replacing the originals)');
+  });
+
+  it('distinguishes repairing from repairing-and-replacing', () => {
+    const text = formatBatchLog(run(empty, { filing: { repairDamaged: true } }));
+    expect(text).toContain('repair damaged files');
+    expect(text).not.toContain('replacing the originals');
+  });
+
+  it('says where each original went, and flags the ones that stayed put', () => {
+    const text = formatBatchLog(
+      run({
+        cancelled: false,
+        skippedDirs: [],
+        results: [
+          { rel: 'a.pdf', status: 'ocr', pagesOcrd: 2, movedTo: 'D:\\done\\a.pdf' },
+          { rel: 'b.pdf', status: 'skipped', reason: 'password-protected', movedTo: 'D:\\errors\\b.pdf' },
+          { rel: 'c.pdf', status: 'ocr', pagesOcrd: 1, moveError: 'access denied' },
+        ],
+      }),
+    );
+    expect(text).toContain('-> original moved to D:\\done\\a.pdf');
+    expect(text).toContain('-> original moved to D:\\errors\\b.pdf');
+    // `!!` so "what did NOT get filed" is one filter away, like [skipped].
+    expect(text).toContain('!! original NOT moved: access denied');
+    // Exactly one FILE line is flagged. (The summary line names `!!` too, on
+    // purpose — it tells the reader what to grep for — so the filter is
+    // anchored on the status tag that starts every file line.)
+    const stuck = text.split('\r\n').filter((l) => l.startsWith('[') && l.includes('!!'));
+    expect(stuck).toHaveLength(1);
+    expect(stuck[0]).toContain('c.pdf');
+    expect(text).toContain('Originals: 2 moved · 1 NOT moved (see the !! lines) · 0 repaired');
+  });
+
+  it('marks a repaired file, and separately whether the original was replaced', () => {
+    const text = formatBatchLog(
+      run({
+        cancelled: false,
+        skippedDirs: [],
+        results: [
+          { rel: 'r1.pdf', status: 'ocr', pagesOcrd: 1, repaired: true },
+          { rel: 'r2.pdf', status: 'ocr', pagesOcrd: 1, repaired: true, repairedOriginalReplaced: true },
+        ],
+      }),
+    );
+    expect(text).toContain('[repaired]');
+    expect(text).toContain('[repaired; original replaced]');
+    expect(text).toContain('2 repaired');
+  });
+
+  it('omits the originals line entirely when nothing moved or was repaired', () => {
+    const text = formatBatchLog(
+      run({ cancelled: false, skippedDirs: [], results: [{ rel: 'a.pdf', status: 'copied' }] }),
+    );
+    expect(text).not.toContain('Originals:');
+  });
+
   it('uses CRLF and ends with a newline', () => {
     const text = formatBatchLog(run(empty));
     expect(text).toContain('\r\n');

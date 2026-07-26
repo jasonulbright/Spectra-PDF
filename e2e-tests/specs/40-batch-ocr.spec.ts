@@ -20,6 +20,7 @@ import {
   waitForHarness,
   invokeAppCommand,
   batchOcrSetFolders,
+  batchOcrSetFiling,
   batchOcrStart,
   batchOcrSnapshot,
 } from '../support/harness.js';
@@ -164,6 +165,95 @@ describe('batch OCR folder mirror (Phase 6)', () => {
     expect(await startBtn.isEnabled()).toBe(false);
 
     await $('[data-testid="batch-ocr-cancel"]').click();
+  });
+
+  // Issue #1 requests 2 and 3 — the only batch behaviour that MOVES the user's
+  // own files, so this drives it against a REAL tree and asserts the source
+  // folder afterwards, not just the report.
+  //
+  // Its own fixture tree, deliberately: the test consumes its source folder, so
+  // sharing `src` with the tests above would make them order-dependent. No
+  // scanned page either — the moved/error split and the verify-before-move gate
+  // are what is under test, and test 1 already covers real recognition.
+  it('files originals into moved/error folders, verified first, structure preserved', async function () {
+    this.timeout(120_000);
+    const tree = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-batch-filing-'));
+    const fSrc = resolve(tree, 'in');
+    const fDest = resolve(tree, 'out');
+    const fMoved = resolve(tree, 'done');
+    const fErrors = resolve(tree, 'failed');
+    mkdirSync(resolve(fSrc, 'nested'), { recursive: true });
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    doc.addPage([400, 300]).drawText('Already searchable', { x: 40, y: 200, size: 14, font });
+    writeFileSync(resolve(fSrc, 'nested', 'good.pdf'), await doc.save());
+    writeFileSync(resolve(fSrc, 'rubbish.pdf'), 'not a pdf at all');
+
+    await waitForHarness();
+    expect(await invokeAppCommand('tools.batchOcr')).toBe(true);
+    await $('[data-testid="batch-ocr-dialog"]').waitForDisplayed({ timeout: 10_000 });
+
+    await batchOcrSetFolders(fSrc, fDest);
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.fileCount === 2, {
+      timeout: 15_000,
+      timeoutMsg: 'enumeration never found the 2 filing fixtures',
+    });
+
+    // The options live behind a collapsed disclosure — everything in it moves
+    // the user's files, so it is deliberately not the first thing you see.
+    await $('[data-testid="batch-ocr-filing"] summary').click();
+    // Repair is a real checkbox the user clicks; the roots come through the
+    // harness because their pickers are native.
+    const repairBox = $('[data-testid="batch-ocr-repair"]');
+    await repairBox.waitForDisplayed({ timeout: 5_000 });
+    expect(await repairBox.isSelected()).toBe(false); // OFF by default
+    await repairBox.click();
+    await batchOcrSetFiling({ movedRoot: fMoved, errorRoot: fErrors });
+    await $('[data-testid="batch-ocr-moved"]').waitForDisplayed({ timeout: 5_000 });
+
+    await batchOcrStart();
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.phase === 'done', {
+      timeout: 100_000,
+      interval: 500,
+      timeoutMsg:
+        'filing run never reached done — snapshot: ' + JSON.stringify(await batchOcrSnapshot()),
+    });
+
+    const results = (await batchOcrSnapshot())!.report!.results;
+    const byRel = new Map(results.map((r) => [r.rel, r]));
+    const good = byRel.get('nested\\good.pdf')!;
+    const bad = byRel.get('rubbish.pdf')!;
+    expect(good.status).toBe('copied');
+    expect(bad.status).toBe('skipped');
+
+    // ON DISK is the assertion that matters: the searchable copy is in the
+    // destination, the original is under the moved tree at the SAME relative
+    // path, the failure is under the error tree, and the source folder no
+    // longer holds either.
+    expect(existsSync(resolve(fDest, 'nested', 'good.pdf'))).toBe(true);
+    expect(existsSync(resolve(fMoved, 'nested', 'good.pdf'))).toBe(true);
+    expect(existsSync(resolve(fErrors, 'rubbish.pdf'))).toBe(true);
+    expect(existsSync(resolve(fSrc, 'nested', 'good.pdf'))).toBe(false);
+    expect(existsSync(resolve(fSrc, 'rubbish.pdf'))).toBe(false);
+    expect(good.movedTo).toBe(resolve(fMoved, 'nested', 'good.pdf'));
+    expect(bad.movedTo).toBe(resolve(fErrors, 'rubbish.pdf'));
+    expect(results.some((r) => r.moveError)).toBe(false);
+
+    // Auto-repair really ran end to end: `rubbish.pdf` is not a PDF at all, so
+    // the honest outcome is that repair was ATTEMPTED and did not help. That
+    // string only exists if the scratch allocation and the engine `repair`
+    // call both happened — the wiring this leg is here to prove.
+    expect(bad.reason).toContain('repair did not help');
+
+    const log = readFileSync((await batchOcrSnapshot())!.logPath!, 'utf8');
+    expect(log).toContain(`processed originals -> ${fMoved}`);
+    expect(log).toContain(`failed originals -> ${fErrors}`);
+    expect(log).toContain('repair damaged files');
+    expect(log).toContain(`-> original moved to ${resolve(fMoved, 'nested', 'good.pdf')}`);
+    expect(log).toContain('Originals: 2 moved · 0 NOT moved');
+
+    await $('[data-testid="batch-ocr-close"]').click();
+    rmSync(tree, { recursive: true, force: true });
   });
 
   // Issue #1 request 1: a folder mixing English and French should not need two

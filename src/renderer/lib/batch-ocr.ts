@@ -36,6 +36,18 @@ export interface BatchFileResult {
    * scanned pages recognized, some blank) carries the shortfall here so
    * "made searchable" never silently overstates (review-caught). */
   reason?: string;
+  /** Where the ORIGINAL was moved to, when a moved/error root was given
+   * (Phase 12 requests 2/3). Absent means the source is where it always was. */
+  movedTo?: string;
+  /** A requested move (or repaired-original replacement) that did NOT happen.
+   * Never changes the file's status — the OCR result stands on its own — but
+   * never silent either: the user asked for their tree to be reorganised and
+   * has to be told which files were left behind. */
+  moveError?: string;
+  /** The source failed to load and tier-1 repair made it readable. */
+  repaired?: boolean;
+  /** The repaired bytes were written back over the damaged original. */
+  repairedOriginalReplaced?: boolean;
 }
 
 export interface BatchReport {
@@ -50,7 +62,7 @@ export interface BatchProgress {
   fileIndex: number; // 0-based index of the file being worked
   fileCount: number;
   rel: string;
-  phase: 'loading' | 'scanning' | 'recognizing' | 'writing' | 'copying';
+  phase: 'loading' | 'scanning' | 'recognizing' | 'writing' | 'copying' | 'repairing' | 'moving';
   /** 1-based page being recognized and the count of pages to recognize —
    * only meaningful in the 'recognizing' phase. */
   page?: number;
@@ -73,8 +85,23 @@ export interface BatchIo {
   /** Engine apply_ocr_layer: read `source`, write `output`. Parents of
    * `output` must already exist — the driver calls ensureParentDirs first. */
   applyOcrLayer(source: string, output: string, pages: OcrApplyPage[]): Promise<void>;
+  /** Byte copy, creating parents, overwriting an existing destination. Used
+   * for the mirror pass-through AND — only when the user opted into it — to
+   * write repaired bytes back over a damaged original. */
   copyFile(src: string, dest: string): Promise<void>;
   ensureParentDirs(path: string): Promise<void>;
+  /** Move a SOURCE file into a moved/error mirror. Resolves to the path
+   * actually written (a collision is suffixed, never overwritten). Called ONLY
+   * when the run was given the corresponding root. */
+  moveFile(src: string, dest: string): Promise<string>;
+  /** Is the mirror output at `path` a readable PDF of `expectedPages` pages?
+   * Called only before a source is about to move — see the run loop. */
+  verifyOutput(path: string, expectedPages: number): Promise<boolean>;
+  /** Tier-1 engine repair of a damaged source into a scratch file; resolves to
+   * the scratch path. Called only when `repairDamaged` is on. */
+  repairToScratch(src: string): Promise<string>;
+  /** Delete a scratch file from `repairToScratch`. */
+  discardScratch(path: string): Promise<void>;
 }
 
 export interface BatchRunOptions {
@@ -82,6 +109,21 @@ export interface BatchRunOptions {
   /** Polled between units of work; a true return stops after the in-flight
    * file (completed mirror files remain — the report says what finished). */
   isCancelled?: () => boolean;
+  /** OPT-IN (request 2). Move each successfully processed ORIGINAL into a
+   * mirror under this root. Undefined is the default and the standing
+   * guarantee: batch OCR does not modify the source tree. */
+  movedRoot?: string;
+  /** OPT-IN (request 3). Move each FAILED original into a mirror under this
+   * root, instead of only naming it in a report. */
+  errorRoot?: string;
+  /** OPT-IN (request 3). Run tier-1 repair on a source that will not load and
+   * process the repaired copy if that works. */
+  repairDamaged?: boolean;
+  /** OPT-IN (request 3, "move repaired files back"). Write the repaired bytes
+   * back over the damaged original, healing the source tree. Requires
+   * `repairDamaged`; the repaired copy is the pre-OCR one, deliberately — the
+   * user asked for their file fixed, not for a searchable derivative of it. */
+  replaceRepairedOriginals?: boolean;
 }
 
 // ── Path helpers (vitest-covered) ─────────────────────────────────────────
@@ -137,6 +179,7 @@ export async function runBatchOcr(
 ): Promise<BatchReport> {
   const onProgress = options.onProgress ?? (() => {});
   const isCancelled = options.isCancelled ?? (() => false);
+  const { movedRoot, errorRoot, repairDamaged, replaceRepairedOriginals } = options;
   const results: BatchFileResult[] = [];
   let cancelled = false;
 
@@ -150,15 +193,50 @@ export async function runBatchOcr(
     const base = { fileIndex: i, fileCount: entries.length, rel: entry.rel };
 
     let doc: BatchPdfDoc | null = null;
+    // Set when tier-1 repair produced a readable copy: the file the run then
+    // works FROM, and the bytes "put the repaired original back" writes back.
+    let scratch: string | null = null;
+    // The single result for this entry. Everything below assigns it rather
+    // than pushing, because the tail — verify, heal, move — has to run on
+    // every outcome, and the old `continue`-per-branch shape had no tail.
+    let result: BatchFileResult | null = null;
+    let expectedPages = 0;
+    let broke = false;
+
     try {
       onProgress({ ...base, phase: 'loading' });
       try {
         doc = await io.load(entry.abs);
       } catch (err) {
-        results.push({ rel: entry.rel, status: 'skipped', reason: classifyLoadError(err) });
-        continue;
+        const classification = classifyLoadError(err);
+        // A password failure is NOT a repair candidate: a structural rewrite
+        // cannot supply a password, and trying would replace a clear
+        // "password-protected" with a confusing repair error.
+        if (repairDamaged && classification !== 'password-protected') {
+          onProgress({ ...base, phase: 'repairing' });
+          try {
+            scratch = await io.repairToScratch(entry.abs);
+            doc = await io.load(scratch);
+          } catch (repairErr) {
+            doc = null;
+            result = {
+              rel: entry.rel,
+              status: 'skipped',
+              reason: `${classification}; repair did not help: ${messageOf(repairErr)}`,
+            };
+          }
+        } else {
+          result = { rel: entry.rel, status: 'skipped', reason: classification };
+        }
       }
 
+      // From here on the run works from `working`, which is the repaired copy
+      // when there is one — so the mirror gets the readable file, not the
+      // damaged bytes that failed to load in the first place.
+      const working = scratch ?? entry.abs;
+
+      if (doc) {
+      expectedPages = doc.numPages;
       onProgress({ ...base, phase: 'scanning' });
       const needing: number[] = [];
       for (let p = 0; p < doc.numPages; p++) {
@@ -167,10 +245,9 @@ export async function runBatchOcr(
 
       if (needing.length === 0) {
         onProgress({ ...base, phase: 'copying' });
-        await io.copyFile(entry.abs, dest);
-        results.push({ rel: entry.rel, status: 'copied' });
-        continue;
-      }
+        await io.copyFile(working, dest);
+        result = { rel: entry.rel, status: 'copied' };
+      } else {
 
       // Recognize the scanned pages through the shared worker pool, a small
       // window at a time. A page whose recognition fails fails the FILE (a
@@ -188,11 +265,11 @@ export async function runBatchOcr(
         while (next < needing.length) {
           if (isCancelled()) throw new BatchCancelledError();
           const pageIndex = needing[next++];
-          const result = await doc!.recognize(pageIndex, `batch:${i}:${pageIndex}`);
+          const recognized = await doc!.recognize(pageIndex, `batch:${i}:${pageIndex}`);
           done += 1;
           onProgress({ ...base, phase: 'recognizing', page: done, pageCount: needing.length });
           const geometry = await doc!.geometry(pageIndex);
-          const words = convertWords(result.words, geometry);
+          const words = convertWords(recognized.words, geometry);
           if (words.length > 0) pages.push({ page: pageIndex + 1, words });
         }
       };
@@ -218,41 +295,110 @@ export async function runBatchOcr(
         // Scanned pages, but recognition produced no usable words (blank
         // scans). Nothing to persist — mirror the file as-is, honestly noted.
         onProgress({ ...base, phase: 'copying' });
-        await io.copyFile(entry.abs, dest);
-        results.push({ rel: entry.rel, status: 'copied', reason: 'no text recognized' });
-        continue;
+        await io.copyFile(working, dest);
+        result = { rel: entry.rel, status: 'copied', reason: 'no text recognized' };
+      } else {
+        pages.sort((a, b) => a.page - b.page);
+        onProgress({ ...base, phase: 'writing' });
+        await io.ensureParentDirs(dest);
+        await io.applyOcrLayer(working, dest, pages);
+        result = {
+          rel: entry.rel,
+          status: 'ocr',
+          pagesOcrd: pages.length,
+          ...(pages.length < needing.length
+            ? {
+                reason: `${needing.length - pages.length} of ${needing.length} scanned pages had no recognizable text`,
+              }
+            : {}),
+        };
+      }
+      }
       }
 
-      pages.sort((a, b) => a.page - b.page);
-      onProgress({ ...base, phase: 'writing' });
-      await io.ensureParentDirs(dest);
-      await io.applyOcrLayer(entry.abs, dest, pages);
-      results.push({
-        rel: entry.rel,
-        status: 'ocr',
-        pagesOcrd: pages.length,
-        ...(pages.length < needing.length
-          ? {
-              reason: `${needing.length - pages.length} of ${needing.length} scanned pages had no recognizable text`,
+      // ── The tail: verify, heal, move ──────────────────────────────────
+      //
+      // Everything that touches the user's SOURCE tree happens here, once,
+      // after the file's outcome is known — never inside a success branch.
+      if (result) {
+        // Verification runs only when a source is about to move, which is the
+        // constraint as written: "verify the output is a valid PDF BEFORE the
+        // source moves". Verifying on every ordinary run would double the IO
+        // of the default path to protect a source nothing is going to touch.
+        if (result.status !== 'skipped' && (movedRoot || (scratch && replaceRepairedOriginals))) {
+          const ok = await io.verifyOutput(dest, expectedPages).catch(() => false);
+          if (!ok) {
+            // The mirror file stays where it is — deleting it would be a
+            // second surprise — but the run did NOT produce a usable
+            // searchable copy, so the source is not expendable and the
+            // status must not claim success.
+            result = {
+              rel: entry.rel,
+              status: 'skipped',
+              reason:
+                'the copy in the destination could not be read back as a valid PDF — the original was left untouched',
+            };
+          }
+        }
+
+        if (scratch) {
+          result.repaired = true;
+          if (replaceRepairedOriginals && result.status !== 'skipped') {
+            try {
+              await io.copyFile(scratch, entry.abs);
+              result.repairedOriginalReplaced = true;
+            } catch (err) {
+              result.moveError = `the repaired copy could not replace the original: ${messageOf(err)}`;
             }
-          : {}),
-      });
+          }
+        }
+
+        const moveRoot = result.status === 'skipped' ? errorRoot : movedRoot;
+        if (moveRoot) {
+          onProgress({ ...base, phase: 'moving' });
+          try {
+            result.movedTo = await io.moveFile(entry.abs, joinDest(moveRoot, entry.rel));
+          } catch (err) {
+            // A failed move never changes the STATUS — the OCR result stands
+            // on its own — but it is never silent either: the user asked for
+            // their tree reorganised and must be told what stayed put.
+            result.moveError = result.moveError
+              ? `${result.moveError}; move failed: ${messageOf(err)}`
+              : messageOf(err);
+          }
+        }
+      }
     } catch (err) {
       if (err instanceof BatchCancelledError) {
         cancelled = true;
-        break;
+        broke = true;
+      } else {
+        result = { rel: entry.rel, status: 'skipped', reason: messageOf(err) };
+        // A file that failed mid-work is an error like any other. The move is
+        // attempted here rather than in the tail because the tail is inside
+        // the try this catch belongs to.
+        if (errorRoot) {
+          try {
+            result.movedTo = await io.moveFile(entry.abs, joinDest(errorRoot, entry.rel));
+          } catch (moveErr) {
+            result.moveError = messageOf(moveErr);
+          }
+        }
       }
-      results.push({
-        rel: entry.rel,
-        status: 'skipped',
-        reason: err instanceof Error ? err.message : String(err),
-      });
     } finally {
       if (doc) await doc.destroy().catch(() => {});
+      // After the tail, so "put the repaired original back" still has its bytes.
+      if (scratch) await io.discardScratch(scratch).catch(() => {});
     }
+    if (broke) break;
+    if (result) results.push(result);
   }
 
   return { cancelled, results, skippedDirs };
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 class BatchCancelledError extends Error {
