@@ -128,13 +128,38 @@ describe('edit text (Phase 7.2+7.3)', () => {
     await waitForHarness();
     // Still in edit mode from the prior case (or re-arm harmlessly).
     await invokeAppCommand('tools.open.edit');
-    await browser.waitUntil(async () => (await editTextPageIds()).length > 0, {
-      timeout: 30_000,
-      timeoutMsg: 'text runs never loaded',
-    });
-    const pageId = (await editTextPageIds())[0];
-    const runs = await editTextRuns(pageId);
-    await editTextOpen(pageId, runs[0].index);
+    // Wait for the RUNS, not just the page ids. The previous case ends with an
+    // undo, which refetches the listing — so there is a window where the page
+    // id exists but its runs are still empty. `runs[0]` was then `undefined`,
+    // `editTextOpen` opened nothing, and the failure surfaced 10s later as
+    // "edit-text-input still not displayed", pointing at the editor rather
+    // than at the listing. Same wrong-signal shape as 65-struct-tags.
+    // Re-read the page id INSIDE the retry, and confirm the editor actually
+    // opened. The previous case ends with an undo, and page ids are
+    // generation-tagged (`…#g2#p0` -> `…#g3#p0`), so a listing read a moment
+    // too early hands back the PREVIOUS generation's id — `editTextOpen` then
+    // addresses a page that no longer exists and silently opens nothing. The
+    // failure surfaced 10s later as "edit-text-input still not displayed",
+    // which points at the editor rather than at the stale id. Verified by
+    // probe: the same sequence with the id re-read opens every time.
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        const rs = await editTextRuns(ids[0]);
+        if (rs.length === 0) return false;
+        await editTextOpen(ids[0], rs[0].index);
+        // ...and require it to STAY open. The undo's reindex refresh can land
+        // just after the open and re-render the editor away, so a single
+        // isDisplayed() right after opening can be true and false 200ms later
+        // — which is exactly how this failed: the converging open succeeded
+        // and the assertion below still timed out. Looping until it holds lets
+        // the refresh land and then opens for real.
+        await browser.pause(400);
+        return await $('[data-testid="edit-text-input"]').isDisplayed().catch(() => false);
+      },
+      { timeout: 30_000, timeoutMsg: 'the inline editor never opened on the restored run' },
+    );
     await $('[data-testid="edit-text-input"]').waitForDisplayed({ timeout: 10_000 });
     // The arrow is not in WinAnsi — the error line must name it and Enter
     // must NOT commit (the editor stays open with the invalid value).
