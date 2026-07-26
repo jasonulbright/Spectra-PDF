@@ -42,6 +42,32 @@ describe('app settings', () => {
     expect(loadSettings().checkUpdatesOnLaunch).toBe(false);
   });
 
+  it('logs batch runs by default, kept for 30 days', () => {
+    // The people this serves run batches unattended and will never open
+    // Preferences to switch a log on, so OFF-by-default would mean the feature
+    // effectively does not exist for them.
+    expect(DEFAULTS.batchLogEnabled).toBe(true);
+    expect(DEFAULTS.batchLogRetentionDays).toBe(30);
+  });
+
+  it('gives an EXISTING install the batch-log defaults too', () => {
+    // Same upgrade path as the update check: a stored blob predating these
+    // keys must resolve to logging ON at 30 days, not to `undefined` — which
+    // the Rust sweep reads as 0, i.e. keep forever, and which the dialog reads
+    // as "do not log at all".
+    store.set('spectra-settings', JSON.stringify({ theme: 'dark', gsSource: 'builtin' }));
+    const s = loadSettings();
+    expect(s.batchLogEnabled).toBe(true);
+    expect(s.batchLogRetentionDays).toBe(30);
+  });
+
+  it('round-trips a retention change and an opt-out', () => {
+    saveSettings({ ...DEFAULTS, batchLogRetentionDays: 90 });
+    expect(loadSettings().batchLogRetentionDays).toBe(90);
+    saveSettings({ ...DEFAULTS, batchLogEnabled: false });
+    expect(loadSettings().batchLogEnabled).toBe(false);
+  });
+
   it('falls back to defaults on a corrupt blob instead of throwing', () => {
     store.set('spectra-settings', '{not json');
     expect(loadSettings()).toEqual(DEFAULTS);

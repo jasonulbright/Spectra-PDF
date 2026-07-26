@@ -904,6 +904,9 @@ export interface BatchOcrSnapshot {
     results: { rel: string; status: string; pagesOcrd?: number; reason?: string }[];
     skippedDirs: string[];
   } | null;
+  /** Full path of the log the run wrote (Phase 12), or null when logging is
+   * off or the write failed. The spec reads the file back from disk. */
+  logPath: string | null;
 }
 
 /** Inject source+destination into the open Batch OCR dialog (native folder

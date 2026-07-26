@@ -34,6 +34,15 @@ export function DocumentJsPanel(): React.ReactElement {
   const path = activeFile?.path ?? null;
   const workingPath = activeFile?.workingPath ?? null;
 
+  // The editing controls below are gated on `busy`, which covers this read for
+  // its whole duration. That is deliberate and it is the fix for the "late read
+  // clobbers the user's edit" class (`lib/late-read.ts`) in THIS panel: the
+  // window is made unreachable rather than survivable. Merging is the right
+  // shape where state is keyed (form fields, tag draft props); here it is an
+  // ordered LIST with a selected index and `set_document_js` replaces the whole
+  // name tree, so a merge would have to invent an ordering and a re-selection —
+  // and getting either wrong writes a script list that deletes what the read
+  // just found. One round trip of disabled inputs is the honest trade.
   const load = useCallback(async () => {
     if (!workingPath) return;
     setBusy(true);
@@ -164,7 +173,8 @@ export function DocumentJsPanel(): React.ReactElement {
         <button
           data-testid="docjs-add"
           onClick={addScript}
-          className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded font-medium"
+          disabled={busy}
+          className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded font-medium"
         >
           + Add script
         </button>
@@ -221,13 +231,15 @@ export function DocumentJsPanel(): React.ReactElement {
                   data-testid="docjs-name"
                   type="text"
                   value={sel.name}
+                  disabled={busy}
                   onChange={(e) => updateSelected({ name: e.target.value })}
                   className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
                 />
                 <button
                   data-testid="docjs-delete"
                   onClick={removeSelected}
-                  className="px-2.5 py-1 text-xs bg-red-700/70 hover:bg-red-600 rounded font-medium"
+                  disabled={busy}
+                  className="px-2.5 py-1 text-xs bg-red-700/70 hover:bg-red-600 disabled:opacity-40 rounded font-medium"
                 >
                   Delete
                 </button>
@@ -236,6 +248,7 @@ export function DocumentJsPanel(): React.ReactElement {
                 data-testid="docjs-editor"
                 value={sel.js}
                 spellCheck={false}
+                disabled={busy}
                 onChange={(e) => updateSelected({ js: e.target.value })}
                 className="flex-1 min-h-0 w-full px-2.5 py-2 bg-neutral-950 border border-neutral-700 rounded text-xs font-mono resize-none focus:outline-none focus:border-blue-500"
                 placeholder="// document-level JavaScript"

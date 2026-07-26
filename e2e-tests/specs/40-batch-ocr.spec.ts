@@ -130,6 +130,26 @@ describe('batch OCR folder mirror (Phase 6)', () => {
     const originalText = (await extractAllText(resolve(src, 'a', 'scan.pdf'))).trim();
     expect(originalText).toBe('');
 
+    // Issue #1 request 4: the run leaves a durable record. The dialog's report
+    // dies with the dialog — this is the artefact that survives it, and the
+    // only thing a scheduled run will ever leave behind, so the assertion is
+    // on the FILE's contents, not on the on-screen path label.
+    const logPath = snapshot?.logPath;
+    expect(logPath).toBeTruthy();
+    expect(existsSync(logPath!)).toBe(true);
+    expect(logPath!).toMatch(/batch-ocr-\d{4}-\d{2}-\d{2}_\d{6}\.log$/);
+    const log = readFileSync(logPath!, 'utf8');
+    expect(log).toContain('Open PDF Studio — Batch OCR log');
+    expect(log).toContain(src);
+    expect(log).toContain(dest);
+    expect(log).toContain('Result:       completed');
+    expect(log).toContain('Files: 3 processed');
+    // One greppable line per file, status first — what the format exists for.
+    expect(log).toMatch(/\[ocr\] +a\\scan\.pdf — \d+ pages? made searchable/);
+    expect(log).toContain('[copied]  born.pdf');
+    expect(log).toMatch(/\[skipped\] broken\.pdf — /);
+    await $('[data-testid="batch-ocr-log-path"]').waitForDisplayed({ timeout: 5_000 });
+
     await $('[data-testid="batch-ocr-close"]').click();
   });
 

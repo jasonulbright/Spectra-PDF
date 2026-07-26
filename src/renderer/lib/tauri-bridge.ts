@@ -117,6 +117,17 @@ export const batch = {
    * unattended run over large scanned PDFs. */
   readFileBuffer: async (path: string) =>
     new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath: path })),
+  /** Write one run's log into the app-data log folder; returns its full path.
+   * `name` is validated Rust-side against the exact pattern this app writes —
+   * the webview names a FILE, never a directory. */
+  writeLog: (name: string, contents: string) =>
+    invoke<string>('write_batch_log', { name, contents }),
+  /** Age sweep over that folder. 0 = keep forever (a no-op, not a purge). */
+  pruneLogs: (retentionDays: number) =>
+    invoke<number>('prune_batch_logs', { retentionDays }),
+  /** Reveal the log folder. Takes no path — same compiled-in-destination
+   * property as `open_releases_page`. */
+  openLogFolder: () => invoke<void>('open_batch_log_folder'),
 };
 
 // ── File operations ───────────────────────────────────────────────────────

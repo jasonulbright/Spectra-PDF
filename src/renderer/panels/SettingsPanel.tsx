@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { app, type GsInfo } from '../lib/tauri-bridge';
+import { app, batch, type GsInfo } from '../lib/tauri-bridge';
 import { deriveAccentVars } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
@@ -199,7 +199,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
     }).catch(() => {});
   }, []);
 
-  const update = useCallback((key: keyof Settings, value: string | boolean) => {
+  const update = useCallback((key: keyof Settings, value: string | boolean | number) => {
     setSettings((prev) => {
       const next = { ...prev, [key]: value };
       saveSettings(next);
@@ -300,6 +300,47 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         H Hand · V Select · U Highlight · X Text · D Draw · K Stamp — off by
         default
       </p>
+      <div data-testid="batch-log-pref">
+        <label className="block text-sm text-neutral-400 mb-2">Batch OCR logs</label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            data-testid="pref-batch-log"
+            checked={settings.batchLogEnabled}
+            onChange={() => update('batchLogEnabled', !settings.batchLogEnabled)}
+            className="rounded bg-neutral-800 border-neutral-700"
+          />
+          <span className="text-sm text-neutral-300">Write a log file for each batch run</span>
+        </label>
+        <div className="flex items-center gap-2 mt-2">
+          <span className="text-sm text-neutral-400">Keep logs for</span>
+          <select
+            data-testid="pref-batch-log-retention"
+            value={String(settings.batchLogRetentionDays)}
+            disabled={!settings.batchLogEnabled}
+            onChange={(e) => update('batchLogRetentionDays', Number(e.target.value))}
+            className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50"
+          >
+            <option value="7">7 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="365">1 year</option>
+            <option value="0">Keep forever</option>
+          </select>
+          <button
+            type="button"
+            data-testid="pref-batch-log-open"
+            onClick={() => void batch.openLogFolder().catch(() => {})}
+            className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
+          >
+            Open log folder
+          </button>
+        </div>
+        <p className="text-xs text-neutral-500 mt-1.5">
+          Each run writes one file listing every PDF and what happened to it. Older logs are
+          swept at the end of the next run — nothing outside this folder is ever touched.
+        </p>
+      </div>
       </>
       )}
 

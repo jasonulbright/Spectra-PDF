@@ -24,6 +24,14 @@ export interface Settings {
    * deployments, or suppress it machine-wide with the DisableAutoUpdate
    * policy, which still wins over this preference. */
   checkUpdatesOnLaunch: boolean;
+  /** Write a log file for every Batch OCR run (issue #1 request 4). Default
+   * ON: a batch runs unattended over folders the user cannot re-inspect
+   * afterwards, and the on-screen report dies with the dialog. */
+  batchLogEnabled: boolean;
+  /** Days a batch log is kept before the next run sweeps it. 0 = keep
+   * forever — deliberately NOT "delete everything", since 0 is what an
+   * unset or corrupted value resolves to. The requester suggested 30. */
+  batchLogRetentionDays: number;
 }
 
 export const DEFAULTS: Settings = {
@@ -36,6 +44,8 @@ export const DEFAULTS: Settings = {
   startMinimized: false,
   singleKeyAccelerators: false,
   checkUpdatesOnLaunch: true,
+  batchLogEnabled: true,
+  batchLogRetentionDays: 30,
 };
 
 export function loadSettings(): Settings {

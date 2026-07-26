@@ -14,6 +14,8 @@ import {
   type BatchReport,
 } from '../lib/batch-ocr';
 import { createBatchIo } from '../lib/batch-ocr-io';
+import { formatBatchLog, batchLogFileName } from '../lib/batch-log';
+import { getSettings } from '../lib/app-settings';
 import { TEST_HARNESS_ENABLED, registerBatchOcr } from '../testHarness';
 
 // Tools ▸ Batch OCR Folder… (Phase 6, docs/architecture/20-phase6-batch-ocr.md):
@@ -154,13 +156,60 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     entries !== null &&
     entries.length > 0;
 
+  // Where this run's log landed, shown on the report. Null when logging is
+  // off, or when the write itself failed — a log that could not be written is
+  // said so on screen rather than silently assumed (the report is the only
+  // other record, and it is about to be dismissed).
+  const [logPath, setLogPath] = useState<string | null>(null);
+  const [logError, setLogError] = useState<string | null>(null);
+
+  // Issue #1 request 4. Writing is best-effort by design: a failed log must
+  // never turn a completed batch into a failed one — the files are already
+  // mirrored, and the run's value does not depend on its paperwork.
+  const writeLog = async (
+    startedAt: Date,
+    rep: BatchReport,
+    src: string,
+    dst: string,
+    fatalError?: string,
+  ): Promise<void> => {
+    const settings = getSettings();
+    if (!settings.batchLogEnabled) return;
+    try {
+      const path = await batch.writeLog(
+        batchLogFileName(startedAt),
+        formatBatchLog({
+          startedAt,
+          finishedAt: new Date(),
+          sourceRoot: src,
+          destRoot: dst,
+          lang: toTesseractLang(langs),
+          langLabel: describeLanguages(langs),
+          report: rep,
+          ...(fatalError ? { fatalError } : {}),
+        }),
+      );
+      setLogPath(path);
+      setLogError(null);
+      // Sweep AFTER writing, so the run that fails to write still prunes, and
+      // so a retention of N never deletes the log just created.
+      await batch.pruneLogs(settings.batchLogRetentionDays).catch(() => {});
+    } catch (e: unknown) {
+      setLogPath(null);
+      setLogError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const start = async (): Promise<void> => {
     if (!canStart || !source || !dest || !entries) return;
     setPhase('running');
     setError(null);
     setProgress(null);
     setStopping(false);
+    setLogPath(null);
+    setLogError(null);
     cancelledRef.current = false;
+    const startedAt = new Date();
     // Client construction lives INSIDE the try: `new Worker` can throw
     // synchronously, and with phase already 'running' an uncaught throw
     // stranded the dialog in an unclosable modal (review-caught) — every
@@ -180,11 +229,22 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         isCancelled: () => cancelledRef.current,
       });
       setReport(rep);
+      await writeLog(startedAt, rep, source, dest);
       setPhase('done');
     } catch (e: unknown) {
       // The driver isolates per-file failures; reaching here means something
-      // structural (e.g. the engine died). Back to setup with the reason.
-      setError(e instanceof Error ? e.message : String(e));
+      // structural (e.g. the engine died). Back to setup with the reason — and
+      // a log anyway: a run that died half way through is precisely the one
+      // whose partial results the user needs a record of.
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      await writeLog(
+        startedAt,
+        { cancelled: false, results: [], skippedDirs },
+        source,
+        dest,
+        message,
+      );
       setPhase('setup');
     } finally {
       cancelOcrRef.current = null;
@@ -206,6 +266,8 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     setReport(null);
     setProgress(null);
     setStopping(false);
+    setLogPath(null);
+    setLogError(null);
     setPhase('setup');
   };
 
@@ -221,6 +283,8 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   entriesRef.current = entries;
   const reportRef = useRef(report);
   reportRef.current = report;
+  const logPathRef = useRef(logPath);
+  logPathRef.current = logPath;
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerBatchOcr({
@@ -231,6 +295,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         phase: phaseRef.current,
         fileCount: entriesRef.current?.length ?? null,
         report: reportRef.current,
+        logPath: logPathRef.current,
       }),
     });
     return () => registerBatchOcr(null);
@@ -436,6 +501,26 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           {report.skippedDirs.length > 0 && (
             <p className="text-xs text-amber-400">
               Unreadable subfolders (missing from the mirror): {report.skippedDirs.join('; ')}
+            </p>
+          )}
+          {logPath && (
+            <p className="text-xs text-neutral-500" data-testid="batch-ocr-log-path">
+              Log written:{' '}
+              <span className="text-neutral-400" title={logPath}>
+                {logPath}
+              </span>{' '}
+              <button
+                data-testid="batch-ocr-log-open"
+                onClick={() => void batch.openLogFolder().catch(() => {})}
+                className="underline hover:text-neutral-300"
+              >
+                Open folder
+              </button>
+            </p>
+          )}
+          {logError && (
+            <p className="text-xs text-amber-400" data-testid="batch-ocr-log-error">
+              The run finished, but its log could not be written: {logError}
             </p>
           )}
           <div className="flex justify-end gap-2 pt-1">

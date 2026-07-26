@@ -136,6 +136,10 @@ export interface BatchOcrHandlers {
       results: { rel: string; status: string; pagesOcrd?: number; reason?: string }[];
       skippedDirs: string[];
     } | null;
+    /** Full path of the log this run wrote, or null (logging off / write
+     * failed). Phase 12: the spec reads the file back to prove the run left a
+     * durable record, not just a dialog that once said so. */
+    logPath: string | null;
   };
 }
 

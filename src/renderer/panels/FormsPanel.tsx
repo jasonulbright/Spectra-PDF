@@ -5,6 +5,7 @@ import { file, app } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { readFormFields } from '../lib/forms';
+import { mergeUntouched } from '../lib/late-read';
 import type { FormField, FormFieldValue } from '../lib/forms';
 
 /** Value equality across the FormFieldValue union (arrays compared element-wise). */
@@ -27,6 +28,13 @@ export function FormsPanel(): React.ReactElement {
   // field would abort the whole fill (gauntlet CRITICAL). pdf-lib's per-field
   // no-op tolerated the full snapshot; the engine does not.
   const initialValues = useRef<Record<string, FormFieldValue>>({});
+  // Field names the user has typed into since the last read landed. The read
+  // below re-runs on EVERY buffer change — an undo, a page-edit commit, any
+  // other panel's op — so it lands mid-form routinely, and a bare
+  // `setValues(seed)` silently reverted every field filled since the panel
+  // opened. See `lib/late-read.ts` for the class and why merging (not skipping
+  // the seed) is the correct shape.
+  const touched = useRef<Set<string>>(new Set());
   const [fields, setFields] = useState<FormField[]>([]);
   const [hasXFA, setHasXFA] = useState(false);
   const [values, setValues] = useState<Record<string, FormFieldValue>>({});
@@ -37,6 +45,12 @@ export function FormsPanel(): React.ReactElement {
 
   const buffer = activeFile?.buffer ?? null;
 
+  // A different document is a fresh filling session: a field name that happens
+  // to exist in both must not carry the previous document's typing forward.
+  useEffect(() => {
+    touched.current.clear();
+  }, [workingPath]);
+
   // Read fields whenever the file's bytes change identity — the same signal
   // the canvas indexer keys on, so this auto-refreshes after an apply
   // (UPDATE_FILE swaps the buffer), after any whole-file op, and after undo.
@@ -46,6 +60,7 @@ export function FormsPanel(): React.ReactElement {
       setFields([]);
       setHasXFA(false);
       setValues({});
+      touched.current.clear();
       return;
     }
     setReading(true);
@@ -60,8 +75,11 @@ export function FormsPanel(): React.ReactElement {
         setHasXFA(result.hasXFA);
         const seed: Record<string, FormFieldValue> = {};
         for (const f of result.fields) seed[f.name] = f.value;
-        setValues(seed);
+        // The file is always the BASELINE — Apply diffs against it, so it must
+        // be the truth even when a read lands mid-typing. Only the fields the
+        // user actually touched survive on top of it.
         initialValues.current = seed;
+        setValues((prev) => mergeUntouched(seed, prev, touched.current));
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -78,6 +96,7 @@ export function FormsPanel(): React.ReactElement {
   }, [buffer, workingPath, call]);
 
   const setValue = useCallback((name: string, value: FormFieldValue) => {
+    touched.current.add(name);
     setValues((prev) => ({ ...prev, [name]: value }));
   }, []);
 
@@ -115,6 +134,10 @@ export function FormsPanel(): React.ReactElement {
         flatten,
         font_dir: await app.getEditFontPath(),
       });
+      // Written: these values ARE the file's now, so the re-read the dispatch
+      // below triggers should reseed everything. (On the error path `touched`
+      // deliberately stands — nothing was written, so the typing must survive.)
+      touched.current.clear();
       const buffer = await file.readBuffer(activeFile.workingPath);
       dispatch({
         type: 'UPDATE_FILE',
