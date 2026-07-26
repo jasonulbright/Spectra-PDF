@@ -108,6 +108,15 @@ export const batch = {
   /** Pre-create a mirror output's parents (apply_ocr_layer saves to the exact
    * path it is given and does not create directories). */
   ensureParentDirs: (path: string) => invoke<void>('ensure_parent_dirs', { path }),
+  /** Move a SOURCE file into a moved/error tree (Phase 12 requests 2/3) —
+   * the only batch call that mutates the user's own folders. Resolves to the
+   * path actually written: a collision is suffixed, never overwritten. */
+  moveFile: (src: string, dest: string) => invoke<string>('move_file_creating_dirs', { src, dest }),
+  /** Allocate a scratch path for the auto-repair step. */
+  createScratch: (tag: string) => invoke<string>('create_batch_scratch', { tag }),
+  /** Delete a scratch file — refused Rust-side for anything outside the
+   * scratch folder, so this can never become a general remove. */
+  deleteScratch: (path: string) => invoke<void>('delete_batch_scratch', { path }),
   /** TRUE file identity (volume serial + file index): canonical STRINGS can
    * disagree about one physical folder (UNC vs mapped letter), so the
    * dest-conflict guard asks the filesystem, not the spelling. */

@@ -45,11 +45,29 @@ function fakeDoc(spec: FakeSpec, destroyed: string[]): BatchPdfDoc {
   };
 }
 
-function makeIo(specs: Record<string, FakeSpec>) {
+/** Phase 12 knobs: which fake operations fail, and what a repair produces. */
+interface IoOpts {
+  /** Mirror outputs that fail the read-back verification. */
+  verifyFails?: string[];
+  /** Source paths whose move throws. */
+  moveFails?: string[];
+  /** src -> the scratch path a repair produces. The scratch path must have its
+   * own entry in `specs`, which is how a test says "repair made it readable". */
+  repairProduces?: Record<string, string>;
+  /** Source paths whose repair itself throws. */
+  repairFails?: string[];
+  /** Source paths whose repaired-bytes copy-back throws. */
+  copyFails?: string[];
+}
+
+function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
   const destroyed: string[] = [];
   const copies: [string, string][] = [];
   const applied: { source: string; output: string; pages: number[] }[] = [];
   const ensured: string[] = [];
+  const moves: [string, string][] = [];
+  const verified: [string, number][] = [];
+  const discarded: string[] = [];
   const io: BatchIo = {
     load: async (abs) => {
       const spec = specs[abs];
@@ -61,13 +79,48 @@ function makeIo(specs: Record<string, FakeSpec>) {
       applied.push({ source, output, pages: pages.map((p) => p.page) });
     },
     copyFile: async (src, dest) => {
+      if (opts.copyFails?.includes(src)) throw new Error('copy denied');
       copies.push([src, dest]);
     },
     ensureParentDirs: async (path) => {
       ensured.push(path);
     },
+    moveFile: async (src, dest) => {
+      if (opts.moveFails?.includes(src)) throw new Error('move denied');
+      moves.push([src, dest]);
+      return dest;
+    },
+    verifyOutput: async (path, expectedPages) => {
+      verified.push([path, expectedPages]);
+      return !opts.verifyFails?.includes(path);
+    },
+    repairToScratch: async (src) => {
+      if (opts.repairFails?.includes(src)) throw new Error('too damaged');
+      const scratch = opts.repairProduces?.[src];
+      if (!scratch) throw new Error('too damaged');
+      return scratch;
+    },
+    discardScratch: async (path) => {
+      discarded.push(path);
+    },
   };
-  return { io, destroyed, copies, applied, ensured };
+  return { io, destroyed, copies, applied, ensured, moves, verified, discarded };
+}
+
+/** The four filing primitives, stubbed to explode. Tests using the inline `io`
+ * literals below do not opt into moved/error folders or repair, so the driver
+ * must never reach these — a throwing stub says that, where a silent no-op
+ * would hide a driver that moved files nobody asked it to move. */
+function noFiling(): Pick<BatchIo, 'moveFile' | 'verifyOutput' | 'repairToScratch' | 'discardScratch'> {
+  const nope = (name: string) => () => {
+    throw new Error(`${name} must not run without the matching opt-in`);
+  };
+  return {
+    moveFile: nope('moveFile') as unknown as BatchIo['moveFile'],
+    verifyOutput: nope('verifyOutput') as unknown as BatchIo['verifyOutput'],
+    repairToScratch: nope('repairToScratch') as unknown as BatchIo['repairToScratch'],
+    discardScratch: nope('discardScratch') as unknown as BatchIo['discardScratch'],
+  };
 }
 
 const entry = (rel: string): BatchEntry => ({ abs: `C:\\src\\${rel}`, rel });
@@ -221,6 +274,7 @@ describe('runBatchOcr', () => {
       applyOcrLayer: vi.fn(async () => {}),
       copyFile: vi.fn(async () => {}),
       ensureParentDirs: vi.fn(async () => {}),
+      ...noFiling(),
     };
     const report = await runBatchOcr([entry('big.pdf')], 'C:\\out', [], io, {
       isCancelled: () => cancelled,
@@ -263,6 +317,7 @@ describe('runBatchOcr', () => {
       applyOcrLayer: vi.fn(async () => {}),
       copyFile: vi.fn(async () => {}),
       ensureParentDirs: vi.fn(async () => {}),
+      ...noFiling(),
     };
     const report = await runBatchOcr([entry('mixed.pdf')], 'C:\\out', [], io);
     expect(report.results[0]).toEqual({
@@ -292,6 +347,7 @@ describe('runBatchOcr', () => {
       applyOcrLayer: vi.fn(async () => {}),
       copyFile: vi.fn(async () => {}),
       ensureParentDirs: vi.fn(async () => {}),
+      ...noFiling(),
     };
     const report = await runBatchOcr([entry('a.pdf')], 'C:\\out', [], io, {
       isCancelled: () => cancelled,
@@ -335,5 +391,233 @@ describe('runBatchOcr', () => {
     };
     await runBatchOcr([entry('w.pdf')], 'C:\\out', [], io);
     expect(capture.rect).toEqual([0, 792 * 0.75, 612 * 0.25, 792]);
+  });
+});
+
+// ── Phase 12 requests 2/3: the moved/error folders and auto-repair ─────────
+//
+// These are the only batch behaviours that MUTATE the user's source tree, so
+// the tests are written around the question "when is a source allowed to
+// move?" rather than around the happy path.
+
+describe('runBatchOcr — filing the originals', () => {
+  const specs = {
+    'C:\\src\\a\\scan.pdf': { pages: [true, false] },
+    'C:\\src\\born.pdf': { pages: [false] },
+    'C:\\src\\broken.pdf': { pages: [], loadError: new Error('bad XRef') },
+  };
+  const allThree = [entry('a\\scan.pdf'), entry('born.pdf'), entry('broken.pdf')];
+
+  it('touches NOTHING when no roots are given — the default guarantee', async () => {
+    // `noFiling`-style proof at the driver level: the fake's moveFile records
+    // every call, so an empty list is the assertion that the standing promise
+    // ("the source folder is never modified") still holds by default.
+    const { io, moves, verified } = makeIo(specs);
+    const report = await runBatchOcr(allThree, 'C:\\out', [], io);
+    expect(moves).toEqual([]);
+    expect(verified).toEqual([]);
+    expect(report.results.every((r) => r.movedTo === undefined)).toBe(true);
+  });
+
+  it('moves successes to the moved root and failures to the error root, structure preserved', async () => {
+    const { io, moves } = makeIo(specs);
+    const report = await runBatchOcr(allThree, 'C:\\out', [], io, {
+      movedRoot: 'D:\\done',
+      errorRoot: 'D:\\errors',
+    });
+    expect(moves).toEqual([
+      ['C:\\src\\a\\scan.pdf', 'D:\\done\\a\\scan.pdf'],
+      ['C:\\src\\born.pdf', 'D:\\done\\born.pdf'],
+      ['C:\\src\\broken.pdf', 'D:\\errors\\broken.pdf'],
+    ]);
+    expect(report.results.map((r) => r.movedTo)).toEqual([
+      'D:\\done\\a\\scan.pdf',
+      'D:\\done\\born.pdf',
+      'D:\\errors\\broken.pdf',
+    ]);
+  });
+
+  it('uses each root independently — an error root alone leaves successes in place', async () => {
+    const { io, moves } = makeIo(specs);
+    await runBatchOcr(allThree, 'C:\\out', [], io, { errorRoot: 'D:\\errors' });
+    expect(moves).toEqual([['C:\\src\\broken.pdf', 'D:\\errors\\broken.pdf']]);
+  });
+
+  it('VERIFIES the output before moving a source, and against the source page count', async () => {
+    const { io, verified } = makeIo(specs);
+    await runBatchOcr([entry('a\\scan.pdf')], 'C:\\out', [], io, { movedRoot: 'D:\\done' });
+    expect(verified).toEqual([['C:\\out\\a\\scan.pdf', 2]]);
+  });
+
+  it('leaves the original ALONE when the output cannot be read back', async () => {
+    // The failure this exists for: the engine reports success and writes a
+    // truncated or unreadable file. Moving the source then loses the only
+    // good copy. Status must not claim success either.
+    const { io, moves } = makeIo(specs, { verifyFails: ['C:\\out\\a\\scan.pdf'] });
+    const report = await runBatchOcr([entry('a\\scan.pdf')], 'C:\\out', [], io, {
+      movedRoot: 'D:\\done',
+    });
+    expect(report.results[0].status).toBe('skipped');
+    expect(report.results[0].reason).toContain('could not be read back');
+    expect(report.results[0].movedTo).toBeUndefined();
+    expect(moves).toEqual([]);
+  });
+
+  it('routes a verification failure to the ERROR root, never the done root', async () => {
+    const { io, moves } = makeIo(specs, { verifyFails: ['C:\\out\\a\\scan.pdf'] });
+    await runBatchOcr([entry('a\\scan.pdf')], 'C:\\out', [], io, {
+      movedRoot: 'D:\\done',
+      errorRoot: 'D:\\errors',
+    });
+    expect(moves).toEqual([['C:\\src\\a\\scan.pdf', 'D:\\errors\\a\\scan.pdf']]);
+  });
+
+  it('does not verify when nothing is going to move (the default path stays one pass)', async () => {
+    const { io, verified } = makeIo(specs);
+    await runBatchOcr([entry('a\\scan.pdf')], 'C:\\out', [], io, { errorRoot: 'D:\\errors' });
+    expect(verified).toEqual([]);
+  });
+
+  it('reports a failed move WITHOUT downgrading the OCR result', async () => {
+    // The OCR genuinely succeeded; the filing did not. Conflating the two
+    // would tell the user their document failed when it is sitting correct in
+    // the destination.
+    const { io } = makeIo(specs, { moveFails: ['C:\\src\\a\\scan.pdf'] });
+    const report = await runBatchOcr([entry('a\\scan.pdf')], 'C:\\out', [], io, {
+      movedRoot: 'D:\\done',
+    });
+    expect(report.results[0].status).toBe('ocr');
+    expect(report.results[0].pagesOcrd).toBe(1);
+    expect(report.results[0].movedTo).toBeUndefined();
+    expect(report.results[0].moveError).toBe('move denied');
+  });
+
+  it('moves a file that failed MID-WORK to the error root', async () => {
+    // Not a load failure — a throw from the write step, which lands in the
+    // driver's outer catch rather than the tail.
+    const { io } = makeIo({ 'C:\\src\\x.pdf': { pages: [true] } });
+    io.applyOcrLayer = async () => {
+      throw new Error('disk full');
+    };
+    const report = await runBatchOcr([entry('x.pdf')], 'C:\\out', [], io, {
+      errorRoot: 'D:\\errors',
+    });
+    expect(report.results[0]).toMatchObject({
+      status: 'skipped',
+      reason: 'disk full',
+      movedTo: 'D:\\errors\\x.pdf',
+    });
+  });
+});
+
+describe('runBatchOcr — auto-repair', () => {
+  const damaged = { pages: [], loadError: new Error('bad XRef') };
+
+  it('is OFF by default: a damaged file is skipped without a repair attempt', async () => {
+    const { io, discarded } = makeIo({ 'C:\\src\\bad.pdf': damaged });
+    const report = await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], io);
+    expect(report.results[0]).toEqual({
+      rel: 'bad.pdf',
+      status: 'skipped',
+      reason: 'unreadable: bad XRef',
+    });
+    expect(discarded).toEqual([]);
+  });
+
+  it('repairs, then processes the REPAIRED copy rather than the damaged source', async () => {
+    const { io, applied, discarded } = makeIo(
+      { 'C:\\src\\bad.pdf': damaged, 'T:\\scratch-0.pdf': { pages: [true] } },
+      { repairProduces: { 'C:\\src\\bad.pdf': 'T:\\scratch-0.pdf' } },
+    );
+    const report = await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], io, {
+      repairDamaged: true,
+    });
+    expect(report.results[0]).toMatchObject({ status: 'ocr', pagesOcrd: 1, repaired: true });
+    // The mirror is built from the repaired bytes — reading the damaged
+    // original again is what would put unreadable content in the destination.
+    expect(applied[0].source).toBe('T:\\scratch-0.pdf');
+    expect(discarded).toEqual(['T:\\scratch-0.pdf']);
+  });
+
+  it('never attempts repair on a password-protected file', async () => {
+    // A structural rewrite cannot supply a password, and trying replaces a
+    // clear diagnosis with a confusing one.
+    const err = Object.assign(new Error('No password given'), { name: 'PasswordException' });
+    const { io } = makeIo({ 'C:\\src\\locked.pdf': { pages: [], loadError: err } });
+    const report = await runBatchOcr([entry('locked.pdf')], 'C:\\out', [], io, {
+      repairDamaged: true,
+    });
+    // repairToScratch would have thrown 'too damaged' had it run.
+    expect(report.results[0].reason).toBe('password-protected');
+    expect(report.results[0].repaired).toBeUndefined();
+  });
+
+  it('keeps the ORIGINAL diagnosis when repair does not help', async () => {
+    const { io } = makeIo(
+      { 'C:\\src\\bad.pdf': damaged },
+      { repairFails: ['C:\\src\\bad.pdf'] },
+    );
+    const report = await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], io, {
+      repairDamaged: true,
+    });
+    expect(report.results[0].reason).toBe('unreadable: bad XRef; repair did not help: too damaged');
+  });
+
+  it('writes the repaired bytes back over the original only when asked', async () => {
+    const setup = () =>
+      makeIo(
+        { 'C:\\src\\bad.pdf': damaged, 'T:\\scratch-0.pdf': { pages: [false] } },
+        { repairProduces: { 'C:\\src\\bad.pdf': 'T:\\scratch-0.pdf' } },
+      );
+    const off = setup();
+    await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], off.io, { repairDamaged: true });
+    // Only the mirror copy — nothing written back into C:\src.
+    expect(off.copies).toEqual([['T:\\scratch-0.pdf', 'C:\\out\\bad.pdf']]);
+
+    const on = setup();
+    const report = await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], on.io, {
+      repairDamaged: true,
+      replaceRepairedOriginals: true,
+    });
+    expect(on.copies).toEqual([
+      ['T:\\scratch-0.pdf', 'C:\\out\\bad.pdf'],
+      // The PRE-OCR repaired bytes go back, not a searchable derivative.
+      ['T:\\scratch-0.pdf', 'C:\\src\\bad.pdf'],
+    ]);
+    expect(report.results[0].repairedOriginalReplaced).toBe(true);
+  });
+
+  it('reports a failed write-back without claiming the original was healed', async () => {
+    // The repaired page NEEDS OCR, so the mirror goes through applyOcrLayer
+    // and the only copyFile in the run is the write-back itself — otherwise
+    // this test would be asserting on a file that failed earlier, for an
+    // unrelated reason, and would pass with the write-back deleted.
+    const { io } = makeIo(
+      { 'C:\\src\\bad.pdf': damaged, 'T:\\scratch-0.pdf': { pages: [true] } },
+      {
+        repairProduces: { 'C:\\src\\bad.pdf': 'T:\\scratch-0.pdf' },
+        copyFails: ['T:\\scratch-0.pdf'],
+      },
+    );
+    const report = await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], io, {
+      repairDamaged: true,
+      replaceRepairedOriginals: true,
+    });
+    // The document itself succeeded; only the healing of the source failed.
+    expect(report.results[0].status).toBe('ocr');
+    expect(report.results[0].repairedOriginalReplaced).toBeUndefined();
+    expect(report.results[0].moveError).toContain('could not replace the original');
+  });
+
+  it('discards the scratch file even when the run fails', async () => {
+    const { io, discarded } = makeIo(
+      { 'C:\\src\\bad.pdf': damaged, 'T:\\scratch-0.pdf': { pages: [true] } },
+      { repairProduces: { 'C:\\src\\bad.pdf': 'T:\\scratch-0.pdf' } },
+    );
+    io.applyOcrLayer = async () => {
+      throw new Error('disk full');
+    };
+    await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], io, { repairDamaged: true });
+    expect(discarded).toEqual(['T:\\scratch-0.pdf']);
   });
 });

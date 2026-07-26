@@ -33,6 +33,16 @@ export interface BatchLogRun {
   /** Human names for those languages, for a reader who doesn't know the codes. */
   langLabel: string;
   report: BatchReport;
+  /** What the run was configured to do with the ORIGINALS (requests 2/3).
+   * Recorded even when nothing was enabled: a log that does not say what the
+   * run was allowed to touch cannot be audited after the fact, and this is the
+   * one setting that moves the user's own files. */
+  filing?: {
+    movedRoot?: string;
+    errorRoot?: string;
+    repairDamaged?: boolean;
+    replaceRepairedOriginals?: boolean;
+  };
   /** Set when the run ended on a structural failure rather than finishing. */
   fatalError?: string;
 }
@@ -76,12 +86,40 @@ export function formatDuration(ms: number): string {
  * viewer — the whole point of reading a log in Notepad. */
 function fileLine(r: BatchFileResult): string {
   const tag = `[${r.status}]`.padEnd(10);
+  let line: string;
   if (r.status === 'ocr') {
     const pages = r.pagesOcrd ?? 0;
-    const head = `${tag}${r.rel} — ${pages} page${pages === 1 ? '' : 's'} made searchable`;
-    return r.reason ? `${head} (${r.reason})` : head;
+    line = `${tag}${r.rel} — ${pages} page${pages === 1 ? '' : 's'} made searchable`;
+    if (r.reason) line += ` (${r.reason})`;
+  } else {
+    line = r.reason ? `${tag}${r.rel} — ${r.reason}` : `${tag}${r.rel}`;
   }
-  return r.reason ? `${tag}${r.rel} — ${r.reason}` : `${tag}${r.rel}`;
+  if (r.repaired) {
+    line += r.repairedOriginalReplaced
+      ? ' [repaired; original replaced]'
+      : ' [repaired]';
+  }
+  if (r.movedTo) line += ` -> original moved to ${r.movedTo}`;
+  // `!!` so a move that did NOT happen is as greppable as a file that failed.
+  // The user asked for their folders reorganised; what stayed put is the thing
+  // they need to find.
+  if (r.moveError) line += ` !! original NOT moved: ${r.moveError}`;
+  return line;
+}
+
+function describeFiling(filing: BatchLogRun['filing']): string {
+  if (!filing) return 'none (source folder untouched)';
+  const parts: string[] = [];
+  if (filing.movedRoot) parts.push(`processed originals -> ${filing.movedRoot}`);
+  if (filing.errorRoot) parts.push(`failed originals -> ${filing.errorRoot}`);
+  if (filing.repairDamaged) {
+    parts.push(
+      filing.replaceRepairedOriginals
+        ? 'repair damaged files (replacing the originals)'
+        : 'repair damaged files',
+    );
+  }
+  return parts.length === 0 ? 'none (source folder untouched)' : parts.join(' · ');
 }
 
 export function formatBatchLog(run: BatchLogRun): string {
@@ -113,6 +151,7 @@ export function formatBatchLog(run: BatchLogRun): string {
     `Source:       ${run.sourceRoot}`,
     `Destination:  ${run.destRoot}`,
     `Languages:    ${run.lang} (${run.langLabel})`,
+    `Filing:       ${describeFiling(run.filing)}`,
     `Result:       ${outcome}`,
     '',
   ];
@@ -132,6 +171,18 @@ export function formatBatchLog(run: BatchLogRun): string {
         `${copiedClean} copied (already searchable) · ` +
         `${copiedNoText} copied (no text recognized) · ${skipped} skipped`,
     );
+    // The originals line only exists when the run was allowed to touch them.
+    // A count of files that did NOT move is carried even at zero: "0 not moved"
+    // is a statement, and its absence would be ambiguous.
+    const moved = report.results.filter((r) => r.movedTo).length;
+    const notMoved = report.results.filter((r) => r.moveError).length;
+    const repairedCount = report.results.filter((r) => r.repaired).length;
+    if (moved > 0 || notMoved > 0 || repairedCount > 0) {
+      lines.push(
+        `Originals: ${moved} moved · ${notMoved} NOT moved (see the !! lines) · ` +
+          `${repairedCount} repaired`,
+      );
+    }
     lines.push('');
     if (report.results.length === 0) lines.push('(no files were processed)');
     else for (const r of report.results) lines.push(fileLine(r));
