@@ -106,6 +106,16 @@ describe('preferences dialog', () => {
       timeoutMsg: 'retention stayed enabled with logging off',
     });
 
+    // The location is configurable and defaults to the app's own data folder.
+    // It exists because a scheduled run under another account resolves that
+    // folder inside THAT account's profile, so the log would not be where the
+    // person who set it up looks. (The picker itself is a native dialog and
+    // not WebDriver-drivable; what is asserted here is that the control is
+    // present, says "Default", and offers no stale reset when unset.)
+    await expect($('[data-testid="pref-batch-log-dir"]')).toHaveText(/Default/);
+    await expect($('[data-testid="pref-batch-log-dir-pick"]')).toBeDisplayed();
+    await expect($('[data-testid="pref-batch-log-dir-reset"]')).not.toBeExisting();
+
     // Leave the shared workspace on the defaults — spec 40 asserts a log gets
     // written, and it runs against whatever this leaves behind.
     await box.click();

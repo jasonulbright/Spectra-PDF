@@ -59,6 +59,22 @@ describe('app settings', () => {
     const s = loadSettings();
     expect(s.batchLogEnabled).toBe(true);
     expect(s.batchLogRetentionDays).toBe(30);
+    expect(s.batchLogDir).toBe('');
+  });
+
+  it('defaults the log location to empty, meaning the app data folder', () => {
+    // Empty is the sentinel Rust resolves to app-data. It must never come back
+    // as `undefined`: `dir || null` would still work, but an explicit '' is
+    // what the settings UI renders "Default" from.
+    expect(DEFAULTS.batchLogDir).toBe('');
+    expect(loadSettings().batchLogDir).toBe('');
+  });
+
+  it('round-trips a configured log location and a reset back to default', () => {
+    saveSettings({ ...DEFAULTS, batchLogDir: 'D:\\shared\\ocr-logs' });
+    expect(loadSettings().batchLogDir).toBe('D:\\shared\\ocr-logs');
+    saveSettings({ ...DEFAULTS, batchLogDir: '' });
+    expect(loadSettings().batchLogDir).toBe('');
   });
 
   it('round-trips a retention change and an opt-out', () => {

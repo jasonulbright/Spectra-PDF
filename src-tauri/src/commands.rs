@@ -890,23 +890,37 @@ pub async fn append_operation_log(app: AppHandle, line: String) -> Result<(), St
 
 // ── Batch run logs ───────────────────────────────────────────────────────
 //
-// Phase 12 (issue #1 request 4): one log file per batch run, kept in the app's
-// own data folder, swept by age.
+// Phase 12 (issue #1 request 4): one log file per batch run, swept by age.
 //
-// The webview supplies only a FILE NAME and the text; it can never supply a
-// directory. The name is validated against the exact pattern this app writes
-// (`batch-ocr-*.log`, no separators, no `..`) before it is joined to anything,
-// so a compromised renderer cannot write outside the log folder or overwrite a
-// settings file by naming one.
+// The location is USER-CONFIGURABLE (owner requirement, 2026-07-26) and
+// defaults to the app's own data folder. It has to be configurable for a real
+// reason, not for taste: a scheduled run under an alternate account or an MSA
+// resolves `app_data_dir()` inside THAT account's profile, so the audit trail
+// for the runs nobody watched would land somewhere the person who set them up
+// cannot see. A shared, explicitly chosen folder is the fix — and when a
+// scheduled profile uses a non-interactive identity, setting one is REQUIRED,
+// not optional (see 27-phase12 § Request 5).
+//
+// The FILE NAME is still never taken on trust: it is validated against the
+// exact pattern this app writes (`batch-ocr-*.log`, no separators, no `..`)
+// before being joined to anything. That is the guard that matters, because the
+// directory is chosen by the user through a native folder picker — the same
+// trust model as the batch destination folder — while a crafted *name* is how
+// a write escapes the folder or lands on a settings file.
 
-/// The one directory batch logs live in. Created on demand.
-fn batch_log_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("{}", e))?
-        .join("batch-logs");
-    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create log folder: {}", e))?;
+/// Resolve the batch-log directory: the caller's configured folder, or the
+/// app-data default when unset. Created on demand.
+fn batch_log_dir(app: &AppHandle, configured: Option<&str>) -> Result<std::path::PathBuf, String> {
+    let dir = match configured.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(custom) => std::path::PathBuf::from(custom),
+        None => app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("{}", e))?
+            .join("batch-logs"),
+    };
+    fs::create_dir_all(&dir)
+        .map_err(|e| format!("Cannot create the log folder {}: {}", dir.display(), e))?;
     Ok(dir)
 }
 
@@ -928,11 +942,12 @@ pub async fn write_batch_log(
     app: AppHandle,
     name: String,
     contents: String,
+    dir: Option<String>,
 ) -> Result<String, String> {
     if !is_batch_log_name(&name) {
         return Err(format!("not a batch log name: {name}"));
     }
-    let path = batch_log_dir(&app)?.join(&name);
+    let path = batch_log_dir(&app, dir.as_deref())?.join(&name);
     fs::write(&path, contents).map_err(|e| format!("Failed to write log: {}", e))?;
     Ok(path.to_string_lossy().to_string())
 }
@@ -945,11 +960,15 @@ pub async fn write_batch_log(
 /// the job. `retention_days == 0` means keep forever and is a no-op, not a
 /// "delete everything" (the reading that would make a default value catastrophic).
 #[tauri::command]
-pub async fn prune_batch_logs(app: AppHandle, retention_days: u32) -> Result<u32, String> {
+pub async fn prune_batch_logs(
+    app: AppHandle,
+    retention_days: u32,
+    dir: Option<String>,
+) -> Result<u32, String> {
     if retention_days == 0 {
         return Ok(0);
     }
-    let dir = batch_log_dir(&app)?;
+    let dir = batch_log_dir(&app, dir.as_deref())?;
     let max_age = std::time::Duration::from_secs(u64::from(retention_days) * 24 * 60 * 60);
     let now = std::time::SystemTime::now();
     let mut removed = 0u32;
@@ -993,8 +1012,15 @@ pub async fn prune_batch_logs(app: AppHandle, retention_days: u32) -> Result<u32
 /// URL: the destination is derived here, so the webview cannot turn a "show me
 /// my logs" affordance into a general shell-open of an arbitrary path.
 #[tauri::command]
-pub async fn open_batch_log_folder(app: AppHandle) -> Result<(), String> {
-    let dir = batch_log_dir(&app)?;
+pub async fn open_batch_log_folder(app: AppHandle, dir: Option<String>) -> Result<(), String> {
+    let dir = batch_log_dir(&app, dir.as_deref())?;
+    // A DIRECTORY, never a file. The path is user-configured rather than
+    // compiled in now, so the remaining guard that earns its keep is this one:
+    // shell-opening a directory browses it, shell-opening a file RUNS whatever
+    // the OS associates with it.
+    if !dir.is_dir() {
+        return Err(format!("not a folder: {}", dir.display()));
+    }
     use tauri_plugin_shell::ShellExt;
     #[allow(deprecated)]
     app.shell()

@@ -227,12 +227,16 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           },
           ...(fatalError ? { fatalError } : {}),
         }),
+        settings.batchLogDir,
       );
       setLogPath(path);
       setLogError(null);
       // Sweep AFTER writing, so the run that fails to write still prunes, and
-      // so a retention of N never deletes the log just created.
-      await batch.pruneLogs(settings.batchLogRetentionDays).catch(() => {});
+      // so a retention of N never deletes the log just created. Same folder
+      // the write used — pruning the DEFAULT folder while writing to a
+      // configured one would let logs accumulate forever in the place the
+      // user actually looks.
+      await batch.pruneLogs(settings.batchLogRetentionDays, settings.batchLogDir).catch(() => {});
     } catch (e: unknown) {
       setLogPath(null);
       setLogError(e instanceof Error ? e.message : String(e));
@@ -673,7 +677,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               </span>{' '}
               <button
                 data-testid="batch-ocr-log-open"
-                onClick={() => void batch.openLogFolder().catch(() => {})}
+                onClick={() => void batch.openLogFolder(getSettings().batchLogDir).catch(() => {})}
                 className="underline hover:text-neutral-300"
               >
                 Open folder
