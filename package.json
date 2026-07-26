@@ -76,7 +76,7 @@
     "d3-selection": "3.0.0",
     "d3-zoom": "3.0.0",
     "pdf-lib": "1.17.1",
-    "pdfjs-dist": "6.0.227",
+    "pdfjs-dist": "6.1.200",
     "react": "19.2.7",
     "react-dom": "19.2.8",
     "tesseract.js": "7.0.0",
