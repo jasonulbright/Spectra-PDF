@@ -126,17 +126,19 @@ export const batch = {
    * unattended run over large scanned PDFs. */
   readFileBuffer: async (path: string) =>
     new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath: path })),
-  /** Write one run's log into the app-data log folder; returns its full path.
-   * `name` is validated Rust-side against the exact pattern this app writes —
-   * the webview names a FILE, never a directory. */
-  writeLog: (name: string, contents: string) =>
-    invoke<string>('write_batch_log', { name, contents }),
-  /** Age sweep over that folder. 0 = keep forever (a no-op, not a purge). */
-  pruneLogs: (retentionDays: number) =>
-    invoke<number>('prune_batch_logs', { retentionDays }),
-  /** Reveal the log folder. Takes no path — same compiled-in-destination
-   * property as `open_releases_page`. */
-  openLogFolder: () => invoke<void>('open_batch_log_folder'),
+  /** Write one run's log; returns its full path. `dir` is the user's
+   * configured log folder (empty/undefined = the app-data default). The NAME
+   * is still validated Rust-side against the exact pattern this app writes —
+   * the folder is user-chosen, a crafted filename is how a write escapes it. */
+  writeLog: (name: string, contents: string, dir?: string) =>
+    invoke<string>('write_batch_log', { name, contents, dir: dir || null }),
+  /** Age sweep over that folder. 0 = keep forever (a no-op, not a purge), and
+   * it only ever removes files matching this app's own log-name pattern. */
+  pruneLogs: (retentionDays: number, dir?: string) =>
+    invoke<number>('prune_batch_logs', { retentionDays, dir: dir || null }),
+  /** Reveal the log folder. Rust refuses anything that is not a directory. */
+  openLogFolder: (dir?: string) =>
+    invoke<void>('open_batch_log_folder', { dir: dir || null }),
 };
 
 // ── File operations ───────────────────────────────────────────────────────
