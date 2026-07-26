@@ -8,7 +8,7 @@
     "build:renderer": "node scripts/sync-ocr-assets.mjs && vite build --config vite.config.ts",
     "build": "cargo tauri build",
     "tauri": "tauri",
-    "prepackage": "powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 && powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1",
+    "prepackage": "powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 && powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1 && node scripts/sync-ocr-assets.mjs",
     "package": "npm run prepackage && cargo tauri build",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
