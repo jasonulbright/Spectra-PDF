@@ -73,4 +73,51 @@ describe('preferences dialog', () => {
     await browser.waitUntil(async () => await box.isSelected(), { timeout: 5_000 });
     await $('[data-testid="prefs-close"]').click();
   });
+
+  // Issue #1 request 4. Logging ships ON with a 30-day sweep, because the
+  // people this serves run batches unattended and will never open Preferences
+  // to switch a log on. The retention value is the one that ARMS a delete
+  // loop, so it gets pinned in storage, not just eyeballed on screen.
+  it('batch logging defaults ON at 30 days and persists a change', async () => {
+    await browser.keys(['Control', 'k']);
+    const box = $('[data-testid="pref-batch-log"]');
+    await box.waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: 'the batch-log preference is missing from General',
+    });
+    expect(await box.isSelected()).toBe(true);
+    const retention = $('[data-testid="pref-batch-log-retention"]');
+    expect(await retention.getValue()).toBe('30');
+
+    await retention.selectByAttribute('value', '90');
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(
+          () => JSON.parse(localStorage.getItem('spectra-settings') ?? '{}').batchLogRetentionDays,
+        )) === 90,
+      { timeout: 5_000, timeoutMsg: 'the retention change never reached storage' },
+    );
+
+    // Turning logging off disables the retention picker rather than leaving a
+    // live control that governs nothing.
+    await box.click();
+    await browser.waitUntil(async () => !(await retention.isEnabled()), {
+      timeout: 5_000,
+      timeoutMsg: 'retention stayed enabled with logging off',
+    });
+
+    // Leave the shared workspace on the defaults — spec 40 asserts a log gets
+    // written, and it runs against whatever this leaves behind.
+    await box.click();
+    await browser.waitUntil(async () => await box.isSelected(), { timeout: 5_000 });
+    await retention.selectByAttribute('value', '30');
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(
+          () => JSON.parse(localStorage.getItem('spectra-settings') ?? '{}').batchLogRetentionDays,
+        )) === 30,
+      { timeout: 5_000 },
+    );
+    await $('[data-testid="prefs-close"]').click();
+  });
 });
