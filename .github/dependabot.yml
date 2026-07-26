@@ -38,6 +38,16 @@ updates:
       # range to admit 7.x, delete this entry and bump both together.
       - dependency-name: typescript
         versions: ['>=7']
+      # pdfjs-dist is HELD at 6.0.x. On 6.1 `getAttachments()` returns an EMPTY
+      # set where 6.0 returned the embedded `.pdfx` manifest, so readManifest()
+      # finds nothing and a .pdfx opens as ONE FLAT PDF with its multi-document
+      # partition silently lost -- the app's own format. Verified by probing
+      # 6.1 directly against tests/fixtures/sample.pdfx. Only three vitest
+      # failures signalled it; CI did not run vitest at the time.
+      # UNBLOCK: adapt readManifest to whatever 6.1 changed in the
+      # embedded-file/name-tree path, then re-pin. See DEFERRALS.
+      - dependency-name: pdfjs-dist
+        versions: ['>=6.1']
 
   - package-ecosystem: npm
     directory: /e2e-tests
@@ -59,6 +69,11 @@ updates:
       # nothing. Revisit when the root project moves to 7.x.
       - dependency-name: typescript
         versions: ['>=7']
+      # Held in lockstep with the root project: the specs verify `.pdfx`
+      # output with their own pdf.js copy, so a version that cannot read the
+      # manifest would make the verification lie rather than fail.
+      - dependency-name: pdfjs-dist
+        versions: ['>=6.1']
 
   - package-ecosystem: cargo
     directory: /src-tauri
