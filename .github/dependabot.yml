@@ -51,6 +51,14 @@ updates:
           - "webdriverio"
       e2e-tooling:
         patterns: ['*']
+    ignore:
+      # Same hold as the root project, different reason. Nothing here
+      # peer-constrains TypeScript, but this package compiles the WDIO specs
+      # that ARE the release gate, and TS 7 against ts-node/tsx/WDIO is
+      # unproven. A broken harness costs the gate; TS 7 in test tooling buys
+      # nothing. Revisit when the root project moves to 7.x.
+      - dependency-name: typescript
+        versions: ['>=7']
 
   - package-ecosystem: cargo
     directory: /src-tauri
