@@ -183,6 +183,7 @@ export const COMMAND_IDS = [
   'file.exit',
   'file.clearRecent',
   'tools.batchOcr',
+  'tools.scheduledRuns',
   'file.createPdfFromPostScript',
   ...CANVAS_TOOLS.map((t) => `tools.${t}` as const),
   ...OPERATIONS.map((op) => `tools.panel.${op}` as const),
@@ -494,6 +495,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Batch OCR Folder…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openBatchOcr(),
+  },
+  // Request 5 — same no-document shape as Batch OCR: it manages schedules over
+  // picked folder trees, nothing to do with what is open.
+  'tools.scheduledRuns': {
+    title: 'Scheduled Batch Runs…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openScheduledRuns(),
   },
   // Phase 8 — same no-document shape: distills a PICKED PostScript file.
   'file.createPdfFromPostScript': {
