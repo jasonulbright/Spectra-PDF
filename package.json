@@ -19,10 +19,10 @@
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",
     "@radix-ui/react-dropdown-menu": "2.1.24",
-    "@radix-ui/react-menubar": "1.1.15",
+    "@radix-ui/react-menubar": "1.1.24",
     "@radix-ui/react-tooltip": "1.2.16",
     "@tauri-apps/api": "2.11.1",
-    "@tauri-apps/plugin-dialog": "2.7.1",
+    "@tauri-apps/plugin-dialog": "2.7.2",
     "@tauri-apps/plugin-fs": "2.5.1",
     "@tauri-apps/plugin-shell": "2.3.5",
     "@tauri-apps/plugin-updater": "2.10.1",
