@@ -39,6 +39,9 @@ Desktop.ini
 resources/python/
 resources/ghostscript/
 resources/fonts/
+# Native Tesseract (vendored by scripts/bundle-tesseract.ps1; large binaries +
+# 47 language models, same repo-hygiene class as resources/ghostscript).
+resources/tesseract/
 
 # Test
 coverage/
