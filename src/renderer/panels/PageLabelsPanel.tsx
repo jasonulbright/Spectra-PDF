@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { file } from '../lib/tauri-bridge';
@@ -68,22 +68,35 @@ export function PageLabelsPanel(): React.ReactElement {
   const buffer = activeFile?.buffer ?? null;
   const workingPath = activeFile?.workingPath ?? null;
 
+  // The file's existing labels seed the editor -- but ONLY if the user hasn't
+  // started editing while the read was in flight. The read is an engine round
+  // trip, so on a slow machine (or a loaded one) there is a real window in
+  // which someone clicks "Add range", the response lands, and their row is
+  // silently discarded by this setRanges. Apply then sends an EMPTY list, and
+  // an empty list is how the engine is told to REMOVE the label tree -- so the
+  // user's edit doesn't just vanish, it deletes the document's existing
+  // labels. Caught as an intermittent e2e failure (`getPageLabels()` -> null)
+  // that only reproduced under full-suite load.
+  const editedRef = useRef(false);
   useEffect(() => {
     let cancelled = false;
     if (!buffer || !workingPath) return;
+    // A new document is a fresh editing session.
+    editedRef.current = false;
     call('get_page_labels', { file: workingPath })
       .then((res) => {
-        if (cancelled) return;
+        if (cancelled || editedRef.current) return;
         const raw = (res as unknown as { ranges: { start: number; style: string; prefix: string; start_at: number }[] }).ranges ?? [];
         setRanges(raw.map((r) => ({ start: r.start + 1, style: r.style, prefix: r.prefix, startAt: r.start_at })));
       })
       .catch(() => {
-        if (!cancelled) setRanges([]);
+        if (!cancelled && !editedRef.current) setRanges([]);
       });
     return () => { cancelled = true; };
   }, [buffer, workingPath, call]);
 
   const addRange = useCallback(() => {
+    editedRef.current = true;
     setRanges((prev) => {
       const nextStart = prev.length === 0 ? 1 : Math.min((activeFile?.pageCount ?? 1), Math.max(...prev.map((r) => r.start)) + 1);
       return [...prev, { start: nextStart, style: 'D', prefix: '', startAt: 1 }];
@@ -91,9 +104,11 @@ export function PageLabelsPanel(): React.ReactElement {
   }, [activeFile]);
 
   const updateRange = useCallback((i: number, patch: Partial<Range>) => {
+    editedRef.current = true;
     setRanges((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   }, []);
   const removeRange = useCallback((i: number) => {
+    editedRef.current = true;
     setRanges((prev) => prev.filter((_, j) => j !== i));
   }, []);
 

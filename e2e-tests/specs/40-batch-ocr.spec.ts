@@ -145,4 +145,36 @@ describe('batch OCR folder mirror (Phase 6)', () => {
 
     await $('[data-testid="batch-ocr-cancel"]').click();
   });
+
+  // Issue #1 request 1: a folder mixing English and French should not need two
+  // passes. Several languages are recognized TOGETHER (Tesseract loads each
+  // model); this pins that the picker actually holds a set rather than
+  // behaving like the single-select it replaced.
+  it('accepts several recognition languages at once', async () => {
+    await waitForHarness();
+    await invokeAppCommand('tools.batchOcr');
+    await $('[data-testid="batch-ocr-dialog"]').waitForDisplayed({ timeout: 10_000 });
+
+    const eng = $('[data-testid="batch-ocr-lang-eng"]');
+    const fra = $('[data-testid="batch-ocr-lang-fra"]');
+    await eng.waitForDisplayed({ timeout: 10_000 });
+    expect(await eng.isSelected()).toBe(true); // English is the default
+
+    await fra.click();
+    await browser.waitUntil(async () => await fra.isSelected(), {
+      timeout: 5_000,
+      timeoutMsg: 'selecting a second language did not take',
+    });
+    // The first one is STILL selected — the failure this guards against is a
+    // picker that silently behaves like a radio group.
+    expect(await eng.isSelected()).toBe(true);
+
+    // The honesty note only appears once more than one is chosen: multi is
+    // slower and not auto-detection, and the UI has to say so.
+    await expect($('[data-testid="batch-ocr-lang-note"]')).toBeDisplayed();
+
+    await fra.click(); // leave the shared workspace as we found it
+    await browser.waitUntil(async () => !(await fra.isSelected()), { timeout: 5_000 });
+    await $('[data-testid="batch-ocr-cancel"]').click();
+  });
 });
