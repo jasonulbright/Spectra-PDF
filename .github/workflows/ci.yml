@@ -24,6 +24,15 @@ jobs:
       - name: Lint (ESLint — errors gate; advisory warnings are not CI noise)
         run: npm run lint -- --quiet
 
+      # CI ran lint, build, cargo check and pytest -- but never the RENDERER
+      # unit tests, so nothing here exercised application logic. That gap let a
+      # pdfjs-dist 6.0->6.1 bump through on 2026-07-25 that returned an empty
+      # attachment set and silently broke `.pdfx` manifest reading (the whole
+      # multi-document format); only a local vitest run caught it. A green
+      # build proves it compiles, not that it works.
+      - name: Unit tests (vitest)
+        run: npm test
+
       - name: Build renderer (Vite)
         run: npm run build:renderer
 
@@ -66,7 +75,7 @@ jobs:
         # so tests exercise what actually ships. pyHanko is required — the engine's
         # signatures handler imports it at module load, so test_engine.py fails to
         # collect without it (pyHanko pulls cryptography/certvalidator transitively).
-        run: pip install pikepdf==10.10.0 pdfminer.six==20260107 pyHanko==0.36.0 pytest
+        run: pip install pikepdf==10.10.0 pdfminer.six==20260107 pyHanko==0.36.1 pytest
 
       - name: Run engine + validation tests
         run: python -m pytest tests/test_engine.py tests/test_validation.py -v
