@@ -5,6 +5,7 @@ import { dialog, batch } from '../lib/tauri-bridge';
 import type { BatchPdfEntry } from '../lib/tauri-bridge';
 import { createOcrClient } from '../ocr/ocr-client';
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
+import { toTesseractLang, describeLanguages } from '../ocr/language-selection';
 import {
   runBatchOcr,
   destConflictsWithSource,
@@ -42,7 +43,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const [entries, setEntries] = useState<BatchPdfEntry[] | null>(null);
   const [skippedDirs, setSkippedDirs] = useState<string[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [lang, setLang] = useState(DEFAULT_OCR_LANGUAGE);
+  const [langs, setLangs] = useState<string[]>([DEFAULT_OCR_LANGUAGE]);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [report, setReport] = useState<BatchReport | null>(null);
@@ -168,7 +169,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     let client: ReturnType<typeof createOcrClient> | null = null;
     try {
       client = createOcrClient();
-      client.setLanguage(lang);
+      client.setLanguage(toTesseractLang(langs));
       const c = client;
       cancelOcrRef.current = () => c.cancelAll();
       const io = createBatchIo(client, async (src, out, pages) => {
@@ -284,20 +285,44 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             </p>
           )}
           <div>
-            <label className="block text-sm text-neutral-400 mb-1" htmlFor="batch-ocr-lang">
-              Recognition language
+            <label className="block text-sm text-neutral-400 mb-1">
+              Recognition languages
+              <span className="text-neutral-500"> — {describeLanguages(langs)}</span>
             </label>
-            <select
-              id="batch-ocr-lang"
+            {/* A checkbox list, not a 47-entry <select multiple>: ctrl-clicking
+                to build a set is a UI most people lose a selection to. */}
+            <div
               data-testid="batch-ocr-lang"
-              className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
-              value={lang}
-              onChange={(e) => setLang(e.target.value)}
+              role="group"
+              aria-label="Recognition languages"
+              className="max-h-44 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-2 gap-x-3 gap-y-1"
             >
               {OCR_LANGUAGES.map((l) => (
-                <option key={l.code} value={l.code}>{l.label}</option>
+                <label key={l.code} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    data-testid={`batch-ocr-lang-${l.code}`}
+                    checked={langs.includes(l.code)}
+                    onChange={() =>
+                      setLangs((prev) =>
+                        prev.includes(l.code)
+                          ? prev.filter((c) => c !== l.code)
+                          : [...prev, l.code],
+                      )
+                    }
+                    className="rounded bg-neutral-900 border-neutral-600"
+                  />
+                  <span className="text-neutral-300">{l.label}</span>
+                </label>
               ))}
-            </select>
+            </div>
+            {langs.length > 1 && (
+              <p className="text-xs text-neutral-500 mt-1" data-testid="batch-ocr-lang-note">
+                Several languages are recognized together, which is slower — and on a page
+                that is only one of them, the single right language is usually more accurate.
+                This is not automatic detection.
+              </p>
+            )}
           </div>
           <p className="text-xs text-neutral-500">
             Every PDF in the source folder is mirrored into the destination:
