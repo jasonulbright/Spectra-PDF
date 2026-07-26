@@ -21,6 +21,17 @@ updates:
           - "@tesseract.js-data/*"
       dev-tooling:
         dependency-type: development
+    ignore:
+      # TypeScript is PINNED at 6.x on purpose. `typescript-eslint@8.65.0` --
+      # the newest stable -- peer-requires `typescript >=4.8.4 <6.1.0`, and no
+      # stable release supports TS 7 yet. Merging a 7.x bump makes `npm ci`
+      # fail with ERESOLVE, which took CI red for 14 consecutive runs on
+      # 2026-07-25. Dependabot re-proposed the identical bump within hours of
+      # the revert, so this ignore is what stops the loop.
+      # UNBLOCK CONDITION: when a stable typescript-eslint widens that peer
+      # range to admit 7.x, delete this entry and bump both together.
+      - dependency-name: typescript
+        versions: ['>=7']
 
   - package-ecosystem: npm
     directory: /e2e-tests
