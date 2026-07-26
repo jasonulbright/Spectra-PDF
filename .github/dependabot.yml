@@ -21,6 +21,12 @@ updates:
           - "@tesseract.js-data/*"
       dev-tooling:
         dependency-type: development
+      # Catch-all LAST: a dependency joins the first group whose rules it
+      # matches, so the two specific groups above still win. Without this,
+      # every ungrouped production dep (react, radix, pdfjs-dist...) arrives as
+      # its OWN PR -- which is how one week produced 13 of them.
+      runtime:
+        patterns: ['*']
     ignore:
       # TypeScript is PINNED at 6.x on purpose. `typescript-eslint@8.65.0` --
       # the newest stable -- peer-requires `typescript >=4.8.4 <6.1.0`, and no
@@ -43,6 +49,8 @@ updates:
         patterns:
           - "@wdio/*"
           - "webdriverio"
+      e2e-tooling:
+        patterns: ['*']
 
   - package-ecosystem: cargo
     directory: /src-tauri
@@ -54,6 +62,8 @@ updates:
         patterns:
           - "tauri"
           - "tauri-*"
+      crates:
+        patterns: ['*']
 
   - package-ecosystem: github-actions
     directory: /
