@@ -73,6 +73,7 @@ export interface AppCommandHandlers {
    * Needs no open document: the dialog operates on a picked folder tree,
    * entirely outside the workspace. */
   openBatchOcr(): void;
+  openScheduledRuns(): void;
   /** Insert a blank page after the page being read (§ 9.3, M6.3) — pdf-lib
    * one-pager sized to the neighbor, through the byte-only import machinery. */
   insertBlankPage(): Promise<void>;

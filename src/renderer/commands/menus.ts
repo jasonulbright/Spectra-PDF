@@ -83,6 +83,7 @@ const toolsItems: MenuNode[] = [
   // stays reachable from an empty workspace.
   sep,
   cmd('tools.batchOcr', 'menuitem-tools-batch-ocr'),
+  cmd('tools.scheduledRuns', 'menuitem-tools-scheduled-runs'),
 ];
 
 // Window ▸ open-document list — focus that doc's tab. importOnly sources

@@ -156,6 +156,21 @@ export interface BatchOcrHandlers {
   };
 }
 
+/** Scheduled batch runs (Phase 12 request 5). The native folder pickers are
+ * not WebDriver-drivable, so a spec injects a whole profile through the SAME
+ * create path the form uses, then lists and deletes through the same commands. */
+export interface ScheduledRunsHandlers {
+  create: (profile: Record<string, unknown>) => Promise<string>;
+  list: () => Promise<unknown[]>;
+  remove: (name: string) => Promise<void>;
+}
+
+let scheduledRuns: ScheduledRunsHandlers | null = null;
+
+export function registerScheduledRuns(handlers: ScheduledRunsHandlers | null): void {
+  scheduledRuns = handlers;
+}
+
 let batchOcr: BatchOcrHandlers | null = null;
 
 export function registerBatchOcr(handlers: BatchOcrHandlers | null): void {
@@ -716,6 +731,9 @@ export interface TestHarness {
   batchOcrSetFiling: (filing: { movedRoot?: string | null; errorRoot?: string | null }) => void;
   batchOcrStart: () => Promise<void>;
   batchOcrSnapshot: () => ReturnType<BatchOcrHandlers['snapshot']> | null;
+  scheduleCreate: (profile: Record<string, unknown>) => Promise<string>;
+  scheduleList: () => Promise<unknown[]>;
+  scheduleRemove: (name: string) => Promise<void>;
   /** Edit ▸ Images (7.1; canvas must be mounted with the edit mode armed). */
   editTextPageIds: () => string[];
   editTextRuns: (
@@ -1329,6 +1347,18 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     batchOcrSnapshot: () => batchOcr?.snapshot() ?? null,
+    scheduleCreate: async (profile) => {
+      if (!scheduledRuns) throw new Error('scheduleCreate: Scheduled Runs dialog not mounted');
+      return scheduledRuns.create(profile);
+    },
+    scheduleList: async () => {
+      if (!scheduledRuns) throw new Error('scheduleList: Scheduled Runs dialog not mounted');
+      return scheduledRuns.list();
+    },
+    scheduleRemove: async (name) => {
+      if (!scheduledRuns) throw new Error('scheduleRemove: Scheduled Runs dialog not mounted');
+      return scheduledRuns.remove(name);
+    },
     editTextPageIds: () => canvasEditImages?.textPageIds() ?? [],
     editTextRuns: (pageId) => canvasEditImages?.textRuns(pageId) ?? [],
     editTextOpen: (pageId, index) => canvasEditImages?.openTextEditor(pageId, index),

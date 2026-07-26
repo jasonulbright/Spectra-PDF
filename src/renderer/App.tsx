@@ -77,6 +77,7 @@ import { persistToolbarOverrides } from './lib/toolbar-layout';
 import { PropertiesDialog } from './components/PropertiesDialog';
 import { PrintDialog } from './components/PrintDialog';
 import { BatchOcrDialog } from './components/BatchOcrDialog';
+import { ScheduledRunsDialog } from './components/ScheduledRunsDialog';
 import { CreatePdfDialog } from './components/CreatePdfDialog';
 import { ExportImagesDialog } from './components/ExportImagesDialog';
 import { buildBlankPagePdf } from './lib/blank-page';
@@ -174,6 +175,7 @@ function AppContent(): React.ReactElement {
   const [showProperties, setShowProperties] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
   const [showBatchOcr, setShowBatchOcr] = useState(false);
+  const [showSchedules, setShowSchedules] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
   const [showExportImages, setShowExportImages] = useState(false);
   const [showCustomizeToolbar, setShowCustomizeToolbar] = useState(false);
@@ -1350,6 +1352,7 @@ function AppContent(): React.ReactElement {
     openProperties: () => setShowProperties(true),
     openPrint: () => setShowPrint(true),
     openBatchOcr: () => setShowBatchOcr(true),
+    openScheduledRuns: () => setShowSchedules(true),
     openCreatePdf: () => setShowCreatePdf(true),
     openExportImages: () => setShowExportImages(true),
     openPresentation: () => {
@@ -1392,6 +1395,7 @@ function AppContent(): React.ReactElement {
       openProperties: () => h.current.openProperties(),
       openPrint: () => h.current.openPrint(),
       openBatchOcr: () => h.current.openBatchOcr(),
+      openScheduledRuns: () => h.current.openScheduledRuns(),
       openCreatePdf: () => h.current.openCreatePdf(),
       openExportImages: () => h.current.openExportImages(),
       openPresentation: () => h.current.openPresentation(),
@@ -1749,6 +1753,7 @@ function AppContent(): React.ReactElement {
       {showProperties && <PropertiesDialog onClose={() => setShowProperties(false)} />}
       {showPrint && <PrintDialog onClose={() => setShowPrint(false)} />}
       {showBatchOcr && <BatchOcrDialog onClose={() => setShowBatchOcr(false)} />}
+      {showSchedules && <ScheduledRunsDialog onClose={() => setShowSchedules(false)} />}
       {showCreatePdf && (
         <CreatePdfDialog
           onClose={() => setShowCreatePdf(false)}

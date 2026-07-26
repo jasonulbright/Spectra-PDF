@@ -141,6 +141,58 @@ export const batch = {
     invoke<void>('open_batch_log_folder', { dir: dir || null }),
 };
 
+// ── Scheduled batch runs (Phase 12 request 5) ─────────────────────────────
+//
+// Windows Task Scheduler runs them; this app owns the whole lifecycle so the
+// user never opens taskschd.msc. Every call is scoped Rust-side to our own
+// `\Open PDF Studio\` task folder.
+
+export interface ScheduleProfile {
+  name: string;
+  source: string;
+  dest: string;
+  lang: string;
+  movedRoot: string;
+  errorRoot: string;
+  repairDamaged: boolean;
+  replaceRepairedOriginals: boolean;
+  /** Required when `account` is set — the default log folder belongs to
+   * whichever account runs the batch. */
+  logDir: string;
+  /** Recurring only. A one-shot would need real date arithmetic and the
+   * request is recurring ("every day at 09:30"); shipping a broken option is
+   * worse than not offering it. */
+  frequency: 'daily' | 'weekly';
+  /** HH:MM, 24-hour, local. */
+  time: string;
+  /** Weekly only: MON,TUE,… */
+  days: string;
+  /** Empty = the current user. Otherwise DOMAIN\\user, or DOMAIN\\gmsa$. */
+  account: string;
+}
+
+export interface ScheduledRun {
+  name: string;
+  /** Read back from the command line the task will actually run — there is no
+   * second store to disagree with it. Null if it was edited outside the app. */
+  profile: ScheduleProfile | null;
+  status: string;
+  nextRun: string;
+  lastRun: string;
+  lastResult: string;
+}
+
+export const schedule = {
+  /** `password` is passed to Windows and never stored by this app. */
+  create: (profile: ScheduleProfile, password?: string) =>
+    invoke<string>('create_scheduled_run', { profile, password: password || null }),
+  list: () => invoke<ScheduledRun[]>('list_scheduled_runs'),
+  remove: (name: string) => invoke<void>('delete_scheduled_run', { name }),
+  runNow: (name: string) => invoke<void>('run_scheduled_now', { name }),
+  setEnabled: (name: string, enabled: boolean) =>
+    invoke<void>('set_scheduled_run_enabled', { name, enabled }),
+};
+
 // ── File operations ───────────────────────────────────────────────────────
 
 // Binary file I/O goes through plugin-fs (efficient binary IPC, capability-

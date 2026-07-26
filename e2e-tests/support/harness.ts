@@ -1217,3 +1217,50 @@ export async function setParagraphSelection(start: number, end: number): Promise
     end,
   );
 }
+
+// --- Scheduled batch runs (Phase 12 request 5) ------------------------------
+//
+// The dialog's folder pickers are native and not WebDriver-drivable, so a spec
+// injects a whole profile through the SAME create path the form's Save button
+// runs, then lists and deletes through the same commands the buttons use.
+
+export interface ScheduleProfileInput {
+  name: string;
+  source: string;
+  dest: string;
+  lang?: string;
+  movedRoot?: string;
+  errorRoot?: string;
+  repairDamaged?: boolean;
+  replaceRepairedOriginals?: boolean;
+  logDir?: string;
+  frequency?: string;
+  time?: string;
+  days?: string;
+  account?: string;
+}
+
+export interface ScheduledRunRow {
+  name: string;
+  profile: { source: string; dest: string; lang: string } | null;
+  status: string;
+  nextRun: string;
+}
+
+export async function scheduleCreate(profile: ScheduleProfileInput): Promise<string> {
+  return await browser.execute(function (p: ScheduleProfileInput) {
+    return (window as any).__SPECTRA_TEST__.scheduleCreate(p);
+  }, profile);
+}
+
+export async function scheduleList(): Promise<ScheduledRunRow[]> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.scheduleList();
+  });
+}
+
+export async function scheduleRemove(name: string): Promise<void> {
+  await browser.execute(function (n: string) {
+    return (window as any).__SPECTRA_TEST__.scheduleRemove(n);
+  }, name);
+}

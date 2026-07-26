@@ -123,6 +123,9 @@ pub enum CliCommand {
     PdfVersion(PdfVersionArgs),
     /// Repair a PDF (Tier 1: pikepdf/QPDF rewrite — fix xref, streams, page tree)
     Repair(RepairArgs),
+    /// OCR every PDF under a folder into a searchable mirror (headless; what a
+    /// scheduled run invokes)
+    BatchOcr(BatchOcrArgs),
     /// Rebuild a PDF (Tier 2: Ghostscript round-trip — re-render every page)
     Rebuild(RebuildArgs),
     /// Convert a PostScript/EPS file to PDF (the Distiller job, via Ghostscript)
@@ -901,6 +904,37 @@ pub struct RepairArgs {
 }
 
 #[derive(Args)]
+pub struct BatchOcrArgs {
+    /// Folder of PDFs to make searchable (searched recursively)
+    pub source: PathBuf,
+    /// Folder the searchable copies are written to (must be outside SOURCE)
+    #[arg(short, long)]
+    pub dest: PathBuf,
+    /// Recognition language(s); '+'-join several, e.g. eng+fra. Not auto-detection.
+    #[arg(short, long, default_value = "eng")]
+    pub lang: String,
+    /// OPT-IN: move each processed original into this folder (structure preserved)
+    #[arg(long)]
+    pub moved: Option<PathBuf>,
+    /// OPT-IN: move each failed original into this folder (structure preserved)
+    #[arg(long)]
+    pub errors: Option<PathBuf>,
+    /// OPT-IN: try a tier-1 repair on a file that will not open
+    #[arg(long)]
+    pub repair: bool,
+    /// OPT-IN: write the repaired file back over the damaged original
+    #[arg(long)]
+    pub replace_repaired: bool,
+    /// Folder for the run log. REQUIRED when scheduled under another account --
+    /// the default app-data folder belongs to whoever ran the batch.
+    #[arg(long)]
+    pub log_dir: Option<PathBuf>,
+    /// Print per-file progress
+    #[arg(short, long)]
+    pub verbose: bool,
+}
+
+#[derive(Args)]
 pub struct RebuildArgs {
     /// Input PDF file
     pub input: PathBuf,
@@ -990,6 +1024,15 @@ fn resolve_engine_script() -> PathBuf {
 
 fn resolve_gs() -> PathBuf {
     exe_dir().join("ghostscript").join("gswin64c.exe")
+}
+
+/// The vendored native Tesseract (Phase 12 step 3). Mirrors `resolve_gs`:
+/// beside the executable in the shipped resource tree. Recognition is a
+/// subprocess, which is precisely what lets a scheduled run under a service
+/// account work -- a WASM recognizer would need a WebView, and a service
+/// account has no interactive desktop to host one in.
+fn resolve_tesseract() -> PathBuf {
+    exe_dir().join("tesseract").join("tesseract.exe")
 }
 
 /// The vendored fallback-fonts DIRECTORY (mirrors `engine::get_edit_font_path`
@@ -2074,6 +2117,30 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 json!({
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
+                }),
+            )
+        }
+
+        CliCommand::BatchOcr(args) => {
+            // The whole tree in ONE engine call: the loop, the filing and the
+            // log all live engine-side (engine/batch_ocr.py) so the CLI and a
+            // scheduled run behave identically to each other -- and log
+            // identically to the GUI.
+            let gs = resolve_gs();
+            engine.call(
+                "batch_ocr",
+                json!({
+                    "source": abs(&args.source).to_string_lossy(),
+                    "dest": abs(&args.dest).to_string_lossy(),
+                    "lang": args.lang,
+                    "tesseract_path": resolve_tesseract().to_string_lossy(),
+                    "gs_path": gs.to_string_lossy(),
+                    "moved_root": args.moved.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
+                    "error_root": args.errors.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
+                    "repair_damaged": args.repair,
+                    "replace_repaired_originals": args.replace_repaired,
+                    "log_dir": args.log_dir.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
+                    "progress": args.verbose,
                 }),
             )
         }
