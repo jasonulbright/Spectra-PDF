@@ -32,6 +32,16 @@ export interface Settings {
    * forever — deliberately NOT "delete everything", since 0 is what an
    * unset or corrupted value resolves to. The requester suggested 30. */
   batchLogRetentionDays: number;
+  /** Where batch logs are written. Empty = the app's own data folder.
+   *
+   * Configurable for a concrete reason, not for taste: a SCHEDULED run under
+   * an alternate account or a managed service account resolves the app-data
+   * path inside THAT account's profile, so the audit trail for precisely the
+   * runs nobody watched would land where the person who set them up cannot
+   * see it. A shared, explicitly chosen folder is the fix — and once
+   * scheduling exists, setting one is REQUIRED for a non-interactive identity
+   * rather than optional (owner requirement 2026-07-26). */
+  batchLogDir: string;
 }
 
 export const DEFAULTS: Settings = {
@@ -46,6 +56,7 @@ export const DEFAULTS: Settings = {
   checkUpdatesOnLaunch: true,
   batchLogEnabled: true,
   batchLogRetentionDays: 30,
+  batchLogDir: '',
 };
 
 export function loadSettings(): Settings {

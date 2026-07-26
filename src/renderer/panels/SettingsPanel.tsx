@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { app, batch, type GsInfo } from '../lib/tauri-bridge';
+import { app, batch, dialog, type GsInfo } from '../lib/tauri-bridge';
 import { deriveAccentVars } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
@@ -330,15 +330,57 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           <button
             type="button"
             data-testid="pref-batch-log-open"
-            onClick={() => void batch.openLogFolder().catch(() => {})}
+            onClick={() => void batch.openLogFolder(settings.batchLogDir).catch(() => {})}
             className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
           >
             Open log folder
           </button>
         </div>
+        <div className="flex items-center gap-2 mt-2">
+          <span className="text-sm text-neutral-400 shrink-0">Location</span>
+          <button
+            type="button"
+            data-testid="pref-batch-log-dir-pick"
+            disabled={!settings.batchLogEnabled}
+            onClick={() => {
+              void dialog
+                .pickFolder('Choose where batch logs are written')
+                .then((path) => {
+                  if (path) update('batchLogDir', path);
+                })
+                .catch(() => {});
+            }}
+            className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded font-medium shrink-0"
+          >
+            Choose…
+          </button>
+          <span
+            data-testid="pref-batch-log-dir"
+            className="text-sm text-neutral-300 truncate"
+            title={settings.batchLogDir || undefined}
+          >
+            {settings.batchLogDir || 'Default (this app’s data folder)'}
+          </span>
+          {settings.batchLogDir !== '' && (
+            <button
+              type="button"
+              data-testid="pref-batch-log-dir-reset"
+              onClick={() => update('batchLogDir', '')}
+              className="px-2 py-1 text-xs text-neutral-500 hover:text-neutral-300 shrink-0"
+            >
+              Use default
+            </button>
+          )}
+        </div>
         <p className="text-xs text-neutral-500 mt-1.5">
           Each run writes one file listing every PDF and what happened to it. Older logs are
-          swept at the end of the next run — nothing outside this folder is ever touched.
+          swept at the end of the next run — only files this app wrote, in this folder, are
+          ever removed.
+        </p>
+        <p className="text-xs text-neutral-500 mt-1">
+          Set a shared location if runs will be scheduled under a different account: the
+          default folder belongs to whichever account ran the batch, so a scheduled run’s log
+          would not appear here.
         </p>
       </div>
       </>
