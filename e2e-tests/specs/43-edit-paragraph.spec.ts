@@ -143,10 +143,26 @@ describe('edit paragraph (Phase 7.5)', () => {
       },
       { timeout: 30_000, timeoutMsg: 'paragraphs never loaded' },
     );
-    const { pageId, para } = await firstParagraph();
-
-    await editParagraphOpen(pageId, para.index);
-    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    // Same convergence the text editor needs (spec 42): the previous case ends
+    // with an undo, page ids are generation-tagged, and the reindex refresh can
+    // land just after the open and re-render the editor away. Re-read the id
+    // inside the loop, open, and require it to STAY open.
+    let pageId = '';
+    let para!: { index: number; text: string; lineCount: number; alignment: string };
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        const paras = await editParagraphs(ids[0]);
+        if (paras.length === 0) return false;
+        pageId = ids[0];
+        para = paras[0];
+        await editParagraphOpen(pageId, para.index);
+        await browser.pause(400);
+        return await $('[data-testid="edit-para-input"]').isDisplayed().catch(() => false);
+      },
+      { timeout: 30_000, timeoutMsg: 'the paragraph editor never opened on the restored paragraph' },
+    );
     // The arrow is outside WinAnsi — the error line names it and Enter
     // must NOT commit (the editor holds open with the invalid value).
     const withArrow = `${para.text} →`;
