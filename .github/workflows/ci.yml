@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main, master]
 
+# Least privilege for GITHUB_TOKEN (CodeQL actions/missing-workflow-permissions).
+# Every job below only READS the repository — checkout, install, run gates.
+# Nothing here publishes, comments, or writes back, so read access to contents
+# is the entire requirement. Declared at the workflow level so a job added later
+# inherits the restriction instead of silently getting the default write set;
+# a job that genuinely needs more should widen it for ITSELF, not here.
+permissions:
+  contents: read
+
 jobs:
   lint-and-build:
     name: Lint & Build
