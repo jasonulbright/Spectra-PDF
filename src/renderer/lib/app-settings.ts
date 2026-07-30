@@ -32,6 +32,10 @@ export interface Settings {
    * forever — deliberately NOT "delete everything", since 0 is what an
    * unset or corrupted value resolves to. The requester suggested 30. */
   batchLogRetentionDays: number;
+  /** The user's display name for dynamic stamps' {name} token (the king's
+   * identity-in-stamps model). Empty = the token resolves to nothing and the
+   * label collapses cleanly. */
+  identityName: string;
   /** Where batch logs are written. Empty = the app's own data folder.
    *
    * Configurable for a concrete reason, not for taste: a SCHEDULED run under
@@ -57,6 +61,7 @@ export const DEFAULTS: Settings = {
   batchLogEnabled: true,
   batchLogRetentionDays: 30,
   batchLogDir: '',
+  identityName: '',
 };
 
 export function loadSettings(): Settings {

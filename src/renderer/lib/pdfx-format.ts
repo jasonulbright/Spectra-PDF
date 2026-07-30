@@ -38,6 +38,7 @@ export interface ExportAnnotation {
   color: string; // #rrggbb
   note?: string;
   points?: number[]; // ink only: flat [x0,y0,x1,y1,...] in the same space as x/y/w/h
+  imageData?: string; // stamp only: custom image stamp's data URL (the AP draws it)
   markupType?: 'highlight' | 'underline' | 'strikeout' | 'squiggly'; // textmarkup only
   quads?: number[]; // textmarkup only: flat [x0,y0,x1,y1,...] per quad, in x/y/w/h space
   // Present for imported annotations only — see PageAnnotation.importedOriginal

@@ -6,6 +6,37 @@ import type { CanvasTool } from '../../state/types';
 import { ANNOTATION_PALETTE, STAMP_PRESETS } from './PageCell';
 import type { StampPreset } from './PageCell';
 import { MEASURE_UNITS, type MeasureScale, type MeasureUnit } from '../../lib/measure';
+import {
+  hasStampTokens,
+  loadCustomStamps,
+  saveCustomStamps,
+  type CustomStamp,
+} from '../../lib/stamp-library';
+import { dialog, file } from '../../lib/tauri-bridge';
+
+/** Read + downscale a picked raster into a library-sized PNG data URL (long
+ * edge capped — stamps are page furniture, not photo archives, and the
+ * library lives in localStorage). Returns null for an unreadable image. */
+async function importStampImage(path: string): Promise<{ dataUrl: string; aspect: number } | null> {
+  try {
+    const bytes = await file.readBuffer(path);
+    const bmp = await createImageBitmap(new Blob([bytes]));
+    const MAX = 800;
+    const scale = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close();
+    return { dataUrl: canvas.toDataURL('image/png'), aspect: h / w };
+  } catch {
+    return null;
+  }
+}
 
 // The secondary toolbar (§ 3.1): "a contextual strip that appears while a tool
 // mode is active, hosting that tool's actions". It sits at the top of the
@@ -106,6 +137,56 @@ export function SecondaryToolbar({
   onToggleImageCrop,
   onRotateImage,
 }: SecondaryToolbarProps): React.JSX.Element | null {
+  // Custom stamp library (parity map § 2): loaded once, persisted on every
+  // change. Hooks live above the early return (rules of hooks).
+  const [customStamps, setCustomStamps] = useState<CustomStamp[]>(() => loadCustomStamps());
+  const [showNewStamp, setShowNewStamp] = useState(false);
+  const [newStampLabel, setNewStampLabel] = useState('');
+  const [newStampColor, setNewStampColor] = useState(ANNOTATION_PALETTE[3]);
+  const persistStamps = (list: CustomStamp[]): void => {
+    setCustomStamps(list);
+    saveCustomStamps(list);
+  };
+  const addTextStamp = (): void => {
+    const label = newStampLabel.trim();
+    if (!label) return;
+    persistStamps([
+      ...customStamps,
+      { id: crypto.randomUUID(), label, color: newStampColor },
+    ]);
+    setNewStampLabel('');
+    setShowNewStamp(false);
+  };
+  const addImageStamp = async (): Promise<void> => {
+    const path = await dialog.pickImageFile();
+    if (!path) return;
+    const img = await importStampImage(path);
+    if (!img) return;
+    const stem = path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'Stamp';
+    persistStamps([
+      ...customStamps,
+      {
+        id: crypto.randomUUID(),
+        label: stem,
+        color: '#2f6fed',
+        imageData: img.dataUrl,
+        aspect: img.aspect,
+      },
+    ]);
+  };
+  const removeCustomStamp = (id: string): void => {
+    const gone = customStamps.find((s) => s.id === id);
+    persistStamps(customStamps.filter((s) => s.id !== id));
+    // Removing the SELECTED stamp also clears the armed preset — a click
+    // placing a stamp that no longer exists in the library would be spooky.
+    if (
+      gone &&
+      stampPreset?.label === gone.label &&
+      (stampPreset?.imageData ?? undefined) === gone.imageData
+    ) {
+      onSetStampPreset(null);
+    }
+  };
   // The strip belongs to the OPEN TOOL, not to the armed mode: Escape means
   // "stop drawing", not "close Comment", and with the pill gone a strip that
   // vanished on Escape would leave no way to re-arm short of the Tools menu.
@@ -352,19 +433,121 @@ export function SecondaryToolbar({
               key={p.label}
               type="button"
               data-testid={`stamp-preset-${p.label.toLowerCase()}`}
-              aria-pressed={stampPreset?.label === p.label}
+              aria-pressed={stampPreset?.label === p.label && !stampPreset?.imageData}
               title={p.label}
               className="stamp-preset"
-              onClick={() => onSetStampPreset(stampPreset?.label === p.label ? null : p)}
+              onClick={() => onSetStampPreset(stampPreset?.label === p.label && !stampPreset?.imageData ? null : p)}
               style={{
                 color: p.color,
                 borderColor: p.color,
-                backgroundColor: stampPreset?.label === p.label ? `${p.color}33` : 'transparent',
+                backgroundColor: stampPreset?.label === p.label && !stampPreset?.imageData ? `${p.color}33` : 'transparent',
               }}
             >
               {p.label}
             </button>
           ))}
+          {customStamps.map((s) => {
+            const active =
+              stampPreset?.label === s.label && (stampPreset?.imageData ?? undefined) === s.imageData;
+            return (
+              <span key={s.id} className="stamp-custom-wrap">
+                <button
+                  type="button"
+                  data-testid={`stamp-custom-${s.id}`}
+                  aria-pressed={active}
+                  title={
+                    s.imageData
+                      ? s.label
+                      : hasStampTokens(s.label)
+                        ? `${s.label} — dynamic: tokens resolve when placed`
+                        : s.label
+                  }
+                  className="stamp-preset"
+                  onClick={() =>
+                    onSetStampPreset(
+                      active
+                        ? null
+                        : { label: s.label, color: s.color, imageData: s.imageData, aspect: s.aspect },
+                    )
+                  }
+                  style={
+                    s.imageData
+                      ? { borderColor: '#45454c', backgroundColor: active ? '#2f6fed33' : 'transparent' }
+                      : {
+                          color: s.color,
+                          borderColor: s.color,
+                          backgroundColor: active ? `${s.color}33` : 'transparent',
+                        }
+                  }
+                >
+                  {s.imageData ? (
+                    <img src={s.imageData} alt={s.label} className="stamp-custom-thumb" />
+                  ) : (
+                    s.label
+                  )}
+                </button>
+                <button
+                  type="button"
+                  data-testid={`stamp-custom-del-${s.id}`}
+                  className="stamp-custom-del"
+                  title="Remove this stamp from the library"
+                  onClick={() => removeCustomStamp(s.id)}
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })}
+          <button
+            type="button"
+            data-testid="stamp-new-text"
+            className="secondary-tool"
+            aria-expanded={showNewStamp}
+            onClick={() => setShowNewStamp((v) => !v)}
+          >
+            New stamp…
+          </button>
+          <button
+            type="button"
+            data-testid="stamp-new-image"
+            className="secondary-tool"
+            onClick={() => void addImageStamp()}
+          >
+            From image…
+          </button>
+        </div>
+      )}
+      {tool === 'stamp' && showNewStamp && (
+        <div className="secondary-toolbar-opts" role="group" aria-label="New custom stamp">
+          <input
+            type="text"
+            data-testid="stamp-new-label"
+            value={newStampLabel}
+            onChange={(e) => setNewStampLabel(e.target.value)}
+            placeholder="Label — {date} {time} {name} allowed"
+            className="stamp-new-label"
+          />
+          {ANNOTATION_PALETTE.map((c) => (
+            <button
+              key={c}
+              type="button"
+              data-testid={`stamp-new-color-${c.slice(1)}`}
+              aria-pressed={newStampColor === c}
+              title={c}
+              className="annot-swatch"
+              style={{ backgroundColor: c, outline: newStampColor === c ? `2px solid ${c}` : 'none' }}
+              onClick={() => setNewStampColor(c)}
+            />
+          ))}
+          <button
+            type="button"
+            data-testid="stamp-new-add"
+            className="secondary-tool"
+            disabled={!newStampLabel.trim()}
+            onClick={addTextStamp}
+          >
+            Add
+          </button>
         </div>
       )}
 

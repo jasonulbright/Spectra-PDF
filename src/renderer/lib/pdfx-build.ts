@@ -222,6 +222,7 @@ function addAnnotations(
   copied: import('pdf-lib').PDFPage,
   annotations: ExportAnnotation[],
   removedImportedOriginals: NonNullable<ExportAnnotation['importedOriginal']>[],
+  stampImages: Map<string, import('pdf-lib').PDFImage>,
 ): void {
   stripImportedOriginals(copied, annotations, removedImportedOriginals);
   const context = output.context;
@@ -326,6 +327,29 @@ function addAnnotations(
         AP: { N: ap },
       });
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
+    } else if (a.kind === 'stamp' && a.imageData && stampImages.get(a.imageData)) {
+      // A custom IMAGE stamp: the appearance draws the pre-embedded raster —
+      // no border, no fill, the king's look. /Contents keeps the display name.
+      const img = stampImages.get(a.imageData)!;
+      const ap = context.register(
+        context.stream(`q ${dispW} 0 0 ${dispH} 0 0 cm /Im0 Do Q`, {
+          Type: 'XObject',
+          Subtype: 'Form',
+          FormType: 1,
+          BBox: [0, 0, dispW, dispH],
+          Matrix: apMatrixFor(rotation),
+          Resources: { XObject: { Im0: img.ref } },
+        }),
+      );
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: 'Stamp',
+        Rect: [x0, y0, x1, y1],
+        C: [r, g, b],
+        F: 4, // print
+        AP: { N: ap },
+      });
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note ?? ''));
     } else if (a.kind === 'stamp') {
       const label = (a.note ?? '').toUpperCase();
       const fontRef = context.register(
@@ -486,14 +510,46 @@ function addAnnotations(
   }
 }
 
-function applyPageExtras(copied: import('pdf-lib').PDFPage, page: ExportPage, output: PDFDocument): void {
+function applyPageExtras(
+  copied: import('pdf-lib').PDFPage,
+  page: ExportPage,
+  output: PDFDocument,
+  stampImages: Map<string, import('pdf-lib').PDFImage>,
+): void {
   applyRotation(copied, page);
   // Must still run when `annotations` is empty but removedImportedOriginals
   // isn't — e.g. the user deleted the only imported annotation on this page,
   // leaving nothing to re-append but still needing the original stripped.
   if (page.annotations?.length || page.removedImportedOriginals?.length) {
-    addAnnotations(output, copied, page.annotations ?? [], page.removedImportedOriginals ?? []);
+    addAnnotations(output, copied, page.annotations ?? [], page.removedImportedOriginals ?? [], stampImages);
   }
+}
+
+/** Pre-embed every distinct custom-stamp image (data URL → PDFImage): the
+ * per-page annotation emit is synchronous, and pdf-lib's embed APIs are not.
+ * An unreadable image embeds nothing — the emit falls back to the bordered
+ * label rather than failing the commit. */
+async function embedStampImages(
+  output: PDFDocument,
+  pages: ExportPage[],
+): Promise<Map<string, import('pdf-lib').PDFImage>> {
+  const map = new Map<string, import('pdf-lib').PDFImage>();
+  for (const page of pages) {
+    for (const a of page.annotations ?? []) {
+      if (a.kind !== 'stamp' || !a.imageData || map.has(a.imageData)) continue;
+      try {
+        const b64 = a.imageData.slice(a.imageData.indexOf(',') + 1);
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const img = a.imageData.startsWith('data:image/png')
+          ? await output.embedPng(bytes)
+          : await output.embedJpg(bytes);
+        map.set(a.imageData, img);
+      } catch {
+        // fall through — emit uses the text look for this one
+      }
+    }
+  }
+  return map;
 }
 
 // Load each distinct source once, prepare its form-field trees for the kept
@@ -529,6 +585,7 @@ async function assemblePages(output: PDFDocument, pages: ExportPage[]): Promise<
     contributions.push(contribution);
     sources.set(key, { doc, copiedByIndex, contribution });
   }
+  const stampImages = await embedStampImages(output, pages);
   const used = new Set<PDFPage>();
   for (const page of pages) {
     const src = sources.get(page.sourceKey)!;
@@ -540,7 +597,7 @@ async function assemblePages(output: PDFDocument, pages: ExportPage[]): Promise<
       [copied] = await output.copyPages(src.doc, [page.pageIndex]);
     }
     used.add(copied);
-    applyPageExtras(copied, page, output);
+    applyPageExtras(copied, page, output, stampImages);
     output.addPage(copied);
     src.contribution.copiedPages.push(copied);
   }

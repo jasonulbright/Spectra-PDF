@@ -273,6 +273,20 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       {category === 'general' && (
       <>
       <div>
+        <label className="block text-sm text-neutral-400 mb-1">Identity name</label>
+        <input
+          type="text"
+          data-testid="pref-identity-name"
+          value={settings.identityName}
+          onChange={(e) => update('identityName', e.target.value)}
+          placeholder="Used by dynamic stamps’ {name} token"
+          className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm w-72"
+        />
+        <p className="text-xs text-neutral-500 mt-1">
+          Shown where a stamp label uses {'{name}'} — e.g. “Reviewed by {'{name}'} {'{date}'}”.
+        </p>
+      </div>
+      <div>
         <label className="block text-sm text-neutral-400 mb-1">Default Compression Quality</label>
         <select
           value={settings.compressionQuality}

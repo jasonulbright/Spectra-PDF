@@ -1557,6 +1557,7 @@ function AppContent(): React.ReactElement {
       note?: string;
       markupType?: string;
       quadCount?: number;
+      hasImage?: boolean;
     } | null
   >(() => null);
   harnessFirstAnnotationRef.current = () => {
@@ -1573,6 +1574,7 @@ function AppContent(): React.ReactElement {
           note: annotation.note,
           markupType: annotation.markupType,
           quadCount: annotation.quads ? annotation.quads.length / 4 : undefined,
+          hasImage: annotation.imageData !== undefined,
         }
       : null;
   };

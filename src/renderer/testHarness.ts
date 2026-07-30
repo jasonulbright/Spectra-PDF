@@ -50,6 +50,8 @@ export interface TestAnnotationInput {
   color: string;
   note?: string;
   points?: number[];
+  /** stamp only: a custom image stamp's data URL. */
+  imageData?: string;
 }
 
 /**
@@ -575,6 +577,8 @@ export interface TestHarness {
     /** textmarkup only: the style, and how many quads it carries. */
     markupType?: string;
     quadCount?: number;
+    /** stamp only: whether it carries a custom image. */
+    hasImage?: boolean;
   } | null>;
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
@@ -888,6 +892,7 @@ export interface TestHarnessDeps {
     note?: string;
     markupType?: string;
     quadCount?: number;
+    hasImage?: boolean;
   } | null;
   dispatchAddAnnotation: (docId: string, pageId: string, annotation: TestAnnotationInput & { id: string }) => void;
   dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
