@@ -176,6 +176,7 @@ export const COMMAND_IDS = [
   'document.applyPageEdits',
   'window.nextTab',
   'window.prevTab',
+  'window.split',
   'window.minimizeToTray',
   'help.about',
   'help.licenses',
@@ -715,6 +716,16 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Previous Tab',
     run: ({ state, dispatch }) =>
       dispatch({ type: 'UI_FOCUS_TAB', tab: cycledTab(state, -1) }),
+  },
+  // Split (I.6, the king's Window ▸ Split): two stacked panes over the same
+  // document, independent scroll/zoom. Document mode only — the organize
+  // board is one d3 world with no honest second scroll position (§ 3.3:
+  // absent, not faked).
+  'window.split': {
+    title: 'Split',
+    when: (ctx) =>
+      inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && hasActiveFile(ctx.state),
+    run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_SPLIT_VIEW' }),
   },
   'window.minimizeToTray': {
     title: 'Minimize to Tray',
