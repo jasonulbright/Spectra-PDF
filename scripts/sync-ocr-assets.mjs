@@ -19,16 +19,7 @@
 //
 // What did change: the models are DECOMPRESSED on the way in. tesseract.js
 // consumed `.traineddata.gz`; native tesseract wants `.traineddata`.
-import {
-  copyFileSync,
-  mkdirSync,
-  readdirSync,
-  rmSync,
-  existsSync,
-  statSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs'
+import { mkdirSync, readdirSync, rmSync, existsSync, statSync, readFileSync, writeFileSync } from 'node:fs'
 import { gunzipSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
@@ -46,30 +37,6 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 const nm = join(root, 'node_modules')
 const tessDir = join(root, 'resources', 'tesseract')
 const dest = join(tessDir, 'tessdata')
-
-// ── TRANSITIONAL: public/ocr is still staged ──────────────────────────────
-// The native path is vendored and the engine `recognize` op exists, but the
-// RENDERER still runs tesseract.js (search/engine.ts + the batch dialog). Until
-// that rewiring lands, dropping public/ocr would break OCR for a fresh clone —
-// so both destinations are staged. Delete this whole block, and the
-// tesseract.js dependencies, in the commit that rewires the renderer; shipping
-// two live recognizers is exactly what this program refused.
-const legacyDest = join(root, 'public', 'ocr')
-const coreDir = join(nm, 'tesseract.js-core')
-const workerJs = join(nm, 'tesseract.js', 'dist', 'worker.min.js')
-if (existsSync(coreDir) && existsSync(workerJs)) {
-  rmSync(legacyDest, { recursive: true, force: true })
-  mkdirSync(join(legacyDest, 'core'), { recursive: true })
-  mkdirSync(join(legacyDest, 'lang'), { recursive: true })
-  copyFileSync(workerJs, join(legacyDest, 'worker.min.js'))
-  const coreFiles = readdirSync(coreDir).filter((f) => /-lstm\.wasm(\.js)?$/.test(f))
-  for (const f of coreFiles) copyFileSync(join(coreDir, f), join(legacyDest, 'core', f))
-  for (const lang of OCR_LANGS) {
-    const from = join(nm, '@tesseract.js-data', lang, '4.0.0_best_int', `${lang}.traineddata.gz`)
-    if (existsSync(from)) copyFileSync(from, join(legacyDest, 'lang', `${lang}.traineddata.gz`))
-  }
-  console.log(`[sync-ocr-assets] (transitional) staged tesseract.js assets -> public/ocr.`)
-}
 
 // The binary is vendored by scripts/bundle-tesseract.ps1. Staging models into a
 // tree with no tesseract.exe would produce a silently useless resource folder,

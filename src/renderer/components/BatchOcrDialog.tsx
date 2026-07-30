@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useEngine } from '../hooks/useEngine';
 import { useAppModal } from '../hooks/useAppModal';
 import { dialog, batch } from '../lib/tauri-bridge';
+import { recognizePage } from '../lib/ocr-recognize';
 import type { BatchPdfEntry } from '../lib/tauri-bridge';
-import { createOcrClient } from '../ocr/ocr-client';
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import { toTesseractLang, describeLanguages } from '../ocr/language-selection';
 import {
@@ -253,24 +253,22 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     setLogError(null);
     cancelledRef.current = false;
     const startedAt = new Date();
-    // Client construction lives INSIDE the try: `new Worker` can throw
-    // synchronously, and with phase already 'running' an uncaught throw
-    // stranded the dialog in an unclosable modal (review-caught) — every
-    // close affordance remaps to cancel while running, and cancel had
-    // nothing to cancel.
-    let client: ReturnType<typeof createOcrClient> | null = null;
+    // Recognition is a subprocess in the ENGINE now, so there is no worker to
+    // construct (and no `new Worker` that could throw synchronously and strand
+    // the dialog in an unclosable modal — the review finding that shaped this
+    // block). Cancellation is the driver's `isCancelled` poll: an in-flight
+    // engine call finishes, then the loop stops.
+    const lang = toTesseractLang(langs);
     try {
-      client = createOcrClient();
-      client.setLanguage(toTesseractLang(langs));
-      const c = client;
-      cancelOcrRef.current = () => c.cancelAll();
-      const io = createBatchIo(client, {
+      cancelOcrRef.current = null;
+      const io = createBatchIo({
         applyOcrLayer: async (src, out, pages) => {
           await callRaw('apply_ocr_layer', { file: src, output: out, pages });
         },
         repair: async (src, out) => {
           await callRaw('repair', { file: src, output: out });
         },
+        recognize: (path, pageIndex) => recognizePage(callRaw, path, pageIndex, lang),
       });
       const rep = await runBatchOcr(entries, dest, skippedDirs, io, {
         onProgress: setProgress,
@@ -303,7 +301,6 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
       setPhase('setup');
     } finally {
       cancelOcrRef.current = null;
-      client?.dispose();
     }
   };
 
