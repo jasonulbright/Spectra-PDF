@@ -46,6 +46,16 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
 
+    // In-app W3C WebDriver server (TRIAL). Double-gated on purpose: the
+    // `webdriver` Cargo feature keeps it out of a release binary at compile
+    // time, and OPENPDFSTUDIO_E2E keeps it from binding a port even in a
+    // feature-enabled build that someone runs by hand. It exposes full
+    // automation over HTTP, so "never in production" is enforced, not trusted.
+    #[cfg(feature = "webdriver")]
+    if e2e {
+        builder = builder.plugin(tauri_plugin_webdriver::init());
+    }
+
     if !e2e {
         builder = builder.plugin(
             tauri_plugin_single_instance::init(|app, argv, _cwd| {
