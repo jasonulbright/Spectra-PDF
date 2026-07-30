@@ -13,6 +13,7 @@ import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
+import type { MeasureScale } from '../../lib/measure';
 
 interface DocLayerProps {
   items: DocPlacement[];
@@ -31,6 +32,9 @@ interface DocLayerProps {
   tool: CanvasTool;
   annotationColor?: string;
   stampPreset?: StampPreset | null;
+  measureScale?: MeasureScale;
+  measureLeaveMarkup?: boolean;
+  onMeasureResult?: (text: string) => void;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
@@ -158,6 +162,9 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               tool={props.tool}
               annotationColor={props.annotationColor}
               stampPreset={props.stampPreset}
+              measureScale={props.measureScale}
+              measureLeaveMarkup={props.measureLeaveMarkup}
+              onMeasureResult={props.onMeasureResult}
               redactionMarksByPage={props.redactionMarksByPage}
               editImagesByPage={props.editImagesByPage}
               editVectorsByPage={props.editVectorsByPage}

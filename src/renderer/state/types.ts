@@ -173,7 +173,15 @@ export type CanvasTool =
   // Edit tool's THIRD mode. Bands like 'addtext'; the picked image is embedded
   // at the box via the engine's add_page_image, undoable — an ordinary
   // placement afterward (movable/resizable via C1).
-  | 'addimage';
+  | 'addimage'
+  // Measuring (parity map § 2 — the king's Measuring Tool). Three modes, one
+  // tool: distance is a drag, perimeter/area are click-a-vertex sequences
+  // (double-click finishes; area closes the ring). Values are computed in the
+  // DISPLAYED frame (lengths are rotation-invariant); a completed measurement
+  // lands as an ordinary 'ink' annotation whose note carries the value.
+  | 'measuredist'
+  | 'measureperim'
+  | 'measurearea';
 
 // The tab-strip model (Phase 4 M2, § 3.1): Home | Tools | one tab per open
 // document. A doc tab focuses that file and shows the document pane (at M2:

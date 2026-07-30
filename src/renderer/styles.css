@@ -1326,6 +1326,37 @@
   color: #f87171;
 }
 
+/* Measure (parity map § 2): the scale-ratio controls + latest-value readout. */
+.measure-scale-input {
+  width: 52px;
+  padding: 2px 4px;
+  font-size: 11px;
+  background: var(--surface-2, #303034);
+  color: var(--text, #e5e5e5);
+  border: 1px solid var(--border, #45454c);
+  border-radius: 4px;
+  align-self: center;
+}
+.measure-scale-select {
+  padding: 2px 2px;
+  font-size: 11px;
+  background: var(--surface-2, #303034);
+  color: var(--text, #e5e5e5);
+  border: 1px solid var(--border, #45454c);
+  border-radius: 4px;
+  align-self: center;
+}
+.measure-leave-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.measure-result {
+  color: #fbbf24;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Edit ▸ Text (7.2): run outlines — quieter than image boxes at rest (text
    pages are dense); locked runs show a subdued outline whose title carries
    the refusal reason. */
@@ -1874,6 +1905,26 @@
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+/* Measure tool (parity map § 2): the live value chip riding the cursor. */
+.measure-live-label {
+  position: absolute;
+  transform: translateY(-100%);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(23, 23, 23, 0.92);
+  border: 1px solid #f59e0b;
+  color: #fbbf24;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}
+[data-theme="light"] .measure-live-label {
+  background: rgba(255, 255, 255, 0.95);
+  color: #92400e;
 }
 
 /* Stamps: fixed-footprint bordered box with a centered bold label. */
