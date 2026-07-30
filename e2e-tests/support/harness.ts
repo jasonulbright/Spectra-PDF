@@ -13,6 +13,7 @@ export interface TestStateSnapshot {
   tool: string;
   activeToolId: string | null;
   docViewMode: 'organize' | 'document';
+  splitView: boolean;
   currentPageId: string | null;
   fileCount: number;
   activeFileId: string | null;

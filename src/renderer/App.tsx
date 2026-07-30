@@ -1516,7 +1516,7 @@ function AppContent(): React.ReactElement {
   const harnessListenersRef = useRef<Set<(s: TestStateSnapshot) => void>>(new Set());
   const harnessSnapshotRef = useRef<() => TestStateSnapshot>(() => ({
     view: 'welcome', focusedTab: 'home', activeOp: 'merge', tool: 'select', activeToolId: null,
-    docViewMode: 'document', currentPageId: null, fileCount: 0, activeFileId: null, activeFile: null,
+    docViewMode: 'document', splitView: false, currentPageId: null, fileCount: 0, activeFileId: null, activeFile: null,
   }));
   harnessSnapshotRef.current = () => ({
     view: viewOf(focusedTab),
@@ -1525,6 +1525,7 @@ function AppContent(): React.ReactElement {
     tool: state.ui.tool,
     activeToolId: state.ui.activeToolId,
     docViewMode: state.ui.docViewMode,
+    splitView: state.ui.splitView,
     currentPageId: state.ui.currentPageId,
     fileCount: state.files.size,
     activeFileId: state.activeFileId,
