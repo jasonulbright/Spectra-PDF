@@ -1745,10 +1745,17 @@ def _self_signed_signer():
     pfx = pkcs12.serialize_key_and_certificates(
         b"t", key, cert, None, serialization.BestAvailableEncryption(b"pw")
     )
-    p = tempfile.mktemp(suffix=".pfx")
-    with open(p, "wb") as f:
-        f.write(pfx)
-    return signers.SimpleSigner.load_pkcs12(p, passphrase=b"pw")
+    # mkstemp, not mktemp: mktemp returns a name WITHOUT creating the file, so
+    # anything else on the box can win the race and have this write land
+    # somewhere it chose -- and what gets written here is a PKCS#12 holding a
+    # private key. mkstemp creates it atomically, owner-only.
+    fd, p = tempfile.mkstemp(suffix=".pfx")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(pfx)
+        return signers.SimpleSigner.load_pkcs12(p, passphrase=b"pw")
+    finally:
+        os.unlink(p)
 
 
 def _signer():
