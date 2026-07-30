@@ -170,3 +170,45 @@ class TestAgainstTheVendoredStack:
     def test_refuses_a_page_past_the_end(self):
         with pytest.raises(RuntimeError):
             recognize(str(SCANNED), 999, "eng", str(TESSERACT), str(GS))
+
+
+class TestOcrFile:
+    """The single-file arm (guided-actions slice 2): composed from the SAME
+    helpers as batch_ocr, so these pin the composition, not new logic."""
+
+    def test_text_pdf_reported_not_rewritten(self, tmp_pdf, tmp_dir):
+        # A text PDF has no scanned pages: no binaries touched, output is a
+        # plain copy, and the report says why nothing was OCR'd.
+        from engine.batch_ocr import ocr_file
+
+        out = str(Path(tmp_dir) / "searchable.pdf")
+        result = ocr_file(file=tmp_pdf, output=out)
+        assert result["pages_ocrd"] == 0
+        assert result["skipped"] == "no scanned pages"
+        assert Path(out).is_file()
+
+    def test_text_pdf_in_place_is_a_no_op(self, tmp_pdf):
+        from engine.batch_ocr import ocr_file
+
+        before = Path(tmp_pdf).read_bytes()
+        result = ocr_file(file=tmp_pdf, output=tmp_pdf)
+        assert result["pages_ocrd"] == 0
+        assert Path(tmp_pdf).read_bytes() == before  # untouched, not rewritten
+
+    @needs_ocr_stack
+    def test_scanned_file_becomes_searchable(self, tmp_dir):
+        from engine.batch_ocr import ocr_file
+        from engine.extract_text import extract_text
+
+        work = Path(tmp_dir) / "scan.pdf"
+        shutil.copy2(SCANNED, work)
+        result = ocr_file(
+            file=str(work),
+            output=str(work),
+            language="eng",
+            tesseract_path=str(TESSERACT),
+            gs_path=str(GS),
+        )
+        assert result["pages_ocrd"] >= 1
+        text = extract_text(file=str(work))["text"]
+        assert len(text.strip()) > 10

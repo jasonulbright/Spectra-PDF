@@ -3,20 +3,23 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   STEP_CATALOG,
+  askedParamKeys,
   buildStepParams,
   isGuidedAction,
   loadGuidedActions,
   newStep,
   saveGuidedActions,
   validateAction,
+  validateRunValues,
   type GuidedAction,
 } from '../src/renderer/lib/guided-actions';
 
 describe('step catalog integrity', () => {
-  it('every step builds from defaults and round-trips buildStepParams', () => {
+  it('every step builds from defaults; unmapped steps round-trip their keys', () => {
     for (const def of STEP_CATALOG) {
       const step = newStep(def.op);
       const params = buildStepParams(step);
+      if (def.mapParams) continue; // shape asserted in its own test below
       for (const p of def.params) {
         expect(params[p.key]).toBeDefined();
         if (p.kind === 'number') expect(typeof params[p.key]).toBe('number');
@@ -24,6 +27,24 @@ describe('step catalog integrity', () => {
           expect(p.options!.some((o) => o.value === params[p.key])).toBe(true);
         }
       }
+    }
+  });
+
+  it('header/footer maps position+text into the engine placements shape', () => {
+    const step = newStep('add_header_footer');
+    step.params.position = 'br';
+    step.params.text = 'Page {page} of {pages}';
+    const params = buildStepParams(step) as { placements: { position: string; text: string }[]; font_size: number };
+    expect(params.placements).toEqual([{ position: 'br', text: 'Page {page} of {pages}' }]);
+    expect(params.font_size).toBe(10);
+  });
+
+  it('the OCR step offers the full recognition language list', () => {
+    const def = STEP_CATALOG.find((d) => d.op === 'ocr_file')!;
+    const lang = def.params.find((p) => p.key === 'language')!;
+    expect(lang.options!.length).toBeGreaterThanOrEqual(40);
+    for (const code of ['eng', 'deu', 'jpn', 'ara', 'chi_sim']) {
+      expect(lang.options!.some((o) => o.value === code)).toBe(true);
     }
   });
 
@@ -57,8 +78,41 @@ describe('validation', () => {
     expect(validateAction(a)).toMatch(/Text is required/);
   });
 
-  it('the catalog has no encrypt step (in-place encryption would make the open working copy unreadable)', () => {
-    expect(STEP_CATALOG.some((d) => (d.op as string) === 'encrypt')).toBe(false);
+  it('encrypt is TERMINAL-output only — never an in-place step (an encrypted working copy is unreadable)', () => {
+    const enc = STEP_CATALOG.find((d) => d.op === 'encrypt')!;
+    expect(enc.terminalOutput).toBe(true);
+    const a = base();
+    a.steps = [newStep('encrypt'), newStep('strip_metadata')];
+    expect(validateAction(a)).toMatch(/last step/);
+    a.steps = [newStep('strip_metadata'), newStep('encrypt')];
+    expect(validateAction(a)).toBeNull(); // passwords are asked, not stored
+  });
+
+  it('secrets are implicitly asked and required-at-save is skipped for asked params', () => {
+    const enc = newStep('encrypt');
+    expect(askedParamKeys(enc).sort()).toEqual(['owner_password', 'user_password']);
+    // A required param marked ask-at-run is the PRE-RUN form's problem.
+    const wm = newStep('watermark');
+    wm.ask = ['text'];
+    const a = base();
+    a.steps = [wm];
+    expect(validateAction(a)).toBeNull();
+    expect(validateRunValues(wm, {})).toMatch(/Text is required/);
+    expect(validateRunValues(wm, { text: 'ASKED' })).toBeNull();
+  });
+
+  it('validateRunValues demands at least one encrypt password at run time', () => {
+    const enc = newStep('encrypt');
+    expect(validateRunValues(enc, {})).toMatch(/open or an owner password/);
+    expect(validateRunValues(enc, { owner_password: 's3cret' })).toBeNull();
+  });
+
+  it('buildStepParams merges ask-at-run overrides BEFORE coercion clamps', () => {
+    const wm = newStep('watermark');
+    wm.params.text = 'stored';
+    const params = buildStepParams(wm, { text: 'runtime', opacity: '9' }) as Record<string, unknown>;
+    expect(params.text).toBe('runtime');
+    expect(params.opacity).toBe(1); // clamped to the declared max
   });
 });
 
@@ -97,6 +151,20 @@ describe('persistence (localStorage stub)', () => {
     expect(loadGuidedActions()).toEqual([]);
     store.set('guided-actions', '"str"');
     expect(loadGuidedActions()).toEqual([]);
+  });
+
+  it('NEVER persists secret values — passwords are stripped at the one write path', () => {
+    const enc = newStep('encrypt');
+    enc.params.user_password = 'hunter2';
+    enc.params.owner_password = 'hunter3';
+    saveGuidedActions([{ id: '1', name: 'Lock', steps: [enc] }]);
+    const raw = store.get('guided-actions')!;
+    expect(raw).not.toContain('hunter2');
+    expect(raw).not.toContain('hunter3');
+    const loaded = loadGuidedActions();
+    expect(loaded[0].steps[0].params.user_password).toBeUndefined();
+    // ...and they remain collectable: still implicitly asked.
+    expect(askedParamKeys(loaded[0].steps[0])).toContain('user_password');
   });
 
   it('isGuidedAction rejects unknown ops and shapeless steps', () => {

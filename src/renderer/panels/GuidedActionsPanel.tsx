@@ -1,18 +1,21 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { file, app } from '../lib/tauri-bridge';
 import { ensureGsPath } from './SettingsPanel';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { TEST_HARNESS_ENABLED, registerGuidedActionsHandlers } from '../testHarness';
 import {
   STEP_CATALOG,
+  askedParamKeys,
   buildStepParams,
   loadGuidedActions,
   newStep,
   saveGuidedActions,
   stepDefFor,
   validateAction,
+  validateRunValues,
   type GuidedAction,
   type GuidedStepOp,
 } from '../lib/guided-actions';
@@ -25,16 +28,19 @@ import {
 // catalog growth (OCR, header/footer), ask-at-run params, folder mode,
 // export/import as files.
 
+type RunValues = Record<number, Record<string, string | number>>;
+
 type PanelView =
   | { kind: 'list' }
   | { kind: 'edit'; action: GuidedAction; isNew: boolean }
+  | { kind: 'prerun'; action: GuidedAction; values: RunValues; error: string | null }
   | { kind: 'run'; action: GuidedAction };
 
 type StepStatus = 'pending' | 'running' | 'done' | { error: string };
 
 export function GuidedActionsPanel(): React.ReactElement {
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
-  const { call } = useEngine();
+  const { call, saveFile } = useEngine();
   const [actions, setActions] = useState<GuidedAction[]>(() => loadGuidedActions());
   const [view, setView] = useState<PanelView>({ kind: 'list' });
   const [editError, setEditError] = useState<string | null>(null);
@@ -62,10 +68,20 @@ export function GuidedActionsPanel(): React.ReactElement {
     [activeFile, call, dispatch],
   );
 
-  const runAction = useCallback(
-    async (action: GuidedAction) => {
+  const executeRun = useCallback(
+    async (action: GuidedAction, values: RunValues, terminalOverride?: string) => {
       if (!activeFile || running) return;
       const workingPath = activeFile.workingPath;
+      // A terminal step (encrypt) writes a NEW file — pick it up front so a
+      // long run never stalls mid-way on a dialog. Cancelling the pick
+      // cancels the run before anything touches the document. (e2e injects
+      // the path via the harness bridge — the dialog is native.)
+      let terminalOutput: string | null = terminalOverride ?? null;
+      const terminalIndex = action.steps.findIndex((s) => stepDefFor(s.op).terminalOutput);
+      if (terminalIndex !== -1 && !terminalOutput) {
+        terminalOutput = (await saveFile('encrypted.pdf')) ?? null;
+        if (!terminalOutput) return;
+      }
       setView({ kind: 'run', action });
       setRunStatuses(action.steps.map(() => 'pending'));
       setRunning(true);
@@ -78,14 +94,26 @@ export function GuidedActionsPanel(): React.ReactElement {
             const extras: Record<string, string> = {};
             if (def.needsGs) extras.gs_path = await ensureGsPath();
             if (def.needsFontDir) extras.font_dir = await app.getEditFontPath();
-            const snapshotPath = await file.snapshot(workingPath);
-            await call(step.op, {
-              file: workingPath,
-              output: workingPath,
-              ...buildStepParams(step),
-              ...extras,
-            });
-            await reloadFile(snapshotPath);
+            if (def.needsTesseract) extras.tesseract_path = await app.getTesseractPath();
+            if (def.terminalOutput) {
+              // Writes the picked file; the open document is untouched, so
+              // there is nothing to snapshot or reload.
+              await call(step.op, {
+                file: workingPath,
+                output: terminalOutput!,
+                ...buildStepParams(step, values[i]),
+                ...extras,
+              });
+            } else {
+              const snapshotPath = await file.snapshot(workingPath);
+              await call(step.op, {
+                file: workingPath,
+                output: workingPath,
+                ...buildStepParams(step, values[i]),
+                ...extras,
+              });
+              await reloadFile(snapshotPath);
+            }
             setRunStatuses((s) => s.map((v, j) => (j === i ? 'done' : v)));
           } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -97,8 +125,38 @@ export function GuidedActionsPanel(): React.ReactElement {
         setRunning(false);
       }
     },
-    [activeFile, running, call, reloadFile],
+    [activeFile, running, call, reloadFile, saveFile],
   );
+
+  /** Run entry: collect ask-at-run values first when any step wants them. */
+  const runAction = useCallback(
+    (action: GuidedAction) => {
+      if (!activeFile || running) return;
+      const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
+      if (anyAsked) {
+        setView({ kind: 'prerun', action, values: {}, error: null });
+        return;
+      }
+      void executeRun(action, {});
+    },
+    [activeFile, running, executeRun],
+  );
+
+  // Harness bridge: the terminal step's output is a NATIVE save dialog —
+  // e2e injects the path + ask-at-run values and drives the REAL executeRun.
+  const bridgeRef = useRef({ actions, executeRun });
+  bridgeRef.current = { actions, executeRun };
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerGuidedActionsHandlers({
+      runWithOutput: async (actionId, values, output) => {
+        const action = bridgeRef.current.actions.find((a) => a.id === actionId);
+        if (!action) throw new Error(`runWithOutput: no action ${actionId}`);
+        await bridgeRef.current.executeRun(action, values as RunValues, output);
+      },
+    });
+    return () => registerGuidedActionsHandlers(null);
+  }, []);
 
   const startNew = (): void => {
     setEditError(null);
@@ -189,50 +247,87 @@ export function GuidedActionsPanel(): React.ReactElement {
                 </div>
                 {def.params.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2">
-                    {def.params.map((p) => (
-                      <label key={p.key} className="flex items-center gap-1 text-xs text-neutral-400">
-                        {p.label}
-                        {p.kind === 'select' ? (
-                          <select
-                            data-testid={`action-step-${i}-${p.key}`}
-                            value={String(step.params[p.key] ?? p.defaultValue)}
-                            onChange={(e) => {
-                              const steps = [...action.steps];
-                              steps[i] = {
-                                ...step,
-                                params: { ...step.params, [p.key]: e.target.value },
-                              };
-                              setAction({ ...action, steps });
-                            }}
-                            className="px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
+                    {def.params.map((p) => {
+                      // Secrets are never stored: no input, just the fact.
+                      if (p.secret) {
+                        return (
+                          <span
+                            key={p.key}
+                            className="text-xs text-neutral-500 px-1.5 py-1 border border-dashed border-neutral-700 rounded"
+                            data-testid={`action-step-${i}-${p.key}-secret`}
                           >
-                            {p.options!.map((o) => (
-                              <option key={o.value} value={o.value}>
-                                {o.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            type={p.kind === 'number' ? 'number' : p.kind}
-                            data-testid={`action-step-${i}-${p.key}`}
-                            value={String(step.params[p.key] ?? p.defaultValue)}
-                            min={p.min}
-                            max={p.max}
-                            step={p.step}
-                            onChange={(e) => {
-                              const steps = [...action.steps];
-                              steps[i] = {
-                                ...step,
-                                params: { ...step.params, [p.key]: e.target.value },
-                              };
-                              setAction({ ...action, steps });
-                            }}
-                            className="px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs w-32"
-                          />
-                        )}
-                      </label>
-                    ))}
+                            {p.label}: asked when the action runs
+                          </span>
+                        );
+                      }
+                      const isAsked = (step.ask ?? []).includes(p.key);
+                      const toggleAsk = (): void => {
+                        const ask = new Set(step.ask ?? []);
+                        if (ask.has(p.key)) ask.delete(p.key);
+                        else ask.add(p.key);
+                        const steps = [...action.steps];
+                        steps[i] = { ...step, ask: [...ask] };
+                        setAction({ ...action, steps });
+                      };
+                      return (
+                        <label key={p.key} className="flex items-center gap-1 text-xs text-neutral-400" title={p.hint}>
+                          {p.label}
+                          {p.kind === 'select' ? (
+                            <select
+                              data-testid={`action-step-${i}-${p.key}`}
+                              value={String(step.params[p.key] ?? p.defaultValue)}
+                              disabled={isAsked}
+                              onChange={(e) => {
+                                const steps = [...action.steps];
+                                steps[i] = {
+                                  ...step,
+                                  params: { ...step.params, [p.key]: e.target.value },
+                                };
+                                setAction({ ...action, steps });
+                              }}
+                              className="px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-40"
+                            >
+                              {p.options!.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type={p.kind === 'number' ? 'number' : p.kind}
+                              data-testid={`action-step-${i}-${p.key}`}
+                              value={String(step.params[p.key] ?? p.defaultValue)}
+                              min={p.min}
+                              max={p.max}
+                              step={p.step}
+                              disabled={isAsked}
+                              onChange={(e) => {
+                                const steps = [...action.steps];
+                                steps[i] = {
+                                  ...step,
+                                  params: { ...step.params, [p.key]: e.target.value },
+                                };
+                                setAction({ ...action, steps });
+                              }}
+                              className="px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs w-32 disabled:opacity-40"
+                            />
+                          )}
+                          <span
+                            className="flex items-center gap-0.5 text-neutral-500"
+                            title="Ask for this value each time the action runs"
+                          >
+                            <input
+                              type="checkbox"
+                              data-testid={`action-step-${i}-${p.key}-ask`}
+                              checked={isAsked}
+                              onChange={toggleAsk}
+                            />
+                            ask
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -265,6 +360,103 @@ export function GuidedActionsPanel(): React.ReactElement {
               setEditError(null);
               setView({ kind: 'list' });
             }}
+            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Pre-run form (ask-at-run values; secrets are always here) ─────────
+  if (view.kind === 'prerun') {
+    const { action, values } = view;
+    const setValue = (stepIdx: number, key: string, v: string): void =>
+      setView({
+        ...view,
+        values: { ...values, [stepIdx]: { ...values[stepIdx], [key]: v } },
+      });
+    const start = (): void => {
+      for (let i = 0; i < action.steps.length; i++) {
+        if (askedParamKeys(action.steps[i]).length === 0) continue;
+        const problem = validateRunValues(action.steps[i], values[i] ?? {});
+        if (problem) {
+          setView({ ...view, error: problem });
+          return;
+        }
+      }
+      void executeRun(action, values);
+    };
+    return (
+      <div className="flex flex-col gap-4" data-testid="actions-prerun">
+        <div className="text-sm font-medium text-neutral-300">
+          Before running “{action.name}”
+        </div>
+        {action.steps.map((step, i) => {
+          const asked = askedParamKeys(step);
+          if (asked.length === 0) return null;
+          const def = stepDefFor(step.op);
+          return (
+            <div key={i} className="flex flex-col gap-2 px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded">
+              <div className="text-sm text-neutral-200">
+                {i + 1}. {def.title}
+                {def.terminalOutput && (
+                  <span className="text-xs text-neutral-500"> — writes a new file you pick next</span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {asked.map((key) => {
+                  const p = def.params.find((x) => x.key === key)!;
+                  return (
+                    <label key={key} className="flex items-center gap-1 text-xs text-neutral-400">
+                      {p.label}
+                      {p.kind === 'select' ? (
+                        <select
+                          data-testid={`prerun-${i}-${key}`}
+                          value={String(values[i]?.[key] ?? p.defaultValue)}
+                          onChange={(e) => setValue(i, key, e.target.value)}
+                          className="px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
+                        >
+                          {p.options!.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type={p.kind === 'number' ? 'number' : p.kind}
+                          data-testid={`prerun-${i}-${key}`}
+                          value={String(values[i]?.[key] ?? '')}
+                          min={p.min}
+                          max={p.max}
+                          step={p.step}
+                          onChange={(e) => setValue(i, key, e.target.value)}
+                          className="px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs w-40"
+                        />
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+        {view.error && (
+          <p className="text-sm text-red-400" data-testid="prerun-error">{view.error}</p>
+        )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="prerun-start"
+            onClick={start}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium"
+          >
+            Start
+          </button>
+          <button
+            type="button"
+            data-testid="prerun-cancel"
+            onClick={() => setView({ kind: 'list' })}
             className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm"
           >
             Cancel

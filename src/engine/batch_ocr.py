@@ -213,6 +213,71 @@ def _copy_file(src: Path, dest: Path) -> None:
     shutil.copy2(src, dest)
 
 
+def ocr_file(
+    file: str,
+    output: str,
+    language: str = "eng",
+    tesseract_path: str = "",
+    gs_path: str = "gs",
+) -> dict:
+    """Make ONE file searchable — the single-file arm of the batch pipeline.
+
+    SAME detection (_pages_needing_ocr), SAME recognition (recognize), SAME
+    rect mapping (_to_pdf_rects), SAME writer (apply_ocr_layer, which already
+    handles output == file with a true-identity temp+rename) — COMPOSED
+    beside batch_ocr from the shared helpers rather than extracted from it,
+    so the batch loop's verified behavior is untouched. Built for the
+    guided-actions OCR step (slice 2); also the CLI's `ocr-file` arm.
+
+    A file with nothing that looks like a scan is reported, not rewritten:
+    in-place → no write at all; to a distinct output → a byte copy.
+    """
+    input_path = Path(file)
+    output_path = Path(output)
+    try:
+        same = output_path.exists() and os.path.samefile(input_path, output_path)
+    except OSError:
+        same = False
+
+    with pikepdf.open(file) as pdf:
+        total = len(pdf.pages)
+        needing = _pages_needing_ocr(file, pdf)
+
+    if not needing:
+        if not same:
+            _copy_file(input_path, output_path)
+        return {
+            "output": str(output_path),
+            "pages_total": total,
+            "pages_ocrd": 0,
+            "skipped": "no scanned pages",
+        }
+
+    pages: list[dict] = []
+    for i in needing:
+        got = recognize(file, i + 1, language, tesseract_path, gs_path)
+        words = _to_pdf_rects(file, i, got["words"])
+        if words:
+            pages.append({"page": i + 1, "words": words})
+
+    if not pages:
+        if not same:
+            _copy_file(input_path, output_path)
+        return {
+            "output": str(output_path),
+            "pages_total": total,
+            "pages_ocrd": 0,
+            "skipped": "no text recognized",
+        }
+
+    apply_ocr_layer(file, str(output_path), pages)
+    return {
+        "output": str(output_path),
+        "pages_total": total,
+        "pages_ocrd": len(pages),
+    }
+
+
 def batch_ocr(
     source: str,
     dest: str,
