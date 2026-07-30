@@ -14,6 +14,10 @@ const QueueContext = createContext<QueueContextValue | null>(null);
 const FRIENDLY_NAMES: Record<string, string> = {
   merge: 'Merge',
   split: 'Split',
+  add_attachment: 'Attach File',
+  remove_attachment: 'Remove Attachment',
+  make_portfolio: 'Convert to Portfolio',
+  update_portfolio_member: 'Update Portfolio Member',
   rotate: 'Rotate',
   delete: 'Delete Pages',
   compress: 'Compress',
@@ -90,6 +94,13 @@ const INTERNAL_METHODS = new Set([
   // Extracting an attachment writes it OUT to a user path; it never mutates the
   // document, so it must not gate/flush pending page edits.
   'extract_attachment',
+  // Portfolio-ness + member list seeds the Portfolio panel AND the open-time
+  // auto-check on every document — a read; gating it would flush pending page
+  // edits just for opening a file (the get_pdf_version hazard).
+  'get_portfolio',
+  // The open-member extract writes a member OUT to the managed folder; like
+  // extract_attachment it never mutates the document.
+  'extract_member_to_dir',
   // Listing optional-content groups to seed the Layers panel — a read;
   // set_layer_visibility (mutation) stays gated.
   'list_layers',

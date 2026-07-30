@@ -33,6 +33,7 @@ export type ToolId =
   | 'pagebox'
   | 'pagelabels'
   | 'attachments'
+  | 'portfolio'
   | 'layers'
   | 'accessibility'
   | 'preflight'
@@ -190,6 +191,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Attachments',
     description: 'Embed, extract, and remove attached files.',
     ops: ['attachments'],
+  },
+  {
+    id: 'portfolio',
+    title: 'Portfolio',
+    description: 'Create a PDF portfolio and manage its member files.',
+    ops: ['portfolio'],
   },
   {
     id: 'layers',

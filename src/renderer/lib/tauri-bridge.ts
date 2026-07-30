@@ -73,6 +73,8 @@ export const dialog = {
   pickPemFile: () => invoke<string | null>('pick_pem_file'),
   /** Pick ANY file to embed as a PDF attachment (no extension filter). */
   pickAnyFile: () => invoke<string | null>('pick_any_file'),
+  /** Pick MULTIPLE files of any type (portfolio members). Empty if cancelled. */
+  pickAnyFiles: () => invoke<string[]>('pick_any_files'),
   /** Pick a folder (Batch OCR source/destination). Returns null if cancelled. */
   pickFolder: (title?: string) => invoke<string | null>('pick_folder_dialog', { title }),
   /** Pick a replacement image (Edit ▸ Replace Image). Null if cancelled. */
@@ -258,6 +260,10 @@ export const app = {
    * gate existed). */
   canonicalizePaths: (paths: string[]) =>
     invoke<string[]>('canonicalize_paths', { paths }),
+  /** The managed app-data folder a portfolio's members extract into for
+   *  "Open member" (per-portfolio, created on demand; Rust owns the path). */
+  portfolioMemberDir: (portfolioPath: string) =>
+    invoke<string>('portfolio_member_dir', { portfolioPath }),
   getBundledGsInfo: () => invoke<GsInfo>('get_bundled_gs_info'),
   detectExternalGs: () => invoke<GsInfo | null>('detect_external_gs'),
   getVersion: () => invoke<string>('get_app_version'),

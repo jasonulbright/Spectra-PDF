@@ -32,6 +32,41 @@ pub async fn canonicalize_paths(paths: Vec<String>) -> Result<Vec<String>, Strin
     Ok(paths.iter().map(|p| canonical_path(p)).collect())
 }
 
+/// The managed folder a portfolio's members extract into for "Open member":
+/// `app-data/portfolio-members/<stem>-<hash16>` — the stem for readability,
+/// a hash of the full canonical path so two same-named portfolios in
+/// different folders never mix members. DefaultHasher's instability across
+/// Rust versions is fine here: a changed hash just mints a fresh folder, and
+/// the extracted copies are working files, not a durable store.
+#[tauri::command]
+pub async fn portfolio_member_dir(
+    app: AppHandle,
+    portfolio_path: String,
+) -> Result<String, String> {
+    use std::hash::{Hash, Hasher};
+    let canonical = canonical_path(&portfolio_path);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    canonical.hash(&mut h);
+    let stem = std::path::Path::new(&canonical)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "portfolio".into());
+    let safe_stem: String = stem
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .take(40)
+        .collect();
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("{}", e))?
+        .join("portfolio-members")
+        .join(format!("{}-{:016x}", safe_stem, h.finish()));
+    fs::create_dir_all(&dir)
+        .map_err(|e| format!("Cannot create the members folder {}: {}", dir.display(), e))?;
+    Ok(dunce::simplified(&dir).to_string_lossy().into_owned())
+}
+
 // ── File dialogs ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -130,6 +165,33 @@ pub async fn pick_certificate_file(
             Err(e) => Err(format!("Path error: {}", e)),
         },
         None => Ok(None),
+    }
+}
+
+/// Pick MULTIPLE files of any type — the portfolio-create member picker.
+#[tauri::command]
+pub async fn pick_any_files(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Vec<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("All files", &["*"])
+        .blocking_pick_files();
+    match result {
+        Some(paths) => {
+            let mut out = Vec::with_capacity(paths.len());
+            for p in paths {
+                match p.into_path() {
+                    Ok(pb) => out.push(canonical_path(&pb.to_string_lossy())),
+                    Err(e) => return Err(format!("Path error: {}", e)),
+                }
+            }
+            Ok(out)
+        }
+        None => Ok(Vec::new()),
     }
 }
 

@@ -25,7 +25,7 @@ export const OPERATIONS = [
   'repair', 'rebuild', 'recover',
   'encrypt', 'decrypt',
   'extract_text', 'watermark', 'forms', 'compare', 'signatures',
-  'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels', 'attachments', 'layers', 'accessibility',
+  'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels', 'attachments', 'portfolio', 'layers', 'accessibility',
   'comments', 'preflight', 'links', 'tags', 'readingorder',
 ] as const;
 
@@ -47,6 +47,7 @@ export const OPERATION_TITLES: Record<Operation, string> = {
   pagebox: 'Crop & Page Boxes',
   pagelabels: 'Page Labels',
   attachments: 'Attachments',
+  portfolio: 'Portfolio',
   layers: 'Layers',
   accessibility: 'Accessibility Check',
   comments: 'Comments',

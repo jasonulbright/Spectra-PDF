@@ -31,6 +31,7 @@ import { HeaderFooterPanel } from './panels/HeaderFooterPanel';
 import { PageBoxesPanel } from './panels/PageBoxesPanel';
 import { PageLabelsPanel } from './panels/PageLabelsPanel';
 import { AttachmentsPanel } from './panels/AttachmentsPanel';
+import { PortfolioPanel, PortfolioAutoOpen } from './panels/PortfolioPanel';
 import { LayersPanel } from './panels/LayersPanel';
 import { AccessibilityPanel } from './panels/AccessibilityPanel';
 import { CommentsPanel } from './panels/CommentsPanel';
@@ -143,7 +144,7 @@ const panels: Record<Operation, React.ComponentType> = {
   watermark: WatermarkPanel, forms: FormsPanel, compare: ComparePanel,
   signatures: SignaturesPanel, document_js: DocumentJsPanel,
   convert_cmyk: PrepressPanel, headerfooter: HeaderFooterPanel, pagebox: PageBoxesPanel,
-  pagelabels: PageLabelsPanel, attachments: AttachmentsPanel, layers: LayersPanel,
+  pagelabels: PageLabelsPanel, attachments: AttachmentsPanel, portfolio: PortfolioPanel, layers: LayersPanel,
   accessibility: AccessibilityPanel, comments: CommentsPanel, preflight: PreflightPanel,
   links: LinksPanel, tags: TagsPanel, readingorder: ReadingOrderPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
@@ -1655,6 +1656,7 @@ function AppContent(): React.ReactElement {
       <MenuBar />
       {!(state.ui.readingMode && isDocTab(state.ui.focusedTab)) && <MainToolbar />}
 
+      <PortfolioAutoOpen />
       <UpdateBar checkSignal={updateCheckSignal} />
 
       {commitError && (

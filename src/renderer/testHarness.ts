@@ -209,6 +209,26 @@ export function registerExportImages(handlers: ExportImagesHandlers | null): voi
 }
 
 /**
+ * Portfolio panel bridges (§ I.6): the member pickers and save dialogs are
+ * NATIVE and undrivable — e2e injects the paths and runs the REAL panel
+ * flows (create routes callRaw+openPath; add/update/save run the gated
+ * snapshot→call→reload shape). The panel registers while mounted — which
+ * the portfolio auto-open story provides for an opened portfolio.
+ */
+export interface PortfolioHandlers {
+  create: (output: string, sources: string[], title?: string) => Promise<unknown>;
+  add: (source: string) => Promise<unknown>;
+  update: (name: string, source: string) => Promise<unknown>;
+  saveMember: (name: string, output: string) => Promise<unknown>;
+}
+
+let portfolioHandlers: PortfolioHandlers | null = null;
+
+export function registerPortfolioHandlers(handlers: PortfolioHandlers | null): void {
+  portfolioHandlers = handlers;
+}
+
+/**
  * Edit ▸ Images (7.1): placements live in transformed canvas space and the
  * Replace/Extract actions pop NATIVE dialogs — both undrivable by WebDriver.
  * The canvas registers its real selection + action paths; `act`'s opts
@@ -762,6 +782,11 @@ export interface TestHarness {
     out: string,
     opts?: { format?: string; dpi?: number; pages?: string; gray?: boolean },
   ) => Promise<unknown>;
+  /** Portfolio flows with injected paths (panel must be mounted). */
+  portfolioCreateRun: (output: string, sources: string[], title?: string) => Promise<unknown>;
+  portfolioAddRun: (source: string) => Promise<unknown>;
+  portfolioUpdateRun: (name: string, source: string) => Promise<unknown>;
+  portfolioSaveMemberRun: (name: string, output: string) => Promise<unknown>;
   editImagePageIds: () => string[];
   editImagePlacements: (
     pageId: string,
@@ -1379,6 +1404,38 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return exportImages.run(out, opts);
+    },
+    portfolioCreateRun: async (output, sources, title) => {
+      if (!portfolioHandlers) {
+        const msg = 'portfolioCreateRun: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return portfolioHandlers.create(output, sources, title);
+    },
+    portfolioAddRun: async (source) => {
+      if (!portfolioHandlers) {
+        const msg = 'portfolioAddRun: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return portfolioHandlers.add(source);
+    },
+    portfolioUpdateRun: async (name, source) => {
+      if (!portfolioHandlers) {
+        const msg = 'portfolioUpdateRun: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return portfolioHandlers.update(name, source);
+    },
+    portfolioSaveMemberRun: async (name, output) => {
+      if (!portfolioHandlers) {
+        const msg = 'portfolioSaveMemberRun: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return portfolioHandlers.saveMember(name, output);
     },
     editImagePageIds: () => canvasEditImages?.pageIds() ?? [],
     editImagePlacements: (pageId) => canvasEditImages?.placements(pageId) ?? [],

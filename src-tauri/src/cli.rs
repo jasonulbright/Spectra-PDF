@@ -67,6 +67,14 @@ pub enum CliCommand {
     AttachExtract(AttachExtractArgs),
     /// Remove an embedded attachment
     AttachRemove(AttachRemoveArgs),
+    /// Report whether a PDF is a portfolio + its member list (JSON)
+    PortfolioInfo(PortfolioInfoArgs),
+    /// Create a NEW PDF portfolio embedding the given files
+    PortfolioCreate(PortfolioCreateArgs),
+    /// Convert an existing PDF into a portfolio (adds /Collection)
+    PortfolioMake(PortfolioMakeArgs),
+    /// Replace a portfolio member's bytes from a file
+    PortfolioUpdate(PortfolioUpdateArgs),
     /// List optional-content layers (JSON)
     LayerList(LayerListArgs),
     /// Show or hide a layer by index
@@ -346,6 +354,52 @@ pub struct PageLabelsArgs {
 pub struct AttachListArgs {
     /// Input PDF file
     pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct PortfolioInfoArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct PortfolioCreateArgs {
+    /// Member files to embed (at least one)
+    #[arg(required = true)]
+    pub inputs: Vec<PathBuf>,
+    /// Output portfolio PDF
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Portfolio title (defaults to the output file name)
+    #[arg(long)]
+    pub title: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PortfolioMakeArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+}
+
+#[derive(Args)]
+pub struct PortfolioUpdateArgs {
+    /// Input portfolio PDF
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// The member name to replace (from portfolio-info)
+    #[arg(long)]
+    pub name: String,
+    /// The file whose bytes replace the member's
+    #[arg(long)]
+    pub source: PathBuf,
+    /// New description (omit to keep the existing one)
+    #[arg(long)]
+    pub description: Option<String>,
 }
 
 #[derive(Args)]
@@ -1601,6 +1655,48 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "name": args.name,
             }),
         ),
+
+        CliCommand::PortfolioInfo(args) => engine.call(
+            "get_portfolio",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::PortfolioCreate(args) => {
+            let sources: Vec<String> = args
+                .inputs
+                .iter()
+                .map(|p| abs(p).to_string_lossy().into_owned())
+                .collect();
+            let mut params = json!({
+                "output": abs(&args.output).to_string_lossy(),
+                "sources": sources,
+            });
+            if let Some(title) = &args.title {
+                params["title"] = json!(title);
+            }
+            engine.call("create_portfolio", params)
+        }
+
+        CliCommand::PortfolioMake(args) => engine.call(
+            "make_portfolio",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+            }),
+        ),
+
+        CliCommand::PortfolioUpdate(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "name": args.name,
+                "source": abs(&args.source).to_string_lossy(),
+            });
+            if let Some(desc) = &args.description {
+                params["description"] = json!(desc);
+            }
+            engine.call("update_portfolio_member", params)
+        }
 
         CliCommand::LayerList(args) => engine.call(
             "list_layers",

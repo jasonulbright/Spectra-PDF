@@ -165,6 +165,14 @@ const GLYPHS: Record<Operation, React.JSX.Element> = {
   attachments: (
     <path d="M21 8.5l-9.2 9.2a4 4 0 0 1-5.66-5.66l8.5-8.5a2.5 2.5 0 0 1 3.54 3.54l-8.5 8.5a1 1 0 0 1-1.42-1.42l7.8-7.8" />
   ),
+  // A briefcase (a portfolio carries files).
+  portfolio: (
+    <>
+      <rect x="3" y="7" width="18" height="13" rx="2" />
+      <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M3 13h18" />
+    </>
+  ),
   // Stacked sheets (layers).
   layers: (
     <>

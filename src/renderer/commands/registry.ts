@@ -296,6 +296,7 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   pagebox: [],
   pagelabels: [],
   attachments: [],
+  portfolio: [],
   layers: [],
   accessibility: [],
   preflight: [],
