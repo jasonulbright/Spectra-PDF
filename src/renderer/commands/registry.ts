@@ -289,6 +289,7 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   prepareform: ['tools.close'],
   redact: ['tools.close'],
   measure: ['tools.close'],
+  actions: [],
   ocr: [],
   compare: [],
   protect: [],

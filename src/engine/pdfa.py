@@ -2,6 +2,7 @@
 
 import subprocess
 from pathlib import Path
+from .inplace import finish_staged, is_same_file, staging_target
 from .validate import validate_pdf
 
 
@@ -34,6 +35,10 @@ def convert_pdfa(
 
     input_path = Path(file)
     output_path = Path(output)
+    # In-place: gs must never write the file it is reading (engine/inplace.py).
+    same_file = is_same_file(file, output)
+    original_size = input_path.stat().st_size
+    gs_target = staging_target(output_path) if same_file else output_path
 
     # Ghostscript PDF/A conversion requires a PDFA_def.ps preamble
     pdfa_def = (
@@ -50,7 +55,7 @@ def convert_pdfa(
         "-dQUIET",
         "-sDEVICE=pdfwrite",
         "-dPDFACompatibilityPolicy=1",
-        f"-sOutputFile={str(output_path).replace('%', '%%')}",  # % is a gs filename template char (distill review)
+        f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % is a gs filename template char (distill review)
         str(input_path),
     ]
 
@@ -58,9 +63,12 @@ def convert_pdfa(
     if result.returncode != 0:
         raise RuntimeError(f"Ghostscript PDF/A conversion failed: {result.stderr}")
 
+    if same_file:
+        finish_staged(gs_target, output_path)
+
     return {
         "output": str(output_path),
         "level": f"PDF/A-{level}",
-        "original_size": input_path.stat().st_size,
+        "original_size": original_size,
         "output_size": output_path.stat().st_size,
     }

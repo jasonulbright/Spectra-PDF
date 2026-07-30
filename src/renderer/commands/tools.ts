@@ -24,6 +24,7 @@ export type ToolId =
   | 'prepareform'
   | 'redact'
   | 'measure'
+  | 'actions'
   | 'ocr'
   | 'compare'
   | 'protect'
@@ -139,6 +140,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     description: 'Measure distances, perimeters, and areas on the page.',
     ops: [],
     canvasTools: ['measuredist', 'measureperim', 'measurearea'],
+  },
+  {
+    id: 'actions',
+    title: 'Guided Actions',
+    description: 'Save sequences of steps and run them on a document with one click.',
+    ops: ['actions'],
   },
   {
     id: 'ocr',
