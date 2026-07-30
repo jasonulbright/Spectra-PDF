@@ -54,6 +54,7 @@ import type { CanvasHandle } from '../../canvas/canvas-handle';
 import type { PageAnnotation, PdfBuffer } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { SecondaryToolbar } from './SecondaryToolbar';
+import { DEFAULT_MEASURE_SCALE, type MeasureScale } from '../../lib/measure';
 import { PropertiesBar } from './PropertiesBar';
 import { CanvasStatusBar } from './CanvasStatusBar';
 
@@ -400,6 +401,12 @@ export function WorkspaceCanvasView({
   // tool creates the next annotation, across tool switches.
   const [toolColor, setToolColor] = useState<string | null>(null);
   const [stampPreset, setStampPreset] = useState<StampPreset | null>(null);
+  // Measure (parity map § 2): the scale ratio the readouts apply, whether a
+  // finished measurement lands as an ink markup, and the latest value shown
+  // in the secondary toolbar. Session-scoped like toolColor.
+  const [measureScale, setMeasureScale] = useState<MeasureScale>(DEFAULT_MEASURE_SCALE);
+  const [measureLeaveMarkup, setMeasureLeaveMarkup] = useState(true);
+  const [measureResult, setMeasureResult] = useState<string | null>(null);
   // Click-selected annotation (Select tool) — the properties bar's subject.
   // Transient view state like redaction marks: resolved against the live
   // workspace every render, cleared the moment it stops resolving (commit
@@ -3068,6 +3075,11 @@ export function WorkspaceCanvasView({
         onSetToolColor={setToolColor}
         stampPreset={stampPreset}
         onSetStampPreset={setStampPreset}
+        measureScale={measureScale}
+        onSetMeasureScale={setMeasureScale}
+        measureLeaveMarkup={measureLeaveMarkup}
+        onToggleMeasureLeaveMarkup={() => setMeasureLeaveMarkup((v) => !v)}
+        measureResult={measureResult}
         editHasSelection={editSel !== null}
         editSelectionKind={editSel?.kind ?? null}
         editTextEditable={
@@ -3135,6 +3147,9 @@ export function WorkspaceCanvasView({
             tool,
             annotationColor: toolColor ?? undefined,
             stampPreset,
+            measureScale,
+            measureLeaveMarkup,
+            onMeasureResult: setMeasureResult,
             redactionMarksByPage,
             editImagesByPage,
             editVectorsByPage,
@@ -3308,6 +3323,9 @@ export function WorkspaceCanvasView({
           tool={tool}
           annotationColor={toolColor ?? undefined}
           stampPreset={stampPreset}
+          measureScale={measureScale}
+          measureLeaveMarkup={measureLeaveMarkup}
+          onMeasureResult={setMeasureResult}
           redactionMarksByPage={redactionMarksByPage}
           editImagesByPage={editImagesByPage}
           editVectorsByPage={editVectorsByPage}

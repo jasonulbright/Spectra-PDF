@@ -19,6 +19,7 @@ import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
+import type { MeasureScale } from '../../lib/measure';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import { displayWidthAt } from '../../canvas/layout';
 import { isEditable } from '../../commands/keymap';
@@ -85,6 +86,9 @@ export interface DocumentViewProps {
   tool: CanvasTool;
   annotationColor?: string;
   stampPreset?: StampPreset | null;
+  measureScale?: MeasureScale;
+  measureLeaveMarkup?: boolean;
+  onMeasureResult?: (text: string) => void;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
@@ -579,6 +583,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           tool={props.tool}
           annotationColor={props.annotationColor}
           stampPreset={props.stampPreset}
+          measureScale={props.measureScale}
+          measureLeaveMarkup={props.measureLeaveMarkup}
+          onMeasureResult={props.onMeasureResult}
           redactionMarks={props.redactionMarksByPage.get(page.id)}
           editImages={props.editImagesByPage.get(page.id)}
           editVectors={props.editVectorsByPage.get(page.id)}

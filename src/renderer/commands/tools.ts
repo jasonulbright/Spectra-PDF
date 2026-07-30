@@ -23,6 +23,7 @@ export type ToolId =
   | 'fillsign'
   | 'prepareform'
   | 'redact'
+  | 'measure'
   | 'ocr'
   | 'compare'
   | 'protect'
@@ -131,6 +132,13 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     description: 'Permanently remove text and images from the file.',
     ops: [],
     canvasTools: ['redact'],
+  },
+  {
+    id: 'measure',
+    title: 'Measure',
+    description: 'Measure distances, perimeters, and areas on the page.',
+    ops: [],
+    canvasTools: ['measuredist', 'measureperim', 'measurearea'],
   },
   {
     id: 'ocr',

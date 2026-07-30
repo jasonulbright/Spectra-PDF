@@ -22,8 +22,19 @@ const base = {
 // per-path so the shared svg wrapper stays uniform.
 // Total over Operation, so adding an op without a glyph fails tsc. The runtime
 // list of operations lives in commands/operations (the canonical source); this
-// map must merely COVER it, which the Record type already guarantees.
-const GLYPHS: Record<Operation, React.JSX.Element> = {
+// map must merely COVER it, which the Record type already guarantees. The
+// union widens for the rare TOOL with no op whose glyph nothing else fits
+// ('measure' — a ruler is not any operation's icon): a superset still covers
+// Operation, and ToolIcon's own prop type follows this key union.
+export type GlyphId = Operation | 'measure';
+const GLYPHS: Record<GlyphId, React.JSX.Element> = {
+  // A diagonal ruler with tick marks.
+  measure: (
+    <>
+      <rect x="2.2" y="13.6" width="19.6" height="6.2" rx="1.2" transform="rotate(-28 12 16.7)" />
+      <path d="M7.2 14.6l1.5 2.8M11 12.6l1.5 2.8M14.8 10.6l1.5 2.8M18.6 8.6l1.5 2.8" transform="rotate(0)" />
+    </>
+  ),
   // A page cut by a dashed line down the middle.
   split: (
     <>
@@ -249,7 +260,7 @@ const GLYPHS: Record<Operation, React.JSX.Element> = {
 };
 
 interface ToolIconProps {
-  op: Operation;
+  op: GlyphId;
   size?: number;
   className?: string;
 }

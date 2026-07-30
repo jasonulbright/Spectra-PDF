@@ -50,6 +50,19 @@ import { PageTextLayer } from './PageTextLayer';
 // keymap read it for enablement); re-exported here for the overlay consumers.
 export type { CanvasTool } from '../../state/types';
 import type { CanvasTool } from '../../state/types';
+import {
+  DEFAULT_MEASURE_SCALE,
+  formatArea,
+  formatDistance,
+  polylineLengthPts,
+  ringAreaPts2,
+  type MeasureScale,
+} from '../../lib/measure';
+
+// Measure overlays draw in amber — legible over both white paper and the
+// annotation palette's blues/yellows, and distinct from ink's default.
+const MEASURE_COLOR = '#f59e0b';
+const MEASURE_MODES: readonly CanvasTool[] = ['measuredist', 'measureperim', 'measurearea'];
 
 export interface AnnotationRect {
   x: number;
@@ -391,6 +404,12 @@ interface PageCellProps {
   // Selected stamp preset — required for the Stamp tool to place anything;
   // clicks are ignored while none is picked.
   stampPreset?: StampPreset | null;
+  /** Measure modes (parity map § 2): the scale ratio, whether a finished
+   * measurement lands as an ink annotation, and where the value reports
+   * (the secondary toolbar's readout). */
+  measureScale?: MeasureScale;
+  measureLeaveMarkup?: boolean;
+  onMeasureResult?: (text: string) => void;
   // Pending redaction marks on this page (transient view state — see
   // lib/redaction.ts); undefined when none.
   redactionMarks?: RedactionMark[];
@@ -662,6 +681,9 @@ function PageCellImpl({
   textLayer,
   annotationColor,
   stampPreset,
+  measureScale,
+  measureLeaveMarkup = true,
+  onMeasureResult,
   redactionMarks,
   editImages,
   editSelectedIndex,
@@ -755,6 +777,12 @@ function PageCellImpl({
   const [editing, setEditing] = useState<string | null>(null);
   // In-progress ink stroke, flat [x0,y0,x1,y1,...] display-normalized points.
   const [inkPoints, setInkPoints] = useState<number[] | null>(null);
+  // In-progress measurement (parity map § 2): committed vertices + the live
+  // cursor, display-normalized like ink. Distance is a drag; perimeter/area
+  // accumulate click-vertices until a double-click finishes.
+  const [measurePts, setMeasurePts] = useState<number[] | null>(null);
+  const [measureCursor, setMeasureCursor] = useState<{ x: number; y: number } | null>(null);
+  const measureSeqActive = useRef(false);
 
   // Display px of the page's own point size — scales freetext to the cell.
   const freetextFontPx =
@@ -827,6 +855,151 @@ function PageCellImpl({
     window.addEventListener('pointercancel', onCancel);
   };
 
+  // ── Measure (parity map § 2) ──────────────────────────────────────────
+  // Values are computed against the DISPLAYED page dims in PDF points (the
+  // axes swap at 90/270 — `page` here already carries the effective
+  // rotation, viewRotation composed by the reading view). Lengths are
+  // rotation-invariant, so the VALUE needs no un-projection; the left-behind
+  // annotation's points un-project exactly like ink's.
+  const measDispW = page.rotation === 90 || page.rotation === 270 ? page.height : page.width;
+  const measDispH = page.rotation === 90 || page.rotation === 270 ? page.width : page.height;
+  const measScale = measureScale ?? DEFAULT_MEASURE_SCALE;
+
+  const measureValueFor = (pts: number[]): string => {
+    if (tool === 'measurearea') {
+      const area = formatArea(ringAreaPts2(pts, measDispW, measDispH), measScale);
+      // The king reports the ring's perimeter beside its area; close the ring
+      // for the length.
+      const ring = [...pts, pts[0], pts[1]];
+      return `${area} · perimeter ${formatDistance(polylineLengthPts(ring, measDispW, measDispH), measScale)}`;
+    }
+    return formatDistance(polylineLengthPts(pts, measDispW, measDispH), measScale);
+  };
+
+  const commitMeasurement = (pts: number[]): void => {
+    const value = measureValueFor(pts);
+    onMeasureResult?.(value);
+    if (!measureLeaveMarkup) return;
+    // Land as an ordinary ink annotation (visible in every viewer, undoable
+    // through the existing lifecycle) whose note carries the value; an area
+    // ring closes so the shape reads closed on paper too.
+    const shape = tool === 'measurearea' ? [...pts, pts[0], pts[1]] : pts;
+    const stored = toStoredPoints(shape);
+    const xs = stored.filter((_, i) => i % 2 === 0);
+    const ys = stored.filter((_, i) => i % 2 === 1);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    onAddAnnotation(docId, page.id, {
+      id: crypto.randomUUID(),
+      kind: 'ink',
+      x: minX,
+      y: minY,
+      w: Math.max(...xs) - minX,
+      h: Math.max(...ys) - minY,
+      color: annotationColor ?? MEASURE_COLOR,
+      points: stored,
+      note: value,
+    });
+  };
+
+  const normPoint = (el: HTMLElement, cx: number, cy: number): { x: number; y: number } => {
+    const rect = el.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
+    };
+  };
+
+  /** Distance: a drag, like ink but keeping only the endpoints. */
+  const handleMeasureDragDown = (e: React.PointerEvent<HTMLElement>): void => {
+    bandActive.current = true;
+    const el = e.currentTarget;
+    const start = normPoint(el, e.clientX, e.clientY);
+    let last = start;
+    setMeasurePts([start.x, start.y]);
+    setMeasureCursor(start);
+    const onMove = (ev: PointerEvent): void => {
+      last = normPoint(el, ev.clientX, ev.clientY);
+      setMeasureCursor(last);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      bandActive.current = false;
+      cancelBand.current = null;
+      setMeasurePts(null);
+      setMeasureCursor(null);
+      const pts = [start.x, start.y, last.x, last.y];
+      // A sub-half-percent drag is a click, not a measurement.
+      if (commit && (Math.abs(last.x - start.x) > 0.005 || Math.abs(last.y - start.y) > 0.005)) {
+        commitMeasurement(pts);
+      }
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    cancelBand.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  };
+
+  /** Perimeter/area: click adds a vertex, double-click finishes, Escape (or
+   * leaving the mode) cancels — the sequence persists BETWEEN pointer events,
+   * so its cancel lives in the same cancelBand seam the drags use. */
+  const appendVertexRef = useRef<((p: { x: number; y: number }, done: boolean) => void) | null>(null);
+  const handleMeasureVertexDown = (e: React.PointerEvent<HTMLElement>): void => {
+    const el = e.currentTarget;
+    const p = normPoint(el, e.clientX, e.clientY);
+    if (!measureSeqActive.current) {
+      measureSeqActive.current = true;
+      let pts = [p.x, p.y];
+      setMeasurePts(pts);
+      setMeasureCursor(p);
+      const onMove = (ev: PointerEvent): void => setMeasureCursor(normPoint(el, ev.clientX, ev.clientY));
+      const cleanup = (): void => {
+        window.removeEventListener('pointermove', onMove);
+        measureSeqActive.current = false;
+        cancelBand.current = null;
+        appendVertexRef.current = null;
+        setMeasurePts(null);
+        setMeasureCursor(null);
+      };
+      appendVertexRef.current = (q, dblclick) => {
+        // Finish on a double-click OR a click landing on the previous vertex
+        // (the CAD "click the same spot" convention) — e.detail is unreliable
+        // for synthesized input, and clicking where you already are can only
+        // mean "done".
+        const nearLast =
+          pts.length >= 2 &&
+          Math.abs(q.x - pts[pts.length - 2]) < 0.008 &&
+          Math.abs(q.y - pts[pts.length - 1]) < 0.008;
+        if (dblclick || nearLast) {
+          const minVerts = tool === 'measurearea' ? 3 : 2;
+          const finished = pts.length / 2 >= minVerts ? [...pts] : null;
+          cleanup();
+          if (finished) commitMeasurement(finished);
+          return;
+        }
+        pts = [...pts, q.x, q.y];
+        setMeasurePts(pts);
+      };
+      cancelBand.current = cleanup;
+      window.addEventListener('pointermove', onMove);
+      return;
+    }
+    // e.detail === 2 is the second press of a double-click: the first press
+    // already appended this point, so finish without appending again.
+    appendVertexRef.current?.(p, e.detail >= 2);
+  };
+
+  // Switching MODES mid-sequence (dist ↔ perim ↔ area via the secondary
+  // toolbar pills) keeps annotateMode true, so the annotate-mode cancel
+  // below never fires — cancel the vertex sequence explicitly.
+  useEffect(() => {
+    if (measureSeqActive.current) cancelBand.current?.();
+  }, [tool]);
+
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     if (!annotateMode) {
       onPagePointerDown(docId, page.id, e);
@@ -846,6 +1019,14 @@ function PageCellImpl({
     e.stopPropagation();
     if (tool === 'ink') {
       handleInkDown(e);
+      return;
+    }
+    if (tool === 'measuredist') {
+      handleMeasureDragDown(e);
+      return;
+    }
+    if (tool === 'measureperim' || tool === 'measurearea') {
+      handleMeasureVertexDown(e);
       return;
     }
     if (tool === 'stamp') {
@@ -1681,6 +1862,45 @@ function PageCellImpl({
             vectorEffect="non-scaling-stroke"
           />
         </svg>
+      )}
+      {measurePts && measureCursor && (
+        <>
+          <svg className="page-annot-ink-svg page-annot-ink-live" viewBox="0 0 1 1" preserveAspectRatio="none">
+            <polyline
+              points={[...measurePts, measureCursor.x, measureCursor.y]
+                .reduce<string[]>((acc, v, i) => {
+                  if (i % 2 === 0) acc.push(`${v}`);
+                  else acc[acc.length - 1] += `,${v}`;
+                  return acc;
+                }, [])
+                .join(' ')}
+              fill={tool === 'measurearea' ? `${MEASURE_COLOR}22` : 'none'}
+              stroke={MEASURE_COLOR}
+              vectorEffect="non-scaling-stroke"
+            />
+            {tool === 'measurearea' && measurePts.length >= 4 && (
+              <line
+                x1={measureCursor.x}
+                y1={measureCursor.y}
+                x2={measurePts[0]}
+                y2={measurePts[1]}
+                stroke={MEASURE_COLOR}
+                strokeDasharray="0.01 0.008"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </svg>
+          <div
+            className="measure-live-label"
+            data-testid="measure-live-label"
+            style={{
+              left: `${Math.min(measureCursor.x * 100, 82)}%`,
+              top: `${Math.max(measureCursor.y * 100 - 4, 0)}%`,
+            }}
+          >
+            {measureValueFor([...measurePts, measureCursor.x, measureCursor.y])}
+          </div>
+        </>
       )}
       <span className="page-number">{visibleNumber}</span>
     </div>

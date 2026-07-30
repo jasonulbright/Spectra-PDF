@@ -10,6 +10,7 @@ import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
+import type { MeasureScale } from '../../lib/measure';
 import { MAX_ROW_WIDTH, ADD_GHOST_WIDTH } from '../../canvas/layout';
 import { GhostPage } from './DropGhost';
 import { PageCell } from './PageCell';
@@ -33,6 +34,9 @@ interface DocumentRowProps {
   tool: CanvasTool;
   annotationColor?: string;
   stampPreset?: StampPreset | null;
+  measureScale?: MeasureScale;
+  measureLeaveMarkup?: boolean;
+  onMeasureResult?: (text: string) => void;
   // Pending redaction marks keyed by pageId — per-page arrays are built once
   // per marks change (WorkspaceCanvasView useMemo), so PageCell memoization
   // survives unrelated re-renders.
@@ -142,6 +146,9 @@ function DocumentRowImpl({
   tool,
   annotationColor,
   stampPreset,
+  measureScale,
+  measureLeaveMarkup,
+  onMeasureResult,
   redactionMarksByPage,
   editImagesByPage,
   editVectorsByPage,
@@ -224,6 +231,9 @@ function DocumentRowImpl({
         tool={tool}
         annotationColor={annotationColor}
         stampPreset={stampPreset}
+        measureScale={measureScale}
+        measureLeaveMarkup={measureLeaveMarkup}
+        onMeasureResult={onMeasureResult}
         redactionMarks={redactionMarksByPage.get(page.id)}
         editImages={editImagesByPage.get(page.id)}
         editVectors={editVectorsByPage.get(page.id)}
