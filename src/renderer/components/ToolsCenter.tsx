@@ -87,6 +87,7 @@ export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = 
   pagebox: 'pagebox',
   pagelabels: 'pagelabels',
   attachments: 'attachments',
+  portfolio: 'portfolio',
   layers: 'layers',
   accessibility: 'accessibility',
   preflight: 'preflight',

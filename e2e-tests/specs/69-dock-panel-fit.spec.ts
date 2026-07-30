@@ -21,7 +21,7 @@ const OPS = [
   'encrypt', 'decrypt',
   'extract_text', 'watermark', 'forms', 'compare', 'signatures',
   'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels',
-  'attachments', 'layers', 'accessibility',
+  'attachments', 'portfolio', 'layers', 'accessibility',
   'comments', 'preflight', 'links', 'tags', 'readingorder',
 ];
 

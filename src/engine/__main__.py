@@ -50,6 +50,13 @@ from engine.attachments import (
     list_attachments,
     remove_attachment,
 )
+from engine.portfolio import (
+    create_portfolio,
+    extract_member_to_dir,
+    get_portfolio,
+    make_portfolio,
+    update_portfolio_member,
+)
 from engine.metadata import get_metadata, set_metadata, strip_metadata
 from engine.reversion import get_pdf_version, set_pdf_version
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
@@ -129,6 +136,11 @@ def main() -> None:
     server.register("add_attachment", add_attachment)
     server.register("extract_attachment", extract_attachment)
     server.register("remove_attachment", remove_attachment)
+    server.register("get_portfolio", get_portfolio)
+    server.register("create_portfolio", create_portfolio)
+    server.register("make_portfolio", make_portfolio)
+    server.register("update_portfolio_member", update_portfolio_member)
+    server.register("extract_member_to_dir", extract_member_to_dir)
     server.register("list_layers", list_layers)
     server.register("set_layer_visibility", set_layer_visibility)
     server.register("check_accessibility", check_accessibility)
