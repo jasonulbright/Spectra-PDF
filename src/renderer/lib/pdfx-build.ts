@@ -4,6 +4,7 @@ import { MANIFEST_NAME, PDFX_VERSION } from './pdfx-format';
 import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from './pdfx-format';
 import { carryAcroForm, prepareSourceForms } from './acroform-carry';
 import type { FormContribution } from './acroform-carry';
+import { carryEmbeddedFiles } from './embedded-files-carry';
 
 function applyRotation(copied: import('pdf-lib').PDFPage, page: ExportPage): void {
   if (!page.rotation) return;
@@ -546,22 +547,34 @@ async function assemblePages(output: PDFDocument, pages: ExportPage[]): Promise<
   carryAcroForm(output, contributions);
 }
 
-export async function buildPdf(pages: ExportPage[]): Promise<Uint8Array> {
+export async function buildPdf(pages: ExportPage[], ownBytes?: Uint8Array): Promise<Uint8Array> {
   // A zero-page PDF is invalid; pdf-lib would happily save one. buildPdfx
   // skips empty documents for the same reason.
   if (pages.length === 0) throw new Error('buildPdf: cannot build a PDF with no pages');
   const output = await PDFDocument.create();
   await assemblePages(output, pages);
+  // Document-level catalog trees (/Names /EmbeddedFiles, /Collection) are not
+  // page subtrees — without this carry a committed page edit deleted every
+  // attachment (embedded-files-carry.ts).
+  if (ownBytes) await carryEmbeddedFiles(output, ownBytes);
   output.setProducer(`PDFX ${PDFX_VERSION}`);
   return output.save();
 }
 
-export async function buildPdfx(documents: ExportDocument[], title: string): Promise<Uint8Array> {
+export async function buildPdfx(
+  documents: ExportDocument[],
+  title: string,
+  ownBytes?: Uint8Array,
+): Promise<Uint8Array> {
   const output = await PDFDocument.create();
   const manifest: PdfxManifest = { pdfx: PDFX_VERSION, title, documents: [] };
 
   const nonEmpty = documents.filter((doc) => doc.pages.length > 0);
   await assemblePages(output, nonEmpty.flatMap((doc) => doc.pages));
+  // Carry BEFORE the manifest attach: pdf-lib's save-time embed appends to an
+  // existing tree, so the manifest and carried members coexist (pinned by
+  // embedded-files-carry.test.ts's pdfx leg).
+  if (ownBytes) await carryEmbeddedFiles(output, ownBytes);
   for (const doc of nonEmpty) {
     manifest.documents.push({ name: doc.name, pages: doc.pages.length });
   }

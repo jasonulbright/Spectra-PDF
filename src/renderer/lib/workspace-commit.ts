@@ -46,6 +46,11 @@ export interface CommitFilePlan {
   // reindex (lib/durable-identity.ts).
   authoredPageIds: string[];
   authoredDocuments: { id: string; name: string }[];
+  // The file's own PRIOR bytes — the carry source for document-level catalog
+  // trees (/Names /EmbeddedFiles, /Collection) that pdf-lib's page copies
+  // leave behind (embedded-files-carry.ts). Own bytes only: pages inserted
+  // from another document must not import that document's attachments.
+  ownBytes: Uint8Array;
 }
 
 function toBytes(buffer: PdfBuffer): Uint8Array {
@@ -129,6 +134,7 @@ export function planCommit(
       pageCount,
       authoredPageIds: docs.flatMap((d) => d.pages.map((p) => p.id)),
       authoredDocuments: docs.map((d) => ({ id: d.id, name: d.name })),
+      ownBytes: toBytes(f.buffer),
     });
   }
   return plans;
@@ -136,8 +142,8 @@ export function planCommit(
 
 export async function buildCommitBytes(plan: CommitFilePlan): Promise<Uint8Array> {
   return plan.useManifest
-    ? buildPdfx(plan.documents, plan.title)
-    : buildPdf(plan.documents[0].pages);
+    ? buildPdfx(plan.documents, plan.title, plan.ownBytes)
+    : buildPdf(plan.documents[0].pages, plan.ownBytes);
 }
 
 interface CommitDeps {
