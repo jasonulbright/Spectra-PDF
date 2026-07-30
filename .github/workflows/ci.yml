@@ -146,10 +146,31 @@ jobs:
     # rule, written after the last stale-pin e2e breakage).
     # The full 39-spec suite remains the release gate, run locally on the
     # rebuilt binary; its green is recorded per milestone in the punchlist.
-    # RE-ENABLED 2026-07-29 as a bounded experiment. #5640 closed AS BY DESIGN
-    # (no fix was ever coming — see the HKLM step below), and it revealed a
-    # config channel that SURVIVES elevation. If the pre-flight step fails,
-    # restore `if: false` and record the outcome; do not leave a red job.
+    #
+    # EXPERIMENT RUN AND FAILED, 2026-07-30. Correcting the note above first:
+    # #5640 is CLOSED AS BY DESIGN, so there is NO upstream fix to wait for and
+    # the old "re-enable once the fix ships" plan was waiting on nothing. v150
+    # deliberately drops the user-writable config channels (WEBVIEW2_* env vars
+    # and HKCU policy) for an elevated host, and Microsoft named HKLM policy as
+    # a surviving channel.
+    #
+    # We tried it. The policy applied correctly (the step below echoed
+    # AdditionalBrowserArguments = --remote-debugging-port=9222 back), and the
+    # session STILL failed `DevToolsActivePort file doesn't exist`. So HKLM
+    # alone is not sufficient for THIS chain.
+    #
+    # Likely why, and why the remaining channel probably cannot close it either
+    # (reasoning, NOT verified): msedgedriver also passes the profile location
+    # via WEBVIEW2_USER_DATA_FOLDER — the same channel class that gets dropped —
+    # so even with debugging enabled by policy, the webview writes
+    # DevToolsActivePort into its default profile while the driver watches the
+    # folder it intended. Setting args from app code would not fix that half.
+    #
+    # Realistic options if this is ever revisited: a SELF-HOSTED runner running
+    # as a normal user (our local suite proves the stack is fine non-elevated),
+    # or leave the local 79-spec suite as the release gate, which is the
+    # status quo. Do NOT pin a Fixed Version 149 runtime (never-pin rule).
+    if: false
     runs-on: windows-latest
     # The job cap is a backstop, not the failure detector — the pre-flight
     # step below is what catches "no session can be created at all" (runner
