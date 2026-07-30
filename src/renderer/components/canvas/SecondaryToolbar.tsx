@@ -5,6 +5,7 @@ import { toolById } from '../../commands/tools';
 import type { CanvasTool } from '../../state/types';
 import { ANNOTATION_PALETTE, STAMP_PRESETS } from './PageCell';
 import type { StampPreset } from './PageCell';
+import { MEASURE_UNITS, type MeasureScale, type MeasureUnit } from '../../lib/measure';
 
 // The secondary toolbar (§ 3.1): "a contextual strip that appears while a tool
 // mode is active, hosting that tool's actions". It sits at the top of the
@@ -37,6 +38,14 @@ export interface SecondaryToolbarProps {
   /** Stamp text preset; null = the default stamp. */
   stampPreset: StampPreset | null;
   onSetStampPreset: (preset: StampPreset | null) => void;
+  /** Measure (parity map § 2): the scale ratio the readouts apply, whether a
+   * finished measurement lands as an ink markup, and the latest value —
+   * mode options in the stamp-preset sense (props, not commands). */
+  measureScale: MeasureScale;
+  onSetMeasureScale: (scale: MeasureScale) => void;
+  measureLeaveMarkup: boolean;
+  onToggleMeasureLeaveMarkup: () => void;
+  measureResult: string | null;
   /** Edit tool (7.1): whether an image is selected, and its actions — mode
    * options in the stamp-preset sense (props+callbacks, not commands: they
    * act on transient canvas selection the registry can't see). */
@@ -77,6 +86,11 @@ export function SecondaryToolbar({
   onSetToolColor,
   stampPreset,
   onSetStampPreset,
+  measureScale,
+  onSetMeasureScale,
+  measureLeaveMarkup,
+  onToggleMeasureLeaveMarkup,
+  measureResult,
   editHasSelection,
   editSelectionKind,
   editTextEditable,
@@ -147,6 +161,76 @@ export function SecondaryToolbar({
 
       {/* Mode OPTIONS — they configure the armed mode, so they belong to the
           tool and move here from the floating cluster. */}
+      {owner.id === 'measure' && (
+        <div className="secondary-toolbar-opts" role="group" aria-label="Measure options">
+          <span className="secondary-toolbar-hint">Scale</span>
+          <input
+            type="number"
+            min={0}
+            step="any"
+            value={measureScale.from}
+            data-testid="measure-scale-from"
+            aria-label="Scale: paper amount"
+            className="measure-scale-input"
+            onChange={(e) =>
+              onSetMeasureScale({ ...measureScale, from: parseFloat(e.target.value) || 0 })
+            }
+          />
+          <select
+            value={measureScale.fromUnit}
+            data-testid="measure-scale-from-unit"
+            aria-label="Scale: paper unit"
+            className="measure-scale-select"
+            onChange={(e) =>
+              onSetMeasureScale({ ...measureScale, fromUnit: e.target.value as MeasureUnit })
+            }
+          >
+            {MEASURE_UNITS.map((u) => (
+              <option key={u} value={u}>{u}</option>
+            ))}
+          </select>
+          <span className="secondary-toolbar-hint">=</span>
+          <input
+            type="number"
+            min={0}
+            step="any"
+            value={measureScale.to}
+            data-testid="measure-scale-to"
+            aria-label="Scale: real-world amount"
+            className="measure-scale-input"
+            onChange={(e) =>
+              onSetMeasureScale({ ...measureScale, to: parseFloat(e.target.value) || 0 })
+            }
+          />
+          <select
+            value={measureScale.toUnit}
+            data-testid="measure-scale-to-unit"
+            aria-label="Scale: real-world unit"
+            className="measure-scale-select"
+            onChange={(e) =>
+              onSetMeasureScale({ ...measureScale, toUnit: e.target.value as MeasureUnit })
+            }
+          >
+            {MEASURE_UNITS.map((u) => (
+              <option key={u} value={u}>{u}</option>
+            ))}
+          </select>
+          <label className="secondary-toolbar-hint measure-leave-label">
+            <input
+              type="checkbox"
+              checked={measureLeaveMarkup}
+              data-testid="measure-leave-markup"
+              onChange={onToggleMeasureLeaveMarkup}
+            />
+            Leave markup
+          </label>
+          {measureResult && (
+            <span className="secondary-toolbar-hint measure-result" data-testid="measure-result" aria-live="polite">
+              {measureResult}
+            </span>
+          )}
+        </div>
+      )}
       {owner.id === 'edit' && (
         <div className="secondary-toolbar-opts" role="group" aria-label="Image actions">
           {!editHasSelection && !editBusy && !editNotice && (
