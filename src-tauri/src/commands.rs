@@ -627,6 +627,11 @@ pub async fn save_as(working_path: String, dest_path: String) -> Result<(), Stri
 // ── App info ──────────────────────────────────────────────────────────────
 
 #[tauri::command]
+pub async fn get_tesseract_path(app: AppHandle) -> Result<String, String> {
+    Ok(engine::get_tesseract_path(&app))
+}
+
+#[tauri::command]
 pub async fn get_gs_path(app: AppHandle) -> Result<String, String> {
     Ok(engine::get_gs_path(&app))
 }

@@ -241,6 +241,8 @@ export interface PrinterList {
 
 export const app = {
   getGsPath: () => invoke<string>('get_gs_path'),
+  /** The vendored native Tesseract. One recognizer for every surface. */
+  getTesseractPath: () => invoke<string>('get_tesseract_path'),
   /** The bundled (or system-fallback) LibreOffice soffice path for O1 export.
    *  '' when none is found — the engine then refuses with a clear message. */
   getSofficePath: () => invoke<string>('get_soffice_path'),

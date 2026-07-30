@@ -3,8 +3,10 @@
 // invalidates a file's cached text/OCR whenever its bytes change underneath
 // (commit, whole-file op, undo, OCR-apply itself) — the same invalidation
 // signal redaction marks and signature placements key on.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createSearchEngine, type SearchEngine, type SearchResult } from './engine';
+import { useEngine } from '../hooks/useEngine';
+import { recognizePage } from '../lib/ocr-recognize';
 import type { SearchOptions } from './normalize';
 import { DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import type { OcrWord } from '../ocr/types';
@@ -41,6 +43,21 @@ export function useSearchIndex(
   const docsRef = useRef(docs);
   docsRef.current = docs;
 
+  // Recognition through the ENGINE (native Tesseract) — the app's one
+  // recognizer, shared with the CLI and every scheduled run. Behind a ref so
+  // the engine is constructed once while still calling the current bridge.
+  //
+  // `callRaw`, not `call`: the retired WASM recognizer rasterised the in-memory
+  // buffer and ran no commit gate, and the working copy's bytes equal that
+  // buffer until a commit. Gating here would side-effect-commit the user's
+  // pending page edits during a BACKGROUND index.
+  const { callRaw } = useEngine();
+  const recognizeRef = useRef<
+    (path: string, pageIndex: number, lang: string) => Promise<{ text: string; words: OcrWord[] }>
+  >(null!);
+  recognizeRef.current = (path, pageIndex, lang) =>
+    recognizePage(callRaw, path, pageIndex, lang);
+
   const engineRef = useRef<SearchEngine | null>(null);
   if (!engineRef.current) {
     engineRef.current = createSearchEngine({
@@ -50,6 +67,7 @@ export function useSearchIndex(
         setHasScanned(scanned);
       },
       getDocs: () => docsRef.current,
+      recognize: (path, pageIndex, lang) => recognizeRef.current(path, pageIndex, lang),
     });
   }
   const engine = engineRef.current;
@@ -70,9 +88,18 @@ export function useSearchIndex(
     }
   }, [files, engine]);
 
+  // sourceDocId IS the files-map key, so the working-copy path for a page's
+  // source file is a direct lookup — no new plumbing, and it is what the engine
+  // recognizer reads.
+  const workingPaths = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [key, f] of files) map.set(key, f.workingPath);
+    return map;
+  }, [files]);
+
   useEffect(() => {
-    engine.reconcile(docs, proxies);
-  }, [docs, proxies, engine]);
+    engine.reconcile(docs, proxies, workingPaths);
+  }, [docs, proxies, workingPaths, engine]);
 
   useEffect(() => {
     return () => {

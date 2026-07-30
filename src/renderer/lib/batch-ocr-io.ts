@@ -8,10 +8,14 @@ import { extractPageText } from '../search/extract';
 import { batch } from './tauri-bridge';
 import type { BatchIo, BatchPdfDoc } from './batch-ocr';
 import type { OcrApplyPage } from './ocr-apply';
-import type { OcrClient } from '../ocr/ocr-client';
+import type { OcrResult } from '../ocr/types';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
-function wrapDoc(proxy: PDFDocumentProxy, client: OcrClient): BatchPdfDoc {
+function wrapDoc(
+  proxy: PDFDocumentProxy,
+  path: string,
+  recognizePage: (path: string, pageIndex: number) => Promise<OcrResult>,
+): BatchPdfDoc {
   return {
     numPages: proxy.numPages,
     async needsOcr(pageIndex) {
@@ -24,8 +28,11 @@ function wrapDoc(proxy: PDFDocumentProxy, client: OcrClient): BatchPdfDoc {
       const [vx0, vy0, vx1, vy1] = p.view;
       return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
     },
-    recognize(pageIndex, jobId) {
-      return client.recognize(proxy, pageIndex, jobId);
+    recognize(pageIndex) {
+      // Native Tesseract via the engine — the app's ONE recognizer. The old
+      // WASM path took the pdf.js proxy; the engine reads the file, which is
+      // exactly what lets the same code run headlessly in the CLI.
+      return recognizePage(path, pageIndex);
     },
     async destroy() {
       await proxy.loadingTask.destroy();
@@ -34,7 +41,6 @@ function wrapDoc(proxy: PDFDocumentProxy, client: OcrClient): BatchPdfDoc {
 }
 
 export function createBatchIo(
-  client: OcrClient,
   engine: {
     applyOcrLayer: (source: string, output: string, pages: OcrApplyPage[]) => Promise<void>;
     /** Tier-1 structural repair (`engine/repair.py`) — a pikepdf/QPDF rewrite,
@@ -42,13 +48,15 @@ export function createBatchIo(
      * NON-DESTRUCTIVE: annotations, bookmarks and metadata survive. An
      * unattended batch must not quietly downgrade a document to make it open. */
     repair: (source: string, output: string) => Promise<void>;
+    /** Recognise one page of `path` (0-based index). */
+    recognize: (path: string, pageIndex: number) => Promise<OcrResult>;
   },
 ): BatchIo {
   return {
     async load(abs) {
       const bytes = await batch.readFileBuffer(abs);
       const proxy = await loadDocument(bytes);
-      return wrapDoc(proxy, client);
+      return wrapDoc(proxy, abs, engine.recognize);
     },
     applyOcrLayer: engine.applyOcrLayer,
     copyFile: (src, dest) => batch.copyFile(src, dest),
