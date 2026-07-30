@@ -233,6 +233,26 @@ export function registerPortfolioHandlers(handlers: PortfolioHandlers | null): v
 }
 
 /**
+ * Guided-actions bridge (slice 2): a TERMINAL step's output is a NATIVE save
+ * dialog — e2e injects the path and any ask-at-run values, then the REAL
+ * runner executes (same executeRun the Run button uses). Panel must be
+ * mounted.
+ */
+export interface GuidedActionsHandlers {
+  runWithOutput: (
+    actionId: string,
+    values: Record<number, Record<string, string | number>>,
+    output: string,
+  ) => Promise<void>;
+}
+
+let guidedActionsHandlers: GuidedActionsHandlers | null = null;
+
+export function registerGuidedActionsHandlers(handlers: GuidedActionsHandlers | null): void {
+  guidedActionsHandlers = handlers;
+}
+
+/**
  * Edit ▸ Images (7.1): placements live in transformed canvas space and the
  * Replace/Extract actions pop NATIVE dialogs — both undrivable by WebDriver.
  * The canvas registers its real selection + action paths; `act`'s opts
@@ -788,6 +808,13 @@ export interface TestHarness {
     out: string,
     opts?: { format?: string; dpi?: number; pages?: string; gray?: boolean },
   ) => Promise<unknown>;
+  /** Guided-actions run with an injected terminal output path (panel must
+   * be mounted; values keyed by step index carry ask-at-run params). */
+  guidedRunWithOutput: (
+    actionId: string,
+    values: Record<number, Record<string, string | number>>,
+    output: string,
+  ) => Promise<void>;
   /** Portfolio flows with injected paths (panel must be mounted). */
   portfolioCreateRun: (output: string, sources: string[], title?: string) => Promise<unknown>;
   portfolioAddRun: (source: string) => Promise<unknown>;
@@ -1411,6 +1438,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return exportImages.run(out, opts);
+    },
+    guidedRunWithOutput: async (actionId, values, output) => {
+      if (!guidedActionsHandlers) {
+        const msg = 'guidedRunWithOutput: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return guidedActionsHandlers.runWithOutput(actionId, values, output);
     },
     portfolioCreateRun: async (output, sources, title) => {
       if (!portfolioHandlers) {
