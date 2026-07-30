@@ -35,8 +35,21 @@ import re
 # flatten them to spaces first (the FC1/S4 gauntlet class: a stray control char
 # in otherwise-renderable text must not crash/refuse the whole value). Covers
 # C0 controls, DEL, and the Unicode LINE/PARAGRAPH separators.
-_CONTROL_ALL_RE = re.compile("[\x00-\x1f\x7f  ]")
-_CONTROL_KEEP_NL_RE = re.compile("[\x00-\x09\x0b-\x1f\x7f  ]")  # keeps \n
+#
+# The separators are ESCAPES on purpose. They were LITERAL U+2028/U+2029
+# here until 2026-07-29: invisible in an editor, indistinguishable from
+# spaces, and one whitespace-normalising edit away from vanishing with no
+# visible diff. The compiled character classes are unchanged -- verified
+# identical across U+0000..U+2FFF when the escapes went in.
+#
+# CodeQL reports py/overly-large-range on the second range. It is a FALSE
+# POSITIVE, and the range is exact rather than sloppy: C0 runs \x00-\x1f, so
+# excluding ONLY \x0a (newline) necessarily leaves \x00-\x09 plus \x0b-\x1f.
+# CR (\x0d) is inside that range deliberately -- flatten_control_chars
+# below normalises CRLF and CR to LF BEFORE substituting, so no CR ever
+# reaches the regex and keep_newline genuinely preserves newlines.
+_CONTROL_ALL_RE = re.compile("[\x00-\x1f\x7f\u2028\u2029]")
+_CONTROL_KEEP_NL_RE = re.compile("[\x00-\x09\x0b-\x1f\x7f\u2028\u2029]")  # keeps \n
 
 
 def flatten_control_chars(text: str, keep_newline: bool = False) -> str:
