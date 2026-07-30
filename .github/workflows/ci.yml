@@ -146,8 +146,10 @@ jobs:
     # rule, written after the last stale-pin e2e breakage).
     # The full 39-spec suite remains the release gate, run locally on the
     # rebuilt binary; its green is recorded per milestone in the punchlist.
-    # Re-enable by deleting the `if:` line below once #5640's fix ships.
-    if: false
+    # RE-ENABLED 2026-07-29 as a bounded experiment. #5640 closed AS BY DESIGN
+    # (no fix was ever coming — see the HKLM step below), and it revealed a
+    # config channel that SURVIVES elevation. If the pre-flight step fails,
+    # restore `if: false` and record the outcome; do not leave a red job.
     runs-on: windows-latest
     # The job cap is a backstop, not the failure detector — the pre-flight
     # step below is what catches "no session can be created at all" (runner
@@ -191,6 +193,18 @@ jobs:
         # a stub. bundle-ghostscript.ps1 downloads + checksum-verifies + extracts
         # with 7-Zip (preinstalled on windows runners).
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1
+
+      - name: Vendor native Tesseract + stage OCR models
+        # Phase 12 made recognition native and engine-side, so 14-ocr-find and
+        # 40-batch-ocr now need the real tesseract.exe and real traineddata —
+        # a stub would fail them for a reason that has nothing to do with the
+        # WebView2 experiment this job is testing. Staging MUST follow the
+        # vendoring: the script supplies tessdata/configs (TSV word-box output)
+        # and osd, which sync-ocr-assets.mjs then adds the 47 models beside.
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
+          node scripts/sync-ocr-assets.mjs
+        shell: pwsh
         shell: pwsh
 
       - name: Build Tauri binary (debug, frontend embedded, no installer)
@@ -216,27 +230,50 @@ jobs:
           echo "$cargoBin" >> $env:GITHUB_PATH
         shell: pwsh
 
-      # The suite runs DE-ELEVATED (Medium integrity, via a -RunLevel Limited
-      # scheduled task — see e2e-tests/ci/run-deelevated.ps1). CI runners are
-      # elevated, and WebView2's DevTools endpoint is gated for elevated hosts
-      # on current runtimes (the v150 trusted-origin check, upstream
-      # MicrosoftEdge/WebView2Feedback#5640) — every WebDriver session fails
-      # `DevToolsActivePort file doesn't exist` from an elevated chain, while
-      # the app itself runs fine (proven by an on-runner probe: bare launch
-      # healthy, raw msedgedriver session fails identically without
-      # tauri-driver in the loop). De-elevating is version-agnostic, keeps
-      # working after Microsoft's fix, respects the no-runtime-pins rule (the
-      # only upstream-suggested workaround is a Fixed Version 149 pin), and
-      # matches how end users actually run the app.
+      # WebView2 Runtime 150 deliberately IGNORES the user-writable config
+      # channels when the host process is elevated (a local privilege-escalation
+      # hardening): WEBVIEW2_* environment variables and HKCU policy are both
+      # dropped. That is our failure exactly — msedgedriver passes
+      # --remote-debugging-port through WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS,
+      # which works in a normal shell and is silently discarded on an elevated
+      # runner, so no DevToolsActivePort file is ever written and every session
+      # fails.
+      #
+      # Upstream MicrosoftEdge/WebView2Feedback#5640 is CLOSED AS BY DESIGN —
+      # there is no fix to wait for. Microsoft's own guidance names the two
+      # channels that survive elevation, and HKLM policy is the one available to
+      # a CI runner (runners are elevated, so we can write it).
+      #
+      # De-elevation, the previous approach, is DEAD and proven so: both a
+      # -RunLevel Limited scheduled task and `runas /trustlevel` executed at
+      # High integrity on this image (in-child TOKEN-IL banners), because the
+      # image runs UAC-disabled and grants no path down.
+      #
+      # This is an EXPERIMENT. The unknown is the port handshake: msedgedriver
+      # chooses a port itself and then reads the actual one back out of the
+      # DevToolsActivePort file, so a fixed policy port may or may not satisfy
+      # it. The pre-flight below is deliberately one spec, so a failure costs
+      # minutes and names itself instead of grinding the whole suite.
+      - name: Enable DevTools via HKLM policy (survives elevation)
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2'
+          New-Item -Path $key -Force | Out-Null
+          Set-ItemProperty -Path $key -Name 'AdditionalBrowserArguments' `
+            -Value '--remote-debugging-port=9222' -Type String
+          Get-ItemProperty -Path $key | Select-Object AdditionalBrowserArguments
+
       - name: Session pre-flight (fail fast on runner-image drift)
         timeout-minutes: 12
         shell: pwsh
-        run: ./e2e-tests/ci/run-deelevated.ps1 -WorkingDirectory e2e-tests -TimeoutMinutes 10 -Command 'npx wdio run wdio.conf.ts --spec specs/01-boot.spec.ts'
+        working-directory: e2e-tests
+        run: npx wdio run wdio.conf.ts --spec specs/01-boot.spec.ts
 
       - name: Run WebdriverIO suite
         timeout-minutes: 40
         shell: pwsh
-        run: ./e2e-tests/ci/run-deelevated.ps1 -WorkingDirectory e2e-tests -TimeoutMinutes 38 -Command 'npm test'
+        working-directory: e2e-tests
+        run: npm test
 
       - name: Dump WebView2 crash diagnostics
         if: failure()
