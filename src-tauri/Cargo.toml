@@ -14,8 +14,20 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# TRIAL (2026-07-30): an in-app W3C WebDriver server, so e2e needs no
+# msedgedriver, no tauri-driver, and no WebView2 remote-debugging port -- which
+# is the only way past the v150 elevated-host hardening that keeps CI's e2e job
+# disabled (see .github/workflows/ci.yml and DECISIONS).
+#
+# A FEATURE, not `cfg(debug_assertions)`: this is excluded from a release build
+# at COMPILE time, so the automation server cannot ship even by accident. The
+# upstream README is explicit -- "Never include it in production builds."
+webdriver = ["tauri-plugin-webdriver"]
+
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-webdriver = { version = "0.2", optional = true }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
