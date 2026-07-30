@@ -2709,7 +2709,7 @@ dependencies = [
 
 [[package]]
 name = "openpdfstudio"
-version = "2.8.5"
+version = "2.8.6"
 dependencies = [
  "clap",
  "dunce",

@@ -1,5 +1,81 @@
 # Changelog
 
+## 2.8.6 — Portfolios, measuring, stamps of your own, and guided actions
+
+Four new capabilities land at once, a long-standing silent bug is fixed, and
+sequences of everyday jobs can now run themselves.
+
+### PDF Portfolios
+- **Open a portfolio and see its files.** A portfolio opens on its cover
+  sheet with the file list alongside — open a PDF inside it as its own tab,
+  save any file out, replace a file's contents, add and remove files.
+- **Create portfolios** from any files on disk, or convert the open document
+  into one; its attachments become the portfolio's files.
+
+### Measure
+- **Distance, perimeter, and area on the page** — drag for a distance,
+  click corners for a perimeter or an area, and read the value as you go.
+- **Real-world scale** — set "1 in = 2 ft" and every readout follows,
+  including areas. A finished measurement stays on the page as a note-carrying
+  markup you can delete like any comment.
+
+### Stamps of your own
+- **Make your own text stamps** — any label, any colour, saved for reuse.
+- **Dynamic stamps** — write `{date}`, `{time}`, or `{name}` in a stamp's
+  label and it fills in when you place it. Your name comes from the new
+  Identity name setting.
+- **Image stamps** — turn any picture into a stamp; it lands undistorted
+  and travels with the document like any other stamp.
+
+### Guided Actions
+- **Save a sequence of steps — compress, watermark, page numbers, OCR,
+  strip metadata — and run it on a document with one click.** Steps run in
+  order, each one undoable, and a failed step stops the run with its reason.
+- **Ask-at-run** — mark any setting to be asked for each run instead of
+  saved (a watermark's text, say). Passwords are never saved at all: an
+  encrypt step always asks, and writes a new locked file so the document
+  you're working on stays open and readable.
+
+### Split view
+- **Window ▸ Split** shows two independently scrolling and zooming views of
+  the same document; click a pane to make it the one your commands and page
+  readout follow.
+
+### Fixed
+- **Attachments no longer vanish when page edits are applied.** Applying any
+  page change (a rotation was enough) silently dropped every attached file a
+  document carried — and would have stripped a portfolio to its cover sheet.
+  Both now survive every page edit.
+- **In-place command-line operations work.** `compress`, `grayscale`,
+  `pdf-a`, and the metadata commands silently failed when the output path
+  equalled the input; all now stage safely and replace the file atomically.
+
+### Command line
+- New arms: `portfolio-info` / `portfolio-create` / `portfolio-make` /
+  `portfolio-update`, and `ocr-file` to make a single PDF searchable.
+
+## 2.8.5 — Batch OCR grows up
+
+Everything the first outside feature request asked for, built around one
+native recognizer that serves the app, the command line, and scheduled runs
+alike.
+
+- **47 recognition languages** — Japanese, Chinese, Korean, Arabic, Hebrew,
+  Russian, Greek, Thai, Vietnamese, and the full European set, in the app
+  and in batch runs.
+- **A log for every batch run** — kept with a retention you control, in a
+  folder you can choose (essential when scheduled runs happen under a
+  service account).
+- **Moved and error folders** — processed originals can file themselves
+  away, with verify-before-move so nothing is moved unless its output is
+  sound; unreadable files can be repaired automatically and retried.
+- **Scheduled batch runs** — create, list, run-now, enable, disable, and
+  delete schedules from Tools ▸ Scheduled Batch Runs. Runs fire even with
+  the app closed, and can run under alternate credentials or a managed
+  service account.
+- **One recognizer** — recognition now runs natively for speed and works
+  under service accounts; the in-browser recognizer is gone.
+
 ## 2.8.4 — Tools you can find
 
 The tool pane and search both got the pass they needed after living with the
