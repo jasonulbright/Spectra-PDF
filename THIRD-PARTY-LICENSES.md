@@ -113,17 +113,36 @@ License text shipped at: `resources/fonts/LICENSE-Libertinus-OFL.txt` (vendored
 hash-pinned from the same pinned release as the faces; upstream copy:
 <https://github.com/alerque/libertinus/blob/master/OFL.txt>)
 
-## OCR — tesseract.js + language data
+## OCR — Tesseract + language data
 
-- **tesseract.js** and **tesseract.js-core** — Apache-2.0 — <https://github.com/naptha/tesseract.js>
-- **Tesseract traineddata** (the `@tesseract.js-data/<lang>` packages, `4.0.0_best_int`
-  models) — **Apache-2.0** — trained models from the Tesseract OCR project
-  (<https://github.com/tesseract-ocr/tessdata>).
+- **Tesseract OCR** — **Apache-2.0** — <https://github.com/tesseract-ocr/tesseract>
+  - Version 5.4.0.20240606, the UB Mannheim Windows build that the upstream
+    project points Windows users to (upstream ships no Windows binary).
+  - **Bundled at:** `resources/tesseract/` (vendored by
+    `scripts/bundle-tesseract.ps1`: pinned version, SHA-256 verified, extracted
+    from the NSIS installer with 7-Zip and never executed as an installer).
+  - **License text shipped at:** `resources/tesseract/LICENSE-Tesseract.txt`
+  - Includes **Leptonica** (BSD-2-Clause) and the supporting imaging libraries
+    the upstream build links (libtiff, libpng, libjpeg-turbo, zlib, libwebp,
+    OpenJPEG, giflib, Cairo, ICU and others), redistributed unmodified as
+    shipped by that build.
+- **Tesseract traineddata** (the `@tesseract.js-data/<lang>` packages,
+  `4.0.0_best_int` models) — **Apache-2.0** — trained models from the Tesseract
+  OCR project (<https://github.com/tesseract-ocr/tessdata>). Only the DATA
+  packages are used; the tesseract.js WASM engine itself is no longer shipped.
 
-The OCR worker, WASM cores, and the language models for all vendored recognition
-languages (P1 — see `src/renderer/ocr/languages.ts` for the list) are staged into
-the app's `public/ocr` resources by `scripts/sync-ocr-assets.mjs` and served from
-the app's own origin — fully offline, no CDN fetch ever (enterprise/air-gapped).
+Open PDF Studio invokes `tesseract.exe` as an independent program (mere
+aggregation) — it is unmodified upstream Tesseract. The language models for all
+vendored recognition languages (see `src/renderer/ocr/languages.ts` for the
+list) are decompressed into `resources/tesseract/tessdata` by
+`scripts/sync-ocr-assets.mjs`. Recognition is fully offline — no CDN fetch ever,
+no service, no account (enterprise/air-gapped).
+
+Recognition runs in the engine rather than the UI, which is what lets the CLI
+(`openpdfstudio batch-ocr`) and scheduled batch runs recognize with no window
+open. There is exactly one recognizer; the previous in-browser WASM path
+(**tesseract.js** / **tesseract.js-core**, Apache-2.0) was retired in v2.8.5 and
+is no longer distributed.
 
 ## Frontend / runtime libraries
 

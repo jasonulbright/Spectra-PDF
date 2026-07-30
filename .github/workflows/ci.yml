@@ -54,6 +54,7 @@ jobs:
           mkdir -p resources/ghostscript
           mkdir -p resources/fonts
           mkdir -p resources/libreoffice
+          mkdir -p resources/tesseract
         shell: bash
 
       - name: Check Rust compilation
