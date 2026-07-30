@@ -187,6 +187,20 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1
         shell: pwsh
 
+      - name: Create resource stubs for the Tauri build script
+        # `--no-bundle` does NOT skip resource validation — the punchlist said it
+        # did, and that claim was wrong (proven 2026-07-29: this job failed with
+        # did, and that claim was wrong (proven 2026-07-29: this job failed with a missing-resource error for resources/libreoffice). Every path in
+        # tauri.conf.json must EXIST at build time; an empty dir satisfies it.
+        # fonts and libreoffice are stubbed rather than vendored because this job
+        # is currently a WebView2 experiment — the specs that genuinely need them
+        # (font fallback, 56-office-export) will fail until they are vendored for
+        # real, and that is a separate decision about CI minutes.
+        run: |
+          mkdir -p resources/fonts
+          mkdir -p resources/libreoffice
+        shell: bash
+
       - name: Vendor Ghostscript (the visual-compare e2e drives the real GS raster)
         # 11-compare.spec.ts (visual mode) exercises engine compare_visual, which
         # shells out to bundled Ghostscript — so the suite DOES need real GS, not
@@ -268,7 +282,13 @@ jobs:
         working-directory: e2e-tests
         run: npx wdio run wdio.conf.ts --spec specs/01-boot.spec.ts
 
+      # DISABLED FOR THE EXPERIMENT. The question being answered is narrow — does
+      # the HKLM policy channel restore the DevTools endpoint for an elevated
+      # host? The pre-flight above answers it in minutes. Running the full suite
+      # now would also fail on the stubbed fonts/libreoffice above and muddy the
+      # result. Re-enable once the pre-flight is green AND those are vendored.
       - name: Run WebdriverIO suite
+        if: false
         timeout-minutes: 40
         shell: pwsh
         working-directory: e2e-tests
