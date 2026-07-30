@@ -58,11 +58,12 @@ import {
   ringAreaPts2,
   type MeasureScale,
 } from '../../lib/measure';
+import { resolveStampTokens } from '../../lib/stamp-library';
+import { getSettings } from '../../lib/app-settings';
 
 // Measure overlays draw in amber — legible over both white paper and the
 // annotation palette's blues/yellows, and distinct from ink's default.
 const MEASURE_COLOR = '#f59e0b';
-const MEASURE_MODES: readonly CanvasTool[] = ['measuredist', 'measureperim', 'measurearea'];
 
 export interface AnnotationRect {
   x: number;
@@ -74,6 +75,11 @@ export interface AnnotationRect {
 export interface StampPreset {
   label: string;
   color: string;
+  /** Custom IMAGE stamps (parity map § 2): the raster as a data URL plus its
+   * height/width ratio — placement sizes the box so the image lands
+   * undistorted, and the commit embeds it as the /Stamp appearance. */
+  imageData?: string;
+  aspect?: number;
 }
 
 export const STAMP_PRESETS: StampPreset[] = [
@@ -1034,20 +1040,34 @@ function PageCellImpl({
       const rect = e.currentTarget.getBoundingClientRect();
       const cx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       const cy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      // Image stamps size from their own aspect (normalized height = width ×
+      // aspect × the displayed page's width/height ratio, so the image is
+      // undistorted on paper); text stamps keep the fixed footprint.
+      const w = STAMP_W;
+      const h =
+        stampPreset.imageData && stampPreset.aspect
+          ? Math.min(0.6, STAMP_W * stampPreset.aspect * (measDispW / measDispH))
+          : STAMP_H;
       // Built in the DISPLAY frame (the stamp reads upright on the view you
       // placed it on), then stored un-projected like every annotation.
       const placed = toStoredRect({
-        x: Math.max(0, Math.min(1 - STAMP_W, cx - STAMP_W / 2)),
-        y: Math.max(0, Math.min(1 - STAMP_H, cy - STAMP_H / 2)),
-        w: STAMP_W,
-        h: STAMP_H,
+        x: Math.max(0, Math.min(1 - w, cx - w / 2)),
+        y: Math.max(0, Math.min(1 - h, cy - h / 2)),
+        w,
+        h,
       });
+      // Dynamic tokens ({date}/{time}/{name}) resolve AT PLACEMENT — a stamp
+      // records when it was placed; committing later must not re-date it.
+      const label = stampPreset.imageData
+        ? stampPreset.label
+        : resolveStampTokens(stampPreset.label, new Date(), getSettings().identityName);
       onAddAnnotation(docId, page.id, {
         id: crypto.randomUUID(),
         kind: 'stamp',
         ...placed,
         color: annotationColor ?? stampPreset.color,
-        note: stampPreset.label,
+        note: label,
+        ...(stampPreset.imageData ? { imageData: stampPreset.imageData } : {}),
       });
       return;
     }
@@ -1270,7 +1290,9 @@ function PageCellImpl({
                   : a.kind === 'note'
                     ? { backgroundColor: `${a.color}dd`, borderColor: a.color, borderRadius: 2 }
                     : a.kind === 'stamp'
-                      ? { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
+                      ? a.imageData
+                        ? {} // image stamps are the raster alone — no box chrome
+                        : { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
                       : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
             // Select tool: every annotation body is clickable (the properties
             // bar's selection gesture — an object on top of the page, Acrobat's
@@ -1332,7 +1354,16 @@ function PageCellImpl({
               <span className="page-annot-text-body">{a.note}</span>
             )}
             {a.kind === 'stamp' && !pristineImport && (
-              <span className="page-annot-stamp-label">{a.note}</span>
+              a.imageData ? (
+                <img
+                  src={a.imageData}
+                  alt={a.note ?? 'Stamp'}
+                  draggable={false}
+                  className="page-annot-stamp-image"
+                />
+              ) : (
+                <span className="page-annot-stamp-label">{a.note}</span>
+              )
             )}
           </MaybeTurn>
           {editing === a.id ? (

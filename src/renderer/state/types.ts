@@ -91,6 +91,11 @@ export interface PageAnnotation {
   // same space as x/y/w/h (which store the path's bounding box). Re-projected
   // point-by-point alongside the bbox on rotation.
   points?: number[];
+  // stamp only: a custom IMAGE stamp's raster as a data URL (PNG/JPEG,
+  // downscaled at library-import time). Present → the appearance draws the
+  // embedded image instead of the bordered label; `note` still carries the
+  // stamp's display name for the comment sidebar and /Contents.
+  imageData?: string;
   // Present only for annotations imported from a pre-existing PDF object.
   // Never touched after import; edits to x/y/w/h/color/note/points do not
   // update it.
