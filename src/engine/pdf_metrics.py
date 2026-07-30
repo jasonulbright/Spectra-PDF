@@ -28,28 +28,33 @@ HELVETICA_DESCENT_EM = 0.207
 GLYPH_HEIGHT_EM = HELVETICA_ASCENT_EM + HELVETICA_DESCENT_EM  # 0.925
 
 
-import re
-
-# Layout-only characters that are NEVER glyphs — an embedded subset font's
+# Layout-only characters that are NEVER glyphs -- an embedded subset font's
 # coverage check rejects them, so any drawn-text path that embeds a font must
 # flatten them to spaces first (the FC1/S4 gauntlet class: a stray control char
 # in otherwise-renderable text must not crash/refuse the whole value). Covers
-# C0 controls, DEL, and the Unicode LINE/PARAGRAPH separators.
+# C0 controls (0x00-0x1F), DEL (0x7F), and the Unicode LINE/PARAGRAPH
+# separators (0x2028/0x2029).
 #
-# The separators are ESCAPES on purpose. They were LITERAL U+2028/U+2029
-# here until 2026-07-29: invisible in an editor, indistinguishable from
-# spaces, and one whitespace-normalising edit away from vanishing with no
-# visible diff. The compiled character classes are unchanged -- verified
-# identical across U+0000..U+2FFF when the escapes went in.
+# str.translate over EXPLICIT integer codepoints, deliberately -- the third
+# representation this list has had, each retreat forced by a tool: literal
+# U+2028/U+2029 chars were invisible in an editor and one whitespace-
+# normalising edit from vanishing (became regex escapes 2026-07-29), then the
+# regex character RANGES tripped CodeQL's py/overly-large-range on the
+# keeps-newline class (a false positive -- C0 minus 0x0A IS 0x00-0x09 plus
+# 0x0B-0x1F -- but removing the construct beats maintaining the exception).
+# Integer codepoints have neither failure mode. Do not "simplify" this back
+# to a regex or to literal characters. Equivalence with the old regexes was
+# proven over U+0000..U+2FFF when the tables went in (2026-07-30,
+# prove-metrics-equiv.local.py).
 #
-# CodeQL reports py/overly-large-range on the second range. It is a FALSE
-# POSITIVE, and the range is exact rather than sloppy: C0 runs \x00-\x1f, so
-# excluding ONLY \x0a (newline) necessarily leaves \x00-\x09 plus \x0b-\x1f.
-# CR (\x0d) is inside that range deliberately -- flatten_control_chars
-# below normalises CRLF and CR to LF BEFORE substituting, so no CR ever
-# reaches the regex and keep_newline genuinely preserves newlines.
-_CONTROL_ALL_RE = re.compile("[\x00-\x1f\x7f\u2028\u2029]")
-_CONTROL_KEEP_NL_RE = re.compile("[\x00-\x09\x0b-\x1f\x7f\u2028\u2029]")  # keeps \n
+# CR (0x0D) is in the tables deliberately -- flatten_control_chars normalises
+# CRLF and CR to LF BEFORE translating, so no CR ever reaches the table and
+# keep_newline genuinely preserves newlines.
+_FLATTEN_CODEPOINTS = [*range(0x00, 0x20), 0x7F, 0x2028, 0x2029]
+_FLATTEN_ALL_TABLE = str.maketrans({c: " " for c in _FLATTEN_CODEPOINTS})
+_FLATTEN_KEEP_NL_TABLE = str.maketrans(
+    {c: " " for c in _FLATTEN_CODEPOINTS if c != 0x0A}
+)
 
 
 def flatten_control_chars(text: str, keep_newline: bool = False) -> str:
@@ -58,7 +63,7 @@ def flatten_control_chars(text: str, keep_newline: bool = False) -> str:
     `\\n` (after normalising `\\r\\n`/`\\r` → `\\n`) for multi-line wrapping;
     otherwise everything — newlines included — flattens (a single-line stamp)."""
     t = text.replace("\r\n", "\n").replace("\r", "\n")
-    return (_CONTROL_KEEP_NL_RE if keep_newline else _CONTROL_ALL_RE).sub(" ", t)
+    return t.translate(_FLATTEN_KEEP_NL_TABLE if keep_newline else _FLATTEN_ALL_TABLE)
 
 
 def text_width_em(text: str) -> float:
