@@ -72,7 +72,7 @@ from engine.compare import compare_text, compare_visual
 from engine.forms import read_form_fields, fill_form_fields
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
-from engine.batch_ocr import batch_ocr
+from engine.batch_ocr import batch_ocr, ocr_file
 from engine.page_images import (
     add_page_image,
     crop_page_image,
@@ -185,6 +185,7 @@ def main() -> None:
     server.register("apply_ocr_layer", apply_ocr_layer)
     server.register("recognize", recognize)
     server.register("batch_ocr", batch_ocr)
+    server.register("ocr_file", ocr_file)
     server.register("list_page_images", list_page_images)
     server.register("delete_page_image", delete_page_image)
     server.register("replace_page_image", replace_page_image)

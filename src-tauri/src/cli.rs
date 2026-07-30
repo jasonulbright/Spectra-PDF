@@ -75,6 +75,8 @@ pub enum CliCommand {
     PortfolioMake(PortfolioMakeArgs),
     /// Replace a portfolio member's bytes from a file
     PortfolioUpdate(PortfolioUpdateArgs),
+    /// Make ONE file searchable (invisible OCR text layers)
+    OcrFile(OcrFileArgs),
     /// List optional-content layers (JSON)
     LayerList(LayerListArgs),
     /// Show or hide a layer by index
@@ -360,6 +362,18 @@ pub struct AttachListArgs {
 pub struct PortfolioInfoArgs {
     /// Input PDF file
     pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct OcrFileArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file (may equal the input for in-place)
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Tesseract language code (e.g. eng, deu, jpn)
+    #[arg(long, default_value = "eng")]
+    pub language: String,
 }
 
 #[derive(Args)]
@@ -1660,6 +1674,21 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             "get_portfolio",
             json!({ "file": abs(&args.input).to_string_lossy() }),
         ),
+
+        CliCommand::OcrFile(args) => {
+            let gs = resolve_gs();
+            let tesseract = resolve_tesseract();
+            engine.call(
+                "ocr_file",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "language": args.language,
+                    "tesseract_path": tesseract.to_string_lossy(),
+                    "gs_path": gs.to_string_lossy(),
+                }),
+            )
+        }
 
         CliCommand::PortfolioCreate(args) => {
             let sources: Vec<String> = args
