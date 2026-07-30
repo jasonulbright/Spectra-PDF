@@ -65,6 +65,18 @@ jobs:
         # bundle-ghostscript.ps1). No repo variable, no manual setup. To bump the
         # version, edit $Version/$ExpectedSha256 in the script.
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
+
+      - name: Vendor native Tesseract
+        # Phase 12: recognition is native Tesseract as a subprocess (the GUI, the
+        # CLI and every scheduled run share it). Pinned + SHA-256 verified in the
+        # script; extracted from the NSIS installer with 7-Zip, never run.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
+
+      - name: Stage OCR language models
+        # Decompresses the 47 pinned Apache-2.0 models into
+        # resources/tesseract/tessdata. Must run AFTER the vendoring step, which
+        # supplies tessdata/configs (TSV output) and osd.
+        run: node scripts/sync-ocr-assets.mjs
         shell: pwsh
 
       - name: Build, sign, and publish release
