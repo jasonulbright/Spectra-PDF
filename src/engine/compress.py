@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from .acroform import reattach_forms_file
+from .inplace import finish_staged, is_same_file, staging_target
 from .validate import validate_pdf
 
 
@@ -37,6 +38,11 @@ def compress(
 
     input_path = Path(file)
     output_path = Path(output)
+    # In-place: gs must never write the file it is reading — stage beside the
+    # output and rename over it after the form reattach (engine/inplace.py).
+    same_file = is_same_file(file, output)
+    original_size = input_path.stat().st_size
+    gs_target = staging_target(output_path) if same_file else output_path
 
     cmd = [
         gs_path,
@@ -63,7 +69,7 @@ def compress(
         preset = QUALITY_PRESETS.get(quality, "/ebook")
         cmd.append(f"-dPDFSETTINGS={preset}")
 
-    cmd.extend([f"-sOutputFile={str(output_path).replace('%', '%%')}", str(input_path)])  # % = gs template char (distill review)
+    cmd.extend([f"-sOutputFile={str(gs_target).replace('%', '%%')}", str(input_path)])  # % = gs template char (distill review)
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)  # stdin isolation: gs must never inherit the RPC pipe (distill review)
     if result.returncode != 0:
@@ -71,12 +77,15 @@ def compress(
 
     # gs pdfwrite drops /AcroForm and every widget annotation — compressing a
     # filled form would silently destroy it. Transplant the original's fields
-    # back onto the regenerated pages (no-op for non-form files).
-    reattach_forms_file(input_path, output_path)
+    # back onto the regenerated pages (no-op for non-form files). Against the
+    # STAGED file when in-place — the original must still be readable here.
+    reattach_forms_file(input_path, gs_target)
+    if same_file:
+        finish_staged(gs_target, output_path)
 
     return {
         "output": str(output_path),
-        "original_size": input_path.stat().st_size,
+        "original_size": original_size,
         "compressed_size": output_path.stat().st_size,
         "quality": quality,
         "dpi": dpi,

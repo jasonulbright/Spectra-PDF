@@ -15,7 +15,8 @@ from engine.compress import compress
 from engine.pdfa import convert_pdfa
 from engine.encrypt import encrypt, decrypt
 from engine.extract_text import extract_text
-from engine.metadata import get_metadata, set_metadata
+from engine.grayscale import grayscale
+from engine.metadata import get_metadata, set_metadata, strip_metadata
 from engine.printer import FIT_SWITCHES, MAX_COPIES, build_gs_args, parse_page_spec, print_pdf
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
 from engine.reversion import get_pdf_version, set_pdf_version
@@ -3052,3 +3053,50 @@ class TestRedactionLeaks:
         self._shading_pdf(src, clipped=True)
         redact(src, out, [{"page": 1, "rect": [0, 0, 20, 20]}])
         assert "sh" not in self._ops(out)
+
+
+# -- In-place outputs (engine/inplace.py) ----------------------------------
+# output == file support: pikepdf cannot save over its own open input, and
+# Ghostscript must never write the file it is still reading. The GUI panels
+# always save to NEW files, so the in-place arms of the CLI were silently
+# broken until the guided-actions runner (which works in place) hit it.
+
+
+class TestInPlaceOutputs:
+    def test_strip_metadata_in_place(self, tmp_pdf):
+        set_metadata(file=tmp_pdf, output=tmp_pdf, title="Before Strip")
+        assert get_metadata(file=tmp_pdf)["title"] == "Before Strip"
+        result = strip_metadata(file=tmp_pdf, output=tmp_pdf)
+        assert result["stripped"] is True
+        assert get_metadata(file=tmp_pdf)["title"] == ""
+
+    def test_set_metadata_in_place(self, tmp_pdf):
+        result = set_metadata(file=tmp_pdf, output=tmp_pdf, author="In Place")
+        assert "author" in result["updated_fields"]
+        assert "In Place" in str(get_metadata(file=tmp_pdf)["author"])
+
+    def test_in_place_leaves_no_staging_litter(self, tmp_pdf):
+        folder = os.path.dirname(tmp_pdf)
+        before = sorted(os.listdir(folder))
+        strip_metadata(file=tmp_pdf, output=tmp_pdf)
+        assert sorted(os.listdir(folder)) == before
+
+    def test_compress_in_place(self, tmp_pdf, gs_path):
+        before = os.path.getsize(tmp_pdf)
+        result = compress(file=tmp_pdf, output=tmp_pdf, quality="ebook", gs_path=gs_path)
+        assert result["original_size"] == before
+        assert os.path.getsize(tmp_pdf) == result["compressed_size"]
+        with pikepdf.open(tmp_pdf) as pdf:
+            assert len(pdf.pages) == 5
+
+    def test_grayscale_in_place(self, tmp_pdf, gs_path):
+        result = grayscale(file=tmp_pdf, output=tmp_pdf, gs_path=gs_path)
+        assert result["output_size"] > 0
+        with pikepdf.open(tmp_pdf) as pdf:
+            assert len(pdf.pages) == 5
+
+    def test_pdfa_in_place(self, tmp_pdf, gs_path):
+        result = convert_pdfa(file=tmp_pdf, output=tmp_pdf, gs_path=gs_path)
+        assert result["level"] == "PDF/A-2b"
+        with pikepdf.open(tmp_pdf) as pdf:
+            assert len(pdf.pages) == 5
