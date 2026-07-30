@@ -26,6 +26,8 @@ export interface TestStateSnapshot {
   activeToolId: string | null;
   /** Which document pane is showing (M6.3 — the View menu's mode items). */
   docViewMode: 'organize' | 'document';
+  /** Split view (I.6, Window ▸ Split): two stacked reading panes. */
+  splitView: boolean;
   /** The page being read (M4.1e tracking) — insertion anchors hang off it. */
   currentPageId: string | null;
   fileCount: number;

@@ -245,15 +245,39 @@ export function WorkspaceCanvasView({
   const docViewMode = state.ui.docViewMode;
   const docViewModeRef = useRef(docViewMode);
   docViewModeRef.current = docViewMode;
+  // Split view (I.6, Window ▸ Split): a SECOND DocumentView over the same
+  // document, stacked under a draggable divider. Zoom and scroll are already
+  // per-instance state in DocumentView, so the panes are independent for
+  // free; what needs routing is (a) which pane camera commands address and
+  // (b) which pane drives the page readout — both keyed on the ACTIVE pane,
+  // set by pointerdown in a pane (the king's click-to-activate).
+  const documentViewRefB = useRef<CanvasHandle | null>(null);
+  const splitView = state.ui.splitView && docViewMode === 'document';
+  const splitViewRef = useRef(splitView);
+  splitViewRef.current = splitView;
+  const [activePane, setActivePane] = useState<'a' | 'b'>('a');
+  const activePaneRef = useRef(activePane);
+  activePaneRef.current = activePane;
+  // The divider ratio is deliberately LOCAL state (session-scoped, like the
+  // splitView flag itself — the king doesn't persist split): it survives
+  // toggling split off/on and doc switches, resets on restart.
+  const [splitRatio, setSplitRatio] = useState(0.5);
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
   // The CanvasHandle of whichever view is active — the board's d3 camera, or the
   // reading view's scroller. EVERY camera caller (find navigation, the zoom
   // buttons, the registered canvasServices) must route through this: the
   // board-only `canvasRef` is null while the reading view is mounted, so a
   // direct `canvasRef.current?.…` silently no-ops in Document mode
-  // (review-caught). Stable identity (reads refs).
+  // (review-caught). Stable identity (reads refs). With split view up, the
+  // ACTIVE pane's handle answers — a bookmark/thumbnail/Find jump lands in
+  // the pane the user last touched, which is the king's behavior too.
   const activeCanvasHandle = useCallback(
     (): CanvasHandle | null =>
-      docViewModeRef.current === 'document' ? documentViewRef.current : canvasRef.current,
+      docViewModeRef.current === 'document'
+        ? splitViewRef.current && activePaneRef.current === 'b'
+          ? documentViewRefB.current
+          : documentViewRef.current
+        : canvasRef.current,
     [],
   );
   // Which document the reading view shows (the board shows ALL docs, the
@@ -1729,6 +1753,56 @@ export function WorkspaceCanvasView({
 
   const handleCancelTextEdit = useCallback(() => setEditingText(null), []);
 
+  // Split view: per-pane page reporting + activation. Each pane always
+  // records its own latest page (so activating a pane can refresh the
+  // readout instantly), but only the ACTIVE pane drives the toolbar box /
+  // ui.currentPageId — the inactive pane scrolls silently, like the king's.
+  const lastPaneAPage = useRef(1);
+  const lastPaneBPage = useRef(1);
+  const onPaneAPageChange = useCallback((n: number) => {
+    lastPaneAPage.current = n;
+    if (!splitViewRef.current || activePaneRef.current === 'a') setCurrentPage(n);
+  }, []);
+  const onPaneBPageChange = useCallback((n: number) => {
+    lastPaneBPage.current = n;
+    if (splitViewRef.current && activePaneRef.current === 'b') setCurrentPage(n);
+  }, []);
+  const activatePane = useCallback((pane: 'a' | 'b') => {
+    if (activePaneRef.current === pane) return;
+    // Switching panes CANCELS an open text/paragraph editor (same as Esc):
+    // the editor renders only in the active pane, and letting a hidden
+    // instance survive would let a stale draft clobber a later commit.
+    setEditingText(null);
+    setActivePane(pane);
+    setCurrentPage(pane === 'a' ? lastPaneAPage.current : lastPaneBPage.current);
+  }, []);
+  // Toggling split off returns the readout to pane A (the surviving pane).
+  useEffect(() => {
+    if (!splitView) {
+      setActivePane('a');
+      setCurrentPage(lastPaneAPage.current);
+    }
+  }, [splitView]);
+  // The divider: a plain pointer drag with WINDOW-level listeners (the
+  // canvas-drag idiom — synthetic React pointermove does not deliver
+  // reliably in the webview). Ratio clamped so neither pane can collapse.
+  const onDividerPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const el = splitContainerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const onMove = (ev: PointerEvent): void => {
+      const r = (ev.clientY - rect.top) / Math.max(rect.height, 1);
+      setSplitRatio(Math.min(0.85, Math.max(0.15, r)));
+    };
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, []);
+
   const handleCommitTextEdit = useCallback(
     async (
       pageId: string,
@@ -3037,81 +3111,166 @@ export function WorkspaceCanvasView({
         />
       )}
       {docViewMode === 'document' && focusedDoc ? (
-        <DocumentView
-          onCreateLinks={createLinks}
-          pageLayout={state.ui.pageLayout}
-          twoUpCover={state.ui.twoUpCover}
-          key={focusedDoc.id}
-          ref={documentViewRef}
-          doc={focusedDoc}
-          viewRotation={state.ui.viewRotationByPath[focusedDoc.path] ?? 0}
-          proxies={proxies}
-          onCurrentPageChange={setCurrentPage}
-          renderVersion={renderVersion}
-          selectedPageIds={selectedPageIds}
-          onSelectPage={onSelectPage}
-          onOpenPage={onOpenPage}
-          onPageContextMenu={onPageContextMenu}
-          tool={tool}
-          annotationColor={toolColor ?? undefined}
-          stampPreset={stampPreset}
-          redactionMarksByPage={redactionMarksByPage}
-          editImagesByPage={editImagesByPage}
-          editVectorsByPage={editVectorsByPage}
-          selectedVector={selectedVector}
-          editImageTransform={editImageTransform}
-          onCommitImageTransform={commitImageTransform}
-          vectorTransform={vectorTransform}
-          onCommitVectorTransform={(pageId, index, matrix) =>
-            void commitVectorTransform(pageId, index, matrix)
+        (() => {
+          // ONE props bundle for the unsplit view and both split panes — the
+          // instances must never drift apart prop-by-prop (the openByPaths
+          // two-implementations lesson, applied to JSX). Transient
+          // interaction overlays (open editors, placements, transforms,
+          // crop) are then stripped from the INACTIVE pane: two live
+          // editors over one paragraph would let a stale draft clobber a
+          // commit. Passive overlays (annotations, marks, find highlights,
+          // form values, selections) mirror in both panes.
+          const dvProps = {
+            onCreateLinks: createLinks,
+            pageLayout: state.ui.pageLayout,
+            twoUpCover: state.ui.twoUpCover,
+            doc: focusedDoc,
+            viewRotation: state.ui.viewRotationByPath[focusedDoc.path] ?? 0,
+            proxies,
+            renderVersion,
+            selectedPageIds,
+            onSelectPage,
+            onOpenPage,
+            onPageContextMenu,
+            tool,
+            annotationColor: toolColor ?? undefined,
+            stampPreset,
+            redactionMarksByPage,
+            editImagesByPage,
+            editVectorsByPage,
+            selectedVector,
+            editImageTransform,
+            onCommitImageTransform: commitImageTransform,
+            vectorTransform,
+            onCommitVectorTransform: (pageId: string, index: number, matrix: number[]) =>
+              void commitVectorTransform(pageId, index, matrix),
+            imageCropArmed,
+            onCommitImageCrop: commitImageCrop,
+            editTextByPage,
+            editSelection: editSel,
+            editingText,
+            onSelectEditImage: handleSelectEditImage,
+            onSelectEditVector: handleSelectEditVector,
+            onDeleteVector: () => void handleDeleteVector(),
+            onRestyleVector: (
+              pageId: string,
+              index: number,
+              opts: {
+                fill?: [number, number, number];
+                stroke?: [number, number, number];
+                lineWidth?: number;
+              },
+            ) => void commitVectorRestyle(pageId, index, opts),
+            onSelectEditText: handleSelectEditText,
+            onOpenTextEditor: handleOpenTextEditor,
+            onCommitTextEdit: (
+              pageId: string,
+              index: number,
+              text: string,
+              opts?: { convert?: boolean },
+            ) => void handleCommitTextEdit(pageId, index, text, opts),
+            onCancelTextEdit: handleCancelTextEdit,
+            onSelectEditParagraph: handleSelectEditParagraph,
+            onOpenParagraphEditor: handleOpenParagraphEditor,
+            onCommitParagraphEdit: (
+              pageId: string,
+              index: number,
+              text: string,
+              opts?: ParagraphEditOpts,
+            ) => void handleCommitParagraphEdit(pageId, index, text, opts),
+            onCancelParagraphEdit: handleCancelTextEdit,
+            onMergeParagraphPrev: (pageId: string, index: number) =>
+              void handleMergeParagraphPrev(pageId, index),
+            signaturePlacement: liveSigPlacement,
+            findMatchPageIds,
+            findWordsByPage,
+            formWidgetsByPage,
+            formValuesByPath: pendingFormValues,
+            onSetFormValue,
+            onSignFieldRequest,
+            newFieldPlacement: liveNewFieldPlacement,
+            onSetNewFieldRect,
+            onClearNewFieldPlacement,
+            addTextPlacement: liveAddTextPlacement,
+            onSetAddTextRect,
+            onAddImageRect,
+            onClearAddTextPlacement,
+            onAddAnnotation,
+            onUpdateAnnotation,
+            onRecolorAnnotation,
+            onRemoveAnnotation,
+            selectedAnnotationId: selectedAnnot?.annotationId ?? null,
+            onSelectAnnotation,
+            onAddRedactionMark,
+            onRemoveRedactionMark,
+            onSetSignaturePlacement,
+            onClearSignaturePlacement,
+          };
+          const inactiveOverrides = {
+            editingText: null,
+            editImageTransform: null,
+            vectorTransform: null,
+            imageCropArmed: false,
+            signaturePlacement: null,
+            newFieldPlacement: null,
+            addTextPlacement: null,
+          };
+          if (!splitView) {
+            return (
+              <DocumentView
+                {...dvProps}
+                key={focusedDoc.id}
+                ref={documentViewRef}
+                onCurrentPageChange={onPaneAPageChange}
+              />
+            );
           }
-          imageCropArmed={imageCropArmed}
-          onCommitImageCrop={commitImageCrop}
-          editTextByPage={editTextByPage}
-          editSelection={editSel}
-          editingText={editingText}
-          onSelectEditImage={handleSelectEditImage}
-          onSelectEditVector={handleSelectEditVector}
-          onDeleteVector={() => void handleDeleteVector()}
-          onRestyleVector={(pageId, index, opts) => void commitVectorRestyle(pageId, index, opts)}
-          onSelectEditText={handleSelectEditText}
-          onOpenTextEditor={handleOpenTextEditor}
-          onCommitTextEdit={(pageId, index, text, opts) =>
-            void handleCommitTextEdit(pageId, index, text, opts)
-          }
-          onCancelTextEdit={handleCancelTextEdit}
-          onSelectEditParagraph={handleSelectEditParagraph}
-          onOpenParagraphEditor={handleOpenParagraphEditor}
-          onCommitParagraphEdit={(pageId, index, text, opts) =>
-            void handleCommitParagraphEdit(pageId, index, text, opts)
-          }
-          onCancelParagraphEdit={handleCancelTextEdit}
-          onMergeParagraphPrev={(pageId, index) => void handleMergeParagraphPrev(pageId, index)}
-          signaturePlacement={liveSigPlacement}
-          findMatchPageIds={findMatchPageIds}
-          findWordsByPage={findWordsByPage}
-          formWidgetsByPage={formWidgetsByPage}
-          formValuesByPath={pendingFormValues}
-          onSetFormValue={onSetFormValue}
-          onSignFieldRequest={onSignFieldRequest}
-          newFieldPlacement={liveNewFieldPlacement}
-          onSetNewFieldRect={onSetNewFieldRect}
-          onClearNewFieldPlacement={onClearNewFieldPlacement}
-          addTextPlacement={liveAddTextPlacement}
-          onSetAddTextRect={onSetAddTextRect}
-          onAddImageRect={onAddImageRect}
-          onClearAddTextPlacement={onClearAddTextPlacement}
-          onAddAnnotation={onAddAnnotation}
-          onUpdateAnnotation={onUpdateAnnotation}
-          onRecolorAnnotation={onRecolorAnnotation}
-          onRemoveAnnotation={onRemoveAnnotation}
-          selectedAnnotationId={selectedAnnot?.annotationId ?? null}
-          onSelectAnnotation={onSelectAnnotation}
-          onAddRedactionMark={onAddRedactionMark}
-          onRemoveRedactionMark={onRemoveRedactionMark}
-          onSetSignaturePlacement={onSetSignaturePlacement}
-          onClearSignaturePlacement={onClearSignaturePlacement}
-        />
+          return (
+            <div
+              ref={splitContainerRef}
+              data-testid="split-container"
+              className="flex flex-1 min-h-0 flex-col"
+            >
+              <div
+                data-testid="doc-pane-a"
+                data-active={activePane === 'a'}
+                className="flex min-h-0 flex-col"
+                style={{ flexGrow: splitRatio, flexBasis: 0 }}
+                onPointerDownCapture={() => activatePane('a')}
+              >
+                <DocumentView
+                  {...dvProps}
+                  {...(activePane === 'a' ? null : inactiveOverrides)}
+                  key={focusedDoc.id}
+                  ref={documentViewRef}
+                  onCurrentPageChange={onPaneAPageChange}
+                />
+              </div>
+              <div
+                data-testid="split-divider"
+                role="separator"
+                aria-orientation="horizontal"
+                className="h-1.5 shrink-0 cursor-row-resize bg-neutral-700 hover:bg-blue-500"
+                onPointerDown={onDividerPointerDown}
+              />
+              <div
+                data-testid="doc-pane-b"
+                data-active={activePane === 'b'}
+                className="flex min-h-0 flex-col"
+                style={{ flexGrow: 1 - splitRatio, flexBasis: 0 }}
+                onPointerDownCapture={() => activatePane('b')}
+              >
+                <DocumentView
+                  {...dvProps}
+                  {...(activePane === 'b' ? null : inactiveOverrides)}
+                  key={`${focusedDoc.id}:b`}
+                  ref={documentViewRefB}
+                  onCurrentPageChange={onPaneBPageChange}
+                />
+              </div>
+            </div>
+          );
+        })()
       ) : (
       <Canvas
         ref={canvasRef}
