@@ -1,24 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Phase 12: reconcile now also takes sourceDocId -> working-copy path, because
+// recognition is an ENGINE call that reads a file rather than a pdf.js proxy.
+// These tests never reach OCR, so an empty map is the honest input (and the
+// engine's default recognizer throws if anything did reach it).
+const PATHS = new Map<string, string>();
+
+
 // The search engine statically imports extract.ts (runtime pdfjs-dist, which
-// can't load in Node) and ocr-client.ts (Worker) — mock both; the engine
-// logic under test is the reconcile/cache/search/invalidate machinery.
+// can't load in Node) — mock it; the engine logic under test is the
+// reconcile/cache/search/invalidate machinery.
 const extractMock = vi.fn();
 vi.mock('../src/renderer/search/extract', () => ({
   extractPageText: (...args: unknown[]) => extractMock(...args),
 }));
 
+// Recognition is no longer a module the engine imports — it is an INJECTED
+// dependency (native Tesseract via the engine bridge), so the test supplies it
+// directly instead of mocking a module out from under the import graph.
 const recognizeMock = vi.fn();
-const setLanguageMock = vi.fn();
-vi.mock('../src/renderer/ocr/ocr-client', () => ({
-  createOcrClient: () => ({
-    setLanguage: setLanguageMock,
-    recognize: (...args: unknown[]) => recognizeMock(...args),
-    cancel: vi.fn(),
-    cancelAll: vi.fn(),
-    dispose: vi.fn(),
-  }),
-}));
 
 import { createSearchEngine, sourceKeyOf } from '../src/renderer/search/engine';
 import {
@@ -191,6 +191,7 @@ describe('search engine', () => {
       onChange,
       onProgress,
       getDocs: () => docsRef.current,
+      recognize: (...args: unknown[]) => recognizeMock(...args),
     });
     return { engine, onChange, onProgress };
   }
@@ -202,7 +203,7 @@ describe('search engine', () => {
       .mockResolvedValueOnce({ text: 'Invoice Total Due', needsOcr: false })
       .mockResolvedValueOnce({ text: 'nothing here', needsOcr: false });
     const { engine } = build(docsRef);
-    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'), PATHS);
     await flush();
     const r = await engine.search('total');
     expect(r.pages).toBe(1);
@@ -217,7 +218,7 @@ describe('search engine', () => {
       .mockResolvedValueOnce({ text: 'Cat cats CAT concatenate Invoice-2024', needsOcr: false })
       .mockResolvedValueOnce({ text: 'nothing relevant', needsOcr: false });
     const { engine } = build(docsRef);
-    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'), PATHS);
     await flush();
 
     // Case-sensitive: only the exact-case "Cat" (not "cats"/"CAT"/"concatenate").
@@ -243,7 +244,7 @@ describe('search engine', () => {
       .mockResolvedValueOnce({ text: 'The quarterly invoice total is due', needsOcr: false })
       .mockResolvedValueOnce({ text: 'unrelated content', needsOcr: false });
     const { engine } = build(docsRef);
-    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'), PATHS);
     await flush();
     const snips = await engine.snippetsFor('invoice');
     expect(snips.size).toBe(1);
@@ -258,7 +259,7 @@ describe('search engine', () => {
     const docsRef = { current: [doc] };
     extractMock.mockResolvedValueOnce({ text: `${filler} SECRET ${filler}`, needsOcr: false });
     const { engine } = build(docsRef);
-    engine.reconcile(docsRef.current, proxiesFor('C:/b.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/b.pdf'), PATHS);
     await flush();
     const snip = (await engine.snippetsFor('secret')).get('C:/b.pdf#p0');
     expect(snip).toBeDefined();
@@ -278,7 +279,7 @@ describe('search engine', () => {
       () => new Promise((resolve) => (resolveOcr = resolve)),
     );
     const { engine } = build(docsRef);
-    engine.reconcile(docsRef.current, proxiesFor('C:/scan.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/scan.pdf'), PATHS);
     await flush();
     expect(recognizeMock).toHaveBeenCalledTimes(1);
     expect((await engine.search('invoice')).pages).toBe(0);
@@ -300,7 +301,7 @@ describe('search engine', () => {
     let resolveStale!: (v: { text: string; words: { text: string; x: number; y: number; w: number; h: number }[] }) => void;
     recognizeMock.mockImplementationOnce(() => new Promise((r) => (resolveStale = r)));
     const { engine } = build(docsRef);
-    engine.reconcile(docsRef.current, proxiesFor('C:/scan.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/scan.pdf'), PATHS);
     await flush();
     const key = sourceKeyOf(doc.pages[0]);
 
@@ -310,7 +311,7 @@ describe('search engine', () => {
     recognizeMock.mockImplementationOnce(
       () => new Promise(() => {}), // fresh pass stays pending
     );
-    engine.reconcile(docsRef.current, proxiesFor('C:/scan.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/scan.pdf'), PATHS);
     await flush();
 
     resolveStale({ text: 'PRE-REDACTION SECRET', words: [{ text: 'SECRET', x: 0.1, y: 0.1, w: 0.2, h: 0.05 }] });
@@ -327,14 +328,14 @@ describe('search engine', () => {
     const docsRef = { current: [doc] };
     extractMock.mockResolvedValue({ text: 'first version', needsOcr: false });
     const { engine } = build(docsRef);
-    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'), PATHS);
     await flush();
     expect((await engine.search('first')).pages).toBe(1);
 
     engine.invalidatePath('C:/a.pdf');
     expect((await engine.search('first')).pages).toBe(0); // stale text dropped
     extractMock.mockResolvedValue({ text: 'second version', needsOcr: false });
-    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'), PATHS);
     await flush();
     expect((await engine.search('second')).pages).toBe(1);
     expect((await engine.search('first')).pages).toBe(0);
@@ -346,13 +347,13 @@ describe('search engine', () => {
     const docsRef = { current: [doc] };
     extractMock.mockResolvedValueOnce({ text: 'cached words', needsOcr: false });
     const { engine } = build(docsRef);
-    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'), PATHS);
     await flush();
     // Move the page into a different doc (new PageRef identity? — no: page
     // ids are positional/persistent; a move keeps the id but changes doc).
     const doc2 = makeDoc('d2', 'C:/a.pdf', [p0]);
     docsRef.current = [doc2];
-    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'), PATHS);
     await flush();
     expect(extractMock).toHaveBeenCalledTimes(1); // no re-extraction
     expect((await engine.search('cached')).pages).toBe(1);
@@ -403,9 +404,10 @@ describe('regex search runs off the render thread (ReDoS hardening)', () => {
       onChange: vi.fn(),
       onProgress: vi.fn(),
       getDocs: () => docsRef.current,
+      recognize: (...args: unknown[]) => recognizeMock(...args),
       createSearchWorker: () => fake.worker,
     });
-    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'), PATHS);
     await flush();
     return { engine, fake, docsRef };
   }
@@ -433,7 +435,7 @@ describe('regex search runs off the render thread (ReDoS hardening)', () => {
 
     engine.invalidatePath('C:/a.pdf'); // bytes changed under the index
     extractMock.mockResolvedValue({ text: 'replacement text', needsOcr: false });
-    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'), PATHS);
     await flush();
     expect((await engine.search('replacement', { regex: true })).pages).toBe(1);
     expect(fake.seeds()).toBe(2);
@@ -471,9 +473,10 @@ describe('regex search runs off the render thread (ReDoS hardening)', () => {
       onChange: vi.fn(),
       onProgress: vi.fn(),
       getDocs: () => docsRef.current,
+      recognize: (...args: unknown[]) => recognizeMock(...args),
       createSearchWorker: () => null,
     });
-    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'));
+    engine.reconcile(docsRef.current, proxiesFor('C:/a.pdf'), PATHS);
     await flush();
     expect((await engine.search('\\d{4}', { regex: true })).occurrences).toBe(1);
   });

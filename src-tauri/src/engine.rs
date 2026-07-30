@@ -43,6 +43,30 @@ pub fn get_python_path(app: &AppHandle) -> String {
         .to_string()
 }
 
+/// Resolves the path to the vendored native Tesseract (Phase 12 step 3).
+///
+/// Recognition is a SUBPROCESS, which is the property that matters: it is what
+/// lets the CLI and a scheduled run under a service account recognise at all,
+/// where a WASM recognizer would need a WebView and a service account has no
+/// interactive desktop to host one in. The GUI routes here too -- one
+/// recognizer, never two that can disagree about the same page.
+pub fn get_tesseract_path(app: &AppHandle) -> String {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .expect("failed to resolve resource dir");
+    let exe = resource_dir.join("tesseract").join("tesseract.exe");
+    // `dunce::simplified` STRIPS the `\?\` verbatim prefix that
+    // `resource_dir()` carries on Windows, and that is load-bearing rather
+    // than cosmetic: Tesseract derives its tessdata directory from the
+    // executable path we hand it, and it CANNOT open a data file through a
+    // verbatim path. The symptom is "Error opening data file ... Failed
+    // loading language 'eng'" while the file plainly exists -- so every page
+    // recognises to nothing, silently. Same reason `commands::canonical_path`
+    // is dunce-backed.
+    dunce::simplified(&exe).to_string_lossy().to_string()
+}
+
 /// Resolves the path to the bundled Ghostscript executable.
 pub fn get_gs_path(app: &AppHandle) -> String {
     let resource_dir = app

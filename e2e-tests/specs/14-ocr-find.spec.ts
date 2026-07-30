@@ -245,15 +245,21 @@ describe('find + OCR (2m)', () => {
     for (const c of ['eng', 'deu', 'jpn', 'chi_sim', 'ara', 'rus', 'kor']) {
       expect(codes).toContain(c);
     }
-    // Every offered language must have its traineddata staged into the built
-    // app's resources — an offered-but-unstaged language OCRs to nothing (the
-    // silent-degradation class). The renderer serves them from /ocr/lang.
+    // Every offered language must have its traineddata staged where the
+    // recognizer actually reads it — an offered-but-unstaged language OCRs to
+    // nothing (the silent-degradation class). Phase 12 moved that from
+    // public/ocr/lang (gzipped, for the retired tesseract.js WASM worker) to
+    // resources/tesseract/tessdata, DECOMPRESSED, for native Tesseract.
     const { readFileSync } = await import('node:fs');
-    const langDir = resolve(__dirname, '..', '..', 'public', 'ocr', 'lang');
+    const tessdata = resolve(__dirname, '..', '..', 'resources', 'tesseract', 'tessdata');
     for (const c of codes) {
-      // Presence + non-empty is the staging proof (gz files are ~1-20 MB).
-      const buf = readFileSync(resolve(langDir, `${c}.traineddata.gz`));
+      // Presence + non-empty is the staging proof (models are ~1-20 MB).
+      const buf = readFileSync(resolve(tessdata, `${c}.traineddata`));
       expect(buf.length).toBeGreaterThan(1000);
     }
+    // TSV is a CONFIG file, not a model, and without it tesseract exits 0 while
+    // printing plain text — so the parser sees no word boxes and every page
+    // reads as "no text". Guard it here too; it cost real time once.
+    expect(readFileSync(resolve(tessdata, 'configs', 'tsv')).length).toBeGreaterThan(0);
   });
 });
