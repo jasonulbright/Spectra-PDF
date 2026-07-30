@@ -205,7 +205,6 @@ jobs:
           powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
           node scripts/sync-ocr-assets.mjs
         shell: pwsh
-        shell: pwsh
 
       - name: Build Tauri binary (debug, frontend embedded, no installer)
         run: npx tauri build --debug --no-bundle
