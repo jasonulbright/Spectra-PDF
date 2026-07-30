@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from .acroform import reattach_forms_file
+from .inplace import finish_staged, is_same_file, staging_target
 from .validate import validate_pdf
 
 
@@ -23,6 +24,10 @@ def grayscale(
 
     input_path = Path(file)
     output_path = Path(output)
+    # In-place: gs must never write the file it is reading (engine/inplace.py).
+    same_file = is_same_file(file, output)
+    original_size = input_path.stat().st_size
+    gs_target = staging_target(output_path) if same_file else output_path
 
     cmd = [
         gs_path,
@@ -34,7 +39,7 @@ def grayscale(
         "-dQUIET",
         "-dBATCH",
         "-dSAFER",
-        f"-sOutputFile={str(output_path).replace('%', '%%')}",  # % is a gs filename template char (distill review)
+        f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % is a gs filename template char (distill review)
         str(input_path),
     ]
 
@@ -44,11 +49,14 @@ def grayscale(
 
     # gs pdfwrite drops /AcroForm and every widget annotation — converting a
     # filled form would silently destroy it. Transplant the original's fields
-    # back onto the regenerated pages (no-op for non-form files).
-    reattach_forms_file(input_path, output_path)
+    # back onto the regenerated pages (no-op for non-form files). Against the
+    # STAGED file when in-place — the original must still be readable here.
+    reattach_forms_file(input_path, gs_target)
+    if same_file:
+        finish_staged(gs_target, output_path)
 
     return {
         "output": str(output_path),
-        "original_size": input_path.stat().st_size,
+        "original_size": original_size,
         "output_size": output_path.stat().st_size,
     }

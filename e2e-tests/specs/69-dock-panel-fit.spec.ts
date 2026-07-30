@@ -22,7 +22,7 @@ const OPS = [
   'extract_text', 'watermark', 'forms', 'compare', 'signatures',
   'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels',
   'attachments', 'portfolio', 'layers', 'accessibility',
-  'comments', 'preflight', 'links', 'tags', 'readingorder',
+  'comments', 'preflight', 'links', 'tags', 'readingorder', 'actions',
 ];
 
 describe('dock panel fit (Phase 10 B2)', () => {

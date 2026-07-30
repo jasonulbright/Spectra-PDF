@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pikepdf
 
+from .inplace import finish_staged, is_same_file, staging_target
+
 
 def _rebrand_xmptk(path: Path) -> None:
     """Replace pikepdf's xmptk attribute. Same byte length to preserve linearization."""
@@ -63,7 +65,13 @@ def set_metadata(
                 meta["pdf:Keywords"] = keywords
 
         output_path = Path(output)
-        pdf.save(output_path)
+        # pikepdf cannot save over its own open input (engine/inplace.py).
+        if is_same_file(file, output):
+            staged = staging_target(output_path)
+            pdf.save(staged)
+            finish_staged(staged, output_path)
+        else:
+            pdf.save(output_path)
 
     return {
         "output": str(output_path),
@@ -82,6 +90,8 @@ def strip_metadata(file: str, output: str) -> dict:
         output: Output PDF path.
     """
     output_path = Path(output)
+    # pikepdf cannot save over its own open input (engine/inplace.py).
+    same_file = is_same_file(file, output)
 
     with pikepdf.open(file) as pdf:
         with pdf.open_metadata(
@@ -90,9 +100,17 @@ def strip_metadata(file: str, output: str) -> dict:
             meta.clear()
         if pikepdf.Name.Info in pdf.trailer:
             del pdf.trailer[pikepdf.Name.Info]
-        pdf.save(output_path)
+        if same_file:
+            staged = staging_target(output_path)
+            pdf.save(staged)
+        else:
+            pdf.save(output_path)
 
-    _rebrand_xmptk(output_path)
+    if same_file:
+        _rebrand_xmptk(staged)
+        finish_staged(staged, output_path)
+    else:
+        _rebrand_xmptk(output_path)
 
     return {
         "output": str(output_path),
