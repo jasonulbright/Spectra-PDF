@@ -27,7 +27,7 @@ export type RawEngineCall = (
 let tesseractPathPromise: Promise<string> | null = null;
 let bundledGsPromise: Promise<string> | null = null;
 
-function tesseractPath(): Promise<string> {
+export function tesseractPath(): Promise<string> {
   if (!tesseractPathPromise) tesseractPathPromise = app.getTesseractPath();
   return tesseractPathPromise;
 }
@@ -35,7 +35,7 @@ function tesseractPath(): Promise<string> {
 /** The user's configured Ghostscript, else the bundled one. Ghostscript is what
  * rasterises the page for recognition, so it honours the same preference every
  * other gs-backed operation does rather than hard-wiring the bundle. */
-async function ghostscriptPath(): Promise<string> {
+export async function ghostscriptPath(): Promise<string> {
   const configured = loadSettings().gsPath;
   if (configured) return configured;
   if (!bundledGsPromise) bundledGsPromise = app.getGsPath();

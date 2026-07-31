@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useEngine } from '../hooks/useEngine';
 import { useAppModal } from '../hooks/useAppModal';
 import { dialog, batch } from '../lib/tauri-bridge';
-import { recognizePage } from '../lib/ocr-recognize';
+import { recognizePage, tesseractPath, ghostscriptPath } from '../lib/ocr-recognize';
 import type { BatchPdfEntry } from '../lib/tauri-bridge';
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import { toTesseractLang, describeLanguages } from '../ocr/language-selection';
@@ -53,6 +53,14 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const [errorRoot, setErrorRoot] = useState<string | null>(null);
   const [repairDamaged, setRepairDamaged] = useState(false);
   const [replaceRepaired, setReplaceRepaired] = useState(false);
+  // O7 in-place batch mode: REPLACE each original with its searchable
+  // version. Inverts the no-source-mutation guarantee harder than the filing
+  // options, so it is off by default, retires the destination/moved-root
+  // machinery while on, and takes a two-step confirm. Runs as ONE engine
+  // call (the guided-folder-run precedent) — the live per-file progress
+  // driver stays mirror-only, and there is no mid-run stop.
+  const [inPlace, setInPlace] = useState(false);
+  const [confirmInPlace, setConfirmInPlace] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [report, setReport] = useState<BatchReport | null>(null);
@@ -182,9 +190,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     phase === 'setup' &&
     !scanning &&
     source !== null &&
-    dest !== null &&
-    !conflict &&
-    movedConflict === null &&
+    (inPlace || (dest !== null && !conflict && movedConflict === null)) &&
     errorConflict === null &&
     entries !== null &&
     entries.length > 0;
@@ -240,6 +246,46 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     } catch (e: unknown) {
       setLogPath(null);
       setLogError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // The in-place run: ONE engine RPC over the whole tree (engine batch_ocr
+  // with in_place=True — per-file staging, verify-read, atomic swap). The
+  // engine writes its own run log; the GUI writeLog is skipped so the run is
+  // not logged twice.
+  const startInPlace = async (): Promise<void> => {
+    if (!canStart || !source) return;
+    setConfirmInPlace(false);
+    setPhase('running');
+    setError(null);
+    setProgress(null);
+    setStopping(false);
+    setLogPath(null);
+    setLogError(null);
+    try {
+      const settings = getSettings();
+      const logDir = settings.batchLogEnabled ? await batch.logDir(settings.batchLogDir) : '';
+      if (settings.batchLogEnabled && settings.batchLogRetentionDays > 0) {
+        await batch.pruneLogs(settings.batchLogRetentionDays, settings.batchLogDir).catch(() => 0);
+      }
+      const rep = (await callRaw('batch_ocr', {
+        source,
+        dest: '',
+        lang: toTesseractLang(langs),
+        tesseract_path: await tesseractPath(),
+        gs_path: await ghostscriptPath(),
+        error_root: errorRoot ?? '',
+        repair_damaged: repairDamaged,
+        replace_repaired_originals: repairDamaged && replaceRepaired,
+        log_dir: logDir,
+        in_place: true,
+      })) as unknown as BatchReport & { logPath?: string };
+      setReport(rep);
+      setLogPath(rep.logPath ?? null);
+      setPhase('done');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase('setup');
     }
   };
 
@@ -397,13 +443,41 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                   : null
             }
           />
-          <FolderRow
-            label="Destination folder"
-            testid="batch-ocr-dest"
-            value={dest}
-            onPick={() => void pickDest()}
-            note={null}
-          />
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              data-testid="batch-inplace"
+              checked={inPlace}
+              onChange={() => {
+                const next = !inPlace;
+                setInPlace(next);
+                setConfirmInPlace(false);
+                if (next) {
+                  setDest(null);
+                  setMovedRoot(null);
+                }
+              }}
+              className="rounded bg-neutral-900 border-neutral-600"
+            />
+            <span className="text-sm text-neutral-300">
+              Replace the originals in place (no destination folder)
+            </span>
+          </label>
+          {inPlace ? (
+            <p className="text-xs text-amber-400" data-testid="batch-inplace-note">
+              Each file is processed to a staged copy beside it, read back and verified,
+              then swapped over the original. Already-searchable files are left untouched.
+              Runs as one operation — there is no per-file stop.
+            </p>
+          ) : (
+            <FolderRow
+              label="Destination folder"
+              testid="batch-ocr-dest"
+              value={dest}
+              onPick={() => void pickDest()}
+              note={null}
+            />
+          )}
           {conflict && (
             <p className="text-sm text-red-400" data-testid="batch-ocr-conflict">
               {identityConflict
@@ -472,18 +546,20 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 Everything below MOVES files out of your source folder. Left alone, the
                 source folder is never modified — that is the default.
               </p>
-              <OptionalFolderRow
-                label="Move processed originals to"
-                testid="batch-ocr-moved"
-                value={movedRoot}
-                conflict={movedConflict}
-                onPick={async () => {
-                  const path = await dialog.pickFolder('Choose where processed originals go');
-                  if (path) setMovedRoot(path);
-                }}
-                onClear={() => setMovedRoot(null)}
-                note="Only after the searchable copy has been read back and verified. The folder structure is preserved, and a name that already exists is never overwritten."
-              />
+              {!inPlace && (
+                <OptionalFolderRow
+                  label="Move processed originals to"
+                  testid="batch-ocr-moved"
+                  value={movedRoot}
+                  conflict={movedConflict}
+                  onPick={async () => {
+                    const path = await dialog.pickFolder('Choose where processed originals go');
+                    if (path) setMovedRoot(path);
+                  }}
+                  onClear={() => setMovedRoot(null)}
+                  note="Only after the searchable copy has been read back and verified. The folder structure is preserved, and a name that already exists is never overwritten."
+                />
+              )}
               <OptionalFolderRow
                 label="Move failed originals to"
                 testid="batch-ocr-errors"
@@ -556,14 +632,36 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             >
               Cancel
             </button>
-            <button
-              data-testid="batch-ocr-start"
-              disabled={!canStart}
-              onClick={() => void start()}
-              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
-            >
-              Start
-            </button>
+            {inPlace && confirmInPlace ? (
+              <>
+                <span className="text-xs text-amber-400 self-center" data-testid="batch-inplace-warning">
+                  Replace the originals in the source folder? There is no undo.
+                </span>
+                <button
+                  data-testid="batch-inplace-keep"
+                  onClick={() => setConfirmInPlace(false)}
+                  className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
+                >
+                  Keep
+                </button>
+                <button
+                  data-testid="batch-inplace-replace"
+                  onClick={() => void startInPlace()}
+                  className="px-3 py-1.5 text-xs text-white bg-red-700/90 hover:bg-red-600 rounded font-medium"
+                >
+                  Replace originals
+                </button>
+              </>
+            ) : (
+              <button
+                data-testid="batch-ocr-start"
+                disabled={!canStart}
+                onClick={() => (inPlace ? setConfirmInPlace(true) : void start())}
+                className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              >
+                Start
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -577,7 +675,8 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               ref={stopBtnRef}
               data-testid="batch-ocr-stop"
               onClick={cancel}
-              disabled={stopping}
+              disabled={stopping || inPlace}
+              title={inPlace ? 'An in-place run is one operation — it cannot stop per file' : undefined}
               className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium disabled:opacity-50"
             >
               {stopping ? 'Stopping…' : 'Stop'}

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
@@ -140,5 +140,37 @@ describe('guided actions — folder mode (slice 3)', () => {
     expect(report.ok).toBe(1);
     expect(report.failed).toBe(0);
     expect(cliText(resolve(dest2, 'c.pdf'))).toContain('CLI TREE');
+  });
+
+  it('O7 in-place mode: --in-place REPLACES the originals, no mirror, no litter', () => {
+    const src3 = resolve(SCRATCH, 'src3');
+    mkdirSync(src3, { recursive: true });
+    copyFileSync(SAMPLE_PDF, resolve(src3, 'd.pdf'));
+    const actionFile = resolve(SCRATCH, 'action-inplace.json');
+    writeFileSync(
+      actionFile,
+      JSON.stringify({
+        name: 'CLI In Place',
+        steps: [{ op: 'watermark', params: { text: 'INPLACE E2E', opacity: 0.2, angle: 45 } }],
+      }),
+    );
+    const out = execFileSync(
+      APP_EXE,
+      ['run-action', src3, '--in-place', '--action', actionFile],
+      { encoding: 'utf-8' },
+    );
+    const lines = out.trim().split(/\r?\n/);
+    const start = lines.findIndex((l) => l.trimStart().startsWith('{'));
+    const report = JSON.parse(lines.slice(start).join('\n')) as {
+      ok: number;
+      failed: number;
+      in_place: boolean;
+    };
+    expect(report.ok).toBe(1);
+    expect(report.failed).toBe(0);
+    expect(report.in_place).toBe(true);
+    // The ORIGINAL carries the watermark now; no staging litter remains.
+    expect(cliText(resolve(src3, 'd.pdf'))).toContain('INPLACE E2E');
+    expect(readdirSync(src3).filter((f) => f.endsWith('.inplace.tmp'))).toEqual([]);
   });
 });

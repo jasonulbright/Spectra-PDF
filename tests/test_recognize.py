@@ -212,3 +212,53 @@ class TestOcrFile:
         assert result["pages_ocrd"] >= 1
         text = extract_text(file=str(work))["text"]
         assert len(text.strip()) > 10
+
+
+class TestBatchInPlace:
+    """O7 in-place batch mode: originals replaced through staged temps."""
+
+    def test_in_place_refuses_dest_and_moved(self, tmp_path):
+        from engine.batch_ocr import batch_ocr
+
+        src = tmp_path / "src"
+        src.mkdir()
+        with pytest.raises(ValueError, match="no destination"):
+            batch_ocr(source=str(src), dest=str(tmp_path / "out"), in_place=True)
+        with pytest.raises(ValueError, match="cannot also move"):
+            batch_ocr(source=str(src), moved_root=str(tmp_path / "moved"), in_place=True)
+        with pytest.raises(ValueError, match="destination folder is required"):
+            batch_ocr(source=str(src))
+
+    @needs_ocr_stack
+    def test_in_place_replaces_scanned_originals_only(self, tmp_path):
+        from engine.batch_ocr import batch_ocr
+        from engine.extract_text import extract_text
+        import pikepdf
+
+        src = tmp_path / "src"
+        src.mkdir()
+        shutil.copy2(SCANNED, src / "scan.pdf")
+        text_pdf = src / "plain.pdf"
+        doc = pikepdf.new()
+        doc.add_blank_page(page_size=(200, 200))
+        doc.save(text_pdf)
+        plain_before = text_pdf.read_bytes()
+
+        report = batch_ocr(
+            source=str(src),
+            in_place=True,
+            tesseract_path=str(TESSERACT),
+            gs_path=str(GS),
+        )
+        assert report["inPlace"] is True
+        by_rel = {r["rel"]: r for r in report["results"]}
+        assert by_rel["scan.pdf"]["status"] == "ocr"
+        assert by_rel["scan.pdf"]["inPlace"] is True
+        # The scanned ORIGINAL is now searchable, in its own place.
+        assert len(extract_text(file=str(src / "scan.pdf"))["text"].strip()) > 10
+        # A blank/no-text file is left byte-identical — nothing was written.
+        assert by_rel["plain.pdf"]["status"] == "copied"
+        assert text_pdf.read_bytes() == plain_before
+        # No staging litter, no mirror.
+        assert not list(src.glob("*.inplace.tmp"))
+        assert not (tmp_path / "out").exists()
