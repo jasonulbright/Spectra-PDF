@@ -11,7 +11,7 @@
 //! triggers a run (and if it slips through anyway, the run's per-file
 //! isolation reports it and leaves it in the intake for the next tick).
 //!
-//! Each run SPAWNS THE CLI (`openpdfstudio run-action … --moved …`): the
+//! Each run SPAWNS THE CLI (`spectrapdf run-action … --moved …`): the
 //! exact process a scheduled task runs, so watched runs and scheduled runs
 //! cannot disagree — and no engine-pipe sharing with the webview. Runs are
 //! logged through the same action-run logs. Watchers live only while the

@@ -10,7 +10,7 @@ interface AboutDialogProps {
   onClose: () => void;
 }
 
-const REPO_URL = 'https://github.com/jasonulbright/Open-PDF-Studio';
+const REPO_URL = 'https://github.com/jasonulbright/Spectra-PDF';
 
 export function AboutDialog({ version, onClose }: AboutDialogProps): React.ReactElement {
   const shellRef = useAppModal(onClose);
@@ -26,12 +26,12 @@ export function AboutDialog({ version, onClose }: AboutDialogProps): React.React
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="About Open PDF Studio"
+        aria-label="About Spectra PDF"
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[380px]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6 text-center">
-          <h2 className="text-lg font-semibold">Open PDF Studio</h2>
+          <h2 className="text-lg font-semibold">Spectra PDF</h2>
           <p data-testid="about-version" className="text-sm text-neutral-400 mt-1">
             Version {version}
           </p>

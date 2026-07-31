@@ -759,7 +759,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     run: (ctx) => ctx.app!.minimizeToTray(),
   },
   'help.about': {
-    title: 'About Open PDF Studio',
+    title: 'About Spectra PDF',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openAbout(),
   },

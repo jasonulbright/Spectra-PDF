@@ -2708,32 +2708,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "openpdfstudio"
-version = "2.8.7"
-dependencies = [
- "clap",
- "dunce",
- "same-file",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-shell",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tauri-plugin-webdriver",
- "tempfile",
- "tokio",
- "uuid",
- "window-vibrancy 0.8.0",
- "windows 0.62.2",
- "windows-version",
- "winreg 0.56.0",
-]
-
-[[package]]
 name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3825,6 +3799,32 @@ dependencies = [
  "gobject-sys 0.18.0",
  "libc",
  "system-deps 6.2.2",
+]
+
+[[package]]
+name = "spectrapdf"
+version = "1.0.0"
+dependencies = [
+ "clap",
+ "dunce",
+ "same-file",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-shell",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tauri-plugin-webdriver",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "window-vibrancy 0.8.0",
+ "windows 0.62.2",
+ "windows-version",
+ "winreg 0.56.0",
 ]
 
 [[package]]

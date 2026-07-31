@@ -143,7 +143,7 @@ export function formatBatchLog(run: BatchLogRun): string {
       : 'completed';
 
   const lines: string[] = [
-    'Open PDF Studio — Batch OCR log',
+    'Spectra PDF — Batch OCR log',
     `Started:      ${formatTimestamp(run.startedAt)}`,
     `Finished:     ${formatTimestamp(run.finishedAt)}  (${formatDuration(
       run.finishedAt.getTime() - run.startedAt.getTime(),

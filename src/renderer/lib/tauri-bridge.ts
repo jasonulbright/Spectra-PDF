@@ -150,7 +150,7 @@ export const batch = {
 //
 // Windows Task Scheduler runs them; this app owns the whole lifecycle so the
 // user never opens taskschd.msc. Every call is scoped Rust-side to our own
-// `\Open PDF Studio\` task folder.
+// `\Spectra PDF\` task folder.
 
 export interface ScheduleProfile {
   name: string;
@@ -265,7 +265,7 @@ export const schedule = {
 // ── File operations ───────────────────────────────────────────────────────
 
 // Binary file I/O goes through plugin-fs (efficient binary IPC, capability-
-// scoped to $TEMP/openpdfstudio in capabilities/main.json) — the working copies,
+// scoped to $TEMP/spectrapdf in capabilities/main.json) — the working copies,
 // snapshots, and commit temp files all live there.
 const snapshotRaw = (workingPath: string) => invoke<string>('snapshot', { workingPath });
 

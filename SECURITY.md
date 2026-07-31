@@ -4,7 +4,7 @@
 
 **Please report security issues privately, not as a public issue.**
 
-Use GitHub's [private vulnerability reporting](https://github.com/jasonulbright/Open-PDF-Studio/security/advisories/new)
+Use GitHub's [private vulnerability reporting](https://github.com/jasonulbright/Spectra-PDF/security/advisories/new)
 (the **Security** tab ▸ *Report a vulnerability*). It creates a private thread
 visible only to the maintainer, and it lets us coordinate a fix and an advisory
 before details are public.

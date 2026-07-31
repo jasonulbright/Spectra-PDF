@@ -492,7 +492,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           <span className="text-sm text-neutral-400">Check for updates on launch</span>
         </label>
         <p className="text-xs text-neutral-500 mt-1.5">
-          Open PDF Studio never installs updates itself. When a newer release exists it
+          Spectra PDF never installs updates itself. When a newer release exists it
           shows a notice, and opening it takes you to the download page. You can always
           check manually with Help ▸ Check for Updates.
         </p>
@@ -559,7 +559,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
   );
 }
 
-// O7 virtual printer: "Open PDF Studio" in every app's print dialog. The
+// O7 virtual printer: "Spectra PDF" in every app's print dialog. The
 // loopback listener + install/remove orchestration live in Rust
 // (print_to_pdf.rs); this block is the whole GUI surface. Install/Remove is
 // ONE visible UAC elevation (printer ports are machine objects) — never
@@ -596,9 +596,9 @@ function VirtualPrinterBlock(): React.JSX.Element {
 
   return (
     <div data-testid="virtual-printer-pref">
-      <label className="block text-sm text-neutral-400 mb-2">Print to Open PDF Studio</label>
+      <label className="block text-sm text-neutral-400 mb-2">Print to Spectra PDF</label>
       <p className="text-xs text-neutral-500 mb-2">
-        Installs a printer named “Open PDF Studio” in every application’s print dialog.
+        Installs a printer named “Spectra PDF” in every application’s print dialog.
         Printing to it opens the pages here as a new PDF. Conversion happens on this PC with
         the bundled tools; jobs are received only while this app is running (minimized to the
         tray counts) — a job printed while it is closed waits in the Windows print queue.
