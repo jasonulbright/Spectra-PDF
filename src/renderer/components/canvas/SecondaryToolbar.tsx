@@ -81,6 +81,10 @@ export interface SecondaryToolbarProps {
   measureLeaveMarkup: boolean;
   onToggleMeasureLeaveMarkup: () => void;
   measureResult: string | null;
+  /** Rung 3: the calibration drag span (PDF points) awaiting its value. */
+  calibration: number | null;
+  onApplyCalibration: (value: number, unit: MeasureUnit) => void;
+  onCancelCalibration: () => void;
   /** Edit tool (7.1): whether an image is selected, and its actions — mode
    * options in the stamp-preset sense (props+callbacks, not commands: they
    * act on transient canvas selection the registry can't see). */
@@ -114,6 +118,57 @@ export interface SecondaryToolbarProps {
   onRotateImage: (dir: 1 | -1) => void;
 }
 
+/** Rung 3: "Measured N pt = [value][unit] Apply" — the calibration drag's
+ * follow-up. Local state per pending span (keyed remount on lengthPts). */
+function CalibrationApplyRow({
+  lengthPts,
+  onApply,
+  onCancel,
+}: {
+  lengthPts: number;
+  onApply: (value: number, unit: MeasureUnit) => void;
+  onCancel: () => void;
+}): React.JSX.Element {
+  const [value, setValue] = useState('');
+  const [unit, setUnit] = useState<MeasureUnit>('ft');
+  const parsed = parseFloat(value);
+  const valid = Number.isFinite(parsed) && parsed > 0;
+  return (
+    <div className="secondary-toolbar-opts" role="group" aria-label="Calibration" data-testid="calibration-row">
+      <span className="secondary-toolbar-hint">Measured {lengthPts.toFixed(1)} pt =</span>
+      <input
+        type="number"
+        min={0}
+        step="any"
+        autoFocus
+        data-testid="calibration-value"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && valid) onApply(parsed, unit);
+        }}
+      />
+      <select
+        data-testid="calibration-unit"
+        value={unit}
+        onChange={(e) => setUnit(e.target.value as MeasureUnit)}
+      >
+        {MEASURE_UNITS.map((u) => (
+          <option key={u} value={u}>
+            {u}
+          </option>
+        ))}
+      </select>
+      <button type="button" className="secondary-tool" data-testid="calibration-apply" disabled={!valid} onClick={() => onApply(parsed, unit)}>
+        Apply
+      </button>
+      <button type="button" className="secondary-tool" data-testid="calibration-cancel" onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 export function SecondaryToolbar({
   tool,
   activeToolId,
@@ -128,6 +183,9 @@ export function SecondaryToolbar({
   measureLeaveMarkup,
   onToggleMeasureLeaveMarkup,
   measureResult,
+  calibration,
+  onApplyCalibration,
+  onCancelCalibration,
   editHasSelection,
   editSelectionKind,
   editTextEditable,
@@ -273,6 +331,13 @@ export function SecondaryToolbar({
             </button>
           ))}
         </div>
+      )}
+      {owner.id === 'measure' && tool === 'measurecal' && calibration !== null && (
+        <CalibrationApplyRow
+          lengthPts={calibration}
+          onApply={onApplyCalibration}
+          onCancel={onCancelCalibration}
+        />
       )}
       {owner.id === 'measure' && (
         <div className="secondary-toolbar-opts" role="group" aria-label="Measure options">

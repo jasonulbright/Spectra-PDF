@@ -576,6 +576,12 @@ interface PageCellProps {
   ) => void;
   // One gesture = one dispatch = one undo step (move, resize, nudge, align).
   onTransformAnnotations: (docId: string, edits: AnnotationTransform[]) => void;
+  // Rung 3: the calibration drag's measured span (PDF points) — the toolbar
+  // turns it into a ratio once the user states the real value.
+  onCalibrate: (lengthPts: number) => void;
+  // Rung 3: right-click on a measurement body (Select tool) — the view opens
+  // the recalibrate popover at the screen point.
+  onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   // Ctrl-marquee result — the view decides how it merges into the selection.
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
   onAddRedactionMark: (
@@ -780,6 +786,8 @@ function PageCellImpl({
   selectedAnnotationIds,
   onSelectAnnotation,
   onTransformAnnotations,
+  onCalibrate,
+  onMeasureContextMenu,
   onMarqueeSelect,
   onAddRedactionMark,
   onRemoveRedactionMark,
@@ -1404,10 +1412,6 @@ function PageCellImpl({
     // finished measurement.
     const shape = tool === 'measurearea' ? [...pts, pts[0], pts[1]] : pts;
     const stored = toStoredPoints(shape);
-    const xs = stored.filter((_, i) => i % 2 === 0);
-    const ys = stored.filter((_, i) => i % 2 === 1);
-    const minX = Math.min(...xs);
-    const minY = Math.min(...ys);
     onAddAnnotation(docId, page.id, {
       id: crypto.randomUUID(),
       kind: 'measure',
@@ -1416,10 +1420,9 @@ function PageCellImpl({
       measureRatio: measureRatioLabel(measScale),
       measureUnitsPerPt: measureUnitsPerPoint(measScale),
       measureUnit: measScale.toUnit,
-      x: minX,
-      y: minY,
-      w: Math.max(...xs) - minX,
-      h: Math.max(...ys) - minY,
+      // Flat-padded box (rung 3): a horizontal dimension needs a clickable
+      // body for selection and the right-click recalibrate. Points exact.
+      ...paddedPointsBbox(stored),
       color: annotationColor ?? MEASURE_COLOR,
       points: stored,
       note: value,
@@ -1457,7 +1460,13 @@ function PageCellImpl({
       const pts = [start.x, start.y, last.x, last.y];
       // A sub-half-percent drag is a click, not a measurement.
       if (commit && (Math.abs(last.x - start.x) > 0.005 || Math.abs(last.y - start.y) > 0.005)) {
-        commitMeasurement(pts);
+        if (tool === 'measurecal') {
+          // Calibration commits NOTHING — it reports the dragged span so the
+          // toolbar can ask what it really measures.
+          onCalibrate(polylineLengthPts(pts, measDispW, measDispH));
+        } else {
+          commitMeasurement(pts);
+        }
       }
     };
     const onUp = (): void => finish(true);
@@ -1555,7 +1564,7 @@ function PageCellImpl({
       handleInkDown(e);
       return;
     }
-    if (tool === 'measuredist') {
+    if (tool === 'measuredist' || tool === 'measurecal') {
       handleMeasureDragDown(e);
       return;
     }
@@ -1922,6 +1931,16 @@ function PageCellImpl({
               ? (e) => {
                   e.stopPropagation();
                   setEditing(a.id);
+                }
+              : undefined
+          }
+          onContextMenu={
+            tool === 'select' && a.kind === 'measure'
+              ? (e) => {
+                  // Rung 3: right-click a dimension → the recalibrate popover.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onMeasureContextMenu(docId, page.id, a.id, e.clientX, e.clientY);
                 }
               : undefined
           }
