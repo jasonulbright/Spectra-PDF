@@ -137,6 +137,14 @@ export const MENUS: MenuDef[] = [
           cmd('file.exportImages', 'menuitem-file-export-images'),
         ],
       },
+      {
+        kind: 'submenu',
+        id: 'file-send-to',
+        label: 'Send To',
+        // Email is the one Send To target with a real desktop mechanism
+        // (MAPI); the submenu leaves room for siblings.
+        items: [cmd('file.sendToEmail', 'menuitem-file-send-email')],
+      },
       sep,
       cmd('file.print', 'menuitem-file-print'),
       sep,
