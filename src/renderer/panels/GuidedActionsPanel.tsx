@@ -49,7 +49,7 @@ type PanelView =
       action: GuidedAction;
       values: RunValues;
       error: string | null;
-      folder?: { source: string; dest: string };
+      folder?: { source: string; dest: string; inPlace?: boolean };
     }
   | { kind: 'run'; action: GuidedAction }
   | { kind: 'folderrun'; action: GuidedAction; report: FolderReport | null; error: string | null };
@@ -166,7 +166,13 @@ export function GuidedActionsPanel(): React.ReactElement {
    * RPC covers the whole run and the CLI/scheduled arms share it. Works with
    * no document open. */
   const executeFolderRun = useCallback(
-    async (action: GuidedAction, values: RunValues, source: string, dest: string) => {
+    async (
+      action: GuidedAction,
+      values: RunValues,
+      source: string,
+      dest: string,
+      inPlace = false,
+    ) => {
       if (running) return;
       setView({ kind: 'folderrun', action, report: null, error: null });
       setRunning(true);
@@ -182,7 +188,7 @@ export function GuidedActionsPanel(): React.ReactElement {
         }));
         const report = (await callRaw('run_action', {
           source,
-          dest,
+          dest: inPlace ? '' : dest,
           steps,
           action_name: action.name,
           gs_path: await ensureGsPath(),
@@ -190,6 +196,7 @@ export function GuidedActionsPanel(): React.ReactElement {
           font_dir: await app.getEditFontPath(),
           log_dir: logDir,
           write_log: settings.batchLogEnabled,
+          in_place: inPlace,
         })) as unknown as FolderReport;
         setView({ kind: 'folderrun', action, report, error: null });
       } catch (e: unknown) {
@@ -218,6 +225,31 @@ export function GuidedActionsPanel(): React.ReactElement {
     },
     [running, executeFolderRun],
   );
+
+  // O7 in-place: run the sequence over a folder REPLACING the originals
+  // (engine-side staging + verify + atomic swap per file). The two-step
+  // confirm lives on the list row — this only fires from its Replace button.
+  const runActionInPlace = useCallback(
+    async (action: GuidedAction) => {
+      if (running) return;
+      const source = await dialog.pickFolder('Folder of PDFs to process IN PLACE');
+      if (!source) return;
+      const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
+      if (anyAsked) {
+        setView({
+          kind: 'prerun',
+          action,
+          values: {},
+          error: null,
+          folder: { source, dest: '', inPlace: true },
+        });
+        return;
+      }
+      void executeFolderRun(action, {}, source, '', true);
+    },
+    [running, executeFolderRun],
+  );
+  const [confirmInPlace, setConfirmInPlace] = useState<string | null>(null);
 
   // Slice 4: actions travel as FILES — the `{name, steps}` shape the CLI
   // consumes (`run-action --action file.json`). Export strips secrets by the
@@ -267,10 +299,16 @@ export function GuidedActionsPanel(): React.ReactElement {
         if (!action) throw new Error(`runWithOutput: no action ${actionId}`);
         await bridgeRef.current.executeRun(action, values as RunValues, output);
       },
-      runFolder: async (actionId, values, source, dest) => {
+      runFolder: async (actionId, values, source, dest, inPlace) => {
         const action = bridgeRef.current.actions.find((a) => a.id === actionId);
         if (!action) throw new Error(`runFolder: no action ${actionId}`);
-        await bridgeRef.current.executeFolderRun(action, values as RunValues, source, dest);
+        await bridgeRef.current.executeFolderRun(
+          action,
+          values as RunValues,
+          source,
+          dest,
+          inPlace ?? false,
+        );
       },
       exportToPath: async (actionId, path) => {
         const action = bridgeRef.current.actions.find((a) => a.id === actionId);
@@ -510,7 +548,14 @@ export function GuidedActionsPanel(): React.ReactElement {
           return;
         }
       }
-      if (view.folder) void executeFolderRun(action, values, view.folder.source, view.folder.dest);
+      if (view.folder)
+        void executeFolderRun(
+          action,
+          values,
+          view.folder.source,
+          view.folder.dest,
+          view.folder.inPlace ?? false,
+        );
       else void executeRun(action, values);
     };
     return (
@@ -768,6 +813,43 @@ export function GuidedActionsPanel(): React.ReactElement {
               >
                 Folder…
               </button>
+              {confirmInPlace === a.id ? (
+                <>
+                  <span className="text-xs text-amber-400 self-center" data-testid={`action-inplace-warning-${a.id}`}>
+                    Replaces the originals — no undo.
+                  </span>
+                  <button
+                    type="button"
+                    data-testid={`action-inplace-confirm-${a.id}`}
+                    disabled={running}
+                    onClick={() => {
+                      setConfirmInPlace(null);
+                      void runActionInPlace(a);
+                    }}
+                    className="px-2 py-1 text-xs text-white bg-red-700/90 hover:bg-red-600 disabled:opacity-50 rounded"
+                  >
+                    Replace
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmInPlace(null)}
+                    className="px-2 py-1 text-xs text-neutral-400 hover:text-neutral-200"
+                  >
+                    Keep
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  data-testid={`action-inplace-${a.id}`}
+                  disabled={running}
+                  title="Run this action over a folder REPLACING the originals (staged, verified, then swapped per file)"
+                  onClick={() => setConfirmInPlace(a.id)}
+                  className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                >
+                  In place…
+                </button>
+              )}
               <button
                 type="button"
                 data-testid={`action-edit-${a.id}`}

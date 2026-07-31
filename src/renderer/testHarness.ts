@@ -246,12 +246,14 @@ export interface GuidedActionsHandlers {
     values: Record<number, Record<string, string | number>>,
     output: string,
   ) => Promise<void>;
-  /** FOLDER mode with injected source/dest (the pickers are native). */
+  /** FOLDER mode with injected source/dest (the pickers are native).
+   * `inPlace` (O7): dest is ignored and the ORIGINALS are replaced. */
   runFolder: (
     actionId: string,
     values: Record<number, Record<string, string | number>>,
     source: string,
     dest: string,
+    inPlace?: boolean,
   ) => Promise<void>;
   /** Slice 4: write one action to `path` (the `{name, steps}` file shape). */
   exportToPath: (actionId: string, path: string) => Promise<void>;
@@ -833,12 +835,14 @@ export interface TestHarness {
     values: Record<number, Record<string, string | number>>,
     output: string,
   ) => Promise<void>;
-  /** Guided-actions FOLDER run with injected source/dest paths. */
+  /** Guided-actions FOLDER run with injected source/dest paths. `inPlace`
+   * (O7) replaces the originals — dest is ignored. */
   guidedRunFolder: (
     actionId: string,
     values: Record<number, Record<string, string | number>>,
     source: string,
     dest: string,
+    inPlace?: boolean,
   ) => Promise<void>;
   /** Guided-actions export/import with injected paths (the dialogs are
    * native). Import rejects with the named refusal for malformed files. */
@@ -1490,13 +1494,13 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
       return guidedActionsHandlers.runWithOutput(actionId, values, output);
     },
-    guidedRunFolder: async (actionId, values, source, dest) => {
+    guidedRunFolder: async (actionId, values, source, dest, inPlace) => {
       if (!guidedActionsHandlers) {
         const msg = 'guidedRunFolder: panel not mounted';
         lastError = msg;
         throw new Error(msg);
       }
-      return guidedActionsHandlers.runFolder(actionId, values, source, dest);
+      return guidedActionsHandlers.runFolder(actionId, values, source, dest, inPlace);
     },
     guidedExportToPath: async (actionId, path) => {
       if (!guidedActionsHandlers) {

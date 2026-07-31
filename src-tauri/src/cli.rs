@@ -383,11 +383,15 @@ pub struct OcrFileArgs {
 
 #[derive(Args)]
 pub struct RunActionArgs {
-    /// Source folder (searched recursively for PDFs; never modified)
+    /// Source folder (searched recursively for PDFs; never modified unless --in-place)
     pub source: PathBuf,
     /// Destination folder — processed copies mirror the source tree here
-    #[arg(short, long)]
-    pub dest: PathBuf,
+    #[arg(short, long, required_unless_present = "in_place", conflicts_with = "in_place")]
+    pub dest: Option<PathBuf>,
+    /// DESTRUCTIVE: replace each original with its processed version
+    /// (staged beside it, verified, then swapped — no destination folder)
+    #[arg(long)]
+    pub in_place: bool,
     /// The action as JSON: {"name": "...", "steps": [{"op": "...", "params": {...}}]}
     /// — the same shape the app saves
     #[arg(long)]
@@ -1006,8 +1010,12 @@ pub struct BatchOcrArgs {
     /// Folder of PDFs to make searchable (searched recursively)
     pub source: PathBuf,
     /// Folder the searchable copies are written to (must be outside SOURCE)
-    #[arg(short, long)]
-    pub dest: PathBuf,
+    #[arg(short, long, required_unless_present = "in_place", conflicts_with = "in_place")]
+    pub dest: Option<PathBuf>,
+    /// DESTRUCTIVE: replace each original with its searchable version
+    /// (staged beside it, verified, then swapped — no destination folder)
+    #[arg(long)]
+    pub in_place: bool,
     /// Recognition language(s); '+'-join several, e.g. eng+fra. Not auto-detection.
     #[arg(short, long, default_value = "eng")]
     pub lang: String,
@@ -1735,7 +1743,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 .unwrap_or_default();
             let mut params = json!({
                 "source": abs(&args.source).to_string_lossy(),
-                "dest": abs(&args.dest).to_string_lossy(),
+                "dest": args.dest.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
                 "steps": steps,
                 "action_name": name,
                 "gs_path": resolve_gs().to_string_lossy(),
@@ -1743,6 +1751,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "font_dir": resolve_fonts().to_string_lossy(),
                 "write_log": args.log_dir.is_some(),
                 "progress": true,
+                "in_place": args.in_place,
             });
             if let Some(dir) = &args.log_dir {
                 params["log_dir"] = json!(abs(dir).to_string_lossy());
@@ -2326,7 +2335,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "batch_ocr",
                 json!({
                     "source": abs(&args.source).to_string_lossy(),
-                    "dest": abs(&args.dest).to_string_lossy(),
+                    "dest": args.dest.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
                     "lang": args.lang,
                     "tesseract_path": resolve_tesseract().to_string_lossy(),
                     "gs_path": gs.to_string_lossy(),
@@ -2336,6 +2345,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "replace_repaired_originals": args.replace_repaired,
                     "log_dir": args.log_dir.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
                     "progress": args.verbose,
+                    "in_place": args.in_place,
                 }),
             )
         }

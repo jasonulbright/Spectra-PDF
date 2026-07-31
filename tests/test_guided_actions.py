@@ -187,3 +187,48 @@ class TestEncryptDecryptInPlace:
         encrypt(file=tmp_pdf, output=tmp_pdf, user_password="pw")
         decrypt(file=tmp_pdf, output=tmp_pdf, password="pw")
         assert check_encrypted(file=tmp_pdf)["encrypted"] is False
+
+
+class TestRunActionInPlace:
+    """O7 in-place mode: originals replaced through staged temps, per-file
+    isolation intact, refusals loud."""
+
+    def test_in_place_replaces_originals(self, tree, tmp_path):
+        report = run_action(
+            source=str(tree),
+            dest="",
+            steps=[{"op": "watermark", "params": {"text": "INPLACE RUN"}}],
+            in_place=True,
+        )
+        assert report["in_place"] is True
+        assert report["ok"] == 2 and report["failed"] == 0
+        # The ORIGINALS carry the watermark now.
+        assert "INPLACE RUN" in extract_text(file=str(tree / "a.pdf"))["text"]
+        assert "INPLACE RUN" in extract_text(file=str(tree / "sub" / "b.pdf"))["text"]
+        # No staging litter anywhere in the tree.
+        assert not list(tree.rglob("*.inplace.tmp"))
+
+    def test_in_place_failed_file_untouched(self, tree):
+        broken = tree / "broken.pdf"
+        broken.write_bytes(b"%PDF-not really")
+        before = broken.read_bytes()
+        report = run_action(
+            source=str(tree),
+            dest="",
+            steps=[{"op": "strip_metadata"}],
+            in_place=True,
+        )
+        assert report["failed"] == 1
+        assert broken.read_bytes() == before
+        assert not list(tree.rglob("*.inplace.tmp"))
+
+    def test_in_place_refuses_a_dest(self, tree, tmp_path):
+        with pytest.raises(ValueError, match="no destination"):
+            run_action(
+                source=str(tree),
+                dest=str(tmp_path / "out"),
+                steps=[{"op": "strip_metadata"}],
+                in_place=True,
+            )
+        with pytest.raises(ValueError, match="destination folder is required"):
+            run_action(source=str(tree), dest="", steps=[{"op": "strip_metadata"}])
