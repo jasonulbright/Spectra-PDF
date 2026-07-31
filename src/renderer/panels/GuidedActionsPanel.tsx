@@ -9,10 +9,12 @@ import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerGuidedActionsHandlers } from '../testHarness';
 import {
   STEP_CATALOG,
+  actionFileJson,
   askedParamKeys,
   buildStepParams,
   loadGuidedActions,
   newStep,
+  parseActionFile,
   saveGuidedActions,
   stepDefFor,
   validateAction,
@@ -60,6 +62,7 @@ export function GuidedActionsPanel(): React.ReactElement {
   const [actions, setActions] = useState<GuidedAction[]>(() => loadGuidedActions());
   const [view, setView] = useState<PanelView>({ kind: 'list' });
   const [editError, setEditError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   const [runStatuses, setRunStatuses] = useState<StepStatus[]>([]);
   const [running, setRunning] = useState(false);
 
@@ -216,11 +219,46 @@ export function GuidedActionsPanel(): React.ReactElement {
     [running, executeFolderRun],
   );
 
-  // Harness bridge: the terminal step's output and the folder pickers are
-  // NATIVE dialogs — e2e injects the paths + ask-at-run values and drives
-  // the REAL executeRun/executeFolderRun.
-  const bridgeRef = useRef({ actions, executeRun, executeFolderRun });
-  bridgeRef.current = { actions, executeRun, executeFolderRun };
+  // Slice 4: actions travel as FILES — the `{name, steps}` shape the CLI
+  // consumes (`run-action --action file.json`). Export strips secrets by the
+  // same construction as the persist path (an exported file can never carry
+  // a password); import validates against the catalog BY NAME and mints a
+  // fresh id, so imports never collide with or overwrite an existing action.
+  const executeExport = async (action: GuidedAction, path: string): Promise<void> => {
+    await file.writeBuffer(path, new TextEncoder().encode(actionFileJson(action)));
+  };
+  const executeImport = async (path: string): Promise<void> => {
+    const bytes = await file.readBuffer(path);
+    const action = parseActionFile(new TextDecoder().decode(bytes));
+    persist([...bridgeRef.current.actions, action]);
+  };
+  const exportAction = async (action: GuidedAction): Promise<void> => {
+    const name = action.name.replace(/[\\/:*?"<>|]/g, '-').trim() || 'action';
+    const path = await saveFile(`${name}.json`);
+    if (!path) return;
+    try {
+      await executeExport(action, path);
+      setListError(null);
+    } catch (e: unknown) {
+      setListError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const importAction = async (): Promise<void> => {
+    const path = await dialog.pickAnyFile();
+    if (!path) return;
+    try {
+      await executeImport(path);
+      setListError(null);
+    } catch (e: unknown) {
+      setListError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // Harness bridge: the terminal step's output, the folder pickers, and the
+  // export/import dialogs are NATIVE — e2e injects the paths + ask-at-run
+  // values and drives the REAL execute paths.
+  const bridgeRef = useRef({ actions, executeRun, executeFolderRun, executeExport, executeImport });
+  bridgeRef.current = { actions, executeRun, executeFolderRun, executeExport, executeImport };
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerGuidedActionsHandlers({
@@ -234,6 +272,12 @@ export function GuidedActionsPanel(): React.ReactElement {
         if (!action) throw new Error(`runFolder: no action ${actionId}`);
         await bridgeRef.current.executeFolderRun(action, values as RunValues, source, dest);
       },
+      exportToPath: async (actionId, path) => {
+        const action = bridgeRef.current.actions.find((a) => a.id === actionId);
+        if (!action) throw new Error(`exportToPath: no action ${actionId}`);
+        await bridgeRef.current.executeExport(action, path);
+      },
+      importFromPath: async (path) => bridgeRef.current.executeImport(path),
     });
     return () => registerGuidedActionsHandlers(null);
   }, []);
@@ -661,15 +705,31 @@ export function GuidedActionsPanel(): React.ReactElement {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium text-neutral-300">Guided actions</div>
-        <button
-          type="button"
-          data-testid="action-new"
-          onClick={startNew}
-          className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded font-medium"
-        >
-          New action…
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="action-import"
+            title="Import an action from a file (exported here or written for the CLI)"
+            onClick={() => void importAction()}
+            className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
+          >
+            Import…
+          </button>
+          <button
+            type="button"
+            data-testid="action-new"
+            onClick={startNew}
+            className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded font-medium"
+          >
+            New action…
+          </button>
+        </div>
       </div>
+      {listError && (
+        <p className="text-sm text-red-400" data-testid="action-list-error">
+          {listError}
+        </p>
+      )}
       {actions.length === 0 ? (
         <p className="text-sm text-neutral-500" data-testid="actions-empty">
           No actions yet. An action runs a sequence of steps — compress,
@@ -735,6 +795,15 @@ export function GuidedActionsPanel(): React.ReactElement {
                 className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
               >
                 Duplicate
+              </button>
+              <button
+                type="button"
+                data-testid={`action-export-${a.id}`}
+                title="Save this action as a file — shareable, and runnable via the CLI's run-action"
+                onClick={() => void exportAction(a)}
+                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
+              >
+                Export…
               </button>
               <button
                 type="button"

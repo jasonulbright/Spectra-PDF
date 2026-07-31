@@ -3,12 +3,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   STEP_CATALOG,
+  actionFileJson,
   askedParamKeys,
   buildStepParams,
   isGuidedAction,
   loadGuidedActions,
   newStep,
+  parseActionFile,
   saveGuidedActions,
+  unattendedBlocker,
   validateAction,
   validateRunValues,
   type GuidedAction,
@@ -171,5 +174,158 @@ describe('persistence (localStorage stub)', () => {
     expect(isGuidedAction({ id: '1', name: 'n', steps: [{ op: 'compress', params: {} }] })).toBe(true);
     expect(isGuidedAction({ id: '1', name: 'n', steps: [{ op: 'nope', params: {} }] })).toBe(false);
     expect(isGuidedAction({ id: '1', name: 'n', steps: [null] })).toBe(false);
+  });
+});
+
+describe('action files (slice 4 — export/import)', () => {
+  const store = new Map<string, string>();
+  beforeEach(() => {
+    store.clear();
+    (globalThis as Record<string, unknown>).localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+
+  it('exports the CLI-consumable {name, steps} shape — no id, and NO password material by construction', () => {
+    const wm = newStep('watermark');
+    wm.params.text = 'DRAFT';
+    const enc = newStep('encrypt');
+    enc.params.user_password = 'hunter2'; // simulate an in-memory secret
+    enc.params.owner_password = 'hunter3';
+    const raw = actionFileJson({ id: 'abc', name: 'Lock', steps: [wm, enc] });
+    expect(raw).not.toContain('hunter2');
+    expect(raw).not.toContain('hunter3');
+    expect(raw).not.toContain('password'); // the KEYS are stripped, not blanked
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    expect(parsed.id).toBeUndefined();
+    expect(parsed).toEqual({
+      name: 'Lock',
+      steps: [
+        { op: 'watermark', params: { text: 'DRAFT', opacity: 0.15, angle: 45 } },
+        { op: 'encrypt', params: {} },
+      ],
+    });
+  });
+
+  it('round-trips through parseActionFile with a FRESH id; params and ask marks survive', () => {
+    const wm = newStep('watermark');
+    wm.params.text = 'X';
+    wm.ask = ['opacity'];
+    const hf = newStep('add_header_footer');
+    hf.params.text = 'Page {page}';
+    const a: GuidedAction = { id: 'orig', name: 'Share', steps: [wm, hf] };
+    const back = parseActionFile(actionFileJson(a));
+    expect(back.id).not.toBe('orig');
+    expect(back.name).toBe('Share');
+    expect(back.steps).toEqual(a.steps);
+    expect(isGuidedAction(back)).toBe(true);
+  });
+
+  it('refuses malformed files BY NAME (the engine validate_steps message shape)', () => {
+    const f = (v: unknown): string => JSON.stringify(v);
+    expect(() => parseActionFile('{oops')).toThrow(/valid JSON/);
+    expect(() => parseActionFile(f([]))).toThrow(/action file/);
+    expect(() => parseActionFile(f({ name: 'x' }))).toThrow(/steps/);
+    expect(() => parseActionFile(f({ name: 'x', steps: [{ op: 'rm_rf', params: {} }] }))).toThrow(
+      /unknown operation 'rm_rf'/,
+    );
+    expect(() =>
+      parseActionFile(f({ name: 'x', steps: [{ op: 'compress', params: { gs_path: 'evil.exe' } }] })),
+    ).toThrow(/unknown parameter\(s\) \[gs_path\]/);
+    expect(() =>
+      parseActionFile(f({ name: 'x', steps: [{ op: 'compress', params: { quality: 'bogus' } }] })),
+    ).toThrow(/invalid value 'bogus' for 'quality'/);
+    expect(() =>
+      parseActionFile(f({ name: 'x', steps: [{ op: 'watermark', params: { text: true } }] })),
+    ).toThrow(/parameter 'text' must be text or a number/);
+    expect(() =>
+      parseActionFile(f({ name: 'x', steps: [{ op: 'compress', params: 'zip' }] })),
+    ).toThrow(/params must be an object/);
+    expect(() => parseActionFile(f({ name: '', steps: [{ op: 'strip_metadata', params: {} }] }))).toThrow(
+      /name/,
+    );
+    expect(() => parseActionFile(f({ name: 'x', steps: [] }))).toThrow(/at least one/);
+    expect(() =>
+      parseActionFile(
+        f({
+          name: 'x',
+          steps: [{ op: 'encrypt', params: {} }, { op: 'strip_metadata', params: {} }],
+        }),
+      ),
+    ).toThrow(/last step/);
+    // Required-and-not-asked params are refused like the editor refuses them.
+    expect(() =>
+      parseActionFile(f({ name: 'x', steps: [{ op: 'watermark', params: {} }] })),
+    ).toThrow(/Text is required/);
+  });
+
+  it('accepts the engine placements shape for ONE placement (CLI-authored files); multi-placement refuses by name', () => {
+    const single = JSON.stringify({
+      name: 'x',
+      steps: [
+        {
+          op: 'add_header_footer',
+          params: { placements: [{ position: 'br', text: 'P {page}' }], font_size: 12 },
+        },
+      ],
+    });
+    const a = parseActionFile(single);
+    expect(a.steps[0].params).toEqual({ position: 'br', text: 'P {page}', font_size: 12 });
+    const multi = JSON.stringify({
+      name: 'x',
+      steps: [
+        {
+          op: 'add_header_footer',
+          params: {
+            placements: [
+              { position: 'br', text: 'a' },
+              { position: 'bl', text: 'b' },
+            ],
+          },
+        },
+      ],
+    });
+    expect(() => parseActionFile(multi)).toThrow(/one placement per step/);
+    const both = JSON.stringify({
+      name: 'x',
+      steps: [{ op: 'add_header_footer', params: { placements: [], position: 'br', text: 'a' } }],
+    });
+    expect(() => parseActionFile(both)).toThrow(/not both/);
+  });
+
+  it('unattendedBlocker: ask-at-run and secret steps cannot be scheduled; plain actions can (slice 5)', () => {
+    const plain: GuidedAction = { id: '1', name: 'Nightly', steps: [newStep('strip_metadata')] };
+    expect(unattendedBlocker(plain)).toBeNull();
+
+    const wm = newStep('watermark');
+    wm.params.text = 'X';
+    wm.ask = ['text'];
+    expect(unattendedBlocker({ id: '2', name: 'Asks', steps: [wm] })).toMatch(
+      /asks for values when it runs \(text\)/,
+    );
+
+    const locked: GuidedAction = {
+      id: '3',
+      name: 'Lock',
+      steps: [newStep('strip_metadata'), newStep('encrypt')],
+    };
+    expect(unattendedBlocker(locked)).toMatch(/passwords are never stored/);
+  });
+
+  it('an imported password never reaches disk: secret values are accepted then stripped at save', () => {
+    const withPw = JSON.stringify({
+      name: 'Lock',
+      steps: [{ op: 'encrypt', params: { user_password: 'leaked' } }],
+    });
+    const a = parseActionFile(withPw);
+    saveGuidedActions([a]);
+    expect(store.get('guided-actions')!).not.toContain('leaked');
+    // …and export strips it the same way.
+    expect(actionFileJson(a)).not.toContain('leaked');
   });
 });

@@ -7,9 +7,7 @@
     "core:default",
     "core:window:allow-set-theme",
     "core:window:allow-set-fullscreen",
-    "updater:default",
     "updater:allow-check",
-    "updater:allow-download-and-install",
     {
       "identifier": "fs:allow-read-file",
       "allow": [{ "path": "$TEMP/openpdfstudio/**" }]

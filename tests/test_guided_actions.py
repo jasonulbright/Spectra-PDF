@@ -61,6 +61,37 @@ class TestValidateSteps:
         with pytest.raises(ValueError, match="open or an owner password"):
             validate_steps([{"op": "encrypt", "params": {}}])
 
+    def test_header_footer_form_sugar_folds_to_placements(self):
+        # The GUI's saved/exported shape stores ONE position+text pair per
+        # step; the fold makes an exported action file CLI-consumable
+        # without translation (slice 4).
+        steps = validate_steps([
+            {
+                "op": "add_header_footer",
+                "params": {"position": "br", "text": "P {page}", "font_size": 12},
+            }
+        ])
+        assert steps[0]["params"]["placements"] == [{"position": "br", "text": "P {page}"}]
+        assert "position" not in steps[0]["params"]
+        assert "text" not in steps[0]["params"]
+        assert steps[0]["params"]["font_size"] == 12
+
+    def test_header_footer_sugar_rules(self):
+        with pytest.raises(ValueError, match="not both"):
+            validate_steps([
+                {
+                    "op": "add_header_footer",
+                    "params": {"position": "br", "text": "x", "placements": []},
+                }
+            ])
+        with pytest.raises(ValueError, match="go together"):
+            validate_steps([{"op": "add_header_footer", "params": {"position": "br"}}])
+        # The placements shape stays first-class (slice 3 files unchanged).
+        steps = validate_steps([
+            {"op": "add_header_footer", "params": {"placements": [{"position": "bc", "text": "x"}]}}
+        ])
+        assert steps[0]["params"]["placements"] == [{"position": "bc", "text": "x"}]
+
 
 class TestRunAction:
     def test_mirrors_the_tree_and_applies_steps(self, tree, tmp_path):
@@ -99,6 +130,23 @@ class TestRunAction:
     def test_dest_inside_source_refused(self, tree):
         with pytest.raises(ValueError, match="outside the source"):
             run_action(source=str(tree), dest=str(tree / "out"), steps=[{"op": "strip_metadata"}])
+
+    def test_gui_exported_header_footer_shape_runs(self, tree, tmp_path):
+        # An exported action file carries the GUI's position/text shape —
+        # prove it runs end-to-end through the same entry the CLI uses.
+        dest = tmp_path / "out"
+        report = run_action(
+            source=str(tree),
+            dest=str(dest),
+            steps=[
+                {
+                    "op": "add_header_footer",
+                    "params": {"position": "bc", "text": "EXPORTED", "font_size": 10},
+                }
+            ],
+        )
+        assert report["ok"] == 2 and report["failed"] == 0
+        assert "EXPORTED" in extract_text(file=str(dest / "a.pdf"))["text"]
 
     def test_encrypt_last_produces_locked_mirrors(self, tree, tmp_path):
         dest = tmp_path / "locked"
