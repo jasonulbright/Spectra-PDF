@@ -127,6 +127,7 @@ export const COMMAND_IDS = [
   'file.openInPlace',
   'file.properties',
   'file.print',
+  'file.sendToEmail',
   'tools.close',
   'file.save',
   'file.saveAs',
@@ -343,6 +344,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Print…',
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.openPrint(),
+  },
+  // File ▸ Send To ▸ Email — attach the current document to a compose window
+  // in the default desktop mail client (owner-ruled in scope 2026-07-31).
+  'file.sendToEmail': {
+    title: 'Email…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => void ctx.app!.sendToEmail(),
   },
   'tools.close': {
     title: 'Close Tool',

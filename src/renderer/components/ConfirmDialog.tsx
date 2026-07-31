@@ -9,8 +9,10 @@ interface ConfirmDialogProps {
   onResult: (result: ConfirmResult) => void;
   /** 'unsaved' (default): the 3-choice Save / Don't Save / Cancel dialog.
    * 'proceed': a 2-choice Continue / Cancel confirmation — 'save' doubles as
-   * the affirmative result (one result type, one dialog, two shapes). */
-  kind?: 'unsaved' | 'proceed';
+   * the affirmative result (one result type, one dialog, two shapes).
+   * 'notice': a one-button OK notice (errors and outcomes with no choice to
+   * make); resolves 'cancel' however dismissed. */
+  kind?: 'unsaved' | 'proceed' | 'notice';
   /** Title override; defaults per kind. */
   title?: string;
 }
@@ -26,11 +28,23 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
           onInteractOutside={(e) => e.preventDefault()}
         >
           <Dialog.Title className="text-sm font-semibold text-neutral-100 mb-1">
-            {title ?? (kind === 'proceed' ? 'Are you sure?' : 'Unsaved Changes')}
+            {title ?? (kind === 'proceed' ? 'Are you sure?' : kind === 'notice' ? 'Notice' : 'Unsaved Changes')}
           </Dialog.Title>
-          <Dialog.Description className="text-sm text-neutral-400 mb-5">
+          <Dialog.Description className="text-sm text-neutral-400 mb-5" data-testid="confirm-message">
             {message}
           </Dialog.Description>
+          {kind === 'notice' ? (
+            <div className="flex justify-end">
+              <button
+                data-testid="notice-ok"
+                onClick={() => onResult('cancel')}
+                autoFocus
+                className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded transition-colors"
+              >
+                OK
+              </button>
+            </div>
+          ) : (
           <div className="flex justify-end gap-2">
             {kind === 'unsaved' && (
               <button
@@ -59,6 +73,7 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
               {kind === 'proceed' ? 'Continue' : 'Save'}
             </button>
           </div>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
