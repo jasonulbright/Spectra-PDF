@@ -70,7 +70,7 @@ export const initialUiState: UiState = {
   twoUpCover: true,
   readingMode: false,
   propertiesBar: false,
-  splitView: false,
+  splitView: 'off',
   toolbarOverrides: NO_OVERRIDES,
   focusedDocId: null,
   currentPageId: null,
@@ -1214,7 +1214,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_TOGGLE_PROPERTIES_BAR':
       return { ...state, ui: { ...state.ui, propertiesBar: !state.ui.propertiesBar } };
     case 'UI_TOGGLE_SPLIT_VIEW':
-      return { ...state, ui: { ...state.ui, splitView: !state.ui.splitView } };
+      // Two-pane toggles against ITSELF; from the quad it switches shape
+      // (the king's menu model: the two split modes replace each other).
+      return {
+        ...state,
+        ui: { ...state.ui, splitView: state.ui.splitView === 'two' ? 'off' : 'two' },
+      };
+    case 'UI_TOGGLE_SPREADSHEET_SPLIT':
+      return {
+        ...state,
+        ui: { ...state.ui, splitView: state.ui.splitView === 'quad' ? 'off' : 'quad' },
+      };
     case 'UI_SET_TOOLBAR_OVERRIDES':
       return { ...state, ui: { ...state.ui, toolbarOverrides: action.overrides } };
     case 'UI_ROTATE_VIEW': {

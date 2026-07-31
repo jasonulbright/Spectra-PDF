@@ -312,12 +312,16 @@ export interface UiState {
   // secondary toolbar showing the selected annotation's properties (or the
   // armed comment tool's defaults). Session-scoped like navPane.open.
   propertiesBar: boolean;
-  // Split view (I.6, the king's Window ▸ Split): the reading view divides into
-  // two stacked panes over the SAME document, each with its own local
-  // scroll/zoom (DocumentView state is per-instance already). Session-scoped
-  // like propertiesBar — the king doesn't persist split either. The organize
-  // board never splits (one d3 world; the command is document-mode-gated).
-  splitView: boolean;
+  // Split view (I.6, the king's Window ▸ Split): the reading view divides
+  // over the SAME document. 'two' = stacked panes with independent
+  // scroll/zoom (DocumentView state is per-instance already). 'quad' = the
+  // king's SPREADSHEET split: a 2×2 grid with frozen-pane semantics — panes
+  // in a row share vertical scroll, panes in a column share horizontal
+  // scroll, and zoom is broadcast (linked positions under unequal zooms
+  // would misalign the frozen rows). Session-scoped like propertiesBar —
+  // the king doesn't persist split either. The organize board never splits
+  // (one d3 world; both commands are document-mode-gated).
+  splitView: 'off' | 'two' | 'quad';
   // Toolbar customization (I.6): the user's show/hide overrides against the
   // toolbar catalog. Persisted — App mirrors it to localStorage, the
   // recent-files pattern (lib/toolbar-layout.ts).
@@ -477,6 +481,8 @@ export type AppAction =
   | { type: 'UI_TOGGLE_NAV_PANE' }
   | { type: 'UI_TOGGLE_PROPERTIES_BAR' }
   | { type: 'UI_TOGGLE_SPLIT_VIEW' }
+  // The 2×2 spreadsheet split (frozen-pane scroll linking); quad ↔ off.
+  | { type: 'UI_TOGGLE_SPREADSHEET_SPLIT' }
   | { type: 'UI_SET_TOOLBAR_OVERRIDES'; overrides: ToolbarOverrides }
   | { type: 'UI_SET_TOOL_DOCK_OPEN'; open: boolean }
   | { type: 'UI_SET_TOOL_DOCK_WIDTH'; width: number }

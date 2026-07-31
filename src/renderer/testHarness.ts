@@ -28,6 +28,9 @@ export interface TestStateSnapshot {
   docViewMode: 'organize' | 'document';
   /** Split view (I.6, Window ▸ Split): two stacked reading panes. */
   splitView: boolean;
+  /** The full split shape ('off' | 'two' | 'quad'); splitView stays the
+   * boolean projection so pre-quad specs' truthy checks hold. */
+  splitMode: 'off' | 'two' | 'quad';
   /** The page being read (M4.1e tracking) — insertion anchors hang off it. */
   currentPageId: string | null;
   fileCount: number;
