@@ -24,6 +24,9 @@ const TESTID_FOR: Partial<Record<CommandId, string>> = {
   'edit.find': 'toolbar-find',
   'view.navPanel.pages': 'toolbar-nav-pages',
   'view.navPanel.bookmarks': 'toolbar-nav-bookmarks',
+  'view.navPanel.attachments': 'toolbar-nav-attachments',
+  'view.navPanel.layers': 'toolbar-nav-layers',
+  'view.navPanel.tags': 'toolbar-nav-tags',
   'view.navPanel.signatures': 'toolbar-nav-signatures',
   'view.toolsPane': 'toolbar-tools-pane',
 };

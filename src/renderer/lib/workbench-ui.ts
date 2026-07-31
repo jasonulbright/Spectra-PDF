@@ -14,9 +14,14 @@ import {
   type NavPanelId,
   type ToolDockState,
 } from '../state/types';
+import { NAV_PANEL_IDS } from '../commands/navpanels';
 
 const KEY = 'workbench-ui';
-const PANELS: readonly NavPanelId[] = ['pages', 'bookmarks', 'signatures', 'search'];
+// The AVAILABLE-panel list is the validator — a hand-copied list here would
+// silently bounce a newly-added panel back to the fallback on every boot
+// (caught when the left-dock candidates landed; navpanels is a leaf data
+// module, so no cycle).
+const PANELS: readonly NavPanelId[] = NAV_PANEL_IDS;
 
 interface WorkbenchUi {
   navPane: NavPaneState;
