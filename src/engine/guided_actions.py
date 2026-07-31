@@ -20,7 +20,10 @@ mirror never holds half-processed files.
 
 from datetime import datetime
 from pathlib import Path
+import os
 import shutil
+
+import pikepdf
 
 from engine.batch_ocr import (
     _format_duration,
@@ -122,6 +125,19 @@ def _apply_steps(path: str, steps: list[dict], tool_paths: dict) -> int:
     return len(steps)
 
 
+def _readable_output(path: Path) -> bool:
+    """The in-place gate: the processed staging must read back as a PDF with
+    pages. An ENCRYPTED result counts as readable — a terminal encrypt step
+    produces exactly that on purpose."""
+    try:
+        with pikepdf.open(str(path)) as pdf:
+            return len(pdf.pages) > 0
+    except pikepdf.PasswordError:
+        return True
+    except Exception:  # noqa: BLE001 — any unreadable staging refuses the swap
+        return False
+
+
 def run_action(
     source: str,
     dest: str,
@@ -133,19 +149,30 @@ def run_action(
     log_dir: str = "",
     write_log: bool = True,
     progress: bool = False,
+    in_place: bool = False,
 ) -> dict:
     """Run a step sequence over every PDF under `source`, mirroring into
-    `dest`. Returns the report; writes an `action-run-*.log` beside the
-    batch-OCR logs when `write_log` and a `log_dir` are given."""
+    `dest` — or, with `in_place`, REPLACING each original with its processed
+    version (O7 in-place batch mode; staged beside the original, verified,
+    then swapped atomically). Returns the report; writes an
+    `action-run-*.log` beside the batch-OCR logs when `write_log` and a
+    `log_dir` are given."""
     source_path = Path(source).resolve()
-    dest_path = Path(dest).resolve()
     if not source_path.is_dir():
         raise ValueError(f"Source folder not found: {source}")
-    if dest_conflicts_with_source(str(source_path), str(dest_path)):
-        raise ValueError(
-            "The destination must be outside the source folder -- choose a "
-            "separate folder for the processed copies."
-        )
+    if in_place:
+        if dest:
+            raise ValueError("In-place mode takes no destination -- the originals are replaced.")
+        dest_path = source_path
+    else:
+        if not dest:
+            raise ValueError("A destination folder is required unless running in place.")
+        dest_path = Path(dest).resolve()
+        if dest_conflicts_with_source(str(source_path), str(dest_path)):
+            raise ValueError(
+                "The destination must be outside the source folder -- choose a "
+                "separate folder for the processed copies."
+            )
     clean_steps = validate_steps(steps)
     tool_paths = {"gs_path": gs_path, "tesseract_path": tesseract_path, "font_dir": font_dir}
 
@@ -155,14 +182,25 @@ def run_action(
     for index, (abs_path, rel) in enumerate(entries):
         if progress:
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
-        out_path = dest_path / rel
+        # In place: stage beside the original, verify, then swap atomically —
+        # a failed step or a bad write can never leave a broken original.
+        out_path = (
+            abs_path.parent / f".{abs_path.name}.inplace.tmp" if in_place else dest_path / rel
+        )
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(abs_path, out_path)
             applied = _apply_steps(str(out_path), clean_steps, tool_paths)
+            if in_place:
+                if not _readable_output(out_path):
+                    raise ValueError(
+                        "the processed copy could not be read back -- the original "
+                        "was left untouched"
+                    )
+                os.replace(out_path, abs_path)
             results.append({"rel": rel, "status": "ok", "steps_applied": applied})
         except Exception as exc:  # noqa: BLE001 — per-file isolation is the contract
-            # Never leave a half-processed file in the mirror.
+            # Never leave a half-processed file in the mirror (or staging litter).
             try:
                 if out_path.exists():
                     out_path.unlink()
@@ -184,6 +222,7 @@ def run_action(
         "results": results,
         "duration_ms": (finished_at - started_at).total_seconds() * 1000,
         "steps": [s["op"] for s in clean_steps],
+        "in_place": in_place,
     }
     if write_log and log_dir:
         try:

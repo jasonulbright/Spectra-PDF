@@ -280,7 +280,7 @@ def ocr_file(
 
 def batch_ocr(
     source: str,
-    dest: str,
+    dest: str = "",
     lang: str = "eng",
     tesseract_path: str = "",
     gs_path: str = "",
@@ -290,23 +290,40 @@ def batch_ocr(
     replace_repaired_originals: bool = False,
     log_dir: str = "",
     progress: bool = False,
+    in_place: bool = False,
 ) -> dict:
-    """Mirror a folder of PDFs into searchable copies. Returns the report."""
+    """Mirror a folder of PDFs into searchable copies — or, with `in_place`,
+    REPLACE each original with its searchable version (O7 in-place batch
+    mode). In-place output goes through a staged temp beside the original
+    and only replaces it after the verify-read succeeds, so a crash or a bad
+    write can never leave a half-written original. Returns the report."""
     source_path = Path(source).resolve()
-    dest_path = Path(dest).resolve()
     if not source_path.is_dir():
         raise ValueError(f"Source folder not found: {source}")
-    if dest_conflicts_with_source(str(source_path), str(dest_path)):
-        raise ValueError(
-            "The destination must be outside the source folder -- choose a separate "
-            "folder for the searchable copies."
-        )
+    if in_place:
+        if dest:
+            raise ValueError("In-place mode takes no destination -- the originals are replaced.")
+        if moved_root:
+            raise ValueError(
+                "In-place mode cannot also move processed originals -- the processed "
+                "file IS the original."
+            )
+        dest_path = source_path  # rel joins resolve to the originals themselves
+    else:
+        if not dest:
+            raise ValueError("A destination folder is required unless running in place.")
+        dest_path = Path(dest).resolve()
+        if dest_conflicts_with_source(str(source_path), str(dest_path)):
+            raise ValueError(
+                "The destination must be outside the source folder -- choose a separate "
+                "folder for the searchable copies."
+            )
     for label, root in (("moved", moved_root), ("error", error_root)):
         if not root:
             continue
         if dest_conflicts_with_source(str(source_path), str(Path(root).resolve())):
             raise ValueError(f"The {label} folder must be outside the source folder.")
-        if dest_conflicts_with_source(str(dest_path), str(Path(root).resolve())):
+        if not in_place and dest_conflicts_with_source(str(dest_path), str(Path(root).resolve())):
             raise ValueError(f"The {label} folder must be outside the destination folder.")
 
     started_at = datetime.now()
@@ -316,7 +333,11 @@ def batch_ocr(
     for index, (abs_path, rel) in enumerate(entries):
         if progress:
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
-        out_path = dest_path / rel
+        # In place: write to a staged temp BESIDE the original; the tail
+        # replaces the original only after the verify-read succeeds.
+        out_path = (
+            abs_path.parent / f".{abs_path.name}.inplace.tmp" if in_place else dest_path / rel
+        )
         result: dict | None = None
         scratch: Path | None = None
         expected_pages = 0
@@ -355,8 +376,12 @@ def batch_ocr(
                 pdf = None
 
                 if not needing:
-                    _copy_file(working, out_path)
-                    result = {"rel": rel, "status": "copied"}
+                    if in_place:
+                        # Nothing to write — the original already IS the output.
+                        result = {"rel": rel, "status": "copied", "reason": "already searchable -- unchanged"}
+                    else:
+                        _copy_file(working, out_path)
+                        result = {"rel": rel, "status": "copied"}
                 else:
                     pages: list[dict] = []
                     for i in needing:
@@ -365,12 +390,19 @@ def batch_ocr(
                         if words:
                             pages.append({"page": i + 1, "words": words})
                     if not pages:
-                        _copy_file(working, out_path)
-                        result = {
-                            "rel": rel,
-                            "status": "copied",
-                            "reason": "no text recognized",
-                        }
+                        if in_place:
+                            result = {
+                                "rel": rel,
+                                "status": "copied",
+                                "reason": "no text recognized -- unchanged",
+                            }
+                        else:
+                            _copy_file(working, out_path)
+                            result = {
+                                "rel": rel,
+                                "status": "copied",
+                                "reason": "no text recognized",
+                            }
                     else:
                         out_path.parent.mkdir(parents=True, exist_ok=True)
                         apply_ocr_layer(str(working), str(out_path), pages)
@@ -384,7 +416,9 @@ def batch_ocr(
             # ── tail: verify, heal, move ────────────────────────────────
             if result is not None:
                 if result["status"] != "skipped" and (
-                    moved_root or (scratch is not None and replace_repaired_originals)
+                    (in_place and result["status"] == "ocr")
+                    or moved_root
+                    or (scratch is not None and replace_repaired_originals)
                 ):
                     if not _verify_output(out_path, expected_pages):
                         result = {
@@ -394,6 +428,19 @@ def batch_ocr(
                                 "the copy in the destination could not be read back as a "
                                 "valid PDF -- the original was left untouched"
                             ),
+                        }
+                # In place: the verified staging REPLACES the original
+                # atomically (same directory, os.replace). A skipped result
+                # leaves the original untouched; the finally unlinks staging.
+                if in_place and result["status"] == "ocr":
+                    try:
+                        os.replace(out_path, abs_path)
+                        result["inPlace"] = True
+                    except OSError as exc:
+                        result = {
+                            "rel": rel,
+                            "status": "skipped",
+                            "reason": f"could not replace the original in place: {exc}",
                         }
 
                 if scratch is not None:
@@ -428,11 +475,14 @@ def batch_ocr(
                 pdf.close()
             if scratch is not None:
                 scratch.unlink(missing_ok=True)
+            if in_place:
+                # Any staging that did not become the original is litter.
+                out_path.unlink(missing_ok=True)
 
         if result is not None:
             results.append(result)
 
-    report = {"cancelled": False, "results": results, "skippedDirs": skipped_dirs}
+    report = {"cancelled": False, "results": results, "skippedDirs": skipped_dirs, "inPlace": in_place}
     log_path = _write_log(
         started_at,
         datetime.now(),
