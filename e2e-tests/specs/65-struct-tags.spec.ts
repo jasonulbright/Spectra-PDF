@@ -16,6 +16,10 @@ import {
   getState,
   saveActiveAs,
   setReactInputValue,
+  invokeAppCommand,
+  selectCanvasPages,
+  getWorkspacePageIds,
+  commitPendingEdits,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -207,6 +211,27 @@ describe('structure tags + reading order (I.6)', () => {
     const dest = resolve(tmp, 'reordered.pdf');
     await applyAndSave(dest);
     expect(rolesOf(await readStructTree(dest))).toEqual(['P', 'H1', 'Figure']);
+  });
+
+  it('tags survive a COMMITTED page edit (P19 struct carry)', async () => {
+    // The page-tier rebuild used to drop /StructTreeRoot wholesale — one
+    // committed rotation orphaned every MCID. pdf.js's getStructTree resolves
+    // through the ParentTree, so this read-back proves the ENTIRE rebuilt
+    // chain (tree, ParentTree renumbering, page /StructParents) is coherent,
+    // not merely present.
+    const carried = resolve(tmp, 'carry-src.pdf');
+    await makeTaggedPdf(carried);
+    await openByPaths([carried]);
+    await browser.waitUntil(async () => (await getState()).view === 'canvas', {
+      timeoutMsg: 'opening the tagged file did not land on canvas',
+    });
+    const ids = await getWorkspacePageIds();
+    await selectCanvasPages([ids[0]]);
+    expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    await commitPendingEdits();
+    const dest = resolve(tmp, 'carried.pdf');
+    await saveActiveAs(dest);
+    expect(rolesOf(await readStructTree(dest))).toEqual(['H1', 'P', 'Figure']);
   });
 
   it('an untagged document states it honestly', async () => {
