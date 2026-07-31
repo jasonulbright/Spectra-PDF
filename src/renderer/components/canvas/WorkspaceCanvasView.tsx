@@ -253,17 +253,27 @@ export function WorkspaceCanvasView({
   // (b) which pane drives the page readout — both keyed on the ACTIVE pane,
   // set by pointerdown in a pane (the king's click-to-activate).
   const documentViewRefB = useRef<CanvasHandle | null>(null);
-  const splitView = state.ui.splitView && docViewMode === 'document';
+  // The spreadsheet split's second row (quad mode): c = bottom-left,
+  // d = bottom-right; a/b stay the top row.
+  const documentViewRefC = useRef<CanvasHandle | null>(null);
+  const documentViewRefD = useRef<CanvasHandle | null>(null);
+  const splitMode = docViewMode === 'document' ? state.ui.splitView : 'off';
+  const splitView = splitMode !== 'off';
   const splitViewRef = useRef(splitView);
   splitViewRef.current = splitView;
-  const [activePane, setActivePane] = useState<'a' | 'b'>('a');
+  const splitModeRef = useRef(splitMode);
+  splitModeRef.current = splitMode;
+  const [activePane, setActivePane] = useState<'a' | 'b' | 'c' | 'd'>('a');
   const activePaneRef = useRef(activePane);
   activePaneRef.current = activePane;
-  // The divider ratio is deliberately LOCAL state (session-scoped, like the
-  // splitView flag itself — the king doesn't persist split): it survives
-  // toggling split off/on and doc switches, resets on restart.
+  // The divider ratios are deliberately LOCAL state (session-scoped, like the
+  // splitView flag itself — the king doesn't persist split): they survive
+  // toggling split off/on and doc switches, reset on restart. splitRatio is
+  // the row ratio in both modes; quadCol is the quad's column ratio.
   const [splitRatio, setSplitRatio] = useState(0.5);
+  const [quadCol, setQuadCol] = useState(0.5);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const quadContainerRef = useRef<HTMLDivElement | null>(null);
   // The CanvasHandle of whichever view is active — the board's d3 camera, or the
   // reading view's scroller. EVERY camera caller (find navigation, the zoom
   // buttons, the registered canvasServices) must route through this: the
@@ -272,15 +282,43 @@ export function WorkspaceCanvasView({
   // (review-caught). Stable identity (reads refs). With split view up, the
   // ACTIVE pane's handle answers — a bookmark/thumbnail/Find jump lands in
   // the pane the user last touched, which is the king's behavior too.
-  const activeCanvasHandle = useCallback(
-    (): CanvasHandle | null =>
-      docViewModeRef.current === 'document'
-        ? splitViewRef.current && activePaneRef.current === 'b'
+  const paneHandleOf = useCallback(
+    (pane: 'a' | 'b' | 'c' | 'd'): CanvasHandle | null =>
+      pane === 'a'
+        ? documentViewRef.current
+        : pane === 'b'
           ? documentViewRefB.current
-          : documentViewRef.current
-        : canvasRef.current,
+          : pane === 'c'
+            ? documentViewRefC.current
+            : documentViewRefD.current,
     [],
   );
+  const activeCanvasHandle = useCallback((): CanvasHandle | null => {
+    if (docViewModeRef.current !== 'document') return canvasRef.current;
+    const mode = splitModeRef.current;
+    if (mode === 'off') return documentViewRef.current;
+    if (mode === 'two') {
+      return activePaneRef.current === 'b' ? documentViewRefB.current : documentViewRef.current;
+    }
+    // Quad: ZOOM broadcasts to all four panes — linked scroll positions
+    // under unequal zooms would misalign the frozen rows. Navigation stays
+    // on the active pane; the scroll links carry a jump to its partners.
+    const active = paneHandleOf(activePaneRef.current) ?? documentViewRef.current;
+    if (!active) return null;
+    const all = (): CanvasHandle[] =>
+      (['a', 'b', 'c', 'd'] as const)
+        .map(paneHandleOf)
+        .filter((h): h is CanvasHandle => h !== null);
+    return {
+      zoomIn: () => all().forEach((h) => h.zoomIn()),
+      zoomOut: () => all().forEach((h) => h.zoomOut()),
+      reset: () => all().forEach((h) => h.reset()),
+      actualSize: active.actualSize ? () => all().forEach((h) => h.actualSize?.()) : undefined,
+      fitWidth: active.fitWidth ? () => all().forEach((h) => h.fitWidth?.()) : undefined,
+      clientToWorld: (x, y) => active.clientToWorld(x, y),
+      centerOn: (pid) => active.centerOn(pid),
+    };
+  }, [paneHandleOf]);
   // Which document the reading view shows (the board shows ALL docs, the
   // reading view exactly one). An explicit per-doc focus — set by a jump that
   // lands in another file or another `.pdfx` partition — wins; otherwise the
@@ -1764,32 +1802,79 @@ export function WorkspaceCanvasView({
   // records its own latest page (so activating a pane can refresh the
   // readout instantly), but only the ACTIVE pane drives the toolbar box /
   // ui.currentPageId — the inactive pane scrolls silently, like the king's.
-  const lastPaneAPage = useRef(1);
-  const lastPaneBPage = useRef(1);
-  const onPaneAPageChange = useCallback((n: number) => {
-    lastPaneAPage.current = n;
-    if (!splitViewRef.current || activePaneRef.current === 'a') setCurrentPage(n);
-  }, []);
-  const onPaneBPageChange = useCallback((n: number) => {
-    lastPaneBPage.current = n;
-    if (splitViewRef.current && activePaneRef.current === 'b') setCurrentPage(n);
-  }, []);
-  const activatePane = useCallback((pane: 'a' | 'b') => {
+  const lastPanePages = useRef<Record<'a' | 'b' | 'c' | 'd', number>>({ a: 1, b: 1, c: 1, d: 1 });
+  const panePageChange = useCallback(
+    (pane: 'a' | 'b' | 'c' | 'd') => (n: number) => {
+      lastPanePages.current[pane] = n;
+      const drives =
+        pane === 'a'
+          ? !splitViewRef.current || activePaneRef.current === 'a'
+          : splitViewRef.current && activePaneRef.current === pane;
+      if (drives) setCurrentPage(n);
+    },
+    [],
+  );
+  const onPaneAPageChange = useMemo(() => panePageChange('a'), [panePageChange]);
+  const onPaneBPageChange = useMemo(() => panePageChange('b'), [panePageChange]);
+  const onPaneCPageChange = useMemo(() => panePageChange('c'), [panePageChange]);
+  const onPaneDPageChange = useMemo(() => panePageChange('d'), [panePageChange]);
+  const activatePane = useCallback((pane: 'a' | 'b' | 'c' | 'd') => {
     if (activePaneRef.current === pane) return;
     // Switching panes CANCELS an open text/paragraph editor (same as Esc):
     // the editor renders only in the active pane, and letting a hidden
     // instance survive would let a stale draft clobber a later commit.
     setEditingText(null);
     setActivePane(pane);
-    setCurrentPage(pane === 'a' ? lastPaneAPage.current : lastPaneBPage.current);
+    setCurrentPage(lastPanePages.current[pane]);
   }, []);
-  // Toggling split off returns the readout to pane A (the surviving pane).
+  // Toggling split off (or dropping quad → two while c/d was active) returns
+  // the readout to a SURVIVING pane.
   useEffect(() => {
-    if (!splitView) {
-      setActivePane('a');
-      setCurrentPage(lastPaneAPage.current);
+    const surviving =
+      splitMode === 'off' ? 'a' : splitMode === 'two' && (activePaneRef.current === 'c' || activePaneRef.current === 'd') ? 'a' : null;
+    if (surviving) {
+      setActivePane(surviving);
+      setCurrentPage(lastPanePages.current[surviving]);
     }
-  }, [splitView]);
+  }, [splitMode]);
+
+  // Quad mode's frozen-pane scroll links: panes in a ROW share vertical
+  // scroll, panes in a COLUMN share horizontal scroll. Wired at the DOM
+  // (DocumentView's root IS its scroller); the syncing flag stops the
+  // mirrored assignment's own scroll event from echoing forever.
+  useEffect(() => {
+    if (splitMode !== 'quad') return;
+    const root = quadContainerRef.current;
+    if (!root) return;
+    const panes = ['a', 'b', 'c', 'd'] as const;
+    const scrollers = new Map<string, HTMLElement>();
+    for (const p of panes) {
+      const el = root.querySelector<HTMLElement>(
+        `[data-testid="doc-pane-${p}"] [data-testid="document-view"]`,
+      );
+      if (!el) return; // a pane not mounted yet — the next effect run wires it
+      scrollers.set(p, el);
+    }
+    const rowOf: Record<string, string> = { a: 'b', b: 'a', c: 'd', d: 'c' };
+    const colOf: Record<string, string> = { a: 'c', c: 'a', b: 'd', d: 'b' };
+    let syncing = false;
+    const cleanups: (() => void)[] = [];
+    for (const p of panes) {
+      const el = scrollers.get(p)!;
+      const onScroll = (): void => {
+        if (syncing) return;
+        syncing = true;
+        scrollers.get(rowOf[p])!.scrollTop = el.scrollTop;
+        scrollers.get(colOf[p])!.scrollLeft = el.scrollLeft;
+        requestAnimationFrame(() => {
+          syncing = false;
+        });
+      };
+      el.addEventListener('scroll', onScroll);
+      cleanups.push(() => el.removeEventListener('scroll', onScroll));
+    }
+    return () => cleanups.forEach((fn) => fn());
+  }, [splitMode, focusedDoc?.id]);
   // The divider: a plain pointer drag with WINDOW-level listeners (the
   // canvas-drag idiom — synthetic React pointermove does not deliver
   // reliably in the webview). Ratio clamped so neither pane can collapse.
@@ -1801,6 +1886,29 @@ export function WorkspaceCanvasView({
     const onMove = (ev: PointerEvent): void => {
       const r = (ev.clientY - rect.top) / Math.max(rect.height, 1);
       setSplitRatio(Math.min(0.85, Math.max(0.15, r)));
+    };
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, []);
+  // The quad's two dividers (same window-listener idiom, against the quad
+  // container): rows reuse splitRatio, columns drive quadCol.
+  const onQuadDividerDown = useCallback((axis: 'row' | 'col', e: React.PointerEvent) => {
+    e.preventDefault();
+    const el = quadContainerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const onMove = (ev: PointerEvent): void => {
+      if (axis === 'row') {
+        const r = (ev.clientY - rect.top) / Math.max(rect.height, 1);
+        setSplitRatio(Math.min(0.85, Math.max(0.15, r)));
+      } else {
+        const c = (ev.clientX - rect.left) / Math.max(rect.width, 1);
+        setQuadCol(Math.min(0.85, Math.max(0.15, c)));
+      }
     };
     const onUp = (): void => {
       window.removeEventListener('pointermove', onMove);
@@ -3238,6 +3346,63 @@ export function WorkspaceCanvasView({
                 ref={documentViewRef}
                 onCurrentPageChange={onPaneAPageChange}
               />
+            );
+          }
+          if (splitMode === 'quad') {
+            // The spreadsheet split: a 2×2 grid with a divider CROSS. Pane a
+            // keeps the unsplit view's key/ref so entering quad never
+            // remounts the primary view (the two-pane invariant, kept).
+            const paneDefs = [
+              { p: 'a' as const, ref: documentViewRef, onPage: onPaneAPageChange, key: focusedDoc.id, col: '1', row: '1' },
+              { p: 'b' as const, ref: documentViewRefB, onPage: onPaneBPageChange, key: `${focusedDoc.id}:b`, col: '3', row: '1' },
+              { p: 'c' as const, ref: documentViewRefC, onPage: onPaneCPageChange, key: `${focusedDoc.id}:c`, col: '1', row: '3' },
+              { p: 'd' as const, ref: documentViewRefD, onPage: onPaneDPageChange, key: `${focusedDoc.id}:d`, col: '3', row: '3' },
+            ];
+            return (
+              <div
+                ref={quadContainerRef}
+                data-testid="quad-container"
+                className="flex-1 min-h-0 grid"
+                style={{
+                  gridTemplateColumns: `${quadCol}fr 6px ${1 - quadCol}fr`,
+                  gridTemplateRows: `${splitRatio}fr 6px ${1 - splitRatio}fr`,
+                }}
+              >
+                {paneDefs.map((def) => (
+                  <div
+                    key={def.p}
+                    data-testid={`doc-pane-${def.p}`}
+                    data-active={activePane === def.p}
+                    className="flex min-h-0 min-w-0 flex-col"
+                    style={{ gridColumn: def.col, gridRow: def.row }}
+                    onPointerDownCapture={() => activatePane(def.p)}
+                  >
+                    <DocumentView
+                      {...dvProps}
+                      {...(activePane === def.p ? null : inactiveOverrides)}
+                      key={def.key}
+                      ref={def.ref}
+                      onCurrentPageChange={def.onPage}
+                    />
+                  </div>
+                ))}
+                <div
+                  data-testid="quad-divider-col"
+                  role="separator"
+                  aria-orientation="vertical"
+                  className="cursor-col-resize bg-neutral-700 hover:bg-blue-500"
+                  style={{ gridColumn: '2', gridRow: '1 / span 3' }}
+                  onPointerDown={(e) => onQuadDividerDown('col', e)}
+                />
+                <div
+                  data-testid="quad-divider-row"
+                  role="separator"
+                  aria-orientation="horizontal"
+                  className="cursor-row-resize bg-neutral-700 hover:bg-blue-500"
+                  style={{ gridColumn: '1 / span 3', gridRow: '2' }}
+                  onPointerDown={(e) => onQuadDividerDown('row', e)}
+                />
+              </div>
             );
           }
           return (

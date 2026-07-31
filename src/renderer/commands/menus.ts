@@ -270,6 +270,7 @@ export const MENUS: MenuDef[] = [
       cmd('window.prevTab', 'menuitem-window-prev-tab'),
       sep,
       cmd('window.split', 'menuitem-window-split'),
+      cmd('window.spreadsheetSplit', 'menuitem-window-spreadsheet-split'),
       sep,
       windowDocList,
       sep,
