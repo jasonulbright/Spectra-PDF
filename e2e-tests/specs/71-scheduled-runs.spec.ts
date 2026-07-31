@@ -19,7 +19,7 @@ import {
 // itself, because the only thing that proves a schedule exists is Task
 // Scheduler having it.
 //
-// These tests register REAL scheduled tasks under \Open PDF Studio\. Every one
+// These tests register REAL scheduled tasks under \Spectra PDF\. Every one
 // is torn down in `after`, and the teardown runs schtasks directly so a failed
 // assertion mid-test still cannot leave a task behind on the machine.
 
@@ -28,7 +28,7 @@ const TASK_NAME = 'E2E Probe Run';
 
 function taskExists(name: string): boolean {
   try {
-    execFileSync('schtasks.exe', ['/Query', '/TN', `\\Open PDF Studio\\${name}`], {
+    execFileSync('schtasks.exe', ['/Query', '/TN', `\\Spectra PDF\\${name}`], {
       stdio: 'pipe',
     });
     return true;
@@ -39,7 +39,7 @@ function taskExists(name: string): boolean {
 
 function forceDelete(name: string): void {
   try {
-    execFileSync('schtasks.exe', ['/Delete', '/F', '/TN', `\\Open PDF Studio\\${name}`], {
+    execFileSync('schtasks.exe', ['/Delete', '/F', '/TN', `\\Spectra PDF\\${name}`], {
       stdio: 'pipe',
     });
   } catch {
@@ -129,7 +129,7 @@ describe('scheduled batch runs (Phase 12 request 5)', () => {
   });
 
   it('refuses a name that could address a task outside our own folder', async () => {
-    // The delete path is scoped to \Open PDF Studio\; a name carrying a
+    // The delete path is scoped to \Spectra PDF\; a name carrying a
     // separator is how that scoping would be escaped.
     let message = '';
     try {

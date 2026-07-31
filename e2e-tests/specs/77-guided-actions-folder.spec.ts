@@ -19,7 +19,7 @@ import {
 // with an action-JSON file — verified here too.
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'openpdfstudio.exe');
+const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
 
 let SCRATCH = '';
 let SRC = '';

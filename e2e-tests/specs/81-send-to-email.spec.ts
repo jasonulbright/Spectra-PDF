@@ -79,7 +79,7 @@ describe('File ▸ Send To ▸ Email (slice: send-to)', () => {
     STAGED.push(staged);
     expect(existsSync(staged)).toBe(true);
     expect(basename(staged)).toBe('sample.pdf');
-    expect(dirname(staged).replace(/\\/g, '/')).toContain('openpdfstudio/send-to');
+    expect(dirname(staged).replace(/\\/g, '/')).toContain('spectrapdf/send-to');
 
     // Byte-identical to the CURRENT working state (same source the harness
     // save writes).

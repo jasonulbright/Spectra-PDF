@@ -10,19 +10,19 @@
     "updater:allow-check",
     {
       "identifier": "fs:allow-read-file",
-      "allow": [{ "path": "$TEMP/openpdfstudio/**" }]
+      "allow": [{ "path": "$TEMP/spectrapdf/**" }]
     },
     {
       "identifier": "fs:allow-write-file",
-      "allow": [{ "path": "$TEMP/openpdfstudio/**" }]
+      "allow": [{ "path": "$TEMP/spectrapdf/**" }]
     },
     {
       "identifier": "fs:allow-rename",
-      "allow": [{ "path": "$TEMP/openpdfstudio/**" }]
+      "allow": [{ "path": "$TEMP/spectrapdf/**" }]
     },
     {
       "identifier": "fs:allow-remove",
-      "allow": [{ "path": "$TEMP/openpdfstudio/**" }]
+      "allow": [{ "path": "$TEMP/spectrapdf/**" }]
     }
   ]
 }

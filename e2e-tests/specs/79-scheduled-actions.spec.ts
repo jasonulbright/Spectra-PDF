@@ -26,7 +26,7 @@ import {
 // Scheduler lifecycle + a FROZEN copy of the action in this app's
 // machine-scoped ProgramData folder: a task must not depend on the GUI's
 // localStorage (wrong profile under a service account, and it fires with the
-// app closed). Real tasks are registered under \Open PDF Studio\ and torn
+// app closed). Real tasks are registered under \Spectra PDF\ and torn
 // down in `after` with schtasks directly, so a failed assertion cannot leave
 // one behind.
 
@@ -34,14 +34,14 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 const TASK_NAME = 'E2E Action Schedule';
 const FROZEN = resolve(
   process.env.ProgramData ?? 'C:\\ProgramData',
-  'Open PDF Studio',
+  'Spectra PDF',
   'scheduled-actions',
   `${TASK_NAME}.json`,
 );
 
 function taskExists(name: string): boolean {
   try {
-    execFileSync('schtasks.exe', ['/Query', '/TN', `\\Open PDF Studio\\${name}`], {
+    execFileSync('schtasks.exe', ['/Query', '/TN', `\\Spectra PDF\\${name}`], {
       stdio: 'pipe',
     });
     return true;
@@ -52,7 +52,7 @@ function taskExists(name: string): boolean {
 
 function forceDelete(name: string): void {
   try {
-    execFileSync('schtasks.exe', ['/Delete', '/F', '/TN', `\\Open PDF Studio\\${name}`], {
+    execFileSync('schtasks.exe', ['/Delete', '/F', '/TN', `\\Spectra PDF\\${name}`], {
       stdio: 'pipe',
     });
   } catch {
@@ -181,10 +181,10 @@ describe('scheduled guided actions (slice 5)', () => {
   });
 
   it('run-now fires the real CLI through Task Scheduler: mirror and action-run log appear', async () => {
-    execFileSync('schtasks.exe', ['/Run', '/TN', `\\Open PDF Studio\\${TASK_NAME}`], {
+    execFileSync('schtasks.exe', ['/Run', '/TN', `\\Spectra PDF\\${TASK_NAME}`], {
       stdio: 'pipe',
     });
-    // The task invokes `openpdfstudio run-action … --action <frozen>` with
+    // The task invokes `spectrapdf run-action … --action <frozen>` with
     // the app CLOSED from the run's point of view — the mirror file and the
     // run log are the proof the whole marriage works headlessly.
     await browser.waitUntil(() => existsSync(resolve(dest, 'doc.pdf')), {

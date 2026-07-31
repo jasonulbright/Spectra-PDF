@@ -1,4 +1,4 @@
-//! The virtual printer (O7): "Open PDF Studio" appears in every
+//! The virtual printer (O7): "Spectra PDF" appears in every
 //! application's print dialog; printing to it lands the pages in this app
 //! as a fresh PDF.
 //!
@@ -26,8 +26,8 @@ use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager};
 
-pub const PRINTER_NAME: &str = "Open PDF Studio";
-pub const PORT_NAME: &str = "OpenPDFStudio_9100";
+pub const PRINTER_NAME: &str = "Spectra PDF";
+pub const PORT_NAME: &str = "SpectraPDF_9100";
 pub const PORT: u16 = 9100;
 /// A print job larger than this is refused (a runaway client, not a page).
 const MAX_JOB_BYTES: u64 = 512 * 1024 * 1024;
@@ -49,7 +49,7 @@ impl PrinterState {
 }
 
 fn printed_dir() -> PathBuf {
-    std::env::temp_dir().join("openpdfstudio").join("printed")
+    std::env::temp_dir().join("spectrapdf").join("printed")
 }
 
 fn timestamp_name() -> String {

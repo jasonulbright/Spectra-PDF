@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.0.0 — A new name: Spectra PDF
+
+The product formerly released as "Open PDF Studio" continues here as
+**Spectra PDF**. A naming conflict with another open-source project made the
+old name untenable; rather than share it, the app returns to its original
+working name and restarts its public numbering at 1.0.0. Same application,
+same code line — only the name is new.
+
+### Moving from Open PDF Studio
+
+- **Spectra PDF is a fresh install, not an update.** Download it from the
+  new home. An existing Open PDF Studio install keeps working but will not
+  receive updates; uninstall it whenever you like.
+- **Settings and saved items do not carry over.** Preferences, recents,
+  custom stamps, and saved actions start fresh. Guided actions survive the
+  move as files: export them from the old app, import them here — the file
+  format is unchanged.
+- **The moving parts follow the name.** The command line is
+  `spectrapdf.exe`; the virtual printer appears as "Spectra PDF"; scheduled
+  runs live under the `\Spectra PDF\` Task Scheduler folder; enterprise
+  policies read from `HKLM\SOFTWARE\Spectra PDF`. Printers and schedules
+  created by the old app belong to the old install — recreate them here.
+
+### New since 2.8.7
+
+Everything below was built after 2.8.7 and ships for the first time in 1.0.0.
+
+- **Navigation panels on the left dock.** Attachments, Layers, and Tags join
+  the navigation pane — open beside the document, at the same time as a tool
+  panel.
+- **Send To ▸ Email.** Hand the current document to your default mail client
+  as a ready-to-send attachment.
+- **Accessibility tags survive page edits.** A tagged document's structure
+  tree — and the rest of the document catalog — now travels through page
+  moves, rotations, deletions, and annotation commits instead of being
+  silently dropped.
+- **Automatic tagging.** Give an untagged document a usable structure tree
+  in one step from the Tags panel — headings, paragraphs, figures, and
+  reading order inferred from the page layout.
+- **Batch OCR in place.** Batch OCR can update files where they stand, with
+  the same per-file isolation and honest reporting as mirror runs.
+- **Watched folders.** Point a folder at a guided action and PDFs that
+  arrive are processed automatically while the app is open — including
+  minimized to the tray.
+- **A virtual printer.** Install "Spectra PDF" as a printer and anything any
+  application prints arrives in the app as a PDF.
+- **Portfolio files open in their own apps.** A non-PDF file inside a
+  portfolio now opens with the application that owns its type.
+- **Real measurement annotations.** Measurements save as true PDF
+  measurement annotations — scale included — that other PDF viewers
+  understand.
+- **Four-pane split view.** Split the document 2×2 with linked scrolling
+  and zoom, for wide, spreadsheet-like documents.
+
 ## 2.8.7 — Actions that travel: files to share, schedules that run themselves
 
 Guided actions finish growing up: run one over a whole folder, hand one to a

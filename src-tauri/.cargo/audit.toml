@@ -1,4 +1,4 @@
-# cargo-audit policy for Open PDF Studio.
+# cargo-audit policy for Spectra PDF.
 #
 # Every advisory ignored below is in a TRANSITIVE dependency pulled in by
 # Tauri 2.11.2 / its build stack — none is a direct dependency of this crate,
