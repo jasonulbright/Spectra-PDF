@@ -62,6 +62,16 @@ import {
 } from '../../lib/measure';
 import { resolveStampTokens } from '../../lib/stamp-library';
 import { getSettings } from '../../lib/app-settings';
+import {
+  isTransformable,
+  isResizable,
+  translated,
+  translatedBy,
+  resized,
+  recomputedMeasureNote,
+  type AnnotationTransform,
+  type ResizeHandle,
+} from '../../lib/annotation-manipulation';
 
 // Measure overlays draw in amber — legible over both white paper and the
 // annotation palette's blues/yellows, and distinct from ink's default.
@@ -543,10 +553,22 @@ interface PageCellProps {
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
-  // Click-selection for the properties bar (I.6). Select tool only — armed
-  // modes keep their band/stroke gestures untouched. null clears.
-  selectedAnnotationId: string | null;
-  onSelectAnnotation: (docId: string, pageId: string, annotationId: string | null) => void;
+  // Click-selection for the properties bar (I.6) + manipulation (rung 1).
+  // Select tool only — armed modes keep their band/stroke gestures untouched.
+  // Selection is SAME-PAGE (multi via ctrl-click / ctrl-marquee); ids are
+  // globally unique so the cell checks membership without a page key.
+  // null clears; `additive` is the ctrl/cmd state of the gesture.
+  selectedAnnotationIds: readonly string[];
+  onSelectAnnotation: (
+    docId: string,
+    pageId: string,
+    annotationId: string | null,
+    additive: boolean,
+  ) => void;
+  // One gesture = one dispatch = one undo step (move, resize, nudge, align).
+  onTransformAnnotations: (docId: string, edits: AnnotationTransform[]) => void;
+  // Ctrl-marquee result — the view decides how it merges into the selection.
+  onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -745,8 +767,10 @@ function PageCellImpl({
   onUpdateAnnotation,
   onRecolorAnnotation,
   onRemoveAnnotation,
-  selectedAnnotationId,
+  selectedAnnotationIds,
   onSelectAnnotation,
+  onTransformAnnotations,
+  onMarqueeSelect,
   onAddRedactionMark,
   onRemoveRedactionMark,
   onSetSignaturePlacement,
@@ -808,6 +832,312 @@ function PageCellImpl({
     viewRotation === 0 ? r : { ...r, ...rotateNormalizedRect(r, inverseView) };
   const toStoredPoints = (pts: number[]): number[] =>
     viewRotation === 0 ? pts : rotateNormalizedPoints(pts, inverseView);
+
+  // ── Annotation manipulation (rung 1): move / resize / marquee ─────────
+  // Gestures run with window-level listeners (the canvas invariant), preview
+  // through local state in the STORED frame (so the render-side projection is
+  // the ONE projection), and dispatch a single batch edit on release — one
+  // gesture, one undo step. Escape/blur/pointercancel abandon cleanly.
+  const [manipPreview, setManipPreview] = useState<Map<
+    string,
+    { x: number; y: number; w: number; h: number; points?: number[] }
+  > | null>(null);
+  const manipActive = useRef(false);
+  const cancelManip = useRef<(() => void) | null>(null);
+  useEffect(() => () => cancelManip.current?.(), []);
+  // A real drag's release must not land as a click anywhere (the usePageDrag
+  // swallow pattern) — a plain press-release keeps its click.
+  const swallowNextClick = (): void => {
+    const swallow = (ev: MouseEvent): void => {
+      ev.stopPropagation();
+      ev.preventDefault();
+    };
+    window.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener('click', swallow, { capture: true } as EventListenerOptions), 0);
+  };
+  const cellElOf = (e: React.PointerEvent<HTMLElement>): HTMLElement =>
+    (e.currentTarget as HTMLElement).closest('[data-page-id]') as HTMLElement;
+
+  /** Press on an annotation body (Select tool): selection on the press, a
+   * move gesture past a 3px threshold. Dragging a selected member moves the
+   * whole same-page selection; dragging an unselected one selects it first
+   * (ctrl adds instead of replacing, Acrobat's model). */
+  const handleAnnotMoveDown = (a: PageAnnotation, e: React.PointerEvent<HTMLElement>): void => {
+    if (tool !== 'select' || e.button !== 0 || editing || manipActive.current) return;
+    e.stopPropagation();
+    const additive = e.ctrlKey || e.metaKey;
+    const wasSelected = selectedAnnotationIds.includes(a.id);
+    // Selection resolves on the PRESS (drag needs the group now). The
+    // subsequent click is a no-op — additive toggling of an already-selected
+    // member happens here too, and only when the press never becomes a drag.
+    let groupIds: string[];
+    if (wasSelected) {
+      groupIds = [...selectedAnnotationIds];
+    } else {
+      onSelectAnnotation(docId, page.id, a.id, additive);
+      groupIds = additive ? [...selectedAnnotationIds, a.id] : [a.id];
+    }
+    if (!isTransformable(a)) return; // text markup: selectable, never movable
+    const cell = cellElOf(e);
+    if (!cell) return;
+    const group = (page.annotations ?? []).filter(
+      (x) => groupIds.includes(x.id) && isTransformable(x),
+    );
+    if (group.length === 0) return;
+    const rect = cell.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let activated = false;
+
+    const storedDelta = (ev: PointerEvent): { dx: number; dy: number } => {
+      // Un-project the pointer TRAVEL as two points — a delta is the
+      // difference of un-projected positions, never an un-projected pair of
+      // raw distances (axes swap at 90/270).
+      const p0 = toStoredPoints([
+        (startX - rect.left) / rect.width,
+        (startY - rect.top) / rect.height,
+      ]);
+      const p1 = toStoredPoints([
+        (ev.clientX - rect.left) / rect.width,
+        (ev.clientY - rect.top) / rect.height,
+      ]);
+      return { dx: p1[0] - p0[0], dy: p1[1] - p0[1] };
+    };
+
+    const onMove = (ev: PointerEvent): void => {
+      if (!activated) {
+        if (Math.abs(ev.clientX - startX) < 3 && Math.abs(ev.clientY - startY) < 3) return;
+        activated = true;
+        manipActive.current = true;
+      }
+      const { dx, dy } = storedDelta(ev);
+      // The pressed annotation leads; its CLAMPED delta moves the group in
+      // formation (members still clamp individually at the page edge).
+      const lead = translated(a, dx, dy);
+      const next = new Map<string, { x: number; y: number; w: number; h: number; points?: number[] }>();
+      for (const m of group) {
+        const t = m.id === a.id ? lead : translatedBy(m, lead.dx, lead.dy);
+        next.set(m.id, { x: t.x, y: t.y, w: m.w, h: m.h, ...(t.points ? { points: t.points } : {}) });
+      }
+      setManipPreview(next);
+    };
+    const finish = (commit: boolean, ev?: PointerEvent): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('blur', onBlur);
+      cancelManip.current = null;
+      if (!activated) {
+        // A plain press-release. Ctrl-click on an already-selected member
+        // TOGGLES it off; a plain click on one COLLAPSES the selection to
+        // just it (both Acrobat) — either way only now, when it provably
+        // wasn't the start of a group drag.
+        if (commit && wasSelected) onSelectAnnotation(docId, page.id, a.id, additive);
+        return;
+      }
+      manipActive.current = false;
+      setManipPreview(null);
+      swallowNextClick();
+      if (!commit || !ev) return;
+      const { dx, dy } = storedDelta(ev);
+      const lead = translated(a, dx, dy);
+      if (lead.dx === 0 && lead.dy === 0) return;
+      const edits: AnnotationTransform[] = group.map((m) => {
+        const t = m.id === a.id ? lead : translatedBy(m, lead.dx, lead.dy);
+        return {
+          pageId: page.id,
+          annotationId: m.id,
+          x: t.x,
+          y: t.y,
+          w: m.w,
+          h: m.h,
+          ...(t.points ? { points: t.points } : {}),
+        };
+      });
+      onTransformAnnotations(docId, edits);
+    };
+    const onUp = (ev: PointerEvent): void => finish(true, ev);
+    const onCancel = (): void => finish(false);
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        finish(false);
+      }
+    };
+    const onBlur = (): void => finish(false);
+    cancelManip.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('blur', onBlur);
+  };
+
+  /** Drag a resize handle (single selection only — handles only render
+   * then). Math runs in the VIEW frame (the handle the user grabbed), the
+   * result un-projects through the same helpers as every capture path. */
+  const handleResizeDown = (
+    a: PageAnnotation,
+    handle: ResizeHandle,
+    e: React.PointerEvent<HTMLElement>,
+  ): void => {
+    if (tool !== 'select' || e.button !== 0 || manipActive.current) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const cell = cellElOf(e);
+    if (!cell) return;
+    const rect = cell.getBoundingClientRect();
+    // The annotation projected into the view frame — the frame the pointer
+    // and the grabbed handle live in.
+    const viewBox = viewRotation === 0 ? { x: a.x, y: a.y, w: a.w, h: a.h } : rotateNormalizedRect(a, viewRotation);
+    const viewA: PageAnnotation = {
+      ...a,
+      ...viewBox,
+      points: a.points && viewRotation !== 0 ? rotateNormalizedPoints(a.points, viewRotation) : a.points,
+    };
+    // Image stamps default to their own aspect (they are pictures); Shift
+    // locks the rest on demand.
+    const aspectByDefault = a.kind === 'stamp' && !!a.imageData;
+    let activated = false;
+    let lastStored: { x: number; y: number; w: number; h: number; points?: number[] } | null = null;
+
+    const applyAt = (ev: PointerEvent): void => {
+      const px = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+      const py = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
+      const keepAspect = aspectByDefault ? !ev.shiftKey : ev.shiftKey;
+      const r = resized(viewA, handle, px, py, keepAspect);
+      const storedBox = toStoredRect({ x: r.x, y: r.y, w: r.w, h: r.h });
+      const stored = {
+        ...storedBox,
+        ...(r.points ? { points: toStoredPoints(r.points) } : {}),
+      };
+      lastStored = stored;
+      setManipPreview(new Map([[a.id, stored]]));
+    };
+    const onMove = (ev: PointerEvent): void => {
+      if (!activated) {
+        activated = true;
+        manipActive.current = true;
+      }
+      applyAt(ev);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('blur', onBlur);
+      cancelManip.current = null;
+      if (!activated) return;
+      manipActive.current = false;
+      setManipPreview(null);
+      swallowNextClick();
+      if (!commit || !lastStored) return;
+      const s = lastStored;
+      if (s.x === a.x && s.y === a.y && s.w === a.w && s.h === a.h && !s.points) return;
+      // Stored points live in the REAL page-rotation frame; `page.rotation`
+      // here is the EFFECTIVE rotation (real + view, composed by the reading
+      // view) — subtract the view part or the dims swap against the wrong
+      // frame at 90/270 view turns.
+      const realRotation = (((page.rotation - viewRotation) % 360) + 360) % 360;
+      const note = s.points
+        ? recomputedMeasureNote(a, s.points, page.width, page.height, realRotation)
+        : undefined;
+      onTransformAnnotations(docId, [
+        {
+          pageId: page.id,
+          annotationId: a.id,
+          x: s.x,
+          y: s.y,
+          w: s.w,
+          h: s.h,
+          ...(s.points ? { points: s.points } : {}),
+          ...(note !== undefined ? { note } : {}),
+        },
+      ]);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        finish(false);
+      }
+    };
+    const onBlur = (): void => finish(false);
+    cancelManip.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('blur', onBlur);
+  };
+
+  // Ctrl-marquee rubber band (Select tool): plain drags stay text selection,
+  // the modifier claims multi-select — no fight over the text layer.
+  const [marquee, setMarquee] = useState<AnnotationRect | null>(null);
+  const handleMarqueeDown = (e: React.PointerEvent<HTMLElement>): void => {
+    if (e.button !== 0 || manipActive.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    manipActive.current = true;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const norm = (cx: number, cy: number): { x: number; y: number } => ({
+      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
+    });
+    const start = norm(e.clientX, e.clientY);
+    let latest: AnnotationRect = { ...start, w: 0, h: 0 };
+    setMarquee(latest);
+    const onMove = (ev: PointerEvent): void => {
+      const p = norm(ev.clientX, ev.clientY);
+      latest = {
+        x: Math.min(start.x, p.x),
+        y: Math.min(start.y, p.y),
+        w: Math.abs(p.x - start.x),
+        h: Math.abs(p.y - start.y),
+      };
+      setMarquee(latest);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKey, true);
+      manipActive.current = false;
+      cancelManip.current = null;
+      setMarquee(null);
+      swallowNextClick();
+      if (!commit || (latest.w < 0.005 && latest.h < 0.005)) return;
+      // Intersect in the VIEW frame — the marquee's own frame.
+      const hits = (page.annotations ?? [])
+        .filter((x) => {
+          const b = viewRotation === 0 ? x : rotateNormalizedRect(x, viewRotation);
+          return (
+            b.x < latest.x + latest.w &&
+            b.x + b.w > latest.x &&
+            b.y < latest.y + latest.h &&
+            b.y + b.h > latest.y
+          );
+        })
+        .map((x) => x.id);
+      if (hits.length > 0) onMarqueeSelect(docId, page.id, hits, true);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        finish(false);
+      }
+    };
+    cancelManip.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onKey, true);
+  };
 
   const handleInkDown = (e: React.PointerEvent<HTMLElement>): void => {
     bandActive.current = true;
@@ -1019,6 +1349,12 @@ function PageCellImpl({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     if (!annotateMode) {
+      // Ctrl-drag in Select mode is the annotation marquee; plain drags stay
+      // text selection / page interaction untouched.
+      if (tool === 'select' && (e.ctrlKey || e.metaKey) && e.button === 0) {
+        handleMarqueeDown(e);
+        return;
+      }
       onPagePointerDown(docId, page.id, e);
       return;
     }
@@ -1197,7 +1533,10 @@ function PageCellImpl({
         e.stopPropagation();
         // A click that reached the cell (not an annotation — those stop
         // propagation in select mode) clears the annotation selection.
-        if (tool === 'select') onSelectAnnotation(docId, page.id, null);
+        // Ctrl-clicks keep it: an additive gesture over empty page must not
+        // throw away what it was adding to.
+        if (tool === 'select' && !e.ctrlKey && !e.metaKey)
+          onSelectAnnotation(docId, page.id, null, false);
         onSelectPage(docId, page.id, e);
       }}
       onDoubleClick={(e) => {
@@ -1231,17 +1570,24 @@ function PageCellImpl({
           active={tool === 'select'}
         />
       )}
-      {(page.annotations ?? []).map((a) => {
+      {(page.annotations ?? []).map((raw) => {
+        // A live manipulation gesture previews through the SAME projection as
+        // committed geometry — the override is stored-frame, `da` below does
+        // the rest. Preview implies divergence (the body must show mid-drag).
+        const previewBox = manipPreview?.get(raw.id);
+        const a = previewBox ? { ...raw, ...previewBox, geometryDiverged: true } : raw;
         // pdf.js's base raster (PageView) already draws every real annotation
         // in the CURRENTLY LOADED file with AnnotationMode.ENABLE — including
         // ones we've imported but haven't touched. Painting our own visible
         // body on top of an untouched import would double it up. Only once
-        // color/note diverges from the importedOriginal snapshot is the file
-        // on disk stale relative to the edit, and the overlay must take over
+        // color/note — or, since rung 1, geometry (geometryDiverged) —
+        // diverges from the importedOriginal snapshot is the file on disk
+        // stale relative to the edit, and the overlay must take over
         // (same as any brand-new, uncommitted annotation always does).
         const pristineImport =
           !!a.importedOriginal &&
           a.importedOriginal.hasAppearance && // else pdf.js draws nothing to avoid duplicating
+          !a.geometryDiverged &&
           a.color === a.importedOriginal.color &&
           (a.note ?? '') === (a.importedOriginal.contents ?? '');
         // Rotate View (M6.1): stored geometry lives in the page.rotation
@@ -1284,7 +1630,7 @@ function PageCellImpl({
             (a.kind === 'ink' || a.kind === 'measure' ? ' page-annot-ink' : '') +
             (a.kind === 'textmarkup' ? ' page-annot-ink' : '') + // SVG body, no default border
             (a.kind === 'stamp' ? ' page-annot-stamp' : '') +
-            (a.id === selectedAnnotationId ? ' page-annot-selected' : '')
+            (selectedAnnotationIds.includes(a.id) ? ' page-annot-selected' : '')
           }
           title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'note' ? a.note : undefined}
           style={{
@@ -1307,20 +1653,26 @@ function PageCellImpl({
                       : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
             // Select tool: every annotation body is clickable (the properties
             // bar's selection gesture — an object on top of the page, Acrobat's
-            // model). Other modes keep pointer-events: none, so bands, strokes
-            // and page pickup behave exactly as before.
-            ...(tool === 'select' ? { pointerEvents: 'auto' } : {}),
+            // model) and movable (rung 1). Other modes keep pointer-events:
+            // none, so bands, strokes and page pickup behave exactly as before.
+            ...(tool === 'select'
+              ? { pointerEvents: 'auto', cursor: isTransformable(a) ? 'move' : 'pointer' }
+              : {}),
           }}
           onPointerDown={
-            tool === 'select' || a.kind === 'freetext' ? (e) => e.stopPropagation() : undefined
+            tool === 'select'
+              ? (e) => handleAnnotMoveDown(raw, e)
+              : a.kind === 'freetext'
+                ? (e) => e.stopPropagation()
+                : undefined
           }
           onClick={
             tool === 'select'
               ? (e) => {
-                  // Keep the click off the cell root — it would clear this
-                  // selection (and select the page) the instant it bubbled.
+                  // Selection resolved on the PRESS (handleAnnotMoveDown);
+                  // the click only stays off the cell root, which would
+                  // clear the selection the instant it bubbled.
                   e.stopPropagation();
-                  onSelectAnnotation(docId, page.id, a.id);
                 }
               : undefined
           }
@@ -1444,9 +1796,35 @@ function PageCellImpl({
               </>
             )
           )}
+          {tool === 'select' &&
+            selectedAnnotationIds.length === 1 &&
+            selectedAnnotationIds[0] === a.id &&
+            isResizable(a) && (
+              <>
+                {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((h) => (
+                  <div
+                    key={h}
+                    className={`annot-handle annot-handle-${h}`}
+                    data-testid={`annot-handle-${h}`}
+                    onPointerDown={(e) => handleResizeDown(raw, h, e)}
+                  />
+                ))}
+              </>
+            )}
         </div>
         );
       })}
+      {marquee && (
+        <div
+          className="page-annot page-annot-band annot-marquee"
+          style={{
+            left: `${marquee.x * 100}%`,
+            top: `${marquee.y * 100}%`,
+            width: `${marquee.w * 100}%`,
+            height: `${marquee.h * 100}%`,
+          }}
+        />
+      )}
       {(redactionMarks ?? []).map((m) => {
         // Marks store the rect as drawn; a page rotated in memory since then
         // just changes the projection (user space is unmoved by /Rotate).

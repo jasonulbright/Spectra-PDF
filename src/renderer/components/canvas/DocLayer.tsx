@@ -5,6 +5,7 @@ import { DocumentRow } from './DocumentRow';
 import type { DocPlacement } from '../../canvas/layout';
 import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { AnnotationTransform } from '../../lib/annotation-manipulation';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditVectorObject } from '../../lib/edit-vectors';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
@@ -108,8 +109,15 @@ interface DocLayerProps {
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
   // Click-selection for the properties bar (I.6). null clears.
-  selectedAnnotationId: string | null;
-  onSelectAnnotation: (docId: string, pageId: string, annotationId: string | null) => void;
+  selectedAnnotationIds: readonly string[];
+  onSelectAnnotation: (
+    docId: string,
+    pageId: string,
+    annotationId: string | null,
+    additive: boolean,
+  ) => void;
+  onTransformAnnotations: (docId: string, edits: AnnotationTransform[]) => void;
+  onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -211,8 +219,10 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onUpdateAnnotation={props.onUpdateAnnotation}
               onRecolorAnnotation={props.onRecolorAnnotation}
               onRemoveAnnotation={props.onRemoveAnnotation}
-              selectedAnnotationId={props.selectedAnnotationId}
+              selectedAnnotationIds={props.selectedAnnotationIds}
               onSelectAnnotation={props.onSelectAnnotation}
+              onTransformAnnotations={props.onTransformAnnotations}
+              onMarqueeSelect={props.onMarqueeSelect}
               onAddRedactionMark={props.onAddRedactionMark}
               onRemoveRedactionMark={props.onRemoveRedactionMark}
               onSetSignaturePlacement={props.onSetSignaturePlacement}

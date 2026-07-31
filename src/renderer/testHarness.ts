@@ -637,6 +637,12 @@ export interface TestHarness {
     /** stamp only: whether it carries a custom image. */
     hasImage?: boolean;
   } | null>;
+  /** Every pending annotation on one page, workspace order (= z-order) —
+   * geometry assertions for the manipulation gestures (rung 1). */
+  getPageAnnotations: (
+    docId: string,
+    pageId: string,
+  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string }[];
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
   commitPendingEdits: () => Promise<void>;
@@ -975,6 +981,12 @@ export interface TestHarnessDeps {
     quadCount?: number;
     hasImage?: boolean;
   } | null;
+  /** Every pending annotation on one page, workspace order (= z-order) —
+   * for asserting geometry after manipulation gestures (rung 1). */
+  getPageAnnotations: (
+    docId: string,
+    pageId: string,
+  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string }[];
   dispatchAddAnnotation: (docId: string, pageId: string, annotation: TestAnnotationInput & { id: string }) => void;
   dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   dispatchRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
@@ -1194,6 +1206,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
       return found;
     },
+    getPageAnnotations: (docId, pageId) => deps.getPageAnnotations(docId, pageId),
     commitPendingEdits: async () => {
       try {
         await deps.commitPendingEdits();
