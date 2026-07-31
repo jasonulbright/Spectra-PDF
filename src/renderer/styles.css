@@ -317,6 +317,9 @@
 
 .navpanel-scroll { height: 100%; overflow-y: auto; overflow-x: hidden; }
 .navpanel-empty { padding: 16px; font-size: 13px; color: #737373; }
+/* Nav-pane host for tool-dock panel components (left-dock candidates):
+   the dock body's breathing room at nav width. */
+.navpanel-tool-host { padding: 12px; }
 
 .thumb-row {
   display: flex;

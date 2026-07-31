@@ -25,6 +25,9 @@ export type ChromeIconId =
   | 'pages'
   | 'bookmarks'
   | 'signatures'
+  | 'attachments'
+  | 'layers'
+  | 'tags'
   | 'hand'
   | 'cursor';
 
@@ -149,6 +152,25 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
     <>
       <path d="M3 16c2.5 0 3.5-4 5.5-4s1.5 3 3.5 3 3-5 6-5" />
       <path d="M3 20h18" />
+    </>
+  ),
+  // Paperclip (nav-pane Attachments panel).
+  attachments: (
+    <path d="M20 12.5l-7.8 7.8a5 5 0 0 1-7-7l8.5-8.5a3.4 3.4 0 0 1 4.8 4.8l-8.5 8.4a1.8 1.8 0 0 1-2.5-2.5l7.8-7.7" />
+  ),
+  // Stacked planes (nav-pane Layers panel).
+  layers: (
+    <>
+      <path d="M12 3l9 5-9 5-9-5z" />
+      <path d="M3 13l9 5 9-5" />
+      <path d="M3 17l9 5 9-5" />
+    </>
+  ),
+  // Price-tag with its hole (nav-pane Tags panel).
+  tags: (
+    <>
+      <path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z" />
+      <circle cx="7.5" cy="7.5" r="1.5" />
     </>
   ),
 };
