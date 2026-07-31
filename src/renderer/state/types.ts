@@ -218,7 +218,14 @@ export function viewOf(tab: FocusedTab): ViewMode {
 // the panels that actually exist at a given sub-slice, so an icon never
 // appears without a working panel (completeness rule). Persisted under the
 // `workbench-ui` localStorage key (§ 4.3 — new keys don't extend `spectra-`).
-export type NavPanelId = 'pages' | 'bookmarks' | 'signatures' | 'search';
+export type NavPanelId =
+  | 'pages'
+  | 'bookmarks'
+  | 'attachments'
+  | 'layers'
+  | 'tags'
+  | 'search'
+  | 'signatures';
 
 export interface NavPaneState {
   open: boolean;

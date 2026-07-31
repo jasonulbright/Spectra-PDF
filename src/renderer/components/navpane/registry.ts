@@ -8,10 +8,19 @@ import { PagesPanel } from './PagesPanel';
 import { BookmarksPanel } from './BookmarksPanel';
 import { SearchPanel } from './SearchPanel';
 import { SignaturesNavPanel } from './SignaturesNavPanel';
+import { toolPanelNav } from './ToolPanelNav';
+import { AttachmentsPanel } from '../../panels/AttachmentsPanel';
+import { LayersPanel } from '../../panels/LayersPanel';
+import { TagsPanel } from '../../panels/TagsPanel';
 
 export const NAV_PANEL_DEFS = [
   { id: 'pages', title: NAV_PANEL_TITLES.pages, icon: 'pages', Component: PagesPanel },
   { id: 'bookmarks', title: NAV_PANEL_TITLES.bookmarks, icon: 'bookmarks', Component: BookmarksPanel },
+  // Left-dock candidates (§ I.6): the SAME components the tool dock mounts,
+  // hosted at nav width — one implementation per capability (ToolPanelNav).
+  { id: 'attachments', title: NAV_PANEL_TITLES.attachments, icon: 'attachments', Component: toolPanelNav(AttachmentsPanel) },
+  { id: 'layers', title: NAV_PANEL_TITLES.layers, icon: 'layers', Component: toolPanelNav(LayersPanel) },
+  { id: 'tags', title: NAV_PANEL_TITLES.tags, icon: 'tags', Component: toolPanelNav(TagsPanel) },
   // Reuses the magnifier glyph — Acrobat marks both Find and Search with one.
   { id: 'search', title: NAV_PANEL_TITLES.search, icon: 'find', Component: SearchPanel },
   { id: 'signatures', title: NAV_PANEL_TITLES.signatures, icon: 'signatures', Component: SignaturesNavPanel },

@@ -63,6 +63,9 @@ export const TOOLBAR_CATALOG: readonly ToolbarCatalogGroup[] = [
     items: [
       item('view.navPanel.pages', 'pages', false),
       item('view.navPanel.bookmarks', 'bookmarks', false),
+      item('view.navPanel.attachments', 'attachments', false),
+      item('view.navPanel.layers', 'layers', false),
+      item('view.navPanel.tags', 'tags', false),
       item('view.navPanel.signatures', 'signatures', false),
       // Ships VISIBLE (2026-07-25, owner-directed): the tool dock's header has
       // a close X and nothing visible reopened it — a one-way door out of the
