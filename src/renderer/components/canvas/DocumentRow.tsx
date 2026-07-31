@@ -125,6 +125,8 @@ interface DocumentRowProps {
     additive: boolean,
   ) => void;
   onTransformAnnotations: (docId: string, edits: AnnotationTransform[]) => void;
+  onCalibrate: (lengthPts: number) => void;
+  onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
   onAddRedactionMark: (
     docId: string,
@@ -209,6 +211,8 @@ function DocumentRowImpl({
   selectedAnnotationIds,
   onSelectAnnotation,
   onTransformAnnotations,
+  onCalibrate,
+  onMeasureContextMenu,
   onMarqueeSelect,
   onAddRedactionMark,
   onRemoveRedactionMark,
@@ -321,6 +325,8 @@ function DocumentRowImpl({
         selectedAnnotationIds={selectedAnnotationIds}
         onSelectAnnotation={onSelectAnnotation}
         onTransformAnnotations={onTransformAnnotations}
+        onCalibrate={onCalibrate}
+        onMeasureContextMenu={onMeasureContextMenu}
         onMarqueeSelect={onMarqueeSelect}
         onAddRedactionMark={onAddRedactionMark}
         onRemoveRedactionMark={onRemoveRedactionMark}
