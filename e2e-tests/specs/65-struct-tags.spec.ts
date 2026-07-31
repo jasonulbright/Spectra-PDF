@@ -79,6 +79,22 @@ async function makeTaggedPdf(path: string): Promise<void> {
   writeFileSync(path, await doc.save());
 }
 
+// Untagged but CONTENT-BEARING — what autotag (P20) needs; sample.pdf is
+// five blank pages, whose "nothing taggable" refusal is correct behavior.
+async function makeUntaggedPdf(path: string): Promise<void> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([300, 400]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const ctx = doc.context;
+  const content = [
+    'BT /F1 20 Tf 40 350 Td (AutotagE2EHeading) Tj ET',
+    'BT /F1 11 Tf 40 320 Td (AutotagE2EBody paragraph) Tj ET',
+  ].join('\n');
+  page.node.set(PDFName.of('Contents'), ctx.register(ctx.stream(content)));
+  page.node.set(PDFName.of('Resources'), ctx.obj({ Font: { F1: font.ref } }));
+  writeFileSync(path, await doc.save());
+}
+
 interface StructNode {
   role?: string;
   alt?: string;
@@ -234,10 +250,37 @@ describe('structure tags + reading order (I.6)', () => {
     expect(rolesOf(await readStructTree(dest))).toEqual(['H1', 'P', 'Figure']);
   });
 
-  it('an untagged document states it honestly', async () => {
+  it('an untagged document states it honestly — and autotag builds a first tree (P20)', async () => {
+    // sample.pdf is five BLANK pages — the honest untagged state, and (by
+    // design) autotag refuses it: nothing taggable is a named error, not an
+    // invented empty tree. The P20 leg runs on a content-bearing file.
     await openByPaths([SAMPLE]);
     await setView('operations');
     await setActiveOp('tags');
     await $('[data-testid="tags-untagged"]').waitForDisplayed({ timeout: 20_000 });
+
+    const untagged = resolve(tmp, 'untagged-content.pdf');
+    await makeUntaggedPdf(untagged);
+    await openByPaths([untagged]);
+    await setView('operations');
+    await setActiveOp('tags');
+    await $('[data-testid="tags-untagged"]').waitForDisplayed({ timeout: 20_000 });
+
+    // P20: the refusal state carries the content-analysis half. One click
+    // runs the REAL engine op over the working copy (undoable), and the
+    // panel refreshes into the tagged editor: Document + H1 + P.
+    await $('[data-testid="tags-autotag"]').click();
+    await $('[data-testid="tags-summary"]').waitForDisplayed({
+      timeout: 30_000,
+      timeoutMsg: 'autotag never produced a tagged tree in the panel',
+    });
+    expect(await $('[data-testid="tags-summary"]').getText()).toContain('3 tags');
+    // The tree renders collapsed to the Document root; expand it and the
+    // two autotagged children (H1, P) appear.
+    await $('[data-testid^="tag-toggle-"]').click();
+    await browser.waitUntil(
+      async () => (await $$('[data-testid^="tag-row-"]')).length === 3,
+      { timeoutMsg: 'expanding the root did not reveal the autotagged children' },
+    );
   });
 });
