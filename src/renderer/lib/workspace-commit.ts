@@ -101,7 +101,7 @@ export function planCommit(
           ...(p.annotations?.length
             ? {
                 annotations: p.annotations.map(
-                  ({ kind, x, y, w, h, color, note, points, imageData, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, importedOriginal }) => ({
+                  ({ kind, x, y, w, h, color, note, points, imageData, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, importedOriginal }) => ({
                     kind,
                     x,
                     y,
@@ -117,6 +117,14 @@ export function planCommit(
                     measureRatio,
                     measureUnitsPerPt,
                     measureUnit,
+                    // Rung 2 — the shape/callout fields the builder reads.
+                    shapeType,
+                    strokeWidth,
+                    fillColor,
+                    opacity,
+                    calloutBox,
+                    lineEndings,
+                    cloudIntensity,
                     importedOriginal,
                   }),
                 ),

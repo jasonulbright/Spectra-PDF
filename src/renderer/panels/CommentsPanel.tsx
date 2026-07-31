@@ -38,6 +38,9 @@ const KIND_LABEL: Record<string, string> = {
   stamp: 'Stamp',
   note: 'Text',
   link: 'Link',
+  measure: 'Measurement',
+  shape: 'Shape',
+  callout: 'Callout',
 };
 
 function labelFor(kind: string, markupType?: string): string {

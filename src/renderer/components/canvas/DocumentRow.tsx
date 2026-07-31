@@ -11,6 +11,7 @@ import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
+import type { ShapeType } from '../../state/types';
 import type { MeasureScale } from '../../lib/measure';
 import { MAX_ROW_WIDTH, ADD_GHOST_WIDTH } from '../../canvas/layout';
 import { GhostPage } from './DropGhost';
@@ -35,6 +36,7 @@ interface DocumentRowProps {
   tool: CanvasTool;
   annotationColor?: string;
   stampPreset?: StampPreset | null;
+  shapeType: ShapeType;
   measureScale?: MeasureScale;
   measureLeaveMarkup?: boolean;
   onMeasureResult?: (text: string) => void;
@@ -154,6 +156,7 @@ function DocumentRowImpl({
   tool,
   annotationColor,
   stampPreset,
+  shapeType,
   measureScale,
   measureLeaveMarkup,
   onMeasureResult,
@@ -241,6 +244,7 @@ function DocumentRowImpl({
         tool={tool}
         annotationColor={annotationColor}
         stampPreset={stampPreset}
+        shapeType={shapeType}
         measureScale={measureScale}
         measureLeaveMarkup={measureLeaveMarkup}
         onMeasureResult={onMeasureResult}

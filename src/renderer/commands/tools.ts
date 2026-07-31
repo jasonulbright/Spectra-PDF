@@ -97,9 +97,11 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // Comment still lands you ON the page, with its pane seated one dock-click
     // away rather than grabbing horizontal space.
     ops: ['comments'],
-    // Four modes, one tool — the pill listed them flat and made the user infer
-    // the grouping; Acrobat's Comment toolbar states it.
-    canvasTools: ['highlight', 'freetext', 'ink', 'stamp'],
+    // Six modes, one tool — the pill listed them flat and made the user infer
+    // the grouping; Acrobat's Comment toolbar states it. 'shape' fans out via
+    // the secondary toolbar's figure picker (rect/ellipse/line/arrow/polygon/
+    // polyline/cloud — rung 2); 'callout' is the leadered text box.
+    canvasTools: ['highlight', 'freetext', 'ink', 'stamp', 'shape', 'callout'],
   },
   {
     id: 'edit',
