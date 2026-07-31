@@ -187,6 +187,7 @@ export const COMMAND_IDS = [
   'file.clearRecent',
   'tools.batchOcr',
   'tools.scheduledRuns',
+  'tools.watchedFolders',
   'file.createPdfFromPostScript',
   ...CANVAS_TOOLS.map((t) => `tools.${t}` as const),
   ...OPERATIONS.map((op) => `tools.panel.${op}` as const),
@@ -515,6 +516,12 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Scheduled Batch Runs…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openScheduledRuns(),
+  },
+  // O7 watched folders — same no-document shape: watches picked folder trees.
+  'tools.watchedFolders': {
+    title: 'Watched Folders…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openWatchedFolders(),
   },
   // Phase 8 — same no-document shape: distills a PICKED PostScript file.
   'file.createPdfFromPostScript': {

@@ -396,6 +396,10 @@ pub struct RunActionArgs {
     /// — the same shape the app saves
     #[arg(long)]
     pub action: PathBuf,
+    /// OPT-IN: move each processed original into this folder (the watched-
+    /// folder In → Out → Done shape; mirror mode only)
+    #[arg(long, conflicts_with = "in_place")]
+    pub moved: Option<PathBuf>,
     /// Where the run log is written (default: no log from the CLI)
     #[arg(long)]
     pub log_dir: Option<PathBuf>,
@@ -1752,6 +1756,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "write_log": args.log_dir.is_some(),
                 "progress": true,
                 "in_place": args.in_place,
+                "move_processed_root": args.moved.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
             });
             if let Some(dir) = &args.log_dir {
                 params["log_dir"] = json!(abs(dir).to_string_lossy());

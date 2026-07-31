@@ -78,6 +78,8 @@ export interface AppCommandHandlers {
    * entirely outside the workspace. */
   openBatchOcr(): void;
   openScheduledRuns(): void;
+  /** Open the Watched Folders dialog (O7 — Tools ▸ Watched Folders…). */
+  openWatchedFolders(): void;
   /** Insert a blank page after the page being read (§ 9.3, M6.3) — pdf-lib
    * one-pager sized to the neighbor, through the byte-only import machinery. */
   insertBlankPage(): Promise<void>;
