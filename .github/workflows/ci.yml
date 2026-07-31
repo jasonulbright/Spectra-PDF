@@ -321,7 +321,7 @@ jobs:
         run: |
           try {
             Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000,1001} -MaxEvents 40 -ErrorAction Stop |
-              Where-Object { $_.Message -match 'msedgewebview2|openpdfstudio|msedgedriver' } |
+              Where-Object { $_.Message -match 'msedgewebview2|spectrapdf|msedgedriver' } |
               Format-List TimeCreated, Id, Message
           } catch { Write-Host "no matching crash events" }
           try {

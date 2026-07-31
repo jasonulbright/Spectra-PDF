@@ -64,7 +64,7 @@ while (-not (Test-Path $rcFile) -and (Get-Date) -lt $deadline) {
 if (Test-Path $logFile) { Get-Content $logFile }
 if (-not (Test-Path $rcFile)) {
   Write-Host "##[error]de-elevated command timed out after $TimeoutMinutes minutes"
-  Get-Process -Name openpdfstudio, msedgedriver, 'tauri-driver' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Get-Process -Name spectrapdf, msedgedriver, 'tauri-driver' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   exit 124
 }
 $rc = [int](Get-Content $rcFile -Raw).Trim()

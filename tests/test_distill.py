@@ -16,7 +16,7 @@ PS_FIXTURE = b"""%!PS-Adobe-3.0
 %%Page: 1 1
 /Helvetica findfont 24 scalefont setfont
 72 700 moveto
-(Distilled by Open PDF Studio) show
+(Distilled by Spectra PDF) show
 newpath 72 680 moveto 400 680 lineto 2 setlinewidth stroke
 showpage
 %%EOF

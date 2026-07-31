@@ -1,4 +1,4 @@
-"""Generate NSIS installer graphics for Open PDF Studio.
+"""Generate NSIS installer graphics for Spectra PDF.
 
 Composes the two Tauri-NSIS images (header 150x57, welcome/finish sidebar
 164x314) from the app icon master (`src-tauri/icons/icon-master.png`, the
@@ -53,8 +53,8 @@ def gen_header():
     paste_mark(img, mark, (8, 10))
 
     font = try_load_font(14, bold=True)
-    draw.text((52, 12), "Open PDF", fill=WHITE, font=font)
-    draw.text((52, 28), "Studio", fill=MUTED, font=font)
+    draw.text((52, 12), "Spectra", fill=WHITE, font=font)
+    draw.text((52, 28), "PDF", fill=MUTED, font=font)
 
     # Coral accent rule along the bottom edge.
     draw.rectangle([0, 54, 150, 57], fill=CORAL)
@@ -75,13 +75,13 @@ def gen_sidebar():
 
     # Name stacked beneath.
     font_large = try_load_font(20, bold=True)
-    bbox = draw.textbbox((0, 0), "Open PDF", font=font_large)
+    bbox = draw.textbbox((0, 0), "Spectra", font=font_large)
     tw = bbox[2] - bbox[0]
-    draw.text(((164 - tw) // 2, 168), "Open PDF", fill=WHITE, font=font_large)
+    draw.text(((164 - tw) // 2, 168), "Spectra", fill=WHITE, font=font_large)
 
-    bbox = draw.textbbox((0, 0), "Studio", font=font_large)
+    bbox = draw.textbbox((0, 0), "PDF", font=font_large)
     tw = bbox[2] - bbox[0]
-    draw.text(((164 - tw) // 2, 194), "Studio", fill=MUTED, font=font_large)
+    draw.text(((164 - tw) // 2, 194), "PDF", fill=MUTED, font=font_large)
 
     # Coral accent rule along the bottom edge.
     draw.rectangle([0, 308, 164, 314], fill=CORAL)

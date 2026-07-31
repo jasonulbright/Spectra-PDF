@@ -170,7 +170,7 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     // ETSI.CAdES.detached, and `trusted` flips true ONLY with the signer's
     // own cert supplied as a user trust anchor (self-signed → its own root).
     const { execFileSync } = await import('node:child_process');
-    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'openpdfstudio.exe');
+    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
     const bare = JSON.parse(
       execFileSync(binary, ['verify-signatures', padesOut], { encoding: 'utf-8' }),
     ) as { signatures: { pades: boolean; subfilter: string; trusted: boolean }[] };

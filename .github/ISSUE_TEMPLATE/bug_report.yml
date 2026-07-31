@@ -10,7 +10,7 @@ body:
         **If this is a security issue** -- a crafted file that crashes the app,
         redaction that leaves content behind, a signature verified as good when
         it isn't -- please **don't** file it here. Use
-        [private vulnerability reporting](https://github.com/jasonulbright/Open-PDF-Studio/security/advisories/new)
+        [private vulnerability reporting](https://github.com/jasonulbright/Spectra-PDF/security/advisories/new)
         instead, so a fix can ship before the details are public.
 
   - type: textarea

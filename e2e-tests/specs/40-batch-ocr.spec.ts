@@ -140,7 +140,7 @@ describe('batch OCR folder mirror (Phase 6)', () => {
     expect(existsSync(logPath!)).toBe(true);
     expect(logPath!).toMatch(/batch-ocr-\d{4}-\d{2}-\d{2}_\d{6}\.log$/);
     const log = readFileSync(logPath!, 'utf8');
-    expect(log).toContain('Open PDF Studio — Batch OCR log');
+    expect(log).toContain('Spectra PDF — Batch OCR log');
     expect(log).toContain(src);
     expect(log).toContain(dest);
     expect(log).toContain('Result:       completed');

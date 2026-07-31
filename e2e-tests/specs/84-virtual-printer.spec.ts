@@ -12,7 +12,7 @@ import { waitForHarness, invokeAppCommand, getState, saveActiveAs } from '../sup
 // for this path (that half is admin-gated UI, asserted as affordance only),
 // so the whole conversion chain is exercised for real.
 
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'openpdfstudio.exe');
+const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
 
 let TMP = '';
 let listenerReady = false;

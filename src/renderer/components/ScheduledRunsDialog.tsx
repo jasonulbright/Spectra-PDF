@@ -500,7 +500,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                     />
                   </Field>
                   <p className="text-xs text-neutral-500 -mt-1">
-                    Windows stores this, not Open PDF Studio. The account also needs the “Log on
+                    Windows stores this, not Spectra PDF. The account also needs the “Log on
                     as a batch job” right on this machine, or the schedule is created but never
                     runs.
                   </p>

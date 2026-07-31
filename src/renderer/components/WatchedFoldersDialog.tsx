@@ -127,7 +127,7 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
           <p className="text-xs text-neutral-500">
             A watched folder runs a saved guided action on every PDF dropped into it:
             processed copies land in the destination, the originals file into the processed
-            folder. Watching runs while Open PDF Studio is open (including minimized to the
+            folder. Watching runs while Spectra PDF is open (including minimized to the
             tray); runs are logged with the batch logs.
           </p>
           {folders === null ? (

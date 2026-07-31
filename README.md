@@ -1,14 +1,14 @@
-# Open PDF Studio
+# Spectra PDF
 
-[![CI](https://github.com/jasonulbright/Open-PDF-Studio/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonulbright/Open-PDF-Studio/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/jasonulbright/Open-PDF-Studio?sort=semver)](https://github.com/jasonulbright/Open-PDF-Studio/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/jasonulbright/Open-PDF-Studio/total)](https://github.com/jasonulbright/Open-PDF-Studio/releases)
+[![CI](https://github.com/jasonulbright/Spectra-PDF/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonulbright/Spectra-PDF/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/jasonulbright/Spectra-PDF?sort=semver)](https://github.com/jasonulbright/Spectra-PDF/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/jasonulbright/Spectra-PDF/total)](https://github.com/jasonulbright/Spectra-PDF/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4)](https://github.com/jasonulbright/Open-PDF-Studio/releases/latest)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4)](https://github.com/jasonulbright/Spectra-PDF/releases/latest)
 
 A modern, open-source PDF workbench for Windows. Tauri v2 + React, with an embedded Python engine and vendored upstream Ghostscript (AGPL-3.0). No ads, no telemetry, no upsells. WebView2 prerequisite (ships with Windows 10/11).
 
-![Open PDF Studio](docs/images/screenshot_dark_clean.png)
+![Spectra PDF](docs/images/screenshot_dark_clean.png)
 
 ## What it is
 
@@ -65,91 +65,91 @@ NSIS installer with silent modes and enterprise policy, file associations, Explo
 
 ## Command Line
 
-When invoked with a subcommand, Open PDF Studio runs headless — no window, same engine. `openpdfstudio.exe /?` shows the full list.
+When invoked with a subcommand, Spectra PDF runs headless — no window, same engine. `spectrapdf.exe /?` shows the full list.
 
 ```bash
 # Compress
-openpdfstudio compress input.pdf -o compressed.pdf --quality ebook
+spectrapdf compress input.pdf -o compressed.pdf --quality ebook
 
 # Merge / split / rotate / delete
-openpdfstudio merge a.pdf b.pdf c.pdf -o merged.pdf
-openpdfstudio split input.pdf -o output_dir/ --ranges "1-3,5-7"
-openpdfstudio rotate input.pdf -o rotated.pdf --angle 90 --pages 1,3,5
-openpdfstudio delete input.pdf -o trimmed.pdf --pages 3,7
+spectrapdf merge a.pdf b.pdf c.pdf -o merged.pdf
+spectrapdf split input.pdf -o output_dir/ --ranges "1-3,5-7"
+spectrapdf rotate input.pdf -o rotated.pdf --angle 90 --pages 1,3,5
+spectrapdf delete input.pdf -o trimmed.pdf --pages 3,7
 
 # Print — to any installed Windows printer, via the bundled Ghostscript
-openpdfstudio printers                       # list printers (JSON, with the default)
-openpdfstudio print input.pdf --printer "Brother HL-L2400D" --pages 1-3 --copies 2 --fit fit
+spectrapdf printers                       # list printers (JSON, with the default)
+spectrapdf print input.pdf --printer "Brother HL-L2400D" --pages 1-3 --copies 2 --fit fit
 
 # Create PDF from PostScript/EPS (distill)
-openpdfstudio distill input.ps -o output.pdf --preset printer
+spectrapdf distill input.ps -o output.pdf --preset printer
 
 # Encrypt / decrypt
-openpdfstudio encrypt input.pdf -o encrypted.pdf --password secret
-openpdfstudio decrypt encrypted.pdf -o decrypted.pdf --password secret
+spectrapdf encrypt input.pdf -o encrypted.pdf --password secret
+spectrapdf decrypt encrypted.pdf -o decrypted.pdf --password secret
 
 # PDF/A, optimize, grayscale, version
-openpdfstudio pdfa input.pdf -o archive.pdf --level 2b
-openpdfstudio optimize input.pdf -o optimized.pdf --linearize --strip-metadata --compress-streams
-openpdfstudio grayscale input.pdf -o grayscale.pdf
-openpdfstudio pdf-version input.pdf -o out.pdf --version 1.7
+spectrapdf pdfa input.pdf -o archive.pdf --level 2b
+spectrapdf optimize input.pdf -o optimized.pdf --linearize --strip-metadata --compress-streams
+spectrapdf grayscale input.pdf -o grayscale.pdf
+spectrapdf pdf-version input.pdf -o out.pdf --version 1.7
 
 # Text, metadata
-openpdfstudio extract-text input.pdf --pages 1,2,3
-openpdfstudio metadata input.pdf --title "New Title" -o updated.pdf
-openpdfstudio metadata input.pdf --strip -o stripped.pdf
+spectrapdf extract-text input.pdf --pages 1,2,3
+spectrapdf metadata input.pdf --title "New Title" -o updated.pdf
+spectrapdf metadata input.pdf --strip -o stripped.pdf
 
 # Forms — list fields (JSON), or fill (± flatten)
-openpdfstudio forms input.pdf
-openpdfstudio forms input.pdf -o filled.pdf --set name=Ada --set subscribe=true --flatten
+spectrapdf forms input.pdf
+spectrapdf forms input.pdf -o filled.pdf --set name=Ada --set subscribe=true --flatten
 
 # Bookmarks — read (JSON) or replace
-openpdfstudio outline input.pdf
-openpdfstudio outline input.pdf -o out.pdf --from-json bookmarks.json
+spectrapdf outline input.pdf
+spectrapdf outline input.pdf -o out.pdf --from-json bookmarks.json
 
 # Signatures
-openpdfstudio verify-signatures signed.pdf
-openpdfstudio sign input.pdf -o signed.pdf --pfx signer.pfx --password pass
-openpdfstudio sign input.pdf -o signed.pdf --pfx signer.pfx --password pass --pades b-lta --tsa-url http://timestamp.example/tsa
-openpdfstudio verify-signatures signed.pdf --trust-root my-ca.pem
-openpdfstudio generate-signer -o me.pfx --cn "My Name" --password pass
+spectrapdf verify-signatures signed.pdf
+spectrapdf sign input.pdf -o signed.pdf --pfx signer.pfx --password pass
+spectrapdf sign input.pdf -o signed.pdf --pfx signer.pfx --password pass --pades b-lta --tsa-url http://timestamp.example/tsa
+spectrapdf verify-signatures signed.pdf --trust-root my-ca.pem
+spectrapdf generate-signer -o me.pfx --cn "My Name" --password pass
 
 # Compare, redact, watermark, repair tiers
-openpdfstudio compare a.pdf b.pdf
-openpdfstudio redact input.pdf -o redacted.pdf --page 1 --rect 100,100,300,150
-openpdfstudio watermark input.pdf -o marked.pdf --text "CONFIDENTIAL"
-openpdfstudio repair broken.pdf -o repaired.pdf
-openpdfstudio rebuild broken.pdf -o rebuilt.pdf
-openpdfstudio recover broken.pdf -o recovered.pdf
-openpdfstudio check input.pdf
+spectrapdf compare a.pdf b.pdf
+spectrapdf redact input.pdf -o redacted.pdf --page 1 --rect 100,100,300,150
+spectrapdf watermark input.pdf -o marked.pdf --text "CONFIDENTIAL"
+spectrapdf repair broken.pdf -o repaired.pdf
+spectrapdf rebuild broken.pdf -o rebuilt.pdf
+spectrapdf recover broken.pdf -o recovered.pdf
+spectrapdf check input.pdf
 
 # Export — Office/web formats (bundled converter) and page images
-openpdfstudio export input.pdf -o output.docx --format docx
-openpdfstudio export-images input.pdf -o page.png --format png --dpi 300 --pages 1-5
+spectrapdf export input.pdf -o output.docx --format docx
+spectrapdf export-images input.pdf -o page.png --format png --dpi 300 --pages 1-5
 
 # Pages — headers/footers/Bates, page boxes, page-number labels
-openpdfstudio header-footer input.pdf -o numbered.pdf --bc "Page {page} of {pages}"
-openpdfstudio header-footer input.pdf -o stamped.pdf --br "BATES-{bates}" --bates-start 1000
-openpdfstudio page-box input.pdf -o cropped.pdf --box crop --top 36 --bottom 36 --left 36 --right 36
-openpdfstudio page-labels input.pdf -o labeled.pdf --range "1:r" --range "5:D"
+spectrapdf header-footer input.pdf -o numbered.pdf --bc "Page {page} of {pages}"
+spectrapdf header-footer input.pdf -o stamped.pdf --br "BATES-{bates}" --bates-start 1000
+spectrapdf page-box input.pdf -o cropped.pdf --box crop --top 36 --bottom 36 --left 36 --right 36
+spectrapdf page-labels input.pdf -o labeled.pdf --range "1:r" --range "5:D"
 
 # Attachments, layers, links
-openpdfstudio attach-list input.pdf
-openpdfstudio attach-add input.pdf -o out.pdf --source data.xlsx
-openpdfstudio layer-list plans.pdf
-openpdfstudio layer-set plans.pdf -o out.pdf --index 2          # hide layer 2
-openpdfstudio layer-set plans.pdf -o out.pdf --index 2 --show   # show it again
-openpdfstudio link-list input.pdf
-openpdfstudio link-add input.pdf -o out.pdf --page 1 --rect 100 700 300 715 --url https://example.com
+spectrapdf attach-list input.pdf
+spectrapdf attach-add input.pdf -o out.pdf --source data.xlsx
+spectrapdf layer-list plans.pdf
+spectrapdf layer-set plans.pdf -o out.pdf --index 2          # hide layer 2
+spectrapdf layer-set plans.pdf -o out.pdf --index 2 --show   # show it again
+spectrapdf link-list input.pdf
+spectrapdf link-add input.pdf -o out.pdf --page 1 --rect 100 700 300 715 --url https://example.com
 
 # Accessibility — checker, structure tags, and print preflight
-openpdfstudio accessibility input.pdf
-openpdfstudio tags-list input.pdf
-openpdfstudio tags-set input.pdf -o out.pdf --path 0,0 --type H1 --alt "Chart of quarterly totals"
-openpdfstudio preflight input.pdf
+spectrapdf accessibility input.pdf
+spectrapdf tags-list input.pdf
+spectrapdf tags-set input.pdf -o out.pdf --path 0,0 --type H1 --alt "Chart of quarterly totals"
+spectrapdf preflight input.pdf
 
 # Batch — process every PDF in a directory
-openpdfstudio batch C:\pdfs\ -o C:\out\ compress --quality ebook
+spectrapdf batch C:\pdfs\ -o C:\out\ compress --quality ebook
 ```
 
 Results are JSON on stdout. Progress and errors go to stderr. Exit codes: 0 = success, 1 = operation error, 2 = bad args.
@@ -158,16 +158,16 @@ Results are JSON on stdout. Progress and errors go to stderr. Exit codes: 0 = su
 
 ```bash
 # Silent install (per-machine, update check disabled)
-"Open PDF Studio_X.Y.Z_x64-setup.exe" /S
+"Spectra PDF_X.Y.Z_x64-setup.exe" /S
 
 # Silent uninstall (keeps user data for redeployment)
-"C:\Program Files\Open PDF Studio\uninstall.exe" /S
+"C:\Program Files\Spectra PDF\uninstall.exe" /S
 
 # Silent uninstall (removes all user data)
-"C:\Program Files\Open PDF Studio\uninstall.exe" /S /removeuserdata
+"C:\Program Files\Spectra PDF\uninstall.exe" /S /removeuserdata
 ```
 
-Updates are notify-only — the app checks for a newer release and shows a banner, and never downloads or installs anything itself. Even the check can be disabled machine-wide via `HKLM\SOFTWARE\Open PDF Studio\DisableAutoUpdate = 1` (set automatically by the silent installer). Everything the app needs is inside the installer — the Python runtime, Ghostscript, the LibreOffice export runtime, the edit fonts, and the offline OCR language data — so there is no second deployment step and no machine needs its own copy of any of them. Third-party licence notices are installed alongside the app and open from Settings ▸ Updates & Licenses. The installer's own `/?` dialog documents all switches:
+Updates are notify-only — the app checks for a newer release and shows a banner, and never downloads or installs anything itself. Even the check can be disabled machine-wide via `HKLM\SOFTWARE\Spectra PDF\DisableAutoUpdate = 1` (set automatically by the silent installer). Everything the app needs is inside the installer — the Python runtime, Ghostscript, the LibreOffice export runtime, the edit fonts, and the offline OCR language data — so there is no second deployment step and no machine needs its own copy of any of them. Third-party licence notices are installed alongside the app and open from Settings ▸ Updates & Licenses. The installer's own `/?` dialog documents all switches:
 
 <img src="docs/images/silent.png" width="376" alt="Installer switches dialog">
 
@@ -176,7 +176,7 @@ Updates are notify-only — the app checks for a newer release and shows a banne
 
 **End users**: WebView2 (included with Windows 10/11 via Edge). The interactive installer downloads the bootstrapper if missing.
 
-> **Note on unsigned releases:** Open PDF Studio is distributed **unsigned** (no Authenticode code-signing certificate). On first run, Windows SmartScreen may show a blue *"Windows protected your PC — Unknown publisher"* prompt. This is expected for unsigned open-source software, not a sign of tampering. To proceed, click **More info → Run anyway**. Builds are published on the [releases page](https://github.com/jasonulbright/Open-PDF-Studio/releases).
+> **Note on unsigned releases:** Spectra PDF is distributed **unsigned** (no Authenticode code-signing certificate). On first run, Windows SmartScreen may show a blue *"Windows protected your PC — Unknown publisher"* prompt. This is expected for unsigned open-source software, not a sign of tampering. To proceed, click **More info → Run anyway**. Builds are published on the [releases page](https://github.com/jasonulbright/Spectra-PDF/releases).
 
 **Developers**:
 
@@ -210,7 +210,7 @@ npm run package
 
 This runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it), `scripts/sync-edit-fonts.ps1` (the hash-pinned Liberation + Libertinus faces and their OFL licence texts), and `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it) — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, produces the NSIS installer). Every one of those four is a `tauri.conf.json` resource, so all four must have run before a build can succeed.
 
-Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio_X.Y.Z_x64-setup.exe`
+Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 
 **Individual steps** (if needed):
 
@@ -267,7 +267,7 @@ versions: [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 ## Project Structure
 
 ```
-openpdfstudio/
+spectrapdf/
 ├── src-tauri/                 # Tauri v2 Rust backend
 │   ├── src/
 │   │   ├── lib.rs             # App setup, tray, single-instance, events

@@ -9,7 +9,7 @@ import {
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
-const BINARY = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'openpdfstudio.exe');
+const BINARY = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
 
 // M-P (§ 3.4): File ▸ Print… (Ctrl+P) — printer picker, range, copies,
 // fit/actual — plus the CLI arm. Nothing here SPOOLS a job (the only printers
