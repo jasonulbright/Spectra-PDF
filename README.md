@@ -12,7 +12,7 @@ A modern, open-source PDF workbench for Windows. Tauri v2 + React, with an embed
 
 ## What it is
 
-A full-featured PDF workbench with a familiar user interface: a menu bar, customizable toolbar, and document tabs over a continuous reading view; a navigation pane on the left; twenty-one task-oriented tools that open in a resizable pane on the right — your document never leaves the screen; and a status bar carrying page, zoom, and any pending work. The keymap is verified against the industry-standard editor's published shortcut table, so your muscle memory just works. Every whole-file operation also ships as a CLI subcommand with identical results.
+A full-featured PDF workbench with a familiar user interface: a menu bar, customizable toolbar, and document tabs over a continuous reading view; a navigation pane on the left; twenty-four task-oriented tools that open in a resizable pane on the right — your document never leaves the screen; and a status bar carrying page, zoom, and any pending work. The keymap is verified against the industry-standard editor's published shortcut table, so your muscle memory just works. Every whole-file operation also ships as a CLI subcommand with identical results.
 
 ### Reading & navigating
 - **Reading view** — continuous, virtualized scroll; smooth with 1,000-page documents. Real text selection and copy (select text to highlight, underline, strike out, or link it), zoom presets (`Ctrl+0/1/2`), go-to-page (`Ctrl+Shift+N`), Rotate View (`Ctrl+Shift+Plus/Minus` — the page turns, the file doesn't), Hand/Select with Space as a temporary hand, two-page spreads with a cover option, Reading Mode (`Ctrl+H`), and full-screen Presentation (`F5`)
@@ -24,8 +24,31 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 
 ![Organize view](docs/images/screenshot_organize.png)
 
-### The twenty-one tools
-Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and recoloring on each; existing PDF annotations import as editable; and one list of every comment in the document — jump to it, edit its note, recolour or delete it, or clear them all) · Edit (select an image, a paragraph, or a line of text on the page — move, resize, rotate, crop, dim, replace, extract or delete images and place new ones; rewrite text in place in the document's own font with live validation, kerned like a typesetter; edit whole paragraphs with true rewrap, split and merge them, restyle size, colour, family, bold and italic — plus real OpenType small caps and stylistic alternates — a whole paragraph or just a selected range; select and move, resize, rotate, recolour, re-width or delete the drawn vector shapes (lines, boxes, rules) on the page, even inside groups; add brand-new text boxes) · Fill & Sign (AcroForm fill on the page, digital signatures: verify with your own trust anchors, sign with PFX/PEM incl. PAdES baseline-through-LTA profiles with timestamping, visible stamps, sign-into-field, sign in place with counter-signing) · Prepare Form (draw new fields on the page; view and edit the document's JavaScript) · Redact (true content removal) · Scan & OCR · Compare (text + visual diff) · Protect (AES-256 encrypt/decrypt) · Optimize (compress, grayscale, convert to CMYK, linearize, PDF/A, PDF version) · Repair (three tiers up to per-page salvage) · Watermark · Header & Footer (six positions, page-number and auto-incrementing Bates tokens) · Crop & Page Boxes (crop/bleed/trim/art) · Page Labels (front matter as i, ii, iii; prefixed appendices) · Attachments (embed, extract, remove) · Layers (show/hide optional content) · Accessibility (checker, structure-tag editor, reading-order panel) · Preflight (fonts, colour, and transparency checks for print) · Links (list, retarget, or remove link regions — and create them from selected text) · Export (text extraction, Word/RTF/ODT/HTML via a bundled converter, page images as PNG/JPEG/TIFF)
+### The twenty-four tools
+- **Organize Pages** — reorder, rotate, delete, split, extract — and merge pages between open files by dragging
+- **Comment** — highlights, text boxes, ink, and stamps, with notes and recoloring on each; existing PDF annotations import as editable; one list of every comment in the document — jump to it, edit its note, recolour or delete it, or clear them all
+- **Edit** — select an image, a paragraph, or a line of text on the page: move, resize, rotate, crop, dim, replace, extract or delete images and place new ones; rewrite text in place in the document's own font with live validation, kerned like a typesetter; edit whole paragraphs with true rewrap, split and merge, restyle size, colour, family, bold and italic — plus real OpenType small caps and stylistic alternates — for a whole paragraph or a selected range; move, resize, recolour, re-width or delete drawn vector shapes, even inside groups; add brand-new text boxes
+- **Fill & Sign** — AcroForm fill on the page; digital signatures: verify with your own trust anchors, sign with PFX/PEM including PAdES baseline-through-LTA profiles with timestamping, visible stamps, sign-into-field, counter-signing
+- **Prepare Form** — draw new fields on the page; view and edit the document's JavaScript
+- **Redact** — true content removal
+- **Measure** — distance, perimeter, and area on the page, with a real-world scale ratio ("1 in = 2 ft"); finished measurements stay on the page as markups you can delete like any comment
+- **Guided Actions** — save sequences of steps (compress, watermark, page numbers, OCR, strip metadata, encrypt to a new file…) and run them on a document with one click; any setting can be asked for at run time — passwords always are, and are never stored
+- **Scan & OCR** — make scanned pages searchable, in 47 languages, fully offline
+- **Compare** — text and visual diff
+- **Protect** — AES-256 encrypt/decrypt with owner-permission controls
+- **Optimize** — compress, grayscale, convert to CMYK, linearize, PDF/A, PDF version
+- **Repair** — three tiers, up to per-page salvage
+- **Watermark**
+- **Header & Footer** — six positions, page-number and auto-incrementing Bates tokens
+- **Crop & Page Boxes** — crop/bleed/trim/art
+- **Page Labels** — front matter as i, ii, iii; prefixed appendices
+- **Attachments** — embed, extract, remove
+- **Portfolio** — open a portfolio and work its files; create one from any files on disk, or convert the open document; add, open, save out, update, and remove member files
+- **Layers** — show/hide optional content
+- **Accessibility** — checker, structure-tag editor, reading-order panel
+- **Preflight** — fonts, colour, and transparency checks for print
+- **Links** — list, retarget, or remove link regions — and create them from selected text
+- **Export** — text extraction, Word/RTF/ODT/HTML via a bundled converter, page images as PNG/JPEG/TIFF
 
 ![Tools](docs/images/screenshot_tools.png)
 
@@ -38,7 +61,7 @@ Organize Pages · Comment (highlights, text boxes, ink, stamps — notes and rec
 - Multi-level undo/redo across staged page edits and applied operations; one file is one document no matter how its path is spelled
 
 ### Desktop citizenship
-NSIS installer with silent modes and enterprise policy, file associations, Explorer context menu, system tray, start-with-Windows, auto-update, light/dark/system themes with Windows accent + Mica, WCAG 2.1 AA, full keyboard navigation (single-key tool accelerators available, off by default).
+NSIS installer with silent modes and enterprise policy, file associations, Explorer context menu, system tray, start-with-Windows, update notifications (the app never downloads or installs updates itself), light/dark/system themes with Windows accent + Mica, WCAG 2.1 AA, full keyboard navigation (single-key tool accelerators available, off by default).
 
 ## Command Line
 
@@ -134,7 +157,7 @@ Results are JSON on stdout. Progress and errors go to stderr. Exit codes: 0 = su
 ## Enterprise Deployment
 
 ```bash
-# Silent install (per-machine, auto-update disabled)
+# Silent install (per-machine, update check disabled)
 "Open PDF Studio_X.Y.Z_x64-setup.exe" /S
 
 # Silent uninstall (keeps user data for redeployment)
@@ -144,7 +167,7 @@ Results are JSON on stdout. Progress and errors go to stderr. Exit codes: 0 = su
 "C:\Program Files\Open PDF Studio\uninstall.exe" /S /removeuserdata
 ```
 
-Auto-update can be disabled machine-wide via `HKLM\SOFTWARE\Open PDF Studio\DisableAutoUpdate = 1` (set automatically by the silent installer). Everything the app needs is inside the installer — the Python runtime, Ghostscript, the LibreOffice export runtime, the edit fonts, and the offline OCR language data — so there is no second deployment step and no machine needs its own copy of any of them. Third-party licence notices are installed alongside the app and open from Settings ▸ Updates & Licenses. The installer's own `/?` dialog documents all switches:
+Updates are notify-only — the app checks for a newer release and shows a banner, and never downloads or installs anything itself. Even the check can be disabled machine-wide via `HKLM\SOFTWARE\Open PDF Studio\DisableAutoUpdate = 1` (set automatically by the silent installer). Everything the app needs is inside the installer — the Python runtime, Ghostscript, the LibreOffice export runtime, the edit fonts, and the offline OCR language data — so there is no second deployment step and no machine needs its own copy of any of them. Third-party licence notices are installed alongside the app and open from Settings ▸ Updates & Licenses. The installer's own `/?` dialog documents all switches:
 
 <img src="docs/images/silent.png" width="376" alt="Installer switches dialog">
 
@@ -212,13 +235,13 @@ Output: `src-tauri/target/release/bundle/nsis/Open PDF Studio_X.Y.Z_x64-setup.ex
   - Reading view (virtualized)             - Printer enumeration                    - pikepdf (structural)
   - Organize board (page strips)           - Sidecar management                     - pdfminer.six (text)
   - Navigation pane                        - System tray                            - pyHanko (signatures)
-  - Tool dock (21 tools) + status bar      - Single instance                        - Ghostscript (upstream:
-  - Command registry + keymap              - Auto-updater                             compress, PDF/A, print,
+  - Tool dock (24 tools) + status bar      - Single instance                        - Ghostscript (upstream:
+  - Command registry + keymap              - Update check (notify-only)               compress, PDF/A, print,
   - pdf.js render + text layer             - Registry policy check                    distill)
 ```
 
-**Frontend**: Tauri v2 (WebView2), React 19, TailwindCSS, pdf.js, pdf-lib, tesseract.js
-**Backend**: Rust (Tauri commands) + Python 3.14 (embedded), pikepdf, pdfminer.six, pyHanko, Ghostscript (upstream, AGPL-3.0)
+**Frontend**: Tauri v2 (WebView2), React 19, TailwindCSS, pdf.js, pdf-lib
+**Backend**: Rust (Tauri commands) + Python 3.14 (embedded), pikepdf, pdfminer.six, pyHanko, Ghostscript (upstream, AGPL-3.0), Tesseract (upstream, Apache-2.0)
 **IPC**: Tauri `invoke()` (JS→Rust), JSON-RPC 2.0 over stdin/stdout (Rust→Python)
 
 ### What powers each feature
