@@ -112,6 +112,13 @@ export interface PageAnnotation {
   // Never touched after import; edits to x/y/w/h/color/note/points do not
   // update it.
   importedOriginal?: ImportedAnnotationFingerprint;
+  // Set by TRANSFORM_ANNOTATIONS when an IMPORTED annotation's geometry
+  // moves: the pristine-import render suppression keys on color/note, which
+  // a pure move leaves equal — without this flag the moved body would stay
+  // invisible (raster-only, at the OLD spot) until commit. The raster's
+  // original still shows until the commit resolves both — the same
+  // pending-tier semantics as deleting an imported annotation.
+  geometryDiverged?: boolean;
 }
 
 export interface PageRef {
@@ -440,6 +447,36 @@ export type AppAction =
   | { type: 'UPDATE_ANNOTATION'; docId: string; pageId: string; annotationId: string; note: string }
   | { type: 'RECOLOR_ANNOTATION'; docId: string; pageId: string; annotationId: string; color: string }
   | { type: 'REMOVE_ANNOTATION'; docId: string; pageId: string; annotationId: string }
+  // Annotation manipulation (rung 1). One dispatch = one gesture = one undo
+  // step, so every action below is BATCH-shaped even when the UI sends one
+  // entry. Geometry is display-normalized in the page.rotation frame (the
+  // stored frame) — callers un-project view-frame gestures first.
+  // Kind rules are enforced HERE, not per call site (the ui.tool lesson):
+  // 'textmarkup' never transforms (quads are text-anchored); 'note' moves
+  // but keeps its icon w/h; 'measure' recomputes its note from the caller.
+  | {
+      type: 'TRANSFORM_ANNOTATIONS';
+      docId: string;
+      edits: {
+        pageId: string;
+        annotationId: string;
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        points?: number[];
+        note?: string; // measure only: the recomputed value
+      }[];
+    }
+  | {
+      type: 'REORDER_ANNOTATIONS';
+      docId: string;
+      pageId: string;
+      annotationIds: string[];
+      direction: 'front' | 'back' | 'forward' | 'backward';
+    }
+  | { type: 'RECOLOR_ANNOTATIONS'; docId: string; pageId: string; annotationIds: string[]; color: string }
+  | { type: 'REMOVE_ANNOTATIONS'; docId: string; pageId: string; annotationIds: string[] }
   | { type: 'SPLIT_DOC'; docId: string; atIndex: number; newDocId: string; newName: string }
   | { type: 'ROTATE_PAGE_REF'; docId: string; pageId: string; rotation: 0 | 90 | 180 | 270 }
   | { type: 'ROTATE_PAGE_REFS'; pageIds: string[]; delta: 90 | 180 | 270 }
