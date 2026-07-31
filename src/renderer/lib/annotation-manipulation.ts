@@ -24,6 +24,7 @@ export interface AnnotationTransform {
   h: number;
   points?: number[];
   note?: string;
+  calloutBox?: [number, number, number, number];
 }
 
 /** Kinds whose geometry the user may change at all. Text markup is anchored
@@ -55,7 +56,14 @@ export function translated(
   a: PageAnnotation,
   dx: number,
   dy: number,
-): { x: number; y: number; points?: number[]; dx: number; dy: number } {
+): {
+  x: number;
+  y: number;
+  points?: number[];
+  calloutBox?: [number, number, number, number];
+  dx: number;
+  dy: number;
+} {
   const x = clamp01(Math.min(a.x + dx, 1 - a.w));
   const y = clamp01(Math.min(a.y + dy, 1 - a.h));
   const adx = x - a.x;
@@ -65,6 +73,9 @@ export function translated(
     y,
     ...(a.points
       ? { points: a.points.map((v, i) => (i % 2 === 0 ? v + adx : v + ady)) }
+      : {}),
+    ...(a.calloutBox
+      ? { calloutBox: [a.calloutBox[0] + adx, a.calloutBox[1] + ady, a.calloutBox[2], a.calloutBox[3]] as [number, number, number, number] }
       : {}),
     dx: adx,
     dy: ady,
@@ -78,9 +89,14 @@ export function translatedBy(
   a: PageAnnotation,
   dx: number,
   dy: number,
-): { x: number; y: number; points?: number[] } {
+): { x: number; y: number; points?: number[]; calloutBox?: [number, number, number, number] } {
   const t = translated(a, dx, dy);
-  return { x: t.x, y: t.y, ...(t.points ? { points: t.points } : {}) };
+  return {
+    x: t.x,
+    y: t.y,
+    ...(t.points ? { points: t.points } : {}),
+    ...(t.calloutBox ? { calloutBox: t.calloutBox } : {}),
+  };
 }
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
@@ -147,7 +163,89 @@ export function resized(
   }
 
   const out = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-  return { ...out, ...(a.points ? { points: scaledPoints(a, out) } : {}) };
+  return {
+    ...out,
+    ...(a.points ? { points: scaledPoints(a, out) } : {}),
+    ...(a.calloutBox ? { calloutBox: scaledCalloutBox(a, out) } : {}),
+  };
+}
+
+/** Scale a callout's text sub-rect with the same box mapping scaledPoints
+ * uses, so the box and the leader stay attached through a resize. */
+export function scaledCalloutBox(
+  a: PageAnnotation,
+  box: { x: number; y: number; w: number; h: number },
+): [number, number, number, number] {
+  const cb = a.calloutBox ?? [a.x, a.y, a.w, a.h];
+  const sx = a.w > 0 ? box.w / a.w : 1;
+  const sy = a.h > 0 ? box.h / a.h : 1;
+  return [
+    box.x + (cb[0] - a.x) * sx,
+    box.y + (cb[1] - a.y) * sy,
+    cb[2] * sx,
+    cb[3] * sy,
+  ];
+}
+
+/** Kinds whose geometry is edited per-VERTEX (a dragged endpoint or corner)
+ * rather than via the 8 box handles: the point-defined shapes, and the
+ * callout's leader. rect/ellipse keep box handles; the callout gets BOTH
+ * (box handles resize everything, vertex handles move the leader). */
+export function hasVertexHandles(a: PageAnnotation): boolean {
+  if (a.kind === 'callout') return true;
+  if (a.kind !== 'shape') return false;
+  return a.shapeType !== 'rect' && a.shapeType !== 'ellipse';
+}
+
+/** Bounding box of a flat point list, PADDED to a minimum size per axis — a
+ * perfectly flat line's box would otherwise have no height to click, no SVG
+ * pixel to draw in, and no handle to grab. Points stay exact; only the box
+ * grows (symmetrically) around them. The emit reads geometry from the
+ * points, so the pad never reaches the PDF's /L or /Vertices. */
+export function paddedPointsBbox(
+  points: number[],
+  extraXs: number[] = [],
+  extraYs: number[] = [],
+): { x: number; y: number; w: number; h: number } {
+  const xs = [...points.filter((_, i) => i % 2 === 0), ...extraXs];
+  const ys = [...points.filter((_, i) => i % 2 === 1), ...extraYs];
+  let x = Math.min(...xs);
+  let y = Math.min(...ys);
+  let w = Math.max(...xs) - x;
+  let h = Math.max(...ys) - y;
+  if (w < MIN_SIZE_NORM) {
+    x = clamp01(x - (MIN_SIZE_NORM - w) / 2);
+    w = MIN_SIZE_NORM;
+  }
+  if (h < MIN_SIZE_NORM) {
+    y = clamp01(y - (MIN_SIZE_NORM - h) / 2);
+    h = MIN_SIZE_NORM;
+  }
+  return { x, y, w, h };
+}
+
+/** Move one vertex of a points-carrying annotation to a new normalized page
+ * position; the bbox re-derives from the moved points (∪ the callout's text
+ * box, which a leader-vertex drag never moves), flat-padded like creation. */
+export function vertexDragged(
+  a: PageAnnotation,
+  vertexIndex: number,
+  nx: number,
+  ny: number,
+): { x: number; y: number; w: number; h: number; points: number[]; calloutBox?: [number, number, number, number] } {
+  const points = [...(a.points ?? [])];
+  points[vertexIndex * 2] = clamp01(nx);
+  points[vertexIndex * 2 + 1] = clamp01(ny);
+  const box = paddedPointsBbox(
+    points,
+    a.calloutBox ? [a.calloutBox[0], a.calloutBox[0] + a.calloutBox[2]] : [],
+    a.calloutBox ? [a.calloutBox[1], a.calloutBox[1] + a.calloutBox[3]] : [],
+  );
+  return {
+    ...box,
+    points,
+    ...(a.calloutBox ? { calloutBox: a.calloutBox } : {}),
+  };
 }
 
 /** Scale stored path points from the annotation's current box into a new
@@ -346,6 +444,57 @@ export function sizeMatchEdits(
       ...(points ? { points } : {}),
       ...(note !== undefined ? { note } : {}),
     });
+  }
+  return out;
+}
+
+/** One scallop of a cloud border: a cubic from `s` to `e` with control
+ * points offset outward by (4/3)r — the standard half-circle Bézier. Shared
+ * by the SVG renderer and the PDF appearance emit so the two cannot drift. */
+export interface CloudBump {
+  s: [number, number];
+  c1: [number, number];
+  c2: [number, number];
+  e: [number, number];
+}
+
+/** Scallops marching along each edge of a closed ring, bulging AWAY from the
+ * centroid (winding-independent). Coordinates are whatever space the caller
+ * works in — the bump radius `r` just has to match it. */
+export function cloudBumps(verts: [number, number][], r: number): CloudBump[] {
+  if (verts.length < 3) return [];
+  const cx = verts.reduce((s, v) => s + v[0], 0) / verts.length;
+  const cy = verts.reduce((s, v) => s + v[1], 0) / verts.length;
+  const out: CloudBump[] = [];
+  const k = (4 / 3) * r;
+  for (let i = 0; i < verts.length; i++) {
+    const p = verts[i];
+    const q = verts[(i + 1) % verts.length];
+    const ex = q[0] - p[0];
+    const ey = q[1] - p[1];
+    const len = Math.hypot(ex, ey);
+    if (len < 0.01) continue;
+    const steps = Math.max(1, Math.round(len / (r * 1.8)));
+    let nx = -ey / len;
+    let ny = ex / len;
+    const mx = (p[0] + q[0]) / 2;
+    const my = (p[1] + q[1]) / 2;
+    if (nx * (mx - cx) + ny * (my - cy) < 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    for (let s = 0; s < steps; s++) {
+      const sx = p[0] + (ex * s) / steps;
+      const sy = p[1] + (ey * s) / steps;
+      const tx = p[0] + (ex * (s + 1)) / steps;
+      const ty = p[1] + (ey * (s + 1)) / steps;
+      out.push({
+        s: [sx, sy],
+        c1: [sx + nx * k, sy + ny * k],
+        c2: [tx + nx * k, ty + ny * k],
+        e: [tx, ty],
+      });
+    }
   }
   return out;
 }

@@ -14,6 +14,7 @@ import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
+import type { ShapeType } from '../../state/types';
 import type { MeasureScale } from '../../lib/measure';
 
 interface DocLayerProps {
@@ -33,6 +34,7 @@ interface DocLayerProps {
   tool: CanvasTool;
   annotationColor?: string;
   stampPreset?: StampPreset | null;
+  shapeType: ShapeType;
   measureScale?: MeasureScale;
   measureLeaveMarkup?: boolean;
   onMeasureResult?: (text: string) => void;
@@ -170,6 +172,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               tool={props.tool}
               annotationColor={props.annotationColor}
               stampPreset={props.stampPreset}
+              shapeType={props.shapeType}
               measureScale={props.measureScale}
               measureLeaveMarkup={props.measureLeaveMarkup}
               onMeasureResult={props.onMeasureResult}

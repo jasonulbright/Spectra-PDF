@@ -8,6 +8,11 @@ import {
   type SizeMatchMode,
 } from '../../lib/annotation-manipulation';
 
+/** Kinds the style controls (stroke width / opacity / fill) apply to. */
+const styleable = (a: PageAnnotation): boolean =>
+  a.kind === 'shape' || a.kind === 'callout' || a.kind === 'ink';
+const fillable = (a: PageAnnotation): boolean => a.kind === 'shape' || a.kind === 'callout';
+
 // The Properties Bar (I.6 — Acrobat's Ctrl+E): a contextual strip under the
 // secondary toolbar. With ONE annotation selected (click, Select tool) it
 // shows that annotation's properties with quick controls (recolor, delete,
@@ -43,6 +48,9 @@ interface PropertiesBarProps {
   onReorder: (direction: 'front' | 'back' | 'forward' | 'backward') => void;
   onRecolorGroup: (color: string) => void;
   onRemoveGroup: () => void;
+  /** Shared style edit (rung 2) — stroke width / fill / opacity across the
+   * selection; the reducer applies each only to kinds that carry it. */
+  onRestyle: (style: { strokeWidth?: number; fillColor?: string | null; opacity?: number }) => void;
   onClose: () => void;
 }
 
@@ -54,6 +62,18 @@ const KIND_LABELS: Record<PageAnnotation['kind'], string> = {
   textmarkup: 'Text markup',
   note: 'Sticky note',
   measure: 'Measurement',
+  shape: 'Shape',
+  callout: 'Callout',
+};
+
+const SHAPE_LABELS: Record<string, string> = {
+  rect: 'Rectangle',
+  ellipse: 'Ellipse',
+  line: 'Line',
+  arrow: 'Arrow',
+  polygon: 'Polygon',
+  polyline: 'Polyline',
+  cloud: 'Cloud',
 };
 
 const MARKUP_LABELS: Record<string, string> = {
@@ -96,13 +116,16 @@ export function PropertiesBar({
   onReorder,
   onRecolorGroup,
   onRemoveGroup,
+  onRestyle,
   onClose,
 }: PropertiesBarProps): React.JSX.Element {
   const a = selected?.annotation ?? null;
   const label = a
     ? a.kind === 'textmarkup'
       ? (MARKUP_LABELS[a.markupType ?? 'highlight'] ?? 'Text markup')
-      : KIND_LABELS[a.kind]
+      : a.kind === 'shape'
+        ? (SHAPE_LABELS[a.shapeType ?? 'rect'] ?? 'Shape')
+        : KIND_LABELS[a.kind]
     : null;
   const multi = selectedGroup.length > 1;
   const movableCount = selectedGroup.filter(isTransformable).length;
@@ -125,6 +148,68 @@ export function PropertiesBar({
       ))}
     </span>
   );
+  // Style controls (rung 2): shown when the selection carries any styleable
+  // kind. Values seed from the FIRST styleable member; edits apply to all.
+  const styleRef = selectedGroup.find(styleable) ?? null;
+  const anyFillable = selectedGroup.some(fillable);
+  const styleControls = styleRef ? (
+    <span className="properties-bar-swatches" role="group" aria-label="Style">
+      <select
+        data-testid="pbar-stroke-width"
+        className="properties-bar-select"
+        title="Stroke width"
+        aria-label="Stroke width"
+        value={String(styleRef.strokeWidth ?? (styleRef.kind === 'callout' ? 1 : 2))}
+        onChange={(e) => onRestyle({ strokeWidth: parseFloat(e.target.value) })}
+      >
+        {['1', '2', '3', '4', '6', '8', '12'].map((v) => (
+          <option key={v} value={v}>
+            {v} pt
+          </option>
+        ))}
+      </select>
+      <select
+        data-testid="pbar-opacity"
+        className="properties-bar-select"
+        title="Opacity"
+        aria-label="Opacity"
+        value={String(Math.round((styleRef.opacity ?? 1) * 100))}
+        onChange={(e) => onRestyle({ opacity: parseInt(e.target.value, 10) / 100 })}
+      >
+        {['25', '50', '75', '100'].map((v) => (
+          <option key={v} value={v}>
+            {v}%
+          </option>
+        ))}
+      </select>
+      {anyFillable && (
+        <>
+          <button
+            type="button"
+            data-testid="pbar-fill-none"
+            className={'properties-bar-action' + (styleRef.fillColor ? '' : ' active')}
+            title="No fill"
+            aria-label="No fill"
+            onClick={() => onRestyle({ fillColor: null })}
+          >
+            ∅
+          </button>
+          {ANNOTATION_PALETTE.map((c) => (
+            <button
+              key={`fill-${c}`}
+              type="button"
+              data-testid={`pbar-fill-${c.slice(1)}`}
+              className={'properties-bar-swatch pbar-fill-swatch' + (styleRef.fillColor === c ? ' active' : '')}
+              style={{ backgroundColor: c }}
+              title={`Fill with ${c}`}
+              aria-pressed={styleRef.fillColor === c}
+              onClick={() => onRestyle({ fillColor: c })}
+            />
+          ))}
+        </>
+      )}
+    </span>
+  ) : null;
   return (
     <div className="properties-bar" data-testid="properties-bar" role="toolbar" aria-label="Properties bar">
       {multi ? (
@@ -207,6 +292,7 @@ export function PropertiesBar({
               </button>
             </span>
           )}
+          {styleControls}
           {zOrder}
           <span className="properties-bar-swatches" role="group" aria-label="Recolor all">
             {ANNOTATION_PALETTE.map((c) => (
@@ -256,6 +342,7 @@ export function PropertiesBar({
               />
             ))}
           </span>
+          {styleControls}
           {zOrder}
           <button
             type="button"

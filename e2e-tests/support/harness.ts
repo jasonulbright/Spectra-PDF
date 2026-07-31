@@ -253,6 +253,10 @@ export interface PageAnnotationSnapshot {
   h: number;
   color: string;
   note?: string;
+  shapeType?: string;
+  strokeWidth?: number;
+  fillColor?: string;
+  opacity?: number;
 }
 
 /** Every pending annotation on one page, workspace order (= z-order). */

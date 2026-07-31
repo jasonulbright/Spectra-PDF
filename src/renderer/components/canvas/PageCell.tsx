@@ -69,13 +69,20 @@ import {
   translatedBy,
   resized,
   recomputedMeasureNote,
+  hasVertexHandles,
+  vertexDragged,
+  cloudBumps,
+  paddedPointsBbox,
   type AnnotationTransform,
   type ResizeHandle,
 } from '../../lib/annotation-manipulation';
+import type { ShapeType } from '../../state/types';
 
 // Measure overlays draw in amber — legible over both white paper and the
 // annotation palette's blues/yellows, and distinct from ink's default.
 const MEASURE_COLOR = '#f59e0b';
+// Drawing shapes default to review red (the king's shape default).
+const SHAPE_COLOR = '#e0393e';
 
 export interface AnnotationRect {
   x: number;
@@ -549,6 +556,8 @@ interface PageCellProps {
   onOpenPage: (docId: string, pageId: string) => void;
   onPageContextMenu: (docId: string, pageId: string, e: React.MouseEvent) => void;
   onPagePointerDown: (docId: string, pageId: string, e: React.PointerEvent<HTMLElement>) => void;
+  // Which figure the armed 'shape' mode draws (the secondary toolbar picker).
+  shapeType: ShapeType;
   onAddAnnotation: (docId: string, pageId: string, annotation: PageAnnotation) => void;
   onUpdateAnnotation: (docId: string, pageId: string, annotationId: string, note: string) => void;
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
@@ -763,6 +772,7 @@ function PageCellImpl({
   onOpenPage,
   onPageContextMenu,
   onPagePointerDown,
+  shapeType,
   onAddAnnotation,
   onUpdateAnnotation,
   onRecolorAnnotation,
@@ -1139,6 +1149,173 @@ function PageCellImpl({
     window.addEventListener('keydown', onKey, true);
   };
 
+  /** Drag one vertex of a points shape (or the callout leader) — single
+   * selection only, same preview/dispatch discipline as move/resize. */
+  const handleVertexDown = (
+    a: PageAnnotation,
+    vertexIndex: number,
+    e: React.PointerEvent<HTMLElement>,
+  ): void => {
+    if (tool !== 'select' || e.button !== 0 || manipActive.current) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const cell = cellElOf(e);
+    if (!cell) return;
+    const rect = cell.getBoundingClientRect();
+    let activated = false;
+    let last: ReturnType<typeof vertexDragged> | null = null;
+    const onMove = (ev: PointerEvent): void => {
+      if (!activated) {
+        activated = true;
+        manipActive.current = true;
+      }
+      const stored = toStoredPoints([
+        Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)),
+        Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height)),
+      ]);
+      last = vertexDragged(a, vertexIndex, stored[0], stored[1]);
+      setManipPreview(new Map([[a.id, last]]));
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('blur', onBlur);
+      cancelManip.current = null;
+      if (!activated) return;
+      manipActive.current = false;
+      setManipPreview(null);
+      swallowNextClick();
+      if (!commit || !last) return;
+      onTransformAnnotations(docId, [
+        {
+          pageId: page.id,
+          annotationId: a.id,
+          x: last.x,
+          y: last.y,
+          w: last.w,
+          h: last.h,
+          points: last.points,
+          ...(last.calloutBox ? { calloutBox: last.calloutBox } : {}),
+        },
+      ]);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        finish(false);
+      }
+    };
+    const onBlur = (): void => finish(false);
+    cancelManip.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('blur', onBlur);
+  };
+
+  // ── Shape + callout creation (rung 2) ────────────────────────────────
+  // Line/arrow: a drag. Polygon/polyline/cloud: a vertex-click sequence
+  // (double-click or click-the-last-vertex finishes — the measure tools'
+  // convention). Rect/ellipse and the callout box ride the generic band at
+  // the bottom of handlePointerDown. The dashed draft previews here.
+  const [shapeDraft, setShapeDraft] = useState<number[] | null>(null);
+  const [shapeCursor, setShapeCursor] = useState<{ x: number; y: number } | null>(null);
+  const shapeSeqActive = useRef(false);
+  const appendShapeVertexRef = useRef<((p: { x: number; y: number }, done: boolean) => void) | null>(null);
+
+  const commitShape = (type: ShapeType, viewPts: number[]): void => {
+    const stored = toStoredPoints(viewPts);
+    onAddAnnotation(docId, page.id, {
+      id: crypto.randomUUID(),
+      kind: 'shape',
+      shapeType: type,
+      // Flat-padded box (a horizontal line still needs a clickable body).
+      ...paddedPointsBbox(stored),
+      color: annotationColor ?? SHAPE_COLOR,
+      strokeWidth: 2,
+      points: stored,
+    });
+  };
+
+  const handleShapeLineDown = (e: React.PointerEvent<HTMLElement>): void => {
+    bandActive.current = true;
+    const el = e.currentTarget;
+    const start = normPoint(el, e.clientX, e.clientY);
+    let lastP = start;
+    setShapeDraft([start.x, start.y]);
+    setShapeCursor(start);
+    const onMove = (ev: PointerEvent): void => {
+      lastP = normPoint(el, ev.clientX, ev.clientY);
+      setShapeCursor(lastP);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      bandActive.current = false;
+      cancelBand.current = null;
+      setShapeDraft(null);
+      setShapeCursor(null);
+      if (commit && (Math.abs(lastP.x - start.x) > 0.005 || Math.abs(lastP.y - start.y) > 0.005)) {
+        commitShape(shapeType, [start.x, start.y, lastP.x, lastP.y]);
+      }
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    cancelBand.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  };
+
+  const handleShapeVertexDown = (e: React.PointerEvent<HTMLElement>): void => {
+    const el = e.currentTarget;
+    const p = normPoint(el, e.clientX, e.clientY);
+    if (!shapeSeqActive.current) {
+      // The SECOND press of a double-click that just FINISHED a sequence
+      // (via the click-the-last-vertex rule) must not seed a phantom new one.
+      if (e.detail >= 2) return;
+      shapeSeqActive.current = true;
+      let pts = [p.x, p.y];
+      setShapeDraft(pts);
+      setShapeCursor(p);
+      const onMove = (ev: PointerEvent): void => setShapeCursor(normPoint(el, ev.clientX, ev.clientY));
+      const cleanup = (): void => {
+        window.removeEventListener('pointermove', onMove);
+        shapeSeqActive.current = false;
+        cancelBand.current = null;
+        appendShapeVertexRef.current = null;
+        setShapeDraft(null);
+        setShapeCursor(null);
+      };
+      appendShapeVertexRef.current = (q, dblclick) => {
+        const nearLast =
+          pts.length >= 2 &&
+          Math.abs(q.x - pts[pts.length - 2]) < 0.008 &&
+          Math.abs(q.y - pts[pts.length - 1]) < 0.008;
+        if (dblclick || nearLast) {
+          const minVerts = shapeType === 'polyline' ? 2 : 3;
+          const finished = pts.length / 2 >= minVerts ? [...pts] : null;
+          const type = shapeType;
+          cleanup();
+          if (finished) commitShape(type, finished);
+          return;
+        }
+        pts = [...pts, q.x, q.y];
+        setShapeDraft(pts);
+      };
+      cancelBand.current = cleanup;
+      window.addEventListener('pointermove', onMove);
+      return;
+    }
+    appendShapeVertexRef.current?.(p, e.detail >= 2);
+  };
+
   const handleInkDown = (e: React.PointerEvent<HTMLElement>): void => {
     bandActive.current = true;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -1299,6 +1476,10 @@ function PageCellImpl({
     const el = e.currentTarget;
     const p = normPoint(el, e.clientX, e.clientY);
     if (!measureSeqActive.current) {
+      // Same phantom-sequence guard as shapes: a double-click whose first
+      // press finished the sequence (click-the-last-vertex) must not have
+      // its second press start a fresh one.
+      if (e.detail >= 2) return;
       measureSeqActive.current = true;
       let pts = [p.x, p.y];
       setMeasurePts(pts);
@@ -1382,6 +1563,17 @@ function PageCellImpl({
       handleMeasureVertexDown(e);
       return;
     }
+    if (tool === 'shape') {
+      if (shapeType === 'line' || shapeType === 'arrow') {
+        handleShapeLineDown(e);
+        return;
+      }
+      if (shapeType === 'polygon' || shapeType === 'polyline' || shapeType === 'cloud') {
+        handleShapeVertexDown(e);
+        return;
+      }
+      // rect/ellipse fall through to the generic band below.
+    }
     if (tool === 'stamp') {
       if (!stampPreset) return; // no preset picked yet — clicks are a no-op
       const rect = e.currentTarget.getBoundingClientRect();
@@ -1464,6 +1656,44 @@ function PageCellImpl({
         } else if (tool === 'addimage') {
           // Add-image (9.C2) — the box; App picks the file + embeds.
           onAddImageRect(docId, page.id, latest, page.rotation);
+        } else if (tool === 'shape') {
+          // rect/ellipse: the band IS the box.
+          const b = toStoredRect(latest);
+          onAddAnnotation(docId, page.id, {
+            id: crypto.randomUUID(),
+            kind: 'shape',
+            shapeType,
+            ...b,
+            color: annotationColor ?? SHAPE_COLOR,
+            strokeWidth: 2,
+          });
+        } else if (tool === 'callout') {
+          // The band is the TEXT BOX; the default leader lands to its left,
+          // pointing at nothing in particular yet — vertex handles move it.
+          // Built in the stored frame (box + leader must agree).
+          const cb = toStoredRect(latest);
+          const attach: [number, number] = [cb.x, cb.y + cb.h / 2];
+          const tip: [number, number] = [Math.max(0.01, cb.x - 0.08), Math.min(0.99, attach[1] + 0.06)];
+          const knee: [number, number] = [(tip[0] + attach[0]) / 2, tip[1]];
+          const points = [tip[0], tip[1], knee[0], knee[1], attach[0], attach[1]];
+          const xs = [cb.x, cb.x + cb.w, ...points.filter((_, i) => i % 2 === 0)];
+          const ys = [cb.y, cb.y + cb.h, ...points.filter((_, i) => i % 2 === 1)];
+          const minX = Math.min(...xs);
+          const minY = Math.min(...ys);
+          const annotation: PageAnnotation = {
+            id: crypto.randomUUID(),
+            kind: 'callout',
+            x: minX,
+            y: minY,
+            w: Math.max(...xs) - minX,
+            h: Math.max(...ys) - minY,
+            calloutBox: [cb.x, cb.y, cb.w, cb.h],
+            points,
+            color: annotationColor ?? SHAPE_COLOR,
+            strokeWidth: 1,
+          };
+          onAddAnnotation(docId, page.id, annotation);
+          setEditing(annotation.id); // type the text straight away, like freetext
         } else {
           const annotation: PageAnnotation = {
             id: crypto.randomUUID(),
@@ -1603,6 +1833,16 @@ function PageCellImpl({
                 // quads are corner pairs — rotating each (x,y) then min/max-ing
                 // per quad in the SVG below reprojects them into the view frame.
                 quads: a.quads ? rotateNormalizedPoints(a.quads, viewRotation) : a.quads,
+                // The callout's text sub-rect projects like the bbox.
+                calloutBox: a.calloutBox
+                  ? (() => {
+                      const r2 = rotateNormalizedRect(
+                        { x: a.calloutBox[0], y: a.calloutBox[1], w: a.calloutBox[2], h: a.calloutBox[3] },
+                        viewRotation,
+                      );
+                      return [r2.x, r2.y, r2.w, r2.h] as [number, number, number, number];
+                    })()
+                  : a.calloutBox,
               };
         // Text bodies (freetext/stamp + the inline editor) turn WITH the page
         // — a counter-sized wrapper rotated about its center, the PageView
@@ -1629,10 +1869,11 @@ function PageCellImpl({
             (a.kind === 'freetext' ? ' page-annot-text' : '') +
             (a.kind === 'ink' || a.kind === 'measure' ? ' page-annot-ink' : '') +
             (a.kind === 'textmarkup' ? ' page-annot-ink' : '') + // SVG body, no default border
+            (a.kind === 'shape' || a.kind === 'callout' ? ' page-annot-ink' : '') + // SVG bodies too
             (a.kind === 'stamp' ? ' page-annot-stamp' : '') +
             (selectedAnnotationIds.includes(a.id) ? ' page-annot-selected' : '')
           }
-          title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'note' ? a.note : undefined}
+          title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'note' || a.kind === 'shape' ? a.note : undefined}
           style={{
             left: `${da.x * 100}%`,
             top: `${da.y * 100}%`,
@@ -1642,7 +1883,7 @@ function PageCellImpl({
               ? {}
               : a.kind === 'highlight'
                 ? { backgroundColor: `${a.color}66`, borderColor: a.color }
-                : a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup'
+                : a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'shape' || a.kind === 'callout'
                   ? {}
                   : a.kind === 'note'
                     ? { backgroundColor: `${a.color}dd`, borderColor: a.color, borderRadius: 2 }
@@ -1677,7 +1918,7 @@ function PageCellImpl({
               : undefined
           }
           onDoubleClick={
-            a.kind === 'freetext'
+            a.kind === 'freetext' || a.kind === 'callout'
               ? (e) => {
                   e.stopPropagation();
                   setEditing(a.id);
@@ -1686,7 +1927,12 @@ function PageCellImpl({
           }
         >
           {(a.kind === 'ink' || a.kind === 'measure') && !pristineImport && (
-            <svg className="page-annot-ink-svg" viewBox="0 0 1 1" preserveAspectRatio="none">
+            <svg
+              className="page-annot-ink-svg"
+              viewBox="0 0 1 1"
+              preserveAspectRatio="none"
+              style={a.opacity !== undefined && a.opacity < 1 ? { opacity: a.opacity } : undefined}
+            >
               <polyline
                 points={(da.points ?? [])
                   .map((v, i) =>
@@ -1700,6 +1946,9 @@ function PageCellImpl({
                   .join(' ')}
                 fill="none"
                 stroke={a.color}
+                {...(a.strokeWidth !== undefined
+                  ? { strokeWidth: Math.max(0.75, a.strokeWidth * (pageHeight / measDispH)) }
+                  : {})}
                 vectorEffect="non-scaling-stroke"
               />
             </svg>
@@ -1711,6 +1960,153 @@ function PageCellImpl({
               markupType={a.markupType ?? 'highlight'}
               color={a.color}
             />
+          )}
+          {(a.kind === 'shape' || a.kind === 'callout') && !pristineImport && (() => {
+            // Shapes draw in the body's PIXEL space (not a normalized
+            // viewBox) so stroke widths and arrowhead angles are true — a
+            // non-uniform viewBox would shear them. Same geometry as the
+            // committed AP, cloud bumps included (shared cloudBumps).
+            const bw = Math.max(1, da.w * displayWidth);
+            const bh = Math.max(1, da.h * pageHeight);
+            const pxPerPt = pageHeight / measDispH;
+            const swPt = a.strokeWidth ?? (a.kind === 'callout' ? 1 : 2);
+            const sw = Math.max(0.75, swPt * pxPerPt);
+            const px = (nx: number): number => (da.w > 0 ? ((nx - da.x) / da.w) * bw : bw / 2);
+            const py = (ny: number): number => (da.h > 0 ? ((ny - da.y) / da.h) * bh : bh / 2);
+            const pts = da.points ?? [];
+            const fill = a.fillColor ?? 'none';
+            const endings =
+              a.lineEndings ?? (a.kind === 'shape' && a.shapeType === 'arrow' ? ['None', 'OpenArrow'] : null);
+            const head = (
+              at: [number, number],
+              from: [number, number],
+              style: string,
+              key: string,
+            ): React.JSX.Element | null => {
+              if (!style || style === 'None') return null;
+              const dxv = at[0] - from[0];
+              const dyv = at[1] - from[1];
+              const len = Math.hypot(dxv, dyv) || 1;
+              const hl = (4 * swPt + 6) * pxPerPt;
+              const ux = dxv / len;
+              const uy = dyv / len;
+              const bxp = at[0] - ux * hl;
+              const byp = at[1] - uy * hl;
+              const p1 = `${bxp - uy * hl * 0.45},${byp + ux * hl * 0.45}`;
+              const p2 = `${bxp + uy * hl * 0.45},${byp - ux * hl * 0.45}`;
+              if (style === 'ClosedArrow')
+                return (
+                  <polygon
+                    key={key}
+                    points={`${p1} ${at[0]},${at[1]} ${p2}`}
+                    fill={a.fillColor ?? a.color}
+                    stroke={a.color}
+                    strokeWidth={sw}
+                  />
+                );
+              return (
+                <polyline
+                  key={key}
+                  points={`${p1} ${at[0]},${at[1]} ${p2}`}
+                  fill="none"
+                  stroke={a.color}
+                  strokeWidth={sw}
+                />
+              );
+            };
+            const common = { stroke: a.color, strokeWidth: sw, fill } as const;
+            let body: React.JSX.Element | null = null;
+            const extras: (React.JSX.Element | null)[] = [];
+            if (a.kind === 'callout') {
+              const cb = da.calloutBox ?? [da.x, da.y, da.w, da.h];
+              const bx = px(cb[0]);
+              const by = py(cb[1]);
+              const bwid = da.w > 0 ? (cb[2] / da.w) * bw : bw;
+              const bhei = da.h > 0 ? (cb[3] / da.h) * bh : bh;
+              body = (
+                <>
+                  {pts.length >= 4 && (
+                    <polyline
+                      points={Array.from({ length: pts.length / 2 }, (_, i) => `${px(pts[i * 2])},${py(pts[i * 2 + 1])}`).join(' ')}
+                      fill="none"
+                      stroke={a.color}
+                      strokeWidth={sw}
+                    />
+                  )}
+                  <rect x={bx} y={by} width={bwid} height={bhei} fill="#fbfaf5" stroke={a.color} strokeWidth={Math.max(0.75, sw)} />
+                </>
+              );
+              if (pts.length >= 4)
+                extras.push(
+                  head([px(pts[0]), py(pts[1])], [px(pts[2]), py(pts[3])], a.lineEndings?.[0] ?? 'OpenArrow', 'tip'),
+                );
+            } else if (a.shapeType === 'rect') {
+              body = <rect x={sw / 2} y={sw / 2} width={Math.max(0, bw - sw)} height={Math.max(0, bh - sw)} {...common} />;
+            } else if (a.shapeType === 'ellipse') {
+              body = (
+                <ellipse cx={bw / 2} cy={bh / 2} rx={Math.max(0, (bw - sw) / 2)} ry={Math.max(0, (bh - sw) / 2)} {...common} />
+              );
+            } else if (a.shapeType === 'line' || a.shapeType === 'arrow') {
+              if (pts.length >= 4) {
+                const p0: [number, number] = [px(pts[0]), py(pts[1])];
+                const p1: [number, number] = [px(pts[2]), py(pts[3])];
+                body = <line x1={p0[0]} y1={p0[1]} x2={p1[0]} y2={p1[1]} stroke={a.color} strokeWidth={sw} />;
+                if (endings) {
+                  extras.push(head(p0, p1, endings[0], 'h0'));
+                  extras.push(head(p1, p0, endings[1], 'h1'));
+                }
+              }
+            } else if (a.shapeType === 'polyline') {
+              const str = Array.from({ length: pts.length / 2 }, (_, i) => `${px(pts[i * 2])},${py(pts[i * 2 + 1])}`).join(' ');
+              body = <polyline points={str} fill="none" stroke={a.color} strokeWidth={sw} />;
+              if (endings && pts.length >= 4) {
+                const n = pts.length;
+                extras.push(head([px(pts[0]), py(pts[1])], [px(pts[2]), py(pts[3])], endings[0], 'h0'));
+                extras.push(
+                  head([px(pts[n - 2]), py(pts[n - 1])], [px(pts[n - 4]), py(pts[n - 3])], endings[1], 'h1'),
+                );
+              }
+            } else if (a.shapeType === 'cloud') {
+              const verts = Array.from({ length: pts.length / 2 }, (_, i): [number, number] => [px(pts[i * 2]), py(pts[i * 2 + 1])]);
+              const r2 = (4 * (a.cloudIntensity ?? 2) + 2) * pxPerPt;
+              const bumps = cloudBumps(verts, r2);
+              if (bumps.length > 0) {
+                const d =
+                  `M ${bumps[0].s[0]} ${bumps[0].s[1]} ` +
+                  bumps.map((b) => `C ${b.c1[0]} ${b.c1[1]} ${b.c2[0]} ${b.c2[1]} ${b.e[0]} ${b.e[1]}`).join(' ');
+                body = <path d={d} {...common} />;
+              }
+            } else {
+              // polygon
+              const str = Array.from({ length: pts.length / 2 }, (_, i) => `${px(pts[i * 2])},${py(pts[i * 2 + 1])}`).join(' ');
+              body = <polygon points={str} {...common} />;
+            }
+            return (
+              <svg
+                className="page-annot-shape-svg"
+                viewBox={`0 0 ${bw} ${bh}`}
+                preserveAspectRatio="none"
+                style={{ opacity: a.opacity ?? 1 }}
+              >
+                {body}
+                {extras}
+              </svg>
+            );
+          })()}
+          {a.kind === 'callout' && editing !== a.id && !pristineImport && da.calloutBox && (
+            <span
+              className="page-annot-callout-text"
+              style={{
+                left: `${da.w > 0 ? ((da.calloutBox[0] - da.x) / da.w) * 100 : 0}%`,
+                top: `${da.h > 0 ? ((da.calloutBox[1] - da.y) / da.h) * 100 : 0}%`,
+                width: `${da.w > 0 ? (da.calloutBox[2] / da.w) * 100 : 100}%`,
+                height: `${da.h > 0 ? (da.calloutBox[3] / da.h) * 100 : 100}%`,
+                color: a.color,
+                fontSize: freetextFontPx,
+              }}
+            >
+              {a.note}
+            </span>
           )}
           <MaybeTurn style={turnStyle}>
             {a.kind === 'freetext' && editing !== a.id && !pristineImport && (
@@ -1731,11 +2127,24 @@ function PageCellImpl({
           </MaybeTurn>
           {editing === a.id ? (
             // The inline editor turns with the page too (same wrapper) — the
-            // text you type reads the way it will render.
+            // text you type reads the way it will render. A callout's editor
+            // covers its TEXT BOX, not the whole (leader-including) extent.
             <MaybeTurn style={turnStyle}>
               <textarea
                 className="page-annot-editor"
-                style={{ fontSize: freetextFontPx, color: a.color }}
+                style={{
+                  fontSize: freetextFontPx,
+                  color: a.color,
+                  ...(a.kind === 'callout' && da.calloutBox
+                    ? {
+                        position: 'absolute' as const,
+                        left: `${da.w > 0 ? ((da.calloutBox[0] - da.x) / da.w) * 100 : 0}%`,
+                        top: `${da.h > 0 ? ((da.calloutBox[1] - da.y) / da.h) * 100 : 0}%`,
+                        width: `${da.w > 0 ? (da.calloutBox[2] / da.w) * 100 : 100}%`,
+                        height: `${da.h > 0 ? (da.calloutBox[3] / da.h) * 100 : 100}%`,
+                      }
+                    : {}),
+                }}
                 autoFocus
                 defaultValue={a.note ?? ''}
                 onPointerDown={(e) => e.stopPropagation()}
@@ -1799,7 +2208,10 @@ function PageCellImpl({
           {tool === 'select' &&
             selectedAnnotationIds.length === 1 &&
             selectedAnnotationIds[0] === a.id &&
-            isResizable(a) && (
+            isResizable(a) &&
+            // A two-point line's box handles are its vertex handles' worse
+            // twin (a flat bbox has no height to grab) — vertices only.
+            !(a.kind === 'shape' && (a.shapeType === 'line' || a.shapeType === 'arrow')) && (
               <>
                 {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((h) => (
                   <div
@@ -1807,6 +2219,26 @@ function PageCellImpl({
                     className={`annot-handle annot-handle-${h}`}
                     data-testid={`annot-handle-${h}`}
                     onPointerDown={(e) => handleResizeDown(raw, h, e)}
+                  />
+                ))}
+              </>
+            )}
+          {tool === 'select' &&
+            selectedAnnotationIds.length === 1 &&
+            selectedAnnotationIds[0] === a.id &&
+            hasVertexHandles(a) &&
+            (da.points ?? []).length >= 4 && (
+              <>
+                {Array.from({ length: (da.points?.length ?? 0) / 2 }, (_, vi) => (
+                  <div
+                    key={`v${vi}`}
+                    className="annot-vertex"
+                    data-testid={`annot-vertex-${vi}`}
+                    style={{
+                      left: `${da.w > 0 ? ((da.points![vi * 2] - da.x) / da.w) * 100 : 50}%`,
+                      top: `${da.h > 0 ? ((da.points![vi * 2 + 1] - da.y) / da.h) * 100 : 50}%`,
+                    }}
+                    onPointerDown={(e) => handleVertexDown(raw, vi, e)}
                   />
                 ))}
               </>
@@ -2281,6 +2713,33 @@ function PageCellImpl({
             stroke={annotationColor ?? INK_COLOR}
             vectorEffect="non-scaling-stroke"
           />
+        </svg>
+      )}
+      {shapeDraft && shapeCursor && (
+        <svg className="page-annot-ink-svg page-annot-ink-live" viewBox="0 0 1 1" preserveAspectRatio="none">
+          <polyline
+            points={[...shapeDraft, shapeCursor.x, shapeCursor.y]
+              .reduce<string[]>((acc, v, i) => {
+                if (i % 2 === 0) acc.push(`${v}`);
+                else acc[acc.length - 1] += `,${v}`;
+                return acc;
+              }, [])
+              .join(' ')}
+            fill="none"
+            stroke={annotationColor ?? SHAPE_COLOR}
+            vectorEffect="non-scaling-stroke"
+          />
+          {(shapeType === 'polygon' || shapeType === 'cloud') && shapeDraft.length >= 4 && (
+            <line
+              x1={shapeCursor.x}
+              y1={shapeCursor.y}
+              x2={shapeDraft[0]}
+              y2={shapeDraft[1]}
+              stroke={annotationColor ?? SHAPE_COLOR}
+              strokeDasharray="0.01 0.008"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
         </svg>
       )}
       {measurePts && measureCursor && (

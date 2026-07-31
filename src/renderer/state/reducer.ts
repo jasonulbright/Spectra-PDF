@@ -42,7 +42,20 @@ export function rotateAnnotationRect(a: PageAnnotation, delta: number): PageAnno
       quads.push(Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by));
     }
   }
-  const extra = { ...(points ? { points } : {}), ...(quads ? { quads } : {}) };
+  // The callout's text sub-rect re-projects exactly like the bbox: rotate
+  // its two corners, re-derive min/max (the quad treatment, rect-shaped).
+  let calloutBox: [number, number, number, number] | undefined;
+  if (a.calloutBox) {
+    const [cx, cy, cw, ch] = a.calloutBox;
+    const [ax, ay] = rotatePoint(cx, cy, d);
+    const [bx, by] = rotatePoint(cx + cw, cy + ch, d);
+    calloutBox = [Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)];
+  }
+  const extra = {
+    ...(points ? { points } : {}),
+    ...(quads ? { quads } : {}),
+    ...(calloutBox ? { calloutBox } : {}),
+  };
   if (d === 90) return { ...a, x: 1 - (a.y + a.h), y: a.x, w: a.h, h: a.w, ...extra };
   if (d === 180) return { ...a, x: 1 - (a.x + a.w), y: 1 - (a.y + a.h), ...extra };
   return { ...a, x: a.y, y: 1 - (a.x + a.w), w: a.h, h: a.w, ...extra }; // 270
@@ -1095,6 +1108,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
               h: a.kind === 'note' ? a.h : e.h,
               ...(e.points && a.points ? { points: e.points } : {}),
               ...(e.note !== undefined && a.kind === 'measure' ? { note: e.note } : {}),
+              ...(e.calloutBox && a.kind === 'callout' ? { calloutBox: e.calloutBox } : {}),
               // A moved IMPORT must render as the overlay's body from now on
               // (see the field's comment in types.ts).
               ...(a.importedOriginal ? { geometryDiverged: true } : {}),
@@ -1105,7 +1119,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
               next.w === a.w &&
               next.h === a.h &&
               next.points === a.points &&
-              next.note === a.note
+              next.note === a.note &&
+              next.calloutBox === a.calloutBox
             )
               return a;
             pageChanged = true;
@@ -1164,6 +1179,54 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...d,
         pages: d.pages.map((p) => (p.id === action.pageId ? { ...p, annotations } : p)),
       }));
+      return applyPageEdit(state, documents, [doc.path]);
+    }
+    case 'RESTYLE_ANNOTATIONS': {
+      // Shared style edit (rung 2), one undo step. Property applicability is
+      // enforced HERE (the kind-rules seam): shape/callout take everything;
+      // ink takes strokeWidth/opacity (no interior to fill); other kinds keep
+      // their fixed looks. `fillColor: null` clears the fill.
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      const page = doc?.pages.find((p) => p.id === action.pageId);
+      if (!doc || !page?.annotations?.length) return state;
+      const chosen = new Set(action.annotationIds);
+      const { strokeWidth, fillColor, opacity } = action.style;
+      let changed = false;
+      const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
+        ...d,
+        pages: d.pages.map((p) =>
+          p.id === action.pageId
+            ? {
+                ...p,
+                annotations: p.annotations!.map((a) => {
+                  if (!chosen.has(a.id)) return a;
+                  const styleable = a.kind === 'shape' || a.kind === 'callout' || a.kind === 'ink';
+                  if (!styleable) return a;
+                  const fillable = a.kind !== 'ink';
+                  const next = {
+                    ...a,
+                    ...(strokeWidth !== undefined ? { strokeWidth } : {}),
+                    ...(opacity !== undefined ? { opacity } : {}),
+                    ...(fillable && fillColor !== undefined
+                      ? fillColor === null
+                        ? { fillColor: undefined }
+                        : { fillColor }
+                      : {}),
+                  };
+                  if (
+                    next.strokeWidth === a.strokeWidth &&
+                    next.opacity === a.opacity &&
+                    next.fillColor === a.fillColor
+                  )
+                    return a;
+                  changed = true;
+                  return next;
+                }),
+              }
+            : p,
+        ),
+      }));
+      if (!changed) return state;
       return applyPageEdit(state, documents, [doc.path]);
     }
     case 'RECOLOR_ANNOTATIONS': {

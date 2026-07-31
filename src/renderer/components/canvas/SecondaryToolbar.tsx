@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { invokeCommand } from '../../commands/context';
 import { COMMANDS, SECONDARY_TOOLBAR_ACTIONS, TOOL_TITLES } from '../../commands/registry';
 import { toolById } from '../../commands/tools';
-import type { CanvasTool } from '../../state/types';
+import type { CanvasTool, ShapeType } from '../../state/types';
 import { ANNOTATION_PALETTE, STAMP_PRESETS } from './PageCell';
 import type { StampPreset } from './PageCell';
 import { MEASURE_UNITS, type MeasureScale, type MeasureUnit } from '../../lib/measure';
@@ -69,6 +69,10 @@ export interface SecondaryToolbarProps {
   /** Stamp text preset; null = the default stamp. */
   stampPreset: StampPreset | null;
   onSetStampPreset: (preset: StampPreset | null) => void;
+  /** Shape mode (rung 2): which figure the gesture draws — a mode option in
+   * the stamp-preset sense. */
+  shapeType: ShapeType;
+  onSetShapeType: (type: ShapeType) => void;
   /** Measure (parity map § 2): the scale ratio the readouts apply, whether a
    * finished measurement lands as an ink markup, and the latest value —
    * mode options in the stamp-preset sense (props, not commands). */
@@ -117,6 +121,8 @@ export function SecondaryToolbar({
   onSetToolColor,
   stampPreset,
   onSetStampPreset,
+  shapeType,
+  onSetShapeType,
   measureScale,
   onSetMeasureScale,
   measureLeaveMarkup,
@@ -242,6 +248,32 @@ export function SecondaryToolbar({
 
       {/* Mode OPTIONS — they configure the armed mode, so they belong to the
           tool and move here from the floating cluster. */}
+      {owner.id === 'comment' && tool === 'shape' && (
+        <div className="secondary-toolbar-opts" role="group" aria-label="Shape">
+          {(
+            [
+              ['rect', 'Rectangle'],
+              ['ellipse', 'Ellipse'],
+              ['line', 'Line'],
+              ['arrow', 'Arrow'],
+              ['polygon', 'Polygon'],
+              ['polyline', 'Polyline'],
+              ['cloud', 'Cloud'],
+            ] as [ShapeType, string][]
+          ).map(([t, label]) => (
+            <button
+              key={t}
+              type="button"
+              data-testid={`shape-type-${t}`}
+              aria-pressed={shapeType === t}
+              className={'secondary-tool' + (shapeType === t ? ' active' : '')}
+              onClick={() => onSetShapeType(t)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {owner.id === 'measure' && (
         <div className="secondary-toolbar-opts" role="group" aria-label="Measure options">
           <span className="secondary-toolbar-hint">Scale</span>
