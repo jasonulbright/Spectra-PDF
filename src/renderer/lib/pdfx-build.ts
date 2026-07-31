@@ -237,13 +237,13 @@ function addAnnotations(
   const rotation = ((copied.getRotation().angle % 360) + 360) % 360;
   for (const a of annotations) {
     const [rx0, ry0, rx1, ry1] = displayRectToPdf(a, { x, y, width, height }, rotation);
-    // Ink strokes are legitimately zero-width/height (a straight horizontal
+    // Ink strokes (and measure lines) are legitimately zero-width/height (a straight horizontal
     // or vertical line) — degenerate only for the box-shaped kinds.
-    if (a.kind !== 'ink' && (rx1 - rx0 <= 0 || ry1 - ry0 <= 0)) continue;
+    if (a.kind !== 'ink' && a.kind !== 'measure' && (rx1 - rx0 <= 0 || ry1 - ry0 <= 0)) continue;
     // Pad ink's rect/BBox past the stroke's half-width so a flat line's edge
     // isn't sitting exactly on the BBox boundary (a Form XObject clips to
     // BBox, and that's a knife-edge float-rounding risk at pad == half-width).
-    const pad = a.kind === 'ink' ? 2 : 0;
+    const pad = a.kind === 'ink' || a.kind === 'measure' ? 2 : 0;
     const x0 = rx0 - pad;
     const y0 = ry0 - pad;
     const x1 = rx1 + pad;
@@ -329,6 +329,75 @@ function addAnnotations(
         BS: { W: strokeW },
         AP: { N: ap },
       });
+      if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
+    } else if (a.kind === 'measure') {
+      // A REAL dimension annotation (the king's class): /Line //PolyLine
+      // //Polygon with /IT + /Measure, so other tools can RE-MEASURE it —
+      // the value in /Contents is a convenience, the geometry + /Measure /C
+      // factors are the contract. The AP mirrors ink's stroke look.
+      const strokeW = 2;
+      const flatPdf: number[] = [];
+      for (let i = 0; i < (a.points?.length ?? 0); i += 2) {
+        const [px, py] = displayPointToPdf(a.points![i], a.points![i + 1], { x, y, width, height }, rotation);
+        flatPdf.push(px, py);
+      }
+      let content = `${r} ${g} ${b} RG ${strokeW} w 1 J 1 j `;
+      for (let i = 0; i < flatPdf.length; i += 2) {
+        const px = flatPdf[i] - x0;
+        const py = flatPdf[i + 1] - y0;
+        content += i === 0 ? `${px} ${py} m ` : `${px} ${py} l `;
+      }
+      content += 'S';
+      const ap = context.register(
+        context.stream(content, {
+          Type: 'XObject',
+          Subtype: 'Form',
+          FormType: 1,
+          BBox: [0, 0, w, h],
+        }),
+      );
+      const subtype =
+        a.measureKind === 'distance' ? 'Line' : a.measureKind === 'area' ? 'Polygon' : 'PolyLine';
+      const it =
+        a.measureKind === 'distance'
+          ? 'LineDimension'
+          : a.measureKind === 'area'
+            ? 'PolygonDimension'
+            : 'PolyLineDimension';
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: subtype,
+        Rect: [x0, y0, x1, y1],
+        C: [r, g, b],
+        F: 4, // print
+        IT: it,
+        BS: { W: strokeW },
+        AP: { N: ap },
+      });
+      if (subtype === 'Line') {
+        annot.set(PDFName.of('L'), context.obj(flatPdf.slice(0, 4)));
+      } else {
+        // The area tool stores a CLOSED ring (last point repeats the first)
+        // so the on-page stroke closes; /Polygon closes itself — emit the
+        // vertices without the duplicate.
+        const vertices =
+          subtype === 'Polygon' && flatPdf.length >= 4 ? flatPdf.slice(0, -2) : flatPdf;
+        annot.set(PDFName.of('Vertices'), context.obj(vertices));
+      }
+      if (a.measureRatio && a.measureUnitsPerPt && a.measureUnit) {
+        const fmt = (c: number) =>
+          context.obj({ Type: 'NumberFormat', U: PDFHexString.fromText(a.measureUnit!), C: c, D: 100, F: 'D' });
+        annot.set(
+          PDFName.of('Measure'),
+          context.obj({
+            Type: 'Measure',
+            R: PDFHexString.fromText(a.measureRatio),
+            X: [fmt(a.measureUnitsPerPt)],
+            D: [fmt(a.measureUnitsPerPt)],
+            A: [fmt(a.measureUnitsPerPt * a.measureUnitsPerPt)],
+          }),
+        );
+      }
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     } else if (a.kind === 'stamp' && a.imageData && stampImages.get(a.imageData)) {
       // A custom IMAGE stamp: the appearance draws the pre-embedded raster —

@@ -54,6 +54,8 @@ import {
   DEFAULT_MEASURE_SCALE,
   formatArea,
   formatDistance,
+  measureRatioLabel,
+  measureUnitsPerPoint,
   polylineLengthPts,
   ringAreaPts2,
   type MeasureScale,
@@ -107,6 +109,7 @@ const FREETEXT_FONT_PT = 12;
 function defaultColorFor(kind: PageAnnotation['kind']): string {
   if (kind === 'freetext') return FREETEXT_COLOR;
   if (kind === 'ink') return INK_COLOR;
+  if (kind === 'measure') return MEASURE_COLOR;
   return HIGHLIGHT_COLOR;
 }
 
@@ -886,9 +889,12 @@ function PageCellImpl({
     const value = measureValueFor(pts);
     onMeasureResult?.(value);
     if (!measureLeaveMarkup) return;
-    // Land as an ordinary ink annotation (visible in every viewer, undoable
-    // through the existing lifecycle) whose note carries the value; an area
-    // ring closes so the shape reads closed on paper too.
+    // Land as a REAL dimension annotation (kind 'measure' → /Line //PolyLine
+    // //Polygon + /IT + /Measure at commit, re-measurable in other tools);
+    // undoable through the existing lifecycle, the value in the note. An
+    // area ring closes so the on-page stroke reads closed too. The scale is
+    // CAPTURED NOW — changing the toolbar ratio later must never rewrite a
+    // finished measurement.
     const shape = tool === 'measurearea' ? [...pts, pts[0], pts[1]] : pts;
     const stored = toStoredPoints(shape);
     const xs = stored.filter((_, i) => i % 2 === 0);
@@ -897,7 +903,12 @@ function PageCellImpl({
     const minY = Math.min(...ys);
     onAddAnnotation(docId, page.id, {
       id: crypto.randomUUID(),
-      kind: 'ink',
+      kind: 'measure',
+      measureKind:
+        tool === 'measurearea' ? 'area' : tool === 'measureperim' ? 'perimeter' : 'distance',
+      measureRatio: measureRatioLabel(measScale),
+      measureUnitsPerPt: measureUnitsPerPoint(measScale),
+      measureUnit: measScale.toUnit,
       x: minX,
       y: minY,
       w: Math.max(...xs) - minX,
@@ -1270,12 +1281,12 @@ function PageCellImpl({
           className={
             'page-annot' +
             (a.kind === 'freetext' ? ' page-annot-text' : '') +
-            (a.kind === 'ink' ? ' page-annot-ink' : '') +
+            (a.kind === 'ink' || a.kind === 'measure' ? ' page-annot-ink' : '') +
             (a.kind === 'textmarkup' ? ' page-annot-ink' : '') + // SVG body, no default border
             (a.kind === 'stamp' ? ' page-annot-stamp' : '') +
             (a.id === selectedAnnotationId ? ' page-annot-selected' : '')
           }
-          title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'textmarkup' || a.kind === 'note' ? a.note : undefined}
+          title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'note' ? a.note : undefined}
           style={{
             left: `${da.x * 100}%`,
             top: `${da.y * 100}%`,
@@ -1285,7 +1296,7 @@ function PageCellImpl({
               ? {}
               : a.kind === 'highlight'
                 ? { backgroundColor: `${a.color}66`, borderColor: a.color }
-                : a.kind === 'ink' || a.kind === 'textmarkup'
+                : a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup'
                   ? {}
                   : a.kind === 'note'
                     ? { backgroundColor: `${a.color}dd`, borderColor: a.color, borderRadius: 2 }
@@ -1322,7 +1333,7 @@ function PageCellImpl({
               : undefined
           }
         >
-          {a.kind === 'ink' && !pristineImport && (
+          {(a.kind === 'ink' || a.kind === 'measure') && !pristineImport && (
             <svg className="page-annot-ink-svg" viewBox="0 0 1 1" preserveAspectRatio="none">
               <polyline
                 points={(da.points ?? [])

@@ -191,6 +191,32 @@ export function PortfolioPanel(): React.ReactElement {
     [activeFile, call],
   );
 
+  // Non-PDF members open with the OS DEFAULT app (the king's behavior):
+  // extract to the same managed dir the in-app open uses, then a Rust
+  // command scoped to THAT dir shell-opens it — never an arbitrary path.
+  const handleOpenMemberExternal = useCallback(
+    async (name: string) => {
+      if (!activeFile) return;
+      setBusy(true);
+      setStatus('Opening…');
+      try {
+        const dir = await app.portfolioMemberDir(activeFile.path);
+        const r = await call('extract_member_to_dir', {
+          file: activeFile.workingPath,
+          name,
+          dest_dir: dir,
+        });
+        await app.openPortfolioMemberFile((r as unknown as { output: string }).output);
+        setStatus(`Opened ${name} in its own app`);
+      } catch (e: unknown) {
+        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeFile, call],
+  );
+
   const saveMemberTo = useCallback(
     async (name: string, output: string) => {
       if (!activeFile) return;
@@ -396,10 +422,20 @@ export function PortfolioPanel(): React.ReactElement {
                       {m.description ? ` · ${m.description}` : ''}
                     </div>
                   </div>
-                  {isPdfMember(m) && (
+                  {isPdfMember(m) ? (
                     <button
                       data-testid={`portfolio-open-${m.name}`}
                       onClick={() => handleOpenMember(m.name)}
+                      disabled={busy}
+                      className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                    >
+                      Open
+                    </button>
+                  ) : (
+                    <button
+                      data-testid={`portfolio-open-os-${m.name}`}
+                      title="Open with the app your PC uses for this file type"
+                      onClick={() => handleOpenMemberExternal(m.name)}
                       disabled={busy}
                       className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                     >

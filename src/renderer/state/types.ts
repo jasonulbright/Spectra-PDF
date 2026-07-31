@@ -69,7 +69,10 @@ export interface PageAnnotation {
   id: string;
   // 'note' is a native /Text sticky note — a comment icon at a point, with its
   // text in `note`. Rect-based like the box kinds (no quads/points).
-  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note';
+  // 'measure' is a finished measurement (points-based like ink): commits as a
+  // REAL /Line //PolyLine //Polygon carrying /IT + /Measure, so other tools
+  // can re-measure it (the king's dimension-annotation class).
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note' | 'measure';
   x: number;
   y: number;
   w: number;
@@ -96,6 +99,15 @@ export interface PageAnnotation {
   // embedded image instead of the bordered label; `note` still carries the
   // stamp's display name for the comment sidebar and /Contents.
   imageData?: string;
+  // measure only: which dimension class (→ /Line //PolyLine //Polygon +
+  // matching /IT), the ratio string (→ /Measure /R) and the reported-units-
+  // per-PDF-point factor (→ the NumberFormat /C other tools re-measure with;
+  // captured at measurement time so a later scale change never rewrites a
+  // finished measurement).
+  measureKind?: 'distance' | 'perimeter' | 'area';
+  measureRatio?: string;
+  measureUnitsPerPt?: number;
+  measureUnit?: string;
   // Present only for annotations imported from a pre-existing PDF object.
   // Never touched after import; edits to x/y/w/h/color/note/points do not
   // update it.

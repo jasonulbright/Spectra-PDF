@@ -30,17 +30,22 @@ export interface PagePartition {
 // orientation); the builder maps it into PDF user space. Open PDF Studio extension —
 // absent keeps PDFx-identical output.
 export interface ExportAnnotation {
-  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note';
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note' | 'measure';
   x: number;
   y: number;
   w: number;
   h: number;
   color: string; // #rrggbb
   note?: string;
-  points?: number[]; // ink only: flat [x0,y0,x1,y1,...] in the same space as x/y/w/h
+  points?: number[]; // ink/measure: flat [x0,y0,x1,y1,...] in the same space as x/y/w/h
   imageData?: string; // stamp only: custom image stamp's data URL (the AP draws it)
   markupType?: 'highlight' | 'underline' | 'strikeout' | 'squiggly'; // textmarkup only
   quads?: number[]; // textmarkup only: flat [x0,y0,x1,y1,...] per quad, in x/y/w/h space
+  // measure only — the dimension class + the /Measure dict inputs.
+  measureKind?: 'distance' | 'perimeter' | 'area';
+  measureRatio?: string;
+  measureUnitsPerPt?: number;
+  measureUnit?: string;
   // Present for imported annotations only — see PageAnnotation.importedOriginal
   // and the "importing existing annotations safely" design note. The builder
   // uses this to positively match and strip the ORIGINAL object from the

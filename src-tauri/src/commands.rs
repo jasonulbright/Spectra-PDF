@@ -67,6 +67,40 @@ pub async fn portfolio_member_dir(
     Ok(dunce::simplified(&dir).to_string_lossy().into_owned())
 }
 
+/// Where an extracted member may live for `open_portfolio_member_file` —
+/// pure so the scope gate is testable without an AppHandle.
+pub(crate) fn is_managed_member_path(base: &std::path::Path, canonical: &std::path::Path) -> bool {
+    canonical.starts_with(base) && canonical != base
+}
+
+/// Shell-open an EXTRACTED portfolio member with the OS default handler.
+/// The 2026-07-30 shell-scope deferral, resolved by the owner's queue ruling:
+/// the scope is the MANAGED portfolio-members dir ONLY — the path is
+/// re-canonicalized and must sit inside it, so this command can never open
+/// (or probe) an arbitrary path. Extraction happens first through the
+/// engine; this only ever launches what that flow just wrote.
+#[tauri::command]
+pub async fn open_portfolio_member_file(app: AppHandle, path: String) -> Result<(), String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("portfolio-members");
+    let base = dunce::simplified(&base).to_path_buf();
+    let canonical = std::path::PathBuf::from(canonical_path(&path));
+    if !is_managed_member_path(&base, &canonical) {
+        return Err("Not a managed portfolio member file.".to_string());
+    }
+    if !canonical.is_file() {
+        return Err(format!("Member file not found: {}", canonical.display()));
+    }
+    use tauri_plugin_shell::ShellExt;
+    #[allow(deprecated)]
+    app.shell()
+        .open(canonical.to_string_lossy().to_string(), None)
+        .map_err(|e| e.to_string())
+}
+
 // ── File dialogs ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -1281,4 +1315,26 @@ pub async fn set_startup_enabled(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_managed_member_path;
+    use std::path::Path;
+
+    #[test]
+    fn member_open_scope_is_the_managed_dir_only() {
+        let base = Path::new(r"C:\Users\u\AppData\Roaming\app\portfolio-members");
+        assert!(is_managed_member_path(
+            base,
+            Path::new(r"C:\Users\u\AppData\Roaming\app\portfolio-members\doc-abc\notes.txt")
+        ));
+        // The base itself, siblings, and traversal escapes are all refused.
+        assert!(!is_managed_member_path(base, base));
+        assert!(!is_managed_member_path(
+            base,
+            Path::new(r"C:\Users\u\AppData\Roaming\app\other\notes.txt")
+        ));
+        assert!(!is_managed_member_path(base, Path::new(r"C:\Windows\System32\cmd.exe")));
+    }
 }

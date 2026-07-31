@@ -81,6 +81,17 @@ function trim(v: number): string {
   return s.replace(/\.?0+$/, '') || '0';
 }
 
+/** The /Measure NumberFormat conversion factor: reported units per PDF
+ * POINT along an axis (the C entry other tools re-measure with). */
+export function measureUnitsPerPoint(scale: MeasureScale): number {
+  return reportedPerPt(scale);
+}
+
+/** The /Measure /R ratio string, in the king's own phrasing ("1 in = 2 ft"). */
+export function measureRatioLabel(scale: MeasureScale): string {
+  return `${trim(scale.from)} ${scale.fromUnit} = ${trim(scale.to)} ${scale.toUnit}`;
+}
+
 /** "3.42 ft" — a polyline length in the scale's reported unit. */
 export function formatDistance(lengthPts: number, scale: MeasureScale): string {
   return `${trim(lengthPts * reportedPerPt(scale))} ${scale.toUnit}`;

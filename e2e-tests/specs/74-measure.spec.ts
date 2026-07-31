@@ -1,10 +1,15 @@
 import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFString } from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
   getState,
   invokeAppCommand,
+  commitPendingEdits,
+  saveActiveAs,
 } from '../support/harness.js';
 
 // § parity-map 2 — the Measure tool: distance drag, area click-ring, the
@@ -102,7 +107,9 @@ describe('measure tool (parity map § 2)', () => {
 
     const a = await firstAnnotation();
     expect(a).not.toBeNull();
-    expect(a!.kind).toBe('ink');
+    // A finished measurement is a REAL dimension annotation now (the
+    // resolved /Measure deferral), not a plain ink stroke.
+    expect(a!.kind).toBe('measure');
     expect(a!.note).toBe(text);
   });
 
@@ -156,5 +163,37 @@ describe('measure tool (parity map § 2)', () => {
     );
     const text = await $('[data-testid="measure-result"]').getText();
     expect(text).toMatch(/^\d+(\.\d+)? sq ft · perimeter \d+(\.\d+)? ft$/);
+  });
+
+  it('committed measurements are REAL /Line and /Polygon dimension annotations with /Measure', async () => {
+    // Bake the measurements left by the earlier legs, save, and read the
+    // file back with an independent parser: the geometry + /IT + /Measure
+    // factors are what let other tools RE-MEASURE our output.
+    await commitPendingEdits();
+    const dest = resolve(mkdtempSync(resolve(tmpdir(), 'spectra-e2e-measure-')), 'measured.pdf');
+    await saveActiveAs(dest);
+
+    const doc = await PDFDocument.load(new Uint8Array(readFileSync(dest)));
+    const found: Record<string, PDFDict> = {};
+    for (const page of doc.getPages()) {
+      const annots = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
+      if (!annots) continue;
+      for (let i = 0; i < annots.size(); i++) {
+        const a = annots.lookupMaybe(i, PDFDict);
+        if (!a) continue;
+        const subtype = String(a.lookup(PDFName.of('Subtype'))).slice(1);
+        if (['Line', 'Polygon', 'PolyLine'].includes(subtype)) found[subtype] = a;
+      }
+    }
+    // The distance legs left /Line annotations; the area leg a /Polygon.
+    expect(found.Line).toBeDefined();
+    expect(found.Polygon).toBeDefined();
+    expect(String(found.Line.lookup(PDFName.of('IT')))).toBe('/LineDimension');
+    const measure = found.Polygon.lookupMaybe(PDFName.of('Measure'), PDFDict);
+    expect(measure).toBeDefined();
+    const r = measure!.lookup(PDFName.of('R'));
+    const ratio =
+      r instanceof PDFString || r instanceof PDFHexString ? r.decodeText() : String(r);
+    expect(ratio).toBe('1 in = 2 ft'); // the scale active when the ring was drawn
   });
 });

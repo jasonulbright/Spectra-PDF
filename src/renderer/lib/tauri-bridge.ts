@@ -340,6 +340,11 @@ export const app = {
    *  "Open member" (per-portfolio, created on demand; Rust owns the path). */
   portfolioMemberDir: (portfolioPath: string) =>
     invoke<string>('portfolio_member_dir', { portfolioPath }),
+  /** Shell-open an EXTRACTED member with the OS default handler. Scoped
+   * Rust-side to the managed portfolio-members dir — never arbitrary paths
+   * (the 2026-07-30 deferral's recorded unblock, owner-ruled in). */
+  openPortfolioMemberFile: (path: string) =>
+    invoke<void>('open_portfolio_member_file', { path }),
   getBundledGsInfo: () => invoke<GsInfo>('get_bundled_gs_info'),
   detectExternalGs: () => invoke<GsInfo | null>('detect_external_gs'),
   getVersion: () => invoke<string>('get_app_version'),

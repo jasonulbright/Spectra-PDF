@@ -116,6 +116,7 @@ pub fn run() {
             commands::list_printers,
             commands::canonicalize_paths,
             commands::portfolio_member_dir,
+            commands::open_portfolio_member_file,
             commands::get_bundled_gs_info,
             commands::detect_external_gs,
             commands::get_app_version,

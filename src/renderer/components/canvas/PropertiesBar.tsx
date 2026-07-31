@@ -35,6 +35,7 @@ const KIND_LABELS: Record<PageAnnotation['kind'], string> = {
   stamp: 'Stamp',
   textmarkup: 'Text markup',
   note: 'Sticky note',
+  measure: 'Measurement',
 };
 
 const MARKUP_LABELS: Record<string, string> = {
