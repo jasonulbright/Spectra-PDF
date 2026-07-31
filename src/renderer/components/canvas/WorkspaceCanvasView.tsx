@@ -55,6 +55,19 @@ import type { PageAnnotation, PdfBuffer } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { SecondaryToolbar } from './SecondaryToolbar';
 import { DEFAULT_MEASURE_SCALE, type MeasureScale } from '../../lib/measure';
+import {
+  alignEdits,
+  distributeEdits,
+  sizeMatchEdits,
+  nudgeDelta,
+  translated,
+  translatedBy,
+  isTransformable,
+  type AnnotationTransform,
+  type AlignMode,
+  type DistributeMode,
+  type SizeMatchMode,
+} from '../../lib/annotation-manipulation';
 import { PropertiesBar } from './PropertiesBar';
 import { CanvasStatusBar } from './CanvasStatusBar';
 
@@ -203,6 +216,8 @@ export type CanvasDropResolver = (clientX: number, clientY: number) => CanvasDro
 const HAND_SUPPRESSES_PICKUP = (): void => {};
 const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
+const NO_ANNOTATIONS: readonly PageAnnotation[] = [];
+const NO_ANNOTATION_IDS: readonly string[] = [];
 const NO_EDIT_IMAGES: ReadonlyMap<string, EditImagePlacement[]> = new Map();
 const NO_EDIT_VECTORS: ReadonlyMap<string, EditVectorObject[]> = new Map();
 const NO_EDIT_GEOM: ReadonlyMap<string, PageGeometry> = new Map();
@@ -445,14 +460,18 @@ export function WorkspaceCanvasView({
   const [measureScale, setMeasureScale] = useState<MeasureScale>(DEFAULT_MEASURE_SCALE);
   const [measureLeaveMarkup, setMeasureLeaveMarkup] = useState(true);
   const [measureResult, setMeasureResult] = useState<string | null>(null);
-  // Click-selected annotation (Select tool) — the properties bar's subject.
-  // Transient view state like redaction marks: resolved against the live
-  // workspace every render, cleared the moment it stops resolving (commit
-  // bakes annotations and empties page.annotations, so no staleness class).
+  // Click-selected annotations (Select tool) — the properties bar's subject
+  // and the manipulation group (rung 1). SAME-PAGE by design: align/
+  // distribute/z-order are page-geometry operations, and a cross-page
+  // "formation move" has no meaning — a gesture on another page starts a new
+  // selection there. Transient view state like redaction marks: resolved
+  // against the live workspace every render, pruned the moment members stop
+  // resolving (commit bakes annotations and empties page.annotations, so no
+  // staleness class).
   const [selectedAnnot, setSelectedAnnot] = useState<{
     docId: string;
     pageId: string;
-    annotationId: string;
+    ids: string[];
   } | null>(null);
   // Pending redaction marks — transient view state, deliberately NOT the
   // page-edit tier (see lib/redaction.ts for why). They survive tool
@@ -1117,31 +1136,67 @@ export function WorkspaceCanvasView({
   );
 
   const onSelectAnnotation = useCallback(
-    (docId: string, pageId: string, annotationId: string | null) =>
-      setSelectedAnnot(annotationId === null ? null : { docId, pageId, annotationId }),
+    (docId: string, pageId: string, annotationId: string | null, additive: boolean) =>
+      setSelectedAnnot((prev) => {
+        if (annotationId === null) return additive ? prev : null;
+        // A non-additive gesture, or one on another page/doc, starts fresh
+        // (same-page selection by design — see the state's comment).
+        if (!additive || !prev || prev.docId !== docId || prev.pageId !== pageId)
+          return { docId, pageId, ids: [annotationId] };
+        // Additive on the same page toggles membership; the last member
+        // toggling off clears.
+        if (prev.ids.includes(annotationId)) {
+          const ids = prev.ids.filter((i) => i !== annotationId);
+          return ids.length === 0 ? null : { ...prev, ids };
+        }
+        return { ...prev, ids: [...prev.ids, annotationId] };
+      }),
     [],
   );
 
-  // The selection resolved against the LIVE workspace — the annotation's data
-  // always comes from here, never from a captured copy, so recolors show
-  // instantly and a vanished target (commit, undo, page delete, doc close)
-  // yields null.
-  const resolvedAnnot = useMemo(() => {
+  const onMarqueeSelect = useCallback(
+    (docId: string, pageId: string, annotationIds: string[], additive: boolean) =>
+      setSelectedAnnot((prev) => {
+        if (annotationIds.length === 0) return prev;
+        if (!additive || !prev || prev.docId !== docId || prev.pageId !== pageId)
+          return { docId, pageId, ids: annotationIds };
+        const merged = [...prev.ids, ...annotationIds.filter((i) => !prev.ids.includes(i))];
+        return { ...prev, ids: merged };
+      }),
+    [],
+  );
+
+  const onTransformAnnotations = useCallback(
+    (docId: string, edits: AnnotationTransform[]) =>
+      dispatch({ type: 'TRANSFORM_ANNOTATIONS', docId, edits }),
+    [dispatch],
+  );
+
+  // The selection resolved against the LIVE workspace — the annotations'
+  // data always comes from here, never from a captured copy, so recolors
+  // show instantly and vanished members (commit, undo, page delete, doc
+  // close) drop out.
+  const resolvedAnnots = useMemo(() => {
     if (!selectedAnnot) return null;
     for (const d of docs) {
       if (d.id !== selectedAnnot.docId) continue;
       for (let i = 0; i < d.pages.length; i++) {
         const p = d.pages[i];
         if (p.id !== selectedAnnot.pageId) continue;
-        const annotation = (p.annotations ?? []).find((a) => a.id === selectedAnnot.annotationId);
-        if (!annotation) return null;
+        const byId = new Map((p.annotations ?? []).map((a) => [a.id, a]));
+        const annotations = selectedAnnot.ids
+          .map((id) => byId.get(id))
+          .filter((a): a is PageAnnotation => !!a);
+        if (annotations.length === 0) return null;
         return {
           docId: d.id,
+          docPath: d.path,
           pageId: p.id,
           pageNumber: i + 1,
-          annotation,
+          annotations,
           pageWidth: p.width,
           pageHeight: p.height,
+          rotation: p.rotation,
         };
       }
       return null;
@@ -1149,11 +1204,36 @@ export function WorkspaceCanvasView({
     return null;
   }, [selectedAnnot, docs]);
 
-  // Drop the stored ids once they stop resolving, so a dead selection can't
-  // linger and rebind (the transient-view-state discipline).
+  // The properties bar's single subject — exactly one selected.
+  const resolvedAnnot = useMemo(
+    () =>
+      resolvedAnnots && resolvedAnnots.annotations.length === 1
+        ? {
+            docId: resolvedAnnots.docId,
+            pageId: resolvedAnnots.pageId,
+            pageNumber: resolvedAnnots.pageNumber,
+            annotation: resolvedAnnots.annotations[0],
+            pageWidth: resolvedAnnots.pageWidth,
+            pageHeight: resolvedAnnots.pageHeight,
+          }
+        : null,
+    [resolvedAnnots],
+  );
+
+  // Prune the stored ids to the survivors (a commit/undo/delete may take
+  // some, not all), so a dead member can't linger and rebind (the
+  // transient-view-state discipline).
   useEffect(() => {
-    if (selectedAnnot && !resolvedAnnot) setSelectedAnnot(null);
-  }, [selectedAnnot, resolvedAnnot]);
+    if (!selectedAnnot) return;
+    if (!resolvedAnnots) {
+      setSelectedAnnot(null);
+      return;
+    }
+    if (resolvedAnnots.annotations.length !== selectedAnnot.ids.length) {
+      const alive = new Set(resolvedAnnots.annotations.map((a) => a.id));
+      setSelectedAnnot({ ...selectedAnnot, ids: selectedAnnot.ids.filter((i) => alive.has(i)) });
+    }
+  }, [selectedAnnot, resolvedAnnots]);
 
   // Escape clears the selection first (LIFO — registered while one exists, so
   // an in-flight drag's own interceptor still wins over this one).
@@ -1164,6 +1244,152 @@ export function WorkspaceCanvasView({
       return true;
     });
   }, [selectedAnnot]);
+
+  // ── Group operations on the selection (rung 1) ───────────────────────
+  // Each is one dispatch = one undo step. The align/distribute/size math is
+  // pure (lib/annotation-manipulation); measure notes recompute from their
+  // captured factors inside sizeMatchEdits.
+  const groupMembers = useMemo(
+    () =>
+      resolvedAnnots
+        ? resolvedAnnots.annotations.map((annotation) => ({
+            annotation,
+            pageId: resolvedAnnots.pageId,
+          }))
+        : [],
+    [resolvedAnnots],
+  );
+  const groupPageDims = useMemo(
+    () =>
+      resolvedAnnots
+        ? new Map([
+            [
+              resolvedAnnots.pageId,
+              {
+                width: resolvedAnnots.pageWidth,
+                height: resolvedAnnots.pageHeight,
+                rotation: resolvedAnnots.rotation,
+              },
+            ],
+          ])
+        : new Map<string, { width: number; height: number; rotation: number }>(),
+    [resolvedAnnots],
+  );
+  const onAlignSelection = useCallback(
+    (mode: AlignMode) => {
+      if (!resolvedAnnots) return;
+      const edits = alignEdits(groupMembers, mode);
+      if (edits.length > 0) onTransformAnnotations(resolvedAnnots.docId, edits);
+    },
+    [resolvedAnnots, groupMembers, onTransformAnnotations],
+  );
+  const onDistributeSelection = useCallback(
+    (mode: DistributeMode) => {
+      if (!resolvedAnnots) return;
+      const edits = distributeEdits(groupMembers, mode);
+      if (edits.length > 0) onTransformAnnotations(resolvedAnnots.docId, edits);
+    },
+    [resolvedAnnots, groupMembers, onTransformAnnotations],
+  );
+  const onSizeMatchSelection = useCallback(
+    (mode: SizeMatchMode) => {
+      if (!resolvedAnnots) return;
+      const edits = sizeMatchEdits(groupMembers, mode, groupPageDims);
+      if (edits.length > 0) onTransformAnnotations(resolvedAnnots.docId, edits);
+    },
+    [resolvedAnnots, groupMembers, groupPageDims, onTransformAnnotations],
+  );
+  const onReorderSelection = useCallback(
+    (direction: 'front' | 'back' | 'forward' | 'backward') => {
+      if (!resolvedAnnots) return;
+      dispatch({
+        type: 'REORDER_ANNOTATIONS',
+        docId: resolvedAnnots.docId,
+        pageId: resolvedAnnots.pageId,
+        annotationIds: resolvedAnnots.annotations.map((a) => a.id),
+        direction,
+      });
+    },
+    [resolvedAnnots, dispatch],
+  );
+  const onRecolorSelection = useCallback(
+    (color: string) => {
+      if (!resolvedAnnots) return;
+      dispatch({
+        type: 'RECOLOR_ANNOTATIONS',
+        docId: resolvedAnnots.docId,
+        pageId: resolvedAnnots.pageId,
+        annotationIds: resolvedAnnots.annotations.map((a) => a.id),
+        color,
+      });
+    },
+    [resolvedAnnots, dispatch],
+  );
+  const onRemoveSelection = useCallback(() => {
+    if (!resolvedAnnots) return;
+    dispatch({
+      type: 'REMOVE_ANNOTATIONS',
+      docId: resolvedAnnots.docId,
+      pageId: resolvedAnnots.pageId,
+      annotationIds: resolvedAnnots.annotations.map((a) => a.id),
+    });
+    setSelectedAnnot(null);
+  }, [resolvedAnnots, dispatch]);
+
+  // Keyboard on the selection: Delete removes, arrows nudge 1pt (Shift:
+  // 10pt) — skipped while typing in any editable surface.
+  useEffect(() => {
+    if (!resolvedAnnots || tool !== 'select') return;
+    const onKey = (e: KeyboardEvent): void => {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
+      )
+        return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        onRemoveSelection();
+        return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        const movable = resolvedAnnots.annotations.filter(isTransformable);
+        if (movable.length === 0) return;
+        e.preventDefault();
+        // Arrows are SCREEN directions. Stored geometry lives in the page's
+        // real-rotation frame; Rotate View (M6.1) projects it by
+        // viewRotation for display — so the screen vector un-projects by the
+        // inverse view rotation before it can be a stored-frame delta.
+        // (Vector form of rotateNormalizedPoint: translation cancels.)
+        const { dx, dy } = nudgeDelta(
+          e.key,
+          e.shiftKey,
+          resolvedAnnots.pageWidth,
+          resolvedAnnots.pageHeight,
+        );
+        const vr = state.ui.viewRotationByPath[resolvedAnnots.docPath] ?? 0;
+        const inv = (360 - vr) % 360;
+        const [sdx, sdy] =
+          inv === 90 ? [-dy, dx] : inv === 180 ? [-dx, -dy] : inv === 270 ? [dy, -dx] : [dx, dy];
+        const lead = translated(movable[0], sdx, sdy);
+        const edits: AnnotationTransform[] = movable.map((m) => {
+          const t2 = m.id === movable[0].id ? lead : translatedBy(m, lead.dx, lead.dy);
+          return {
+            pageId: resolvedAnnots.pageId,
+            annotationId: m.id,
+            x: t2.x,
+            y: t2.y,
+            w: m.w,
+            h: m.h,
+            ...(t2.points ? { points: t2.points } : {}),
+          };
+        });
+        if (lead.dx !== 0 || lead.dy !== 0) onTransformAnnotations(resolvedAnnots.docId, edits);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [resolvedAnnots, tool, onRemoveSelection, onTransformAnnotations, state.ui.viewRotationByPath]);
 
   // Marks whose page still exists in the workspace — a deleted page's marks
   // drop out of the count and the apply payload rather than being guessed at.
@@ -3222,11 +3448,18 @@ export function WorkspaceCanvasView({
       {state.ui.propertiesBar && (
         <PropertiesBar
           selected={resolvedAnnot}
+          selectedGroup={resolvedAnnots?.annotations ?? NO_ANNOTATIONS}
           tool={tool}
           toolColor={toolColor}
           onSetToolColor={setToolColor}
           onRecolor={onRecolorAnnotation}
           onRemove={onRemoveAnnotation}
+          onAlign={onAlignSelection}
+          onDistribute={onDistributeSelection}
+          onSizeMatch={onSizeMatchSelection}
+          onReorder={onReorderSelection}
+          onRecolorGroup={onRecolorSelection}
+          onRemoveGroup={onRemoveSelection}
           onClose={() => dispatch({ type: 'UI_TOGGLE_PROPERTIES_BAR' })}
         />
       )}
@@ -3322,8 +3555,10 @@ export function WorkspaceCanvasView({
             onUpdateAnnotation,
             onRecolorAnnotation,
             onRemoveAnnotation,
-            selectedAnnotationId: selectedAnnot?.annotationId ?? null,
+            selectedAnnotationIds: selectedAnnot?.ids ?? NO_ANNOTATION_IDS,
             onSelectAnnotation,
+            onTransformAnnotations,
+            onMarqueeSelect,
             onAddRedactionMark,
             onRemoveRedactionMark,
             onSetSignaturePlacement,
@@ -3543,8 +3778,10 @@ export function WorkspaceCanvasView({
           onUpdateAnnotation={onUpdateAnnotation}
           onRecolorAnnotation={onRecolorAnnotation}
           onRemoveAnnotation={onRemoveAnnotation}
-          selectedAnnotationId={selectedAnnot?.annotationId ?? null}
+          selectedAnnotationIds={selectedAnnot?.ids ?? NO_ANNOTATION_IDS}
           onSelectAnnotation={onSelectAnnotation}
+          onTransformAnnotations={onTransformAnnotations}
+          onMarqueeSelect={onMarqueeSelect}
           onAddRedactionMark={onAddRedactionMark}
           onRemoveRedactionMark={onRemoveRedactionMark}
           onSetSignaturePlacement={onSetSignaturePlacement}

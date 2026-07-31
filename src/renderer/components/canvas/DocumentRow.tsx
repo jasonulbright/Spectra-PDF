@@ -2,6 +2,7 @@ import { memo } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { AnnotationTransform } from '../../lib/annotation-manipulation';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditVectorObject } from '../../lib/edit-vectors';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
@@ -114,8 +115,15 @@ interface DocumentRowProps {
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
   // Click-selection for the properties bar (I.6). null clears.
-  selectedAnnotationId: string | null;
-  onSelectAnnotation: (docId: string, pageId: string, annotationId: string | null) => void;
+  selectedAnnotationIds: readonly string[];
+  onSelectAnnotation: (
+    docId: string,
+    pageId: string,
+    annotationId: string | null,
+    additive: boolean,
+  ) => void;
+  onTransformAnnotations: (docId: string, edits: AnnotationTransform[]) => void;
+  onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -195,8 +203,10 @@ function DocumentRowImpl({
   onUpdateAnnotation,
   onRecolorAnnotation,
   onRemoveAnnotation,
-  selectedAnnotationId,
+  selectedAnnotationIds,
   onSelectAnnotation,
+  onTransformAnnotations,
+  onMarqueeSelect,
   onAddRedactionMark,
   onRemoveRedactionMark,
   onSetSignaturePlacement,
@@ -304,8 +314,10 @@ function DocumentRowImpl({
         onUpdateAnnotation={onUpdateAnnotation}
         onRecolorAnnotation={onRecolorAnnotation}
         onRemoveAnnotation={onRemoveAnnotation}
-        selectedAnnotationId={selectedAnnotationId}
+        selectedAnnotationIds={selectedAnnotationIds}
         onSelectAnnotation={onSelectAnnotation}
+        onTransformAnnotations={onTransformAnnotations}
+        onMarqueeSelect={onMarqueeSelect}
         onAddRedactionMark={onAddRedactionMark}
         onRemoveRedactionMark={onRemoveRedactionMark}
         onSetSignaturePlacement={onSetSignaturePlacement}

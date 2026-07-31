@@ -2688,6 +2688,33 @@
   outline: 2px solid var(--accent, #3b82f6);
   outline-offset: 1px;
 }
+
+/* Resize handles (rung 1) — 8 grips on the single-selected annotation. */
+.annot-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border: 1px solid var(--accent, #3b82f6);
+  border-radius: 1px;
+  pointer-events: auto;
+  z-index: 3;
+}
+.annot-handle-nw { left: -5px; top: -5px; cursor: nwse-resize; }
+.annot-handle-n { left: calc(50% - 4px); top: -5px; cursor: ns-resize; }
+.annot-handle-ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.annot-handle-e { right: -5px; top: calc(50% - 4px); cursor: ew-resize; }
+.annot-handle-se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.annot-handle-s { left: calc(50% - 4px); bottom: -5px; cursor: ns-resize; }
+.annot-handle-sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.annot-handle-w { left: -5px; top: calc(50% - 4px); cursor: ew-resize; }
+
+/* Ctrl-marquee rubber band (Select tool multi-select). */
+.annot-marquee {
+  border: 1px dashed var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.08);
+  pointer-events: none;
+}
 .secondary-toolbar-title {
   font-size: 11px;
   font-weight: 600;
