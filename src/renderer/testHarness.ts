@@ -164,7 +164,9 @@ export interface BatchOcrHandlers {
  * not WebDriver-drivable, so a spec injects a whole profile through the SAME
  * create path the form uses, then lists and deletes through the same commands. */
 export interface ScheduledRunsHandlers {
-  create: (profile: Record<string, unknown>) => Promise<string>;
+  /** `actionJson` = the frozen guided-action `{name, steps}` body for
+   * runType 'action' profiles (slice 5). */
+  create: (profile: Record<string, unknown>, actionJson?: string) => Promise<string>;
   list: () => Promise<unknown[]>;
   remove: (name: string) => Promise<void>;
 }
@@ -251,6 +253,10 @@ export interface GuidedActionsHandlers {
     source: string,
     dest: string,
   ) => Promise<void>;
+  /** Slice 4: write one action to `path` (the `{name, steps}` file shape). */
+  exportToPath: (actionId: string, path: string) => Promise<void>;
+  /** Slice 4: import an action file; rejects with the named refusal. */
+  importFromPath: (path: string) => Promise<void>;
 }
 
 let guidedActionsHandlers: GuidedActionsHandlers | null = null;
@@ -784,7 +790,7 @@ export interface TestHarness {
   batchOcrSetFiling: (filing: { movedRoot?: string | null; errorRoot?: string | null }) => void;
   batchOcrStart: () => Promise<void>;
   batchOcrSnapshot: () => ReturnType<BatchOcrHandlers['snapshot']> | null;
-  scheduleCreate: (profile: Record<string, unknown>) => Promise<string>;
+  scheduleCreate: (profile: Record<string, unknown>, actionJson?: string) => Promise<string>;
   scheduleList: () => Promise<unknown[]>;
   scheduleRemove: (name: string) => Promise<void>;
   /** Edit ▸ Images (7.1; canvas must be mounted with the edit mode armed). */
@@ -829,6 +835,10 @@ export interface TestHarness {
     source: string,
     dest: string,
   ) => Promise<void>;
+  /** Guided-actions export/import with injected paths (the dialogs are
+   * native). Import rejects with the named refusal for malformed files. */
+  guidedExportToPath: (actionId: string, path: string) => Promise<void>;
+  guidedImportFromPath: (path: string) => Promise<void>;
   /** Portfolio flows with injected paths (panel must be mounted). */
   portfolioCreateRun: (output: string, sources: string[], title?: string) => Promise<unknown>;
   portfolioAddRun: (source: string) => Promise<unknown>;
@@ -1420,9 +1430,9 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     batchOcrSnapshot: () => batchOcr?.snapshot() ?? null,
-    scheduleCreate: async (profile) => {
+    scheduleCreate: async (profile, actionJson) => {
       if (!scheduledRuns) throw new Error('scheduleCreate: Scheduled Runs dialog not mounted');
-      return scheduledRuns.create(profile);
+      return scheduledRuns.create(profile, actionJson);
     },
     scheduleList: async () => {
       if (!scheduledRuns) throw new Error('scheduleList: Scheduled Runs dialog not mounted');
@@ -1468,6 +1478,22 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return guidedActionsHandlers.runFolder(actionId, values, source, dest);
+    },
+    guidedExportToPath: async (actionId, path) => {
+      if (!guidedActionsHandlers) {
+        const msg = 'guidedExportToPath: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return guidedActionsHandlers.exportToPath(actionId, path);
+    },
+    guidedImportFromPath: async (path) => {
+      if (!guidedActionsHandlers) {
+        const msg = 'guidedImportFromPath: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return guidedActionsHandlers.importFromPath(path);
     },
     portfolioCreateRun: async (output, sources, title) => {
       if (!portfolioHandlers) {

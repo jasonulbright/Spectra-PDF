@@ -117,10 +117,28 @@ pub async fn save_file_dialog(
             // An EXISTING target canonicalizes (overwrite flows can be
             // reopened later under the same spelling); a brand-new file
             // fails to resolve and passes through as the dialog spelled it.
-            Ok(pb) => Ok(Some(canonical_path(&pb.to_string_lossy()))),
+            Ok(pb) => {
+                let resolved = canonical_path(&pb.to_string_lossy());
+                allow_picked_path(&app, &resolved);
+                Ok(Some(resolved))
+            }
             Err(e) => Err(format!("Path error: {}", e)),
         },
         None => Ok(None),
+    }
+}
+
+/// Add a USER-PICKED path to the fs plugin's runtime scope — the official
+/// dialog plugin's own trust model (a path the user chose in a native dialog
+/// becomes readable/writable to the webview), mirrored here because these
+/// dialogs are custom Rust commands the plugin cannot see. Without this the
+/// static `$TEMP/openpdfstudio/**` scope refuses renderer-side fs IO on any
+/// picked path (found live by guided-actions export/import — the first
+/// renderer feature to write a picked path with plugin-fs).
+fn allow_picked_path(app: &AppHandle, path: &str) {
+    use tauri_plugin_fs::FsExt;
+    if let Err(e) = app.fs_scope().allow_file(path) {
+        eprintln!("fs scope: could not allow picked path {path}: {e}");
     }
 }
 
@@ -210,7 +228,11 @@ pub async fn pick_any_file(
         .blocking_pick_file();
     match result {
         Some(p) => match p.into_path() {
-            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Ok(pb) => {
+                let picked = pb.to_string_lossy().to_string();
+                allow_picked_path(&app, &picked);
+                Ok(Some(picked))
+            }
             Err(e) => Err(format!("Path error: {}", e)),
         },
         None => Ok(None),

@@ -5,6 +5,12 @@ import type { ScheduleProfile, ScheduledRun } from '../lib/tauri-bridge';
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import { toTesseractLang, describeLanguages } from '../ocr/language-selection';
 import { getSettings } from '../lib/app-settings';
+import {
+  actionFileJson,
+  loadGuidedActions,
+  stepDefFor,
+  unattendedBlocker,
+} from '../lib/guided-actions';
 import { TEST_HARNESS_ENABLED, registerScheduledRuns } from '../testHarness';
 
 // Tools ▸ Scheduled Batch Runs (Phase 12, issue #1 request 5).
@@ -17,6 +23,14 @@ import { TEST_HARNESS_ENABLED, registerScheduledRuns } from '../testHarness';
 //
 // The list is read back from the registered tasks themselves — there is no
 // profile file that could disagree with what will actually fire.
+//
+// Guided-actions slice 5: the same lifecycle schedules a SAVED ACTION over a
+// folder (run_action was built engine-side for exactly this). The action is
+// frozen to a machine-scoped file at creation — a scheduled task must not
+// depend on the GUI's localStorage (wrong profile under a service account,
+// and the run fires with the app closed). Actions with ask-at-run values
+// (secrets included — never persisted, by rule) are refused here: a headless
+// run has nobody to ask, and a task that fails every time must not register.
 
 export interface ScheduledRunsDialogProps {
   onClose: () => void;
@@ -36,6 +50,8 @@ const EMPTY: ScheduleProfile = {
   time: '09:30',
   days: 'MON,TUE,WED,THU,FRI',
   account: '',
+  runType: 'batch-ocr',
+  actionFile: '',
 };
 
 export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): React.JSX.Element {
@@ -46,6 +62,11 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // The saved-action library (fresh at dialog mount) + which one a new/edited
+  // action schedule runs. '' while EDITING an existing action schedule means
+  // "keep the frozen copy already on disk".
+  const [libraryActions] = useState(() => loadGuidedActions());
+  const [actionId, setActionId] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -65,11 +86,31 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
 
   const save = useCallback(async () => {
     if (!editing) return;
+    let actionJson: string | undefined;
+    if (editing.runType === 'action') {
+      const chosen = libraryActions.find((a) => a.id === actionId);
+      if (!chosen && !editing.actionFile) {
+        setError('Choose which guided action to run.');
+        return;
+      }
+      if (chosen) {
+        // Never register a task that will not fire: ask-at-run values
+        // (secrets included) have nobody to answer them headlessly.
+        const blocker = unattendedBlocker(chosen);
+        if (blocker) {
+          setError(blocker);
+          return;
+        }
+        // The frozen copy is the SAME sanitized construction the export
+        // writes — it can never carry a password.
+        actionJson = actionFileJson(chosen);
+      }
+    }
     setBusy(true);
     setError(null);
     setStatus('Creating the schedule…');
     try {
-      await schedule.create(editing, password || undefined);
+      await schedule.create(editing, password || undefined, actionJson);
       // The password only ever existed for this call — Windows stores it, we
       // do not (the .pfx signing-password posture).
       setPassword('');
@@ -82,7 +123,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
     } finally {
       setBusy(false);
     }
-  }, [editing, password, refresh]);
+  }, [editing, password, refresh, libraryActions, actionId]);
 
   const act = useCallback(
     async (label: string, fn: () => Promise<unknown>) => {
@@ -105,12 +146,12 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
 
   // Harness: the native folder pickers are not WebDriver-drivable, so a spec
   // injects a whole profile through the SAME create path the form uses.
-  const createRef = useRef<(p: ScheduleProfile) => Promise<string>>(null!);
-  createRef.current = (p) => schedule.create(p);
+  const createRef = useRef<(p: ScheduleProfile, actionJson?: string) => Promise<string>>(null!);
+  createRef.current = (p, actionJson) => schedule.create(p, undefined, actionJson);
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerScheduledRuns({
-      create: (p) => createRef.current(p as unknown as ScheduleProfile),
+      create: (p, actionJson) => createRef.current(p as unknown as ScheduleProfile, actionJson),
       list: () => schedule.list(),
       remove: (name) => schedule.remove(name),
     });
@@ -155,9 +196,28 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                     {r.lastResult ? ` (${r.lastResult})` : ''}
                   </div>
                   {r.profile ? (
-                    <div className="text-xs text-neutral-400 mt-0.5 truncate" title={r.profile.source}>
-                      {r.profile.source} → {r.profile.dest}
-                    </div>
+                    <>
+                      <div className="text-xs text-neutral-400 mt-0.5 truncate" title={r.profile.source}>
+                        {r.profile.source} → {r.profile.dest}
+                      </div>
+                      {r.profile.runType === 'action' && (
+                        <div
+                          className="text-xs text-neutral-400 mt-0.5 truncate"
+                          data-testid={`schedule-action-info-${r.name}`}
+                          title={r.actionSteps.join(' → ')}
+                        >
+                          Guided action: {r.actionName || '(unnamed)'}
+                          {r.actionSteps.length > 0 && ` — ${r.actionSteps.join(' → ')}`}
+                        </div>
+                      )}
+                      {r.actionMissing && (
+                        // It will still FIRE and fail — shown, never hidden.
+                        <div className="text-xs text-amber-400 mt-0.5" data-testid={`schedule-action-missing-${r.name}`}>
+                          Its action file is missing — the run will fail until the schedule is
+                          recreated.
+                        </div>
+                      )}
+                    </>
                   ) : (
                     // It will still FIRE, so it is shown rather than hidden.
                     <div className="text-xs text-amber-400 mt-0.5">
@@ -193,7 +253,10 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                     {r.profile && (
                       <button
                         disabled={busy}
-                        onClick={() => setEditing({ ...EMPTY, ...r.profile! })}
+                        onClick={() => {
+                          setActionId('');
+                          setEditing({ ...EMPTY, ...r.profile! });
+                        }}
                         className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                       >
                         Edit
@@ -253,6 +316,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
             <button
               data-testid="schedule-new"
               onClick={() => {
+                setActionId('');
                 setEditing({ ...EMPTY, logDir: getSettings().batchLogDir });
                 setError(null);
               }}
@@ -273,11 +337,47 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
             />
           </Field>
 
+          <Field label="What runs">
+            <select
+              data-testid="schedule-runtype"
+              value={editing.runType === 'action' ? 'action' : 'batch-ocr'}
+              onChange={(e) => setEditing({ ...editing, runType: e.target.value })}
+              className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
+            >
+              <option value="batch-ocr">Batch OCR (make searchable)</option>
+              <option value="action">Guided action</option>
+            </select>
+          </Field>
+
+          {editing.runType === 'action' && (
+            <Field label="Guided action">
+              <select
+                data-testid="schedule-action"
+                value={actionId}
+                onChange={(e) => setActionId(e.target.value)}
+                className="w-full px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
+              >
+                <option value="">
+                  {editing.actionFile ? '(keep the current action)' : 'Choose an action…'}
+                </option>
+                {libraryActions.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} — {a.steps.map((s) => stepDefFor(s.op).title).join(' → ')}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-neutral-500 mt-1">
+                The schedule keeps its own copy of the action; edit the schedule to pick up
+                later changes. Actions that ask for values when they run can’t be scheduled.
+              </p>
+            </Field>
+          )}
+
           <FolderField
             label="Source folder"
             testid="schedule-source"
             value={editing.source}
-            onPick={() => void pick('Choose the folder to make searchable', (p) => setEditing({ ...editing, source: p }))}
+            onPick={() => void pick('Choose the folder to process', (p) => setEditing({ ...editing, source: p }))}
           />
           <FolderField
             label="Destination folder"
@@ -286,26 +386,28 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
             onPick={() => void pick('Choose the destination folder', (p) => setEditing({ ...editing, dest: p }))}
           />
 
-          <Field label={`Recognition languages — ${describeLanguages(langs)}`}>
-            <div className="max-h-28 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-3 gap-x-3 gap-y-1">
-              {OCR_LANGUAGES.map((l) => (
-                <label key={l.code} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={langs.includes(l.code)}
-                    onChange={() => {
-                      const next = langs.includes(l.code)
-                        ? langs.filter((c) => c !== l.code)
-                        : [...langs, l.code];
-                      setEditing({ ...editing, lang: toTesseractLang(next) });
-                    }}
-                    className="rounded bg-neutral-900 border-neutral-600"
-                  />
-                  <span className="text-neutral-300">{l.label}</span>
-                </label>
-              ))}
-            </div>
-          </Field>
+          {editing.runType !== 'action' && (
+            <Field label={`Recognition languages — ${describeLanguages(langs)}`}>
+              <div className="max-h-28 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-3 gap-x-3 gap-y-1">
+                {OCR_LANGUAGES.map((l) => (
+                  <label key={l.code} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={langs.includes(l.code)}
+                      onChange={() => {
+                        const next = langs.includes(l.code)
+                          ? langs.filter((c) => c !== l.code)
+                          : [...langs, l.code];
+                        setEditing({ ...editing, lang: toTesseractLang(next) });
+                      }}
+                      className="rounded bg-neutral-900 border-neutral-600"
+                    />
+                    <span className="text-neutral-300">{l.label}</span>
+                  </label>
+                ))}
+              </div>
+            </Field>
+          )}
 
           <div className="flex gap-3">
             <Field label="Runs">
@@ -344,34 +446,38 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
 
           <details className="rounded border border-neutral-800 bg-neutral-950/40">
             <summary className="px-3 py-2 text-sm text-neutral-300 cursor-pointer select-none">
-              Filing and account
+              {editing.runType === 'action' ? 'Account' : 'Filing and account'}
               <span className="text-neutral-500"> — optional</span>
             </summary>
             <div className="px-3 pb-3 pt-1 flex flex-col gap-3">
-              <FolderField
-                label="Move processed originals to"
-                testid="schedule-moved"
-                value={editing.movedRoot}
-                onPick={() => void pick('Choose where processed originals go', (p) => setEditing({ ...editing, movedRoot: p }))}
-                onClear={() => setEditing({ ...editing, movedRoot: '' })}
-              />
-              <FolderField
-                label="Move failed originals to"
-                testid="schedule-errors"
-                value={editing.errorRoot}
-                onPick={() => void pick('Choose where failed originals go', (p) => setEditing({ ...editing, errorRoot: p }))}
-                onClear={() => setEditing({ ...editing, errorRoot: '' })}
-              />
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  data-testid="schedule-repair"
-                  checked={editing.repairDamaged}
-                  onChange={() => setEditing({ ...editing, repairDamaged: !editing.repairDamaged })}
-                  className="rounded bg-neutral-900 border-neutral-600"
-                />
-                <span className="text-sm text-neutral-300">Try to repair damaged files</span>
-              </label>
+              {editing.runType !== 'action' && (
+                <>
+                  <FolderField
+                    label="Move processed originals to"
+                    testid="schedule-moved"
+                    value={editing.movedRoot}
+                    onPick={() => void pick('Choose where processed originals go', (p) => setEditing({ ...editing, movedRoot: p }))}
+                    onClear={() => setEditing({ ...editing, movedRoot: '' })}
+                  />
+                  <FolderField
+                    label="Move failed originals to"
+                    testid="schedule-errors"
+                    value={editing.errorRoot}
+                    onPick={() => void pick('Choose where failed originals go', (p) => setEditing({ ...editing, errorRoot: p }))}
+                    onClear={() => setEditing({ ...editing, errorRoot: '' })}
+                  />
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      data-testid="schedule-repair"
+                      checked={editing.repairDamaged}
+                      onChange={() => setEditing({ ...editing, repairDamaged: !editing.repairDamaged })}
+                      className="rounded bg-neutral-900 border-neutral-600"
+                    />
+                    <span className="text-sm text-neutral-300">Try to repair damaged files</span>
+                  </label>
+                </>
+              )}
 
               <Field label="Run as (blank = you)">
                 <input

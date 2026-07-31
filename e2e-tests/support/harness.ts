@@ -1239,19 +1239,32 @@ export interface ScheduleProfileInput {
   time?: string;
   days?: string;
   account?: string;
+  /** 'batch-ocr' (default) or 'action' (guided-actions slice 5). */
+  runType?: string;
 }
 
 export interface ScheduledRunRow {
   name: string;
-  profile: { source: string; dest: string; lang: string } | null;
+  profile: { source: string; dest: string; lang: string; runType?: string; actionFile?: string } | null;
   status: string;
   nextRun: string;
+  actionName?: string;
+  actionSteps?: string[];
+  actionMissing?: boolean;
 }
 
-export async function scheduleCreate(profile: ScheduleProfileInput): Promise<string> {
-  return await browser.execute(function (p: ScheduleProfileInput) {
-    return (window as any).__SPECTRA_TEST__.scheduleCreate(p);
-  }, profile);
+/** `actionJson` = the frozen `{name, steps}` body for runType 'action'. */
+export async function scheduleCreate(
+  profile: ScheduleProfileInput,
+  actionJson?: string,
+): Promise<string> {
+  return await browser.execute(
+    function (p: ScheduleProfileInput, aj: string | undefined) {
+      return (window as any).__SPECTRA_TEST__.scheduleCreate(p, aj);
+    },
+    profile,
+    actionJson,
+  );
 }
 
 export async function scheduleList(): Promise<ScheduledRunRow[]> {

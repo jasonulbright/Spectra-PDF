@@ -174,6 +174,12 @@ export interface ScheduleProfile {
   days: string;
   /** Empty = the current user. Otherwise DOMAIN\\user, or DOMAIN\\gmsa$. */
   account: string;
+  /** Which CLI arm the task invokes: 'batch-ocr' (default; also for '') or
+   * 'action' — a guided-action run over the source tree. */
+  runType: string;
+  /** Action runs: the frozen action file the task reads. Set by create,
+   * never by the caller. */
+  actionFile: string;
 }
 
 export interface ScheduledRun {
@@ -185,12 +191,26 @@ export interface ScheduledRun {
   nextRun: string;
   lastRun: string;
   lastResult: string;
+  /** Action runs: the action's display name + step ops read from the frozen
+   * file (empty for batch-OCR runs). */
+  actionName: string;
+  actionSteps: string[];
+  /** True when the task references an action file that cannot be read — it
+   * will still FIRE and fail, so it is shown rather than hidden. */
+  actionMissing: boolean;
 }
 
 export const schedule = {
-  /** `password` is passed to Windows and never stored by this app. */
-  create: (profile: ScheduleProfile, password?: string) =>
-    invoke<string>('create_scheduled_run', { profile, password: password || null }),
+  /** `password` is passed to Windows and never stored by this app.
+   * `actionJson` (action runs) is the frozen sanitized `{name, steps}` shape
+   * — the export construction, so it can never carry a password. Omit it
+   * when replacing an action schedule to keep the file already on disk. */
+  create: (profile: ScheduleProfile, password?: string, actionJson?: string) =>
+    invoke<string>('create_scheduled_run', {
+      profile,
+      password: password || null,
+      actionJson: actionJson || null,
+    }),
   list: () => invoke<ScheduledRun[]>('list_scheduled_runs'),
   remove: (name: string) => invoke<void>('delete_scheduled_run', { name }),
   runNow: (name: string) => invoke<void>('run_scheduled_now', { name }),

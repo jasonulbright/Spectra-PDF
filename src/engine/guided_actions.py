@@ -51,7 +51,21 @@ _STEPS: dict = {
     ),
     "add_header_footer": (
         add_header_footer,
-        frozenset({"placements", "font_size", "margin", "color", "bates_start", "bates_digits"}),
+        # position/text is the GUI's saved/exported one-pair-per-step shape;
+        # validate_steps folds it into placements so an exported action file
+        # runs through the CLI without translation.
+        frozenset(
+            {
+                "placements",
+                "position",
+                "text",
+                "font_size",
+                "margin",
+                "color",
+                "bates_start",
+                "bates_digits",
+            }
+        ),
         frozenset({"font_dir"}),
     ),
     "ocr_file": (ocr_file, frozenset({"language"}), frozenset({"gs_path", "tesseract_path"})),
@@ -77,6 +91,15 @@ def validate_steps(steps) -> list[dict]:
         unknown = sorted(set(params) - allowed)
         if unknown:
             raise ValueError(f"step {i + 1} ({op}): unknown parameter(s) {unknown}")
+        params = dict(params)
+        if op == "add_header_footer" and ("position" in params or "text" in params):
+            if "placements" in params:
+                raise ValueError(f"step {i + 1} ({op}): use placements or position/text, not both")
+            if "position" not in params or "text" not in params:
+                raise ValueError(f"step {i + 1} ({op}): position and text go together")
+            params["placements"] = [
+                {"position": str(params.pop("position")), "text": str(params.pop("text"))}
+            ]
         if op == "encrypt":
             if i != len(steps) - 1:
                 raise ValueError("encrypt must be the last step")
@@ -84,7 +107,7 @@ def validate_steps(steps) -> list[dict]:
             o = str(params.get("owner_password") or "").strip()
             if not u and not o:
                 raise ValueError("encrypt: set an open or an owner password")
-        out.append({"op": op, "params": dict(params)})
+        out.append({"op": op, "params": params})
     return out
 
 
