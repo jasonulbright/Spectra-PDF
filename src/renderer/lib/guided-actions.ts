@@ -289,6 +289,33 @@ export function validateRunValues(
   return null;
 }
 
+/**
+ * Why an action cannot run UNATTENDED, or null if it can (slice 5 —
+ * scheduling). A scheduled run has nobody at the keyboard: ask-at-run values
+ * (and secrets, which are implicitly asked and by rule never persisted) make
+ * a task that would fail every time it fires. Refuse at scheduling time,
+ * naming the step — never register a task that will not run.
+ */
+export function unattendedBlocker(action: GuidedAction): string | null {
+  for (let i = 0; i < action.steps.length; i++) {
+    const step = action.steps[i];
+    const def = stepDefFor(step.op);
+    const asked = askedParamKeys(step);
+    if (asked.length === 0) continue;
+    if (def.params.some((p) => p.secret && asked.includes(p.key))) {
+      return (
+        `Step ${i + 1} (${def.title}) needs a password when it runs, and passwords are ` +
+        `never stored in an action — it cannot run unattended.`
+      );
+    }
+    return (
+      `Step ${i + 1} (${def.title}) asks for values when it runs (${asked.join(', ')}) — ` +
+      `a scheduled run has nobody to ask. Store the values in the action first.`
+    );
+  }
+  return null;
+}
+
 const STORE_KEY = 'guided-actions';
 
 export function isGuidedAction(v: unknown): v is GuidedAction {
@@ -319,12 +346,13 @@ export function loadGuidedActions(): GuidedAction[] {
   }
 }
 
-export function saveGuidedActions(actions: GuidedAction[]): void {
-  // SECURITY: secret params (passwords) are NEVER persisted — their values
-  // are stripped here (the one write path) and their keys are implicitly
-  // ask-at-run, so a saved action can carry an Encrypt step but never its
-  // passwords.
-  const sanitized = actions.map((a) => ({
+/** Strip secret param values (passwords) from an action; the keys stay
+ * implicitly ask-at-run. Every path that writes an action OUTSIDE React
+ * state — the localStorage persist, the file export — goes through this,
+ * which is what makes "a saved or exported action can never carry a
+ * password" true by construction rather than by call-site discipline. */
+export function sanitizeAction(a: GuidedAction): GuidedAction {
+  return {
     ...a,
     steps: a.steps.map((s) => {
       const def = STEP_CATALOG.find((d) => d.op === s.op);
@@ -333,6 +361,117 @@ export function saveGuidedActions(actions: GuidedAction[]): void {
       for (const p of def.params) if (p.secret) delete params[p.key];
       return { ...s, params };
     }),
-  }));
-  localStorage.setItem(STORE_KEY, JSON.stringify(sanitized));
+  };
+}
+
+export function saveGuidedActions(actions: GuidedAction[]): void {
+  // SECURITY: secret params (passwords) are NEVER persisted — sanitizeAction
+  // strips them at the one write path, so a saved action can carry an
+  // Encrypt step but never its passwords.
+  localStorage.setItem(STORE_KEY, JSON.stringify(actions.map(sanitizeAction)));
+}
+
+/** The export file body — the `{name, steps}` shape the CLI consumes
+ * (`run-action --action file.json`). No id: imports mint their own. Secrets
+ * are stripped by the SAME construction as the persist path. */
+export function actionFileJson(action: GuidedAction): string {
+  const clean = sanitizeAction(action);
+  return `${JSON.stringify({ name: clean.name, steps: clean.steps }, null, 2)}\n`;
+}
+
+/**
+ * Parse + validate an action FILE (the `{name, steps}` export shape — also
+ * what the CLI consumes). Mirrors the engine `validate_steps` refusals BY
+ * NAME against the renderer's own catalog: an op or param this editor cannot
+ * represent is refused with the offending name, never silently dropped
+ * (buildStepParams would otherwise discard it and the imported action would
+ * run differently here than through the CLI). Returns a ready-to-append
+ * action with a freshly minted id — imports never collide with or overwrite
+ * an existing action. Throws a human-readable message on refusal.
+ */
+export function parseActionFile(text: string): GuidedAction {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('Not a valid JSON file.');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Not an action file — expected an object with "name" and "steps".');
+  }
+  const a = parsed as Record<string, unknown>;
+  if (typeof a.name !== 'string' || !Array.isArray(a.steps)) {
+    throw new Error('Not an action file — expected an object with "name" and "steps".');
+  }
+  const steps = a.steps.map((s, i) => parseImportedStep(s, i));
+  const action: GuidedAction = { id: crypto.randomUUID(), name: a.name.trim(), steps };
+  const problem = validateAction(action);
+  if (problem) throw new Error(problem);
+  return action;
+}
+
+function parseImportedStep(s: unknown, i: number): GuidedStep {
+  const n = i + 1;
+  if (typeof s !== 'object' || s === null || Array.isArray(s)) {
+    throw new Error(`Step ${n} is not a step object.`);
+  }
+  const raw = s as Record<string, unknown>;
+  const op = raw.op;
+  if (typeof op !== 'string') throw new Error(`Step ${n} is not a step object.`);
+  const def = STEP_CATALOG.find((d) => d.op === op);
+  if (!def) throw new Error(`Step ${n}: unknown operation '${op}'.`);
+  const rawParams = raw.params ?? {};
+  if (typeof rawParams !== 'object' || rawParams === null || Array.isArray(rawParams)) {
+    throw new Error(`Step ${n} (${op}): params must be an object.`);
+  }
+  const params: Record<string, unknown> = { ...(rawParams as Record<string, unknown>) };
+  // The engine's placements list is this editor's position+text pair: fold a
+  // single-entry list back into the form shape (CLI-authored files). More
+  // placements than one per step is not representable in the editor.
+  if (op === 'add_header_footer' && 'placements' in params) {
+    if ('position' in params || 'text' in params) {
+      throw new Error(`Step ${n} (${op}): use placements or position/text, not both.`);
+    }
+    const pl = params.placements;
+    delete params.placements;
+    if (!Array.isArray(pl) || pl.length === 0) {
+      throw new Error(`Step ${n} (${op}): placements must be a non-empty list.`);
+    }
+    if (pl.length > 1) {
+      throw new Error(
+        `Step ${n} (${op}): only one placement per step is editable here — split into one step per position.`,
+      );
+    }
+    const first = pl[0] as Record<string, unknown> | null;
+    if (typeof first !== 'object' || first === null) {
+      throw new Error(`Step ${n} (${op}): placements must be a list of {position, text}.`);
+    }
+    params.position = first.position;
+    params.text = first.text;
+  }
+  const allowed = new Map(def.params.map((p) => [p.key, p]));
+  const unknown = Object.keys(params)
+    .filter((k) => !allowed.has(k))
+    .sort();
+  if (unknown.length > 0) {
+    throw new Error(`Step ${n} (${op}): unknown parameter(s) [${unknown.join(', ')}].`);
+  }
+  const clean: Record<string, string | number> = {};
+  for (const [key, v] of Object.entries(params)) {
+    const p = allowed.get(key)!;
+    if (typeof v !== 'string' && typeof v !== 'number') {
+      throw new Error(`Step ${n} (${op}): parameter '${key}' must be text or a number.`);
+    }
+    if (p.kind === 'select' && !p.options!.some((o) => o.value === String(v))) {
+      throw new Error(`Step ${n} (${op}): invalid value '${String(v)}' for '${key}'.`);
+    }
+    clean[key] = v;
+  }
+  // ask: param keys collected at run time. Keys the catalog doesn't know are
+  // meaningless here (askedParamKeys intersects anyway) — keep the known.
+  if (raw.ask === undefined) return { op: def.op, params: clean };
+  if (!Array.isArray(raw.ask) || raw.ask.some((k) => typeof k !== 'string')) {
+    throw new Error(`Step ${n} (${op}): "ask" must be a list of parameter names.`);
+  }
+  return { op: def.op, params: clean, ask: (raw.ask as string[]).filter((k) => allowed.has(k)) };
 }
