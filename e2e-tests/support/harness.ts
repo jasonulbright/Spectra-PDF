@@ -14,6 +14,7 @@ export interface TestStateSnapshot {
   activeToolId: string | null;
   docViewMode: 'organize' | 'document';
   splitView: boolean;
+  splitMode: 'off' | 'two' | 'quad';
   currentPageId: string | null;
   fileCount: number;
   activeFileId: string | null;

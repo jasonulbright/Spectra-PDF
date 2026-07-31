@@ -179,6 +179,7 @@ export const COMMAND_IDS = [
   'window.nextTab',
   'window.prevTab',
   'window.split',
+  'window.spreadsheetSplit',
   'window.minimizeToTray',
   'help.about',
   'help.licenses',
@@ -744,6 +745,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) =>
       inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && hasActiveFile(ctx.state),
     run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_SPLIT_VIEW' }),
+  },
+  // The king's Spreadsheet Split: a 2×2 grid with frozen-pane scroll linking.
+  'window.spreadsheetSplit': {
+    title: 'Spreadsheet Split',
+    when: (ctx) =>
+      inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && hasActiveFile(ctx.state),
+    run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_SPREADSHEET_SPLIT' }),
   },
   'window.minimizeToTray': {
     title: 'Minimize to Tray',

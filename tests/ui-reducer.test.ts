@@ -720,3 +720,21 @@ describe('UI_ROTATE_VIEW (M6.1 — Rotate View, render-only)', () => {
     expect(s.ui.viewRotationByPath['b.pdf']).toBe(90); // untouched
   });
 });
+
+describe('split view modes (two-pane + spreadsheet quad)', () => {
+  it('the two split shapes replace each other; each toggles itself off', () => {
+    let s = appReducer(initialState, { type: 'UI_TOGGLE_SPLIT_VIEW' });
+    expect(s.ui.splitView).toBe('two');
+    s = appReducer(s, { type: 'UI_TOGGLE_SPREADSHEET_SPLIT' });
+    expect(s.ui.splitView).toBe('quad');
+    // From the quad, Window ▸ Split switches SHAPE (the king's menu model)…
+    s = appReducer(s, { type: 'UI_TOGGLE_SPLIT_VIEW' });
+    expect(s.ui.splitView).toBe('two');
+    // …and each mode toggled against itself turns split off.
+    s = appReducer(s, { type: 'UI_TOGGLE_SPLIT_VIEW' });
+    expect(s.ui.splitView).toBe('off');
+    s = appReducer(s, { type: 'UI_TOGGLE_SPREADSHEET_SPLIT' });
+    s = appReducer(s, { type: 'UI_TOGGLE_SPREADSHEET_SPLIT' });
+    expect(s.ui.splitView).toBe('off');
+  });
+});
