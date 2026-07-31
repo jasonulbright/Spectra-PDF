@@ -101,7 +101,7 @@ export function planCommit(
           ...(p.annotations?.length
             ? {
                 annotations: p.annotations.map(
-                  ({ kind, x, y, w, h, color, note, points, imageData, markupType, quads, importedOriginal }) => ({
+                  ({ kind, x, y, w, h, color, note, points, imageData, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, importedOriginal }) => ({
                     kind,
                     x,
                     y,
@@ -113,6 +113,10 @@ export function planCommit(
                     imageData,
                     markupType,
                     quads,
+                    measureKind,
+                    measureRatio,
+                    measureUnitsPerPt,
+                    measureUnit,
                     importedOriginal,
                   }),
                 ),
