@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file } from '../lib/tauri-bridge';
+import { dialog, file } from '../lib/tauri-bridge';
 import { getCanvasServices } from '../commands/context';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { ANNOTATION_PALETTE } from '../components/canvas/PageCell';
@@ -125,6 +125,55 @@ export function CommentsPanel(): React.ReactElement {
     }
     void refresh();
   }, [buffer, workingPath, refresh]);
+
+  // XFDF interchange (rung 4). Export is a gate-flushed read (the engine
+  // call's commit gate bakes pending comments first, so the file it reads
+  // matches what the user sees); import is the standard undoable mutation.
+  const exportXfdf = useCallback(async () => {
+    if (!activeFile) return;
+    const output = await dialog.saveFile({
+      defaultPath: activeFile.name.replace(/\.pdf$/i, '') + '.xfdf',
+    });
+    if (!output) return;
+    setBusy(true);
+    setStatus('Exporting XFDF…');
+    try {
+      const r = await call('export_xfdf', { file: activeFile.workingPath, output });
+      const n = (r as unknown as { count: number }).count;
+      setStatus(`Exported ${n} comment${n === 1 ? '' : 's'} to XFDF`);
+    } catch (e: unknown) {
+      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [activeFile, call]);
+
+  const importXfdf = useCallback(async () => {
+    if (!activeFile) return;
+    const xfdf = await dialog.pickAnyFile();
+    if (!xfdf) return;
+    setBusy(true);
+    setStatus('Importing XFDF…');
+    try {
+      const snapshotPath = await file.snapshot(activeFile.workingPath);
+      const r = await call('import_xfdf', {
+        file: activeFile.workingPath,
+        xfdf,
+        output: activeFile.workingPath,
+      });
+      const buf = await file.readBuffer(activeFile.workingPath);
+      const info = await call('get_page_count', { file: activeFile.workingPath });
+      dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
+      await refresh();
+      const rr = r as unknown as { added: number; skipped: { reason: string }[] };
+      const skipped = rr.skipped.length ? ` (${rr.skipped.length} skipped)` : '';
+      setStatus(`Imported ${rr.added} comment${rr.added === 1 ? '' : 's'}${skipped} — undo with Ctrl+Z`);
+    } catch (e: unknown) {
+      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [activeFile, call, dispatch, refresh]);
 
   const deleteAll = useCallback(async () => {
     if (!activeFile) return;
@@ -297,14 +346,34 @@ export function CommentsPanel(): React.ReactElement {
               </button>
             </div>
           ) : (
-            <button
-              data-testid="comments-delete-all"
-              onClick={() => setConfirming(true)}
-              disabled={busy}
-              className="self-start px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
-            >
-              Delete all comments
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                data-testid="comments-delete-all"
+                onClick={() => setConfirming(true)}
+                disabled={busy}
+                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+              >
+                Delete all comments
+              </button>
+              <button
+                data-testid="comments-export-xfdf"
+                onClick={() => void exportXfdf()}
+                disabled={busy}
+                title="Export every comment to an XFDF interchange file"
+                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+              >
+                Export XFDF…
+              </button>
+              <button
+                data-testid="comments-import-xfdf"
+                onClick={() => void importXfdf()}
+                disabled={busy}
+                title="Add comments from an XFDF interchange file (undoable)"
+                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+              >
+                Import XFDF…
+              </button>
+            </div>
           )}
         </>
       )}

@@ -59,6 +59,10 @@ pub enum CliCommand {
     PageBox(PageBoxArgs),
     /// Set page-number labels (/PageLabels) — front matter as i/ii/iii, etc.
     PageLabels(PageLabelsArgs),
+    /// Export annotations to an XFDF file
+    XfdfExport(XfdfExportArgs),
+    /// Import annotations from an XFDF file
+    XfdfImport(XfdfImportArgs),
     /// List embedded file attachments (JSON)
     AttachList(AttachListArgs),
     /// Embed a file as an attachment
@@ -658,6 +662,27 @@ pub struct LayerSetArgs {
     /// Show the layer (default hides it)
     #[arg(long)]
     pub show: bool,
+}
+
+#[derive(Args)]
+pub struct XfdfExportArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output XFDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+}
+
+#[derive(Args)]
+pub struct XfdfImportArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// The XFDF file whose annotations to add
+    #[arg(long)]
+    pub xfdf: PathBuf,
 }
 
 #[derive(Args)]
@@ -1677,6 +1702,23 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         CliCommand::AttachList(args) => engine.call(
             "list_attachments",
             json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::XfdfExport(args) => engine.call(
+            "export_xfdf",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+            }),
+        ),
+
+        CliCommand::XfdfImport(args) => engine.call(
+            "import_xfdf",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "xfdf": abs(&args.xfdf).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+            }),
         ),
 
         CliCommand::AttachAdd(args) => {
