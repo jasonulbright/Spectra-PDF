@@ -1,16 +1,26 @@
 // Imports pre-existing PDF annotations into Spectra PDF's editable PageAnnotation
 // model at index time. Only the subtypes we can also author ourselves are
-// recognized — Square (our highlight tool), FreeText, Ink, Stamp. Everything
-// else (Link, Popup, Widget, native Highlight/Underline/StrikeOut quad-point
-// markup, Text sticky notes, …) is left alone entirely: not imported, not
-// editable, and — critically — never touched by the commit-time strip in
-// pdfx-build.ts's stripImportedOriginals, which only ever removes an original
-// it can positively fingerprint-match against something in this list. See
-// docs/architecture/05-phase2c-annotations.md, "importing existing
-// annotations safely".
+// recognized — everything else (Link, Popup, Widget, …) is left alone
+// entirely: not imported, not editable, and — critically — never touched by
+// the commit-time strip in pdfx-build.ts's stripImportedOriginals, which only
+// ever removes an original it can positively fingerprint-match against
+// something in this list. See docs/architecture/05-phase2c-annotations.md,
+// "importing existing annotations safely".
+//
+// Rung 2 widens the list to the drawing shapes (/Circle /Line /Polygon
+// /PolyLine) and callouts (/FreeText + /IT /FreeTextCallout) — but ONLY when
+// the raw-style sidecar (annotation-raw-style.ts) supplies the entries
+// pdf.js hides (/IC /CA /BE /CL /RD /LE), because importing one blind and
+// re-committing it would silently strip those. Faithful-or-untouched: no
+// sidecar entry, or a line-ending outside the set we author, and the
+// annotation stays raster-only exactly like before rung 2. Dimension lines
+// (/Measure or /IT LineDimension) always stay untouched — the measure
+// class's own no-degradation rule.
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { ImportedAnnotationFingerprint, PageAnnotation, TextMarkupType } from '../state/types';
 import { pdfPointToDisplay, pdfRectToDisplay } from './pdfx-build';
+import { takeRawStyle, type RawAnnotStyle } from './annotation-raw-style';
+import { paddedPointsBbox } from './annotation-manipulation';
 
 type ImportedSubtype = ImportedAnnotationFingerprint['subtype'];
 
@@ -20,7 +30,13 @@ const RECOGNIZED_SUBTYPES = new Set([
   'Highlight', 'Underline', 'StrikeOut', 'Squiggly',
   // N1 — native /Text sticky note, imported as `kind: 'note'`.
   'Text',
+  // Rung 2 — drawing shapes (sidecar-gated; see the header).
+  'Circle', 'Line', 'Polygon', 'PolyLine',
 ]);
+
+// The line endings our arrow/line emit can reproduce byte-faithfully. An
+// import carrying any other ending is left untouched rather than degraded.
+const AUTHORABLE_ENDINGS = new Set(['None', 'OpenArrow', 'ClosedArrow']);
 
 // The four text-markup subtypes and the style each renders/round-trips as.
 const MARKUP_TYPE: Record<string, TextMarkupType> = {
@@ -40,6 +56,10 @@ const DEFAULT_COLOR: Record<string, string> = {
   StrikeOut: '#e0393e',
   Squiggly: '#2fbf71',
   Text: '#ffd54a',
+  Circle: '#e0393e',
+  Line: '#e0393e',
+  Polygon: '#e0393e',
+  PolyLine: '#e0393e',
 };
 
 function colorToHex(color: unknown): string | null {
@@ -65,6 +85,10 @@ interface RawAnnotation {
   inkLists?: ArrayLike<number>[];
   quadPoints?: unknown; // markup only — pdf.js's parsed /QuadPoints
   hasAppearance?: boolean;
+  // Rung 2 — pdf.js's parses where they exist; the sidecar supplies the rest.
+  it?: string;
+  vertices?: ArrayLike<number>;
+  lineCoordinates?: ArrayLike<number>;
 }
 
 // pdf.js exposes /QuadPoints in one of a couple of shapes across versions: an
@@ -127,11 +151,15 @@ function quadRects(quadPoints: unknown): [number, number, number, number][] {
 // is the page's own inherent /Rotate — the "final rotation" at fresh-import
 // time, since a freshly indexed PageRef.rotation is always 0 (no pending
 // edit yet).
-export async function importPageAnnotations(page: PDFPageProxy): Promise<PageAnnotation[]> {
+export async function importPageAnnotations(
+  page: PDFPageProxy,
+  rawStyles?: RawAnnotStyle[],
+): Promise<PageAnnotation[]> {
   const raw = (await page.getAnnotations()) as unknown as RawAnnotation[];
   const [vx0, vy0, vx1, vy1] = page.view;
   const box = { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 };
   const rotation = page.rotate;
+  const consumedStyles = new Set<number>();
 
   const imported: PageAnnotation[] = [];
   for (const a of raw) {
@@ -149,6 +177,19 @@ export async function importPageAnnotations(page: PDFPageProxy): Promise<PageAnn
       // is a worse failure than a redundant duplicate rendering.
       hasAppearance: a.hasAppearance === true,
     };
+    const sidecar = takeRawStyle(rawStyles, consumedStyles, a.subtype, a.rect);
+
+    // ── Rung 2: drawing shapes + callouts (sidecar-gated) ────────────
+    if (a.subtype === 'Circle' || a.subtype === 'Line' || a.subtype === 'Polygon' || a.subtype === 'PolyLine') {
+      const shape = importShape(a, sidecar, box, rotation, color, contents, importedOriginal);
+      if (shape) imported.push(shape);
+      continue;
+    }
+    if (a.subtype === 'FreeText' && (sidecar?.it === 'FreeTextCallout' || (a as { it?: string }).it === 'FreeTextCallout')) {
+      const callout = importCallout(a, sidecar, box, rotation, color, contents, importedOriginal);
+      if (callout) imported.push(callout);
+      continue;
+    }
 
     const markupType = MARKUP_TYPE[a.subtype];
     if (markupType) {
@@ -223,6 +264,31 @@ export async function importPageAnnotations(page: PDFPageProxy): Promise<PageAnn
       continue;
     }
 
+    // A /Square WITH an explicit border style is a drawn RECTANGLE, not a
+    // highlight box: our own rect emit always writes /BS while our highlight
+    // emit never does — that asymmetry IS the discriminator, and it routes
+    // BS-carrying foreign Squares to the higher-fidelity import too (their
+    // stroke width/fill survive instead of degrading to the highlight look).
+    // Cloudy Squares stay untouched (a /BE rectangle isn't authorable here).
+    if (a.subtype === 'Square' && sidecar?.cloudy) continue;
+    if (a.subtype === 'Square' && sidecar?.strokeWidth !== undefined) {
+      const d = pdfRectToDisplay(a.rect, box, rotation);
+      if (d.w <= 0 || d.h <= 0) continue;
+      imported.push({
+        id: crypto.randomUUID(),
+        kind: 'shape',
+        shapeType: 'rect',
+        ...d,
+        color,
+        note: contents,
+        strokeWidth: sidecar.strokeWidth,
+        ...(sidecar.fillColor ? { fillColor: sidecar.fillColor } : {}),
+        ...(sidecar.opacity !== undefined && sidecar.opacity < 1 ? { opacity: sidecar.opacity } : {}),
+        importedOriginal,
+      });
+      continue;
+    }
+
     const { x, y, w, h } = pdfRectToDisplay(a.rect, box, rotation);
     if (kind === 'note') {
       // A /Text sticky note is a fixed-size icon at a point; some tools give it
@@ -237,4 +303,156 @@ export async function importPageAnnotations(page: PDFPageProxy): Promise<PageAnn
     imported.push({ id: crypto.randomUUID(), kind, x, y, w, h, color, note: contents, importedOriginal });
   }
   return imported;
+}
+
+type ViewBox = { x: number; y: number; width: number; height: number };
+
+/** Shared style block for a sidecar-backed shape import. The PDF default
+ * border width is 1 when /BS is absent — stored explicitly so the re-emit
+ * writes what the donor rendered as. */
+function sidecarStyle(s: RawAnnotStyle): Pick<PageAnnotation, 'strokeWidth' | 'fillColor' | 'opacity'> {
+  return {
+    strokeWidth: s.strokeWidth ?? 1,
+    ...(s.fillColor ? { fillColor: s.fillColor } : {}),
+    ...(s.opacity !== undefined && s.opacity < 1 ? { opacity: s.opacity } : {}),
+  };
+}
+
+function bboxOf(points: number[]): { x: number; y: number; w: number; h: number } | null {
+  const xs = points.filter((_, i) => i % 2 === 0);
+  const ys = points.filter((_, i) => i % 2 === 1);
+  if (xs.length === 0) return null;
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+/** /Circle /Line /Polygon /PolyLine → kind 'shape', sidecar-gated (the
+ * header's faithful-or-untouched rules). Returns null to leave the original
+ * exactly as it is. */
+function importShape(
+  a: RawAnnotation,
+  sidecar: RawAnnotStyle | undefined,
+  box: ViewBox,
+  rotation: number,
+  color: string,
+  contents: string | undefined,
+  importedOriginal: ImportedAnnotationFingerprint,
+): PageAnnotation | null {
+  if (!sidecar) return null;
+  // Dimensions belong to the measure class — never imported (their /Measure
+  // dict would be stripped by an edit-commit cycle).
+  if (sidecar.measure || sidecar.it === 'LineDimension' || sidecar.it === 'PolyLineDimension' || sidecar.it === 'PolygonDimension')
+    return null;
+  const base = {
+    id: crypto.randomUUID(),
+    kind: 'shape' as const,
+    color,
+    note: contents,
+    ...sidecarStyle(sidecar),
+    importedOriginal,
+  };
+  if (a.subtype === 'Circle') {
+    if (sidecar.cloudy) return null; // cloudy ellipse — not authorable
+    const d = pdfRectToDisplay(a.rect, box, rotation);
+    if (d.w <= 0 || d.h <= 0) return null;
+    return { ...base, shapeType: 'ellipse', ...d };
+  }
+  if (a.subtype === 'Line') {
+    const l = sidecar.l ?? (a.lineCoordinates ? Array.from(a.lineCoordinates) : undefined);
+    if (!l || l.length < 4) return null;
+    const endings = (sidecar.le ?? ['None', 'None']).slice(0, 2);
+    while (endings.length < 2) endings.push('None');
+    if (!endings.every((e) => AUTHORABLE_ENDINGS.has(e))) return null;
+    const p0 = pdfPointToDisplay(l[0], l[1], box, rotation);
+    const p1 = pdfPointToDisplay(l[2], l[3], box, rotation);
+    const points = [p0[0], p0[1], p1[0], p1[1]];
+    const bb = bboxOf(points)!;
+    const hasArrow = endings.some((e) => e !== 'None');
+    return {
+      ...base,
+      shapeType: hasArrow ? 'arrow' : 'line',
+      ...bb,
+      points,
+      ...(hasArrow ? { lineEndings: endings as [string, string] } : {}),
+    };
+  }
+  // Polygon / PolyLine — vertices from the sidecar (pdf.js's parse where
+  // present agrees; the sidecar is the one that always exists here).
+  const rawVerts = sidecar.vertices ?? (a.vertices ? Array.from(a.vertices) : undefined);
+  if (!rawVerts || rawVerts.length < 4) return null;
+  const points: number[] = [];
+  for (let i = 0; i + 1 < rawVerts.length; i += 2) {
+    const [u, v] = pdfPointToDisplay(rawVerts[i], rawVerts[i + 1], box, rotation);
+    points.push(u, v);
+  }
+  const bb = bboxOf(points);
+  if (!bb) return null;
+  if (a.subtype === 'Polygon') {
+    if (sidecar.cloudy)
+      return {
+        ...base,
+        shapeType: 'cloud',
+        ...bb,
+        points,
+        ...(sidecar.cloudIntensity !== undefined ? { cloudIntensity: sidecar.cloudIntensity } : {}),
+      };
+    return { ...base, shapeType: 'polygon', ...bb, points };
+  }
+  // PolyLine: endings must be authorable (arrowheaded polylines round-trip).
+  const endings = (sidecar.le ?? ['None', 'None']).slice(0, 2);
+  while (endings.length < 2) endings.push('None');
+  if (!endings.every((e) => AUTHORABLE_ENDINGS.has(e))) return null;
+  const hasEnd = endings.some((e) => e !== 'None');
+  return {
+    ...base,
+    shapeType: 'polyline',
+    ...bb,
+    points,
+    ...(hasEnd ? { lineEndings: endings as [string, string] } : {}),
+  };
+}
+
+/** /FreeText + /IT /FreeTextCallout → kind 'callout', sidecar-gated: the
+ * leader (/CL) and text-box insets (/RD) only exist raw. */
+function importCallout(
+  a: RawAnnotation,
+  sidecar: RawAnnotStyle | undefined,
+  box: ViewBox,
+  rotation: number,
+  color: string,
+  contents: string | undefined,
+  importedOriginal: ImportedAnnotationFingerprint,
+): PageAnnotation | null {
+  if (!sidecar?.cl || sidecar.cl.length < 4) return null;
+  if (sidecar.le && sidecar.le.length > 0 && !AUTHORABLE_ENDINGS.has(sidecar.le[0])) return null;
+  const full = pdfRectToDisplay(a.rect, box, rotation);
+  if (full.w <= 0 || full.h <= 0) return null;
+  // /RD insets carve the text box out of /Rect (in PDF space, before the
+  // display projection — project the inset rect like any other).
+  const [rl, rt, rr, rb] = sidecar.rd ?? [0, 0, 0, 0];
+  const textRectPdf: [number, number, number, number] = [
+    a.rect[0] + rl,
+    a.rect[1] + rb,
+    a.rect[2] - rr,
+    a.rect[3] - rt,
+  ];
+  const tb = pdfRectToDisplay(textRectPdf, box, rotation);
+  const points: number[] = [];
+  for (let i = 0; i + 1 < sidecar.cl.length; i += 2) {
+    const [u, v] = pdfPointToDisplay(sidecar.cl[i], sidecar.cl[i + 1], box, rotation);
+    points.push(u, v);
+  }
+  return {
+    id: crypto.randomUUID(),
+    kind: 'callout',
+    ...full,
+    calloutBox: [tb.x, tb.y, tb.w, tb.h],
+    points,
+    color,
+    note: contents,
+    strokeWidth: sidecar.strokeWidth ?? 1,
+    ...(sidecar.opacity !== undefined && sidecar.opacity < 1 ? { opacity: sidecar.opacity } : {}),
+    importedOriginal,
+  };
 }

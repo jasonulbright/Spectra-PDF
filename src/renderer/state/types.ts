@@ -37,7 +37,11 @@ export interface OpenFile {
 // docs/architecture/05-phase2c-annotations.md, "importing existing
 // annotations safely".
 export interface ImportedAnnotationFingerprint {
-  subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut' | 'Squiggly' | 'Text';
+  subtype:
+    | 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut'
+    | 'Squiggly' | 'Text'
+    // Rung 2 — the shape subtypes import as editable shapes/callouts.
+    | 'Circle' | 'Line' | 'Polygon' | 'PolyLine';
   rect: [number, number, number, number];
   contents?: string;
   // Color at import time — NOT used for the commit-time fingerprint match
@@ -65,6 +69,14 @@ export interface ImportedAnnotationFingerprint {
 // /Highlight + /QuadPoints, never be converted to a Square.
 export type TextMarkupType = 'highlight' | 'underline' | 'strikeout' | 'squiggly';
 
+// The drawing-shape figures (rung 2 — the king's comment-toolbar shapes and
+// the rival's shape set). rect/ellipse are box-defined (x/y/w/h alone);
+// line/arrow are two-point; polygon/polyline/cloud carry a vertex list in
+// `points` (open vertices — polygon/cloud close implicitly, UNLIKE measure's
+// stored-closed area ring). Each commits as its REAL subtype (/Square
+// /Circle /Line /Polygon /PolyLine) with an appearance stream.
+export type ShapeType = 'rect' | 'ellipse' | 'line' | 'arrow' | 'polygon' | 'polyline' | 'cloud';
+
 export interface PageAnnotation {
   id: string;
   // 'note' is a native /Text sticky note — a comment icon at a point, with its
@@ -72,7 +84,13 @@ export interface PageAnnotation {
   // 'measure' is a finished measurement (points-based like ink): commits as a
   // REAL /Line //PolyLine //Polygon carrying /IT + /Measure, so other tools
   // can re-measure it (the king's dimension-annotation class).
-  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note' | 'measure';
+  // 'shape' is a drawing figure (rung 2): shapeType picks the geometry, and
+  // it commits as that real subtype. 'callout' is a text box with a leader
+  // line (/FreeText + /IT /FreeTextCallout + /CL): x/y/w/h span the FULL
+  // extent (box + leader) so selection and manipulation cover everything;
+  // calloutBox is the text sub-rect and `points` the leader [tip, knee,
+  // attach], all in the same display-normalized page space.
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note' | 'measure' | 'shape' | 'callout';
   x: number;
   y: number;
   w: number;
@@ -99,6 +117,24 @@ export interface PageAnnotation {
   // embedded image instead of the bordered label; `note` still carries the
   // stamp's display name for the comment sidebar and /Contents.
   imageData?: string;
+  // shape only: which figure. See ShapeType.
+  shapeType?: ShapeType;
+  // line/arrow/polyline only: the /LE ending names at [start, end], limited
+  // to the authorable set (None, OpenArrow, ClosedArrow). Absent = plain.
+  // Imports carry the original's pair so a ClosedArrow round-trips closed.
+  lineEndings?: [string, string];
+  // cloud only: the /BE /I intensity (default 2); imports keep the donor's.
+  cloudIntensity?: number;
+  // shape/callout styling (+ ink honors strokeWidth/opacity too). strokeWidth
+  // is in PDF points (→ /BS /W); fillColor fills the interior (→ /IC + the
+  // AP's fill — absent = none); opacity 0..1 applies to the whole annotation
+  // (→ /CA). Defaults when absent: width 2, no fill, opaque.
+  strokeWidth?: number;
+  fillColor?: string;
+  opacity?: number;
+  // callout only: the text sub-rect [x,y,w,h] inside the full-extent x/y/w/h
+  // (→ /RD insets at commit). The leader lives in `points`.
+  calloutBox?: [number, number, number, number];
   // measure only: which dimension class (→ /Line //PolyLine //Polygon +
   // matching /IT), the ratio string (→ /Measure /R) and the reported-units-
   // per-PDF-point factor (→ the NumberFormat /C other tools re-measure with;
@@ -205,7 +241,14 @@ export type CanvasTool =
   // lands as an ordinary 'ink' annotation whose note carries the value.
   | 'measuredist'
   | 'measureperim'
-  | 'measurearea';
+  | 'measurearea'
+  // Drawing shapes (rung 2) — ONE mode; the secondary toolbar's shape picker
+  // (like stamp's preset picker) chooses WHICH figure the gesture draws:
+  // rect/ellipse band, line/arrow drag, polygon/polyline/cloud vertex clicks.
+  | 'shape'
+  // Callout (rung 2): drag the text box; the leader lands pointing at the
+  // drag origin, editable per-vertex afterward.
+  | 'callout';
 
 // The tab-strip model (Phase 4 M2, § 3.1): Home | Tools | one tab per open
 // document. A doc tab focuses that file and shows the document pane (at M2:
@@ -466,7 +509,19 @@ export type AppAction =
         h: number;
         points?: number[];
         note?: string; // measure only: the recomputed value
+        calloutBox?: [number, number, number, number]; // callout only
       }[];
+    }
+  // Shared style edit (rung 2): stroke width / fill / opacity across the
+  // selection, one undo step. The reducer applies each property only to
+  // kinds that carry it (shape/callout; ink takes width+opacity, no fill).
+  // `fillColor: null` clears the fill; undefined leaves it untouched.
+  | {
+      type: 'RESTYLE_ANNOTATIONS';
+      docId: string;
+      pageId: string;
+      annotationIds: string[];
+      style: { strokeWidth?: number; fillColor?: string | null; opacity?: number };
     }
   | {
       type: 'REORDER_ANNOTATIONS';

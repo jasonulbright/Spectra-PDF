@@ -20,6 +20,7 @@ import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
+import type { ShapeType } from '../../state/types';
 import type { MeasureScale } from '../../lib/measure';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import { displayWidthAt } from '../../canvas/layout';
@@ -87,6 +88,7 @@ export interface DocumentViewProps {
   tool: CanvasTool;
   annotationColor?: string;
   stampPreset?: StampPreset | null;
+  shapeType: ShapeType;
   measureScale?: MeasureScale;
   measureLeaveMarkup?: boolean;
   onMeasureResult?: (text: string) => void;
@@ -591,6 +593,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           tool={props.tool}
           annotationColor={props.annotationColor}
           stampPreset={props.stampPreset}
+          shapeType={props.shapeType}
           measureScale={props.measureScale}
           measureLeaveMarkup={props.measureLeaveMarkup}
           onMeasureResult={props.onMeasureResult}

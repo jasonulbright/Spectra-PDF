@@ -1,6 +1,7 @@
 import { getDocumentProxy } from './pdfDocCache';
 import { readManifest, partitionPages, stripExtension } from './pdfx-format';
 import { importPageAnnotations } from './annotation-import';
+import { readRawAnnotationStyles } from './annotation-raw-style';
 import {
   adoptAuthoredIdentity,
   nextGeneration,
@@ -28,13 +29,17 @@ export async function indexOpenFile(file: OpenFile): Promise<OpenDocument[]> {
   const doc = await getDocumentProxy(file.path, file.buffer);
   const manifest = await readManifest(doc);
   const partitions = partitionPages(manifest, doc.numPages, stripExtension(file.name));
+  // The raw-style sidecar (rung 2): pdf-lib reads the /Annots entries pdf.js
+  // hides (/IC /CA /BE /CL /RD /LE), so shape/callout imports are faithful.
+  // null (encrypted/unparseable) degrades those imports to untouched.
+  const rawStyles = await readRawAnnotationStyles(file.buffer);
   const dims: { width: number; height: number }[] = [];
   const annotations: PageAnnotation[][] = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const { width, height } = page.getViewport({ scale: 1 });
     dims.push({ width, height });
-    annotations.push(await importPageAnnotations(page));
+    annotations.push(await importPageAnnotations(page, rawStyles?.[i - 1]));
   }
   const generation = nextGeneration(file.path);
   const positional = partitions.map((partition, docIndex) => ({

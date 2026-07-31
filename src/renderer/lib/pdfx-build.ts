@@ -8,6 +8,7 @@ import { carryEmbeddedFiles } from './embedded-files-carry';
 import { carryDocumentCatalog } from './catalog-carry';
 import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
+import { cloudBumps } from './annotation-manipulation';
 
 function applyRotation(copied: import('pdf-lib').PDFPage, page: ExportPage): void {
   if (!page.rotation) return;
@@ -161,6 +162,19 @@ function apMatrixFor(rotation: number): number[] {
   }
 }
 
+// The cloud border's scalloped path (rung 2) as PDF operators — the bump
+// geometry itself is shared with the SVG renderer (cloudBumps) so the two
+// looks cannot drift.
+function cloudPath(verts: [number, number][], r: number): string {
+  const bumps = cloudBumps(verts, r);
+  if (bumps.length === 0) return '';
+  let out = `${bumps[0].s[0]} ${bumps[0].s[1]} m `;
+  for (const b of bumps) {
+    out += `${b.c1[0]} ${b.c1[1]} ${b.c2[0]} ${b.c2[1]} ${b.e[0]} ${b.e[1]} c `;
+  }
+  return out;
+}
+
 // Positively match and remove ORIGINAL annotation objects on the copied page
 // that correspond to imported annotations in `annotations` (which the caller
 // will re-append, possibly edited, right after this runs) — never a blanket
@@ -197,7 +211,11 @@ function stripImportedOriginals(
       continue; // not a dict (shouldn't happen for a valid /Annots entry) — leave it
     }
     const subtype = dict.lookupMaybe(PDFName.of('Subtype'), PDFName)?.decodeText();
-    const STRIPPABLE = new Set(['Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Text']);
+    const STRIPPABLE = new Set([
+      'Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Text',
+      // Rung 2 — the imported drawing shapes re-append like everything else.
+      'Circle', 'Line', 'Polygon', 'PolyLine',
+    ]);
     if (!subtype || !STRIPPABLE.has(subtype)) continue;
     const rectArr = dict.lookupMaybe(PDFName.of('Rect'), PDFArray);
     if (!rectArr || rectArr.size() !== 4) continue;
@@ -237,13 +255,26 @@ function addAnnotations(
   const rotation = ((copied.getRotation().angle % 360) + 360) % 360;
   for (const a of annotations) {
     const [rx0, ry0, rx1, ry1] = displayRectToPdf(a, { x, y, width, height }, rotation);
-    // Ink strokes (and measure lines) are legitimately zero-width/height (a straight horizontal
-    // or vertical line) — degenerate only for the box-shaped kinds.
-    if (a.kind !== 'ink' && a.kind !== 'measure' && (rx1 - rx0 <= 0 || ry1 - ry0 <= 0)) continue;
-    // Pad ink's rect/BBox past the stroke's half-width so a flat line's edge
-    // isn't sitting exactly on the BBox boundary (a Form XObject clips to
-    // BBox, and that's a knife-edge float-rounding risk at pad == half-width).
-    const pad = a.kind === 'ink' || a.kind === 'measure' ? 2 : 0;
+    // Ink strokes, measure lines, and the point-defined shapes are
+    // legitimately zero-width/height (a straight horizontal or vertical
+    // line) — degenerate only for the box-shaped kinds.
+    const pointsKind =
+      a.kind === 'ink' ||
+      a.kind === 'measure' ||
+      (a.kind === 'shape' && a.shapeType !== 'rect' && a.shapeType !== 'ellipse');
+    if (!pointsKind && (rx1 - rx0 <= 0 || ry1 - ry0 <= 0)) continue;
+    // Pad the points kinds' rect/BBox past the stroke's half-width so a flat
+    // line's edge isn't sitting exactly on the BBox boundary (a Form XObject
+    // clips to BBox, and that's a knife-edge float-rounding risk at pad ==
+    // half-width). Ink/measure keep their original 2 (byte-stable output);
+    // shapes pad enough to cover arrowheads and cloud bumps at any stroke
+    // width. Box shapes draw inset instead.
+    const pad =
+      a.kind === 'ink' || a.kind === 'measure'
+        ? 2
+        : pointsKind
+          ? Math.max(2, (a.strokeWidth ?? 2) * 5 + 6)
+          : 0;
     const x0 = rx0 - pad;
     const y0 = ry0 - pad;
     const x1 = rx1 + pad;
@@ -298,7 +329,9 @@ function addAnnotations(
       annot.set(PDFName.of('DA'), PDFHexString.fromText(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
     } else if (a.kind === 'ink') {
-      const strokeW = 2;
+      // Rung 2's shared style edit reaches ink too: width + opacity (default
+      // 2 / opaque — byte-identical to the pre-rung-2 output when unset).
+      const strokeW = a.strokeWidth ?? 2;
       const flatPdf: number[] = [];
       for (let i = 0; i < (a.points?.length ?? 0); i += 2) {
         const [px, py] = displayPointToPdf(a.points![i], a.points![i + 1], { x, y, width, height }, rotation);
@@ -329,6 +362,7 @@ function addAnnotations(
         BS: { W: strokeW },
         AP: { N: ap },
       });
+      if (a.opacity !== undefined && a.opacity < 1) annot.set(PDFName.of('CA'), context.obj(a.opacity));
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     } else if (a.kind === 'measure') {
       // A REAL dimension annotation (the king's class): /Line //PolyLine
@@ -399,6 +433,237 @@ function addAnnotations(
         );
       }
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
+    } else if (a.kind === 'shape') {
+      // Rung 2: a drawing shape commits as its REAL subtype with a faithful
+      // appearance. /BS is ALWAYS written — its presence is what tells the
+      // importer a /Square is a rectangle and not a highlight box.
+      const strokeW = a.strokeWidth ?? 2;
+      const fill = a.fillColor ? hexToRgb(a.fillColor) : null;
+      const paint = fill ? 'B' : 'S';
+      const setColors =
+        `${r} ${g} ${b} RG ${strokeW} w 1 J 1 j ` + (fill ? `${fill[0]} ${fill[1]} ${fill[2]} rg ` : '');
+      const flatPdf: number[] = [];
+      for (let i = 0; i < (a.points?.length ?? 0); i += 2) {
+        const [px, py] = displayPointToPdf(a.points![i], a.points![i + 1], { x, y, width, height }, rotation);
+        flatPdf.push(px, py);
+      }
+      const local = (i: number): [number, number] => [flatPdf[i] - x0, flatPdf[i + 1] - y0];
+      let content = setColors;
+      let subtype: string;
+      const extra: [string, unknown][] = [];
+      const endings = a.lineEndings ?? (a.shapeType === 'arrow' ? ['None', 'OpenArrow'] : null);
+      // An arrowhead at `at`, pointing away from `from`. Open = two strokes;
+      // Closed = a filled triangle (interior takes the fill colour, else the
+      // stroke colour — Acrobat's look).
+      const arrowhead = (at: [number, number], from: [number, number], style: string): string => {
+        if (style === 'None') return '';
+        const dx = at[0] - from[0];
+        const dy = at[1] - from[1];
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len;
+        const uy = dy / len;
+        const hl = 4 * strokeW + 6; // head length
+        const spread = 0.45;
+        const bx = at[0] - ux * hl;
+        const by = at[1] - uy * hl;
+        const p1: [number, number] = [bx - uy * hl * spread, by + ux * hl * spread];
+        const p2: [number, number] = [bx + uy * hl * spread, by - ux * hl * spread];
+        if (style === 'ClosedArrow') {
+          const headFill = fill ?? [r, g, b];
+          return (
+            `${headFill[0]} ${headFill[1]} ${headFill[2]} rg ` +
+            `${p1[0]} ${p1[1]} m ${at[0]} ${at[1]} l ${p2[0]} ${p2[1]} l h B `
+          );
+        }
+        return `${p1[0]} ${p1[1]} m ${at[0]} ${at[1]} l ${p2[0]} ${p2[1]} l S `;
+      };
+      if (a.shapeType === 'rect') {
+        subtype = 'Square';
+        const inset = strokeW / 2;
+        content += `${inset} ${inset} ${Math.max(0, w - strokeW)} ${Math.max(0, h - strokeW)} re ${paint}`;
+      } else if (a.shapeType === 'ellipse') {
+        subtype = 'Circle';
+        const k = 0.5523;
+        const cx = w / 2;
+        const cy = h / 2;
+        const rx = Math.max(0, (w - strokeW) / 2);
+        const ry = Math.max(0, (h - strokeW) / 2);
+        content +=
+          `${cx + rx} ${cy} m ` +
+          `${cx + rx} ${cy + ry * k} ${cx + rx * k} ${cy + ry} ${cx} ${cy + ry} c ` +
+          `${cx - rx * k} ${cy + ry} ${cx - rx} ${cy + ry * k} ${cx - rx} ${cy} c ` +
+          `${cx - rx} ${cy - ry * k} ${cx - rx * k} ${cy - ry} ${cx} ${cy - ry} c ` +
+          `${cx + rx * k} ${cy - ry} ${cx + rx} ${cy - ry * k} ${cx + rx} ${cy} c ` +
+          `h ${paint}`;
+      } else if (a.shapeType === 'line' || a.shapeType === 'arrow') {
+        subtype = 'Line';
+        const p0 = local(0);
+        const p1 = local(2);
+        content += `${p0[0]} ${p0[1]} m ${p1[0]} ${p1[1]} l S `;
+        if (endings) {
+          content += arrowhead(p0, p1, endings[0]);
+          content += arrowhead(p1, p0, endings[1]);
+          extra.push(['LE', context.obj(endings.map((e) => PDFName.of(e)))]);
+        }
+        extra.push(['L', context.obj(flatPdf.slice(0, 4))]);
+      } else if (a.shapeType === 'polyline') {
+        subtype = 'PolyLine';
+        for (let i = 0; i < flatPdf.length; i += 2) {
+          const [px, py] = local(i);
+          content += i === 0 ? `${px} ${py} m ` : `${px} ${py} l `;
+        }
+        content += 'S ';
+        if (endings) {
+          const n = flatPdf.length;
+          content += arrowhead(local(0), local(2), endings[0]);
+          content += arrowhead(local(n - 2), local(n - 4), endings[1]);
+          extra.push(['LE', context.obj(endings.map((e) => PDFName.of(e)))]);
+        }
+        extra.push(['Vertices', context.obj(flatPdf)]);
+      } else {
+        // polygon / cloud
+        subtype = 'Polygon';
+        if (a.shapeType === 'cloud') {
+          const intensity = a.cloudIntensity ?? 2;
+          content += cloudPath(
+            Array.from({ length: flatPdf.length / 2 }, (_, i) => local(i * 2)),
+            4 * intensity + 2,
+          );
+          content += paint === 'B' ? 'B' : 'S';
+          extra.push(['BE', context.obj({ S: 'C', I: intensity })]);
+          extra.push(['IT', PDFName.of('PolygonCloud')]);
+        } else {
+          for (let i = 0; i < flatPdf.length; i += 2) {
+            const [px, py] = local(i);
+            content += i === 0 ? `${px} ${py} m ` : `${px} ${py} l `;
+          }
+          content += `h ${paint}`;
+        }
+        extra.push(['Vertices', context.obj(flatPdf)]);
+      }
+      // Pad the BBox past the stroke (and any arrowheads/cloud bumps) — a
+      // Form XObject clips to BBox, the ink lesson at larger widths.
+      const pad = strokeW * 6 + 8;
+      const ap = context.register(
+        context.stream(content, {
+          Type: 'XObject',
+          Subtype: 'Form',
+          FormType: 1,
+          BBox: [-pad, -pad, w + pad, h + pad],
+        }),
+      );
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: subtype,
+        Rect: [x0, y0, x1, y1],
+        C: [r, g, b],
+        F: 4, // print
+        BS: { W: strokeW },
+        AP: { N: ap },
+      });
+      for (const [k2, v2] of extra) annot.set(PDFName.of(k2), v2 as Parameters<typeof annot.set>[1]);
+      if (fill) annot.set(PDFName.of('IC'), context.obj(fill));
+      if (a.opacity !== undefined && a.opacity < 1) annot.set(PDFName.of('CA'), context.obj(a.opacity));
+      if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
+    } else if (a.kind === 'callout') {
+      // Rung 2: /FreeText + /IT /FreeTextCallout + /CL. The whole appearance
+      // (text box + leader) is authored in DISPLAY space and counter-rotated
+      // by the AP matrix like freetext; /CL itself is page-space semantic
+      // data for other editors.
+      const strokeW = a.strokeWidth ?? 1;
+      const text = a.note ?? '';
+      const cb = a.calloutBox ?? [a.x, a.y, a.w, a.h];
+      // Display-normalized → AP-local (origin bottom-left, dispW×dispH).
+      const lx = (nx: number): number => (a.w > 0 ? ((nx - a.x) / a.w) * dispW : 0);
+      const ly = (ny: number): number => (a.h > 0 ? (1 - (ny - a.y) / a.h) * dispH : 0);
+      const bx0 = lx(cb[0]);
+      const by1 = ly(cb[1]); // top edge in AP space
+      const bw = a.w > 0 ? (cb[2] / a.w) * dispW : dispW;
+      const bh = a.h > 0 ? (cb[3] / a.h) * dispH : dispH;
+      const by0 = by1 - bh;
+      const fontRef = context.register(
+        context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica', Encoding: 'WinAnsiEncoding' }),
+      );
+      const leading = FREETEXT_FONT_SIZE * 1.2;
+      const pad = 3;
+      const lines = wrapLines(text, bw - pad * 2, FREETEXT_FONT_SIZE);
+      const tj = lines.map((l) => `(${escapePdfText(l)}) Tj T*`).join(' ');
+      // Leader in AP-local space, arrowhead at the tip (points[0]).
+      const pts = a.points ?? [];
+      let leader = '';
+      if (pts.length >= 4) {
+        leader += `${r} ${g} ${b} RG ${strokeW} w 1 J 1 j `;
+        for (let i = 0; i < pts.length; i += 2) {
+          const px = lx(pts[i]);
+          const py = ly(pts[i + 1]);
+          leader += i === 0 ? `${px} ${py} m ` : `${px} ${py} l `;
+        }
+        leader += 'S ';
+        const tip: [number, number] = [lx(pts[0]), ly(pts[1])];
+        const from: [number, number] = [lx(pts[2]), ly(pts[3])];
+        const dxv = tip[0] - from[0];
+        const dyv = tip[1] - from[1];
+        const len = Math.hypot(dxv, dyv) || 1;
+        const hl = 4 * strokeW + 6;
+        const ux = dxv / len;
+        const uy = dyv / len;
+        const bxp = tip[0] - ux * hl;
+        const byp = tip[1] - uy * hl;
+        leader += `${bxp - uy * hl * 0.45} ${byp + ux * hl * 0.45} m ${tip[0]} ${tip[1]} l ${bxp + uy * hl * 0.45} ${byp - ux * hl * 0.45} l S `;
+      }
+      const content =
+        leader +
+        `0.98 0.98 0.96 rg ${bx0} ${by0} ${bw} ${bh} re f ` +
+        `${r} ${g} ${b} RG ${Math.max(0.75, strokeW)} w ${bx0 + 0.5} ${by0 + 0.5} ${bw - 1} ${bh - 1} re S ` +
+        `BT /Helv ${FREETEXT_FONT_SIZE} Tf ${leading} TL ${r} ${g} ${b} rg ` +
+        `${bx0 + pad} ${by1 - FREETEXT_FONT_SIZE - pad} Td ${tj} ET`;
+      const apPad = strokeW * 6 + 8;
+      const ap = context.register(
+        context.stream(content, {
+          Type: 'XObject',
+          Subtype: 'Form',
+          FormType: 1,
+          BBox: [-apPad, -apPad, dispW + apPad, dispH + apPad],
+          Matrix: apMatrixFor(rotation),
+          Resources: { Font: { Helv: fontRef } },
+        }),
+      );
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: 'FreeText',
+        Rect: [x0, y0, x1, y1],
+        C: [r, g, b],
+        F: 4, // print
+        IT: 'FreeTextCallout',
+        BS: { W: strokeW },
+        AP: { N: ap },
+      });
+      // /CL in page space; /RD carves the text box out of /Rect. Both are in
+      // the PDF frame, so project the display geometry the standard way.
+      const clPdf: number[] = [];
+      for (let i = 0; i + 1 < pts.length; i += 2) {
+        const [px, py] = displayPointToPdf(pts[i], pts[i + 1], { x, y, width, height }, rotation);
+        clPdf.push(px, py);
+      }
+      if (clPdf.length >= 4) annot.set(PDFName.of('CL'), context.obj(clPdf));
+      const [tbx0, tby0, tbx1, tby1] = displayRectToPdf(
+        { x: cb[0], y: cb[1], w: cb[2], h: cb[3] },
+        { x, y, width, height },
+        rotation,
+      );
+      annot.set(
+        PDFName.of('RD'),
+        context.obj([
+          Math.max(0, tbx0 - x0),
+          Math.max(0, y1 - tby1),
+          Math.max(0, x1 - tbx1),
+          Math.max(0, tby0 - y0),
+        ]),
+      );
+      annot.set(PDFName.of('LE'), PDFName.of(a.lineEndings?.[0] ?? 'OpenArrow'));
+      if (a.opacity !== undefined && a.opacity < 1) annot.set(PDFName.of('CA'), context.obj(a.opacity));
+      annot.set(PDFName.of('DA'), PDFHexString.fromText(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
     } else if (a.kind === 'stamp' && a.imageData && stampImages.get(a.imageData)) {
       // A custom IMAGE stamp: the appearance draws the pre-embedded raster —
       // no border, no fill, the king's look. /Contents keeps the display name.
