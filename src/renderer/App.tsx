@@ -80,6 +80,7 @@ import { PropertiesDialog } from './components/PropertiesDialog';
 import { PrintDialog } from './components/PrintDialog';
 import { BatchOcrDialog } from './components/BatchOcrDialog';
 import { ScheduledRunsDialog } from './components/ScheduledRunsDialog';
+import { WatchedFoldersDialog } from './components/WatchedFoldersDialog';
 import { CreatePdfDialog } from './components/CreatePdfDialog';
 import { ExportImagesDialog } from './components/ExportImagesDialog';
 import { buildBlankPagePdf } from './lib/blank-page';
@@ -179,6 +180,7 @@ function AppContent(): React.ReactElement {
   const [showPrint, setShowPrint] = useState(false);
   const [showBatchOcr, setShowBatchOcr] = useState(false);
   const [showSchedules, setShowSchedules] = useState(false);
+  const [showWatchers, setShowWatchers] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
   const [showExportImages, setShowExportImages] = useState(false);
   const [showCustomizeToolbar, setShowCustomizeToolbar] = useState(false);
@@ -1383,6 +1385,7 @@ function AppContent(): React.ReactElement {
     openPrint: () => setShowPrint(true),
     openBatchOcr: () => setShowBatchOcr(true),
     openScheduledRuns: () => setShowSchedules(true),
+    openWatchedFolders: () => setShowWatchers(true),
     openCreatePdf: () => setShowCreatePdf(true),
     openExportImages: () => setShowExportImages(true),
     openPresentation: () => {
@@ -1427,6 +1430,7 @@ function AppContent(): React.ReactElement {
       openPrint: () => h.current.openPrint(),
       openBatchOcr: () => h.current.openBatchOcr(),
       openScheduledRuns: () => h.current.openScheduledRuns(),
+      openWatchedFolders: () => h.current.openWatchedFolders(),
       openCreatePdf: () => h.current.openCreatePdf(),
       openExportImages: () => h.current.openExportImages(),
       openPresentation: () => h.current.openPresentation(),
@@ -1789,6 +1793,7 @@ function AppContent(): React.ReactElement {
       {showPrint && <PrintDialog onClose={() => setShowPrint(false)} />}
       {showBatchOcr && <BatchOcrDialog onClose={() => setShowBatchOcr(false)} />}
       {showSchedules && <ScheduledRunsDialog onClose={() => setShowSchedules(false)} />}
+      {showWatchers && <WatchedFoldersDialog onClose={() => setShowWatchers(false)} />}
       {showCreatePdf && (
         <CreatePdfDialog
           onClose={() => setShowCreatePdf(false)}

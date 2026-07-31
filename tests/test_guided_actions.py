@@ -232,3 +232,57 @@ class TestRunActionInPlace:
             )
         with pytest.raises(ValueError, match="destination folder is required"):
             run_action(source=str(tree), dest="", steps=[{"op": "strip_metadata"}])
+
+
+class TestRunActionMoved:
+    """The watched-folder shape: processed originals leave the intake."""
+
+    def test_processed_originals_move_out(self, tree, tmp_path):
+        dest = tmp_path / "out"
+        done = tmp_path / "done"
+        report = run_action(
+            source=str(tree),
+            dest=str(dest),
+            steps=[{"op": "strip_metadata"}],
+            move_processed_root=str(done),
+        )
+        assert report["ok"] == 2
+        moved = [r.get("moved_to") for r in report["results"] if r["status"] == "ok"]
+        assert all(moved)
+        # Intake emptied of processed PDFs; structure preserved in Done.
+        assert not (tree / "a.pdf").exists()
+        assert not (tree / "sub" / "b.pdf").exists()
+        assert (done / "a.pdf").is_file()
+        assert (done / "sub" / "b.pdf").is_file()
+        assert (dest / "a.pdf").is_file()
+        # The decoy non-PDF never moves.
+        assert (tree / "notes.txt").is_file()
+
+    def test_failed_file_stays_in_the_intake(self, tree, tmp_path):
+        broken = tree / "broken.pdf"
+        broken.write_bytes(b"%PDF-not really")
+        report = run_action(
+            source=str(tree),
+            dest=str(tmp_path / "out"),
+            steps=[{"op": "strip_metadata"}],
+            move_processed_root=str(tmp_path / "done"),
+        )
+        assert report["failed"] == 1
+        assert broken.is_file()  # still in the intake for the next attempt
+
+    def test_moved_refusals(self, tree, tmp_path):
+        with pytest.raises(ValueError, match="outside the source"):
+            run_action(
+                source=str(tree),
+                dest=str(tmp_path / "out"),
+                steps=[{"op": "strip_metadata"}],
+                move_processed_root=str(tree / "done"),
+            )
+        with pytest.raises(ValueError, match="cannot also move"):
+            run_action(
+                source=str(tree),
+                dest="",
+                steps=[{"op": "strip_metadata"}],
+                in_place=True,
+                move_processed_root=str(tmp_path / "done"),
+            )
