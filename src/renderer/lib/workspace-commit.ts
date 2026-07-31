@@ -142,9 +142,12 @@ export function planCommit(
 }
 
 export async function buildCommitBytes(plan: CommitFilePlan): Promise<Uint8Array> {
+  // plan.path doubles as the OWN sourceKey (ExportPage.sourceKey is the
+  // sourceDocId, which IS the path for the file's own pages) — the identity
+  // the catalog carry keys on.
   return plan.useManifest
-    ? buildPdfx(plan.documents, plan.title, plan.ownBytes)
-    : buildPdf(plan.documents[0].pages, plan.ownBytes);
+    ? buildPdfx(plan.documents, plan.title, plan.ownBytes, plan.path)
+    : buildPdf(plan.documents[0].pages, plan.ownBytes, plan.path);
 }
 
 interface CommitDeps {

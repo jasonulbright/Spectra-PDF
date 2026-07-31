@@ -5,6 +5,9 @@ import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from 
 import { carryAcroForm, prepareSourceForms } from './acroform-carry';
 import type { FormContribution } from './acroform-carry';
 import { carryEmbeddedFiles } from './embedded-files-carry';
+import { carryDocumentCatalog } from './catalog-carry';
+import type { CarriedSourcePages } from './catalog-carry';
+import { carryStructTree } from './struct-carry';
 
 function applyRotation(copied: import('pdf-lib').PDFPage, page: ExportPage): void {
   if (!page.rotation) return;
@@ -560,7 +563,11 @@ async function embedStampImages(
 // added in output order, and carryAcroForm rebuilds the output /AcroForm
 // from the copied widgets — without it a rebuild destroys every form field
 // (see lib/acroform-carry.ts).
-async function assemblePages(output: PDFDocument, pages: ExportPage[]): Promise<void> {
+async function assemblePages(
+  output: PDFDocument,
+  pages: ExportPage[],
+  ownSourceKey?: string,
+): Promise<void> {
   const groups = new Map<string, { bytes: Uint8Array; indices: number[] }>();
   for (const page of pages) {
     let g = groups.get(page.sourceKey);
@@ -587,6 +594,9 @@ async function assemblePages(output: PDFDocument, pages: ExportPage[]): Promise<
   }
   const stampImages = await embedStampImages(output, pages);
   const used = new Set<PDFPage>();
+  // Which source page landed at which output page — the reference-identity
+  // channel every catalog/struct remap depends on (catalog-carry.ts).
+  const pairsByKey = new Map<string, { srcIndex: number; outPage: PDFPage }[]>();
   for (const page of pages) {
     const src = sources.get(page.sourceKey)!;
     let copied = src.copiedByIndex.get(page.pageIndex);
@@ -600,16 +610,46 @@ async function assemblePages(output: PDFDocument, pages: ExportPage[]): Promise<
     applyPageExtras(copied, page, output, stampImages);
     output.addPage(copied);
     src.contribution.copiedPages.push(copied);
+    let pairs = pairsByKey.get(page.sourceKey);
+    if (!pairs) {
+      pairs = [];
+      pairsByKey.set(page.sourceKey, pairs);
+    }
+    pairs.push({ srcIndex: page.pageIndex, outPage: copied });
   }
   carryAcroForm(output, contributions);
+  // The structure tree (P19): EVERY source contributes its surviving tags —
+  // a donor page's MCIDs arrive in its copied stream, so its subtree must
+  // come along (the AcroForm precedent). Also sweeps the stale
+  // /StructParents keys page copies drag in, tagged or not.
+  const carriedSources: CarriedSourcePages[] = [...sources.entries()].map(([key, s]) => ({
+    doc: s.doc,
+    pairs: pairsByKey.get(key) ?? [],
+  }));
+  carryStructTree(output, carriedSources);
+  // Document-level catalog state (/Lang, /ViewerPreferences, /Outlines,
+  // /PageLabels, /OCProperties) carries from the OWN source only — a page
+  // inserted from a donor must not import the donor document's bookmarks or
+  // layer config (the embedded-files rule).
+  if (ownSourceKey) {
+    const own = sources.get(ownSourceKey);
+    const ownPairs = pairsByKey.get(ownSourceKey);
+    if (own && ownPairs && ownPairs.length > 0) {
+      carryDocumentCatalog(output, { doc: own.doc, pairs: ownPairs });
+    }
+  }
 }
 
-export async function buildPdf(pages: ExportPage[], ownBytes?: Uint8Array): Promise<Uint8Array> {
+export async function buildPdf(
+  pages: ExportPage[],
+  ownBytes?: Uint8Array,
+  ownSourceKey?: string,
+): Promise<Uint8Array> {
   // A zero-page PDF is invalid; pdf-lib would happily save one. buildPdfx
   // skips empty documents for the same reason.
   if (pages.length === 0) throw new Error('buildPdf: cannot build a PDF with no pages');
   const output = await PDFDocument.create();
-  await assemblePages(output, pages);
+  await assemblePages(output, pages, ownSourceKey);
   // Document-level catalog trees (/Names /EmbeddedFiles, /Collection) are not
   // page subtrees — without this carry a committed page edit deleted every
   // attachment (embedded-files-carry.ts).
@@ -622,12 +662,13 @@ export async function buildPdfx(
   documents: ExportDocument[],
   title: string,
   ownBytes?: Uint8Array,
+  ownSourceKey?: string,
 ): Promise<Uint8Array> {
   const output = await PDFDocument.create();
   const manifest: PdfxManifest = { pdfx: PDFX_VERSION, title, documents: [] };
 
   const nonEmpty = documents.filter((doc) => doc.pages.length > 0);
-  await assemblePages(output, nonEmpty.flatMap((doc) => doc.pages));
+  await assemblePages(output, nonEmpty.flatMap((doc) => doc.pages), ownSourceKey);
   // Carry BEFORE the manifest attach: pdf-lib's save-time embed appends to an
   // existing tree, so the manifest and carried members coexist (pinned by
   // embedded-files-carry.test.ts's pdfx leg).
