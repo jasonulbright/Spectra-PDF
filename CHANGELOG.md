@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.0.1 — Comments you can move, shapes you can draw, measurements you can trust
+
+Annotations grow up: everything you place can now be moved, resized, and
+arranged; a full set of drawing shapes joins the Comment toolbar; measuring
+gains real-world calibration; and comments travel between tools as XFDF.
+
+### Arrange your comments
+- **Move and resize any comment.** Drag a comment to move it, grab a corner
+  to resize — with the opposite corner anchored, and Shift locking the
+  aspect. Text markups stay anchored to their text, as they should.
+- **Select several at once.** Ctrl-click adds to the selection; Ctrl-drag
+  sweeps a rubber band over everything it touches. Delete removes them all
+  in one step; arrow keys nudge by a point (ten with Shift).
+- **Align, distribute, and match sizes** from the properties bar — left,
+  center, right, top, and bottom alignment, even gaps, and size matching to
+  the first-selected comment.
+- **Front and back.** Bring a comment forward or send it behind its
+  neighbours; the order carries into the saved file.
+
+### Draw on the page
+- **Seven shapes.** Rectangle, ellipse, line, arrow, polygon, polyline, and
+  the review cloud — drawn with the gestures you expect (drag a box, drag a
+  line, click the corners) and saved as the real PDF shapes other tools
+  recognize and edit.
+- **Callouts.** A text box with an arrowed leader pointing at what you mean;
+  the text opens for typing the moment you draw it.
+- **Style them.** Stroke width, fill colour, and opacity — for one shape or
+  a whole selection at once, and pen strokes take width and opacity too.
+- **Edit by the point.** Lines, arrows, polygons, and callout leaders show
+  draggable vertex handles when selected.
+- **Faithful exchange.** Shapes drawn in other tools open as editable
+  shapes here — including cloud borders, fills, stroke widths, opacity, and
+  arrowheads — and anything this app can't represent faithfully is left
+  exactly as it was rather than quietly simplified.
+
+### Measure with confidence
+- **Calibrate against a known length.** Drag along something whose size you
+  know — a scale bar, a dimension line — type its real value, and every
+  measurement that follows uses the ratio.
+- **Recalibrate any measurement.** Right-click a placed measurement to set
+  the document scale from it, or to correct that one measurement's recorded
+  value — undoable, geometry untouched.
+
+### Comments that travel
+- **XFDF import and export.** Send every comment to the interchange format
+  reviewers share, and bring a colleague's comments in — geometry, colours,
+  authors, dates, and the review thread itself: replies stay attached to
+  what they answer, and Accepted/Rejected/Completed statuses survive the
+  round trip. In the Comments panel, and on the command line as
+  `xfdf-export` / `xfdf-import`.
+
 ## 1.0.0 — A new name: Spectra PDF
 
 The product formerly released as "Open PDF Studio" continues here as
