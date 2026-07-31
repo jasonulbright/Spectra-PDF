@@ -266,6 +266,15 @@ export interface PrinterList {
 
 export const app = {
   getGsPath: () => invoke<string>('get_gs_path'),
+  /** File ▸ Send To ▸ Email (owner-ruled in 2026-07-31). Stage a copy of the
+   * working file under the document's real name (mail clients may read the
+   * attachment lazily — the live working copy would race later edits)… */
+  stageSendCopy: (path: string, displayName: string) =>
+    invoke<string>('stage_send_copy', { path, displayName }),
+  /** …then hand it to the default desktop mail client via MAPI. Resolves as
+   * soon as the compose window is up (or with a fast, named refusal — e.g.
+   * no mail client registered). Never sends anything by itself. */
+  sendByEmail: (stagedPath: string) => invoke<void>('send_by_email', { stagedPath }),
   /** The vendored native Tesseract. One recognizer for every surface. */
   getTesseractPath: () => invoke<string>('get_tesseract_path'),
   /** The bundled (or system-fallback) LibreOffice soffice path for O1 export.

@@ -1,6 +1,7 @@
 pub mod cli;
 mod commands;
 mod scheduler;
+mod send_to;
 mod engine;
 mod printers;
 
@@ -128,6 +129,8 @@ pub fn run() {
             commands::get_batch_log_dir,
             commands::prune_batch_logs,
             commands::open_batch_log_folder,
+            send_to::stage_send_copy,
+            send_to::send_by_email,
             scheduler::create_scheduled_run,
             scheduler::list_scheduled_runs,
             scheduler::delete_scheduled_run,

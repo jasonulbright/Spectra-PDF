@@ -198,11 +198,12 @@ function AppContent(): React.ReactElement {
   const { call, openFiles, saveFile } = useEngine();
   useWorkspaceIndexer();
 
-  // Confirm dialog state — 3-choice unsaved (Save / Don't Save / Cancel) or
-  // 2-choice proceed (Continue / Cancel), one dialog, one result type.
+  // Confirm dialog state — 3-choice unsaved (Save / Don't Save / Cancel),
+  // 2-choice proceed (Continue / Cancel), or 1-button notice (OK); one
+  // dialog, one result type.
   const [confirmState, setConfirmState] = useState<{
     message: string;
-    kind?: 'unsaved' | 'proceed';
+    kind?: 'unsaved' | 'proceed' | 'notice';
     title?: string;
     resolve: (result: ConfirmResult) => void;
   } | null>(null);
@@ -237,6 +238,13 @@ function AppContent(): React.ReactElement {
   const showProceedConfirm = useCallback((title: string, message: string): Promise<boolean> => {
     return new Promise((resolve) => {
       setConfirmState({ message, kind: 'proceed', title, resolve: (r) => resolve(r === 'save') });
+    });
+  }, []);
+
+  /** One-button OK notice — errors and outcomes with no choice to make. */
+  const showNotice = useCallback((title: string, message: string): Promise<void> => {
+    return new Promise((resolve) => {
+      setConfirmState({ message, kind: 'notice', title, resolve: () => resolve() });
     });
   }, []);
 
@@ -1237,6 +1245,24 @@ function AppContent(): React.ReactElement {
     dispatch({ type: 'MARK_SAVED', path: activeFile.path });
   }, [activeFile, saveFile, dispatch, commitOrAbort]);
 
+  // File ▸ Send To ▸ Email (owner-ruled in 2026-07-31 — a local OS
+  // integration, distinct from the excluded cloud-share cluster). Flush
+  // pending page edits, stage a copy of the CURRENT working state under the
+  // document's real name, and hand it to the default desktop mail client via
+  // MAPI. The compose window is the mail client's own — nothing here sends
+  // anything by itself; failures (chiefly: no mail client registered) come
+  // back fast and named, and are shown rather than swallowed.
+  const handleSendToEmail = useCallback(async () => {
+    if (!activeFile) return;
+    if (!(await commitOrAbort())) return;
+    try {
+      const staged = await app.stageSendCopy(activeFile.workingPath, activeFile.name);
+      await app.sendByEmail(staged);
+    } catch (e: unknown) {
+      await showNotice('Send by Email', e instanceof Error ? e.message : String(e));
+    }
+  }, [activeFile, commitOrAbort, showNotice]);
+
   // O1: export the active document to an editable Office / web format via the
   // bundled LibreOffice. The engine `call` is commit-gated, so pending page
   // edits flush first and the export reflects what the user sees; the output is
@@ -1345,6 +1371,7 @@ function AppContent(): React.ReactElement {
     },
     save: handleSave,
     saveAs: handleSaveAs,
+    sendToEmail: handleSendToEmail,
     exportDocument: handleExportDocument,
     closeFile: handleCloseFile,
     closeAll: handleCloseAll,
@@ -1388,6 +1415,7 @@ function AppContent(): React.ReactElement {
       openPathAtPage: (path, pageNumber) => h.current.openPathAtPage(path, pageNumber),
       save: () => h.current.save(),
       saveAs: () => h.current.saveAs(),
+      sendToEmail: () => h.current.sendToEmail(),
       exportDocument: (format) => h.current.exportDocument(format),
       closeFile: (path) => h.current.closeFile(path),
       closeAll: () => h.current.closeAll(),

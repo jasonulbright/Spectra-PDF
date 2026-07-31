@@ -9,7 +9,7 @@
  * grant any capability the renderer doesn't already have. Treat it as a
  * scriptable remote control over the public IPC surface.
  */
-import { file, engine } from './lib/tauri-bridge';
+import { app, file, engine } from './lib/tauri-bridge';
 import { invokeCommand as invokeRegisteredCommand } from './commands/context';
 import { COMMANDS, type CommandId } from './commands/registry';
 import type { FocusedTab } from './state/types';
@@ -543,6 +543,11 @@ export interface TestHarness {
   openByPaths: (paths: string[]) => Promise<void>;
   /** Save the active working copy to a known destination, no dialog. */
   saveActiveAs: (destPath: string) => Promise<void>;
+  /** Send To ▸ Email's STAGING half: copy the active working file into the
+   * send-to scratch under its real name and return the staged path. The
+   * MAPI launch half is deliberately not bridged — it opens a real compose
+   * window on boxes with a mail client. */
+  sendToEmailStage: () => Promise<string>;
   /** O1: export the active document to `destPath` in `format` via the engine
    *  (bypasses the native save dialog). Returns the engine result. */
   exportActiveAs: (destPath: string, format: string) => Promise<unknown>;
@@ -1048,6 +1053,20 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         await file.saveAs(snap.activeFile.workingPath, destPath);
       } catch (err) {
         captureError('saveActiveAs', err);
+        throw err;
+      }
+    },
+    sendToEmailStage: async () => {
+      const snap = deps.getStateSnapshot();
+      if (!snap.activeFile) {
+        const msg = 'sendToEmailStage: no active file';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await app.stageSendCopy(snap.activeFile.workingPath, snap.activeFile.name);
+      } catch (err) {
+        captureError('sendToEmailStage', err);
         throw err;
       }
     },
