@@ -51,7 +51,7 @@ import { HeaderLayer } from './HeaderLayer';
 import { AddDocGhost, GhostRow } from './DropGhost';
 import { deriveDropGhosts } from './ghost-size';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
-import type { PageAnnotation, PdfBuffer } from '../../state/types';
+import type { PageAnnotation, PdfBuffer, ShapeType } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { SecondaryToolbar } from './SecondaryToolbar';
 import { DEFAULT_MEASURE_SCALE, type MeasureScale } from '../../lib/measure';
@@ -454,6 +454,8 @@ export function WorkspaceCanvasView({
   // tool creates the next annotation, across tool switches.
   const [toolColor, setToolColor] = useState<string | null>(null);
   const [stampPreset, setStampPreset] = useState<StampPreset | null>(null);
+  // Shape mode's figure picker (rung 2) — the stamp-preset pattern.
+  const [shapeType, setShapeType] = useState<ShapeType>('rect');
   // Measure (parity map § 2): the scale ratio the readouts apply, whether a
   // finished measurement lands as an ink markup, and the latest value shown
   // in the secondary toolbar. Session-scoped like toolColor.
@@ -1321,6 +1323,19 @@ export function WorkspaceCanvasView({
         pageId: resolvedAnnots.pageId,
         annotationIds: resolvedAnnots.annotations.map((a) => a.id),
         color,
+      });
+    },
+    [resolvedAnnots, dispatch],
+  );
+  const onRestyleSelection = useCallback(
+    (style: { strokeWidth?: number; fillColor?: string | null; opacity?: number }) => {
+      if (!resolvedAnnots) return;
+      dispatch({
+        type: 'RESTYLE_ANNOTATIONS',
+        docId: resolvedAnnots.docId,
+        pageId: resolvedAnnots.pageId,
+        annotationIds: resolvedAnnots.annotations.map((a) => a.id),
+        style,
       });
     },
     [resolvedAnnots, dispatch],
@@ -3409,6 +3424,8 @@ export function WorkspaceCanvasView({
         onSetToolColor={setToolColor}
         stampPreset={stampPreset}
         onSetStampPreset={setStampPreset}
+        shapeType={shapeType}
+        onSetShapeType={setShapeType}
         measureScale={measureScale}
         onSetMeasureScale={setMeasureScale}
         measureLeaveMarkup={measureLeaveMarkup}
@@ -3460,6 +3477,7 @@ export function WorkspaceCanvasView({
           onReorder={onReorderSelection}
           onRecolorGroup={onRecolorSelection}
           onRemoveGroup={onRemoveSelection}
+          onRestyle={onRestyleSelection}
           onClose={() => dispatch({ type: 'UI_TOGGLE_PROPERTIES_BAR' })}
         />
       )}
@@ -3488,6 +3506,7 @@ export function WorkspaceCanvasView({
             tool,
             annotationColor: toolColor ?? undefined,
             stampPreset,
+            shapeType,
             measureScale,
             measureLeaveMarkup,
             onMeasureResult: setMeasureResult,
@@ -3723,6 +3742,7 @@ export function WorkspaceCanvasView({
           tool={tool}
           annotationColor={toolColor ?? undefined}
           stampPreset={stampPreset}
+          shapeType={shapeType}
           measureScale={measureScale}
           measureLeaveMarkup={measureLeaveMarkup}
           onMeasureResult={setMeasureResult}

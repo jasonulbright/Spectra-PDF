@@ -1669,6 +1669,10 @@ function AppContent(): React.ReactElement {
           h: a.h,
           color: a.color,
           note: a.note,
+          shapeType: a.shapeType,
+          strokeWidth: a.strokeWidth,
+          fillColor: a.fillColor,
+          opacity: a.opacity,
         }));
       },
       dispatchAddAnnotation: (docId, pageId, annotation) =>

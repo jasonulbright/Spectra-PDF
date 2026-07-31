@@ -98,6 +98,7 @@ export function cycledTab(state: AppState, delta: 1 | -1): FocusedTab {
 const CANVAS_TOOLS = [
   'select', 'hand', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
   'formfields', 'edit', 'addtext', 'addimage', 'measuredist', 'measureperim', 'measurearea',
+  'shape', 'callout',
 ] as const;
 
 export const TOOL_TITLES: Record<CanvasTool, string> = {
@@ -106,6 +107,7 @@ export const TOOL_TITLES: Record<CanvasTool, string> = {
   formfields: 'Add Field', edit: 'Select Image', addtext: 'Add Text',
   addimage: 'Add Image',
   measuredist: 'Distance', measureperim: 'Perimeter', measurearea: 'Area',
+  shape: 'Shape', callout: 'Callout',
 };
 
 // CANVAS_TOOLS must be a literal tuple (COMMAND_IDS builds `tools.${t}` from

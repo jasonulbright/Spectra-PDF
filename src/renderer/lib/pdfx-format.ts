@@ -30,14 +30,14 @@ export interface PagePartition {
 // orientation); the builder maps it into PDF user space. Spectra PDF extension —
 // absent keeps PDFx-identical output.
 export interface ExportAnnotation {
-  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note' | 'measure';
+  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note' | 'measure' | 'shape' | 'callout';
   x: number;
   y: number;
   w: number;
   h: number;
   color: string; // #rrggbb
   note?: string;
-  points?: number[]; // ink/measure: flat [x0,y0,x1,y1,...] in the same space as x/y/w/h
+  points?: number[]; // ink/measure/shape/callout-leader: flat [x0,y0,...] in x/y/w/h space
   imageData?: string; // stamp only: custom image stamp's data URL (the AP draws it)
   markupType?: 'highlight' | 'underline' | 'strikeout' | 'squiggly'; // textmarkup only
   quads?: number[]; // textmarkup only: flat [x0,y0,x1,y1,...] per quad, in x/y/w/h space
@@ -46,13 +46,23 @@ export interface ExportAnnotation {
   measureRatio?: string;
   measureUnitsPerPt?: number;
   measureUnit?: string;
+  // shape/callout (rung 2) — see PageAnnotation's field comments.
+  shapeType?: 'rect' | 'ellipse' | 'line' | 'arrow' | 'polygon' | 'polyline' | 'cloud';
+  strokeWidth?: number;
+  fillColor?: string;
+  opacity?: number;
+  calloutBox?: [number, number, number, number];
+  lineEndings?: [string, string];
+  cloudIntensity?: number;
   // Present for imported annotations only — see PageAnnotation.importedOriginal
   // and the "importing existing annotations safely" design note. The builder
   // uses this to positively match and strip the ORIGINAL object from the
   // copied page before re-appending this (possibly edited) annotation, so
   // imported-but-unedited annotations don't end up duplicated in the output.
   importedOriginal?: {
-    subtype: 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut' | 'Squiggly' | 'Text';
+    subtype:
+      | 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut'
+      | 'Squiggly' | 'Text' | 'Circle' | 'Line' | 'Polygon' | 'PolyLine';
     rect: [number, number, number, number];
     contents?: string;
   };
