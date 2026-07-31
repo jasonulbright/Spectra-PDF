@@ -1657,6 +1657,20 @@ function AppContent(): React.ReactElement {
           .filter((d) => d.path === stateRef.current.activeFileId)
           .flatMap((d) => d.pages.map((p) => ({ id: p.id, width: p.width, height: p.height }))),
       getFirstPageAnnotation: () => harnessFirstAnnotationRef.current(),
+      getPageAnnotations: (docId, pageId) => {
+        const d = stateRef.current.workspace.documents.find((x) => x.id === docId);
+        const p = d?.pages.find((x) => x.id === pageId);
+        return (p?.annotations ?? []).map((a) => ({
+          id: a.id,
+          kind: a.kind,
+          x: a.x,
+          y: a.y,
+          w: a.w,
+          h: a.h,
+          color: a.color,
+          note: a.note,
+        }));
+      },
       dispatchAddAnnotation: (docId, pageId, annotation) =>
         dispatch({ type: 'ADD_ANNOTATION', docId, pageId, annotation }),
       dispatchRecolorAnnotation: (docId, pageId, annotationId, color) =>

@@ -102,3 +102,19 @@ export function formatArea(areaPts2: number, scale: MeasureScale): string {
   const k = reportedPerPt(scale);
   return `${trim(areaPts2 * k * k)} sq ${scale.toUnit}`;
 }
+
+// ── Recompute against a CAPTURED factor ──────────────────────────────────
+// A finished measurement stores its /C units-per-point + unit at creation;
+// resizing it recomputes the reported value from THOSE, never from the live
+// toolbar scale (which may have changed since). Same trim/format as above,
+// one implementation of the phrasing.
+
+/** "3.42 ft" from a captured units-per-point factor. */
+export function formatDistanceWithFactor(lengthPts: number, unitsPerPt: number, unit: string): string {
+  return `${trim(lengthPts * unitsPerPt)} ${unit}`;
+}
+
+/** "12.34 sq ft" from a captured units-per-point factor. */
+export function formatAreaWithFactor(areaPts2: number, unitsPerPt: number, unit: string): string {
+  return `${trim(areaPts2 * unitsPerPt * unitsPerPt)} sq ${unit}`;
+}

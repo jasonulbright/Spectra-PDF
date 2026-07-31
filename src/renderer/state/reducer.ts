@@ -1063,6 +1063,168 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }));
       return applyPageEdit(state, documents, [doc.path]);
     }
+    case 'TRANSFORM_ANNOTATIONS': {
+      // Geometry edits, batch-shaped (one gesture = one undo step). Kind
+      // rules live HERE: 'textmarkup' never transforms (quads anchor to
+      // text); 'note' translates but keeps its icon size; everything else
+      // takes the caller's rect (and points, for the path kinds). Entries
+      // that don't resolve are skipped, never guessed at.
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      if (!doc || action.edits.length === 0) return state;
+      const byPage = new Map<string, typeof action.edits>();
+      for (const e of action.edits) {
+        const list = byPage.get(e.pageId);
+        if (list) list.push(e);
+        else byPage.set(e.pageId, [e]);
+      }
+      let changed = false;
+      const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
+        ...d,
+        pages: d.pages.map((p) => {
+          const edits = byPage.get(p.id);
+          if (!edits || !p.annotations?.length) return p;
+          let pageChanged = false;
+          const annotations = p.annotations.map((a) => {
+            const e = edits.find((x) => x.annotationId === a.id);
+            if (!e || a.kind === 'textmarkup') return a;
+            const next = {
+              ...a,
+              x: e.x,
+              y: e.y,
+              w: a.kind === 'note' ? a.w : e.w,
+              h: a.kind === 'note' ? a.h : e.h,
+              ...(e.points && a.points ? { points: e.points } : {}),
+              ...(e.note !== undefined && a.kind === 'measure' ? { note: e.note } : {}),
+              // A moved IMPORT must render as the overlay's body from now on
+              // (see the field's comment in types.ts).
+              ...(a.importedOriginal ? { geometryDiverged: true } : {}),
+            };
+            if (
+              next.x === a.x &&
+              next.y === a.y &&
+              next.w === a.w &&
+              next.h === a.h &&
+              next.points === a.points &&
+              next.note === a.note
+            )
+              return a;
+            pageChanged = true;
+            return next;
+          });
+          if (!pageChanged) return p;
+          changed = true;
+          return { ...p, annotations };
+        }),
+      }));
+      if (!changed) return state;
+      return applyPageEdit(state, documents, [doc.path]);
+    }
+    case 'REORDER_ANNOTATIONS': {
+      // Z-order within the page's annotation array — array order IS both the
+      // overlay's paint order and the /Annots emit order at commit. The
+      // selected group keeps its internal order; 'forward'/'backward' step
+      // over one unselected neighbour, 'front'/'back' go to the ends.
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      const page = doc?.pages.find((p) => p.id === action.pageId);
+      const all = page?.annotations;
+      if (!doc || !page || !all?.length) return state;
+      const chosen = new Set(action.annotationIds);
+      const selected = all.filter((a) => chosen.has(a.id));
+      if (selected.length === 0) return state;
+      const rest = all.filter((a) => !chosen.has(a.id));
+      let annotations: PageAnnotation[];
+      switch (action.direction) {
+        case 'back':
+          annotations = [...selected, ...rest];
+          break;
+        case 'front':
+          annotations = [...rest, ...selected];
+          break;
+        case 'backward': {
+          // Move the group to just before the unselected annotation that
+          // precedes the group's first member (one visual step down).
+          const firstIdx = all.findIndex((a) => chosen.has(a.id));
+          const prevUnselected = all.slice(0, firstIdx).reverse().find((a) => !chosen.has(a.id));
+          if (!prevUnselected) return state; // already at the back
+          const at = rest.indexOf(prevUnselected);
+          annotations = [...rest.slice(0, at), ...selected, ...rest.slice(at)];
+          break;
+        }
+        case 'forward': {
+          const lastIdx = all.map((a) => chosen.has(a.id)).lastIndexOf(true);
+          const nextUnselected = all.slice(lastIdx + 1).find((a) => !chosen.has(a.id));
+          if (!nextUnselected) return state; // already at the front
+          const at = rest.indexOf(nextUnselected);
+          annotations = [...rest.slice(0, at + 1), ...selected, ...rest.slice(at + 1)];
+          break;
+        }
+      }
+      if (annotations.every((a, i) => a === all[i])) return state;
+      const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
+        ...d,
+        pages: d.pages.map((p) => (p.id === action.pageId ? { ...p, annotations } : p)),
+      }));
+      return applyPageEdit(state, documents, [doc.path]);
+    }
+    case 'RECOLOR_ANNOTATIONS': {
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      const page = doc?.pages.find((p) => p.id === action.pageId);
+      if (!doc || !page?.annotations?.length) return state;
+      const chosen = new Set(action.annotationIds);
+      let changed = false;
+      const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
+        ...d,
+        pages: d.pages.map((p) =>
+          p.id === action.pageId
+            ? {
+                ...p,
+                annotations: p.annotations!.map((a) => {
+                  if (!chosen.has(a.id) || a.color === action.color) return a;
+                  changed = true;
+                  return { ...a, color: action.color };
+                }),
+              }
+            : p,
+        ),
+      }));
+      if (!changed) return state;
+      return applyPageEdit(state, documents, [doc.path]);
+    }
+    case 'REMOVE_ANNOTATIONS': {
+      // Batch remove = one undo step. Same fingerprint-tombstone rule as the
+      // single REMOVE_ANNOTATION: a removed IMPORT's fingerprint must survive
+      // or the commit-time strip has nothing to match and the original
+      // resurrects on reindex.
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      const page = doc?.pages.find((p) => p.id === action.pageId);
+      if (!doc || !page?.annotations?.length) return state;
+      const chosen = new Set(action.annotationIds);
+      const removed = page.annotations.filter((a) => chosen.has(a.id));
+      if (removed.length === 0) return state;
+      const tombstones = removed
+        .map((a) => a.importedOriginal)
+        .filter((f): f is NonNullable<PageAnnotation['importedOriginal']> => !!f);
+      const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
+        ...d,
+        pages: d.pages.map((p) =>
+          p.id === action.pageId
+            ? {
+                ...p,
+                annotations: p.annotations!.filter((a) => !chosen.has(a.id)),
+                ...(tombstones.length
+                  ? {
+                      removedImportedOriginals: [
+                        ...(p.removedImportedOriginals ?? []),
+                        ...tombstones,
+                      ],
+                    }
+                  : {}),
+              }
+            : p,
+        ),
+      }));
+      return applyPageEdit(state, documents, [doc.path]);
+    }
     case 'ROTATE_PAGE_REF': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       const page = doc?.pages.find((p) => p.id === action.pageId);

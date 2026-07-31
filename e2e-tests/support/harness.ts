@@ -244,6 +244,31 @@ export async function getFirstAnnotation(timeoutMs = 10_000): Promise<FirstAnnot
   );
 }
 
+export interface PageAnnotationSnapshot {
+  id: string;
+  kind: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  note?: string;
+}
+
+/** Every pending annotation on one page, workspace order (= z-order). */
+export async function getPageAnnotations(
+  docId: string,
+  pageId: string,
+): Promise<PageAnnotationSnapshot[]> {
+  return await browser.execute<PageAnnotationSnapshot[], [string, string]>(
+    function (d, p) {
+      return (window as any).__SPECTRA_TEST__.getPageAnnotations(d, p);
+    },
+    docId,
+    pageId,
+  );
+}
+
 export async function commitPendingEdits(): Promise<void> {
   const result = await browser.executeAsync<string | null, []>(function (done) {
     (window as any).__SPECTRA_TEST__.commitPendingEdits()

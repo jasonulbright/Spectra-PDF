@@ -11,6 +11,7 @@ import {
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation, PageRef } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { AnnotationTransform } from '../../lib/annotation-manipulation';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditVectorObject } from '../../lib/edit-vectors';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
@@ -159,8 +160,15 @@ export interface DocumentViewProps {
   onRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   onRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
   // Click-selection for the properties bar (I.6). null clears.
-  selectedAnnotationId: string | null;
-  onSelectAnnotation: (docId: string, pageId: string, annotationId: string | null) => void;
+  selectedAnnotationIds: readonly string[];
+  onSelectAnnotation: (
+    docId: string,
+    pageId: string,
+    annotationId: string | null,
+    additive: boolean,
+  ) => void;
+  onTransformAnnotations: (docId: string, edits: AnnotationTransform[]) => void;
+  onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -663,8 +671,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onUpdateAnnotation={props.onUpdateAnnotation}
           onRecolorAnnotation={props.onRecolorAnnotation}
           onRemoveAnnotation={props.onRemoveAnnotation}
-          selectedAnnotationId={props.selectedAnnotationId}
+          selectedAnnotationIds={props.selectedAnnotationIds}
           onSelectAnnotation={props.onSelectAnnotation}
+          onTransformAnnotations={props.onTransformAnnotations}
+          onMarqueeSelect={props.onMarqueeSelect}
           onAddRedactionMark={props.onAddRedactionMark}
           onRemoveRedactionMark={props.onRemoveRedactionMark}
           onSetSignaturePlacement={props.onSetSignaturePlacement}
