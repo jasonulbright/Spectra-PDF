@@ -2895,3 +2895,64 @@
 }
 .text-selection-error { align-self: center; padding: 0 4px; font-size: 11px; color: #f87171; }
 [data-theme="light"] .text-selection-url { border-color: #d1d5db; background: #ffffff; color: #111827; }
+
+/* Rung 3 — the recalibrate popover (right-click a measurement). */
+.recal-popover {
+  position: fixed;
+  z-index: 60;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  color: #d4d4d4;
+}
+.recal-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.recal-popover-row:last-child {
+  margin-bottom: 0;
+}
+.recal-popover-title {
+  font-weight: 600;
+}
+.recal-popover-current {
+  font-weight: 400;
+  color: #8a8a8a;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recal-popover input,
+.recal-popover select {
+  background: #262626;
+  color: #d4d4d4;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.recal-popover input {
+  width: 90px;
+}
+.recal-popover button {
+  background: #2b2b2b;
+  color: #d4d4d4;
+  border: 1px solid #3f3f3f;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.recal-popover button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.recal-popover button:hover:not(:disabled) {
+  background: #333;
+}

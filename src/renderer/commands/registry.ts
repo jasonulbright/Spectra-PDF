@@ -98,7 +98,7 @@ export function cycledTab(state: AppState, delta: 1 | -1): FocusedTab {
 const CANVAS_TOOLS = [
   'select', 'hand', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
   'formfields', 'edit', 'addtext', 'addimage', 'measuredist', 'measureperim', 'measurearea',
-  'shape', 'callout',
+  'measurecal', 'shape', 'callout',
 ] as const;
 
 export const TOOL_TITLES: Record<CanvasTool, string> = {
@@ -106,7 +106,7 @@ export const TOOL_TITLES: Record<CanvasTool, string> = {
   stamp: 'Stamp', redact: 'Redact', signature: 'Sign', forms: 'Fill Fields',
   formfields: 'Add Field', edit: 'Select Image', addtext: 'Add Text',
   addimage: 'Add Image',
-  measuredist: 'Distance', measureperim: 'Perimeter', measurearea: 'Area',
+  measuredist: 'Distance', measureperim: 'Perimeter', measurearea: 'Area', measurecal: 'Calibrate',
   shape: 'Shape', callout: 'Callout',
 };
 

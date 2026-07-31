@@ -242,6 +242,9 @@ export type CanvasTool =
   | 'measuredist'
   | 'measureperim'
   | 'measurearea'
+  // Scale calibration (rung 3): drag a KNOWN length, then state its value —
+  // the toolbar ratio derives from it. Commits nothing.
+  | 'measurecal'
   // Drawing shapes (rung 2) — ONE mode; the secondary toolbar's shape picker
   // (like stamp's preset picker) chooses WHICH figure the gesture draws:
   // rect/ellipse band, line/arrow drag, polygon/polyline/cloud vertex clicks.
@@ -531,6 +534,18 @@ export type AppAction =
       direction: 'front' | 'back' | 'forward' | 'backward';
     }
   | { type: 'RECOLOR_ANNOTATIONS'; docId: string; pageId: string; annotationIds: string[]; color: string }
+  // Rung 3: override ONE measurement's recorded scale — new /Measure factors
+  // + ratio + recomputed note, undoable like any edit. Geometry untouched.
+  | {
+      type: 'RECALIBRATE_ANNOTATION';
+      docId: string;
+      pageId: string;
+      annotationId: string;
+      measureUnitsPerPt: number;
+      measureUnit: string;
+      measureRatio: string;
+      note: string;
+    }
   | { type: 'REMOVE_ANNOTATIONS'; docId: string; pageId: string; annotationIds: string[] }
   | { type: 'SPLIT_DOC'; docId: string; atIndex: number; newDocId: string; newName: string }
   | { type: 'ROTATE_PAGE_REF'; docId: string; pageId: string; rotation: 0 | 90 | 180 | 270 }

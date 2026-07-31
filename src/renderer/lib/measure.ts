@@ -118,3 +118,15 @@ export function formatDistanceWithFactor(lengthPts: number, unitsPerPt: number, 
 export function formatAreaWithFactor(areaPts2: number, unitsPerPt: number, unit: string): string {
   return `${trim(areaPts2 * unitsPerPt * unitsPerPt)} sq ${unit}`;
 }
+
+// ── Calibration (rung 3) ─────────────────────────────────────────────────
+// The user drags a KNOWN length and states its real-world value; the toolbar
+// ratio derives from it. Normalized to "1 in = X unit" — the same phrasing
+// the ratio label and the /Measure /R string already use.
+
+/** The scale under which `lengthPts` points read as `value` `unit`s. */
+export function scaleFromCalibration(lengthPts: number, value: number, unit: MeasureUnit): MeasureScale {
+  const inches = lengthPts / 72;
+  const per = inches > 0 && value > 0 ? value / inches : 1;
+  return { from: 1, fromUnit: 'in', to: per, toUnit: unit };
+}

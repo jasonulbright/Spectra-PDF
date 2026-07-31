@@ -1229,6 +1229,43 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       if (!changed) return state;
       return applyPageEdit(state, documents, [doc.path]);
     }
+    case 'RECALIBRATE_ANNOTATION': {
+      // Rung 3: one measurement's recorded scale is overridden — the /Measure
+      // factors, ratio, and reported note rewrite together; geometry stays.
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      const page = doc?.pages.find((p) => p.id === action.pageId);
+      const existing = page?.annotations?.find((a) => a.id === action.annotationId);
+      if (!doc || !existing || existing.kind !== 'measure') return state;
+      if (
+        existing.measureUnitsPerPt === action.measureUnitsPerPt &&
+        existing.measureUnit === action.measureUnit &&
+        existing.note === action.note
+      )
+        return state;
+      const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
+        ...d,
+        pages: d.pages.map((p) =>
+          p.id === action.pageId
+            ? {
+                ...p,
+                annotations: p.annotations!.map((a) =>
+                  a.id === action.annotationId
+                    ? {
+                        ...a,
+                        measureUnitsPerPt: action.measureUnitsPerPt,
+                        measureUnit: action.measureUnit,
+                        measureRatio: action.measureRatio,
+                        note: action.note,
+                        ...(a.importedOriginal ? { geometryDiverged: true } : {}),
+                      }
+                    : a,
+                ),
+              }
+            : p,
+        ),
+      }));
+      return applyPageEdit(state, documents, [doc.path]);
+    }
     case 'RECOLOR_ANNOTATIONS': {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       const page = doc?.pages.find((p) => p.id === action.pageId);
