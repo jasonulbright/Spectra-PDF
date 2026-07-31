@@ -135,6 +135,9 @@ pub enum CliCommand {
     PdfVersion(PdfVersionArgs),
     /// Repair a PDF (Tier 1: pikepdf/QPDF rewrite — fix xref, streams, page tree)
     Repair(RepairArgs),
+    /// Build a structure tree for an UNTAGGED PDF heuristically (headings by
+    /// size, paragraphs, figures; refine in the Tags / Reading Order panels)
+    Autotag(AutotagArgs),
     /// OCR every PDF under a folder into a searchable mirror (headless; what a
     /// scheduled run invokes)
     BatchOcr(BatchOcrArgs),
@@ -983,6 +986,15 @@ pub struct PdfVersionArgs {
 #[derive(Args)]
 pub struct RepairArgs {
     /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+}
+
+#[derive(Args)]
+pub struct AutotagArgs {
+    /// Input PDF file (must be untagged)
     pub input: PathBuf,
     /// Output PDF file
     #[arg(short, long)]
@@ -2287,6 +2299,16 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         CliCommand::Repair(args) => {
             engine.call(
                 "repair",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                }),
+            )
+        }
+
+        CliCommand::Autotag(args) => {
+            engine.call(
+                "autotag",
                 json!({
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),

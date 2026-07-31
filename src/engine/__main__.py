@@ -74,6 +74,7 @@ from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
 from engine.batch_ocr import batch_ocr, ocr_file
 from engine.guided_actions import run_action
+from engine.autotag import autotag
 from engine.page_images import (
     add_page_image,
     crop_page_image,
@@ -188,6 +189,7 @@ def main() -> None:
     server.register("batch_ocr", batch_ocr)
     server.register("ocr_file", ocr_file)
     server.register("run_action", run_action)
+    server.register("autotag", autotag)
     server.register("list_page_images", list_page_images)
     server.register("delete_page_image", delete_page_image)
     server.register("replace_page_image", replace_page_image)

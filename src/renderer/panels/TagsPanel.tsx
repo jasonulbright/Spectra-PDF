@@ -356,10 +356,33 @@ export function TagsPanel(): React.ReactElement {
         Working on: <span className="text-neutral-200">{activeFile.name}</span>
       </div>
       {!tree || !tree.tagged ? (
-        <p className="text-sm text-neutral-500" data-testid="tags-untagged">
-          This document has no structure tags. Tag editing needs a tagged PDF — tags are what
-          assistive technology reads, and this file was produced without them.
-        </p>
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-neutral-500" data-testid="tags-untagged">
+            This document has no structure tags. Tag editing needs a tagged PDF — tags are what
+            assistive technology reads, and this file was produced without them.
+          </p>
+          {/* P20: the content-analysis half — builds a FIRST tree (headings
+              by size, paragraphs, figures, page-stream order) that this
+              panel and Reading Order then refine. Undoable like every other
+              mutation here. */}
+          <div>
+            <button
+              type="button"
+              data-testid="tags-autotag"
+              disabled={busy}
+              onClick={() =>
+                void runMutation('autotag', {}, 'Tags added — review them below.', null)
+              }
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+            >
+              Add tags automatically
+            </button>
+          </div>
+          <p className="text-xs text-neutral-500">
+            Builds a first structure from the page content — headings by size, paragraphs,
+            figures — in page order. Refine the roles here and the sequence in Reading Order.
+          </p>
+        </div>
       ) : (
         <div className="flex flex-col gap-3 flex-1 min-h-0">
           <div className="flex items-center gap-2 shrink-0">
