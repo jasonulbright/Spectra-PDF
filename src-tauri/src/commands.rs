@@ -166,7 +166,7 @@ pub async fn save_file_dialog(
 /// dialog plugin's own trust model (a path the user chose in a native dialog
 /// becomes readable/writable to the webview), mirrored here because these
 /// dialogs are custom Rust commands the plugin cannot see. Without this the
-/// static `$TEMP/openpdfstudio/**` scope refuses renderer-side fs IO on any
+/// static `$TEMP/spectrapdf/**` scope refuses renderer-side fs IO on any
 /// picked path (found live by guided-actions export/import — the first
 /// renderer feature to write a picked path with plugin-fs).
 fn allow_picked_path(app: &AppHandle, path: &str) {
@@ -617,7 +617,7 @@ fn unique_destination(dest: &Path) -> std::path::PathBuf {
 /// searchable derivative of it.
 #[tauri::command]
 pub async fn create_batch_scratch(app: AppHandle, tag: String) -> Result<String, String> {
-    let dir = std::env::temp_dir().join("openpdfstudio").join("batch-scratch");
+    let dir = std::env::temp_dir().join("spectrapdf").join("batch-scratch");
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create scratch folder: {}", e))?;
     let _ = &app; // handle kept for symmetry with the other app-scoped commands
     let safe: String = tag
@@ -640,7 +640,7 @@ pub async fn create_batch_scratch(app: AppHandle, tag: String) -> Result<String,
 /// source path.
 #[tauri::command]
 pub async fn delete_batch_scratch(path: String) -> Result<(), String> {
-    let dir = std::env::temp_dir().join("openpdfstudio").join("batch-scratch");
+    let dir = std::env::temp_dir().join("spectrapdf").join("batch-scratch");
     let target = Path::new(&path);
     let inside = target
         .canonicalize()
@@ -688,7 +688,7 @@ pub async fn read_file_buffer(file_path: String) -> Result<Vec<u8>, String> {
 #[tauri::command]
 pub async fn create_working_copy(file_path: String) -> Result<String, String> {
     let work_dir = std::env::temp_dir()
-        .join("openpdfstudio")
+        .join("spectrapdf")
         .join(Uuid::new_v4().to_string());
     fs::create_dir_all(&work_dir)
         .map_err(|e| format!("Failed to create temp dir: {}", e))?;
@@ -779,7 +779,7 @@ pub async fn get_app_version() -> Result<String, String> {
 /// it to reach. That is the whole security argument for this design.
 #[tauri::command]
 pub async fn open_releases_page(app: AppHandle) -> Result<(), String> {
-    const RELEASES_URL: &str = "https://github.com/jasonulbright/Open-PDF-Studio/releases/latest";
+    const RELEASES_URL: &str = "https://github.com/jasonulbright/Spectra-PDF/releases/latest";
     use tauri_plugin_shell::ShellExt;
     #[allow(deprecated)]
     app.shell()
@@ -1249,7 +1249,7 @@ pub async fn check_auto_update_disabled() -> Result<bool, String> {
     use winreg::RegKey;
 
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    match hklm.open_subkey("SOFTWARE\\Open PDF Studio") {
+    match hklm.open_subkey("SOFTWARE\\Spectra PDF") {
         Ok(key) => {
             let value: Result<u32, _> = key.get_value("DisableAutoUpdate");
             Ok(value.unwrap_or(0) == 1)
@@ -1261,7 +1261,7 @@ pub async fn check_auto_update_disabled() -> Result<bool, String> {
 // ── Startup (Start with Windows) ─────────────────────────────────────────
 
 const STARTUP_REG_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const STARTUP_REG_VALUE: &str = "OpenPDFStudio";
+const STARTUP_REG_VALUE: &str = "SpectraPDF";
 
 /// Read the current state of the "Start with Windows" registry entry.
 /// Returns (enabled, minimized) — minimized is true if the --minimized flag is present.

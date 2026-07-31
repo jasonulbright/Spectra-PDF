@@ -421,7 +421,7 @@ function AppContent(): React.ReactElement {
       const canonical = await app.canonicalizePaths(paths);
       //
       // The same path twice in one batch is one open. Nothing upstream
-      // dedupes: `openpdfstudio.exe a.pdf a.pdf` really arrives as two
+      // dedupes: `spectrapdf.exe a.pdf a.pdf` really arrives as two
       // entries — and post-gate, `a.pdf A.PDF` collapses here too.
       //
       // This can't be left to the already-open check below: that reads state
@@ -613,7 +613,7 @@ function AppContent(): React.ReactElement {
     );
     // Written beside the destination's working copy: that directory exists by
     // construction (create_working_copy made it) and is inside the fs
-    // capability's $TEMP/openpdfstudio scope — no new grants, no mkdir.
+    // capability's $TEMP/spectrapdf scope — no new grants, no mkdir.
     const dir = destFile.workingPath.replace(/[\\/][^\\/]+$/, '');
     const sep = destFile.workingPath.includes('\\') ? '\\' : '/';
     const tempPath = `${dir}${sep}blank-${crypto.randomUUID()}.pdf`;

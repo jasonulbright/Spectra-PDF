@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 const SWEEP_AFTER_SECS: u64 = 24 * 60 * 60;
 
 fn send_dir() -> PathBuf {
-    std::env::temp_dir().join("openpdfstudio").join("send-to")
+    std::env::temp_dir().join("spectrapdf").join("send-to")
 }
 
 /// A display name derives from a real file name, but it crossed the webview

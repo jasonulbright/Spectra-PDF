@@ -11,10 +11,10 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// Working copies land in %TEMP%/openpdfstudio/<uuid>/ — one dir per
+// Working copies land in %TEMP%/spectrapdf/<uuid>/ — one dir per
 // create_working_copy call (src-tauri/src/commands.rs), never reused.
 function countWorkDirs(): number {
-  const dir = join(tmpdir(), 'openpdfstudio');
+  const dir = join(tmpdir(), 'spectrapdf');
   return existsSync(dir) ? readdirSync(dir).length : 0;
 }
 
@@ -43,7 +43,7 @@ describe('open valid PDF', () => {
   });
 
   it('the same path twice in one batch opens it once', async () => {
-    // `openpdfstudio.exe a.pdf a.pdf` really does arrive as two entries — the
+    // `spectrapdf.exe a.pdf a.pdf` really does arrive as two entries — the
     // CLI and second-instance handlers build the list straight off argv with no
     // dedupe. The already-open check can't catch it: the loop only awaits
     // BEFORE each dispatch, so the second iteration reads state React hasn't

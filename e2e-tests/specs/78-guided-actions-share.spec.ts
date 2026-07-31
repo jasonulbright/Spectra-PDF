@@ -20,7 +20,7 @@ import {
 // 76/77 precedent). Library state cleared at the end (cross-spec-leak rule).
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
-const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'openpdfstudio.exe');
+const APP_EXE = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
 
 let SCRATCH = '';
 let EXPORTED = '';
@@ -70,10 +70,10 @@ async function importViaBridge(path: string): Promise<string | null> {
 
 describe('guided actions — export/import as files (slice 4)', () => {
   before(async () => {
-    // Scratch lives INSIDE the app's static fs scope ($TEMP/openpdfstudio/**):
+    // Scratch lives INSIDE the app's static fs scope ($TEMP/spectrapdf/**):
     // the bridge injects paths without a native dialog, so the runtime scope
     // extension real picks get (allow_picked_path) never runs for them.
-    const scoped = resolve(tmpdir(), 'openpdfstudio');
+    const scoped = resolve(tmpdir(), 'spectrapdf');
     mkdirSync(scoped, { recursive: true });
     SCRATCH = mkdtempSync(resolve(scoped, 'e2e-actions-share-'));
     await waitForHarness();

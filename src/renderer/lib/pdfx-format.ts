@@ -27,7 +27,7 @@ export interface PagePartition {
 }
 
 // Display-normalized annotation (0..1 in the rendered, rotation-inclusive
-// orientation); the builder maps it into PDF user space. Open PDF Studio extension —
+// orientation); the builder maps it into PDF user space. Spectra PDF extension —
 // absent keeps PDFx-identical output.
 export interface ExportAnnotation {
   kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note' | 'measure';

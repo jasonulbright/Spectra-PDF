@@ -89,7 +89,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Open PDF Studio ${{ github.ref_name }}"
+          releaseName: "Spectra PDF ${{ github.ref_name }}"
           releaseBody: "See CHANGELOG.md for details. The installer is unsigned (no code-signing certificate); SmartScreen may warn on first run -- verify your download against SHA256SUMS.txt, published with this release."
           releaseDraft: false
           prerelease: false

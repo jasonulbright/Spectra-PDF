@@ -636,7 +636,7 @@ def _write_log(
 
     duration = (finished_at - started_at).total_seconds() * 1000
     lines = [
-        "Open PDF Studio — Batch OCR log",
+        "Spectra PDF — Batch OCR log",
         f"Started:      {_format_timestamp(started_at)}",
         f"Finished:     {_format_timestamp(finished_at)}  ({_format_duration(duration)})",
         f"Source:       {source}",

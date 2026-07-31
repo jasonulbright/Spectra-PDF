@@ -17,7 +17,7 @@
 //! what a schedule does, and the one that actually fires would be the one the
 //! user cannot see.
 //!
-//! **Scoped to our own folder.** Everything lives under `\Open PDF Studio\`, so
+//! **Scoped to our own folder.** Everything lives under `\Spectra PDF\`, so
 //! enumeration and deletion address a folder we created rather than pattern-
 //! matching across the machine — the same discipline as the batch-log sweep and
 //! `delete_batch_scratch`. This code never touches a task outside that folder.
@@ -29,7 +29,7 @@ use tauri::AppHandle;
 
 /// The one Task Scheduler folder this app writes to. Everything below is
 /// scoped to it; nothing outside it is ever listed, changed or deleted.
-const TASK_FOLDER: &str = "Open PDF Studio";
+const TASK_FOLDER: &str = "Spectra PDF";
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -446,7 +446,7 @@ fn build_task_xml(
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Author>Open PDF Studio</Author>
+    <Author>Spectra PDF</Author>
     <Description>{kind}: {desc}</Description>
   </RegistrationInfo>
   <Triggers>{trigger}</Triggers>
@@ -785,7 +785,7 @@ mod tests {
             days: String::new(),
             account: String::new(),
             run_type: "action".into(),
-            action_file: r"C:\ProgramData\Open PDF Studio\scheduled-actions\Nightly Strip.json"
+            action_file: r"C:\ProgramData\Spectra PDF\scheduled-actions\Nightly Strip.json"
                 .into(),
         }
     }
@@ -795,7 +795,7 @@ mod tests {
         let args = build_arguments("exe", &action_profile());
         assert_eq!(
             args,
-            r#"run-action "C:\in folder" --dest "C:\out" --action "C:\ProgramData\Open PDF Studio\scheduled-actions\Nightly Strip.json" --log-dir "C:\logs""#
+            r#"run-action "C:\in folder" --dest "C:\out" --action "C:\ProgramData\Spectra PDF\scheduled-actions\Nightly Strip.json" --log-dir "C:\logs""#
         );
     }
 
@@ -822,20 +822,20 @@ mod tests {
         // the faithful source, entities unescaped, exe + args joined.
         let xml = r#"<Task><Actions Context="Author"><Exec>
       <Command>C:\Program Files\app.exe</Command>
-      <Arguments>run-action &quot;C:\in &amp; out\src&quot; --dest &quot;C:\out&quot; --action &quot;C:\ProgramData\Open PDF Studio\scheduled-actions\N.json&quot;</Arguments>
+      <Arguments>run-action &quot;C:\in &amp; out\src&quot; --dest &quot;C:\out&quot; --action &quot;C:\ProgramData\Spectra PDF\scheduled-actions\N.json&quot;</Arguments>
     </Exec></Actions></Task>"#;
         assert_eq!(extract_tag(xml, "Command").as_deref(), Some(r"C:\Program Files\app.exe"));
         let args = extract_tag(xml, "Arguments").expect("arguments");
         assert_eq!(
             args,
-            r#"run-action "C:\in & out\src" --dest "C:\out" --action "C:\ProgramData\Open PDF Studio\scheduled-actions\N.json""#
+            r#"run-action "C:\in & out\src" --dest "C:\out" --action "C:\ProgramData\Spectra PDF\scheduled-actions\N.json""#
         );
         let parsed = profile_from_command("N", &format!("\"C:\\Program Files\\app.exe\" {args}"))
             .expect("parses");
         assert_eq!(parsed.source, r"C:\in & out\src");
         assert_eq!(
             parsed.action_file,
-            r"C:\ProgramData\Open PDF Studio\scheduled-actions\N.json"
+            r"C:\ProgramData\Spectra PDF\scheduled-actions\N.json"
         );
     }
 
