@@ -177,6 +177,20 @@ export function registerScheduledRuns(handlers: ScheduledRunsHandlers | null): v
   scheduledRuns = handlers;
 }
 
+/** Watched folders (O7). The dialog's folder pickers are native, so a spec
+ * injects a whole entry through the SAME upsert path the form uses. */
+export interface WatchedFoldersHandlers {
+  create: (folder: Record<string, unknown>) => Promise<void>;
+  list: () => Promise<unknown[]>;
+  remove: (id: string) => Promise<void>;
+}
+
+let watchedFolders: WatchedFoldersHandlers | null = null;
+
+export function registerWatchedFolders(handlers: WatchedFoldersHandlers | null): void {
+  watchedFolders = handlers;
+}
+
 let batchOcr: BatchOcrHandlers | null = null;
 
 export function registerBatchOcr(handlers: BatchOcrHandlers | null): void {
@@ -800,6 +814,10 @@ export interface TestHarness {
   scheduleCreate: (profile: Record<string, unknown>, actionJson?: string) => Promise<string>;
   scheduleList: () => Promise<unknown[]>;
   scheduleRemove: (name: string) => Promise<void>;
+  /** Watched folders (O7; dialog must be open — `tools.watchedFolders`). */
+  watcherCreate: (folder: Record<string, unknown>) => Promise<void>;
+  watcherList: () => Promise<unknown[]>;
+  watcherRemove: (id: string) => Promise<void>;
   /** Edit ▸ Images (7.1; canvas must be mounted with the edit mode armed). */
   editTextPageIds: () => string[];
   editTextRuns: (
@@ -1460,6 +1478,18 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     scheduleList: async () => {
       if (!scheduledRuns) throw new Error('scheduleList: Scheduled Runs dialog not mounted');
       return scheduledRuns.list();
+    },
+    watcherCreate: async (folder) => {
+      if (!watchedFolders) throw new Error('watcherCreate: Watched Folders dialog not mounted');
+      return watchedFolders.create(folder);
+    },
+    watcherList: async () => {
+      if (!watchedFolders) throw new Error('watcherList: Watched Folders dialog not mounted');
+      return watchedFolders.list();
+    },
+    watcherRemove: async (id) => {
+      if (!watchedFolders) throw new Error('watcherRemove: Watched Folders dialog not mounted');
+      return watchedFolders.remove(id);
     },
     scheduleRemove: async (name) => {
       if (!scheduledRuns) throw new Error('scheduleRemove: Scheduled Runs dialog not mounted');

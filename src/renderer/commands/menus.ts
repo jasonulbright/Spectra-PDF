@@ -84,6 +84,7 @@ const toolsItems: MenuNode[] = [
   sep,
   cmd('tools.batchOcr', 'menuitem-tools-batch-ocr'),
   cmd('tools.scheduledRuns', 'menuitem-tools-scheduled-runs'),
+  cmd('tools.watchedFolders', 'menuitem-tools-watched-folders'),
 ];
 
 // Window ▸ open-document list — focus that doc's tab. importOnly sources

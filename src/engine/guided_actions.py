@@ -29,6 +29,7 @@ from engine.batch_ocr import (
     _format_duration,
     _format_timestamp,
     _list_pdfs,
+    _move_file,
     _pad,
     dest_conflicts_with_source,
     ocr_file,
@@ -150,6 +151,7 @@ def run_action(
     write_log: bool = True,
     progress: bool = False,
     in_place: bool = False,
+    move_processed_root: str = "",
 ) -> dict:
     """Run a step sequence over every PDF under `source`, mirroring into
     `dest` — or, with `in_place`, REPLACING each original with its processed
@@ -163,6 +165,11 @@ def run_action(
     if in_place:
         if dest:
             raise ValueError("In-place mode takes no destination -- the originals are replaced.")
+        if move_processed_root:
+            raise ValueError(
+                "In-place mode cannot also move processed originals -- the processed "
+                "file IS the original."
+            )
         dest_path = source_path
     else:
         if not dest:
@@ -172,6 +179,16 @@ def run_action(
             raise ValueError(
                 "The destination must be outside the source folder -- choose a "
                 "separate folder for the processed copies."
+            )
+    if move_processed_root:
+        # The watched-folder shape (Distiller's In -> Out -> Done): processed
+        # originals leave the intake so the next run never reprocesses them.
+        moved = Path(move_processed_root).resolve()
+        if dest_conflicts_with_source(str(source_path), str(moved)):
+            raise ValueError("The processed-originals folder must be outside the source folder.")
+        if dest_conflicts_with_source(str(dest_path), str(moved)):
+            raise ValueError(
+                "The processed-originals folder must be outside the destination folder."
             )
     clean_steps = validate_steps(steps)
     tool_paths = {"gs_path": gs_path, "tesseract_path": tesseract_path, "font_dir": font_dir}
@@ -198,7 +215,20 @@ def run_action(
                         "was left untouched"
                     )
                 os.replace(out_path, abs_path)
-            results.append({"rel": rel, "status": "ok", "steps_applied": applied})
+            row: dict = {"rel": rel, "status": "ok", "steps_applied": applied}
+            if move_processed_root:
+                # Only after the mirror copy fully processed — a failed file
+                # stays in the intake for the next attempt.
+                if not _readable_output(out_path):
+                    raise ValueError(
+                        "the processed copy could not be read back -- the original "
+                        "stays in the source folder"
+                    )
+                try:
+                    row["moved_to"] = _move_file(abs_path, Path(move_processed_root) / rel)
+                except Exception as exc:  # noqa: BLE001 — the OCR result stands; the move is reported
+                    row["move_error"] = str(exc)
+            results.append(row)
         except Exception as exc:  # noqa: BLE001 — per-file isolation is the contract
             # Never leave a half-processed file in the mirror (or staging litter).
             try:

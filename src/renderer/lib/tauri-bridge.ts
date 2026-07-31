@@ -200,6 +200,33 @@ export interface ScheduledRun {
   actionMissing: boolean;
 }
 
+// ── Watched folders (O7) ──────────────────────────────────────────────────
+//
+// Drop a PDF into an intake folder and a saved guided action runs over it
+// (In → Out → Done). Watchers poll IN-APP (tray-residency counts) and each
+// run spawns the CLI — byte-identical to a scheduled run. Config is
+// Rust-owned; the action is FROZEN at save (never localStorage).
+
+export interface WatchedFolder {
+  id: string;
+  name: string;
+  source: string;
+  dest: string;
+  /** Where processed ORIGINALS file to — required (it is what keeps the
+   * intake holding only unprocessed work). */
+  processedRoot: string;
+  /** The frozen `{name, steps}` action body (the export construction). */
+  action: unknown;
+  logDir: string;
+  enabled: boolean;
+}
+
+export const watchers = {
+  list: () => invoke<WatchedFolder[]>('list_watched_folders'),
+  upsert: (folder: WatchedFolder) => invoke<void>('upsert_watched_folder', { folder }),
+  remove: (id: string) => invoke<void>('delete_watched_folder', { id }),
+};
+
 export const schedule = {
   /** `password` is passed to Windows and never stored by this app.
    * `actionJson` (action runs) is the frozen sanitized `{name, steps}` shape

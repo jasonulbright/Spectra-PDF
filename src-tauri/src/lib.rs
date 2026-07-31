@@ -2,6 +2,7 @@ pub mod cli;
 mod commands;
 mod scheduler;
 mod send_to;
+mod watchers;
 mod engine;
 mod printers;
 
@@ -131,6 +132,9 @@ pub fn run() {
             commands::open_batch_log_folder,
             send_to::stage_send_copy,
             send_to::send_by_email,
+            watchers::list_watched_folders,
+            watchers::upsert_watched_folder,
+            watchers::delete_watched_folder,
             scheduler::create_scheduled_run,
             scheduler::list_scheduled_runs,
             scheduler::delete_scheduled_run,
@@ -174,6 +178,12 @@ pub fn run() {
                 "none"
             };
             app.manage(BackdropState(backdrop));
+
+            // Watched folders (O7): resume every enabled watcher. Deliberately
+            // BEFORE the e2e early-return — the watchers are part of the
+            // product under test.
+            app.manage(watchers::WatcherState::new());
+            watchers::start_all(app.handle());
 
             if e2e {
                 // E2E: skip tray + force-show window; every launch must be
