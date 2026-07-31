@@ -141,7 +141,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Measure',
     description: 'Measure distances, perimeters, and areas on the page.',
     ops: [],
-    canvasTools: ['measuredist', 'measureperim', 'measurearea'],
+    canvasTools: ['measuredist', 'measureperim', 'measurearea', 'measurecal'],
   },
   {
     id: 'actions',

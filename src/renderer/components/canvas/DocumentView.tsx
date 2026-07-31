@@ -170,6 +170,8 @@ export interface DocumentViewProps {
     additive: boolean,
   ) => void;
   onTransformAnnotations: (docId: string, edits: AnnotationTransform[]) => void;
+  onCalibrate: (lengthPts: number) => void;
+  onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
   onAddRedactionMark: (
     docId: string,
@@ -677,6 +679,8 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           selectedAnnotationIds={props.selectedAnnotationIds}
           onSelectAnnotation={props.onSelectAnnotation}
           onTransformAnnotations={props.onTransformAnnotations}
+          onCalibrate={props.onCalibrate}
+          onMeasureContextMenu={props.onMeasureContextMenu}
           onMarqueeSelect={props.onMarqueeSelect}
           onAddRedactionMark={props.onAddRedactionMark}
           onRemoveRedactionMark={props.onRemoveRedactionMark}

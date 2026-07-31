@@ -54,10 +54,20 @@ import type { CanvasHandle } from '../../canvas/canvas-handle';
 import type { PageAnnotation, PdfBuffer, ShapeType } from '../../state/types';
 import type { CanvasTool, StampPreset } from './PageCell';
 import { SecondaryToolbar } from './SecondaryToolbar';
-import { DEFAULT_MEASURE_SCALE, type MeasureScale } from '../../lib/measure';
+import {
+  DEFAULT_MEASURE_SCALE,
+  MEASURE_UNITS,
+  scaleFromCalibration,
+  measureRatioLabel,
+  polylineLengthPts,
+  ringAreaPts2,
+  type MeasureScale,
+  type MeasureUnit,
+} from '../../lib/measure';
 import {
   alignEdits,
   distributeEdits,
+  recomputedMeasureNote,
   sizeMatchEdits,
   nudgeDelta,
   translated,
@@ -218,6 +228,98 @@ const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
 const NO_ANNOTATIONS: readonly PageAnnotation[] = [];
 const NO_ANNOTATION_IDS: readonly string[] = [];
+
+// Rung 3: the right-click recalibrate popover — "this measures X unit" with
+// two outcomes: set the toolbar scale for FUTURE measurements, or override
+// THIS measurement's recorded factors (undoable edit).
+function RecalibratePopover({
+  x,
+  y,
+  measureKind,
+  currentNote,
+  onApply,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  measureKind: 'distance' | 'perimeter' | 'area';
+  currentNote: string;
+  onApply: (value: number, unit: MeasureUnit, mode: 'scale' | 'override') => void;
+  onClose: () => void;
+}): React.JSX.Element {
+  const [value, setValue] = useState('');
+  const [unit, setUnit] = useState<MeasureUnit>('ft');
+  const parsed = parseFloat(value);
+  const valid = Number.isFinite(parsed) && parsed > 0;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+  return (
+    <div
+      className="recal-popover"
+      data-testid="recal-popover"
+      style={{ left: Math.min(x, window.innerWidth - 280), top: Math.min(y, window.innerHeight - 120) }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="recal-popover-row recal-popover-title">
+        {measureKind === 'area' ? 'This area measures' : 'This distance measures'}
+        <span className="recal-popover-current" title={currentNote}>
+          (now: {currentNote})
+        </span>
+      </div>
+      <div className="recal-popover-row">
+        <input
+          type="number"
+          min={0}
+          step="any"
+          autoFocus
+          data-testid="recal-value"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && valid) onApply(parsed, unit, 'override');
+          }}
+        />
+        <select data-testid="recal-unit" value={unit} onChange={(e) => setUnit(e.target.value as MeasureUnit)}>
+          {MEASURE_UNITS.map((u) => (
+            <option key={u} value={u}>
+              {measureKind === 'area' ? `sq ${u}` : u}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="recal-popover-row">
+        <button
+          type="button"
+          data-testid="recal-override"
+          disabled={!valid}
+          onClick={() => onApply(parsed, unit, 'override')}
+        >
+          Override this measurement
+        </button>
+        <button
+          type="button"
+          data-testid="recal-set-scale"
+          disabled={!valid}
+          onClick={() => onApply(parsed, unit, 'scale')}
+        >
+          Set scale from it
+        </button>
+        <button type="button" data-testid="recal-cancel" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
 const NO_EDIT_IMAGES: ReadonlyMap<string, EditImagePlacement[]> = new Map();
 const NO_EDIT_VECTORS: ReadonlyMap<string, EditVectorObject[]> = new Map();
 const NO_EDIT_GEOM: ReadonlyMap<string, PageGeometry> = new Map();
@@ -462,6 +564,16 @@ export function WorkspaceCanvasView({
   const [measureScale, setMeasureScale] = useState<MeasureScale>(DEFAULT_MEASURE_SCALE);
   const [measureLeaveMarkup, setMeasureLeaveMarkup] = useState(true);
   const [measureResult, setMeasureResult] = useState<string | null>(null);
+  // Rung 3 — calibration: the dragged span (PDF points) awaiting its real
+  // value in the toolbar; and the right-click recalibrate popover's target.
+  const [calibration, setCalibration] = useState<number | null>(null);
+  const [recalTarget, setRecalTarget] = useState<{
+    docId: string;
+    pageId: string;
+    annotationId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   // Click-selected annotations (Select tool) — the properties bar's subject
   // and the manipulation group (rung 1). SAME-PAGE by design: align/
   // distribute/z-order are page-geometry operations, and a cross-page
@@ -1327,6 +1439,84 @@ export function WorkspaceCanvasView({
     },
     [resolvedAnnots, dispatch],
   );
+  // ── Rung 3: calibration + per-measurement recalibration ──────────────
+  const onCalibrate = useCallback((lengthPts: number) => setCalibration(lengthPts), []);
+  const onMeasureContextMenu = useCallback(
+    (docId: string, pageId: string, annotationId: string, x: number, y: number) =>
+      setRecalTarget({ docId, pageId, annotationId, x, y }),
+    [],
+  );
+  const applyCalibration = useCallback(
+    (value: number, unit: MeasureUnit) => {
+      if (calibration === null || !(value > 0)) return;
+      setMeasureScale(scaleFromCalibration(calibration, value, unit));
+      setCalibration(null);
+    },
+    [calibration],
+  );
+  /** The recal popover's target measurement, resolved live with its page. */
+  const recalAnnot = useMemo(() => {
+    if (!recalTarget) return null;
+    for (const d of docs) {
+      if (d.id !== recalTarget.docId) continue;
+      for (const p of d.pages) {
+        if (p.id !== recalTarget.pageId) continue;
+        const annotation = (p.annotations ?? []).find((a) => a.id === recalTarget.annotationId);
+        if (!annotation || annotation.kind !== 'measure' || !annotation.points) return null;
+        return { annotation, page: p };
+      }
+      return null;
+    }
+    return null;
+  }, [recalTarget, docs]);
+  useEffect(() => {
+    if (recalTarget && !recalAnnot) setRecalTarget(null);
+  }, [recalTarget, recalAnnot]);
+  const applyRecalibration = useCallback(
+    (value: number, unit: MeasureUnit, mode: 'scale' | 'override') => {
+      if (!recalTarget || !recalAnnot || !(value > 0)) return;
+      const { annotation: a, page: p } = recalAnnot;
+      const swapped = p.rotation === 90 || p.rotation === 270;
+      const dispW = swapped ? p.height : p.width;
+      const dispH = swapped ? p.width : p.height;
+      // The measurement's own geometric magnitude — linear points for
+      // distance/perimeter, an equivalent-side length for area (so one
+      // linear factor serves both the /C entries and the ratio label).
+      const linearPts =
+        a.measureKind === 'area'
+          ? Math.sqrt(ringAreaPts2(a.points!, dispW, dispH))
+          : polylineLengthPts(a.points!, dispW, dispH);
+      const linearValue = a.measureKind === 'area' ? Math.sqrt(value) : value;
+      if (linearPts <= 0) return;
+      if (mode === 'scale') {
+        setMeasureScale(scaleFromCalibration(linearPts, linearValue, unit));
+      } else {
+        const factor = linearValue / linearPts;
+        const scale = scaleFromCalibration(linearPts, linearValue, unit);
+        const note =
+          recomputedMeasureNote(
+            { ...a, measureUnitsPerPt: factor, measureUnit: unit },
+            a.points!,
+            p.width,
+            p.height,
+            p.rotation,
+          ) ?? a.note ?? '';
+        dispatch({
+          type: 'RECALIBRATE_ANNOTATION',
+          docId: recalTarget.docId,
+          pageId: recalTarget.pageId,
+          annotationId: recalTarget.annotationId,
+          measureUnitsPerPt: factor,
+          measureUnit: unit,
+          measureRatio: measureRatioLabel(scale),
+          note,
+        });
+      }
+      setRecalTarget(null);
+    },
+    [recalTarget, recalAnnot, dispatch],
+  );
+
   const onRestyleSelection = useCallback(
     (style: { strokeWidth?: number; fillColor?: string | null; opacity?: number }) => {
       if (!resolvedAnnots) return;
@@ -3431,6 +3621,9 @@ export function WorkspaceCanvasView({
         measureLeaveMarkup={measureLeaveMarkup}
         onToggleMeasureLeaveMarkup={() => setMeasureLeaveMarkup((v) => !v)}
         measureResult={measureResult}
+        calibration={calibration}
+        onApplyCalibration={applyCalibration}
+        onCancelCalibration={() => setCalibration(null)}
         editHasSelection={editSel !== null}
         editSelectionKind={editSel?.kind ?? null}
         editTextEditable={
@@ -3479,6 +3672,16 @@ export function WorkspaceCanvasView({
           onRemoveGroup={onRemoveSelection}
           onRestyle={onRestyleSelection}
           onClose={() => dispatch({ type: 'UI_TOGGLE_PROPERTIES_BAR' })}
+        />
+      )}
+      {recalTarget && recalAnnot && (
+        <RecalibratePopover
+          x={recalTarget.x}
+          y={recalTarget.y}
+          measureKind={recalAnnot.annotation.measureKind ?? 'distance'}
+          currentNote={recalAnnot.annotation.note ?? ''}
+          onApply={applyRecalibration}
+          onClose={() => setRecalTarget(null)}
         />
       )}
       {docViewMode === 'document' && focusedDoc ? (
@@ -3577,6 +3780,8 @@ export function WorkspaceCanvasView({
             selectedAnnotationIds: selectedAnnot?.ids ?? NO_ANNOTATION_IDS,
             onSelectAnnotation,
             onTransformAnnotations,
+            onCalibrate,
+            onMeasureContextMenu,
             onMarqueeSelect,
             onAddRedactionMark,
             onRemoveRedactionMark,
@@ -3801,6 +4006,8 @@ export function WorkspaceCanvasView({
           selectedAnnotationIds={selectedAnnot?.ids ?? NO_ANNOTATION_IDS}
           onSelectAnnotation={onSelectAnnotation}
           onTransformAnnotations={onTransformAnnotations}
+          onCalibrate={onCalibrate}
+          onMeasureContextMenu={onMeasureContextMenu}
           onMarqueeSelect={onMarqueeSelect}
           onAddRedactionMark={onAddRedactionMark}
           onRemoveRedactionMark={onRemoveRedactionMark}
