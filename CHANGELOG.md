@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.8.7 — Actions that travel: files to share, schedules that run themselves
+
+Guided actions finish growing up: run one over a whole folder, hand one to a
+colleague as a file, and put one on a schedule that fires even when the app
+is closed.
+
+### Guided Actions
+- **Run an action over a folder.** Point an action at a folder of PDFs and a
+  destination: every PDF — subfolders included — is processed into a mirror
+  of the tree. Originals are untouched, one file's failure never stops the
+  rest, and a run log lands beside the batch OCR logs.
+- **Share actions as files.** Export any action as a small JSON file;
+  import one with full checking — an unknown step or setting is refused by
+  name, never guessed at, and an import never overwrites an existing action.
+  An exported file never contains a password.
+- **Schedule an action.** Scheduled Batch Runs now schedules a guided
+  action too: pick the action, the folders, and the time, and Windows Task
+  Scheduler runs it even while the app is closed — under another account or
+  a managed service account, with the same explicit-log-folder rule as
+  scheduled OCR. The schedule keeps its own frozen copy of the action, so it
+  always runs exactly what you scheduled. Actions that ask for values at run
+  time are refused up front: an unattended run has nobody to ask.
+
+### Command line
+- New arm: `run-action <source> --dest <folder> --action action.json` runs a
+  saved action file over a folder — the same file the app exports. In
+  hand-written files, a header/footer step may use the app's simple
+  `position`/`text` form as well as the fuller `placements` list.
+
+### Fixed
+- **In-place `encrypt` and `decrypt` work from the command line** — the last
+  two operations that silently failed when the output path equalled the
+  input now stage safely and replace the file atomically.
+
 ## 2.8.6 — Portfolios, measuring, stamps of your own, and guided actions
 
 Four new capabilities land at once, a long-standing silent bug is fixed, and
