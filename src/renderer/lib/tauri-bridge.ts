@@ -221,6 +221,23 @@ export interface WatchedFolder {
   enabled: boolean;
 }
 
+// ── Virtual printer (O7) ──────────────────────────────────────────────────
+
+export interface VirtualPrinterStatus {
+  installed: boolean;
+  /** 'listening', or the named reason the loopback listener is down. */
+  listener: string;
+  lastJobError: string;
+  printerName: string;
+}
+
+export const virtualPrinter = {
+  status: () => invoke<VirtualPrinterStatus>('virtual_printer_status'),
+  /** One visible UAC elevation over a staged pure-ASCII script. */
+  install: () => invoke<void>('install_virtual_printer'),
+  uninstall: () => invoke<void>('uninstall_virtual_printer'),
+};
+
 export const watchers = {
   list: () => invoke<WatchedFolder[]>('list_watched_folders'),
   upsert: (folder: WatchedFolder) => invoke<void>('upsert_watched_folder', { folder }),

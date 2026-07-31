@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { app, batch, dialog, type GsInfo } from '../lib/tauri-bridge';
+import { app, batch, dialog, virtualPrinter, type GsInfo, type VirtualPrinterStatus } from '../lib/tauri-bridge';
 import { deriveAccentVars } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
@@ -397,6 +397,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           would not appear here.
         </p>
       </div>
+      <VirtualPrinterBlock />
       </>
       )}
 
@@ -554,6 +555,103 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
 
       <StatusBar message={status} />
       </div>
+    </div>
+  );
+}
+
+// O7 virtual printer: "Open PDF Studio" in every app's print dialog. The
+// loopback listener + install/remove orchestration live in Rust
+// (print_to_pdf.rs); this block is the whole GUI surface. Install/Remove is
+// ONE visible UAC elevation (printer ports are machine objects) — never
+// silent; the listener status and the last failed job are shown verbatim so
+// a taken port or a bad job is a named condition, not a mystery.
+function VirtualPrinterBlock(): React.JSX.Element {
+  const [vpStatus, setVpStatus] = useState<VirtualPrinterStatus | null>(null);
+  const [vpBusy, setVpBusy] = useState(false);
+  const [vpError, setVpError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setVpStatus(await virtualPrinter.status());
+    } catch {
+      setVpStatus(null);
+    }
+  }, []);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const run = async (fn: () => Promise<void>): Promise<void> => {
+    setVpBusy(true);
+    setVpError(null);
+    try {
+      await fn();
+    } catch (e: unknown) {
+      setVpError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setVpBusy(false);
+      void refresh();
+    }
+  };
+
+  return (
+    <div data-testid="virtual-printer-pref">
+      <label className="block text-sm text-neutral-400 mb-2">Print to Open PDF Studio</label>
+      <p className="text-xs text-neutral-500 mb-2">
+        Installs a printer named “Open PDF Studio” in every application’s print dialog.
+        Printing to it opens the pages here as a new PDF. Conversion happens on this PC with
+        the bundled tools; jobs are received only while this app is running (minimized to the
+        tray counts) — a job printed while it is closed waits in the Windows print queue.
+      </p>
+      {vpStatus === null ? (
+        <p className="text-sm text-neutral-500">Checking…</p>
+      ) : (
+        <>
+          <p className="text-sm text-neutral-300" data-testid="virtual-printer-status">
+            {vpStatus.installed ? 'Printer installed' : 'Printer not installed'}
+            {' · '}
+            {vpStatus.listener === 'listening'
+              ? 'ready to receive jobs'
+              : `receiver down: ${vpStatus.listener}`}
+          </p>
+          {vpStatus.lastJobError !== '' && (
+            <p className="text-xs text-amber-400 mt-1" data-testid="virtual-printer-job-error">
+              Last job failed: {vpStatus.lastJobError}
+            </p>
+          )}
+          <div className="flex items-center gap-2 mt-2">
+            {vpStatus.installed ? (
+              <button
+                type="button"
+                data-testid="virtual-printer-remove"
+                disabled={vpBusy}
+                onClick={() => void run(() => virtualPrinter.uninstall())}
+                className="px-2.5 py-1 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded font-medium"
+              >
+                Remove printer…
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-testid="virtual-printer-install"
+                disabled={vpBusy}
+                onClick={() => void run(() => virtualPrinter.install())}
+                className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              >
+                Install printer…
+              </button>
+            )}
+            <span className="text-xs text-neutral-500">
+              Windows asks for administrator approval — printers are system devices.
+            </span>
+          </div>
+          {vpError && (
+            <p className="text-xs text-red-400 mt-1" data-testid="virtual-printer-error">
+              {vpError}
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

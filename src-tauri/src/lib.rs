@@ -1,5 +1,6 @@
 pub mod cli;
 mod commands;
+mod print_to_pdf;
 mod scheduler;
 mod send_to;
 mod watchers;
@@ -135,6 +136,9 @@ pub fn run() {
             watchers::list_watched_folders,
             watchers::upsert_watched_folder,
             watchers::delete_watched_folder,
+            print_to_pdf::virtual_printer_status,
+            print_to_pdf::install_virtual_printer,
+            print_to_pdf::uninstall_virtual_printer,
             scheduler::create_scheduled_run,
             scheduler::list_scheduled_runs,
             scheduler::delete_scheduled_run,
@@ -184,6 +188,11 @@ pub fn run() {
             // product under test.
             app.manage(watchers::WatcherState::new());
             watchers::start_all(app.handle());
+
+            // The virtual printer's loopback listener (O7) — also part of the
+            // product under test (e2e streams a job straight at the port).
+            app.manage(print_to_pdf::PrinterState::new());
+            print_to_pdf::start_listener(app.handle());
 
             if e2e {
                 // E2E: skip tray + force-show window; every launch must be
