@@ -125,6 +125,7 @@ pub fn run() {
             commands::create_batch_scratch,
             commands::delete_batch_scratch,
             commands::write_batch_log,
+            commands::get_batch_log_dir,
             commands::prune_batch_logs,
             commands::open_batch_log_folder,
             scheduler::create_scheduled_run,

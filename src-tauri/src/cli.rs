@@ -77,6 +77,8 @@ pub enum CliCommand {
     PortfolioUpdate(PortfolioUpdateArgs),
     /// Make ONE file searchable (invisible OCR text layers)
     OcrFile(OcrFileArgs),
+    /// Run a guided action (a saved step sequence) over a folder of PDFs
+    RunAction(RunActionArgs),
     /// List optional-content layers (JSON)
     LayerList(LayerListArgs),
     /// Show or hide a layer by index
@@ -374,6 +376,22 @@ pub struct OcrFileArgs {
     /// Tesseract language code (e.g. eng, deu, jpn)
     #[arg(long, default_value = "eng")]
     pub language: String,
+}
+
+#[derive(Args)]
+pub struct RunActionArgs {
+    /// Source folder (searched recursively for PDFs; never modified)
+    pub source: PathBuf,
+    /// Destination folder — processed copies mirror the source tree here
+    #[arg(short, long)]
+    pub dest: PathBuf,
+    /// The action as JSON: {"name": "...", "steps": [{"op": "...", "params": {...}}]}
+    /// — the same shape the app saves
+    #[arg(long)]
+    pub action: PathBuf,
+    /// Where the run log is written (default: no log from the CLI)
+    #[arg(long)]
+    pub log_dir: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -1688,6 +1706,36 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "gs_path": gs.to_string_lossy(),
                 }),
             )
+        }
+
+        CliCommand::RunAction(args) => {
+            let raw = std::fs::read_to_string(&args.action)
+                .map_err(|e| format!("Cannot read action file {}: {e}", args.action.display()))?;
+            let parsed: serde_json::Value = serde_json::from_str(&raw)
+                .map_err(|e| format!("Action file is not valid JSON: {e}"))?;
+            let steps = parsed
+                .get("steps")
+                .cloned()
+                .ok_or_else(|| "Action file has no \"steps\"".to_string())?;
+            let name = parsed
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let mut params = json!({
+                "source": abs(&args.source).to_string_lossy(),
+                "dest": abs(&args.dest).to_string_lossy(),
+                "steps": steps,
+                "action_name": name,
+                "gs_path": resolve_gs().to_string_lossy(),
+                "tesseract_path": resolve_tesseract().to_string_lossy(),
+                "font_dir": resolve_fonts().to_string_lossy(),
+                "write_log": args.log_dir.is_some(),
+                "progress": true,
+            });
+            if let Some(dir) = &args.log_dir {
+                params["log_dir"] = json!(abs(dir).to_string_lossy());
+            }
+            engine.call("run_action", params)
         }
 
         CliCommand::PortfolioCreate(args) => {

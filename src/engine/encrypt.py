@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pikepdf
 
+from .inplace import finish_staged, is_same_file, staging_target
+
 
 # User-facing permission categories → pikepdf.Permissions flags. Accessibility
 # (assistive-tech text extraction) is NEVER blocked — a document a screen reader
@@ -58,7 +60,13 @@ def encrypt(
 
     with pikepdf.open(file) as pdf:
         output_path = Path(output)
-        pdf.save(output_path, encryption=pikepdf.Encryption(**enc_kwargs))
+        # pikepdf cannot save over its own open input (engine/inplace.py).
+        if is_same_file(file, output):
+            staged = staging_target(output_path)
+            pdf.save(staged, encryption=pikepdf.Encryption(**enc_kwargs))
+            finish_staged(staged, output_path)
+        else:
+            pdf.save(output_path, encryption=pikepdf.Encryption(**enc_kwargs))
 
     return {
         "output": str(output_path),
@@ -78,7 +86,13 @@ def decrypt(file: str, output: str, password: str = "") -> dict:
     """
     with pikepdf.open(file, password=password) as pdf:
         output_path = Path(output)
-        pdf.save(output_path)
+        # pikepdf cannot save over its own open input (engine/inplace.py).
+        if is_same_file(file, output):
+            staged = staging_target(output_path)
+            pdf.save(staged)
+            finish_staged(staged, output_path)
+        else:
+            pdf.save(output_path)
 
     return {
         "output": str(output_path),

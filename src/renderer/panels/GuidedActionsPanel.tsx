@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file, app } from '../lib/tauri-bridge';
+import { file, app, dialog, batch } from '../lib/tauri-bridge';
+import { getSettings } from '../lib/app-settings';
 import { ensureGsPath } from './SettingsPanel';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -30,17 +31,32 @@ import {
 
 type RunValues = Record<number, Record<string, string | number>>;
 
+interface FolderReport {
+  total: number;
+  ok: number;
+  failed: number;
+  results: { rel: string; status: string; steps_applied?: number; error?: string }[];
+  log_path?: string;
+}
+
 type PanelView =
   | { kind: 'list' }
   | { kind: 'edit'; action: GuidedAction; isNew: boolean }
-  | { kind: 'prerun'; action: GuidedAction; values: RunValues; error: string | null }
-  | { kind: 'run'; action: GuidedAction };
+  | {
+      kind: 'prerun';
+      action: GuidedAction;
+      values: RunValues;
+      error: string | null;
+      folder?: { source: string; dest: string };
+    }
+  | { kind: 'run'; action: GuidedAction }
+  | { kind: 'folderrun'; action: GuidedAction; report: FolderReport | null; error: string | null };
 
 type StepStatus = 'pending' | 'running' | 'done' | { error: string };
 
 export function GuidedActionsPanel(): React.ReactElement {
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
-  const { call, saveFile } = useEngine();
+  const { call, callRaw, saveFile } = useEngine();
   const [actions, setActions] = useState<GuidedAction[]>(() => loadGuidedActions());
   const [view, setView] = useState<PanelView>({ kind: 'list' });
   const [editError, setEditError] = useState<string | null>(null);
@@ -142,10 +158,69 @@ export function GuidedActionsPanel(): React.ReactElement {
     [activeFile, running, executeRun],
   );
 
-  // Harness bridge: the terminal step's output is a NATIVE save dialog —
-  // e2e injects the path + ask-at-run values and drives the REAL executeRun.
-  const bridgeRef = useRef({ actions, executeRun });
-  bridgeRef.current = { actions, executeRun };
+  /** FOLDER mode (slice 3): run the sequence over every PDF under a folder,
+   * mirroring into a destination — the batch-OCR shape, engine-side, so one
+   * RPC covers the whole run and the CLI/scheduled arms share it. Works with
+   * no document open. */
+  const executeFolderRun = useCallback(
+    async (action: GuidedAction, values: RunValues, source: string, dest: string) => {
+      if (running) return;
+      setView({ kind: 'folderrun', action, report: null, error: null });
+      setRunning(true);
+      try {
+        const settings = getSettings();
+        const logDir = settings.batchLogEnabled ? await batch.logDir(settings.batchLogDir) : '';
+        if (settings.batchLogEnabled && settings.batchLogRetentionDays > 0) {
+          await batch.pruneLogs(settings.batchLogRetentionDays, settings.batchLogDir).catch(() => 0);
+        }
+        const steps = action.steps.map((s, i) => ({
+          op: s.op,
+          params: buildStepParams(s, values[i]),
+        }));
+        const report = (await callRaw('run_action', {
+          source,
+          dest,
+          steps,
+          action_name: action.name,
+          gs_path: await ensureGsPath(),
+          tesseract_path: await app.getTesseractPath(),
+          font_dir: await app.getEditFontPath(),
+          log_dir: logDir,
+          write_log: settings.batchLogEnabled,
+        })) as unknown as FolderReport;
+        setView({ kind: 'folderrun', action, report, error: null });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setView({ kind: 'folderrun', action, report: null, error: msg });
+      } finally {
+        setRunning(false);
+      }
+    },
+    [running, callRaw],
+  );
+
+  const runActionOnFolder = useCallback(
+    async (action: GuidedAction) => {
+      if (running) return;
+      const source = await dialog.pickFolder('Folder of PDFs to process');
+      if (!source) return;
+      const dest = await dialog.pickFolder('Destination for the processed copies');
+      if (!dest) return;
+      const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
+      if (anyAsked) {
+        setView({ kind: 'prerun', action, values: {}, error: null, folder: { source, dest } });
+        return;
+      }
+      void executeFolderRun(action, {}, source, dest);
+    },
+    [running, executeFolderRun],
+  );
+
+  // Harness bridge: the terminal step's output and the folder pickers are
+  // NATIVE dialogs — e2e injects the paths + ask-at-run values and drives
+  // the REAL executeRun/executeFolderRun.
+  const bridgeRef = useRef({ actions, executeRun, executeFolderRun });
+  bridgeRef.current = { actions, executeRun, executeFolderRun };
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerGuidedActionsHandlers({
@@ -153,6 +228,11 @@ export function GuidedActionsPanel(): React.ReactElement {
         const action = bridgeRef.current.actions.find((a) => a.id === actionId);
         if (!action) throw new Error(`runWithOutput: no action ${actionId}`);
         await bridgeRef.current.executeRun(action, values as RunValues, output);
+      },
+      runFolder: async (actionId, values, source, dest) => {
+        const action = bridgeRef.current.actions.find((a) => a.id === actionId);
+        if (!action) throw new Error(`runFolder: no action ${actionId}`);
+        await bridgeRef.current.executeFolderRun(action, values as RunValues, source, dest);
       },
     });
     return () => registerGuidedActionsHandlers(null);
@@ -386,7 +466,8 @@ export function GuidedActionsPanel(): React.ReactElement {
           return;
         }
       }
-      void executeRun(action, values);
+      if (view.folder) void executeFolderRun(action, values, view.folder.source, view.folder.dest);
+      else void executeRun(action, values);
     };
     return (
       <div className="flex flex-col gap-4" data-testid="actions-prerun">
@@ -460,6 +541,60 @@ export function GuidedActionsPanel(): React.ReactElement {
             className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm"
           >
             Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Folder-run view: spinner while the engine works, then the report ──
+  if (view.kind === 'folderrun') {
+    const { report, error } = view;
+    return (
+      <div className="flex flex-col gap-4" data-testid="actions-folderrun">
+        <div className="text-sm font-medium text-neutral-300">
+          Folder run — “{view.action.name}”
+        </div>
+        {!report && !error && (
+          <p className="text-sm text-neutral-400" data-testid="folderrun-busy" aria-live="polite">
+            Processing the folder…
+          </p>
+        )}
+        {error && (
+          <p className="text-sm text-red-400" data-testid="folderrun-error">{error}</p>
+        )}
+        {report && (
+          <>
+            <p className="text-sm text-neutral-200" data-testid="folderrun-summary">
+              {report.ok} processed · {report.failed} failed · {report.total} total
+            </p>
+            {report.failed > 0 && (
+              <div className="flex flex-col gap-1" data-testid="folderrun-errors">
+                {report.results
+                  .filter((r) => r.status === 'error')
+                  .map((r) => (
+                    <div key={r.rel} className="text-xs text-red-400" title={r.error}>
+                      {r.rel} — {r.error}
+                    </div>
+                  ))}
+              </div>
+            )}
+            {report.log_path && (
+              <p className="text-xs text-neutral-500" data-testid="folderrun-log">
+                Log: {report.log_path}
+              </p>
+            )}
+          </>
+        )}
+        <div>
+          <button
+            type="button"
+            data-testid="folderrun-close"
+            disabled={running}
+            onClick={() => setView({ kind: 'list' })}
+            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+          >
+            Back to actions
           </button>
         </div>
       </div>
@@ -562,6 +697,16 @@ export function GuidedActionsPanel(): React.ReactElement {
                 className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
               >
                 Run
+              </button>
+              <button
+                type="button"
+                data-testid={`action-folder-${a.id}`}
+                disabled={running}
+                title="Run this action on every PDF under a folder (originals untouched; copies mirror into a destination)"
+                onClick={() => void runActionOnFolder(a)}
+                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+              >
+                Folder…
               </button>
               <button
                 type="button"

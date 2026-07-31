@@ -244,6 +244,13 @@ export interface GuidedActionsHandlers {
     values: Record<number, Record<string, string | number>>,
     output: string,
   ) => Promise<void>;
+  /** FOLDER mode with injected source/dest (the pickers are native). */
+  runFolder: (
+    actionId: string,
+    values: Record<number, Record<string, string | number>>,
+    source: string,
+    dest: string,
+  ) => Promise<void>;
 }
 
 let guidedActionsHandlers: GuidedActionsHandlers | null = null;
@@ -814,6 +821,13 @@ export interface TestHarness {
     actionId: string,
     values: Record<number, Record<string, string | number>>,
     output: string,
+  ) => Promise<void>;
+  /** Guided-actions FOLDER run with injected source/dest paths. */
+  guidedRunFolder: (
+    actionId: string,
+    values: Record<number, Record<string, string | number>>,
+    source: string,
+    dest: string,
   ) => Promise<void>;
   /** Portfolio flows with injected paths (panel must be mounted). */
   portfolioCreateRun: (output: string, sources: string[], title?: string) => Promise<unknown>;
@@ -1446,6 +1460,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return guidedActionsHandlers.runWithOutput(actionId, values, output);
+    },
+    guidedRunFolder: async (actionId, values, source, dest) => {
+      if (!guidedActionsHandlers) {
+        const msg = 'guidedRunFolder: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return guidedActionsHandlers.runFolder(actionId, values, source, dest);
     },
     portfolioCreateRun: async (output, sources, title) => {
       if (!portfolioHandlers) {

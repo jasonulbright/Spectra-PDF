@@ -134,6 +134,9 @@ export const batch = {
    * the folder is user-chosen, a crafted filename is how a write escapes it. */
   writeLog: (name: string, contents: string, dir?: string) =>
     invoke<string>('write_batch_log', { name, contents, dir: dir || null }),
+  /** The resolved log folder (configured or the app-data default), created
+   *  on demand — for callers that hand the ENGINE a log destination. */
+  logDir: (dir?: string) => invoke<string>('get_batch_log_dir', { dir: dir || null }),
   /** Age sweep over that folder. 0 = keep forever (a no-op, not a purge), and
    * it only ever removes files matching this app's own log-name pattern. */
   pruneLogs: (retentionDays: number, dir?: string) =>
