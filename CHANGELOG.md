@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.0.9 — Right to left, and it reads back
+
+Arabic, Hebrew and Persian paragraphs edit and reflow like any others.
+Repeated image edits stop piling up. Documents that number their pages
+their own way are navigated that way.
+
+### Text
+- **Right-to-left paragraphs edit.** Arabic, Hebrew, Persian, Urdu and
+  the other right-to-left scripts now reflow: type into a paragraph and
+  it re-wraps, re-orders and re-draws correctly, with embedded Latin
+  words and numbers staying the right way round. The text you edit is in
+  reading order, and the box you type into reads that way too.
+- **Arabic letters stay joined.** Arabic is cursive — every letter
+  changes shape depending on its neighbours — so edited text is
+  re-shaped rather than re-typed letter by letter. A shaping-capable
+  font ships with the app for exactly this. Ligatures and letter marks
+  survive the round trip, so an edited paragraph can be edited again.
+- **A paragraph is only offered when it can be read back.** Where a
+  document's drawing order cannot be traced to a single reading order,
+  the paragraph says so instead of guessing — the individual text runs
+  stay editable, as before.
+
+### Pages
+- **Navigate by the page's own number.** A document that labels its pages
+  the way the printed thing does — i, ii, iii for front matter, then a
+  body restarting at 1 — now shows that label in the page box, with the
+  sheet position beside it. Type a label or a sheet number; either works.
+
+### Images
+- **Repeated edits stop stacking.** Moving or re-scaling the same image
+  several times used to leave a layer of transform behind each time, and
+  the same for opacity. Both now collapse, so a much-adjusted image
+  leaves a file no more complicated than a once-adjusted one.
+
+### Reliability
+- **One file, one operation at a time.** Two operations that rewrite the
+  same file can no longer overlap; the second waits for the first. A
+  failed operation releases its file immediately.
+
 ## 1.0.8 — Style the spans, read every script
 
 Added text gains per-selection styling, Chinese, Japanese and Korean text
