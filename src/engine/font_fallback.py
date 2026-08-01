@@ -204,6 +204,67 @@ _CJK_FACES = {
     "bolditalic": "NotoSansCJKsc-Bold.otf",
 }
 
+# T3: the right-to-left faces (IBM Plex Sans Arabic / Noto Sans Hebrew —
+# both OFL, vendored by sync-edit-fonts.ps1). Arabic is the SHAPING face: it
+# carries the GSUB joining rules a document's own subset almost never keeps,
+# which is why an Arabic run substitutes here rather than re-emitting per
+# character. Hebrew joins nothing and is here purely for coverage — a Hebrew
+# run in a font that can already draw it never comes this way. Neither
+# family ships an italic; the style map degrades to Regular, the same honest
+# degradation the CJK map makes.
+#
+# IBM Plex rather than Noto Sans Arabic, on a measured difference: Noto's
+# GSUB DECOMPOSES each letter into a dotless skeleton plus separately
+# positioned dots, so one character draws as several glyphs and the letter is
+# spelled by the SEQUENCE — which a per-code ToUnicode cannot express, and a
+# shaped edit that cannot be read back is a one-way trip. IBM Plex shapes one
+# composite glyph per character, so the round trip is exact by construction.
+_RTL_FACES = {
+    "arabic": {
+        "regular": "IBMPlexSansArabic-Regular.ttf",
+        "bold": "IBMPlexSansArabic-Bold.ttf",
+        "italic": "IBMPlexSansArabic-Regular.ttf",
+        "bolditalic": "IBMPlexSansArabic-Bold.ttf",
+    },
+    "hebrew": {
+        "regular": "NotoSansHebrew-Regular.ttf",
+        "bold": "NotoSansHebrew-Bold.ttf",
+        "italic": "NotoSansHebrew-Regular.ttf",
+        "bolditalic": "NotoSansHebrew-Bold.ttf",
+    },
+}
+
+
+def resolve_rtl_font(font_path: str, text: str, style: str = "regular") -> str:
+    """The bundled face that can DRAW `text` — the Arabic face when the text
+    joins cursively, else whichever RTL face covers it (T3).
+
+    `font_path` must be the vendored fonts DIRECTORY. Raises ValueError
+    naming the text when no bundled face can express it, which is the
+    signal the reflow turns into an honest refusal rather than a silent
+    substitution of the wrong script."""
+    from engine.shaping import face_can_shape, requires_shaping
+
+    if not os.path.isdir(font_path):
+        return font_path
+    st = style if style in _RTL_FACES["arabic"] else "regular"
+    joining = requires_shaping(text)
+    families = ("arabic", "hebrew") if joining else ("hebrew", "arabic")
+    for family in families:
+        for name in (_RTL_FACES[family][st], _RTL_FACES[family]["regular"]):
+            candidate = os.path.join(font_path, name)
+            if not os.path.isfile(candidate):
+                continue
+            if joining:
+                # Coverage is not enough for a joining script: the face must
+                # produce real joining forms, not `.notdef`s.
+                if face_can_shape(candidate, text):
+                    return candidate
+            elif face_covers(candidate, text):
+                return candidate
+            break
+    raise ValueError(f"no bundled right-to-left font can express {text!r}")
+
 
 def face_covers(face_path: str, text: str) -> bool:
     """Whether the face's cmap maps every DRAWN character of `text`
@@ -284,7 +345,7 @@ def resolve_feature_font(font_path: str, style: str = "regular") -> str:
     raise ValueError(f"Libertinus Serif (feature font) not found in {font_path}")
 
 
-def _subset_font(font_path: str, text: str, glyphs=None) -> tuple[bytes, "TTFont"]:
+def _subset_font(font_path: str, text: str, glyphs=None, retain_gids=False) -> tuple[bytes, "TTFont"]:
     """Subset the fallback font; returns (ttf bytes, the loaded subset TTFont
     for metrics/cmap reads).
 
@@ -294,7 +355,12 @@ def _subset_font(font_path: str, text: str, glyphs=None) -> tuple[bytes, "TTFont
     text-driven subset would drop them; a glyph-driven subset keeps exactly
     what will be drawn."""
     options = ft_subset.Options()
-    options.retain_gids = False
+    # 9.T3: a SHAPED subset keeps the source glyph ids (`retain_gids`), because
+    # the shaper addresses glyphs by id and the subsetter drops the `post`
+    # names that would otherwise let us re-find them. The character path keeps
+    # the shipped renumbering — it re-derives every glyph through the subset's
+    # OWN cmap, so it never crosses the id boundary at all.
+    options.retain_gids = bool(retain_gids)
     options.name_IDs = [1, 2]  # family + subfamily are plenty
     options.notdef_outline = True
     subsetter = ft_subset.Subsetter(options=options)
@@ -393,6 +459,22 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for
     def width_1000(s: str) -> float:
         return sum(widths[used[ch]] for ch in s if ch in used)
 
+    return _embed_identity_h(
+        pdf, ttf_bytes, font, font_path, metrics, widths,
+        sorted(((gid, ch) for ch, gid in used.items())),
+    ) + (encode, width_1000)
+
+
+def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicode_pairs):
+    """The Type0/Identity-H embed shared by the character and the SHAPED
+    builders — descriptor, descendant CIDFont, /W, ToUnicode. Returns a
+    1-tuple so the callers can concatenate their own encode/measure pair
+    onto it; splitting it out is what keeps the shaped path from forking a
+    second copy of the embedding rules (9.T3).
+
+    `tounicode_pairs` is [(code, text)] sorted by code; `text` may be empty
+    (a shaped cluster's non-leading glyph maps to NOTHING, so the word
+    extracts back exactly once) or several characters (a ligature)."""
     # Derive the embedded BaseFont from the ACTUAL face (9.B1: it may now
     # be Serif/Mono, not always Sans) — a hardcoded "LiberationSans" would
     # lie about a serif embed. "-Regular" is dropped; the "ABCDEF+" fake
@@ -462,14 +544,13 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for
     # Liberation is BMP-only so the coverage refusal fires first, but a
     # future supplementary-plane fallback font must not ship this).
     entries = "\n".join(
-        f"<{gid:04x}> <{ch.encode('utf-16-be').hex()}>"
-        for ch, gid in sorted(used.items(), key=lambda kv: kv[1])
+        f"<{gid:04x}> <{ch.encode('utf-16-be').hex()}>" for gid, ch in tounicode_pairs
     )
     tounicode = (
         "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
         "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n"
         "1 begincodespacerange\n<0000> <ffff>\nendcodespacerange\n"
-        f"{len(used)} beginbfchar\n{entries}\nendbfchar\n"
+        f"{len(tounicode_pairs)} beginbfchar\n{entries}\nendbfchar\n"
         "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
     )
 
@@ -483,4 +564,97 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for
             ToUnicode=pdf.make_stream(tounicode.encode("ascii")),
         )
     )
-    return font_dict, encode, width_1000
+    return (font_dict,)
+
+
+def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
+    """Embed a subset that carries SHAPED glyphs as well as plain characters
+    (9.T3). Returns (font_dict, encode, width_1000, glyph_encode,
+    glyph_width) — the last two take a sequence of glyph NAMES, which is how
+    a shaped run addresses glyphs the cmap cannot reach (a joining form, a
+    lam-alef ligature, an attached mark).
+
+    `shaped` is a list of `engine.shaping.ShapedRun`. The subset RETAINS the
+    source glyph ids, so a shaped glyph's id in the embedded font is the id
+    the shaper handed back and the two-byte Identity-H code is that id — no
+    name round trip, which matters because the subsetter drops `post` names.
+
+    ToUnicode: each cluster's CARRIER glyph takes that cluster's characters
+    and its companions take the EMPTY string, so an Arabic letter drawn as
+    dotless-base-plus-dot still extracts as exactly one character. That is
+    what keeps a shaped edit re-editable — the round trip is the feature,
+    not a nicety."""
+    if not Path(font_path).is_file():
+        raise ValueError(f"bundled fallback font not found: {font_path}")
+    full = TTFont(font_path, fontNumber=0, lazy=True)
+    try:
+        full_cmap = full.getBestCmap() or {}
+        full_gid_of = {name: i for i, name in enumerate(full.getGlyphOrder())}
+    finally:
+        full.close()
+    missing = [ch for ch in set(text) if ord(ch) not in full_cmap]
+    if missing:
+        pretty = " ".join(f"'{c}'" for c in sorted(missing))
+        raise ValueError(f"the fallback font cannot express {pretty}")
+    want = {full_cmap[ord(ch)] for ch in set(text)}
+    for run in shaped:
+        want.update(run.glyph_names)
+    ttf_bytes, font = _subset_font(font_path, text, glyphs=want, retain_gids=True)
+
+    hmtx = font["hmtx"]
+    metrics = _font_metrics(font)
+    scale = metrics["scale"]
+    sub_order = font.getGlyphOrder()
+    widths: dict[int, float] = {}
+
+    def width_of(g: int) -> float:
+        if g not in widths:
+            if g >= len(sub_order):
+                raise ValueError(f"the fallback font lost glyph {g} while subsetting")
+            widths[g] = round(hmtx[sub_order[g]][0] * scale, 2)
+        return widths[g]
+
+    used: dict[str, int] = {}
+    for ch in sorted(set(text)):
+        g = full_gid_of[full_cmap[ord(ch)]]
+        width_of(g)
+        used[ch] = g
+    # A glyph may be reached BOTH ways (an isolated form is often also the
+    # cmap glyph); the shaped attribution wins, because it is the one that
+    # has to spell a whole cluster.
+    unicode_of: dict[int, str] = {g: ch for ch, g in used.items()}
+    for run in shaped:
+        for name, cluster in run.clusters:
+            g = full_gid_of[name]
+            width_of(g)
+            if cluster:
+                unicode_of[g] = cluster  # a carrier is a carrier everywhere
+            else:
+                unicode_of.setdefault(g, "")
+
+    def encode(s: str) -> bytes:
+        out = bytearray()
+        for ch in s:
+            g = used.get(ch)
+            if g is None:
+                raise ValueError(f"the fallback font cannot express {ch!r}")
+            out += bytes(((g >> 8) & 0xFF, g & 0xFF))
+        return bytes(out)
+
+    def width_1000(s: str) -> float:
+        return sum(widths[used[ch]] for ch in s if ch in used)
+
+    def glyph_encode(names) -> bytes:
+        out = bytearray()
+        for name in names:
+            g = full_gid_of[name]
+            out += bytes(((g >> 8) & 0xFF, g & 0xFF))
+        return bytes(out)
+
+    def glyph_width(names) -> float:
+        return sum(widths.get(full_gid_of[name], 0.0) for name in names)
+
+    return _embed_identity_h(
+        pdf, ttf_bytes, font, font_path, metrics, widths,
+        sorted(unicode_of.items()),
+    ) + (encode, width_1000, glyph_encode, glyph_width)

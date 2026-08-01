@@ -1483,3 +1483,99 @@ class TestSetImageOpacity:
         listed = list_page_images(src, 1)["images"]
         assert listed[0]["opacity"] == pytest.approx(0.5)
         assert listed[1]["opacity"] == pytest.approx(1.0)
+
+
+class TestWrapperCollapse:
+    """9-§I.5 P9 — repeat transform/opacity edits must not stack frames."""
+
+    def _list(self, path):
+        from engine.page_images import list_page_images
+
+        return list_page_images(path, 1)["images"]
+
+    def test_repeat_transform_stops_at_two_frames(self, tmp_dir):
+        # Before P9 every move nested another `q cm … Q` around the draw, so
+        # ten nudges left ten frames. The document's OWN placement frame is
+        # kept (shape alone cannot tell it from ours, and folding it would
+        # dissolve author structure for no gain); every tool frame after the
+        # first folds into the next one's matrix.
+        from engine.page_images import transform_page_image
+
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_images(src)
+        cur = src
+        counts = []
+        for i, target in enumerate(
+            ([120, 0, 0, 90, 60, 610], [140, 0, 0, 100, 70, 620], [160, 0, 0, 110, 80, 630])
+        ):
+            nxt = os.path.join(tmp_dir, f"m{i}.pdf")
+            transform_page_image(cur, nxt, 1, 0, target)
+            ops = _ops_in_page_stream(nxt)
+            # Count the cm frames that enclose the FIRST draw (the ops up to
+            # and including it).
+            upto = ops[: next(i for i, (op, a) in enumerate(ops) if op == "Do") + 1]
+            counts.append(sum(1 for op, _ in upto if op == "cm"))
+            cur = nxt
+        assert counts == [2, 2, 2], counts
+        # …and the placement still lands exactly where it was asked to.
+        assert self._list(cur)[0]["matrix"] == pytest.approx([160, 0, 0, 110, 80, 630])
+
+    def test_folding_is_exact_at_every_step(self, tmp_dir):
+        from engine.page_images import transform_page_image
+
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_images(src)
+        cur = src
+        for i, target in enumerate(
+            ([90, 0, 0, 70, 40, 500], [95, 10, -5, 75, 45, 505], [200, 0, 0, 160, 10, 20])
+        ):
+            nxt = os.path.join(tmp_dir, f"e{i}.pdf")
+            transform_page_image(cur, nxt, 1, 0, target)
+            assert self._list(nxt)[0]["matrix"] == pytest.approx(target)
+            cur = nxt
+        # The OTHER placements are untouched throughout.
+        assert self._list(cur)[1]["matrix"] == pytest.approx([100, 0, 0, 80, 300, 600])
+        assert self._list(cur)[2]["matrix"] == pytest.approx([200, 0, 0, 150, 50, 300])
+
+    def test_repeat_opacity_leaves_one_gs_frame(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "s.pdf")
+        _page_with_images(src)
+        cur = src
+        for i, alpha in enumerate((0.5, 0.25, 0.75)):
+            nxt = os.path.join(tmp_dir, f"o{i}.pdf")
+            set_image_opacity(cur, nxt, 1, 0, alpha)
+            cur = nxt
+        ops = _ops_in_page_stream(cur)
+        upto = ops[: next(i for i, (op, a) in enumerate(ops) if op == "Do") + 1]
+        assert sum(1 for op, _ in upto if op == "gs") == 1
+        assert self._list(cur)[0]["opacity"] == pytest.approx(0.75)
+
+    def test_an_authors_graphics_state_is_never_dropped(self, tmp_dir):
+        # The alpha-only test is what makes the opacity collapse safe: an
+        # author's `q /GS1 gs Do Q` has the SAME shape as ours, and its
+        # dictionary may carry a blend mode or a soft mask that vanishing
+        # would change.
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "s.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            XObject=Dictionary(ImA=_rgb_image(pdf, 255, 0, 0)),
+            ExtGState=Dictionary(
+                GS1=Dictionary(Type=Name("/ExtGState"), ca=0.4, BM=Name("/Multiply"))
+            ),
+        )
+        page.Contents = pdf.make_stream(
+            b"q 100 0 0 80 50 600 cm q /GS1 gs /ImA Do Q Q"
+        )
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        set_image_opacity(src, out, 1, 0, 0.9)
+        ops = _ops_in_page_stream(out)
+        names = [a[0] for op, a in ops if op == "gs"]
+        assert "/GS1" in names  # the author's state survived
+        assert len(names) == 2  # ours went inside it

@@ -249,6 +249,30 @@ describe('fetchEditTextListing projection', () => {
     expect(plain.paragraphs[0].vertical).toBe(false);
   });
 
+  it('threads the bidi base direction; absent means left-to-right (9.T3)', async () => {
+    // The editor sets the text box's `dir` from this, so an engine that
+    // omits it must land on 'ltr' rather than leaving the field undefined —
+    // a right-to-left box is unusable for left-to-right text and vice versa.
+    const rtl = {
+      ...listing,
+      paragraphs: [{ ...listing.paragraphs[0], rtl: true }],
+    };
+    const out = await fetchEditTextListing(
+      async () => rtl,
+      'C:\\w.pdf',
+      1,
+      { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+    );
+    expect(out.paragraphs[0].rtl).toBe(true);
+    const plain = await fetchEditTextListing(
+      async () => listing,
+      'C:\\w.pdf',
+      1,
+      { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+    );
+    expect(plain.paragraphs[0].rtl).toBe(false);
+  });
+
   it('refused paragraphs decompose to run boxes', async () => {
     const refused = {
       ...listing,

@@ -18,6 +18,13 @@ export interface StatusBarPageBox {
   inputRef: React.Ref<HTMLInputElement>;
   value: string;
   total: number;
+  /** P5 follow-on: the document defines /PageLabels that differ from the
+   * sheet numbers, so the box holds a LABEL and the sheet position has to be
+   * shown alongside it — "iv (4 of 20)" — or the reader loses their place in
+   * the file entirely. False keeps the shipped "/ N" readout. */
+  labelled?: boolean;
+  /** The 1-based sheet the reader is on (only shown when `labelled`). */
+  sheet?: number;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onFocus: (e: React.FocusEvent<HTMLInputElement>) => void;
   onBlur: () => void;
@@ -192,8 +199,17 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
             onKeyDown={props.pageBox.onKeyDown}
             className="canvas-status-pageinput"
             aria-label="Current page"
+            title={
+              props.pageBox.labelled
+                ? 'Type a page label (i, iv, A-1) or a sheet number'
+                : 'Type a page number'
+            }
           />
-          <span data-testid="page-nav-total">/ {props.pageBox.total}</span>
+          <span data-testid="page-nav-total">
+            {props.pageBox.labelled
+              ? `(${props.pageBox.sheet ?? 1} of ${props.pageBox.total})`
+              : `/ ${props.pageBox.total}`}
+          </span>
         </div>
       )}
       <div className="canvas-status-zoom" role="group" aria-label="Zoom">
