@@ -98,4 +98,44 @@ describe('ink capture with stroke merging (N5)', () => {
 
     await closeAllFiles();
   });
+
+  it('the eraser SPLITS a crossed stroke (N5b) and removes a fully-erased drawing', async () => {
+    await closeAllFiles();
+    await openByPaths([SAMPLE_PDF]);
+    await setView('canvas');
+    await $('[data-testid="menu-tools"]').click();
+    await $('[data-testid="menuitem-tool-comment"]').waitForDisplayed();
+    await $('[data-testid="menuitem-tool-comment"]').click();
+    await $('[data-testid="tool-ink"]').waitForDisplayed();
+    await $('[data-testid="tool-ink"]').click();
+
+    const r = await pageRect();
+    // One long horizontal stroke.
+    await drawStroke(r, [0.15, 0.15], [0.6, 0.15]);
+    const first = await getFirstAnnotation();
+    expect(first!.kind).toBe('ink');
+    expect(first!.strokeCount).toBe(1);
+
+    // Erase across its MIDDLE: partial erase splits it into two strokes.
+    await $('[data-testid="tool-inkerase"]').waitForDisplayed();
+    await $('[data-testid="tool-inkerase"]').click();
+    await drawStroke(r, [0.37, 0.08], [0.38, 0.22]);
+    await browser.waitUntil(
+      async () => (await getFirstAnnotation())?.strokeCount === 2,
+      { timeoutMsg: 'the eraser did not split the stroke' },
+    );
+
+    // Scrub the whole drawing away: the annotation itself goes.
+    await drawStroke(r, [0.1, 0.15], [0.65, 0.15]);
+    await drawStroke(r, [0.1, 0.13], [0.65, 0.17]);
+    await browser.waitUntil(
+      async () => {
+        const a = await getFirstAnnotation(2000).catch(() => null);
+        return a === null || a.kind !== 'ink';
+      },
+      { timeoutMsg: 'a fully-erased drawing was not removed' },
+    );
+
+    await closeAllFiles();
+  });
 });

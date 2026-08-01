@@ -296,6 +296,29 @@ function stateWithAnnots(annots: PageAnnotation[]): AppState {
 const annotsOf = (s: AppState): PageAnnotation[] => s.workspace.documents[0].pages[0].annotations ?? [];
 
 describe('RESTYLE_ANNOTATIONS', () => {
+  it('applies lineEndings/cloudIntensity only to the kinds that carry them (N7 sheets)', () => {
+    const s0 = stateWithAnnots([
+      shape({ id: 'ar', shapeType: 'arrow', points: [0.2, 0.2, 0.4, 0.4] }),
+      shape({ id: 'cl', shapeType: 'cloud', x: 0.5, y: 0.5, w: 0.2, h: 0.2 }),
+      shape({ id: 'rc', shapeType: 'rect' }),
+    ]);
+    const s1 = appReducer(s0, {
+      type: 'RESTYLE_ANNOTATIONS',
+      docId: 'a.pdf#0',
+      pageId: 'a.pdf#p0',
+      annotationIds: ['ar', 'cl', 'rc'],
+      style: { lineEndings: ['ClosedArrow', 'ClosedArrow'], cloudIntensity: 3 },
+    });
+    const [ar, cl, rc] = annotsOf(s1);
+    expect(ar.lineEndings).toEqual(['ClosedArrow', 'ClosedArrow']);
+    expect(ar.cloudIntensity).toBeUndefined(); // an arrow has no scallops
+    expect(cl.cloudIntensity).toBe(3);
+    expect(cl.lineEndings).toBeUndefined(); // a cloud has no open ends
+    expect(rc.lineEndings).toBeUndefined(); // a rect carries neither
+    expect(rc.cloudIntensity).toBeUndefined();
+    expect(s1.pageUndoStack).toHaveLength(1);
+  });
+
   it('applies width/fill/opacity by kind rules in one undo step', () => {
     const s0 = stateWithAnnots([
       shape({ id: 's' }),

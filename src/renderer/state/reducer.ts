@@ -1205,7 +1205,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const page = doc?.pages.find((p) => p.id === action.pageId);
       if (!doc || !page?.annotations?.length) return state;
       const chosen = new Set(action.annotationIds);
-      const { strokeWidth, fillColor, opacity } = action.style;
+      const { strokeWidth, fillColor, opacity, lineEndings, cloudIntensity } = action.style;
       let changed = false;
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
@@ -1218,6 +1218,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
                   const styleable = a.kind === 'shape' || a.kind === 'callout' || a.kind === 'ink';
                   if (!styleable) return a;
                   const fillable = a.kind !== 'ink';
+                  // Kind-specific sheet fields (N7 residual): endings only
+                  // mean anything on the open-ended figures; intensity only
+                  // on clouds. Anything else silently keeps its look — the
+                  // same applicability seam as fill.
+                  const endable =
+                    a.kind === 'shape' &&
+                    (a.shapeType === 'line' || a.shapeType === 'arrow' || a.shapeType === 'polyline');
+                  const cloudy = a.kind === 'shape' && a.shapeType === 'cloud';
                   const next = {
                     ...a,
                     ...(strokeWidth !== undefined ? { strokeWidth } : {}),
@@ -1227,11 +1235,15 @@ export function appReducer(state: AppState, action: AppAction): AppState {
                         ? { fillColor: undefined }
                         : { fillColor }
                       : {}),
+                    ...(endable && lineEndings !== undefined ? { lineEndings } : {}),
+                    ...(cloudy && cloudIntensity !== undefined ? { cloudIntensity } : {}),
                   };
                   if (
                     next.strokeWidth === a.strokeWidth &&
                     next.opacity === a.opacity &&
-                    next.fillColor === a.fillColor
+                    next.fillColor === a.fillColor &&
+                    next.lineEndings === a.lineEndings &&
+                    next.cloudIntensity === a.cloudIntensity
                   )
                     return a;
                   changed = true;

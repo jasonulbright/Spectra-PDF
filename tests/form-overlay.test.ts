@@ -59,7 +59,7 @@ describe('projectFieldWidgets', () => {
     expect(r.h).toBeCloseTo(600 / 600);
   });
 
-  it('skips hidden and degenerate widgets, missing geometry, and buttons', () => {
+  it('skips hidden and degenerate widgets and missing geometry', () => {
     const field = textField({
       widgets: [
         { pageIndex: 0, rect: [10, 10, 60, 30], hidden: true },
@@ -71,12 +71,22 @@ describe('projectFieldWidgets', () => {
       i === 5 ? null : { box: BOX, bakedRotate: 0 },
     );
     expect(byPage.size).toBe(0);
+  });
 
+  it('F8 INVERSION — buttons PROJECT as click surfaces carrying their action', () => {
+    // This pinned the exclusion ("never an overlay surface") before F8;
+    // pushbuttons act now, so they project like everything else, with the
+    // classified /A action riding the entry.
     const button = textField({
       type: 'button',
+      action: { kind: 'uri', uri: 'https://example.com/x' },
       widgets: [{ pageIndex: 0, rect: [10, 10, 60, 30], hidden: false }],
     });
-    expect(projectFieldWidgets('a.pdf', button, () => ({ box: BOX, bakedRotate: 0 })).size).toBe(0);
+    const byPage = projectFieldWidgets('a.pdf', button, () => ({ box: BOX, bakedRotate: 0 }));
+    expect(byPage.size).toBe(1);
+    const entry = byPage.get(0)![0];
+    expect(entry.type).toBe('button');
+    expect(entry.action).toEqual({ kind: 'uri', uri: 'https://example.com/x' });
   });
 
   it('carries radio option mapping and signature filled state', () => {

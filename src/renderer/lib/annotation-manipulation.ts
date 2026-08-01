@@ -473,6 +473,339 @@ export function sizeMatchEdits(
   return out;
 }
 
+// ── Rotate / flip (the N7 residual) ────────────────────────────────────
+// Only the VERTEX-carrying kinds rotate: their geometry IS the point list,
+// so a quarter-turn or mirror is exactly representable in the file
+// (/L//Vertices//InkList move with the points). Box kinds (rect/ellipse,
+// stamps, text) do NOT rotate — /Square//Circle are axis-aligned by
+// definition, so a "rotation" could only live in the appearance stream and
+// would silently shed itself in any tool that regenerates APs from the
+// rect. Absent, not faked (§ 3.3).
+
+export type RotateDirection = 'cw' | 'ccw';
+export type FlipAxis = 'h' | 'v';
+
+export function isRotatable(a: PageAnnotation): boolean {
+  return (
+    a.kind === 'ink' ||
+    a.kind === 'measure' ||
+    (a.kind === 'shape' &&
+      (a.shapeType === 'line' ||
+        a.shapeType === 'arrow' ||
+        a.shapeType === 'polygon' ||
+        a.shapeType === 'polyline' ||
+        a.shapeType === 'cloud'))
+  );
+}
+
+/** Rotate/flip the selection's rotatable members a quarter turn or mirror.
+ *
+ * The math runs in PAGE-PIXEL space (normalized coords scaled by the page's
+ * display dims): a rotation in the normalized unit square would shear
+ * everything on a non-square page. Members share ONE pivot — the group's
+ * pixel-space bbox center (a single member's own center degenerates to
+ * exactly that) — so a rotated GROUP keeps its arrangement. The result is
+ * clamped back onto the page as a whole (one shared shift, so the group
+ * never smears), and measure notes recompute from their captured factors,
+ * the size-match precedent. */
+export function rotateFlipEdits(
+  members: Placed[],
+  op: { rotate: RotateDirection } | { flip: FlipAxis },
+  pageDims: Map<string, { width: number; height: number; rotation: number }>,
+): AnnotationTransform[] {
+  const rotatable = members.filter((m) => isRotatable(m.annotation));
+  if (rotatable.length === 0) return [];
+  const dims = pageDims.get(rotatable[0].pageId);
+  if (!dims) return [];
+  const swapped = dims.rotation === 90 || dims.rotation === 270;
+  const W = swapped ? dims.height : dims.width;
+  const H = swapped ? dims.width : dims.height;
+  if (!(W > 0) || !(H > 0)) return [];
+
+  // Group pivot in pixel space.
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const m of rotatable) {
+    const a = m.annotation;
+    minX = Math.min(minX, a.x * W);
+    minY = Math.min(minY, a.y * H);
+    maxX = Math.max(maxX, (a.x + a.w) * W);
+    maxY = Math.max(maxY, (a.y + a.h) * H);
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+
+  // Screen coords (y down): CW maps (x,y) -> (cx-(y-cy), cy+(x-cx)).
+  const map = (x: number, y: number): [number, number] => {
+    if ('rotate' in op) {
+      return op.rotate === 'cw'
+        ? [cx - (y - cy), cy + (x - cx)]
+        : [cx + (y - cy), cy - (x - cx)];
+    }
+    return op.flip === 'h' ? [2 * cx - x, y] : [x, 2 * cy - y];
+  };
+
+  interface Staged {
+    m: Placed;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    points?: number[];
+    strokes?: number[][];
+  }
+  const staged: Staged[] = [];
+  let outMinX = Infinity;
+  let outMinY = Infinity;
+  let outMaxX = -Infinity;
+  let outMaxY = -Infinity;
+  for (const m of rotatable) {
+    const a = m.annotation;
+    const mapFlat = (flat: number[]): number[] => {
+      const out: number[] = [];
+      for (let i = 0; i < flat.length; i += 2) {
+        const [nx, ny] = map(flat[i] * W, flat[i + 1] * H);
+        out.push(nx / W, ny / H);
+      }
+      return out;
+    };
+    const points = a.points ? mapFlat(a.points) : undefined;
+    const strokes = a.strokes ? a.strokes.map(mapFlat) : undefined;
+    const all = [...(points ?? []), ...(strokes ?? []).flat()];
+    if (all.length < 2) continue;
+    const xs = all.filter((_, i) => i % 2 === 0);
+    const ys = all.filter((_, i) => i % 2 === 1);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    const s: Staged = {
+      m,
+      x,
+      y,
+      w: Math.max(...xs) - x,
+      h: Math.max(...ys) - y,
+      ...(points ? { points } : {}),
+      ...(strokes ? { strokes } : {}),
+    };
+    staged.push(s);
+    outMinX = Math.min(outMinX, s.x);
+    outMinY = Math.min(outMinY, s.y);
+    outMaxX = Math.max(outMaxX, s.x + s.w);
+    outMaxY = Math.max(outMaxY, s.y + s.h);
+  }
+  if (staged.length === 0) return [];
+
+  // One shared clamp shift keeps the group's arrangement at the page edge.
+  const dx = Math.max(0, -outMinX) - Math.max(0, outMaxX - 1);
+  const dy = Math.max(0, -outMinY) - Math.max(0, outMaxY - 1);
+
+  const out: AnnotationTransform[] = [];
+  for (const s of staged) {
+    const shift = (flat: number[]): number[] =>
+      flat.map((v, i) => clamp01(i % 2 === 0 ? v + dx : v + dy));
+    const points = s.points ? shift(s.points) : undefined;
+    const strokes = s.strokes ? s.strokes.map(shift) : undefined;
+    const d = pageDims.get(s.m.pageId);
+    const note =
+      points && d
+        ? recomputedMeasureNote(s.m.annotation, points, d.width, d.height, d.rotation)
+        : undefined;
+    out.push({
+      pageId: s.m.pageId,
+      annotationId: s.m.annotation.id,
+      x: clamp01(s.x + dx),
+      y: clamp01(s.y + dy),
+      w: s.w,
+      h: s.h,
+      ...(points ? { points } : {}),
+      ...(strokes ? { strokes } : {}),
+      ...(note !== undefined ? { note } : {}),
+    });
+  }
+  return out;
+}
+
+// ── Ink stroke eraser (N5b) ────────────────────────────────────────────
+
+/** Cut everything within the eraser's swath out of an ink annotation's
+ * strokes — the king's pencil eraser, PARTIAL like his: a stroke crossed in
+ * its middle SPLITS into two strokes (which `strokes: number[][]` holds
+ * exactly; the model change that shipped N2 is what makes N5b clean).
+ *
+ * Geometry runs in an aspect-corrected frame: coordinates scale by the
+ * per-axis normalized radius, turning the elliptical eraser (a CIRCLE on
+ * screen mapped through the page aspect) into a unit circle. Each stroke
+ * segment is cut AT THE ERASER'S EDGE: the quadratic entry/exit of the
+ * segment through every eraser-sample disk yields kill intervals along the
+ * segment, and the survivors keep interpolated boundary points. Deleting
+ * whole segments instead would eat a coarse stroke outright — a quick
+ * 3-sample line erased in its middle has BOTH segments within radius of
+ * the shared vertex, so the whole drawing would vanish where the user
+ * expects two halves (the e2e catch that forced this shape).
+ *
+ * No tunnelling in EITHER direction: interval math cuts a long stroke
+ * segment crossing near an eraser sample (sparse stroke sampling), and the
+ * swath itself is treated as a connected CAPSULE CHAIN — the path is
+ * densified to ≤ r/2 sample spacing — so a fast flick whose pointer events
+ * arrive far apart erases the same continuous band the on-screen swath
+ * draws (sparse eraser sampling; the e2e's synthetic 3-waypoint scrub is
+ * the extreme case).
+ *
+ * Returns null when nothing was touched, else the surviving strokes —
+ * possibly [] (the annotation is fully erased; the caller removes it).
+ * Runs shorter than a drawable segment (a single orphan point) are
+ * dropped: a one-point "stroke" renders nothing and round-trips as noise.
+ */
+export function eraseFromStrokes(
+  strokes: number[][],
+  eraserPath: number[],
+  radius: { x: number; y: number },
+): number[][] | null {
+  if (eraserPath.length < 2 || radius.x <= 0 || radius.y <= 0) return null;
+  const ex: number[] = [];
+  const ey: number[] = [];
+  {
+    let px = eraserPath[0] / radius.x;
+    let py = eraserPath[1] / radius.y;
+    ex.push(px);
+    ey.push(py);
+    for (let i = 2; i + 1 < eraserPath.length; i += 2) {
+      const nx = eraserPath[i] / radius.x;
+      const ny = eraserPath[i + 1] / radius.y;
+      const steps = Math.ceil(Math.hypot(nx - px, ny - py) / 0.5);
+      for (let s = 1; s <= steps; s++) {
+        ex.push(px + ((nx - px) * s) / steps);
+        ey.push(py + ((ny - py) * s) / steps);
+      }
+      px = nx;
+      py = ny;
+    }
+  }
+
+  // Merged t-intervals of scaled segment A→B inside any eraser disk.
+  const killIntervals = (
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+  ): Array<[number, number]> => {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const raw: Array<[number, number]> = [];
+    for (let i = 0; i < ex.length; i++) {
+      const px = ax - ex[i];
+      const py = ay - ey[i];
+      if (len2 === 0) {
+        if (px * px + py * py < 1) raw.push([0, 1]);
+        continue;
+      }
+      // |P + tD|² < 1  →  len2·t² + 2(P·D)t + |P|² − 1 < 0
+      const b = px * dx + py * dy;
+      const c = px * px + py * py - 1;
+      const disc = b * b - len2 * c;
+      if (disc <= 0) continue;
+      const sq = Math.sqrt(disc);
+      const t0 = (-b - sq) / len2;
+      const t1 = (-b + sq) / len2;
+      if (t1 <= 0 || t0 >= 1) continue;
+      raw.push([Math.max(0, t0), Math.min(1, t1)]);
+    }
+    if (raw.length < 2) return raw;
+    raw.sort((p, q) => p[0] - q[0]);
+    const merged: Array<[number, number]> = [raw[0]];
+    for (let i = 1; i < raw.length; i++) {
+      const last = merged[merged.length - 1];
+      if (raw[i][0] <= last[1]) last[1] = Math.max(last[1], raw[i][1]);
+      else merged.push(raw[i]);
+    }
+    return merged;
+  };
+
+  let changed = false;
+  const out: number[][] = [];
+  for (const stroke of strokes) {
+    const n = stroke.length / 2;
+    if (n < 2) {
+      // Degenerate input stroke: a lone point erases when the eraser
+      // touches it, else passes through.
+      const px = stroke[0] / radius.x;
+      const py = stroke[1] / radius.y;
+      const hit = ex.some((x, i) => {
+        const dx = x - px;
+        const dy = ey[i] - py;
+        return dx * dx + dy * dy < 1;
+      });
+      if (hit) changed = true;
+      else out.push(stroke);
+      continue;
+    }
+    let run: number[] = [];
+    const closeRun = (): void => {
+      if (run.length >= 4) out.push(run);
+      run = [];
+    };
+    for (let s = 0; s < n - 1; s++) {
+      const x1 = stroke[s * 2];
+      const y1 = stroke[s * 2 + 1];
+      const x2 = stroke[s * 2 + 2];
+      const y2 = stroke[s * 2 + 3];
+      const kills = killIntervals(x1 / radius.x, y1 / radius.y, x2 / radius.x, y2 / radius.y);
+      if (kills.length === 0) {
+        if (run.length === 0) run.push(x1, y1);
+        run.push(x2, y2);
+        continue;
+      }
+      changed = true;
+      // Survivors = complement of the kill intervals in [0,1].
+      const survivors: Array<[number, number]> = [];
+      let cursor = 0;
+      for (const [k0, k1] of kills) {
+        if (k0 > cursor) survivors.push([cursor, k0]);
+        cursor = Math.max(cursor, k1);
+      }
+      if (cursor < 1) survivors.push([cursor, 1]);
+      if (survivors.length === 0) {
+        closeRun();
+        continue;
+      }
+      const segLen = Math.hypot(x2 - x1, y2 - y1);
+      for (const [a, b] of survivors) {
+        // Zero-length float slivers are noise, not geometry.
+        if ((b - a) * segLen < 1e-6) {
+          if (a === 0) closeRun();
+          continue;
+        }
+        const pbx = x1 + (x2 - x1) * b;
+        const pby = y1 + (y2 - y1) * b;
+        if (a === 0 && run.length > 0) {
+          run.push(pbx, pby); // continues the open run to the cut edge
+        } else {
+          closeRun();
+          run.push(x1 + (x2 - x1) * a, y1 + (y2 - y1) * a, pbx, pby);
+        }
+        if (b < 1) closeRun(); // the cut ends this piece mid-segment
+      }
+    }
+    closeRun();
+  }
+  return changed ? out : null;
+}
+
+/** Bbox of a strokes list — the erased annotation's new frame. */
+export function strokesBbox(
+  strokes: number[][],
+): { x: number; y: number; w: number; h: number } | null {
+  const all = strokes.flat();
+  if (all.length < 2) return null;
+  const xs = all.filter((_, i) => i % 2 === 0);
+  const ys = all.filter((_, i) => i % 2 === 1);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
 /** One scallop of a cloud border: a cubic from `s` to `e` with control
  * points offset outward by (4/3)r — the standard half-circle Bézier. Shared
  * by the SVG renderer and the PDF appearance emit so the two cannot drift. */
