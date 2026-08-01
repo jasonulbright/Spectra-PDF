@@ -867,7 +867,7 @@ def convert_text_run(
             # page `resources` back the lookup when a nested form's font
             # lives there.
             original = _lookup_font(gts.font_name, stream_resources, resources)
-            face = resolve_fallback_font(font_path, original)
+            face = resolve_fallback_font(font_path, original, text=text)
             font_dict, encode, width_1000 = build_fallback_font(pdf_, face, text)
             fname = _fresh_font_name(stream_resources, counter, reserved)
             holder["edit"].pending_font = (fname, font_dict)

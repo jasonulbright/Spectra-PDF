@@ -158,10 +158,249 @@ class _BoxLayout(NamedTuple):
     # none — Liberation Mono genuinely has none, so a monospace box simply
     # never kerns with no special case).
     kern_pairs: dict
+    # T15 per-span styling. None = the whole-box path (byte-identical to the
+    # shipped output). Otherwise: `styled_lines` is a list of lines, each a
+    # list of (text, style_index) segments; `styles` is one resolved entry
+    # per distinct style combo: {size, rgb, font_dict, encode, width_1000,
+    # kern_pairs}; `line_leadings` carries each line's own leading (1.2 ×
+    # the largest size ON that line — the paragraph engine's rule).
+    styled_lines: list | None = None
+    styles: list | None = None
+    line_leadings: list | None = None
+
+
+def _layout_box_spans(
+    pdf, body, spans, sz, font_path, family, bold, italic, kern, features,
+    alt_index, rot, l_left, l_right, l_top, l_w, l_h, frame,
+    left, right, top, bottom,
+) -> "_BoxLayout":
+    """T15: the per-span layout — one resolved style per distinct combo,
+    per-char widths, greedy wrap over mixed-width words, per-line leading
+    from the largest size on the line (the paragraph engine's rule), and
+    lines as (text, style_index) segments for the emitter."""
+    # Per-character style index. Style 0 is the box's own arguments; each
+    # distinct (size, bold, italic, color) combo used by a span gets one
+    # resolved entry, so N spans sharing a look share fonts and subsets.
+    char_style = [0] * len(body)
+    combo_index: dict = {(round(sz, 3), bool(bold), bool(italic), None): 0}
+    combos: list[tuple] = [(round(sz, 3), bool(bold), bool(italic), None)]
+    for span in spans:
+        s_size = round(float(span.get("size", sz)), 3)
+        s_bold = bool(span.get("bold", bold))
+        s_italic = bool(span.get("italic", italic))
+        s_color = tuple(span["color"]) if span.get("color") is not None else None
+        key = (s_size, s_bold, s_italic, s_color)
+        idx = combo_index.get(key)
+        if idx is None:
+            idx = len(combos)
+            combo_index[key] = idx
+            combos.append(key)
+        for pos in range(span["start"], span["end"]):
+            char_style[pos] = idx
+
+    feats = _normalize_features(features)
+
+    def resolve_face(b: bool, i: bool):
+        skey = style_key(b, i)
+        if feats:
+            from engine.font_fallback import resolve_feature_font
+
+            return resolve_feature_font(str(font_path), style=skey)
+        if family in ("serif", "mono", "sans"):
+            return resolve_fallback_font(str(font_path), synthetic_family_font(family), style=skey, text=body)
+        return resolve_fallback_font(str(font_path), None, style=skey, text=body)
+
+    # Chars per style (drawn chars only), then one subset font per style.
+    drawn_by_style: dict[int, set] = {}
+    for pos, ch in enumerate(body):
+        if ch in ("\n", "\r", "\t"):
+            continue
+        drawn_by_style.setdefault(char_style[pos], set()).add(ch)
+
+    styles: list[dict] = []
+    for idx, (s_size, s_bold, s_italic, s_color) in enumerate(combos):
+        # Every style that draws anything also draws the JOIN SPACE — the
+        # wrap synthesizes inter-word spaces styled by the preceding word,
+        # whose own body positions may never have contained one
+        # (pin-caught: encode(' ') refused on a word-only span).
+        style_chars = drawn_by_style.get(idx, set())
+        if style_chars:
+            style_chars = set(style_chars) | {" "}
+        chars = "".join(sorted(style_chars))
+        if not chars:
+            styles.append({"size": s_size, "color": s_color, "font_dict": None,
+                           "encode": None, "width_1000": None, "kern_pairs": {}})
+            continue
+        face = resolve_face(s_bold, s_italic)
+        glyph_for = None
+        if feats:
+            from fontTools.ttLib import TTFont as _TTFont
+
+            from engine.font_features import resolve_glyphs
+
+            _ff = _TTFont(str(face), fontNumber=0, lazy=True)
+            try:
+                names = resolve_glyphs(_ff, chars, feats, alt_index=int(alt_index or 0))
+            finally:
+                _ff.close()
+            glyph_for = {ch: nm for ch, nm in zip(chars, names) if nm is not None}
+        font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars, glyph_for=glyph_for)
+        pairs: dict = {}
+        if kern:
+            from engine.font_kerning import kern_pairs as _kern_pairs, kerned_width
+
+            pairs = _kern_pairs(str(face))
+            if pairs:
+                _bw = width_1000
+
+                def width_1000(t, _b=_bw, _p=pairs):
+                    return _b(t) + kerned_width(_p, t)
+
+        styles.append({"size": s_size, "color": s_color, "font_dict": font_dict,
+                       "encode": encode, "width_1000": width_1000, "kern_pairs": pairs})
+
+    def seg_split(a: int, b: int) -> list[tuple[str, int]]:
+        """[a,b) of body → (text, style) segments grouped by style."""
+        out: list[tuple[str, int]] = []
+        pos = a
+        while pos < b:
+            st = char_style[pos]
+            end = pos + 1
+            while end < b and char_style[end] == st:
+                end += 1
+            out.append((body[pos:end], st))
+            pos = end
+        return out
+
+    def range_width(a: int, b: int) -> float:
+        """Points width of body[a:b) under its styles (cross-style kern
+        deliberately not attempted — an honest hairline)."""
+        w = 0.0
+        for text, st in seg_split(a, b):
+            s = styles[st]
+            if s["width_1000"] is None:
+                continue
+            w += s["width_1000"](text) / 1000.0 * s["size"]
+        return w
+
+    import re as _re
+
+    styled_lines: list[list[tuple[str, int]]] = []
+    line_leadings: list[float] = []
+    plain_lines: list[str] = []
+    offset = 0
+    for hard in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        # `offset` tracks the hard-segment's start in the ORIGINAL body so
+        # word ranges index char_style correctly. (\r\n normalization can
+        # shift positions by the removed \r count — recompute via find.)
+        start = body.find(hard, offset) if hard else offset
+        words = [(m.start() + start, m.end() + start) for m in _re.finditer(r"\S+", hard)]
+        offset = (start if hard else offset) + len(hard) + 1
+        if not words:
+            styled_lines.append([])
+            line_leadings.append(sz * _LEADING_EM)
+            plain_lines.append("")
+            continue
+        cur: list[tuple[int, int]] = []
+        cur_w = 0.0
+        space_w = lambda st: (styles[st]["width_1000"](" ") / 1000.0 * styles[st]["size"]  # noqa: E731
+                              if styles[st]["width_1000"] is not None else 0.0)
+
+        def flush():
+            if not cur:
+                return
+            a, b = cur[0][0], cur[-1][1]
+            segs: list[tuple[str, int]] = []
+            for wi, (wa, wb) in enumerate(cur):
+                if wi > 0:
+                    # The joining space takes the PRECEDING word's last style
+                    # (the paragraph engine's trailing-space rule).
+                    segs.append((" ", char_style[cur[wi - 1][1] - 1]))
+                segs.extend(seg_split(wa, wb))
+            # Merge adjacent same-style segments for compact emission.
+            merged: list[tuple[str, int]] = []
+            for text, st in segs:
+                if merged and merged[-1][1] == st:
+                    merged[-1] = (merged[-1][0] + text, st)
+                else:
+                    merged.append((text, st))
+            styled_lines.append(merged)
+            line_leadings.append(
+                _LEADING_EM * max(styles[st]["size"] for _t, st in merged)
+            )
+            plain_lines.append("".join(t for t, _s in merged))
+
+        for wa, wb in words:
+            w_width = range_width(wa, wb)
+            join_w = space_w(char_style[cur[-1][1] - 1]) if cur else 0.0
+            if cur and cur_w + join_w + w_width > l_w:
+                flush()
+                cur = [(wa, wb)]
+                cur_w = w_width
+            else:
+                cur_w += join_w + w_width
+                cur.append((wa, wb))
+        flush()
+    while plain_lines and plain_lines[0] == "":
+        plain_lines.pop(0)
+        styled_lines.pop(0)
+        line_leadings.pop(0)
+    while plain_lines and plain_lines[-1] == "":
+        plain_lines.pop()
+        styled_lines.pop()
+        line_leadings.pop()
+    if not plain_lines:
+        raise ValueError("no text to add")
+
+    return _BoxLayout(
+        lines=plain_lines, body=body, leading=sz * _LEADING_EM, sz=sz, rot=rot,
+        l_left=l_left, l_right=l_right, l_top=l_top, l_w=l_w, l_h=l_h,
+        frame=frame, left=left, right=right, top=top, bottom=bottom,
+        font_dict=None, encode=None, width_1000=None, kern_pairs={},
+        styled_lines=styled_lines, styles=styles, line_leadings=line_leadings,
+    )
+
+
+def _validated_spans(spans, body_len: int) -> list[dict]:
+    """T15: normalize the caller's span list. Each span is
+    {start, end, size?, color?, bold?, italic?} over the TEXT's character
+    positions; spans must be in-range, non-overlapping and ascending (the
+    paragraph editor's own contract). Missing style keys inherit the box-
+    level arguments at layout time."""
+    out: list[dict] = []
+    prev_end = 0
+    for raw in spans:
+        try:
+            start, end = int(raw["start"]), int(raw["end"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("each span needs integer start and end") from None
+        if not (0 <= start < end <= body_len):
+            raise ValueError(f"span [{start},{end}) is out of range")
+        if start < prev_end:
+            raise ValueError("spans must be ascending and non-overlapping")
+        prev_end = end
+        span: dict = {"start": start, "end": end}
+        if raw.get("size") is not None:
+            s = float(raw["size"])
+            if not (0.1 <= s <= _MAX_SIZE):
+                raise ValueError("span size out of range")
+            span["size"] = s
+        if raw.get("color") is not None:
+            c = [float(v) for v in raw["color"]]
+            if len(c) != 3 or any(v < 0 or v > 1 for v in c):
+                raise ValueError("span color must be [r,g,b] in 0..1")
+            span["color"] = c
+        for key in ("bold", "italic"):
+            if raw.get(key) is not None:
+                if not isinstance(raw[key], bool):
+                    raise ValueError(f"span {key} must be true or false")
+                span[key] = raw[key]
+        out.append(span)
+    return out
 
 
 def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern=True,
-                features=None, alt_index=0) -> _BoxLayout:
+                features=None, alt_index=0, spans=None) -> _BoxLayout:
     """The ONE layout pass shared by `add_text_box` and `measure_text_box`
     — validation, box geometry (incl. the A2-tail rotation transposition),
     face resolution (family + A3b bold/italic style), subset-font build,
@@ -225,6 +464,16 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     sz = max(1.0, min(_MAX_SIZE, float(size) if size else 12.0))
     leading = sz * _LEADING_EM
 
+    if spans:
+        # T15: the per-span path builds its own styles/segments; the
+        # whole-box path below stays byte-identical when spans is absent.
+        return _layout_box_spans(
+            pdf, body, _validated_spans(spans, len(body)), sz, font_path, family,
+            bold, italic, kern, features, alt_index,
+            rot, l_left, l_right, l_top, l_w, l_h, frame,
+            left, right, top, bottom,
+        )
+
     # A2-tail-2: compose the A3b style into the SAME resolve ladder (both
     # face seats). style_key(False, False) == "regular" == the shipped
     # default, so the no-style path stays byte-identical.
@@ -241,9 +490,9 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
 
         face = resolve_feature_font(str(font_path), style=sk)
     elif family in ("serif", "mono", "sans"):
-        face = resolve_fallback_font(str(font_path), synthetic_family_font(family), style=sk)
+        face = resolve_fallback_font(str(font_path), synthetic_family_font(family), style=sk, text=body)
     else:
-        face = resolve_fallback_font(str(font_path), None, style=sk)
+        face = resolve_fallback_font(str(font_path), None, style=sk, text=body)
 
     # Chars actually DRAWN — control whitespace is structural (the line
     # breaks handled just below), never a glyph, so it stays out of the
@@ -305,6 +554,115 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     )
 
 
+def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, page) -> dict:
+    """T15 emitter: per-style fonts registered once, per-line baselines from
+    each line's OWN leading, per-segment Tf/rg (only on change), the same
+    shift-up-to-visible rule, the same q/Q + rotation-frame envelope."""
+    styles, styled_lines, leadings = lay.styles, lay.styled_lines, lay.line_leadings
+    rot, frame = lay.rot, lay.frame
+    l_left, l_right, l_top, l_w = lay.l_left, lay.l_right, lay.l_top, lay.l_w
+    left, right, top = lay.left, lay.right, lay.top
+
+    def csi(operands, op):
+        return _CSI(operands, Operator(op))
+
+    names: dict[int, str] = {}
+    for idx, s in enumerate(styles):
+        if s["font_dict"] is None:
+            continue
+        nm = _fresh_font_name(fonts)
+        fonts[Name(nm)] = s["font_dict"]
+        names[idx] = nm
+
+    def seg_width(text, st):
+        s = styles[st]
+        return (s["width_1000"](text) / 1000.0 * s["size"]) if s["width_1000"] else 0.0
+
+    first_size = max((styles[st]["size"] for _t, st in styled_lines[0]), default=lay.sz) \
+        if styled_lines and styled_lines[0] else lay.sz
+    # Baselines: the first sits one max-em below the local top; each next
+    # line advances by ITS OWN leading (mixed sizes = mixed leadings).
+    baselines: list[float] = []
+    y = l_top - first_size
+    for i, lead in enumerate(leadings):
+        if i > 0:
+            y -= lead
+        baselines.append(y)
+
+    # The visible-page shift-up rule, identical in spirit to the whole-box
+    # path — computed on the LAST baseline with the same local-space
+    # preimage bands.
+    try:
+        vbox = [float(v) for v in p.cropbox]
+    except Exception:
+        try:
+            vbox = [float(v) for v in p.mediabox]
+        except Exception:
+            vbox = None
+    if vbox is None:
+        page_lly = 0.0
+        page_ury = l_top + first_size
+    elif rot == 90:
+        page_lly, page_ury = right - vbox[2], right - vbox[0]
+    elif rot == 180:
+        page_lly, page_ury = top - vbox[3], top - vbox[1]
+    elif rot == 270:
+        page_lly, page_ury = vbox[0] - left, vbox[2] - left
+    else:
+        page_lly, page_ury = vbox[1], vbox[3]
+    if baselines and baselines[-1] < page_lly:
+        shift = page_lly - baselines[-1]
+        cap = page_ury - first_size
+        shift = min(shift, max(0.0, cap - baselines[0]))
+        baselines = [b + shift for b in baselines]
+
+    instrs = [csi([], "q"), csi([], "BT")]
+    cur_font: tuple | None = None
+    cur_rgb: tuple | None = None
+    for i, segments in enumerate(styled_lines):
+        if not segments:
+            continue
+        line_w = sum(seg_width(t, st) for t, st in segments)
+        if align == "center":
+            lx = l_left + (l_w - line_w) / 2
+        elif align == "right":
+            lx = l_right - line_w
+        else:
+            lx = l_left
+        instrs.append(csi([1, 0, 0, 1, round(lx, 4), round(baselines[i], 4)], "Tm"))
+        for text, st in segments:
+            s = styles[st]
+            if st not in names:
+                continue  # whitespace-only style with no drawn chars
+            want_font = (names[st], s["size"])
+            if want_font != cur_font:
+                instrs.append(csi([Name(names[st]), s["size"]], "Tf"))
+                cur_font = want_font
+            want_rgb = tuple(s["color"]) if s["color"] is not None else tuple(rgb)
+            if want_rgb != cur_rgb:
+                instrs.append(csi(list(want_rgb), "rg"))
+                cur_rgb = want_rgb
+            instrs.append(
+                _show_instruction(text, s["encode"], s["kern_pairs"], csi, pikepdf.Array)
+            )
+    instrs.append(csi([], "ET"))
+    instrs.append(csi([], "Q"))
+    if frame is not None:
+        instrs = [csi([], "q"), csi(frame, "cm")] + instrs + [csi([], "Q")]
+
+    content = pikepdf.unparse_content_stream(instrs)
+    p.contents_add(b"q\n", prepend=True)
+    p.contents_add(b"\nQ\n" + content, prepend=False)
+    _save(pdf, input_path, output_path)
+    return {
+        "output": str(output_path),
+        "page": int(page),
+        "lines": len(lay.lines),
+        "chars": len(lay.body),
+        "styles": len([s for s in styles if s["font_dict"] is not None]),
+    }
+
+
 def add_text_box(
     file: str,
     output: str,
@@ -322,6 +680,7 @@ def add_text_box(
     kern: bool = True,
     features: list | None = None,
     alt_index: int = 0,
+    spans: list | None = None,
 ) -> dict:
     """Author a new text box on `page`.
 
@@ -356,7 +715,7 @@ def add_text_box(
         # the page-range check — the pre-refactor precedence (a doubly-invalid
         # call surfaces the input error, not the page error).
         lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern,
-                          features, alt_index)
+                          features, alt_index, spans)
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
@@ -376,6 +735,10 @@ def add_text_box(
         if fonts is None:
             fonts = Dictionary()
             res["/Font"] = fonts
+        if lay.styled_lines is not None:
+            return _emit_spans_box(
+                pdf, p, lay, rgb, align, fonts, input_path, output_path, page
+            )
         fname = _fresh_font_name(fonts)
         fonts[Name(fname)] = font_dict
 
@@ -483,6 +846,7 @@ def measure_text_box(
     kern: bool = True,
     features: list | None = None,
     alt_index: int = 0,
+    spans: list | None = None,
 ) -> dict:
     """A2-tail-2: report how `text` would lay out in the box WITHOUT
     writing — the card's live fit indicator. Runs the exact `_layout_box`
@@ -500,14 +864,19 @@ def measure_text_box(
         # Same precedence as add_text_box: input-shape checks (inside
         # _layout_box) before the page range.
         lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern,
-                          features, alt_index)
+                          features, alt_index, spans)
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         # Round BEFORE comparing so the verdict matches the reported numbers
         # and float noise can't flip an exact boundary (14*1.2 and a box's
         # subtracted height land on different last-bit values otherwise).
-        text_height = round(len(lay.lines) * lay.leading, 4)
+        # T15: per-span lines carry their OWN leadings; the whole-box
+        # path keeps the shipped uniform product.
+        if lay.line_leadings is not None:
+            text_height = round(sum(lay.line_leadings), 4)
+        else:
+            text_height = round(len(lay.lines) * lay.leading, 4)
         box_height = round(lay.l_h, 4)
         return {
             "lines": len(lay.lines),

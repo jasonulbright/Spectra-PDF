@@ -671,7 +671,7 @@ def _family_for_da(da: str | None) -> str:
     return "sans"
 
 
-def _unicode_face(font_dir: str, da: str | None) -> str | None:
+def _unicode_face(font_dir: str, da: str | None, value: str = "") -> str | None:
     """The bundled fallback .ttf to embed for a non-WinAnsi value, by the /DA
     family. None when no fonts DIR is available (→ the value is refused, never
     crashed): a missing/non-directory path fails safe here rather than letting
@@ -681,7 +681,11 @@ def _unicode_face(font_dir: str, da: str | None) -> str | None:
     from engine.font_fallback import resolve_fallback_font, synthetic_family_font
 
     try:
-        return resolve_fallback_font(font_dir, synthetic_family_font(_family_for_da(da)))
+        # T5: the VALUE drives the CJK step — a CJK form value lands on
+        # the CJK-capable face instead of the coverage refusal.
+        return resolve_fallback_font(
+            font_dir, synthetic_family_font(_family_for_da(da)), text=value or None
+        )
     except (ValueError, OSError):
         return None
 
@@ -735,7 +739,7 @@ def _text_appearance(
         value.encode("cp1252")
         unicode_face = None
     except UnicodeEncodeError:
-        unicode_face = _unicode_face(font_dir, da)
+        unicode_face = _unicode_face(font_dir, da, value)
 
     if unicode_face is None:
         # WinAnsi — byte-identical: everything below runs on the raw value
@@ -856,7 +860,7 @@ def _text_value_problem(name: str, text: str, da: str | None, font_dir: str) -> 
         return None
     except UnicodeEncodeError:
         pass
-    face = _unicode_face(font_dir, da)
+    face = _unicode_face(font_dir, da, text)
     if face is None:
         return (
             f"value for {name} contains characters outside the form font's "

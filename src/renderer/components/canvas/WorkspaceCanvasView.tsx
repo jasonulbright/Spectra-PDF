@@ -865,6 +865,18 @@ export function WorkspaceCanvasView({
   const [addTextPlacement, setAddTextPlacement] = useState<SignaturePlacement | null>(null);
   const [atText, setAtText] = useState('');
   const [atSize, setAtSize] = useState(12);
+  // T15: per-span styling — spans over atText's character positions,
+  // captured from the textarea's live selection. Any TEXT change clears
+  // them (positions would silently drift under arbitrary edits; a visible
+  // reset is the predictable rule) — the card notes it.
+  const [atSpans, setAtSpans] = useState<
+    { start: number; end: number; size?: number; color?: [number, number, number]; bold?: boolean; italic?: boolean }[]
+  >([]);
+  const [atSpanSize, setAtSpanSize] = useState('');
+  const [atSpanColor, setAtSpanColor] = useState<string | null>(null);
+  const [atSpanBold, setAtSpanBold] = useState(false);
+  const [atSpanItalic, setAtSpanItalic] = useState(false);
+  const atTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   // A2-tail: authoring-time rotation (90-deg steps; sticky like size/family).
   const [atRotate, setAtRotate] = useState<0 | 90 | 180 | 270>(0);
   // A2-tail-2: whole-box style toggles (sticky) + the live fit result
@@ -949,6 +961,15 @@ export function WorkspaceCanvasView({
       smallCaps?: boolean;
       alternates?: boolean;
       altIndex?: number;
+      /** T15: per-span styling over the text's character positions. */
+      spans?: {
+        start: number;
+        end: number;
+        size?: number;
+        color?: [number, number, number];
+        bold?: boolean;
+        italic?: boolean;
+      }[];
     }): Promise<void> => {
       if (creatingTextRef.current) return; // re-entry: the button is disabled while creating
       const placement = liveAddTextPlacement;
@@ -1009,12 +1030,16 @@ export function WorkspaceCanvasView({
                   ...(params.alternates ? { alt_index: params.altIndex ?? 0 } : {}),
                 }
               : {}),
+            // T15: per-span styling (send-nothing when unstyled — the
+            // spanless path stays byte-identical to shipped A2).
+            ...(params.spans && params.spans.length > 0 ? { spans: params.spans } : {}),
           },
         );
         // Signed-doc refusal — keep the card open (the user can cancel).
         if (result === EDIT_DECLINED) return;
         setAddTextPlacement(null);
         setAtText('');
+        setAtSpans([]);
       } catch (err) {
         setAtError(err instanceof Error ? err.message : String(err));
         throw err;
@@ -1080,6 +1105,9 @@ export function WorkspaceCanvasView({
                   ...(atAlternates ? { alt_index: atAltIndex } : {}),
                 }
               : {}),
+            // T15: the fit indicator measures with the SAME spans the commit
+            // sends (mixed sizes change line heights — the K1 discipline).
+            ...(atSpans.length > 0 ? { spans: atSpans } : {}),
           })) as { fits?: boolean };
           if (!stale) setAtFits(typeof res?.fits === 'boolean' ? res.fits : null);
         } catch {
@@ -1103,6 +1131,7 @@ export function WorkspaceCanvasView({
     atSmallCaps,
     atAlternates,
     atAltIndex,
+    atSpans,
     docs,
     state.files,
     engineCall,
@@ -1121,8 +1150,10 @@ export function WorkspaceCanvasView({
       smallCaps: atSmallCaps,
       alternates: atAlternates,
       altIndex: atAltIndex,
+      ...(atSpans.length > 0 ? { spans: atSpans } : {}),
     }).catch(() => undefined); // surfaced via atError; the card stays open
   }, [
+    atSpans,
     commitAddText,
     atText,
     atSize,
@@ -4597,11 +4628,17 @@ export function WorkspaceCanvasView({
           </p>
           <textarea
             data-testid="add-text-input"
+            ref={atTextareaRef}
             value={atText}
             rows={3}
             autoFocus
             placeholder="Type the text to add…"
-            onChange={(e) => setAtText(e.target.value)}
+            onChange={(e) => {
+              setAtText(e.target.value);
+              // T15: character positions drift under edits — clear spans
+              // visibly rather than let them silently mis-bind.
+              if (atSpans.length > 0) setAtSpans([]);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 e.preventDefault();
@@ -4610,6 +4647,114 @@ export function WorkspaceCanvasView({
             }}
             className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500 resize-y"
           />
+          <div className="flex items-center gap-1.5 flex-wrap" data-testid="add-text-span-row">
+            <span className="text-xs text-neutral-400 w-16 shrink-0" title="Select text above, choose a look, then Style selection">
+              Spans
+            </span>
+            <input
+              data-testid="add-text-span-size"
+              type="number"
+              min={1}
+              max={999}
+              placeholder="size"
+              value={atSpanSize}
+              onChange={(e) => setAtSpanSize(e.target.value)}
+              className="w-14 px-1.5 py-0.5 bg-neutral-800 border border-neutral-700 rounded text-xs"
+            />
+            {['#000000', '#c62828', '#1565c0', '#2e7d32'].map((hex) => (
+              <button
+                key={hex}
+                type="button"
+                className={'page-edittext-colorchip' + (atSpanColor === hex ? ' selected' : '')}
+                style={{ background: hex }}
+                onClick={() => setAtSpanColor((c) => (c === hex ? null : hex))}
+              />
+            ))}
+            <button
+              type="button"
+              onClick={() => setAtSpanBold((v) => !v)}
+              className={`px-1.5 py-0.5 text-xs font-bold rounded border ${atSpanBold ? 'border-emerald-500 text-emerald-400' : 'border-neutral-700 text-neutral-400'}`}
+            >
+              B
+            </button>
+            <button
+              type="button"
+              onClick={() => setAtSpanItalic((v) => !v)}
+              className={`px-1.5 py-0.5 text-xs italic rounded border ${atSpanItalic ? 'border-emerald-500 text-emerald-400' : 'border-neutral-700 text-neutral-400'}`}
+            >
+              I
+            </button>
+            <button
+              data-testid="add-text-span-apply"
+              type="button"
+              onClick={() => {
+                const ta = atTextareaRef.current;
+                if (!ta) return;
+                const start = ta.selectionStart ?? 0;
+                const end = ta.selectionEnd ?? 0;
+                if (start >= end) {
+                  setAtError('Select some text above first, then apply the span style.');
+                  return;
+                }
+                const size = parseFloat(atSpanSize);
+                const span: {
+                  start: number; end: number; size?: number;
+                  color?: [number, number, number]; bold?: boolean; italic?: boolean;
+                } = { start, end };
+                if (atSpanSize !== '' && Number.isFinite(size) && size > 0) span.size = size;
+                if (atSpanColor) {
+                  const c = hexToRgb(atSpanColor);
+                  if (c) span.color = c;
+                }
+                if (atSpanBold) span.bold = true;
+                if (atSpanItalic) span.italic = true;
+                if (span.size === undefined && !span.color && !span.bold && !span.italic) {
+                  setAtError('Pick a size, colour, or style for the span first.');
+                  return;
+                }
+                setAtError(null);
+                // Overlapping earlier spans are replaced by the new one —
+                // last application wins, kept sorted for the engine.
+                setAtSpans((prev) =>
+                  [...prev.filter((s) => s.end <= start || s.start >= end), span].sort(
+                    (a, b) => a.start - b.start,
+                  ),
+                );
+              }}
+              className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+            >
+              Style selection
+            </button>
+          </div>
+          {atSpans.length > 0 && (
+            <div className="flex flex-wrap gap-1" data-testid="add-text-span-chips">
+              {atSpans.map((s, i) => (
+                <span
+                  key={`${s.start}-${s.end}-${i}`}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] bg-neutral-800 border border-neutral-700 rounded text-neutral-300"
+                  title={`"${atText.slice(s.start, s.end)}"`}
+                >
+                  {s.start}–{s.end}
+                  {s.size !== undefined ? ` · ${s.size}pt` : ''}
+                  {s.bold ? ' · B' : ''}
+                  {s.italic ? ' · I' : ''}
+                  {s.color ? (
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-sm"
+                      style={{ background: `rgb(${s.color.map((v) => Math.round(v * 255)).join(',')})` }}
+                    />
+                  ) : null}
+                  <button
+                    type="button"
+                    className="text-neutral-500 hover:text-red-400"
+                    onClick={() => setAtSpans((prev) => prev.filter((_x, xi) => xi !== i))}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <span className="text-xs text-neutral-400 w-16 shrink-0">Font</span>
             <select

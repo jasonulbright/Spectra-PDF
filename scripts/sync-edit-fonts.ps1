@@ -171,3 +171,34 @@ Write-Host "Vendored: $Target"
 
 Remove-Item $LibTmp -Force
 Remove-Item $LibExtract -Recurse -Force
+
+# --- Noto Sans CJK SC (T5, 2026-08-01): the CJK-capable fallback face ---
+# SIL OFL 1.1 like the rest. Regular + Bold (no CJK italic exists; the
+# resolve ladder's style degrade lands italic requests on Regular by
+# design). Pinned per-face from the tagged release tree; ~16MB/weight is
+# an accepted cost (the standing size ruling). The engine reaches these
+# through font_fallback's text-aware CJK step - never as a silent
+# substitution for text the family face can already express.
+$NotoBase = 'https://github.com/notofonts/noto-cjk/raw/Sans2.004/Sans/OTF/SimplifiedChinese'
+$NotoFaces = @(
+    @{ Name = 'NotoSansCJKsc-Regular.otf'; Sha256 = '2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b' }
+    @{ Name = 'NotoSansCJKsc-Bold.otf';    Sha256 = 'b5f0d1a190a7f9b43c310a8850630af12553df32c4c050543f9059732d9b4c0a' }
+)
+foreach ($face in $NotoFaces) {
+    $Target = Join-Path $Dest $face.Name
+    Invoke-WebRequest -Uri "$NotoBase/$($face.Name)" -OutFile $Target -UseBasicParsing
+    $h = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
+    if ($h -ne $face.Sha256) {
+        Remove-Item $Target -Force
+        throw "sha256 mismatch for $($face.Name): $h"
+    }
+    Write-Host "Vendored: $Target"
+}
+$NotoLicense = Join-Path $Dest 'LICENSE-NotoCJK.txt'
+Invoke-WebRequest -Uri 'https://github.com/notofonts/noto-cjk/raw/Sans2.004/LICENSE' -OutFile $NotoLicense -UseBasicParsing
+$h = (Get-FileHash -Algorithm SHA256 $NotoLicense).Hash.ToLowerInvariant()
+if ($h -ne '6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2') {
+    Remove-Item $NotoLicense -Force
+    throw "sha256 mismatch for LICENSE-NotoCJK.txt: $h"
+}
+Write-Host "Vendored: $NotoLicense"

@@ -2569,7 +2569,7 @@ def replace_paragraph_text(
                         first.style["font_name"], first.resources or resources, resources
                     )
                 face = resolve_fallback_font(
-                    str(font_path), original, style=style_key(kbold, kitalic)
+                    str(font_path), original, style=style_key(kbold, kitalic), text=chars
                 )
                 font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars)
                 fallbacks[key] = _Fallback(None, font_dict, encode, width_1000, face)
