@@ -10,10 +10,14 @@ The output is post-validated by opening it with pikepdf — a zero exit
 from gs is not proof of a well-formed PDF.
 """
 
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pikepdf
+
+from engine.acroform import adopt_orphan_widget_fields
 
 # Reuses compress.py's preset vocabulary; 'default' emits no
 # -dPDFSETTINGS (Ghostscript's own defaults — Distiller's "Standard").
@@ -101,16 +105,39 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "gs"
     if result.returncode != 0:
         raise RuntimeError(f"Ghostscript failed: {result.stderr.strip() or 'no diagnostics'}")
 
-    # Post-validate: the result must be a PDF pikepdf can open.
+    # Post-validate: the result must be a PDF pikepdf can open. In the same
+    # pass, register any form-field pdfmarks (O8): gs lands Distiller /ANN
+    # Widget pdfmarks on the page with their field keys intact but never
+    # writes /AcroForm — without adoption a distilled form renders dead.
+    adopted = 0
+    adopted_tmp: str | None = None
     try:
         with pikepdf.open(output_path) as pdf:
             pages = len(pdf.pages)
+            if pages > 0:
+                adopted = adopt_orphan_widget_fields(pdf)
+                if adopted:
+                    fd, adopted_tmp = tempfile.mkstemp(
+                        suffix=".pdf", dir=str(output_path.parent)
+                    )
+                    os.close(fd)
+                    pdf.save(adopted_tmp)
+        # The replace happens after the reading handle closes — Windows
+        # refuses to replace a file the process still holds open.
+        if adopted_tmp is not None:
+            os.replace(adopted_tmp, output_path)
+            adopted_tmp = None
+    except RuntimeError:
+        raise
     except Exception as exc:
         raise RuntimeError(f"Ghostscript produced an unreadable PDF: {exc}") from exc
+    finally:
+        if adopted_tmp is not None and os.path.exists(adopted_tmp):
+            os.unlink(adopted_tmp)
     if pages == 0:
         raise RuntimeError("Ghostscript produced a PDF with no pages")
 
-    return {
+    result_dict = {
         "output": str(output_path),
         "pages": pages,
         "preset": preset,
@@ -118,3 +145,6 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "gs"
         "output_size": output_path.stat().st_size,
         "eps": is_eps,
     }
+    if adopted:
+        result_dict["form_fields_adopted"] = adopted
+    return result_dict

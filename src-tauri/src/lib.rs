@@ -94,6 +94,7 @@ pub fn run() {
             commands::pick_postscript_file,
             commands::pick_pem_file,
             commands::pick_icc_file,
+            commands::pick_pkcs11_module,
             commands::pick_any_file,
             commands::pick_any_files,
             commands::pick_folder_dialog,

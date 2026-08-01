@@ -88,3 +88,4 @@ userinput.md
 # LibreOffice runtime for O1 export (assembled by scripts/bundle-libreoffice.ps1;
 # large, gitignored like resources/python & resources/ghostscript).
 resources/libreoffice/
+tests/softhsm2/

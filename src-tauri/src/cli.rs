@@ -1066,6 +1066,19 @@ pub struct SignArgs {
     /// Trust anchor certificate file(s) (PEM/DER) for revocation gathering (repeatable)
     #[arg(long = "trust-root")]
     pub trust_roots: Vec<PathBuf>,
+    /// PKCS#11 provider module (.dll) — sign with a hardware token/HSM.
+    /// Use with --token-label and --cert-label; --password is the PIN.
+    #[arg(long, conflicts_with_all = ["pfx", "key", "cert"], requires_all = ["token_label", "cert_label"])]
+    pub pkcs11_module: Option<PathBuf>,
+    /// Token label on the PKCS#11 module
+    #[arg(long, requires = "pkcs11_module")]
+    pub token_label: Option<String>,
+    /// Certificate label on the token
+    #[arg(long, requires = "pkcs11_module")]
+    pub cert_label: Option<String>,
+    /// Private-key label on the token (defaults to the certificate label)
+    #[arg(long, requires = "pkcs11_module")]
+    pub key_label: Option<String>,
 }
 
 #[derive(Args)]
@@ -2414,10 +2427,24 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
                 "output": abs(&args.output).to_string_lossy(),
-                "password": password,
             });
-            // Signer source: --pfx, or --key + --cert (clap enforces the
-            // pairing/conflicts; the engine re-validates).
+            // A PKCS#11 source takes the password as its PIN (F3); the
+            // file-based sources take it as the passphrase.
+            if args.pkcs11_module.is_some() {
+                params["pkcs11_pin"] = json!(password);
+            } else {
+                params["password"] = json!(password);
+            }
+            // Signer source: --pfx, --key + --cert, or a PKCS#11 token
+            // (clap enforces the pairing/conflicts; the engine re-validates).
+            if let Some(module) = &args.pkcs11_module {
+                params["pkcs11_module"] = json!(abs(module).to_string_lossy());
+                params["pkcs11_token"] = json!(args.token_label.as_deref().unwrap_or(""));
+                params["pkcs11_cert_label"] = json!(args.cert_label.as_deref().unwrap_or(""));
+                if let Some(kl) = &args.key_label {
+                    params["pkcs11_key_label"] = json!(kl);
+                }
+            }
             if let Some(pfx) = &args.pfx {
                 params["pfx_path"] = json!(abs(pfx).to_string_lossy());
             }
