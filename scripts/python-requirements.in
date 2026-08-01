@@ -12,3 +12,6 @@ pyHanko==0.36.2
 # font (resources/fonts) for characters a document's own font can't
 # express. Deliberate dep-bump per 21-phase7-content-editing.md.
 fonttools==4.63.0
+# F3 PKCS#11 token signing: pyHanko's pkcs11 arm needs python-pkcs11
+# (MIT; import name `pkcs11`). Wheel available for the embedded CPython.
+python-pkcs11==0.9.5

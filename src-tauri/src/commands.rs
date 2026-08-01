@@ -297,6 +297,29 @@ pub async fn pick_pem_file(
     }
 }
 
+/// Pick a PKCS#11 provider module — the token-signing source (F3). The
+/// vendor's cryptoki DLL is the one artifact every token ships.
+#[tauri::command]
+pub async fn pick_pkcs11_module(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("PKCS#11 module", &["dll"])
+        .add_filter("All files", &["*"])
+        .blocking_pick_file();
+    match result {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
 /// Pick an ICC colour profile — the prepress destination-profile picker
 /// (O6 tail). .icm is the same format under Windows' preferred extension.
 #[tauri::command]

@@ -3411,7 +3411,8 @@ export function WorkspaceCanvasView({
         file: file.workingPath,
         output: dest,
         ...resolved.params!,
-        password: sigPassword,
+        // A token source takes the password field as its PIN (F3).
+        ...(resolved.params!.pkcs11_module ? { pkcs11_pin: sigPassword } : { password: sigPassword }),
         ...(sigReason.trim() ? { reason: sigReason.trim() } : {}),
         ...(sigLocation.trim() ? { location: sigLocation.trim() } : {}),
         ...placementParams,
