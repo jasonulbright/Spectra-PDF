@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.0.3 — Signed documents stay signed
+
+The headline: you can now comment on, fill in, and add pages to a signed
+document without breaking its signatures. Alongside it: a live print
+preview, pen strokes that behave like a pen, and three long-reserved
+keyboard shortcuts come alive.
+
+### Signatures survive your edits
+- **Comment, fill, and add pages — signatures intact.** Edits to a signed
+  document are now appended to the file the way the format intends, so
+  every existing signature keeps verifying. This covers comments and
+  markups, form filling (in the panel, on the canvas, and from the command
+  line), importing a reviewer's XFDF comments, adding links, and adding
+  pages.
+- **Honest limits.** Edits a signed file cannot carry — removing or
+  reordering pages, editing page content, flattening — behave exactly as
+  before. And structural edits still warn before invalidating.
+- **`incremental-save`** joins the command line: apply an edited copy's
+  changes onto a signed original as one appended revision.
+- **Jump to a signature.** Signature cards now name the page carrying the
+  signature — click to go there.
+
+### See it before you print it
+- **Live preview in the Print dialog.** Every option — page subsets,
+  booklet order, poster tiles, multiple pages per sheet, grayscale,
+  comments modes, custom scale — renders exactly as it will land on paper,
+  sheet by sheet, as you change it.
+
+### A pen that acts like a pen
+- **Multi-stroke drawings.** Pen strokes drawn in quick succession join
+  into one drawing — sign your name in four strokes and it's one
+  annotation, not four. Drawings made of several strokes in other tools
+  now import whole, too.
+
+### Three keys wake up
+- With single-key accelerators enabled: **S** places a sticky note where
+  you click (and opens it for typing), **Z** is marquee zoom — sweep a
+  region and the view zooms to it — and **E** opens the content editor.
+
 ## 1.0.2 — Print the way print shops do
 
 The Print dialog grows from four controls to the full professional surface —
