@@ -8,6 +8,7 @@ import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerSignHandler } from '../testHarness';
 import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../components/SignerSourceFields';
 import type { SignerSource } from '../components/SignerSourceFields';
+import { getCanvasServices } from '../commands/context';
 import {
   classifySignature,
   SIGNATURE_STATUS_LABEL,
@@ -341,7 +342,18 @@ export function SignaturesPanel(): React.ReactElement {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1">
             {result.signatures.map((sig, i) => (
-              <SignatureCard key={sig.field ?? i} sig={sig} />
+              <SignatureCard
+                key={sig.field ?? i}
+                sig={sig}
+                // F7: jump to the widget's page. jumpToFilePage (not
+                // centerOn) — the bookmark rule: it resolves page number →
+                // live id, partitions included.
+                onJump={
+                  sig.page !== undefined && activeFile
+                    ? () => getCanvasServices()?.jumpToFilePage(activeFile.path, sig.page!)
+                    : undefined
+                }
+              />
             ))}
           </div>
           {/* Trust posture (F4): with no anchors, identity is explicitly
@@ -539,7 +551,7 @@ export function SignaturesPanel(): React.ReactElement {
   );
 }
 
-function SignatureCard({ sig }: { sig: SignatureEntry }): React.ReactElement {
+function SignatureCard({ sig, onJump }: { sig: SignatureEntry; onJump?: () => void }): React.ReactElement {
   const status = classifySignature(sig);
   const cls = {
     invalid: 'bg-red-600/20 text-red-300 border-red-600/40',
@@ -558,6 +570,19 @@ function SignatureCard({ sig }: { sig: SignatureEntry }): React.ReactElement {
       </div>
       <div className="text-xs text-neutral-500 flex flex-wrap gap-x-4 gap-y-0.5">
         {sig.field && <span>field: {sig.field}</span>}
+        {sig.page !== undefined && (
+          onJump ? (
+            <button
+              data-testid="signature-jump"
+              className="text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline"
+              onClick={onJump}
+            >
+              page {sig.page} →
+            </button>
+          ) : (
+            <span>page {sig.page}</span>
+          )
+        )}
         <span>
           integrity: {sig.intact ? 'intact' : 'BROKEN'}
           {' · '}

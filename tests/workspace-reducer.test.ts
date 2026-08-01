@@ -812,6 +812,16 @@ describe('annotation rects follow page rotation', () => {
     expect(rotated.points![1]).toBeCloseTo(0.1, 10);
     expect(rotated.points![2]).toBeCloseTo(0.7, 10);
     expect(rotated.points![3]).toBeCloseTo(0.4, 10);
+    // N2: strokes reproject per stroke, exactly like points.
+    const multi = rotateAnnotationRect(
+      { ...ink, points: undefined, strokes: [[0.1, 0.2, 0.4, 0.3], [0.2, 0.25, 0.3, 0.25]] },
+      90,
+    );
+    expect(multi.strokes).toHaveLength(2);
+    expect(multi.strokes![0][0]).toBeCloseTo(0.8, 10);
+    expect(multi.strokes![0][1]).toBeCloseTo(0.1, 10);
+    expect(multi.strokes![1][0]).toBeCloseTo(0.75, 10);
+    expect(multi.strokes![1][1]).toBeCloseTo(0.2, 10);
     // Four quarter-turns compose back to the original.
     let r: PageAnnotation = ink;
     for (let i = 0; i < 4; i++) r = rotateAnnotationRect(r, 90);

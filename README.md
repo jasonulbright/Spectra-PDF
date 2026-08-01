@@ -86,6 +86,10 @@ spectrapdf print input.pdf --printer "Brother HL-L2400D" --pages 1-3 --copies 2 
 #   --as-image --image-dpi 300 --layout nup|booklet|poster (each with its own flags; see --help)
 spectrapdf print big-drawing.pdf --printer "Brother HL-L2400D" --layout poster --poster-scale 200 --poster-cut-marks
 
+# Apply an edited copy's annotate/fill/add-page changes onto a SIGNED original
+# as one incremental append — its signatures keep verifying
+spectrapdf incremental-save signed.pdf edited-copy.pdf -o signed-updated.pdf
+
 # Create PDF from PostScript/EPS (distill)
 spectrapdf distill input.ps -o output.pdf --preset printer
 

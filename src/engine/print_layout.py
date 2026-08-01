@@ -567,3 +567,40 @@ def rasterize_pdf(
         args.append(f"-sPageList={pages}")
     args += [f"-sOutputFile={dst}", str(Path(src))]
     _run_render(args, "Print rasterization")
+
+
+def render_preview(
+    gs_path: str,
+    src: str,
+    out_dir: str,
+    dpi: int,
+    sheet_w: float,
+    sheet_h: float,
+    fit_switches: list[str],
+    gray: bool = False,
+    pages: str = "",
+) -> list[str]:
+    """Render sheets as PNGs THE WAY THE JOB WILL PRINT them (O3): the same
+    fixed medium and fit switches the mswinpr2 run gets, so letterboxing,
+    clipping, auto-rotation, and imposition all show as they will land on
+    paper. Returns the produced files in sheet order."""
+    device = "pnggray" if gray else "png16m"
+    template = str(Path(out_dir) / "sheet-%d.png")
+    args = [
+        gs_path, "-dNOPAUSE", "-dBATCH", "-dQUIET", "-dSAFER",
+        f"-sDEVICE={device}", f"-r{int(dpi)}",
+        f"-dDEVICEWIDTHPOINTS={_fmt(sheet_w)}",
+        f"-dDEVICEHEIGHTPOINTS={_fmt(sheet_h)}",
+        "-dTextAlphaBits=4", "-dGraphicsAlphaBits=4",
+        "-dPrinted", "-dUseCropBox",
+        *fit_switches,
+    ]
+    if pages:
+        args.append(f"-sPageList={pages}")
+    args += [f"-sOutputFile={template}", str(Path(src))]
+    _run_render(args, "Print preview render")
+    produced = sorted(
+        Path(out_dir).glob("sheet-*.png"),
+        key=lambda p: int(p.stem.split("-")[1]),
+    )
+    return [str(p) for p in produced]

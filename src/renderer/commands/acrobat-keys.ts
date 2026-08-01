@@ -154,14 +154,16 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   // Acrobat. Bare letters, so: guard-exempt is unthinkable (editableGuard
   // true), no modifiers at all (ctrl/shift/alt all false — Alt+letter is a
   // mnemonic shape, not a tool pick), canvas scope, whenEnabled (a disabled
-  // tool command must let the letter fall through). Reserved, deliberately
-  // NOT bound (reserve-don't-remap, § 9.2): Z (zoom mode — no such device
-  // exists yet; a Z that surprises beats a Z that lies), S (sticky note,
-  // no such kind), E (text edits, no content editing).
+  // tool command must let the letter fall through). The reserve-don't-remap
+  // trio (Z/S/E) BOUND at N3/N6: their features exist now — Z has the
+  // marquee-zoom mode, S the sticky-note mode, E the content-editing tool.
   { key: 'h', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.hand', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
   { key: 'v', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.select', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
   { key: 'u', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.highlight', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
   { key: 'x', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.freetext', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
   { key: 'd', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.ink', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
   { key: 'k', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.stamp', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 's', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.note', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 'z', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.zoommarquee', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 'e', ctrl: false, shift: false, alt: false, requiresPref: 'singleKeyAccelerators', command: 'tools.open.edit', scope: 'canvas', editableGuard: true, preventDefault: 'whenEnabled' },
 ];

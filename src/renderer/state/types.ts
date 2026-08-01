@@ -108,10 +108,16 @@ export interface PageAnnotation {
   // preset label (e.g. "APPROVED"). All three land in /Contents at commit,
   // and are what the comment sidebar lists.
   note?: string;
-  // ink only: flat [x0,y0,x1,y1,...] stroke path, display-normalized in the
-  // same space as x/y/w/h (which store the path's bounding box). Re-projected
-  // point-by-point alongside the bbox on rotation.
+  // measure/callout: flat [x0,y0,x1,y1,...] vertex path, display-normalized
+  // in the same space as x/y/w/h (which store the path's bounding box).
+  // Re-projected point-by-point alongside the bbox on rotation. NOT used by
+  // ink (see `strokes`).
   points?: number[];
+  // ink only (N2): the pen strokes, one flat [x0,y0,...] path per pen-lift,
+  // in the same display-normalized space. Ink uses `strokes` EXCLUSIVELY —
+  // a single-stroke drawing is strokes.length === 1 — so a multi-stroke
+  // /InkList (a signature) round-trips whole instead of being refused.
+  strokes?: number[][];
   // stamp only: a custom IMAGE stamp's raster as a data URL (PNG/JPEG,
   // downscaled at library-import time). Present → the appearance draws the
   // embedded image instead of the bordered label; `note` still carries the
@@ -251,7 +257,15 @@ export type CanvasTool =
   | 'shape'
   // Callout (rung 2): drag the text box; the leader lands pointing at the
   // drag origin, editable per-vertex afterward.
-  | 'callout';
+  | 'callout'
+  // Sticky note (N3): click places a native /Text note at the point and opens
+  // its editor. Comment's mode; the note keeps its fixed icon size (rung 1's
+  // kind rule) so placement is the only geometry.
+  | 'note'
+  // Zoom marquee (N3, Acrobat's Z): band a region, the reading view zooms to
+  // it. The THIRD ownerless mode beside select/hand — pure navigation, no
+  // tool, commits nothing.
+  | 'zoommarquee';
 
 // The tab-strip model (Phase 4 M2, § 3.1): Home | Tools | one tab per open
 // document. A doc tab focuses that file and shows the document pane (at M2:
@@ -511,6 +525,7 @@ export type AppAction =
         w: number;
         h: number;
         points?: number[];
+        strokes?: number[][]; // ink only (N2)
         note?: string; // measure only: the recomputed value
         calloutBox?: [number, number, number, number]; // callout only
       }[];

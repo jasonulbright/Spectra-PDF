@@ -3423,6 +3423,133 @@ class TestPrintPipeline:
             print_pdf(file=src, printer="P", gs_path="GS", subset="even")
 
 
+class TestPrintPreview:
+    """O3 — the preview runs print_pdf's own validation and prepass, then
+    renders sheets the way the job will print them. Real bundled gs; no
+    printer, no spool, no winspool gate."""
+
+    def _pdf(self, tmp_dir, widths, name="p.pdf"):
+        path = os.path.join(tmp_dir, name)
+        pdf = pikepdf.new()
+        for w in widths:
+            page = pdf.add_blank_page(page_size=(w, 400))
+            page.Contents = pdf.make_stream(b"0 g 10 10 50 50 re f")
+        pdf.save(path)
+        return path
+
+    def _cleanup(self, result):
+        from engine.printer import _remove_preview_dir
+        _remove_preview_dir(result["preview_dir"])
+
+    def test_plain_preview_one_png_per_page(self, tmp_dir, gs_path):
+        from engine.printer import print_preview
+        src = self._pdf(tmp_dir, [300, 300, 300])
+        r = print_preview(file=src, gs_path=gs_path,
+                          sheet_width=612, sheet_height=792)
+        try:
+            assert r["sheets"] == 3
+            assert r["truncated"] is False
+            assert len(r["pages"]) == 3
+            for p in r["pages"]:
+                with open(p, "rb") as f:
+                    assert f.read(8)[:4] == b"\x89PNG"
+        finally:
+            self._cleanup(r)
+
+    def test_preview_caps_pages_and_reports_truncation(self, tmp_dir, gs_path):
+        from engine.printer import print_preview
+        src = self._pdf(tmp_dir, [300] * 6)
+        r = print_preview(file=src, gs_path=gs_path, max_pages=2,
+                          sheet_width=612, sheet_height=792)
+        try:
+            assert r["sheets"] == 6
+            assert len(r["pages"]) == 2
+            assert r["truncated"] is True
+        finally:
+            self._cleanup(r)
+
+    def test_nup_preview_shows_sheets_not_pages(self, tmp_dir, gs_path):
+        from engine.printer import print_preview
+        src = self._pdf(tmp_dir, [300, 300, 300, 300])
+        r = print_preview(file=src, gs_path=gs_path,
+                          layout="nup", nup_rows=2, nup_cols=2,
+                          sheet_width=612, sheet_height=792)
+        try:
+            assert r["sheets"] == 1
+            assert len(r["pages"]) == 1
+            assert r["prepass"] == ["flatten", "nup2x2"]
+        finally:
+            self._cleanup(r)
+
+    def test_booklet_preview_landscape_sheets(self, tmp_dir, gs_path):
+        from engine.printer import print_preview
+        src = self._pdf(tmp_dir, [300] * 4)
+        r = print_preview(file=src, gs_path=gs_path, layout="booklet",
+                          sheet_width=612, sheet_height=792, dpi=36)
+        try:
+            assert r["sheets"] == 2
+            assert r["orientation"] == "landscape"
+            # Landscape medium: the PNG is wider than tall.
+            import struct
+            with open(r["pages"][0], "rb") as f:
+                header = f.read(26)
+            w, h = struct.unpack(">II", header[16:24])
+            assert w > h
+        finally:
+            self._cleanup(r)
+
+    def test_preview_ignores_copies_and_printer(self, tmp_dir, gs_path):
+        from engine.printer import print_preview
+        src = self._pdf(tmp_dir, [300, 300])
+        # printer/copies/collate are spool concerns; the wire may carry them
+        # and the preview must not multiply pages or hit winspool.
+        r = print_preview(file=src, gs_path=gs_path,
+                          printer="No Such Printer Anywhere",
+                          copies=5, collate=False,
+                          sheet_width=612, sheet_height=792)
+        try:
+            assert r["sheets"] == 2
+            assert len(r["pages"]) == 2
+        finally:
+            self._cleanup(r)
+
+    def test_preview_requires_sheet_and_validates(self, tmp_dir, gs_path):
+        from engine.printer import print_preview
+        src = self._pdf(tmp_dir, [300])
+        with pytest.raises(ValueError, match="paper size"):
+            print_preview(file=src, gs_path=gs_path)
+        with pytest.raises(ValueError, match="DPI"):
+            print_preview(file=src, gs_path=gs_path, dpi=1000,
+                          sheet_width=612, sheet_height=792)
+
+    def test_cleanup_dir_guard(self, tmp_dir, gs_path):
+        from engine.printer import print_preview
+        # A cleanup path OUTSIDE the preview namespace must be ignored.
+        victim = os.path.join(tmp_dir, "precious")
+        os.makedirs(victim)
+        src = self._pdf(tmp_dir, [300])
+        r = print_preview(file=src, gs_path=gs_path, cleanup_dir=victim,
+                          sheet_width=612, sheet_height=792)
+        try:
+            assert os.path.isdir(victim)
+        finally:
+            self._cleanup(r)
+
+    def test_cleanup_removes_prior_preview(self, tmp_dir, gs_path):
+        from engine.printer import print_preview
+        src = self._pdf(tmp_dir, [300])
+        first = print_preview(file=src, gs_path=gs_path,
+                              sheet_width=612, sheet_height=792)
+        second = print_preview(file=src, gs_path=gs_path,
+                               cleanup_dir=first["preview_dir"],
+                               sheet_width=612, sheet_height=792)
+        try:
+            assert not os.path.isdir(first["preview_dir"])
+            assert os.path.isdir(second["preview_dir"])
+        finally:
+            self._cleanup(second)
+
+
 class TestRedactionLeaks:
     """Security regressions: redaction MUST remove content, not cover it.
 

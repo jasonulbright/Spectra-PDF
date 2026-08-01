@@ -331,21 +331,28 @@ function addAnnotations(
     } else if (a.kind === 'ink') {
       // Rung 2's shared style edit reaches ink too: width + opacity (default
       // 2 / opaque — byte-identical to the pre-rung-2 output when unset).
+      // N2: one /InkList entry AND one AP sub-path per stroke — a signature
+      // of several pen lifts round-trips as exactly its strokes.
       const strokeW = a.strokeWidth ?? 2;
-      const flatPdf: number[] = [];
-      for (let i = 0; i < (a.points?.length ?? 0); i += 2) {
-        const [px, py] = displayPointToPdf(a.points![i], a.points![i + 1], { x, y, width, height }, rotation);
-        flatPdf.push(px, py);
-      }
+      const strokesPdf: number[][] = (a.strokes ?? []).map((stroke) => {
+        const flat: number[] = [];
+        for (let i = 0; i < stroke.length; i += 2) {
+          const [px, py] = displayPointToPdf(stroke[i], stroke[i + 1], { x, y, width, height }, rotation);
+          flat.push(px, py);
+        }
+        return flat;
+      });
       let content = `${r} ${g} ${b} RG ${strokeW} w 1 J 1 j `;
-      for (let i = 0; i < flatPdf.length; i += 2) {
-        const px = flatPdf[i] - x0;
-        const py = flatPdf[i + 1] - y0;
-        content += i === 0 ? `${px} ${py} m ` : `${px} ${py} l `;
+      for (const flat of strokesPdf) {
+        for (let i = 0; i < flat.length; i += 2) {
+          const px = flat[i] - x0;
+          const py = flat[i + 1] - y0;
+          content += i === 0 ? `${px} ${py} m ` : `${px} ${py} l `;
+        }
+        content += 'S ';
       }
-      content += 'S';
       const ap = context.register(
-        context.stream(content, {
+        context.stream(content.trimEnd(), {
           Type: 'XObject',
           Subtype: 'Form',
           FormType: 1,
@@ -358,7 +365,7 @@ function addAnnotations(
         Rect: [x0, y0, x1, y1],
         C: [r, g, b],
         F: 4, // print
-        InkList: [flatPdf],
+        InkList: strokesPdf,
         BS: { W: strokeW },
         AP: { N: ap },
       });

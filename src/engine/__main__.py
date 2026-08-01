@@ -100,7 +100,8 @@ from engine.text_paragraphs import (
     replace_paragraph_text,
 )
 from engine.text_runs import convert_text_run, list_text_runs, replace_text_run
-from engine.printer import print_pdf
+from engine.printer import print_pdf, print_preview, print_preview_cleanup
+from engine.incremental import transplant_incremental
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
 from engine.struct_tree import (
     add_struct_node,
@@ -215,9 +216,12 @@ def main() -> None:
     server.register("add_text_box", add_text_box)
     server.register("measure_text_box", measure_text_box)
     server.register("print", print_pdf)
+    server.register("print_preview", print_preview)
+    server.register("print_preview_cleanup", print_preview_cleanup)
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)
     server.register("generate_signer", generate_signer)
+    server.register("transplant_incremental", transplant_incremental)
 
     # Signal readiness on stderr so the Tauri backend knows we're alive
     print("engine: ready", file=sys.stderr, flush=True)

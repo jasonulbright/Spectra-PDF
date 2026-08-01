@@ -160,6 +160,32 @@ describe('print (M-P)', () => {
     await $('[data-testid="print-dialog"]').waitForDisplayed({ reverse: true });
   });
 
+  it('renders a live preview of the prepared sheets (O3)', async () => {
+    await browser.keys(['Control', 'p']);
+    await $('[data-testid="print-dialog"]').waitForDisplayed();
+
+    // The preview runs the REAL prepass through the engine and renders
+    // PNGs of the sheets — wait for the first image (gs render + read-back
+    // can take a few seconds on first run).
+    await $('[data-testid="print-preview-img"]').waitForDisplayed({
+      timeout: 30_000,
+      timeoutMsg: 'print preview never rendered',
+    });
+    const count = $('[data-testid="print-preview-count"]');
+    expect(await count.getText()).toContain('Sheet 1 of 5');
+
+    // 2x2 imposition folds five pages onto two sheets — the preview count
+    // must follow the PREPARED output, not the document page count.
+    await $('[data-testid="print-layout"]').selectByAttribute('value', 'nup');
+    await browser.waitUntil(
+      async () => (await count.getText()).includes('of 2'),
+      { timeout: 30_000, timeoutMsg: 'n-up preview never re-rendered' },
+    );
+
+    await $('[data-testid="print-cancel"]').click();
+    await $('[data-testid="print-dialog"]').waitForDisplayed({ reverse: true });
+  });
+
   it('CLI printers --capabilities reports the same driver facts', async () => {
     const list = JSON.parse(
       execFileSync(BINARY, ['printers'], { encoding: 'utf8' }),

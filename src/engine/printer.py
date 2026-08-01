@@ -44,9 +44,11 @@ content the user cannot see (the § I.0 class).
 """
 
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pikepdf
@@ -63,6 +65,7 @@ from .print_layout import (
     nup_cells,
     page_geometry,
     rasterize_pdf,
+    render_preview,
     strip_annotations,
 )
 from .validate import validate_pdf
@@ -116,6 +119,13 @@ _LAYOUTS = ("single", "nup", "booklet", "poster")
 
 MIN_IMAGE_DPI, MAX_IMAGE_DPI = 72, 1200
 MIN_SHEET_PT, MAX_SHEET_PT = 72.0, 14400.0
+
+# Preview scratch dirs (O3): distinctive prefix so cleanup can never be
+# talked into removing anything else, plus an age-based sweep for dirs a
+# crash orphaned.
+PREVIEW_PREFIX = "spectrapdf-print-preview-"
+PREVIEW_MAX_PAGES = 32
+_PREVIEW_STALE_S = 3600
 
 
 def parse_page_spec(spec: str, page_count: int) -> str:
@@ -332,6 +342,7 @@ def print_pdf(
     poster_labels: bool = False,
     sheet_width: float | None = None,
     sheet_height: float | None = None,
+    _preview: dict | None = None,
 ) -> dict:
     """Print a PDF to a named Windows printer (full O2 contract).
 
@@ -353,7 +364,7 @@ def print_pdf(
     """
     validate_pdf(file)
 
-    if not printer or not printer.strip():
+    if not _preview and (not printer or not printer.strip()):
         raise ValueError("No printer specified")
     if not isinstance(copies, int) or isinstance(copies, bool):
         raise ValueError(f"Copies must be a whole number, got {copies!r}")
@@ -408,7 +419,9 @@ def print_pdf(
             poster_overlap = _num(
                 "Poster overlap", poster_overlap, 0, min(sheet_width, sheet_height) / 2
             )
-    if not printer_exists(printer):
+    # Preview renders, never spools — no winspool gate (it must work while
+    # the picker is still loading, and with zero printers installed).
+    if not _preview and not printer_exists(printer):
         raise ValueError(f"Unknown printer: '{printer}'")
 
     with pikepdf.open(file) as pdf:
@@ -422,7 +435,9 @@ def print_pdf(
         order = list(reversed(order))
 
     doc_name = Path(file).name
-    uncollated_dup = (not collate) and copies > 1
+    # Copies and collation change the SPOOL, not what a sheet looks like —
+    # preview ignores them (and never duplicates pages).
+    uncollated_dup = (not collate) and copies > 1 and not _preview
 
     # Resolve orientation. Imposition authors the sheet shape, so DEVMODE
     # must match it explicitly; booklet is always 2-up on landscape sheets.
@@ -462,7 +477,54 @@ def print_pdf(
     stages: list[str] = []
     sheets_out: int | None = None
 
+    # Preview mode: cap the WORK, not just the output, where that is sound
+    # — single/nup output maps 1:1 onto a prefix of the selection, so the
+    # prepass (flatten!) only touches what the first sheets show. Booklet
+    # and poster read the whole selection (saddle order pulls from the end;
+    # tiling spans a page) and cap at render time instead.
+    total_sheets_hint: int | None = None
+    preview_max = int(_preview.get("max_pages", 8)) if _preview else 0
+    if _preview:
+        if sheet_width is None or sheet_height is None:
+            raise ValueError("Preview needs the paper size (sheet_width/sheet_height)")
+        sheet_width = _num("Sheet width", sheet_width, MIN_SHEET_PT, MAX_SHEET_PT)
+        sheet_height = _num("Sheet height", sheet_height, MIN_SHEET_PT, MAX_SHEET_PT)
+        if layout == "single":
+            total_sheets_hint = len(order)
+            if not plain:
+                order = order[:preview_max]
+        elif layout == "nup":
+            per = nup_rows * nup_cols
+            total_sheets_hint = -(-len(order) // per)
+            order = order[: preview_max * per]
+
+    def _emit_preview(src: str, fit_mode: str, page_spec: str, total: int) -> dict:
+        psw, psh = float(sheet_width), float(sheet_height)
+        if resolved_orient == "landscape":
+            psw, psh = max(psw, psh), min(psw, psh)
+        out_dir = tempfile.mkdtemp(prefix=PREVIEW_PREFIX)
+        images = render_preview(
+            gs_path, src, out_dir, int(_preview.get("dpi", 72)),
+            psw, psh, FIT_SWITCHES[fit_mode],
+            gray=(color == "gray"), pages=page_spec,
+        )
+        return {
+            "preview_dir": out_dir,
+            "pages": images,
+            "sheets": total,
+            "truncated": len(images) < total,
+            "layout": layout,
+            "fit": fit,
+            "orientation": resolved_orient,
+            "annots": annots,
+            "prepass": stages,
+            "page_count": page_count,
+        }
+
     if plain:
+        if _preview:
+            spec = ",".join(str(p + 1) for p in order[:preview_max])
+            return _emit_preview(file, fit, spec, len(order))
         args = build_gs_args(file, printer, page_list, fit, gs_path, duplex, us_ps)
         jobs = copies
         _run_jobs(args, jobs)
@@ -568,6 +630,21 @@ def print_pdf(
                 current = seq
                 stages.append("reorder" if not rotate_prepass else "reorder+rotate")
 
+            final_fit = (
+                "fit" if layout in ("nup", "booklet")
+                else "actual" if (layout == "poster" or fit == "scale")
+                else fit
+            )
+
+            if _preview:
+                total = sheets_out if sheets_out is not None else (
+                    total_sheets_hint if total_sheets_hint is not None else len(order)
+                )
+                spec = f"1-{preview_max}" if total > preview_max else ""
+                # Renders while the TemporaryDirectory (and `current` in
+                # it) is still alive; the PNGs land in their own dir.
+                return _emit_preview(current, final_fit, spec, total)
+
             if uncollated_dup:
                 with pikepdf.open(current) as prepared:
                     n_prepared = len(prepared.pages)
@@ -577,11 +654,6 @@ def print_pdf(
                 current = dup
                 stages.append("uncollated-copies")
 
-            final_fit = (
-                "fit" if layout in ("nup", "booklet")
-                else "actual" if (layout == "poster" or fit == "scale")
-                else fit
-            )
             args = build_gs_args(current, printer, "", final_fit, gs_path, duplex, us_ps)
             jobs = 1 if uncollated_dup else copies
             _run_jobs(args, jobs)
@@ -611,3 +683,83 @@ def print_pdf(
         result["as_image"] = True
         result["image_dpi"] = image_dpi
     return result
+
+
+def _remove_preview_dir(path: str) -> None:
+    """Delete ONE preview dir — refused for anything that is not ours (the
+    prefix + parent check is the traversal guard; this must never become a
+    general rmtree reachable over RPC)."""
+    p = Path(path)
+    if not p.name.startswith(PREVIEW_PREFIX):
+        return
+    if p.parent != Path(tempfile.gettempdir()):
+        return
+    shutil.rmtree(p, ignore_errors=True)
+
+
+def _sweep_stale_previews() -> None:
+    """Crash hygiene: preview dirs older than an hour are orphans."""
+    now = time.time()
+    try:
+        for p in Path(tempfile.gettempdir()).glob(PREVIEW_PREFIX + "*"):
+            try:
+                if now - p.stat().st_mtime > _PREVIEW_STALE_S:
+                    shutil.rmtree(p, ignore_errors=True)
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+
+def print_preview_cleanup(directory: str) -> dict:
+    """Dialog-close hook: delete the last preview dir without rendering
+    anything. Same prefix guard as the in-call cleanup."""
+    _remove_preview_dir(directory)
+    _sweep_stale_previews()
+    return {"removed": True}
+
+
+def print_preview(
+    file: str,
+    gs_path: str = "gs",
+    dpi: int = 72,
+    max_pages: int = 8,
+    cleanup_dir: str | None = None,
+    **options,
+) -> dict:
+    """Render what the print job WILL produce (O3), sheet by sheet.
+
+    Runs the exact `print_pdf` validation and prepass — same code, so the
+    preview cannot drift from the job — then renders the prepared sheets
+    to PNGs on the same fixed medium and fit switches mswinpr2 would get.
+    ``options`` takes the print wire keys (pages/subset/reverse/fit/layout/
+    ... plus the REQUIRED sheet_width/sheet_height); printer/copies/collate
+    are ignored — they change the spool, not the sheets. ``cleanup_dir``
+    deletes the CALLER'S previous preview (prefix-guarded).
+
+    Returns {"preview_dir", "pages": [png paths], "sheets", "truncated",
+    ...}. The caller owns the returned dir until its next call (or a final
+    cleanup); dirs older than an hour are swept as crash orphans.
+    """
+    if cleanup_dir:
+        _remove_preview_dir(cleanup_dir)
+    _sweep_stale_previews()
+
+    if isinstance(dpi, bool) or not isinstance(dpi, int) or not 18 <= dpi <= 300:
+        raise ValueError(f"Preview DPI must be 18-300, got {dpi!r}")
+    if (
+        isinstance(max_pages, bool)
+        or not isinstance(max_pages, int)
+        or not 1 <= max_pages <= PREVIEW_MAX_PAGES
+    ):
+        raise ValueError(f"Preview page cap must be 1-{PREVIEW_MAX_PAGES}, got {max_pages!r}")
+    for key in ("printer", "copies", "collate", "gs_path", "_preview"):
+        options.pop(key, None)
+
+    return print_pdf(
+        file=file,
+        printer="",
+        gs_path=gs_path,
+        _preview={"dpi": dpi, "max_pages": max_pages},
+        **options,
+    )

@@ -1037,10 +1037,21 @@ def fill_form_fields(
         else:
             pdf.save(output_path)
 
+    # O5b: filling a SIGNED document lands as an incremental append —
+    # original bytes verbatim + one revision carrying the value/appearance
+    # updates — so existing signatures keep verifying (the fill-and-sign
+    # workflow the king supports). Flatten removes widgets, which the
+    # transplant refuses by design; that path keeps today's rewrite (a
+    # flatten inherently destroys what the signature covers).
+    from engine.incremental import finalize_preserving_signatures
+
+    landed = tmp_path if same_file else str(output_path)
+    preserved = finalize_preserving_signatures(str(input_path), landed)
+
     if same_file:
         shutil.move(tmp_path, str(output_path))
 
-    return {
+    result = {
         "output": str(output_path),
         "filled": filled,
         "flattened": flattened,
@@ -1049,6 +1060,9 @@ def fill_form_fields(
         # render (honestly) in Helvetica. Surfaced, never silent.
         "fonts_substituted": fonts_substituted,
     }
+    if preserved.get("preserved"):
+        result["signatures_preserved"] = True
+    return result
 
 
 # ── Flatten ───────────────────────────────────────────────────────────────

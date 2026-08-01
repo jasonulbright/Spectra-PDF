@@ -21,8 +21,10 @@ import { ANNOTATION_PALETTE } from '../components/canvas/PageCell';
 //     of them now, not just the ones with a note (a highlight without a note is
 //     still a comment) — with jump, edit, recolour and delete;
 //   - the FILE's total comes from the engine, so a document carrying markup
-//     this app doesn't model (multi-stroke ink, polygons) reports honestly
-//     instead of quietly under-counting;
+//     this app doesn't model reports honestly instead of quietly
+//     under-counting (multi-stroke ink and polygons, once that list's
+//     examples, are modeled since N2/rung 2 — the residue is exotica like
+//     3D or rich-media annotations);
 //   - Delete All is the engine op, so it removes everything and is undoable.
 
 // The PDF's own vocabulary, not the app's internal kind. A row that says

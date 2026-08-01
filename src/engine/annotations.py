@@ -111,7 +111,18 @@ def delete_all_annotations(file: str, output: str) -> dict:
         else:
             pdf.save(output_path)
 
+    # O5b: on a signed input the landed bytes become an incremental append
+    # (original verbatim + one revision), so sweeping comments never breaks
+    # the signature. The staged/landed rewrite stands when not applicable.
+    from engine.incremental import finalize_preserving_signatures
+
+    landed = tmp_path if same_file else str(output_path)
+    preserved = finalize_preserving_signatures(str(input_path), landed)
+
     if same_file:
         shutil.move(tmp_path, str(output_path))
 
-    return {"output": str(output_path), "removed": removed}
+    out = {"output": str(output_path), "removed": removed}
+    if preserved.get("preserved"):
+        out["signatures_preserved"] = True
+    return out

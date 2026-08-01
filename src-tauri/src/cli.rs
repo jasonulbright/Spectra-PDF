@@ -159,6 +159,20 @@ pub enum CliCommand {
     Print(PrintArgs),
     /// List installed Windows printers (JSON: names + default)
     Printers(PrintersArgs),
+    /// Apply an edited copy's annotate/fill/add-page changes onto a SIGNED
+    /// original as one incremental append (signatures keep verifying)
+    IncrementalSave(IncrementalSaveArgs),
+}
+
+#[derive(Args)]
+pub struct IncrementalSaveArgs {
+    /// The signed original PDF
+    pub original: PathBuf,
+    /// The edited (rewritten) copy whose changes to apply
+    pub modified: PathBuf,
+    /// Output file (must not be the original)
+    #[arg(short, long)]
+    pub output: PathBuf,
 }
 
 #[derive(Args)]
@@ -1601,6 +1615,15 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
             engine.call("print", params)
         }
+
+        CliCommand::IncrementalSave(args) => engine.call(
+            "transplant_incremental",
+            json!({
+                "original": abs(&args.original).to_string_lossy(),
+                "modified": abs(&args.modified).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+            }),
+        ),
 
         // Handled in run() before the engine spawns.
         CliCommand::Printers(_) => unreachable!("printers is dispatched before engine start"),

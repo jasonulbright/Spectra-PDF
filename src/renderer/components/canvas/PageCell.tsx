@@ -122,6 +122,10 @@ const HIGHLIGHT_COLOR = '#ffd54a';
 const FREETEXT_COLOR = '#16161a';
 const INK_COLOR = '#2f6fed';
 const FREETEXT_FONT_PT = 12;
+// N5: pen lifts within this window extend the previous ink annotation (a
+// signature is one annotation). Long enough for a deliberate lift-and-cross,
+// short enough that a new thought starts a new drawing.
+const INK_MERGE_WINDOW_MS = 2500;
 
 function defaultColorFor(kind: PageAnnotation['kind']): string {
   if (kind === 'freetext') return FREETEXT_COLOR;
@@ -584,6 +588,9 @@ interface PageCellProps {
   onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   // Ctrl-marquee result — the view decides how it merges into the selection.
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
+  // N3 marquee zoom: band in DISPLAY page-normalized coords; the reading
+  // view zooms until it fills the pane. Optional — the board has no zoom.
+  onZoomToRect?: (pageId: string, rect: { x: number; y: number; w: number; h: number }) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -789,6 +796,7 @@ function PageCellImpl({
   onCalibrate,
   onMeasureContextMenu,
   onMarqueeSelect,
+  onZoomToRect,
   onAddRedactionMark,
   onRemoveRedactionMark,
   onSetSignaturePlacement,
@@ -1324,6 +1332,9 @@ function PageCellImpl({
     appendShapeVertexRef.current?.(p, e.detail >= 2);
   };
 
+  // N5 stroke merging: the last ink annotation this cell created/extended.
+  const lastInkRef = useRef<{ id: string; pageId: string; color: string; time: number } | null>(null);
+
   const handleInkDown = (e: React.PointerEvent<HTMLElement>): void => {
     bandActive.current = true;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -1359,16 +1370,49 @@ function PageCellImpl({
       const w = Math.max(...xs) - minX;
       const h = Math.max(...ys) - minY;
       if (commit && (w > 0.005 || h > 0.005)) {
-        onAddAnnotation(docId, page.id, {
-          id: crypto.randomUUID(),
-          kind: 'ink',
-          x: minX,
-          y: minY,
-          w,
-          h,
-          color: annotationColor ?? INK_COLOR,
-          points: stored,
-        });
+        const color = annotationColor ?? INK_COLOR;
+        // N5: pen lifts within the merge window EXTEND the previous ink
+        // annotation instead of spawning a new one — a signature drawn in
+        // four strokes is ONE annotation (one /InkList with four paths),
+        // exactly how it would import. The window resets on every stroke;
+        // a color change, another page, deletion, or undo breaks the chain
+        // (the target must still exist with its strokes intact).
+        const prev = lastInkRef.current;
+        const target =
+          prev && prev.pageId === page.id && prev.color === color &&
+          performance.now() - prev.time < INK_MERGE_WINDOW_MS
+            ? page.annotations?.find((a) => a.id === prev.id && a.kind === 'ink' && a.strokes)
+            : undefined;
+        if (target) {
+          const strokes = [...(target.strokes ?? []), stored];
+          const sx = strokes.flatMap((s) => s.filter((_, i) => i % 2 === 0));
+          const sy = strokes.flatMap((s) => s.filter((_, i) => i % 2 === 1));
+          const bx = Math.min(...sx);
+          const by = Math.min(...sy);
+          onTransformAnnotations(docId, [{
+            pageId: page.id,
+            annotationId: target.id,
+            x: bx,
+            y: by,
+            w: Math.max(...sx) - bx,
+            h: Math.max(...sy) - by,
+            strokes,
+          }]);
+          lastInkRef.current = { id: target.id, pageId: page.id, color, time: performance.now() };
+        } else {
+          const id = crypto.randomUUID();
+          onAddAnnotation(docId, page.id, {
+            id,
+            kind: 'ink',
+            x: minX,
+            y: minY,
+            w,
+            h,
+            color,
+            strokes: [stored],
+          });
+          lastInkRef.current = { id, pageId: page.id, color, time: performance.now() };
+        }
       }
     };
     const onUp = (): void => finish(true);
@@ -1583,6 +1627,32 @@ function PageCellImpl({
       }
       // rect/ellipse fall through to the generic band below.
     }
+    if (tool === 'note') {
+      // N3: click places a native /Text sticky note at the point (fixed icon
+      // size — rung 1's kind rule) and opens its text editor immediately,
+      // the king's gesture. An editor left empty removes the note.
+      const rect = e.currentTarget.getBoundingClientRect();
+      const cx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const cy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      const w = Math.min(0.2, 18 / measDispW);
+      const h = Math.min(0.2, 18 / measDispH);
+      const placed = toStoredRect({
+        x: Math.max(0, Math.min(1 - w, cx - w / 2)),
+        y: Math.max(0, Math.min(1 - h, cy - h / 2)),
+        w,
+        h,
+      });
+      const annotation: PageAnnotation = {
+        id: crypto.randomUUID(),
+        kind: 'note',
+        ...placed,
+        color: annotationColor ?? HIGHLIGHT_COLOR,
+        note: '',
+      };
+      onAddAnnotation(docId, page.id, annotation);
+      setEditing(annotation.id);
+      return;
+    }
     if (tool === 'stamp') {
       if (!stampPreset) return; // no preset picked yet — clicks are a no-op
       const rect = e.currentTarget.getBoundingClientRect();
@@ -1651,7 +1721,11 @@ function PageCellImpl({
       cancelBand.current = null;
       setBand(null);
       if (commit && latest.w > 0.01 && latest.h > 0.01) {
-        if (tool === 'redact') {
+        if (tool === 'zoommarquee') {
+          // N3: the band is a VIEW request, not an annotation — zoom the
+          // reading view until this display-frame region fills it.
+          onZoomToRect?.(page.id, latest);
+        } else if (tool === 'redact') {
           onAddRedactionMark(docId, page.id, latest, page.rotation);
         } else if (tool === 'signature') {
           // Single pending placement — drawing again (anywhere) replaces it.
@@ -1952,24 +2026,29 @@ function PageCellImpl({
               preserveAspectRatio="none"
               style={a.opacity !== undefined && a.opacity < 1 ? { opacity: a.opacity } : undefined}
             >
-              <polyline
-                points={(da.points ?? [])
-                  .map((v, i) =>
-                    i % 2 === 0 ? (da.w > 0 ? (v - da.x) / da.w : 0.5) : (da.h > 0 ? (v - da.y) / da.h : 0.5),
-                  )
-                  .reduce<string[]>((acc, v, i) => {
-                    if (i % 2 === 0) acc.push(`${v}`);
-                    else acc[acc.length - 1] += `,${v}`;
-                    return acc;
-                  }, [])
-                  .join(' ')}
-                fill="none"
-                stroke={a.color}
-                {...(a.strokeWidth !== undefined
-                  ? { strokeWidth: Math.max(0.75, a.strokeWidth * (pageHeight / measDispH)) }
-                  : {})}
-                vectorEffect="non-scaling-stroke"
-              />
+              {/* N2: ink draws one polyline PER STROKE (da.strokes); measure
+                  keeps its single vertex path (da.points). */}
+              {(a.kind === 'ink' ? (da.strokes ?? []) : [da.points ?? []]).map((stroke, si) => (
+                <polyline
+                  key={si}
+                  points={stroke
+                    .map((v, i) =>
+                      i % 2 === 0 ? (da.w > 0 ? (v - da.x) / da.w : 0.5) : (da.h > 0 ? (v - da.y) / da.h : 0.5),
+                    )
+                    .reduce<string[]>((acc, v, i) => {
+                      if (i % 2 === 0) acc.push(`${v}`);
+                      else acc[acc.length - 1] += `,${v}`;
+                      return acc;
+                    }, [])
+                    .join(' ')}
+                  fill="none"
+                  stroke={a.color}
+                  {...(a.strokeWidth !== undefined
+                    ? { strokeWidth: Math.max(0.75, a.strokeWidth * (pageHeight / measDispH)) }
+                    : {})}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
             </svg>
           )}
           {a.kind === 'textmarkup' && !pristineImport && (
@@ -2161,6 +2240,22 @@ function PageCellImpl({
                         top: `${da.h > 0 ? ((da.calloutBox[1] - da.y) / da.h) * 100 : 0}%`,
                         width: `${da.w > 0 ? (da.calloutBox[2] / da.w) * 100 : 100}%`,
                         height: `${da.h > 0 ? (da.calloutBox[3] / da.h) * 100 : 100}%`,
+                      }
+                    : {}),
+                  // A sticky note's box is its ICON — the editor pops out
+                  // beside it at a typable size instead (N3), like the
+                  // king's note popup.
+                  ...(a.kind === 'note'
+                    ? {
+                        position: 'absolute' as const,
+                        left: '100%',
+                        top: 0,
+                        width: 180,
+                        height: 90,
+                        background: '#fffbe8',
+                        border: `1px solid ${a.color}`,
+                        color: '#16161a',
+                        zIndex: 5,
                       }
                     : {}),
                 }}

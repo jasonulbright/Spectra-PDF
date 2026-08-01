@@ -77,12 +77,28 @@ describe('transformability rules', () => {
 
 describe('translated / translatedBy', () => {
   it('translates the box and its points together', () => {
-    const a = annot('i', { kind: 'ink', points: [0.2, 0.2, 0.4, 0.3] });
+    const a = annot('i', { kind: 'measure', points: [0.2, 0.2, 0.4, 0.3] });
     const t = translated(a, 0.1, 0.05);
     expect(t.x).toBeCloseTo(0.3);
     expect(t.y).toBeCloseTo(0.25);
     expect(t.points![0]).toBeCloseTo(0.3);
     expect(t.points![3]).toBeCloseTo(0.35);
+  });
+
+  it('translates every ink stroke together (N2)', () => {
+    const a = annot('i', {
+      kind: 'ink',
+      strokes: [
+        [0.2, 0.2, 0.4, 0.3],
+        [0.25, 0.35, 0.3, 0.4],
+      ],
+    });
+    const t = translated(a, 0.1, 0.05);
+    expect(t.strokes).toHaveLength(2);
+    expect(t.strokes![0][0]).toBeCloseTo(0.3);
+    expect(t.strokes![0][1]).toBeCloseTo(0.25);
+    expect(t.strokes![1][2]).toBeCloseTo(0.4);
+    expect(t.strokes![1][3]).toBeCloseTo(0.45);
   });
   it('clamps at the page edge and reports the APPLIED delta', () => {
     const a = annot('h', { x: 0.7, w: 0.2 });
@@ -129,11 +145,28 @@ describe('resized', () => {
     expect(r.y).toBeCloseTo(0.4);
   });
   it('scales points into the new box; a flat axis translates instead', () => {
-    const ink = annot('i', { kind: 'ink', x: 0.2, y: 0.5, w: 0.4, h: 0, points: [0.2, 0.5, 0.6, 0.5] });
+    const ink = annot('i', { kind: 'measure', x: 0.2, y: 0.5, w: 0.4, h: 0, points: [0.2, 0.5, 0.6, 0.5] });
     const pts = scaledPoints(ink, { x: 0.1, y: 0.6, w: 0.2, h: 0 });
     expect(pts[0]).toBeCloseTo(0.1);
     expect(pts[2]).toBeCloseTo(0.3);
     expect(pts[1]).toBeCloseTo(0.6);
+  });
+
+  it('resize scales every ink stroke with the one box (N2)', () => {
+    const ink = annot('i', {
+      kind: 'ink',
+      x: 0.2, y: 0.2, w: 0.2, h: 0.2,
+      strokes: [
+        [0.2, 0.2, 0.4, 0.4],
+        [0.3, 0.2, 0.3, 0.4],
+      ],
+    });
+    const r = resized(ink, 'se', 0.6, 0.6, false);
+    expect(r.strokes).toHaveLength(2);
+    // The box doubled from its top-left anchor; stroke coords double too.
+    expect(r.strokes![0][2]).toBeCloseTo(0.6);
+    expect(r.strokes![0][3]).toBeCloseTo(0.6);
+    expect(r.strokes![1][0]).toBeCloseTo(0.4);
   });
 });
 

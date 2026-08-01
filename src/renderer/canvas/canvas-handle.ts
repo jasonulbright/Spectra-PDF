@@ -25,6 +25,13 @@ export interface CanvasHandle {
    * cell). Built for Find navigation (2m); outline click-to-jump (2n)
    * reuses it. No-op when the page isn't in the DOM. */
   centerOn(pageId: string): void;
+  /** N3 marquee zoom (reading view only): zoom until the display-normalized
+   * page rect fills the pane, scroll it centered, and return the APPLIED
+   * zoom (null when the request names nothing) — the split layer syncs
+   * sibling panes to that value, since quad zoom must stay equal. */
+  zoomToPageRect?(pageId: string, rect: { x: number; y: number; w: number; h: number }): number | null;
+  /** Clamped absolute zoom set — the sibling half of zoomToPageRect. */
+  setZoomAbsolute?(zoom: number): void;
 }
 
 interface CanvasHandleArgs {

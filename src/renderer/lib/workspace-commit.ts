@@ -101,7 +101,7 @@ export function planCommit(
           ...(p.annotations?.length
             ? {
                 annotations: p.annotations.map(
-                  ({ kind, x, y, w, h, color, note, points, imageData, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, importedOriginal }) => ({
+                  ({ kind, x, y, w, h, color, note, points, strokes, imageData, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, importedOriginal }) => ({
                     kind,
                     x,
                     y,
@@ -110,6 +110,7 @@ export function planCommit(
                     color,
                     note,
                     points,
+                    strokes, // N2 — ink's per-pen-lift paths (the ALLOWLIST trap)
                     imageData,
                     markupType,
                     quads,
@@ -171,6 +172,15 @@ interface CommitDeps {
   writeBuffer: (filePath: string, bytes: Uint8Array) => Promise<unknown>;
   rename: (fromPath: string, toPath: string) => Promise<unknown>;
   remove: (filePath: string) => Promise<unknown>;
+  /** O5b: rewrite a staged temp as an incremental append onto the SIGNED
+   *  working copy (engine `transplant_incremental`). Returns whether it
+   *  applied — false covers unsigned files and out-of-scope deltas (page
+   *  removal/reorder, content edits), which keep the plain rewrite. */
+  preserveSignatures?: (workingPath: string, stagedPath: string) => Promise<boolean>;
+  /** Read a staged file's bytes back — the state buffer must carry the
+   *  TRANSPLANTED bytes, not the pdf-lib rebuild's (buffer identity keys
+   *  the reindex). Required whenever preserveSignatures is supplied. */
+  readBack?: (filePath: string) => Promise<Uint8Array>;
 }
 
 // Temp names are unique per run so a stale leftover (crash, prior failure)
@@ -203,6 +213,8 @@ export async function commitPageEdits({
   writeBuffer,
   rename,
   remove,
+  preserveSignatures,
+  readBack,
 }: CommitDeps): Promise<void> {
   if (commitRunning) {
     throw new Error('commitPageEdits is already running — callers must share the in-flight run');
@@ -229,7 +241,21 @@ export async function commitPageEdits({
       for (let i = 0; i < plans.length; i++) {
         const tmp = plans[i].workingPath + runTag;
         await writeBuffer(tmp, built[i]);
-        staged.push(tmp);
+        staged.push(tmp); // before the transplant attempt — cleanup owns it either way
+        // O5b: an annotation-tier commit on a SIGNED file lands as an
+        // incremental append instead of the pdf-lib rewrite, so the
+        // signature keeps verifying. Failure here (engine down, refusal)
+        // NEVER blocks the commit — the rewrite is the standing behavior
+        // and the fallback for every out-of-scope delta.
+        if (preserveSignatures && readBack) {
+          try {
+            if (await preserveSignatures(plans[i].workingPath, tmp)) {
+              built[i] = await readBack(tmp);
+            }
+          } catch (err) {
+            console.warn('signature-preserving commit unavailable:', err);
+          }
+        }
       }
       for (let i = 0; i < plans.length; i++) {
         const snapshotPath = await snapshot(plans[i].workingPath);
