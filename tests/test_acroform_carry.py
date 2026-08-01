@@ -377,3 +377,114 @@ class TestDeleteFormPrune:
             assert "sigf" not in names
             assert "title" not in names  # also lived on p0
             assert {"span", "only2", "ghost"} <= names
+
+
+def _make_calc_form(path: str, *, names=("rate", "total"), with_xfa=False,
+                    aa_js="app.alert('closing');") -> None:
+    """Two pages, one calc-bearing text field per page (per-field /AA /C),
+    /CO listing them REVERSED (order preservation is part of the contract),
+    a nested root 'grp' with kid 'sub' ALSO in /CO, and a catalog /AA /WC
+    JavaScript action. with_xfa adds a minimal /XFA packet array."""
+    pdf = pikepdf.new()
+    p0 = pdf.add_blank_page(page_size=(400, 400))
+    p1 = pdf.add_blank_page(page_size=(400, 400))
+    calc = Dictionary(C=Dictionary(S=Name.JavaScript, JS=pikepdf.String("AFSimple_Calculate('SUM');")))
+    f0 = _text_widget(pdf, p0, [40, 340, 200, 364], name=names[0], value="1")
+    f0["/AA"] = calc
+    f1 = _text_widget(pdf, p1, [40, 340, 200, 364], name=names[1], value="2")
+    f1["/AA"] = calc
+    kid = _text_widget(pdf, p1, [40, 300, 200, 324])
+    del kid["/FT"]
+    kid["/T"] = pikepdf.String("sub")
+    grp = pdf.make_indirect(Dictionary(T=pikepdf.String("grp"), FT=Name.Tx, Kids=Array([kid])))
+    kid["/Parent"] = grp
+    acro = Dictionary(
+        Fields=Array([f0, f1, grp]),
+        CO=Array([f1, f0, kid]),  # reversed + a nested member
+        DA=pikepdf.String("/Helv 0 Tf 0 g"),
+    )
+    if with_xfa:
+        acro["/XFA"] = Array([pikepdf.String("template"), pdf.make_stream(b"<template/>")])
+    pdf.Root["/AcroForm"] = pdf.make_indirect(acro)
+    pdf.Root["/AA"] = pdf.make_indirect(
+        Dictionary(WC=Dictionary(S=Name.JavaScript, JS=pikepdf.String(aa_js)))
+    )
+    pdf.save(path)
+    pdf.close()
+
+
+def _co_names(pdf) -> list:
+    """FQ names of the /CO entries, climbing /Parent."""
+    from engine.acroform import _fq_name
+    acro = pdf.Root.get("/AcroForm")
+    co = acro.get("/CO") if acro is not None else None
+    if co is None:
+        return []
+    return [_fq_name(e) for e in co]
+
+
+class TestDocFormExtras:
+    """F11: /CO reconciled, catalog /AA carried, XFA page surgery refused."""
+
+    def test_merge_reconciles_co_across_sources_with_renames(self, tmp_dir):
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        out = os.path.join(tmp_dir, "out.pdf")
+        _make_calc_form(a)
+        _make_calc_form(b)  # same names — every b root renames (+1)
+        merge([a, b], out)
+        with pikepdf.open(out) as pdf:
+            names = _co_names(pdf)
+            assert names == ["total", "rate", "grp.sub",
+                             "total+1", "rate+1", "grp+1.sub"]
+            # /AA: first source wins, carried whole.
+            aa = pdf.Root.get("/AA")
+            assert aa is not None
+            assert str(aa["/WC"]["/JS"]) == "app.alert('closing');"
+
+    def test_split_prunes_co_to_kept_pages(self, tmp_dir):
+        src = os.path.join(tmp_dir, "calc.pdf")
+        _make_calc_form(src)
+        result = split(src, "1", tmp_dir)
+        with pikepdf.open(result["outputs"][0]) as pdf:
+            # Page 1 keeps only 'rate'; 'total' and 'grp.sub' lived on p1.
+            assert _co_names(pdf) == ["rate"]
+            assert pdf.Root.get("/AA") is not None
+
+    def test_delete_filters_co_in_place(self, tmp_dir):
+        src = os.path.join(tmp_dir, "calc.pdf")
+        out = os.path.join(tmp_dir, "out.pdf")
+        _make_calc_form(src)
+        delete(src, [2], out)  # drop p1: 'total' and 'grp.sub' die
+        with pikepdf.open(out) as pdf:
+            assert _co_names(pdf) == ["rate"]
+            assert pdf.Root.get("/AA") is not None  # untouched in place
+
+    def test_reattach_carries_co_aa_and_xfa_verbatim(self, tmp_dir):
+        from engine.acroform import reattach_acroform
+        src = os.path.join(tmp_dir, "calc.pdf")
+        _make_calc_form(src, with_xfa=True)
+        with pikepdf.open(src) as orig:
+            regen = pikepdf.new()
+            regen.add_blank_page(page_size=(400, 400))
+            regen.add_blank_page(page_size=(400, 400))
+            assert reattach_acroform(orig, regen)
+            acro = regen.Root["/AcroForm"]
+            assert acro.get("/XFA") is not None
+            assert regen.Root.get("/AA") is not None
+            # /CO refs resolve to the COPIED fields (same copy_foreign
+            # session), not orphans: each entry's FQ name must appear in
+            # the regenerated /Fields forest.
+            co_names = set(_co_names(regen))
+            assert co_names == {"total", "rate", "grp.sub"}
+
+    def test_xfa_refuses_merge_split_delete(self, tmp_dir, sample_pdf):
+        xfa = os.path.join(tmp_dir, "xfa.pdf")
+        out = os.path.join(tmp_dir, "out.pdf")
+        _make_calc_form(xfa, with_xfa=True)
+        with pytest.raises(ValueError, match="XML form"):
+            merge([sample_pdf, xfa], out)
+        with pytest.raises(ValueError, match="XML form"):
+            split(xfa, "1", tmp_dir)
+        with pytest.raises(ValueError, match="XML form"):
+            delete(xfa, [1], out)
