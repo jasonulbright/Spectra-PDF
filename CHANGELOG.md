@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.0.5 — Lock with certificates, print with intent
+
+Documents can now be encrypted to certificates instead of passwords, form
+behavior survives every page operation, and the prepress tools grow real
+colour-profile control and PDF/X output.
+
+### Certificate encryption
+- **Encrypt to people, not passwords.** Lock a document to one or more
+  recipient certificates — anyone holding a matching private key opens it,
+  and nobody has to share a password. The same permission controls apply,
+  and screen-reader access is never blocked.
+- **Opening certificate-encrypted files.** The app now recognizes them and
+  asks for your key file (.pfx / .p12) — including files other tools
+  encrypted this way, which previously failed with an unhelpful error.
+- Both directions are on the command line too.
+
+### Forms keep their behavior
+- **Calculation order survives.** Forms whose fields calculate from each
+  other keep their calculation order through page inserts, merges, splits,
+  deletions, and every other page operation — reconciled field by field,
+  so removed fields drop out cleanly.
+- **Document scripts survive.** Scripts that run on save, print, or close
+  stay with the document through page operations and through compression.
+- **XML (XFA) forms are protected.** Page operations on an XFA form would
+  detach the form from its pages, so they now refuse with a clear message —
+  previously the form data was silently destroyed.
+
+### Prepress
+- **Choose your destination profile.** Convert to CMYK through your own
+  ICC profile, the bundled one, or Ghostscript's built-in default.
+- **PDF/X print masters.** Produce PDF/X-1a, X-3, or X-4 files carrying a
+  real output intent — naming a standard printing condition, or embedding
+  your chosen profile. The conversion verifies its own output before
+  reporting success.
+
+### Sharper and handier
+- **Zoom stays sharp on rotated pages.** Zooming into a page whose
+  rotation hasn't been applied yet now renders at full detail instead of
+  scaling up a coarse preview.
+- **Actual Size and Fit Width on the page board.** Both presets now work
+  in the page-organizing view, zooming to the selected page.
+
 ## 1.0.4 — Marks that keep, buttons that work
 
 Redaction marks now survive closing the file. Form buttons do what they
