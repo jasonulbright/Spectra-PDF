@@ -666,3 +666,117 @@ def test_kern_validation_runs_before_font_work(tmp_dir):
     with pytest.raises(ValueError, match="kern must be"):
         add_text_box(src, out, 1, [72, 600, 500, 700], "unencodable \U0001F600",
                      size=24, font_path=FONTS_DIR, family="serif", kern="yes")
+
+
+class TestT15SpanStyling:
+    """T15: per-span size/colour/bold/italic on the Add-Text box. The span
+    path shares _layout_box's entry (same validation precedence) and the
+    whole-box path stays byte-identical when spans is absent."""
+
+    def test_spans_emit_multiple_styles_and_extract_whole(self, tmp_dir, sample_pdf):
+        out = os.path.join(tmp_dir, "spans.pdf")
+        text = "Big red small blue"
+        r = add_text_box(
+            sample_pdf, out, 1, [72, 600, 500, 700], text,
+            size=12, font_path=FONTS_DIR,
+            spans=[
+                {"start": 0, "end": 7, "size": 24, "color": [1, 0, 0], "bold": True},
+                {"start": 14, "end": 18, "color": [0, 0, 1]},
+            ],
+        )
+        assert r["styles"] >= 3  # default + big-red-bold + blue
+        content = _page_content(out)
+        assert b"1 0 0 rg" in content and b"0 0 1 rg" in content
+        assert b" 24 Tf" in content and b" 12 Tf" in content
+        # The authored text still extracts as ONE readable string.
+        extracted = extract_text(out, pages=[1])["text"]
+        for word in ("Big", "red", "small", "blue"):
+            assert word in extracted
+
+    def test_measure_agrees_with_commit_on_mixed_sizes(self, tmp_dir, sample_pdf):
+        from engine.text_authoring import measure_text_box
+
+        text = "one two three four five six seven eight"
+        spans = [{"start": 0, "end": 13, "size": 28}]
+        m = measure_text_box(
+            sample_pdf, 1, [72, 600, 260, 700], text,
+            size=12, font_path=FONTS_DIR, spans=spans,
+        )
+        out = os.path.join(tmp_dir, "mixed.pdf")
+        r = add_text_box(
+            sample_pdf, out, 1, [72, 600, 260, 700], text,
+            size=12, font_path=FONTS_DIR, spans=spans,
+        )
+        assert m["lines"] == r["lines"]  # ONE layout pass, two consumers
+        # Mixed sizes ⇒ the 28pt line's leading dominates its row: the
+        # text_height must exceed a uniform-12pt stack of the same lines.
+        assert m["text_height"] > m["lines"] * 12 * 1.2 - 0.01
+
+    def test_bad_spans_refused(self, tmp_dir, sample_pdf):
+        out = os.path.join(tmp_dir, "no.pdf")
+        with pytest.raises(ValueError, match="out of range"):
+            add_text_box(sample_pdf, out, 1, [72, 600, 500, 700], "short",
+                         font_path=FONTS_DIR, spans=[{"start": 0, "end": 99}])
+        with pytest.raises(ValueError, match="ascending"):
+            add_text_box(sample_pdf, out, 1, [72, 600, 500, 700], "overlap here",
+                         font_path=FONTS_DIR,
+                         spans=[{"start": 3, "end": 8}, {"start": 5, "end": 10}])
+        with pytest.raises(ValueError, match="span color"):
+            add_text_box(sample_pdf, out, 1, [72, 600, 500, 700], "bad color",
+                         font_path=FONTS_DIR,
+                         spans=[{"start": 0, "end": 3, "color": [2, 0, 0]}])
+
+    def test_authored_spans_reedit_as_runs(self, tmp_dir, sample_pdf):
+        from engine.text_runs import list_text_runs
+
+        out = os.path.join(tmp_dir, "reedit.pdf")
+        add_text_box(
+            sample_pdf, out, 1, [72, 600, 500, 700], "Alpha beta",
+            size=12, font_path=FONTS_DIR,
+            spans=[{"start": 0, "end": 5, "size": 20}],
+        )
+        runs = list_text_runs(out, 1)["runs"]
+        texts = [r["text"] for r in runs]
+        assert any("Alpha" in t for t in texts) and any("beta" in t for t in texts)
+        assert all(r["editable"] for r in runs if "Alpha" in r["text"] or "beta" in r["text"])
+
+
+class TestT5CjkAuthoring:
+    """T5: CJK text authors via the vendored Noto Sans CJK face — a
+    TEXT-driven switch, never a substitution for text Liberation covers."""
+
+    _needs_cjk = pytest.mark.skipif(
+        not os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")),
+        reason="Noto Sans CJK not provisioned (scripts/sync-edit-fonts.ps1)",
+    )
+
+    @_needs_cjk
+    def test_cjk_text_authors_and_reedits(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "cjk.pdf")
+        add_text_box(src, out, 1, [72, 600, 500, 700], "中文测试 mixed Latin",
+                     size=14, font_path=FONTS_DIR)
+        text = extract_text(out)["text"]
+        assert "中文测试" in text and "mixed Latin" in text
+        runs = list_text_runs(out, 1)["runs"]
+        assert any("中文测试" in r["text"] and r["editable"] for r in runs)
+        # The embedded face is the CJK one (Latin included — one face,
+        # no mid-string font split).
+        with pikepdf.open(out) as pdf:
+            fonts = pdf.pages[0]["/Resources"]["/Font"]
+            names = [str(fonts[k].get("/BaseFont")) for k in fonts.keys()]
+        assert any("NotoSansCJK" in n for n in names)
+
+    @_needs_cjk
+    def test_latin_text_never_switches_to_cjk(self, tmp_dir):
+        # The switch is text-DRIVEN: coverage Liberation has stays on
+        # Liberation (the no-silent-substitution property).
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "latin.pdf")
+        add_text_box(src, out, 1, [72, 600, 500, 700], "Plain Latin only",
+                     font_path=FONTS_DIR)
+        with pikepdf.open(out) as pdf:
+            fonts = pdf.pages[0]["/Resources"]["/Font"]
+            names = [str(fonts[k].get("/BaseFont")) for k in fonts.keys()]
+        assert all("NotoSansCJK" not in n for n in names)
+        assert any("Liberation" in n for n in names)

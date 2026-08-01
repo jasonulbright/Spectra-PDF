@@ -508,14 +508,20 @@ class TestFillFormFields:
             assert b"> Tj" in body  # a hex string show, not a WinAnsi (...) Tj
 
     @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
-    def test_fc1_cjk_refused_even_with_font_dir(self, tmp_dir):
-        # Liberation covers Latin/Cyrillic/Greek but NOT CJK — a CJK value is
-        # refused with the coverage message (the B2 fallback-face boundary),
-        # atomically, even WITH a font_dir. Checked in validation.
+    def test_fc1_cjk_fills_via_the_cjk_face(self, tmp_dir):
+        # T5 INVERSION (was: refusal). The value-driven CJK step lands a
+        # CJK form value on Noto Sans CJK when the bundle carries it; the
+        # refusal survives only when the CJK faces are absent.
+        cjk_present = os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf"))
         out = os.path.join(tmp_dir, "cjk.pdf")
-        with pytest.raises(ValueError, match="no available font can render"):
-            fill_form_fields(PDFLIB_FORM, out, {"applicant.name": "日本語"}, font_dir=FONTS_DIR)
-        assert not os.path.exists(out)
+        if not cjk_present:
+            with pytest.raises(ValueError, match="no available font can render"):
+                fill_form_fields(PDFLIB_FORM, out, {"applicant.name": "日本語"}, font_dir=FONTS_DIR)
+            assert not os.path.exists(out)
+            return
+        fill_form_fields(PDFLIB_FORM, out, {"applicant.name": "日本語"}, font_dir=FONTS_DIR)
+        fields = {f["name"]: f for f in read_form_fields(out)["fields"]}
+        assert fields["applicant.name"]["value"] == "日本語"
 
     def test_fc1_unicode_without_font_dir_refused(self, tmp_dir):
         # Without a font_dir the non-WinAnsi value is refused with the

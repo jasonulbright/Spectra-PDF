@@ -1060,6 +1060,15 @@ function AppContent(): React.ReactElement {
          * always renders in a bundled face, so a feature switches to Libertinus
          * Serif (Liberation has none); alt_index picks the salt alternate. */
         features?: string[];
+        /** T15: per-span styling over the text's character positions. */
+        spans?: {
+          start: number;
+          end: number;
+          size?: number;
+          color?: [number, number, number];
+          bold?: boolean;
+          italic?: boolean;
+        }[];
         alt_index?: number;
       },
     ): Promise<string | void> => {
@@ -1081,6 +1090,7 @@ function AppContent(): React.ReactElement {
       if (opts?.kern === false) params.kern = false;
       if (opts?.features !== undefined && opts.features.length > 0) params.features = opts.features;
       if (opts?.alt_index !== undefined) params.alt_index = opts.alt_index;
+      if (opts?.spans !== undefined && opts.spans.length > 0) params.spans = opts.spans;
       await performOperation(path, 'add_text_box', params);
     },
     [state.files, performOperation, confirmEditOfSignedDoc],
