@@ -36,6 +36,8 @@ export interface OverlayWidget {
   multiline?: boolean;
   radioOption?: string;
   sigFilled?: boolean;
+  /** button only (F8): the classified /A action the click acts on. */
+  action?: import('./forms').ButtonAction;
 }
 
 export interface PageBox {
@@ -56,7 +58,9 @@ export function projectFieldWidgets(
   geometryFor: (pageIndex: number) => { box: PageBox; bakedRotate: number } | null,
 ): Map<number, OverlayWidget[]> {
   const byPage = new Map<number, OverlayWidget[]>();
-  if (field.type === 'button') return byPage; // never an overlay surface
+  // Buttons used to be excluded here ("never an overlay surface") — F8
+  // lifts that: a pushbutton projects as a CLICK surface whose classified
+  // /A action the renderer acts on (reset for real, the rest honestly).
   for (const w of field.widgets) {
     if (w.hidden) continue;
     const [x0, y0, x1, y1] = w.rect;
@@ -78,6 +82,7 @@ export function projectFieldWidgets(
       ...(field.multiline !== undefined ? { multiline: field.multiline } : {}),
       ...(w.radioOption !== undefined ? { radioOption: w.radioOption } : {}),
       ...(field.type === 'signature' ? { sigFilled: field.filled ?? false } : {}),
+      ...(field.type === 'button' && field.action ? { action: field.action } : {}),
     };
     const arr = byPage.get(w.pageIndex);
     if (arr) arr.push(entry);

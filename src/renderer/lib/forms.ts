@@ -55,7 +55,19 @@ export interface FormField {
   widgets: FormWidgetPlacement[];
   // signature only: the field already holds a signature (/V present).
   filled?: boolean;
+  // button only (F8): the pushbutton's classified /A action. `reset` runs
+  // for real; `uri` is SHOWN (this app deliberately opens no external
+  // URLs itself); the rest report their kind honestly.
+  action?: ButtonAction;
 }
+
+export type ButtonAction =
+  | { kind: 'uri'; uri: string }
+  | { kind: 'reset'; fields: string[] | null; exclude: boolean }
+  | { kind: 'javascript' }
+  | { kind: 'submit' }
+  | { kind: 'named'; name: string }
+  | { kind: 'other' };
 
 export interface FormReadResult {
   fields: FormField[];
@@ -96,6 +108,7 @@ interface EngineField {
   required: boolean;
   multiline?: boolean;
   filled?: boolean;
+  action?: ButtonAction;
   widgets?: EngineWidget[];
 }
 interface EngineReadResult {
@@ -153,6 +166,7 @@ export function mapEngineField(ef: EngineField): FormField | null {
     editable: EDITABLE_TYPES.has(type) && !readOnly,
     widgets,
     ...(type === 'signature' ? { filled: Boolean(ef.filled) } : {}),
+    ...(type === 'button' && ef.action ? { action: ef.action } : {}),
   };
 }
 

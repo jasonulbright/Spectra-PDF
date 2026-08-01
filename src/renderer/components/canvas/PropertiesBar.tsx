@@ -3,8 +3,11 @@ import { ANNOTATION_PALETTE } from './PageCell';
 import {
   isTransformable,
   isResizable,
+  isRotatable,
   type AlignMode,
   type DistributeMode,
+  type FlipAxis,
+  type RotateDirection,
   type SizeMatchMode,
 } from '../../lib/annotation-manipulation';
 
@@ -48,9 +51,17 @@ interface PropertiesBarProps {
   onReorder: (direction: 'front' | 'back' | 'forward' | 'backward') => void;
   onRecolorGroup: (color: string) => void;
   onRemoveGroup: () => void;
-  /** Shared style edit (rung 2) — stroke width / fill / opacity across the
-   * selection; the reducer applies each only to kinds that carry it. */
-  onRestyle: (style: { strokeWidth?: number; fillColor?: string | null; opacity?: number }) => void;
+  /** Shared style edit (rung 2 + the N7 sheets) — the reducer applies each
+   * field only to kinds that carry it. */
+  onRestyle: (style: {
+    strokeWidth?: number;
+    fillColor?: string | null;
+    opacity?: number;
+    lineEndings?: [string, string];
+    cloudIntensity?: number;
+  }) => void;
+  /** Quarter-turn / mirror for the vertex kinds (N7 residual). */
+  onRotateFlip: (op: { rotate: RotateDirection } | { flip: FlipAxis }) => void;
   onClose: () => void;
 }
 
@@ -117,6 +128,7 @@ export function PropertiesBar({
   onRecolorGroup,
   onRemoveGroup,
   onRestyle,
+  onRotateFlip,
   onClose,
 }: PropertiesBarProps): React.JSX.Element {
   const a = selected?.annotation ?? null;
@@ -210,6 +222,127 @@ export function PropertiesBar({
       )}
     </span>
   ) : null;
+  // Rotate/flip (N7 residual): only the vertex kinds — their geometry is
+  // the point list, so a quarter-turn is exactly representable in the file.
+  const anyRotatable = selectedGroup.some(isRotatable);
+  const rotateFlip = anyRotatable ? (
+    <span className="properties-bar-swatches" role="group" aria-label="Rotate and flip">
+      <button
+        type="button"
+        data-testid="pbar-rotate-ccw"
+        className="properties-bar-action"
+        title="Rotate 90° counter-clockwise"
+        aria-label="Rotate 90° counter-clockwise"
+        onClick={() => onRotateFlip({ rotate: 'ccw' })}
+      >
+        ⟲
+      </button>
+      <button
+        type="button"
+        data-testid="pbar-rotate-cw"
+        className="properties-bar-action"
+        title="Rotate 90° clockwise"
+        aria-label="Rotate 90° clockwise"
+        onClick={() => onRotateFlip({ rotate: 'cw' })}
+      >
+        ⟳
+      </button>
+      <button
+        type="button"
+        data-testid="pbar-flip-h"
+        className="properties-bar-action"
+        title="Flip horizontal"
+        aria-label="Flip horizontal"
+        onClick={() => onRotateFlip({ flip: 'h' })}
+      >
+        ⇋
+      </button>
+      <button
+        type="button"
+        data-testid="pbar-flip-v"
+        className="properties-bar-action"
+        title="Flip vertical"
+        aria-label="Flip vertical"
+        onClick={() => onRotateFlip({ flip: 'v' })}
+      >
+        ⇵
+      </button>
+    </span>
+  ) : null;
+  // Kind-specific sheets (N7 residual): endings for the open figures,
+  // intensity for clouds — over the same shared-restyle seam.
+  const endingsRef =
+    selectedGroup.find(
+      (m) =>
+        m.kind === 'shape' &&
+        (m.shapeType === 'line' || m.shapeType === 'arrow' || m.shapeType === 'polyline'),
+    ) ?? null;
+  const cloudRef =
+    selectedGroup.find((m) => m.kind === 'shape' && m.shapeType === 'cloud') ?? null;
+  const ENDING_OPTIONS = ['None', 'OpenArrow', 'ClosedArrow'] as const;
+  const ENDING_LABELS: Record<string, string> = {
+    None: 'Plain',
+    OpenArrow: 'Open arrow',
+    ClosedArrow: 'Closed arrow',
+  };
+  const kindSheet = (endingsRef || cloudRef) ? (
+    <span className="properties-bar-swatches" role="group" aria-label="Shape options">
+      {endingsRef && (
+        <>
+          <select
+            data-testid="pbar-ending-start"
+            className="properties-bar-select"
+            title="Line start"
+            aria-label="Line start"
+            value={endingsRef.lineEndings?.[0] ?? 'None'}
+            onChange={(e) =>
+              onRestyle({
+                lineEndings: [e.target.value, endingsRef.lineEndings?.[1] ?? 'None'],
+              })}
+          >
+            {ENDING_OPTIONS.map((v) => (
+              <option key={v} value={v}>
+                {ENDING_LABELS[v]} start
+              </option>
+            ))}
+          </select>
+          <select
+            data-testid="pbar-ending-end"
+            className="properties-bar-select"
+            title="Line end"
+            aria-label="Line end"
+            value={endingsRef.lineEndings?.[1] ?? (endingsRef.shapeType === 'arrow' ? 'OpenArrow' : 'None')}
+            onChange={(e) =>
+              onRestyle({
+                lineEndings: [endingsRef.lineEndings?.[0] ?? 'None', e.target.value],
+              })}
+          >
+            {ENDING_OPTIONS.map((v) => (
+              <option key={v} value={v}>
+                {ENDING_LABELS[v]} end
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+      {cloudRef && (
+        <select
+          data-testid="pbar-cloud-intensity"
+          className="properties-bar-select"
+          title="Cloud intensity"
+          aria-label="Cloud intensity"
+          value={String(cloudRef.cloudIntensity ?? 2)}
+          onChange={(e) => onRestyle({ cloudIntensity: parseInt(e.target.value, 10) })}
+        >
+          {['1', '2', '3'].map((v) => (
+            <option key={v} value={v}>
+              Cloud {v}
+            </option>
+          ))}
+        </select>
+      )}
+    </span>
+  ) : null;
   return (
     <div className="properties-bar" data-testid="properties-bar" role="toolbar" aria-label="Properties bar">
       {multi ? (
@@ -293,6 +426,8 @@ export function PropertiesBar({
             </span>
           )}
           {styleControls}
+          {kindSheet}
+          {rotateFlip}
           {zOrder}
           <span className="properties-bar-swatches" role="group" aria-label="Recolor all">
             {ANNOTATION_PALETTE.map((c) => (
@@ -343,6 +478,8 @@ export function PropertiesBar({
             ))}
           </span>
           {styleControls}
+          {kindSheet}
+          {rotateFlip}
           {zOrder}
           <button
             type="button"

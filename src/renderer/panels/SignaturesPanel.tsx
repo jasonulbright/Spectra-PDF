@@ -428,9 +428,23 @@ export function SignaturesPanel(): React.ReactElement {
           <p className="text-xs text-neutral-500 -mt-1">
             Applies an invisible signature. <strong>Sign in place</strong> signs the open document
             (undoable; written to disk on Save); <strong>Sign &amp; Save a copy</strong> writes a new
-            signed file and leaves the current one unchanged. Any later edit to a signed document
-            invalidates its signature.
+            signed file and leaves the current one unchanged. Comments, form filling, and added
+            pages keep signatures valid; other edits invalidate them.
           </p>
+          {/* F6: the visible-signature path from the PANEL — hands off to the
+              canvas placement flow with these signer details prefilled, so
+              nothing is typed twice. Offered only while the canvas is up. */}
+          {getCanvasServices()?.startVisibleSignature && (
+            <button
+              data-testid="sign-visible-btn"
+              type="button"
+              onClick={() => getCanvasServices()?.startVisibleSignature?.(source)}
+              className="self-start px-2 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded"
+              title="Place a visible signature: draw its box on the page; these signer details carry over"
+            >
+              Visible signature…
+            </button>
+          )}
           <SignerSourceFields value={source} onChange={setSource} idPrefix="sign" />
           <div className="flex items-center gap-2">
             <span className="text-xs text-neutral-400 w-20 shrink-0">Password</span>

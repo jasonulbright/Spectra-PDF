@@ -44,6 +44,9 @@ interface CanvasStatusBarProps {
   redacting: boolean;
   onApplyRedact: () => void;
   onClearRedact: () => void;
+  /** F10: write the pending marks into the file as /Redact annotations. */
+  savingMarks: boolean;
+  onSaveRedact: () => void;
 }
 
 export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element {
@@ -131,6 +134,16 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
                 {props.redacting
                   ? 'Redacting…'
                   : `Redact ${props.markCount} region${props.markCount === 1 ? '' : 's'}`}
+              </button>
+              <button
+                type="button"
+                data-testid="redact-save-btn"
+                disabled={props.redacting || props.savingMarks}
+                onClick={props.onSaveRedact}
+                title="Save the pending marks into the document to revisit later (nothing is redacted yet)"
+                className="canvas-status-action canvas-status-quiet"
+              >
+                {props.savingMarks ? 'Saving…' : 'Save marks'}
               </button>
               <button
                 type="button"

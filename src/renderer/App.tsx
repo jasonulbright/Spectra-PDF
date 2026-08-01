@@ -658,6 +658,87 @@ function AppContent(): React.ReactElement {
     [performOperation],
   );
 
+  // F10: persist the pending marks as the file's /Redact set — undoable,
+  // same snapshot→engine→reload shape as apply. The reload's buffer change
+  // clears the transient marks and the re-seed loads them back from the
+  // file, so state and file agree by construction.
+  const handleSaveRedactionMarks = useCallback(
+    async (path: string, regions: { page: number; rect: [number, number, number, number] }[]) => {
+      await performOperation(path, 'save_redaction_marks', { regions });
+    },
+    [performOperation],
+  );
+
+  // F8: a pushbutton widget clicked in fill mode. Reset runs for REAL (the
+  // engine op, undoable). A URI is SHOWN and offered to the clipboard — this
+  // app deliberately opens no external URLs itself (the notify-only-updates
+  // posture: no general shell-open surface exists to misuse). JavaScript and
+  // submit actions are reported honestly rather than half-simulated.
+  const handleFormButton = useCallback(
+    async (
+      path: string,
+      fieldName: string,
+      action:
+        | { kind: 'uri'; uri: string }
+        | { kind: 'reset'; fields: string[] | null; exclude: boolean }
+        | { kind: 'javascript' }
+        | { kind: 'submit' }
+        | { kind: 'named'; name: string }
+        | { kind: 'other' }
+        | null,
+    ) => {
+      if (!action) {
+        await showNotice('Form button', `"${fieldName}" has no action attached.`);
+        return;
+      }
+      switch (action.kind) {
+        case 'reset': {
+          const params: Record<string, unknown> = {};
+          if (action.fields) params.fields = action.fields;
+          if (action.exclude) params.exclude = true;
+          params.font_dir = await app.getEditFontPath();
+          await performOperation(path, 'reset_form_fields', params);
+          return;
+        }
+        case 'uri': {
+          const copy = await showProceedConfirm(
+            'Form button — external link',
+            `"${fieldName}" links to:\n\n${action.uri}\n\nThis app never opens external sites itself. Copy the address to the clipboard?`,
+          );
+          if (copy) {
+            try {
+              await navigator.clipboard.writeText(action.uri);
+            } catch {
+              await showNotice('Form button', 'Could not access the clipboard.');
+            }
+          }
+          return;
+        }
+        case 'javascript':
+          await showNotice(
+            'Form button',
+            `"${fieldName}" runs document JavaScript, which this app does not execute.`,
+          );
+          return;
+        case 'submit':
+          await showNotice(
+            'Form button',
+            `"${fieldName}" submits the form to a server, which this app does not do. Fill the form and save or export it instead.`,
+          );
+          return;
+        case 'named':
+          await showNotice(
+            'Form button',
+            `"${fieldName}" triggers the viewer action "${action.name}", which this app does not map.`,
+          );
+          return;
+        default:
+          await showNotice('Form button', `"${fieldName}" carries an action this app does not support.`);
+      }
+    },
+    [performOperation, showNotice, showProceedConfirm],
+  );
+
   const handleAddLinks = useCallback(
     async (path: string, links: { page: number; rect: [number, number, number, number]; url: string }[]) => {
       await performOperation(path, 'add_links', { links });
@@ -1786,6 +1867,8 @@ function AppContent(): React.ReactElement {
                   onCloseFile={(path) => void handleCloseFile(path)}
                   onExtractText={handleExtractFromCanvas}
                   onRedactFile={handleRedactFile}
+                  onSaveRedactionMarks={handleSaveRedactionMarks}
+                  onFormButton={handleFormButton}
                   onAddLinks={handleAddLinks}
                   onApplyOcrLayer={handleApplyOcrLayer}
                   onEditImage={handleEditImage}
