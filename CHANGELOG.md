@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.0.6 — Sign with hardware, edit more fonts
+
+Signing gains hardware-token support, PostScript forms distill into working
+forms, and two long-standing font limits fall.
+
+### Sign with a hardware token
+- **PKCS#11 devices.** Sign with a smart card, USB token, or HSM: choose
+  the vendor's PKCS#11 module, name the token and certificate, and enter
+  the PIN — every signing feature works the same as with a file-based
+  identity, including visible stamps, signing into existing fields,
+  in-place signing, and the full PAdES range with timestamps and long-term
+  validation. On the command line too.
+
+### Forms from PostScript
+- **Distilled forms work.** PostScript files carrying Distiller-style form
+  annotations now produce PDFs whose fields actually work — readable,
+  fillable, and saved values intact. Previously the fields arrived
+  visible but dead.
+
+### More documents become editable
+- **CJK text without an embedded text map.** Documents whose composite
+  fonts lack the usual text-mapping table now recover it — from the
+  registered character collection when one is named, or from the embedded
+  font itself for subset fonts. Text that used to refuse editing with
+  "cannot be re-entered" edits normally.
+- **Classic font formats.** Text set in bare CFF or original Type 1 fonts
+  — common in older documents — is now editable, using the font's own
+  built-in encoding and widths.
+
 ## 1.0.5 — Lock with certificates, print with intent
 
 Documents can now be encrypted to certificates instead of passwords, form
