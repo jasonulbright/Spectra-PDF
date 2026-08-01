@@ -323,17 +323,41 @@ class TestPredefinedCjkCMaps:
         assert cap.char_width("文") == 1000  # noqa: RUF001
         assert set(cap.encodable()) == {"中", "文"}  # noqa: RUF001
 
-    def test_vertical_ucs2_without_tounicode_refuses(self):
-        # Pre-9.B4a this pinned a refusal for ALL vertical CMaps; B4a lifts
-        # exactly the ToUnicode-bearing UCS2-V class (TestVerticalWriting
-        # pins the acceptance). Without ToUnicode the refusal stands, and
-        # its reason still names the vertical class.
+    def test_vertical_ucs2_without_tounicode_RECOVERS_via_registry(self):
+        # T8 INVERSION (was: refusal). This fixture names Adobe-GB1, whose
+        # published CID→Unicode table pdfminer bundles — the exact mapping a
+        # /ToUnicode would have carried. Recovery makes the font editable;
+        # the refusal now only covers fonts with NO recoverable route
+        # (test_identity_without_tounicode_or_program below pins that).
         pdf = pikepdf.new()
         cap = font_capability(
             self._cjk_font(pdf, {0x4E2D: "中"}, "UniGB-UCS2-V", with_tou=False)  # noqa: RUF001
         )
+        assert cap.editable and cap.vertical
+        assert cap.decode(bytes.fromhex("3050")) is not None  # some code decodes
+
+    def test_identity_without_tounicode_or_program_still_refuses(self):
+        # The honest floor under T8: Adobe-Identity-0 says nothing and with
+        # no embedded program there is nothing to reverse — refusal stands,
+        # its reason naming BOTH the missing map and the failed recovery.
+        pdf = pikepdf.new()
+        desc = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name("/SubsetFont"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+            DW=1000,
+        )
+        font_d = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type0"),
+            BaseFont=Name("/SubsetFont"),
+            Encoding=Name("/Identity-H"),
+            DescendantFonts=Array([pdf.make_indirect(desc)]),
+        )
+        cap = font_capability(pdf.make_indirect(font_d))
         assert not cap.editable
-        assert "vertical" in (cap.reason or "") and "ToUnicode" in (cap.reason or "")
+        assert "no recoverable mapping" in (cap.reason or "")
 
     def test_legacy_vertical_cmap_still_refuses(self):
         # Non-Unicode legacy encodings refuse regardless of writing mode —
@@ -347,12 +371,17 @@ class TestPredefinedCjkCMaps:
         cap = font_capability(self._cjk_font(pdf, {0x41: "A"}, "GBK-EUC-H"))
         assert not cap.editable and "encoding" in (cap.reason or "")
 
-    def test_unicode_cmap_without_tounicode_refuses(self):
+    def test_unicode_cmap_without_tounicode_RECOVERS_via_registry(self):
+        # T8 INVERSION (was: refusal) — Adobe-GB1's registry table stands in
+        # for the absent /ToUnicode; the code→CID comes from the predefined
+        # CMap as before. '中' is CID 2085 in Adobe-GB1; the UniGB-UCS2
+        # code for it must round-trip through the recovered mapping.
         pdf = pikepdf.new()
         cap = font_capability(
             self._cjk_font(pdf, {0x4E2D: "中"}, "UniGB-UCS2-H", with_tou=False)  # noqa: RUF001
         )
-        assert not cap.editable and "ToUnicode" in (cap.reason or "")
+        assert cap.editable
+        assert cap.encode("中") is not None  # noqa: RUF001 — the char is reachable again
 
     def test_unknown_cmap_name_refuses_cleanly(self):
         pdf = pikepdf.new()
@@ -832,3 +861,127 @@ class TestLigatureRoundTrip:
         assert cap.text_width("fi") == 500  # the ligature code's hmtx advance
         assert cap.text_width("if") == 250 + 300
 
+
+
+class TestT8ProgramCmapRecovery:
+    """T8 route 2: an Adobe-Identity-0 subset with NO /ToUnicode recovers
+    through the embedded program's own cmap table reversed via /CIDToGIDMap
+    — the modern subset majority the registry route cannot serve."""
+
+    def test_identity_subset_with_embedded_program_recovers(self):
+        import os
+        ttf = os.path.join(
+            os.path.dirname(__file__), "..", "resources", "fonts",
+            "LiberationSans-Regular.ttf",
+        )
+        if not os.path.isfile(ttf):
+            pytest.skip("bundled edit fonts not provisioned")
+        from fontTools.ttLib import TTFont
+
+        tt = TTFont(ttf, lazy=True)
+        gid_A = tt.getGlyphID(tt.getBestCmap()[ord("A")])
+        with open(ttf, "rb") as f:
+            program = f.read()
+
+        pdf = pikepdf.new()
+        desc = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name("/AAAAAA+LiberationSans"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+            DW=1000,
+            CIDToGIDMap=Name("/Identity"),
+            FontDescriptor=pdf.make_indirect(
+                Dictionary(
+                    Type=Name("/FontDescriptor"),
+                    FontName=Name("/AAAAAA+LiberationSans"),
+                    Flags=4,
+                    FontFile2=pdf.make_stream(program),
+                )
+            ),
+        )
+        font_d = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type0"),
+            BaseFont=Name("/AAAAAA+LiberationSans"),
+            Encoding=Name("/Identity-H"),
+            DescendantFonts=Array([pdf.make_indirect(desc)]),
+        )
+        cap = font_capability(pdf.make_indirect(font_d))
+        assert cap.editable
+        # Identity: code == CID == GID; the program's cmap names gid_A as 'A'.
+        assert cap.decode(int(gid_A).to_bytes(2, "big")) == "A"
+
+
+class TestT9BareProgramFonts:
+    """T9: bare-CFF FontFile3 (Type1C) and Type1 /FontFile — both former
+    refusals lift via the program's OWN encoding + charstring widths
+    (cffLib / t1Lib). The symbolic-no-encoding shape is the exact slot the
+    9.B3 derivation targets."""
+
+    def _font_with_program(self, pdf, key, raw, subtype_name):
+        desc = Dictionary(
+            Type=Name("/FontDescriptor"),
+            FontName=Name("/BareProg"),
+            Flags=4,  # symbolic — forces the program-derivation path
+        )
+        desc[key] = pdf.make_stream(raw)
+        return pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name(subtype_name),
+                BaseFont=Name("/BareProg"),
+                FontDescriptor=desc,
+            )
+        )
+
+    def _bare_cff(self):
+        """A real bare CFF built with fontTools: 'A' at its standard code."""
+        from fontTools.fontBuilder import FontBuilder
+        from fontTools.pens.t2CharStringPen import T2CharStringPen
+
+        fb = FontBuilder(1000, isTTF=False)
+        fb.setupGlyphOrder([".notdef", "A"])
+        fb.setupCharacterMap({ord("A"): "A"})
+        charstrings = {}
+        for name in (".notdef", "A"):
+            pen = T2CharStringPen(600, None)
+            pen.moveTo((0, 0))
+            pen.lineTo((0, 500))
+            pen.lineTo((500, 500))
+            pen.closePath()
+            charstrings[name] = pen.getCharString()
+        fb.setupCFF("BareProg", {}, charstrings, {})
+        fb.setupHorizontalMetrics({".notdef": (600, 0), "A": (600, 0)})
+        fb.setupHorizontalHeader(ascent=800, descent=-200)
+        fb.setupNameTable({"familyName": "BareProg", "styleName": "Regular"})
+        fb.setupOS2()
+        fb.setupPost()
+        # Extract the bare CFF table from the built OTF.
+        return fb.font.getTableData("CFF ")
+
+    def test_bare_cff_fontfile3_recovers(self):
+        pdf = pikepdf.new()
+        font = self._font_with_program(pdf, "/FontFile3", self._bare_cff(), "/Type1")
+        cap = font_capability(font)
+        assert cap.editable
+        # CFF standard encoding puts 'A' at code 65; width from the charstring.
+        assert cap.decode(b"\x41") == "A"
+        assert cap.char_width("A") == 600
+
+    def test_type1_fontfile_recovers(self):
+        import os
+        pfa = os.path.join(
+            os.path.dirname(__file__), "..", "resources", "ghostscript",
+            "Resource", "Font", "NimbusRoman-Regular",
+        )
+        if not os.path.isfile(pfa):
+            pytest.skip("bundled gs Type1 fonts not provisioned")
+        with open(pfa, "rb") as f:
+            raw = f.read()
+        pdf = pikepdf.new()
+        font = self._font_with_program(pdf, "/FontFile", raw, "/Type1")
+        cap = font_capability(font)
+        assert cap.editable
+        assert cap.decode(b"\x41") == "A"
+        assert cap.char_width("A") > 0

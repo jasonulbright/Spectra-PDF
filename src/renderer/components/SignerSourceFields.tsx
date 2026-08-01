@@ -3,16 +3,25 @@ import { useEngine } from '../hooks/useEngine';
 import { dialog } from '../lib/tauri-bridge';
 
 // The signer source both sign flows (SignaturesPanel invisible form, canvas
-// visible-signature popover) share: a PKCS#12 file, a PEM key+cert pair, or a
-// freshly generated self-signed .pfx (which becomes the selected .pfx).
-// SECURITY: this component never holds the SIGNING password — only the
-// generator sub-form's own password, which is cleared the moment generation
-// finishes (the user then types it again as the signing password; a generated
-// signer is prompted for like any other, never cached).
+// visible-signature popover) share: a PKCS#12 file, a PEM key+cert pair, a
+// PKCS#11 hardware token (F3), or a freshly generated self-signed .pfx
+// (which becomes the selected .pfx).
+// SECURITY: this component never holds the SIGNING password or token PIN —
+// only the generator sub-form's own password, which is cleared the moment
+// generation finishes (the user then types it again as the signing
+// password/PIN; a generated signer is prompted for like any other, never
+// cached). For a token the sign form's password field IS the PIN.
 
 export type SignerSource =
   | { mode: 'pfx'; pfxPath: string | null }
-  | { mode: 'pem'; keyPath: string | null; certPath: string | null };
+  | { mode: 'pem'; keyPath: string | null; certPath: string | null }
+  | {
+      mode: 'pkcs11';
+      modulePath: string | null;
+      tokenLabel: string;
+      certLabel: string;
+      keyLabel: string;
+    };
 
 export const EMPTY_SIGNER_SOURCE: SignerSource = { mode: 'pfx', pfxPath: null };
 
@@ -24,6 +33,18 @@ export function signerSourceParams(
   if (source.mode === 'pfx') {
     if (!source.pfxPath) return { error: 'Choose a signer (.pfx) file first.' };
     return { params: { pfx_path: source.pfxPath } };
+  }
+  if (source.mode === 'pkcs11') {
+    if (!source.modulePath) return { error: 'Choose the PKCS#11 module (.dll) first.' };
+    if (!source.tokenLabel.trim()) return { error: 'Enter the token label.' };
+    if (!source.certLabel.trim()) return { error: 'Enter the certificate label on the token.' };
+    const params: Record<string, string> = {
+      pkcs11_module: source.modulePath,
+      pkcs11_token: source.tokenLabel.trim(),
+      pkcs11_cert_label: source.certLabel.trim(),
+    };
+    if (source.keyLabel.trim()) params.pkcs11_key_label = source.keyLabel.trim();
+    return { params };
   }
   if (!source.keyPath || !source.certPath)
     return { error: 'Choose both the PEM key file and the certificate file.' };
@@ -60,6 +81,11 @@ export function SignerSourceFields({
     const p = await dialog.pickCertificate();
     if (p) onChange({ mode: 'pfx', pfxPath: p });
   }, [onChange]);
+
+  const pickModule = useCallback(async () => {
+    const p = await dialog.pickPkcs11Module();
+    if (p && value.mode === 'pkcs11') onChange({ ...value, modulePath: p });
+  }, [onChange, value]);
 
   const pickKey = useCallback(async () => {
     const p = await dialog.pickPemFile();
@@ -115,12 +141,18 @@ export function SignerSourceFields({
       <div className="flex items-center gap-2">
         <span className="text-xs text-neutral-400 w-20 shrink-0">Signer</span>
         <div className="flex rounded overflow-hidden border border-neutral-700">
-          {(['pfx', 'pem'] as const).map((m) => (
+          {(['pfx', 'pem', 'pkcs11'] as const).map((m) => (
             <button
               key={m}
               data-testid={`${idPrefix}-source-${m}`}
               onClick={() =>
-                onChange(m === 'pfx' ? { mode: 'pfx', pfxPath: null } : { mode: 'pem', keyPath: null, certPath: null })
+                onChange(
+                  m === 'pfx'
+                    ? { mode: 'pfx', pfxPath: null }
+                    : m === 'pem'
+                      ? { mode: 'pem', keyPath: null, certPath: null }
+                      : { mode: 'pkcs11', modulePath: null, tokenLabel: '', certLabel: '', keyLabel: '' },
+                )
               }
               className={`px-2.5 py-1 text-xs font-medium ${
                 value.mode === m
@@ -128,7 +160,7 @@ export function SignerSourceFields({
                   : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
               }`}
             >
-              {m === 'pfx' ? '.pfx file' : 'PEM key + cert'}
+              {m === 'pfx' ? '.pfx file' : m === 'pem' ? 'PEM key + cert' : 'Token (PKCS#11)'}
             </button>
           ))}
         </div>
@@ -163,6 +195,59 @@ export function SignerSourceFields({
             Choose…
           </button>
         </div>
+      ) : value.mode === 'pkcs11' ? (
+        <>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">Module</span>
+            <span
+              className="flex-1 text-xs text-neutral-300 truncate"
+              title={value.modulePath ?? undefined}
+            >
+              {fileName(value.modulePath)}
+            </span>
+            <button
+              data-testid={`${idPrefix}-pick-module`}
+              onClick={() => void pickModule()}
+              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
+            >
+              Choose…
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">Token</span>
+            <input
+              data-testid={`${idPrefix}-token-label`}
+              value={value.tokenLabel}
+              onChange={(e) => onChange({ ...value, tokenLabel: e.target.value })}
+              placeholder="Token label"
+              className="flex-1 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">Cert label</span>
+            <input
+              data-testid={`${idPrefix}-cert-label`}
+              value={value.certLabel}
+              onChange={(e) => onChange({ ...value, certLabel: e.target.value })}
+              placeholder="Certificate label on the token"
+              className="flex-1 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">Key label</span>
+            <input
+              data-testid={`${idPrefix}-key-label`}
+              value={value.keyLabel}
+              onChange={(e) => onChange({ ...value, keyLabel: e.target.value })}
+              placeholder="Blank = same as certificate label"
+              className="flex-1 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
+            The password field is the token PIN. The module is your device
+            vendor's PKCS#11 .dll.
+          </p>
+        </>
       ) : (
         <>
           <div className="flex items-center gap-2">

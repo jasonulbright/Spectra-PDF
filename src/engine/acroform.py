@@ -386,6 +386,101 @@ def _reconcile_co_in_place(pdf: pikepdf.Pdf) -> None:
         acro["/CO"] = Array(keep)
 
 
+def adopt_orphan_widget_fields(pdf: pikepdf.Pdf) -> int:
+    """Register orphan field-keyed widgets in /AcroForm (O8: distill forms).
+
+    gs pdfwrite honours /ANN pdfmarks — Distiller's form syntax — well enough
+    to land Widget annotations with their /T //FT //V intact on the page, but
+    it never writes the document /AcroForm (probe-verified against bundled
+    10.07.1), leaving every distilled field an orphan: rendered, dead. The
+    widgets ARE the fields (Distiller pdfmark forms are flat — no /Parent
+    trees arrive this way), so adoption is: collect page widgets carrying
+    BOTH /T and /FT that no /Fields forest already reaches, append them to
+    /AcroForm /Fields (created on demand with the standard Helv /DR + /DA),
+    and set /NeedAppearances when any adopted field lacks an /AP — readers
+    regenerate, and this app's own fill builds real appearances on first
+    edit. Widgets with /T but no /FT stay orphans (an untyped field cannot
+    be honestly registered). Same-named widgets adopt as one logical field
+    per the spec's shared-/V rule — exactly Distiller's semantics.
+
+    Returns the number of widgets adopted (0 = untouched document).
+    """
+    registered: set = set()
+    fields = _fields_of(pdf)
+    if fields is not None:
+        def collect(node, depth: int) -> None:
+            if depth > MAX_FIELD_DEPTH or not isinstance(node, Dictionary):
+                return
+            try:
+                if node.is_indirect:
+                    registered.add(node.objgen)
+            except Exception:
+                pass
+            kids = node.get("/Kids")
+            if kids is not None and isinstance(kids, Array):
+                for kid in kids:
+                    collect(kid, depth + 1)
+
+        for f in fields:
+            collect(f, 0)
+
+    adopted = []
+    needs_appearances = False
+    for page in pdf.pages:
+        annots = page.obj.get("/Annots")
+        if annots is None:
+            continue
+        try:
+            entries = list(annots)
+        except Exception:
+            continue
+        for a in entries:
+            if not _is_widget(a) or not isinstance(a, Dictionary):
+                continue
+            if a.get("/T") is None or a.get("/FT") is None:
+                continue
+            try:
+                if a.is_indirect and a.objgen in registered:
+                    continue
+            except Exception:
+                continue
+            handle = a if a.is_indirect else pdf.make_indirect(a)
+            adopted.append(handle)
+            if handle.get("/AP") is None:
+                needs_appearances = True
+
+    if not adopted:
+        return 0
+
+    acro = pdf.Root.get("/AcroForm")
+    if acro is None:
+        helv = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Font,
+                Subtype=Name.Type1,
+                BaseFont=Name.Helvetica,
+                Encoding=Name.WinAnsiEncoding,
+            )
+        )
+        acro = pdf.make_indirect(
+            Dictionary(
+                Fields=Array([]),
+                DA=pikepdf.String("/Helv 0 Tf 0 g"),
+                DR=Dictionary(Font=Dictionary(Helv=helv)),
+            )
+        )
+        pdf.Root["/AcroForm"] = acro
+    dst_fields = acro.get("/Fields")
+    if dst_fields is None or not isinstance(dst_fields, Array):
+        dst_fields = Array([])
+        acro["/Fields"] = dst_fields
+    for handle in adopted:
+        dst_fields.append(handle)
+    if needs_appearances:
+        acro["/NeedAppearances"] = True
+    return len(adopted)
+
+
 def refresh_sig_flags(pdf: pikepdf.Pdf) -> None:
     """Recompute /SigFlags bit 1 (SignaturesExist) from the fields actually
     present; drop the key entirely when no signature field remains. Bit 2

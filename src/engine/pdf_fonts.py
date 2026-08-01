@@ -306,14 +306,137 @@ def _hmtx_code_widths(tt, code2glyph: dict[int, str]) -> dict[int, float]:
     return out
 
 
+def _glyph_names_to_maps(
+    names_by_code: dict[int, str],
+    width_of,
+) -> tuple[dict[int, str], dict[int, float]]:
+    """code→glyphName + a width callback → (code2uni via AGL, code2width)."""
+    from fontTools import agl
+
+    code2uni: dict[int, str] = {}
+    code2width: dict[int, float] = {}
+    for code, gname in names_by_code.items():
+        if not gname or gname == ".notdef":
+            continue
+        u = agl.toUnicode(gname)
+        if u:
+            code2uni[code] = u
+        try:
+            w = width_of(gname)
+        except Exception:
+            w = None
+        if w is not None:
+            code2width[code] = float(w)
+    return code2uni, code2width
+
+
+def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
+    """T9: bare-CFF FontFile3 (Type1C). The CFF carries its OWN encoding
+    (code→glyph name) and every charstring encodes its advance — cffLib
+    exposes both, so 'two refusals, zero justification' had a two-parser
+    answer. CID-keyed CFF has no encoding and returns empty (a CID program
+    in a SIMPLE font slot is malformed; the caller keeps the refusal)."""
+    try:
+        from fontTools.cffLib import CFFFontSet
+        from fontTools.pens.basePen import NullPen
+
+        cff = CFFFontSet()
+        cff.decompile(BytesIO(raw), None)
+        td = cff[cff.fontNames[0]]
+        if hasattr(td, "ROS"):
+            return {}, {}  # CID-keyed — no builtin encoding to honor
+        # cffLib hands back the STRING 'StandardEncoding'/'ExpertEncoding'
+        # for the predefined encodings and a 256-list only for custom ones —
+        # enumerating the string mapped code 0→'S', 1→'t', … and ACCEPTED
+        # the garbage (pin-caught). Expand predefined names to their lists.
+        encoding = td.Encoding
+        if isinstance(encoding, str):
+            if encoding == "StandardEncoding":
+                from fontTools.encodings.StandardEncoding import StandardEncoding
+
+                encoding = list(StandardEncoding)
+            else:
+                return {}, {}  # ExpertEncoding — ornament sets, no honest text map
+        charstrings = td.CharStrings
+        upem = 1.0 / float(td.FontMatrix[0]) if td.FontMatrix[0] else 1000.0
+    except Exception:
+        return {}, {}
+
+    def width_of(gname: str):
+        if gname not in charstrings:
+            return None
+        cs = charstrings[gname]
+        cs.draw(NullPen())  # sets .width (nominal/default applied)
+        return cs.width * (1000.0 / upem)
+
+    # Only glyphs the font actually HAS: a predefined encoding names the
+    # full standard set, but claiming a char whose glyph is absent would
+    # decode text the font cannot show.
+    names_by_code = {
+        c: n
+        for c, n in enumerate(encoding)
+        if n and n != ".notdef" and n in charstrings
+    }
+    return _glyph_names_to_maps(names_by_code, width_of)
+
+
+def _type1_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
+    """T9: /FontFile (Type1, PFA or PFB). t1Lib parses from a temp file
+    (its API is path-based); the font's builtin encoding + charstring
+    widths come out the same way the CFF path's do."""
+    import os
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(suffix=".pfb" if raw[:1] == b"\x80" else ".pfa")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        from fontTools.pens.basePen import NullPen
+        from fontTools.t1Lib import T1Font
+
+        font = T1Font(tmp)
+        font.parse()
+        fdict = font.font
+        encoding = fdict.get("Encoding")
+        charstrings = fdict.get("CharStrings", {})
+        matrix = fdict.get("FontMatrix", [0.001])
+        upem = 1.0 / float(matrix[0]) if matrix and matrix[0] else 1000.0
+        if encoding == "StandardEncoding" or not isinstance(encoding, list):
+            from fontTools.encodings.StandardEncoding import StandardEncoding
+
+            encoding = list(StandardEncoding)
+    except Exception:
+        return {}, {}
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+    def width_of(gname: str):
+        cs = charstrings.get(gname)
+        if cs is None:
+            return None
+        cs.draw(NullPen())
+        return cs.width * (1000.0 / upem)
+
+    names_by_code = {
+        c: n
+        for c, n in enumerate(encoding)
+        if isinstance(n, str) and n != ".notdef" and n in charstrings
+    }
+    return _glyph_names_to_maps(names_by_code, width_of)
+
+
 def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
     """code → unicode + code → advance (1000/em) derived from the embedded
-    font program (9.B3) — the last resort for a symbolic simple font with no
-    usable /Encoding and no ToUnicode. FontFile2 and SFNT-wrapped FontFile3
-    (/OpenType) parse via fontTools; bare-CFF FontFile3 (Type1C) raises in
-    TTFont and keeps the refusal — cffLib builtin-encoding + charstring-width
-    extraction is a scoped-out tail, not attempted.
-    Subtable preference (first that derives any unicode wins):
+    font program (9.B3, widened by T9) — the last resort for a symbolic
+    simple font with no usable /Encoding and no ToUnicode. FontFile2 and
+    SFNT-wrapped FontFile3 (/OpenType) parse via fontTools' TTFont; bare-CFF
+    FontFile3 (Type1C) falls through to cffLib's builtin encoding +
+    charstring widths, and /FontFile (Type1 PFA/PFB) to t1Lib's — T9 lifted
+    both former refusals.
+    TTFont subtable preference (first that derives any unicode wins):
       (3,1) Windows-Unicode — code c maps to chr(c) when c is in the cmap;
       (3,0) Windows-Symbol  — glyph at 0xF000+c (or bare c), then the glyph
             NAME through the AGL (uniXXXX/uXXXX forms included);
@@ -327,20 +450,27 @@ def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
         if desc is None:
             return {}, {}
         program = desc.get("/FontFile2")
+        kind = "sfnt"
         if program is None:
             program = desc.get("/FontFile3")
+        if program is None:
+            program = desc.get("/FontFile")
+            kind = "type1" if program is not None else kind
         if program is None:
             return {}, {}
         raw = program.read_bytes()
     except Exception:
         return {}, {}
+    if kind == "type1":
+        return _type1_encoding_map(raw)
     try:
         from fontTools.ttLib import TTFont
 
         tt = TTFont(BytesIO(raw), fontNumber=0, lazy=True)
         subtables = list(tt["cmap"].tables)
     except Exception:
-        return {}, {}
+        # Not an SFNT: a FontFile3 that TTFont rejects is bare CFF (T9).
+        return _cff_encoding_map(raw)
     from fontTools import agl
 
     by_key: dict[tuple[int, int], dict[int, str]] = {}
@@ -432,6 +562,99 @@ def _cmap_code_widths(named_cmap, codes, cid_widths: dict[int, float]) -> dict[i
             if w is not None:
                 out[code] = w
     return out
+
+
+def _cid_to_unicode_map(font_obj, vertical: bool) -> dict[int, str]:
+    """CID→Unicode WITHOUT a /ToUnicode (T8), via two honest routes:
+
+    1. The CID system's REGISTRY map: a /CIDSystemInfo naming a known
+       ordering (Adobe-Japan1, Adobe-GB1, …) has a published CID→Unicode
+       table, bundled with pdfminer (`CMapDB.get_unicode_map`). This is the
+       same information a /ToUnicode for that ordering would encode.
+    2. The embedded font PROGRAM's own cmap table, reversed — the B3
+       precedent applied to composite fonts. For Adobe-Identity-0 subsets
+       (the modern majority) the registry says nothing, but the TrueType/
+       OpenType program still maps unicode→glyph; inverted through
+       /CIDToGIDMap that is CID→unicode.
+
+    Returns {} when neither route yields anything — the caller keeps the
+    honest refusal.
+    """
+    desc_fonts = font_obj.get("/DescendantFonts")
+    if desc_fonts is None or len(desc_fonts) == 0:
+        return {}
+    desc = desc_fonts[0]
+
+    # Route 1: registry ordering.
+    csi = desc.get("/CIDSystemInfo")
+    if csi is not None:
+        try:
+            registry = str(csi.get("/Registry", ""))
+            ordering = str(csi.get("/Ordering", ""))
+        except Exception:
+            registry = ordering = ""
+        if registry and ordering and ordering != "Identity":
+            try:
+                from pdfminer.cmapdb import CMapDB
+
+                um = CMapDB.get_unicode_map(f"{registry}-{ordering}", vertical)
+            except Exception:
+                um = None
+            if um is not None:
+                out: dict[int, str] = {}
+                # The registry maps are dense; enumerate the 2-byte CID space
+                # once (fast — dict lookups) and keep what resolves.
+                for cid in range(0x10000):
+                    try:
+                        ch = um.get_unichr(cid)
+                    except Exception:
+                        continue
+                    if ch:
+                        out[cid] = ch
+                if out:
+                    return out
+
+    # Route 2: reverse the embedded program's cmap through /CIDToGIDMap.
+    fd = desc.get("/FontDescriptor")
+    if fd is None:
+        return {}
+    program = fd.get("/FontFile2") or fd.get("/FontFile3")
+    if program is None:
+        return {}
+    try:
+        from fontTools.ttLib import TTFont
+
+        tt = TTFont(BytesIO(program.read_bytes()), fontNumber=0, lazy=True)
+        best = tt.getBestCmap()  # {codepoint: glyphName}
+    except Exception:
+        return {}
+    gid2uni: dict[int, str] = {}
+    for cp, gname in best.items():
+        try:
+            gid = tt.getGlyphID(gname)
+        except Exception:
+            continue
+        # First mapping wins — a glyph reachable from several codepoints
+        # (case pairs via GSUB never appear in cmap, so ties are rare).
+        gid2uni.setdefault(gid, chr(cp))
+    if not gid2uni:
+        return {}
+    c2g = desc.get("/CIDToGIDMap")
+    if c2g is None or (not isinstance(c2g, pikepdf.Stream) and str(c2g) == "/Identity"):
+        return dict(gid2uni)  # CID == GID
+    if isinstance(c2g, pikepdf.Stream):
+        try:
+            table = c2g.read_bytes()
+        except Exception:
+            return {}
+        out = {}
+        for cid in range(len(table) // 2):
+            gid = (table[2 * cid] << 8) | table[2 * cid + 1]
+            ch = gid2uni.get(gid)
+            if ch and gid != 0:
+                out.setdefault(cid, ch)
+        return out
+    return {}
 
 
 def _plain(el):
@@ -545,20 +768,44 @@ def font_capability(font_obj) -> FontCapability:
                 )
         tou = font_obj.get("/ToUnicode")
         if tou is None:
-            if vertical:
-                # 9.B4a: the accepted vertical classes still require
-                # ToUnicode; the reason keeps naming the vertical class
-                # (the zoo pins the "vertical" substring).
+            # T8: recover the mapping WITHOUT /ToUnicode — the registry's
+            # published CID→Unicode table for a named ordering, else the
+            # embedded program's own cmap reversed through /CIDToGIDMap
+            # (the B3 precedent applied to composite fonts). Code-keyed via
+            # Identity (code == CID) or the predefined CMap's code→CID.
+            cid2uni = _cid_to_unicode_map(font_obj, vertical)
+            if named_cmap is None:
+                code2uni = dict(cid2uni)
+            else:
+                code2uni = {}
+                for code in range(0x10000):
+                    try:
+                        cids = list(named_cmap.decode(code.to_bytes(2, "big")))
+                    except Exception:
+                        continue
+                    if cids and cids[0] in cid2uni:
+                        code2uni[code] = cid2uni[cids[0]]
+            if not code2uni:
+                if vertical:
+                    # 9.B4a: the reason keeps naming the vertical class
+                    # (the zoo pins the "vertical" substring).
+                    return _refused(
+                        "no ToUnicode map and no recoverable mapping — "
+                        "vertical text cannot be re-entered",
+                        code_bytes=2,
+                    )
                 return _refused(
-                    "no ToUnicode map — vertical text cannot be re-entered", code_bytes=2
+                    "no ToUnicode map and no recoverable mapping — "
+                    "this text cannot be re-entered",
+                    code_bytes=2,
                 )
-            return _refused("no ToUnicode map — this text cannot be re-entered", code_bytes=2)
-        try:
-            code2uni = _parse_tounicode(tou.read_bytes())
-        except Exception:
-            return _refused("unreadable ToUnicode map", code_bytes=2)
-        if not code2uni:
-            return _refused("empty ToUnicode map", code_bytes=2)
+        else:
+            try:
+                code2uni = _parse_tounicode(tou.read_bytes())
+            except Exception:
+                return _refused("unreadable ToUnicode map", code_bytes=2)
+            if not code2uni:
+                return _refused("empty ToUnicode map", code_bytes=2)
         desc_fonts = font_obj.get("/DescendantFonts")
         cid_widths: dict[int, float] = {}
         default = 1000.0

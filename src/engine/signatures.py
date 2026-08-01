@@ -445,6 +445,96 @@ def _stamp_style(reason: str | None, location: str | None) -> "stamp.TextStampSt
     return stamp.TextStampStyle(stamp_text="\n".join(lines))
 
 
+from contextlib import contextmanager
+
+
+@contextmanager
+def _signer_source(
+    pfx_path: str | None,
+    password: str,
+    key_path: str | None,
+    cert_path: str | None,
+    pkcs11_module: str | None,
+    pkcs11_token: str | None,
+    pkcs11_pin: str,
+    pkcs11_cert_label: str | None,
+    pkcs11_key_label: str | None,
+):
+    """Resolve EXACTLY ONE signer source, yielding a live signer (F3 added
+    the third source). File-based signers (PKCS#12 / PEM) resolve eagerly and
+    need no cleanup; a PKCS#11 signer holds an OPEN token session for the
+    whole signing operation — the reason this is a context manager. The PIN,
+    like the password, never lands in results, errors, or logs."""
+    have_pfx = bool(pfx_path)
+    have_pem = bool(key_path) or bool(cert_path)
+    have_p11 = bool(pkcs11_module) or bool(pkcs11_token) or bool(pkcs11_cert_label)
+    if sum([have_pfx, have_pem, have_p11]) > 1:
+        raise ValueError(
+            "Choose ONE signer source: a .pfx file, a PEM key + certificate, "
+            "or a PKCS#11 token."
+        )
+    if have_pem and not (key_path and cert_path):
+        raise ValueError("A PEM signer needs both the key file and the certificate file.")
+    if have_p11:
+        if not (pkcs11_module and pkcs11_token and pkcs11_cert_label):
+            raise ValueError(
+                "A PKCS#11 signer needs the module path, the token label, "
+                "and the certificate label."
+            )
+        if not Path(pkcs11_module).is_file():
+            raise ValueError("PKCS#11 module not found at the given path.")
+        from pyhanko.sign.pkcs11 import PKCS11Signer, open_pkcs11_session
+
+        try:
+            session_cm = open_pkcs11_session(
+                lib_location=pkcs11_module,
+                token_label=pkcs11_token,
+                user_pin=pkcs11_pin or None,
+            )
+            session = session_cm.__enter__()
+        except Exception as exc:
+            # Honest, PIN-free classification. pyHanko wraps everything in
+            # its own PKCS11Error (probe-verified: a missing token surfaces
+            # as "No token matching criteria …"), so classify by TEXT, not
+            # type name. Neither library echoes the PIN in messages.
+            text = str(exc)
+            kind = type(exc).__name__
+            if "No token" in text:
+                msg = f'No token labelled "{pkcs11_token}" in this module.'
+            elif "PIN" in text.upper() or "PinIncorrect" in kind or "PinInvalid" in kind:
+                msg = "The token rejected the PIN."
+            else:
+                msg = f"Could not open the PKCS#11 token: {text}"
+            raise ValueError(msg) from exc
+        try:
+            yield PKCS11Signer(
+                session,
+                cert_label=pkcs11_cert_label,
+                key_label=pkcs11_key_label or pkcs11_cert_label,
+            )
+        except ValueError:
+            raise
+        except Exception as exc:
+            # Signing-time token failures (missing key/cert label, a yanked
+            # device) arrive as pkcs11/pyHanko exceptions whose messages are
+            # already user-honest — re-raise as the engine's error type so
+            # they surface as messages, not tracebacks.
+            raise ValueError(str(exc)) from exc
+        finally:
+            session_cm.__exit__(None, None, None)
+        return
+    if have_pfx:
+        yield _load_signer_from_pfx(pfx_path, password)  # type: ignore[arg-type]
+        return
+    if have_pem:
+        yield _load_signer_from_pem(key_path, cert_path, password)  # type: ignore[arg-type]
+        return
+    raise ValueError(
+        "No signer given — provide a .pfx file, a PEM key + certificate, "
+        "or a PKCS#11 token."
+    )
+
+
 def sign_pdf(
     file: str,
     output: str,
@@ -463,6 +553,11 @@ def sign_pdf(
     embed_revocation: bool = False,
     lta: bool = False,
     trust_roots: list | None = None,
+    pkcs11_module: str | None = None,
+    pkcs11_token: str | None = None,
+    pkcs11_pin: str = "",
+    pkcs11_cert_label: str | None = None,
+    pkcs11_key_label: str | None = None,
 ) -> dict:
     """Apply a digital signature (signing APPENDS an incremental revision — see
     docs/architecture/11-phase2h-signing.md and
@@ -470,10 +565,16 @@ def sign_pdf(
     same path as ``file`` (9.F5 in-place signing — the append is byte-safe over
     the original, and the write is atomic).
 
-    Signer source: EXACTLY ONE of a PKCS#12 file (``pfx_path``) or a PEM/DER
+    Signer source: EXACTLY ONE of a PKCS#12 file (``pfx_path``), a PEM/DER
     key + certificate pair (``key_path`` + ``cert_path``; ``cert_path`` may be
-    a fullchain file). ``password`` unlocks whichever source is used (empty
-    string for an unencrypted PEM key).
+    a fullchain file), or a PKCS#11 token (F3: ``pkcs11_module`` +
+    ``pkcs11_token`` + ``pkcs11_cert_label``, optional ``pkcs11_key_label``
+    defaulting to the cert label, ``pkcs11_pin``). ``password`` unlocks the
+    file-based sources (empty string for an unencrypted PEM key); the PIN
+    unlocks the token, and like the password it is NEVER placed in results,
+    errors, or logs. Every signing feature below — visible stamps,
+    existing-field fill, in-place, PAdES/TSA/LTV/LTA — works identically
+    with a token signer; the session stays open only for the signing step.
 
     Appearance: by default the signature is INVISIBLE. Passing ``appearance``
     = ``{page: <1-based>, rect: [x0,y0,x1,y1]}`` (PDF user-space points,
@@ -526,19 +627,10 @@ def sign_pdf(
             "Choose ONE placement: fill an existing signature field, or place a new visible stamp."
         )
 
-    have_pfx = bool(pfx_path)
-    have_pem = bool(key_path) or bool(cert_path)
-    if have_pfx and have_pem:
-        raise ValueError("Choose ONE signer source: a .pfx file, or a PEM key + certificate.")
-    if have_pem and not (key_path and cert_path):
-        raise ValueError("A PEM signer needs both the key file and the certificate file.")
-    if not have_pfx and not have_pem:
-        raise ValueError("No signer given — provide a .pfx file, or a PEM key + certificate.")
-
-    if have_pfx:
-        signer = _load_signer_from_pfx(pfx_path, password)  # type: ignore[arg-type]
-    else:
-        signer = _load_signer_from_pem(key_path, cert_path, password)  # type: ignore[arg-type]
+    signer_cm = _signer_source(
+        pfx_path, password, key_path, cert_path,
+        pkcs11_module, pkcs11_token, pkcs11_pin, pkcs11_cert_label, pkcs11_key_label,
+    )
 
     placement = _validated_appearance(appearance, file) if appearance is not None else None
     if existing_field is not None:
@@ -568,48 +660,52 @@ def sign_pdf(
         raise ValueError("Embedding revocation info (LTV) requires PAdES mode.")
     timestamper = _make_timestamper(tsa_url) if tsa_url else None
 
-    meta_kwargs: dict = {"field_name": field_name, "reason": reason, "location": location}
-    if pades:
-        meta_kwargs["subfilter"] = SigSeedSubFilter.PADES
-    if embed_revocation:
-        # Validating the signer's own chain is a precondition for gathering
-        # the revinfo that goes into the DSS. Anchors: the user's roots, or —
-        # for a self-signed signer — its own certificate.
-        anchors = _load_trust_roots(trust_roots or [])
-        if not anchors:
-            anchors = [signer.signing_cert, *signer.cert_registry]
-        meta_kwargs["embed_validation_info"] = True
-        meta_kwargs["validation_context"] = ValidationContext(
-            trust_roots=anchors, allow_fetching=True, retroactive_revinfo=True
-        )
-    if lta:
-        meta_kwargs["use_pades_lta"] = True
-    meta = signers.PdfSignatureMetadata(**meta_kwargs)
-    with open(file, "rb") as inf:
-        writer = IncrementalPdfFileWriter(inf)
-        if existing_field is not None:
-            # existing_fields_only is the fail-closed backstop: pyHanko will
-            # refuse to CREATE a field here, so a lookup miss can never
-            # silently turn into a new invisible signature. The stamp style
-            # draws in the field's own widget rect (zero-size -> invisible).
-            pdf_signer = signers.PdfSigner(
-                meta, signer=signer, stamp_style=_stamp_style(reason, location),
-                timestamper=timestamper,
+    # The signer stays live through the signing itself — a PKCS#11 source
+    # holds an open token session here (closed as soon as the signed bytes
+    # exist; the write/verify below needs no signer).
+    with signer_cm as signer:
+        meta_kwargs: dict = {"field_name": field_name, "reason": reason, "location": location}
+        if pades:
+            meta_kwargs["subfilter"] = SigSeedSubFilter.PADES
+        if embed_revocation:
+            # Validating the signer's own chain is a precondition for gathering
+            # the revinfo that goes into the DSS. Anchors: the user's roots, or —
+            # for a self-signed signer — its own certificate.
+            anchors = _load_trust_roots(trust_roots or [])
+            if not anchors:
+                anchors = [signer.signing_cert, *signer.cert_registry]
+            meta_kwargs["embed_validation_info"] = True
+            meta_kwargs["validation_context"] = ValidationContext(
+                trust_roots=anchors, allow_fetching=True, retroactive_revinfo=True
             )
-            signed = pdf_signer.sign_pdf(writer, existing_fields_only=True)
-        elif placement is not None:
-            page_ix, box = placement
-            fields.append_signature_field(
-                writer,
-                sig_field_spec=fields.SigFieldSpec(field_name, on_page=page_ix, box=box),
-            )
-            pdf_signer = signers.PdfSigner(
-                meta, signer=signer, stamp_style=_stamp_style(reason, location),
-                timestamper=timestamper,
-            )
-            signed = pdf_signer.sign_pdf(writer)
-        else:
-            signed = signers.sign_pdf(writer, meta, signer=signer, timestamper=timestamper)
+        if lta:
+            meta_kwargs["use_pades_lta"] = True
+        meta = signers.PdfSignatureMetadata(**meta_kwargs)
+        with open(file, "rb") as inf:
+            writer = IncrementalPdfFileWriter(inf)
+            if existing_field is not None:
+                # existing_fields_only is the fail-closed backstop: pyHanko will
+                # refuse to CREATE a field here, so a lookup miss can never
+                # silently turn into a new invisible signature. The stamp style
+                # draws in the field's own widget rect (zero-size -> invisible).
+                pdf_signer = signers.PdfSigner(
+                    meta, signer=signer, stamp_style=_stamp_style(reason, location),
+                    timestamper=timestamper,
+                )
+                signed = pdf_signer.sign_pdf(writer, existing_fields_only=True)
+            elif placement is not None:
+                page_ix, box = placement
+                fields.append_signature_field(
+                    writer,
+                    sig_field_spec=fields.SigFieldSpec(field_name, on_page=page_ix, box=box),
+                )
+                pdf_signer = signers.PdfSigner(
+                    meta, signer=signer, stamp_style=_stamp_style(reason, location),
+                    timestamper=timestamper,
+                )
+                signed = pdf_signer.sign_pdf(writer)
+            else:
+                signed = signers.sign_pdf(writer, meta, signer=signer, timestamper=timestamper)
     # Fail closed + atomic: write the signed bytes to a temp beside the output,
     # SELF-VERIFY the temp, and only then replace. Verifying BEFORE the replace
     # (round-42 gauntlet, HIGH) keeps the in-place case honest: a transient

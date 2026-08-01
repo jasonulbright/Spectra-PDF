@@ -131,7 +131,8 @@ export function SignaturesPanel(): React.ReactElement {
         file: activeFile.workingPath,
         output,
         ...sourceParams,
-        password: pw,
+        // A token source takes the password field as its PIN (F3).
+        ...(sourceParams.pkcs11_module ? { pkcs11_pin: pw } : { password: pw }),
         ...(rsn && rsn.trim() ? { reason: rsn.trim() } : {}),
         ...(loc && loc.trim() ? { location: loc.trim() } : {}),
         ...(appearance ? { appearance } : {}),
@@ -202,7 +203,8 @@ export function SignaturesPanel(): React.ReactElement {
       if (!activeFile) throw new Error('No active file to sign.');
       await performOperation(activeFile.path, 'sign_pdf', {
         ...sourceParams,
-        password: pw,
+        // A token source takes the password field as its PIN (F3).
+        ...(sourceParams.pkcs11_module ? { pkcs11_pin: pw } : { password: pw }),
         // The engine refuses output == input UNLESS this opt-in is set — the
         // in-place flow is the one caller that intends it (round-42 gauntlet).
         allow_in_place: true,
