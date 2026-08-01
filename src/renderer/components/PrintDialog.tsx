@@ -1,31 +1,62 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { app } from '../lib/tauri-bridge';
+import { app, type PrinterCapabilities } from '../lib/tauri-bridge';
 import { useAppModal } from '../hooks/useAppModal';
 import { runCommitGate } from '../lib/commit-gate';
 import { ensureGsPath } from '../panels/SettingsPanel';
 import {
   buildPrintParams,
   copiesError,
+  defaultPrintOptions,
   pageRangeError,
+  posterOverlapError,
+  posterScaleError,
+  scaleError,
+  IMAGE_DPI_CHOICES,
   MAX_COPIES,
+  type AnnotsMode,
+  type BookletBinding,
+  type BookletSubset,
+  type ColorMode,
+  type DuplexMode,
   type FitMode,
+  type NupOrder,
+  type OrientationMode,
+  type PageSubset,
+  type PrintLayout,
 } from '../lib/print-params';
 
-// File ▸ Print… (Ctrl+P) — M-P, § 3.4. Printer picker (real winspool
-// enumeration), page range, copies, fit/actual. Complete without a preview —
-// § 3.4's explicit call: the dialog is a finished feature without one, as
-// many shipping PDF tools' are.
+// File ▸ Print… (Ctrl+P) — M-P § 3.4, widened to the O2 option surface:
+// subsets/reverse/collate, duplex, paper, orientation, color, comments
+// modes, print-as-image, and the layout modes (multiple, booklet, poster,
+// custom scale). Complete without a preview — O3 remains its own register
+// row; the dialog is a finished feature without one, as many shipping PDF
+// tools' are.
 //
 // The job itself is the engine's `print` (bundled Ghostscript mswinpr2,
 // arm's-length subprocess like compress/grayscale). `call` is trackable, so
 // the commit gate flushes pending page edits before gs reads the working
 // copy — what prints is what the page counter says, not the stale bytes.
+//
+// Driver capabilities (paper list, duplexer, color) come from the
+// printer_capabilities command per selected printer; controls a driver
+// cannot honor are not offered (duplex on a simplex printer), and the
+// layout modes resolve their sheet geometry from the same report. Paper
+// TRAY selection is deliberately absent: gs's mswinpr2 hard-forces
+// automatic source selection (§ I O2's recorded residual).
 
 export interface PrintDialogProps {
   onClose: () => void;
 }
+
+type Opts = ReturnType<typeof defaultPrintOptions>;
+
+const selectCls =
+  'w-full px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm';
+const inputCls =
+  'px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50';
+const labelCls = 'block text-sm text-neutral-400 mb-1';
 
 export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   const { activeFile } = useActiveFile();
@@ -34,15 +65,24 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   const [printers, setPrinters] = useState<string[] | null>(null);
   const [printerError, setPrinterError] = useState<string | null>(null);
   const [printer, setPrinter] = useState('');
+  const [caps, setCaps] = useState<PrinterCapabilities | null>(null);
+  const [capsError, setCapsError] = useState<string | null>(null);
+
+  const [opts, setOpts] = useState<Opts>(defaultPrintOptions);
   const [copies, setCopies] = useState('1');
+  const [scaleText, setScaleText] = useState('100');
+  const [posterScaleText, setPosterScaleText] = useState('100');
+  const [overlapText, setOverlapText] = useState('0');
   const [rangeMode, setRangeMode] = useState<'all' | 'custom'>('all');
   const [rangeText, setRangeText] = useState('');
-  const [fit, setFit] = useState<FitMode>('fit');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Until the gate has run, pageCount may describe bytes the pending page
   // edits are about to rewrite — hold validation until the number is true.
   const [gated, setGated] = useState(false);
+
+  const set = <K extends keyof Opts>(key: K, value: Opts[K]): void =>
+    setOpts((o) => ({ ...o, [key]: value }));
 
   useEffect(() => {
     let cancelled = false;
@@ -72,9 +112,36 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
     return () => { cancelled = true; };
   }, []);
 
-  // The command's `when` requires a showable document, but a file can close
-  // underneath an open dialog.
+  // Capabilities follow the selected printer; a failed query degrades to
+  // the driver-default controls rather than blocking basic printing.
+  useEffect(() => {
+    if (printer === '') return;
+    let cancelled = false;
+    setCaps(null);
+    setCapsError(null);
+    void app.printerCapabilities(printer).then(
+      (c) => { if (!cancelled) setCaps(c); },
+      (e: unknown) => {
+        if (!cancelled) setCapsError(e instanceof Error ? e.message : String(e));
+      },
+    );
+    return () => { cancelled = true; };
+  }, [printer]);
+
+  // Portrait sheet size for the layout modes: chosen paper, else the
+  // printer's default, else the driver's first paper.
+  const sheet = useMemo<{ w: number; h: number } | null>(() => {
+    if (!caps || caps.papers.length === 0) return null;
+    const pick =
+      (opts.paper !== null && caps.papers.find((p) => p.id === opts.paper)) ||
+      (caps.default_paper !== null && caps.papers.find((p) => p.id === caps.default_paper)) ||
+      caps.papers[0];
+    return pick ? { w: pick.width_pt, h: pick.height_pt } : null;
+  }, [caps, opts.paper]);
+
   if (!activeFile) {
+    // The command's `when` requires a showable document, but a file can
+    // close underneath an open dialog.
     return (
       <Shell onClose={onClose}>
         <p className="text-sm text-neutral-400" data-testid="print-no-file">
@@ -87,9 +154,17 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   const pageCount = activeFile.pageCount;
   const rangeErr = gated && rangeMode === 'custom' ? pageRangeError(rangeText, pageCount) : null;
   const copiesErr = copiesError(copies);
+  const scaleErr = opts.fit === 'scale' ? scaleError(scaleText) : null;
+  const posterScaleErr = opts.layout === 'poster' ? posterScaleError(posterScaleText) : null;
+  const overlapErr = opts.layout === 'poster'
+    ? posterOverlapError(overlapText, sheet?.w ?? null, sheet?.h ?? null)
+    : null;
+  const needsSheet = opts.layout !== 'single' || opts.fit === 'scale';
+  const sheetMissing = needsSheet && sheet === null;
   const noPrinters = printers !== null && printers.length === 0;
   const canPrint =
-    !busy && gated && printer !== '' && !rangeErr && !copiesErr &&
+    !busy && gated && printer !== '' && !rangeErr && !copiesErr && !scaleErr &&
+    !posterScaleErr && !overlapErr && !sheetMissing &&
     (rangeMode === 'all' || rangeText.trim() !== '');
 
   const handlePrint = async (): Promise<void> => {
@@ -98,12 +173,23 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
     setError(null);
     try {
       await call('print', buildPrintParams({
+        ...opts,
         file: activeFile.workingPath,
         printer,
         gsPath: await ensureGsPath(),
         pages: rangeMode === 'custom' ? rangeText : '',
         copies: Number(copies.trim()),
-        fit,
+        scalePercent: Number(scaleText.trim()),
+        posterScale: Number(posterScaleText.trim()),
+        posterOverlap: Number(overlapText.trim()),
+        sheetWidth: needsSheet ? (sheet?.w ?? null) : null,
+        sheetHeight: needsSheet ? (sheet?.h ?? null) : null,
+        // Booklet is always duplexed onto landscape sheets; short-edge
+        // flipping is what makes consecutive sides face correctly on a
+        // portrait-fed duplexer. Overridable via the duplex control.
+        duplex: opts.layout === 'booklet' && opts.duplex === 'printer' && caps?.duplex
+          ? 'short'
+          : opts.duplex,
       }));
       onClose();
     } catch (e: unknown) {
@@ -116,7 +202,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
     <Shell onClose={onClose}>
       <div className="flex flex-col gap-4">
         <div>
-          <label className="block text-sm text-neutral-400 mb-1" htmlFor="print-printer">Printer</label>
+          <label className={labelCls} htmlFor="print-printer">Printer</label>
           {printerError ? (
             <p className="text-sm text-red-400" data-testid="print-printer-error">
               Could not list printers: {printerError}
@@ -129,7 +215,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             <select
               id="print-printer"
               data-testid="print-printer"
-              className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+              className={selectCls}
               value={printer}
               disabled={printers === null}
               onChange={(e) => setPrinter(e.target.value)}
@@ -140,10 +226,15 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
               ))}
             </select>
           )}
+          {capsError && (
+            <p className="text-xs text-neutral-500 mt-1" data-testid="print-caps-error">
+              Printer options unavailable: {capsError}
+            </p>
+          )}
         </div>
 
         <fieldset>
-          <legend className="block text-sm text-neutral-400 mb-1">Pages</legend>
+          <legend className={labelCls}>Pages</legend>
           <div className="flex items-center gap-4">
             <label className="flex items-center gap-1.5 text-sm">
               <input
@@ -167,7 +258,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             </label>
             <input
               data-testid="print-range-input"
-              className="flex-1 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50"
+              className={`flex-1 ${inputCls}`}
               placeholder="e.g. 1-3, 5"
               value={rangeText}
               disabled={rangeMode !== 'custom'}
@@ -178,18 +269,40 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
           {rangeErr && (
             <p className="text-xs text-red-400 mt-1" data-testid="print-range-error">{rangeErr}</p>
           )}
+          <div className="flex items-center gap-4 mt-2">
+            <select
+              data-testid="print-subset"
+              aria-label="Page subset"
+              className={selectCls + ' w-auto'}
+              value={opts.subset}
+              onChange={(e) => set('subset', e.target.value as PageSubset)}
+            >
+              <option value="all">All pages in range</option>
+              <option value="odd">Odd pages only</option>
+              <option value="even">Even pages only</option>
+            </select>
+            <label className="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                data-testid="print-reverse"
+                checked={opts.reverse}
+                onChange={(e) => set('reverse', e.target.checked)}
+              />
+              Reverse order
+            </label>
+          </div>
         </fieldset>
 
-        <div className="flex gap-6">
+        <div className="flex gap-6 items-start">
           <div>
-            <label className="block text-sm text-neutral-400 mb-1" htmlFor="print-copies">Copies</label>
+            <label className={labelCls} htmlFor="print-copies">Copies</label>
             <input
               id="print-copies"
               data-testid="print-copies"
               type="number"
               min={1}
               max={MAX_COPIES}
-              className="w-24 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+              className={`w-24 ${inputCls}`}
               value={copies}
               onChange={(e) => setCopies(e.target.value)}
             />
@@ -197,17 +310,49 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
               <p className="text-xs text-red-400 mt-1" data-testid="print-copies-error">{copiesErr}</p>
             )}
           </div>
+          <label className="flex items-center gap-1.5 text-sm mt-6">
+            <input
+              type="checkbox"
+              data-testid="print-collate"
+              checked={opts.collate}
+              disabled={copies.trim() === '1'}
+              onChange={(e) => set('collate', e.target.checked)}
+            />
+            Collate
+          </label>
+        </div>
 
-          <fieldset>
-            <legend className="block text-sm text-neutral-400 mb-1">Scale</legend>
-            <div className="flex flex-col gap-1">
+        <fieldset>
+          <legend className={labelCls}>Page sizing &amp; layout</legend>
+          <div className="flex items-center gap-3 mb-2">
+            <select
+              data-testid="print-layout"
+              aria-label="Layout"
+              className={selectCls + ' w-auto'}
+              value={opts.layout}
+              onChange={(e) => set('layout', e.target.value as PrintLayout)}
+            >
+              <option value="single">Size</option>
+              <option value="nup">Multiple pages per sheet</option>
+              <option value="booklet">Booklet</option>
+              <option value="poster">Poster (tile large pages)</option>
+            </select>
+            {sheetMissing && (
+              <span className="text-xs text-red-400" data-testid="print-sheet-missing">
+                Needs the printer's paper size — options unavailable
+              </span>
+            )}
+          </div>
+
+          {opts.layout === 'single' && (
+            <div className="flex items-center gap-4">
               <label className="flex items-center gap-1.5 text-sm">
                 <input
                   type="radio"
                   name="print-fit"
                   data-testid="print-fit-fit"
-                  checked={fit === 'fit'}
-                  onChange={() => setFit('fit')}
+                  checked={opts.fit === 'fit'}
+                  onChange={() => set('fit', 'fit' as FitMode)}
                 />
                 Fit to paper
               </label>
@@ -216,13 +361,282 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
                   type="radio"
                   name="print-fit"
                   data-testid="print-fit-actual"
-                  checked={fit === 'actual'}
-                  onChange={() => setFit('actual')}
+                  checked={opts.fit === 'actual'}
+                  onChange={() => set('fit', 'actual' as FitMode)}
                 />
                 Actual size
               </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="radio"
+                  name="print-fit"
+                  data-testid="print-fit-scale"
+                  checked={opts.fit === 'scale'}
+                  onChange={() => set('fit', 'scale' as FitMode)}
+                />
+                Custom scale
+              </label>
+              <input
+                data-testid="print-scale-input"
+                className={`w-20 ${inputCls}`}
+                value={scaleText}
+                disabled={opts.fit !== 'scale'}
+                onFocus={() => set('fit', 'scale' as FitMode)}
+                onChange={(e) => setScaleText(e.target.value)}
+              />
+              <span className="text-sm text-neutral-400">%</span>
             </div>
-          </fieldset>
+          )}
+          {scaleErr && (
+            <p className="text-xs text-red-400 mt-1" data-testid="print-scale-error">{scaleErr}</p>
+          )}
+
+          {opts.layout === 'nup' && (
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-sm text-neutral-400">
+                Grid{' '}
+                <select
+                  data-testid="print-nup-rows"
+                  aria-label="Rows per sheet"
+                  className={selectCls + ' w-auto inline-block'}
+                  value={opts.nupRows}
+                  onChange={(e) => set('nupRows', Number(e.target.value))}
+                >
+                  {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+                {' × '}
+                <select
+                  data-testid="print-nup-cols"
+                  aria-label="Columns per sheet"
+                  className={selectCls + ' w-auto inline-block'}
+                  value={opts.nupCols}
+                  onChange={(e) => set('nupCols', Number(e.target.value))}
+                >
+                  {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+              <select
+                data-testid="print-nup-order"
+                aria-label="Page order"
+                className={selectCls + ' w-auto'}
+                value={opts.nupOrder}
+                onChange={(e) => set('nupOrder', e.target.value as NupOrder)}
+              >
+                <option value="horizontal">Across, then down</option>
+                <option value="horizontal-reversed">Across (right to left)</option>
+                <option value="vertical">Down, then across</option>
+                <option value="vertical-reversed">Down (right to left)</option>
+              </select>
+              <label className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  data-testid="print-nup-border"
+                  checked={opts.nupBorder}
+                  onChange={(e) => set('nupBorder', e.target.checked)}
+                />
+                Page borders
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  data-testid="print-nup-autorotate"
+                  checked={opts.nupAutoRotate}
+                  onChange={(e) => set('nupAutoRotate', e.target.checked)}
+                />
+                Auto-rotate pages
+              </label>
+            </div>
+          )}
+
+          {opts.layout === 'booklet' && (
+            <div className="flex flex-wrap items-center gap-3">
+              <select
+                data-testid="print-booklet-subset"
+                aria-label="Booklet sides"
+                className={selectCls + ' w-auto'}
+                value={opts.bookletSubset}
+                onChange={(e) => set('bookletSubset', e.target.value as BookletSubset)}
+              >
+                <option value="both">Both sides</option>
+                <option value="front">Front sides only</option>
+                <option value="back">Back sides only</option>
+              </select>
+              <select
+                data-testid="print-booklet-binding"
+                aria-label="Binding edge"
+                className={selectCls + ' w-auto'}
+                value={opts.bookletBinding}
+                onChange={(e) => set('bookletBinding', e.target.value as BookletBinding)}
+              >
+                <option value="left">Left binding</option>
+                <option value="right">Right binding</option>
+              </select>
+              <span className="text-xs text-neutral-500">
+                Two pages per landscape sheet, saddle order
+              </span>
+            </div>
+          )}
+
+          {opts.layout === 'poster' && (
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-sm text-neutral-400">
+                Tile scale{' '}
+                <input
+                  data-testid="print-poster-scale"
+                  className={`w-20 ${inputCls}`}
+                  value={posterScaleText}
+                  onChange={(e) => setPosterScaleText(e.target.value)}
+                />
+                {' '}%
+              </label>
+              <label className="text-sm text-neutral-400">
+                Overlap{' '}
+                <input
+                  data-testid="print-poster-overlap"
+                  className={`w-20 ${inputCls}`}
+                  value={overlapText}
+                  onChange={(e) => setOverlapText(e.target.value)}
+                />
+                {' '}pt
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  data-testid="print-poster-cutmarks"
+                  checked={opts.posterCutMarks}
+                  onChange={(e) => set('posterCutMarks', e.target.checked)}
+                />
+                Cut marks
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  data-testid="print-poster-labels"
+                  checked={opts.posterLabels}
+                  onChange={(e) => set('posterLabels', e.target.checked)}
+                />
+                Labels
+              </label>
+              {(posterScaleErr || overlapErr) && (
+                <p className="text-xs text-red-400 w-full" data-testid="print-poster-error">
+                  {posterScaleErr ?? overlapErr}
+                </p>
+              )}
+            </div>
+          )}
+        </fieldset>
+
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+          <div>
+            <label className={labelCls} htmlFor="print-orientation">Orientation</label>
+            <select
+              id="print-orientation"
+              data-testid="print-orientation"
+              className={selectCls}
+              value={opts.layout === 'booklet' ? 'landscape' : opts.orientation}
+              disabled={opts.layout === 'booklet'}
+              onChange={(e) => set('orientation', e.target.value as OrientationMode)}
+            >
+              <option value="auto">Auto</option>
+              <option value="portrait">Portrait</option>
+              <option value="landscape">Landscape</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="print-paper">Paper size</label>
+            <select
+              id="print-paper"
+              data-testid="print-paper"
+              className={selectCls}
+              value={opts.paper ?? ''}
+              disabled={!caps || caps.papers.length === 0}
+              onChange={(e) =>
+                set('paper', e.target.value === '' ? null : Number(e.target.value))}
+            >
+              <option value="">Printer default</option>
+              {(caps?.papers ?? []).map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+          {caps?.duplex && (
+            <div>
+              <label className={labelCls} htmlFor="print-duplex">Two-sided</label>
+              <select
+                id="print-duplex"
+                data-testid="print-duplex"
+                className={selectCls}
+                value={opts.duplex}
+                onChange={(e) => set('duplex', e.target.value as DuplexMode)}
+              >
+                <option value="printer">Printer default</option>
+                <option value="simplex">One side only</option>
+                <option value="long">Flip on long edge</option>
+                <option value="short">Flip on short edge</option>
+              </select>
+            </div>
+          )}
+          {caps?.color !== false ? (
+            <div>
+              <label className={labelCls} htmlFor="print-color">Color</label>
+              <select
+                id="print-color"
+                data-testid="print-color"
+                className={selectCls}
+                value={opts.color}
+                onChange={(e) => set('color', e.target.value as ColorMode)}
+              >
+                <option value="printer">Printer default</option>
+                <option value="color">Color</option>
+                <option value="gray">Grayscale</option>
+              </select>
+            </div>
+          ) : (
+            <div>
+              <label className={labelCls}>Color</label>
+              <p className="text-sm text-neutral-500 py-1.5" data-testid="print-mono-note">
+                Black &amp; white printer
+              </p>
+            </div>
+          )}
+          <div>
+            <label className={labelCls} htmlFor="print-annots">Comments &amp; forms</label>
+            <select
+              id="print-annots"
+              data-testid="print-annots"
+              className={selectCls}
+              value={opts.annots}
+              onChange={(e) => set('annots', e.target.value as AnnotsMode)}
+            >
+              <option value="all">Document and markups</option>
+              <option value="document">Document only</option>
+              <option value="stamps">Document and stamps</option>
+            </select>
+          </div>
+          <div className="flex items-end gap-3 pb-1">
+            <label className="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                data-testid="print-as-image"
+                checked={opts.asImage}
+                onChange={(e) => set('asImage', e.target.checked)}
+              />
+              Print as image
+            </label>
+            {opts.asImage && (
+              <select
+                data-testid="print-image-dpi"
+                aria-label="Rasterization resolution"
+                className={selectCls + ' w-auto'}
+                value={opts.imageDpi}
+                onChange={(e) => set('imageDpi', Number(e.target.value))}
+              >
+                {IMAGE_DPI_CHOICES.map((d) => (
+                  <option key={d} value={d}>{d} dpi</option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
 
         {error && (
@@ -266,7 +680,7 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
         aria-modal="true"
         aria-label="Print"
         data-testid="print-dialog"
-        className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[520px] max-h-[90vh] overflow-y-auto"
+        className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[640px] max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
