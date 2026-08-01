@@ -443,6 +443,76 @@ def _collapse_crop_frames(kept, instructions, t, open_q, skip_q):
         skip_q.add(frame["close"])
     for kept_at in sorted(removals, reverse=True):
         del kept[kept_at : kept_at + 4]
+    return _intersect_crop_rects(rects)
+
+
+def _collapse_for_transform(kept, instructions, t, open_q, skip_q, delta):
+    """9-§I.5 P9 — the transform action's collapse: crop frames come out (to
+    be re-emitted inside the new `cm`, where the clip stays in unit space)
+    AND every tool-written transform frame folds into the one fresh matrix.
+    Returns `(carried crop or None, folded delta)`.
+
+    Repeatedly moving a placement used to leave a `q cm … Q` per move nested
+    around the draw — ten nudges, ten frames. Folding is exact, not an
+    approximation: with frames M1 (innermost) … Mk (outermost) the CTM at
+    the draw is M1·M2·…·Mk·base, and the new innermost frame makes it
+    delta·M1·…·Mk·base; one frame carrying `delta·M1·…·Mk` over the SAME
+    base is the identical matrix. `base` never has to be known, which is
+    what makes this correct at any nesting depth and inside forms.
+
+    The OUTERMOST recognized transform frame is deliberately KEPT. It is
+    almost always the document's own placement (`q 100 0 0 80 72 640 cm
+    /Im0 Do Q` is how every producer draws an image), and shape alone
+    cannot tell it from one of ours. Folding it would be rendering-neutral
+    but would dissolve the author's structure for no gain; leaving it means
+    the FIRST edit emits exactly the shape this file has always emitted,
+    and the frame count stops at two instead of growing without bound.
+
+    Deletions run in ONE reverse-ordered pass over `kept` because the kinds
+    interleave: dropping an OUTER crop frame shifts every inner frame's
+    recorded position, so two independent passes would delete the wrong
+    entries (`_collapse_crop_frames`'s own batch is safe only because it
+    sorts its removals)."""
+    frames = _recognized_frames(instructions, t, [i for i, _ in open_q])
+    kept_index = {i: k for i, k in open_q}
+    transforms = [f for f in frames if f["kind"] == "transform"]
+    outermost = transforms[-1] if transforms else None
+    removals: list[int] = []
+    rects: list[list[float]] = []
+    composed = None
+    for frame in frames:
+        kept_at = kept_index.get(frame["open"])
+        if kept_at is None:
+            continue
+        if frame["kind"] == "crop":
+            removals.append(kept_at)
+            rects.append(frame["rect"])
+            skip_q.add(frame["close"])
+        elif frame["kind"] == "transform" and frame is not outermost:
+            try:
+                m = tuple(float(v) for v in instructions[frame["open"] + 1].operands)
+            except (TypeError, ValueError):
+                m = ()
+            if len(m) != 6:
+                break  # unreadable: this frame and everything outside it stay
+            removals.append(kept_at)
+            skip_q.add(frame["close"])
+            composed = m if composed is None else _mat_mult(composed, m)
+    for kept_at in sorted(removals, reverse=True):
+        # Every wrap shape this drops is `q` + ONE prefix op for transform,
+        # `q re W n` (four) for crop.
+        span = 4 if kept[kept_at + 1].operator == pikepdf.Operator("re") else 2
+        del kept[kept_at : kept_at + span]
+    if composed is not None:
+        delta = _mat_mult(tuple(delta), composed)
+    return _intersect_crop_rects(rects), delta
+
+
+def _intersect_crop_rects(rects):
+    """The intersection of dropped crop rects (None when none), zero-area
+    when they are DISJOINT — never the raw inverted numbers, because PDF
+    `re` normalizes negative extents and an inverted rect would clip to the
+    region BETWEEN the crops and un-hide what both hid (round 29 HIGH)."""
     if not rects:
         return None
     ix0 = max(r[0] for r in rects)
@@ -450,13 +520,58 @@ def _collapse_crop_frames(kept, instructions, t, open_q, skip_q):
     ix1 = min(r[2] for r in rects)
     iy1 = min(r[3] for r in rects)
     if ix0 >= ix1 or iy0 >= iy1:
-        # DISJOINT frames (pre-tail files): the true intersection is empty.
-        # Never return the raw inverted numbers — PDF `re` normalizes
-        # negative extents, so an inverted rect clips to the region BETWEEN
-        # the crops and un-hides what both hid (round 29 HIGH). A zero-area
-        # rect is the honest carry: still nothing visible.
         return [ix0, iy0, ix0, iy0]
     return [ix0, iy0, ix1, iy1]
+
+
+def _alpha_only_gs(name, resources, fallback_resources) -> bool:
+    """Whether an /ExtGState sets ALPHA AND NOTHING ELSE — the test that
+    makes an opacity frame safe to drop. A shape match alone is not enough
+    here (unlike transform): an author's `q /GS1 gs … Q` has the same
+    shape, and its dictionary may carry a blend mode, a soft mask, a line
+    width — state that vanishing would change the page."""
+    try:
+        gs = None
+        for res in (resources, fallback_resources):
+            if res is None:
+                continue
+            table = res.get("/ExtGState")
+            if table is None or name not in table:
+                continue
+            gs = table[name]
+            break
+        if gs is None:
+            return False
+        keys = {str(k) for k in gs.keys()}
+        return bool(keys) and keys <= {"/Type", "/ca", "/CA"}
+    except Exception:
+        return False
+
+
+def _collapse_opacity_frames(kept, instructions, t, open_q, skip_q, resources, fallback_resources):
+    """9-§I.5 P9 — drop the RECOGNIZED opacity frames around the target
+    whose /ExtGState is alpha-only, so setting opacity twice leaves one
+    frame rather than two. The innermost `gs` already won, so removing the
+    outer ones cannot change what is drawn; the alpha-only test is what
+    keeps an author's graphics state out of it."""
+    kept_index = {i: k for i, k in open_q}
+    removals: list[int] = []
+    for frame in _recognized_frames(instructions, t, [i for i, _ in open_q]):
+        if frame["kind"] != "opacity":
+            continue
+        try:
+            name = str(instructions[frame["open"] + 1].operands[0])
+        except (IndexError, TypeError):
+            break
+        if not _alpha_only_gs(name, resources, fallback_resources):
+            break  # fail closed: this frame and everything outside it stay
+        kept_at = kept_index.get(frame["open"])
+        if kept_at is None:
+            continue
+        removals.append(kept_at)
+        skip_q.add(frame["close"])
+    for kept_at in sorted(removals, reverse=True):
+        del kept[kept_at : kept_at + 2]  # the `q` and its `gs`
 
 
 def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, name_counter, reserved):
@@ -505,8 +620,17 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                 if state.action == "crop":
                     _collapse_crop_frames(kept, instructions, i, open_q, skip_q)
                 elif state.action == "transform":
-                    state.carried_crop = _collapse_crop_frames(
-                        kept, instructions, i, open_q, skip_q
+                    # P9: crop frames come out FIRST (they re-emit inside the
+                    # new cm, where the clip stays in unit space), then the
+                    # transform frames fold into the one matrix about to be
+                    # written — folding first would leave a dropped crop's
+                    # rect measured against a space that no longer exists.
+                    state.carried_crop, state.delta = _collapse_for_transform(
+                        kept, instructions, i, open_q, skip_q, state.delta
+                    )
+                elif state.action == "opacity":
+                    _collapse_opacity_frames(
+                        kept, instructions, i, open_q, skip_q, resources, fallback_resources
                     )
                 if state.action == "delete":
                     pass  # dropped — inline bytes live in the stream itself
@@ -538,8 +662,14 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                 if state.action == "crop":
                     _collapse_crop_frames(kept, instructions, i, open_q, skip_q)
                 elif state.action == "transform":
-                    state.carried_crop = _collapse_crop_frames(
-                        kept, instructions, i, open_q, skip_q
+                    # P9: see the inline-image branch — crops out first, then
+                    # the transform frames fold into the one fresh matrix.
+                    state.carried_crop, state.delta = _collapse_for_transform(
+                        kept, instructions, i, open_q, skip_q, state.delta
+                    )
+                elif state.action == "opacity":
+                    _collapse_opacity_frames(
+                        kept, instructions, i, open_q, skip_q, resources, fallback_resources
                     )
                 if state.action == "delete":
                     state.deleted_name = name

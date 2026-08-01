@@ -47,13 +47,13 @@ asserted directly by the test suite's dual-walk harness.
 import os
 import re
 import statistics
-import unicodedata
 from collections import defaultdict
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Dictionary, Name
 
+from engine import bidi
 from engine.content_walk import GraphicsTextState, color_equal, mat_mult
 from engine.page_images import _finalize_page_rewrite, _fresh_name, _register_xobject, _save
 from engine.redact import (
@@ -355,6 +355,12 @@ class _Paragraph:
         "editable",
         "reason",
         "box",
+        # 9.T3: the paragraph's bidi base level (0 LTR / 1 RTL) and whether
+        # its text was normalized from the page's VISUAL order into logical
+        # order to get here. `base_level` is 0 and `bidi` False for every
+        # paragraph with no strong RTL character — i.e. the shipped path.
+        "base_level",
+        "bidi",
     )
 
     @property
@@ -413,9 +419,17 @@ def _join_paragraphs(lines: list[_Line]) -> list[list[_Line]]:
     return [p["lines"] for p in open_paras]
 
 
-def _detect_alignment(lines: list[_Line], left: float, right: float) -> str:
+def _detect_alignment(
+    lines: list[_Line], left: float, right: float, base_rtl: bool = False
+) -> str:
+    # 9.T3: with no alignment EVIDENCE, a right-to-left paragraph's default
+    # is flush RIGHT — that is where its text starts, and it is the edge new
+    # lines must grow from. `base_rtl=False` (every LTR paragraph, i.e. the
+    # shipped call) keeps "left" in all four no-evidence branches, so the
+    # existing behaviour is unchanged by construction.
+    default = "right" if base_rtl else "left"
     if len(lines) < 2:
-        return "left"
+        return default
     tol = max(EDGE_TOL_PT, EDGE_TOL_FRACTION * (right - left))
     non_last = lines[:-1]
     if len(lines) >= 3 and all(
@@ -432,11 +446,97 @@ def _detect_alignment(lines: list[_Line], left: float, right: float) -> str:
         return "center"
     if lefts_vary and not rights_vary:
         return "right"
-    return "left"
+    if rights_vary and not lefts_vary:
+        return "left"  # flush left is EVIDENCE, in either base direction
+    return default
 
 
-def _assemble_text(lines: list[_Line]) -> tuple[str, list[dict], list[float]]:
-    """(logical text, spans [{start,end,run}], observed word gaps 1000)."""
+def _line_pieces(line: _Line, gaps: list[float]) -> list[tuple[str, int]]:
+    """One line's `(text, run index)` pieces in PAGE order (left to right),
+    appending its observed word gaps to `gaps`."""
+    pieces: list[tuple[str, int]] = []
+    prev: _Member | None = None
+    for mem in line.members:
+        if prev is not None:
+            gap = mem.x0 - prev.x1
+            if gap >= WORD_GAP_FRACTION * prev.space_w:
+                if not (pieces and pieces[-1][0].endswith(" ")):
+                    pieces.append((" ", prev.index))
+                # 9.B4b: the gap converts to 1000ths at the ADVANCE
+                # axis's user scale — d for vertical (Tz never applies
+                # vertically), h_scale×a for horizontal (unchanged).
+                axis = prev.d if prev.vertical else prev.a * prev.style["h_scale"]
+                denom = axis * prev.style["size"]
+                if denom > 1e-9:
+                    gaps.append(gap / denom * 1000.0)
+        if mem.ptext:
+            pieces.append((mem.ptext, mem.index))
+        gaps.extend(mem.gaps_1000)
+        prev = mem
+    return pieces
+
+
+def _to_logical(pieces: list[tuple[str, int]], base_level: int, cap_of):
+    """9.T3 — one line's PAGE-ORDER pieces re-ordered into LOGICAL order,
+    or None when the reconstruction cannot be proven.
+
+    Page order IS visual order: the lister assembles a line left to right by
+    geometry, whatever order the content stream drew it in. Bidi reordering
+    is its own inverse for two-level text, so running the forward algorithm
+    over the visual string is the candidate logical order — and the check
+    below is what makes that a fact rather than a hope: reorder the candidate
+    FORWARD and require the permutation to compose to the identity. Anything
+    deeper than two levels fails here and the paragraph refuses, which is the
+    honest outcome; nothing is ever silently re-spelled.
+
+    Reordering is by UNIT, not by character. One glyph can spell several
+    characters — an Arabic lam-alef, a Latin `fi` — and those characters are
+    already in logical order inside the glyph's ToUnicode entry; reversing
+    them individually would scramble the very word the reordering is meant
+    to restore. `cap_of(run)` supplies the font's own ligature matcher, the
+    SAME one the emission uses to form atomic entries, so both halves agree
+    on where a unit begins."""
+    units: list[tuple[str, int]] = []
+    for text, run in pieces:
+        cap = cap_of(run)
+        i = 0
+        while i < len(text):
+            seq = cap._sequence_at(text, i) if cap is not None else None
+            if seq is not None:
+                units.append((seq, run))
+                i += len(seq)
+            else:
+                units.append((text[i], run))
+                i += 1
+    # A unit's bidi class is its FIRST character's; a ligature's characters
+    # always share one (they are glyphs of a single script).
+    visual = "".join(u[0][0] for u in units)
+    back = bidi.reconstruct_logical(visual, base_level)
+    if len(back) != len(units):
+        return None  # directional formatting codes: rule X9 drops them
+    logical = "".join(visual[i] for i in back)
+    _lvl, forward = bidi.visual_order(logical, base_level)
+    if len(forward) != len(units) or any(back[forward[v]] != v for v in range(len(units))):
+        return None
+    out: list[tuple[str, int]] = []
+    for i in back:
+        text, run = units[i]
+        if out and out[-1][1] == run:
+            out[-1] = (out[-1][0] + text, run)
+        else:
+            out.append((text, run))
+    return out
+
+
+def _assemble_text(
+    lines: list[_Line], base_level: int | None = None
+) -> tuple[str, list[dict], list[float]] | None:
+    """(logical text, spans [{start,end,run}], observed word gaps 1000).
+
+    9.T3: `base_level` None is the shipped path — page order IS logical order
+    for left-to-right text. An int normalizes each line from page (visual)
+    order into logical order under that base direction, and returns None when
+    any line's reconstruction cannot be verified."""
     parts: list[str] = []
     spans: list[dict] = []
     gaps: list[float] = []
@@ -456,9 +556,13 @@ def _assemble_text(lines: list[_Line]) -> tuple[str, list[dict], list[float]]:
         last_char = text[-1]
 
     for li, line in enumerate(lines):
-        next_first = next(
-            (m.ptext[0] for m in line.members if m.ptext), ""
-        )
+        pieces = _line_pieces(line, gaps)
+        if base_level is not None:
+            caps = {m.index: m.cap for m in line.members}
+            pieces = _to_logical(pieces, base_level, caps.get)
+            if pieces is None:
+                return None
+        next_first = next((t[0] for t, _r in pieces if t), "")
         if (
             li > 0
             and last_char not in ("-", " ", "")
@@ -470,27 +574,35 @@ def _assemble_text(lines: list[_Line]) -> tuple[str, list[dict], list[float]]:
             # separators; inserting one would corrupt the round-trip). The
             # separator rides the PREVIOUS span (style continuity).
             emit(" ", spans[-1]["run"] if spans else line.members[0].index)
-        prev: _Member | None = None
-        for mem in line.members:
-            if prev is not None:
-                gap = mem.x0 - prev.x1
-                if gap >= WORD_GAP_FRACTION * prev.space_w:
-                    if last_char != " ":
-                        emit(" ", prev.index)
-                    # 9.B4b: the gap converts to 1000ths at the ADVANCE
-                    # axis's user scale — d for vertical (Tz never applies
-                    # vertically), h_scale×a for horizontal (unchanged).
-                    axis = prev.d if prev.vertical else prev.a * prev.style["h_scale"]
-                    denom = axis * prev.style["size"]
-                    if denom > 1e-9:
-                        gaps.append(gap / denom * 1000.0)
-            emit(mem.ptext, mem.index)
-            gaps.extend(mem.gaps_1000)
-            prev = mem
+        for text, run in pieces:
+            emit(text, run)
     return "".join(parts), spans, gaps
 
 
-_RTL_CLASSES = ("R", "AL")
+def _resolve_bidi_text(lines: list[_Line], visual):
+    """9.T3 — (text, spans, gaps, base_level) in LOGICAL order, or None.
+
+    Both base directions are tried because the page gives no direct evidence
+    of the producer's: P2/P3 on the VISUAL string is unreliable (a paragraph
+    that starts with Hebrew and ends with Latin begins with the Latin once
+    reordered). A candidate that verifies is a base direction under which a
+    conforming bidi engine reproduces exactly what the page draws; when both
+    verify, the one whose own reconstruction agrees with P2/P3 wins, since
+    that is what a producer running the algorithm in `auto` mode would have
+    used."""
+    accepted = []
+    for base in (1, 0):
+        got = _assemble_text(lines, base_level=base)
+        if got is not None:
+            accepted.append((base, got))
+    for base, got in accepted:
+        if bidi.paragraph_level(got[0]) == base:
+            return got + (base,)
+    if accepted:
+        base, got = accepted[0]
+        return got + (base,)
+    del visual
+    return None
 
 
 def _analyze(paras: list[list[_Line]], stream: tuple, lkey: tuple) -> list[_Paragraph]:
@@ -502,6 +614,8 @@ def _analyze(paras: list[list[_Line]], stream: tuple, lkey: tuple) -> list[_Para
         p.lkey = lkey
         p.left = min(l.x0 for l in lines)
         p.right = max(l.x1 for l in lines)
+        p.base_level = 0
+        p.bidi = False
         p.alignment = _detect_alignment(lines, p.left, p.right)
         p.leading = (
             statistics.median(lines[i].y - lines[i + 1].y for i in range(len(lines) - 1))
@@ -515,6 +629,28 @@ def _analyze(paras: list[list[_Line]], stream: tuple, lkey: tuple) -> list[_Para
             else 0.0
         )
         p.text, p.spans, gaps = _assemble_text(lines)
+        bidi_failed = False
+        if bidi.has_strong_rtl(p.text):
+            # 9.T3: page order is VISUAL order. Normalize to logical so the
+            # editor edits reading order, and re-detect alignment now that
+            # the base direction is known.
+            resolved = _resolve_bidi_text(lines, p.text)
+            if resolved is None:
+                bidi_failed = True
+            else:
+                p.text, p.spans, gaps, p.base_level = resolved
+                p.bidi = True
+                p.alignment = _detect_alignment(
+                    lines, p.left, p.right, base_rtl=p.base_level == 1
+                )
+                # The first-line indent is a LEFT-edge measurement; a
+                # right-aligned paragraph has none, so re-derive it now that
+                # the alignment may have flipped.
+                p.indent = (
+                    (lines[0].x0 - min(body_lefts))
+                    if (body_lefts and p.alignment in ("left", "justify"))
+                    else 0.0
+                )
         p.median_gap_1000 = statistics.median(gaps) if gaps else DEFAULT_WORD_GAP_1000
         rects = [m.rect for m in p.members]
         p.box = [
@@ -529,9 +665,16 @@ def _analyze(paras: list[list[_Line]], stream: tuple, lkey: tuple) -> list[_Para
         if blocker is not None:
             p.editable = False
             p.reason = f"contains text that cannot be edited ({blocker.blocking_reason})"
-        elif any(unicodedata.bidirectional(ch) in _RTL_CLASSES for ch in p.text):
+        elif bidi_failed:
+            # 9.T3: the refusal that REPLACED "right-to-left text does not
+            # reflow". RTL now reflows; what is refused is the narrow case
+            # where the page's visual order cannot be proven to come from any
+            # single logical order under either base direction — nesting past
+            # two embedding levels, or explicit directional formatting codes
+            # in the drawn text. Editing on an unproven reconstruction would
+            # silently re-spell the paragraph, so it stays on the run surface.
             p.editable = False
-            p.reason = "right-to-left text does not reflow"
+            p.reason = "this paragraph's right-to-left order could not be reconstructed"
         elif p.vertical and any(m.rise_user != 0.0 for m in p.members):
             # 9.B4b review (round 28 HIGH): a vertical member's rise_user
             # carries a REAL-X displacement (its transposed-y offset from
@@ -679,6 +822,12 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
                 # both modes; alignment names are the TRANSPOSED ones for
                 # vertical ("left" ≡ top — the editor doesn't label them).
                 "vertical": p.vertical,
+                # 9.T3, additive: the paragraph's bidi base direction. The
+                # editor sets the textarea's `dir` from this, so the caret,
+                # selection and typing behave as the reading order the text
+                # is now stored in.
+                "rtl": p.base_level == 1,
+                "bidi": p.bidi,
                 # A1 restyle seeds: the paragraph's dominant (first-member)
                 # size + fill colour.
                 "font_size": round(first.style["size"], 2),
@@ -783,11 +932,18 @@ class _StyleRef:
     bool (one shared subset) through A5a — a non-None key is the new truth,
     so every emission site tests `is not None`, not truthiness."""
 
-    __slots__ = ("member", "fallback", "size_override", "color_override")
+    __slots__ = ("member", "fallback", "size_override", "color_override", "shaped")
 
-    def __init__(self, member: _Member, fallback, size_override=None, color_override=None):
+    def __init__(
+        self, member: _Member, fallback, size_override=None, color_override=None, shaped=None
+    ):
         self.member = member
         self.fallback = fallback
+        # 9.T3: an `engine.shaping.ShapedRun` when this slice is ONE shaped
+        # word — the glyphs, their advances and their mark offsets, decided
+        # by HarfBuzz rather than by a per-character cmap lookup. None
+        # everywhere else, which is every left-to-right slice ever emitted.
+        self.shaped = shaped
         # A1: uniform size (points) / fill-color (ColorState) overrides,
         # or None to keep the member's own. Applied via style().
         self.size_override = size_override
@@ -795,7 +951,13 @@ class _StyleRef:
 
     @property
     def key(self) -> tuple:
-        return (self.member.index, self.fallback, self.size_override, self.color_override)
+        # A shaped word is its own segment by construction (each carries a
+        # distinct ShapedRun), which is what the emission wants anyway: one
+        # positioned show per shaped word.
+        return (
+            self.member.index, self.fallback, self.size_override, self.color_override,
+            None if self.shaped is None else id(self.shaped),
+        )
 
     def style(self) -> dict:
         """The effective style: the member's, with A1 size/color overrides
@@ -845,13 +1007,22 @@ class _Fallback:
     the target stream's resources (deterministic sorted-face order, so the
     single-subset A3 case keeps its shipped `/EditFb0`)."""
 
-    __slots__ = ("name", "font_dict", "encode", "width_1000", "used", "face_path", "kern_pairs")
+    __slots__ = (
+        "name", "font_dict", "encode", "width_1000", "used", "face_path", "kern_pairs",
+        "glyph_encode", "glyph_width",
+    )
 
-    def __init__(self, name, font_dict, encode, width_1000, face_path=None, kern_pairs=None):
+    def __init__(self, name, font_dict, encode, width_1000, face_path=None, kern_pairs=None,
+                 glyph_encode=None, glyph_width=None):
         self.name = name
         self.font_dict = font_dict
         self.encode = encode
         self.width_1000 = width_1000
+        # 9.T3: the GLYPH-level pair, present only on a shaped subset. A
+        # shaped run addresses joining forms, ligatures and marks the cmap
+        # cannot reach, so it encodes and measures by glyph, not character.
+        self.glyph_encode = glyph_encode
+        self.glyph_width = glyph_width
         self.used = False
         # 9.K1b: the resolved face file, so the kern source can read this
         # face's own pair table rather than guessing from the family.
@@ -964,6 +1135,12 @@ def _span_features(entry: dict) -> tuple:
     return (tuple(feats), alt if feats else 0)
 
 
+def _requires_shaping(ch: str) -> bool:
+    from engine import shaping
+
+    return shaping.requires_shaping(ch)
+
+
 def _face_sort_key(key: tuple) -> tuple:
     """Total order over face keys `(family_or_None, bold, italic, features,
     alt_index)` — None family sorts as "" so the sort never compares NoneType
@@ -993,6 +1170,7 @@ def _styled_chars(
     face_by_pos=None,
     size_by_pos=None,
     member_family=None,
+    rtl_style=None,
 ) -> tuple[list[tuple[str, _StyleRef]], dict]:
     """Map every char of the new text to its style source; returns the
     styled stream plus `fb_by_face` — a dict {face key → the char-set that
@@ -1142,6 +1320,25 @@ def _styled_chars(
             col = color_at(pos, member)
             siz = size_at(pos)
             fk = face_at(pos, member)
+            if rtl_style is not None and _requires_shaping(ch):
+                # 9.T3: a cursively joining character ALWAYS routes to the
+                # bundled shaping face, whatever `convert` says and whatever
+                # face was asked for. This is not a conversion the user opts
+                # into: the document's own subset has committed to final
+                # glyph ids and kept neither the cmap nor the GSUB needed to
+                # re-join them, so re-emitting per character would draw a row
+                # of disconnected isolated forms. Broken output is not an
+                # option the completeness standard leaves open; the visible
+                # substitution is. A requested weight/slant is honoured.
+                if fk is not None:
+                    rb, ri = bool(fk[1]), bool(fk[2])
+                else:
+                    rb, ri = rtl_style.get(member.index, (False, False))
+                rk = (RTL_FAMILY, rb, ri, (), 0)
+                fb_by_face.setdefault(rk, set()).add(ch)
+                styled.append((ch, ref(member, rk, col, siz)))
+                i += 1
+                continue
             if fk is not None:
                 if member.vertical:
                     # 9.B4b belt (the para-level substitution refusal is
@@ -1188,13 +1385,20 @@ def _styled_chars(
 
 
 class _Word:
-    __slots__ = ("chars", "width", "gap_after", "gap_styles")
+    __slots__ = ("chars", "width", "gap_after", "gap_styles", "char_widths")
 
     def __init__(self):
         self.chars: list[tuple[str, _StyleRef]] = []
         self.width = 0.0
         self.gap_after = 0.0  # user units of following space chars
         self.gap_styles: list[tuple[str, _StyleRef, float]] = []  # (char, style, w)
+        # 9.T3: each char's width AS MEASURED during tokenizing, i.e. in
+        # LOGICAL order with its logical kern neighbour. A bidi line is
+        # re-ordered before emission, so re-measuring downstream would take
+        # kern pairs from the VISUAL neighbours and quietly disagree with the
+        # wrap that already happened. Carrying the number is what makes
+        # measured and drawn the same number by construction.
+        self.char_widths: list[float] = []
 
 
 class _KernSource:
@@ -1273,6 +1477,17 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
                      kerns=None, prev_ch=None, prev_st=None) -> float:
     m = st.member
     s = st.style()
+    if st.shaped is not None:
+        # 9.T3: a shaped word measures as the GLYPHS the shaper chose. The
+        # advance is the /W total (that is what the viewer adds up), not
+        # HarfBuzz's positioned advance — the difference is a GPOS kern the
+        # emission puts into the TJ array, so measured and drawn still agree
+        # exactly. Tc applies once per GLYPH, Tw never (no space inside a
+        # word).
+        fb = fallbacks.get(st.fallback)
+        total = fb.glyph_width(st.shaped.glyph_names) if fb is not None else 0.0
+        w = total / 1000.0 * s["size"] + s["char_spacing"] * len(st.shaped.glyphs)
+        return w * (s["h_scale"] * m.a)
     if st.fallback is not None:
         fb = fallbacks.get(st.fallback)
         w1000 = fb.width_1000(ch) if fb is not None else 0.0
@@ -1300,6 +1515,57 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
     # whose user scale is d — Tz never applies vertically (Tc does, and
     # already rode in above). Horizontal is byte-identical.
     return w * (m.d if m.vertical else s["h_scale"] * m.a)
+
+
+# 9.T3: the face-key family that means "the bundled right-to-left face".
+# It is not a user-selectable family like serif/sans/mono — it is the
+# automatic, TEXT-driven switch a joining script forces, the same shape T5's
+# CJK switch has. `_face_sort_key` orders it with the named families.
+RTL_FAMILY = "rtl"
+
+
+def _shape_styled_runs(styled: list, key: tuple, face: str) -> tuple[list, list]:
+    """9.T3 — collapse each run of same-style joining-script characters in
+    `styled` into ONE shaped entry, and return (new styled, shaped runs).
+
+    Per WORD, because cursive joining never crosses a space: that is the
+    largest unit whose glyphs do not depend on its neighbours, so the line
+    breaker can still move it anywhere. Runs that HarfBuzz cannot express in
+    this face are left alone — the character path then refuses them by name,
+    which is the honest floor rather than a silent `.notdef`."""
+    from engine import shaping
+
+    out: list = []
+    runs: list = []
+    i = 0
+    while i < len(styled):
+        text, st = styled[i]
+        if st.fallback != key or st.shaped is not None or not shaping.requires_shaping(text):
+            out.append((text, st))
+            i += 1
+            continue
+        j = i
+        chunk: list[str] = []
+        while j < len(styled):
+            t2, s2 = styled[j]
+            if s2.key != st.key or t2 == " " or s2.shaped is not None:
+                break
+            chunk.append(t2)
+            j += 1
+        word = "".join(chunk)
+        try:
+            run = shaping.shape(face, word, rtl=True)
+        except Exception:
+            out.extend(styled[i:j])
+            i = j
+            continue
+        runs.append(run)
+        out.append((
+            word,
+            _StyleRef(st.member, st.fallback, st.size_override, st.color_override, shaped=run),
+        ))
+        i = j
+    return out, runs
 
 
 def _tokenize(
@@ -1338,13 +1604,14 @@ def _tokenize(
         ):
             close()  # break after (and before) CJK — no-space scripts wrap
         current.chars.append((ch, st))
+        current.char_widths.append(w)
         current.width += w
     close()
     return words
 
 
 class _LayoutLine:
-    __slots__ = ("words", "width", "x", "y", "justify_extra", "max_eff")
+    __slots__ = ("words", "width", "x", "y", "justify_extra", "max_eff", "vis_items")
 
     def __init__(self):
         self.words: list[_Word] = []
@@ -1355,6 +1622,42 @@ class _LayoutLine:
         # 9.A5c: the tallest glyph's effective size on this line, filled by
         # _fill_lines — drives the per-line leading when sizes vary.
         self.max_eff = 0.0
+        # 9.T3: the line's items already in VISUAL order, with their measured
+        # widths, for a bidi paragraph. None keeps `_segments` on the shipped
+        # word walk, so every left-to-right emission is untouched.
+        self.vis_items: list | None = None
+
+
+def _visual_items(line: _LayoutLine, base_level: int) -> list:
+    """9.T3 — the line's items in VISUAL order.
+
+    An item is `("ch", text, style, width)` or `("gap", char, style, width)`;
+    the trailing word's gap is dropped exactly as the shipped `_segments`
+    drops it (rule L1 resets a line-final space to the base level anyway, so
+    dropping it BEFORE reordering and letting L1 handle nothing is the same
+    answer by two routes).
+
+    Reordering is by character, not by word: an RTL word's letters mirror
+    within the word as well as the words mirroring within the line, and only
+    a character-level permutation gets both. Widths ride along, so the line's
+    total is invariant under the reordering — the wrap that already happened
+    stays valid."""
+    items: list = []
+    last = len(line.words) - 1
+    for wi, word in enumerate(line.words):
+        for (text, st), w in zip(word.chars, word.char_widths):
+            items.append(["ch", text, st, w])
+        if wi != last:
+            for ch, st, w in word.gap_styles:
+                items.append(["gap", ch, st, w])
+    ordered = bidi.reorder_to_visual(items, base_level, key=lambda it: it[1][:1] or " ")
+    if len(ordered) != len(items):
+        # Rule X9 drops explicit directional formatting codes; a paragraph
+        # whose EDITED text carries them cannot be laid out honestly.
+        raise ValueError(
+            "directional formatting characters cannot be re-laid-out in a paragraph"
+        )
+    return ordered
 
 
 def _char_eff(st: _StyleRef) -> float:
@@ -1548,8 +1851,14 @@ class _Emission:
     def __init__(
         self, para: _Paragraph, styled, fallbacks: dict, page_x0: float, page_x1: float,
         size_override=None, split_at=None, has_span_size=False, kerns=None,
+        base_level=None,
     ):
         self.para = para
+        # 9.T3: the bidi base level when this paragraph reorders (0 or 1),
+        # None when it does not. Set ⇒ every wrapped line is permuted from
+        # logical into visual order before segmentation; None ⇒ the shipped
+        # word walk, untouched.
+        self.base_level = base_level
         self.styled = styled
         # 9.K1b: pair-kerning source for whatever face each slice renders
         # in; None keeps the pre-K1b un-kerned emission.
@@ -1618,10 +1927,21 @@ class _Emission:
             # The single-line rhythm IS 1.2·eff, so its leading-per-unit-size
             # is exactly SINGLE_LINE_LEADING_EM (leading / base_eff).
             base_ratio = SINGLE_LINE_LEADING_EM
-            # Symmetric page margin, never narrower than the existing line
-            # (unchanged text must not rewrap under its own edit).
-            margin = max(para.left - self.page_x0, 0.0)
-            right_limit = max(self.page_x1 - margin, para.right)
+            if self.base_level == 1:
+                # 9.T3: a right-to-left paragraph grows LEFTWARD from its own
+                # right edge, so the symmetric-margin rule mirrors — the
+                # measure is bounded by the LEFT page margin, and the box's
+                # left edge moves rather than its right. Without this the
+                # single-line branch offers a measure the line can never use
+                # and the text walks off the left side of the page.
+                margin = max(self.page_x1 - para.right, 0.0)
+                first_left = body_left = min(self.page_x0 + margin, para.left)
+                right_limit = para.right
+            else:
+                # Symmetric page margin, never narrower than the existing line
+                # (unchanged text must not rewrap under its own edit).
+                margin = max(para.left - self.page_x0, 0.0)
+                right_limit = max(self.page_x1 - margin, para.right)
         first_measure = right_limit - first_left
         body_measure = right_limit - body_left
         # A4 split: each block is its OWN paragraph (fresh first-line
@@ -1682,6 +2002,13 @@ class _Emission:
             lines.extend(block)
         if not lines:
             return []
+        if self.base_level is not None:
+            # 9.T3: wrapping happened in LOGICAL order (that is where line
+            # breaks live); each finished line now permutes into the visual
+            # order the page will draw. Per LINE, after wrapping — rule L1's
+            # line-end reset is meaningless before the lines exist.
+            for line in lines:
+                line.vis_items = _visual_items(line, self.base_level)
 
         ctm_inv = _invert(ctm)
         base = _widest(para.lines[0].members)
@@ -1690,39 +2017,97 @@ class _Emission:
         for line in lines:
             for seg in self._segments(line):
                 st: _StyleRef = seg["style"]
-                # Rise renders via Ts (a state op), never the matrix —
-                # the line target is the BASELINE.
-                if self.vertical:
-                    # 9.B4b: THE untranspose — layout ran wholly in
-                    # transposed space; only the anchor maps back through
-                    # T⁻¹(x′, y′) = (y′, −x′). The linear part stays
-                    # (a, 0, 0, d): glyphs upright — the advance
-                    # DIRECTION is the walker's vertical model
-                    # (advance_after_show), never the matrix.
-                    tx, ty = line.y, -(line.x + seg["dx"])
-                else:
-                    tx, ty = line.x + seg["dx"], line.y
-                target = (lin_a, 0.0, 0.0, lin_d, tx, ty)
-                tm_op = mat_mult(target, ctm_inv)
-                out.append(("op", _instruction([_f(v) for v in tm_op], "Tm"), None))
-                out.extend(self._state_ops(st))
-                encoded_items, raw = self._encode(seg)
-                if len(encoded_items) == 1 and not isinstance(encoded_items[0], float):
-                    out.append(("show", _instruction([pikepdf.String(encoded_items[0])], "Tj"), raw))
-                else:
-                    arr = pikepdf.Array(
-                        [
-                            pikepdf.String(el) if isinstance(el, bytes) else _f(el)
-                            for el in encoded_items
-                        ]
-                    )
-                    out.append(("show", _instruction([arr], "TJ"), raw))
+                for dx, dy, encoded_items, raw in self._pieces(seg, lin_d):
+                    # Rise renders via Ts (a state op), never the matrix —
+                    # the line target is the BASELINE.
+                    if self.vertical:
+                        # 9.B4b: THE untranspose — layout ran wholly in
+                        # transposed space; only the anchor maps back through
+                        # T⁻¹(x′, y′) = (y′, −x′). The linear part stays
+                        # (a, 0, 0, d): glyphs upright — the advance
+                        # DIRECTION is the walker's vertical model
+                        # (advance_after_show), never the matrix.
+                        tx, ty = line.y, -(line.x + dx)
+                    else:
+                        tx, ty = line.x + dx, line.y + dy
+                    target = (lin_a, 0.0, 0.0, lin_d, tx, ty)
+                    tm_op = mat_mult(target, ctm_inv)
+                    out.append(("op", _instruction([_f(v) for v in tm_op], "Tm"), None))
+                    out.extend(self._state_ops(st))
+                    if len(encoded_items) == 1 and not isinstance(encoded_items[0], float):
+                        out.append(
+                            ("show", _instruction([pikepdf.String(encoded_items[0])], "Tj"), raw)
+                        )
+                    else:
+                        arr = pikepdf.Array(
+                            [
+                                pikepdf.String(el) if isinstance(el, bytes) else _f(el)
+                                for el in encoded_items
+                            ]
+                        )
+                        out.append(("show", _instruction([arr], "TJ"), raw))
         return out
+
+    def _pieces(self, seg: dict, lin_d: float) -> list[tuple]:
+        """[(dx, dy, TJ items, raw advance)] for one segment.
+
+        Every ordinary segment is exactly ONE piece at the segment's own dx
+        and no dy — byte-identical to the shipped single-show emission. A
+        SHAPED segment (9.T3) splits only where a glyph carries a vertical
+        mark offset, because a baseline shift is the one thing a TJ array
+        cannot express: the piece gets its own Tm, raised by that offset. The
+        horizontal half of mark positioning, and the GPOS advance deltas,
+        stay inside the TJ where they belong."""
+        st: _StyleRef = seg["style"]
+        if st.shaped is None:
+            items, raw = self._encode(seg)
+            return [(seg["dx"], 0.0, items, raw)]
+
+        s = st.style()
+        m = st.member
+        fb = self.fallbacks[st.fallback]
+        axis = s["h_scale"] * m.a
+        size = s["size"]
+        pieces: list[tuple] = []
+        items: list = []
+        piece_dx = seg["dx"]
+        piece_dy = 0.0
+        piece_raw = 0.0
+        dx = seg["dx"]
+
+        def flush() -> None:
+            nonlocal items, piece_dx, piece_dy, piece_raw
+            if items:
+                pieces.append((piece_dx, piece_dy, items, piece_raw))
+            items = []
+            piece_raw = 0.0
+
+        for name, advance, x_off, y_off in st.shaped.glyphs:
+            width = fb.glyph_width([name])
+            dy = y_off / 1000.0 * size * lin_d
+            if items and abs(dy - piece_dy) > 1e-9:
+                flush()
+            if not items:
+                piece_dx = dx
+                piece_dy = dy
+            if x_off:
+                items.append(-x_off)  # a negative TJ number moves the pen right
+            items.append(fb.glyph_encode([name]))
+            trailing = x_off + width - advance
+            if abs(trailing) > 1e-9:
+                items.append(trailing)
+            step = (advance / 1000.0 * size + s["char_spacing"]) * axis
+            dx += step
+            piece_raw += step / axis if axis else 0.0
+        flush()
+        return pieces or [(seg["dx"], 0.0, [b""], 0.0)]
 
     def _segments(self, line: _LayoutLine) -> list[dict]:
         """Split a line's char stream into same-style segments; synthetic
         spaces and justify extras become in-segment kerns (or fold into
         the next segment's absolute x at a style boundary)."""
+        if line.vis_items is not None:
+            return self._split_segments(self._visual_stream(line))
         stream: list[tuple] = []  # ("ch", ch, style, w) | ("kern", style, w)
         # 9.K1b: the preceding char/style, so a pair kern is only taken
         # between adjacent chars rendering in the SAME style.
@@ -1746,6 +2131,36 @@ class _Emission:
                 if line.justify_extra:
                     last_style = word.gap_styles[-1][1] if word.gap_styles else word.chars[-1][1]
                     stream.append(("kern", last_style, line.justify_extra))
+        return self._split_segments(stream)
+
+    def _visual_stream(self, line: _LayoutLine) -> list[tuple]:
+        """9.T3 — the same item stream `_segments` builds, from a line whose
+        characters are already in visual order. Widths are the ones measured
+        at wrap time; a run of adjacent gap items is one inter-word space, so
+        the justify extra lands after it exactly as in the logical walk."""
+        stream: list[tuple] = []
+        items = line.vis_items
+        i = 0
+        while i < len(items):
+            kind, text, st, w = items[i]
+            if kind == "ch":
+                stream.append(("ch", text, st, w))
+                i += 1
+                continue
+            j = i
+            while j < len(items) and items[j][0] == "gap":
+                _k, ch, gst, gw = items[j]
+                if ch == " " and gst.fallback is None and not gst.member.cap.can_encode(" "):
+                    stream.append(("kern", gst, gw))
+                else:
+                    stream.append(("ch", ch, gst, gw))
+                j += 1
+            if line.justify_extra:
+                stream.append(("kern", items[j - 1][2], line.justify_extra))
+            i = j
+        return stream
+
+    def _split_segments(self, stream: list[tuple]) -> list[dict]:
         segments: list[dict] = []
         current: dict | None = None
         dx = 0.0
@@ -2485,12 +2900,28 @@ def replace_paragraph_text(
             for m in para.members:
                 fd = _lookup_font(m.style["font_name"], m.resources or resources, resources)
                 member_family[m.index] = classify_font_family(fd) if fd is not None else "sans"
+        # 9.T3: a paragraph that reorders may carry a cursively joining
+        # script, which has to be SHAPED into a face that still knows how.
+        # The per-member weight/slant comes along so a bold Arabic run lands
+        # on the bold face rather than flattening.
+        rtl_style = None
+        if para.bidi and not para.vertical:
+            from engine.font_fallback import classify_font_style
+            from engine.text_runs import _lookup_font
+
+            rtl_style = {}
+            for m in para.members:
+                fd = _lookup_font(m.style["font_name"], m.resources or resources, resources)
+                try:
+                    rtl_style[m.index] = classify_font_style(fd) if fd is not None else (False, False)
+                except Exception:
+                    rtl_style[m.index] = (False, False)
         styled, fb_by_face = _styled_chars(
             str(new_text), list(spans), members_by_index, bool(convert),
             size_override=size_override, color_override=color_override,
             whole_para_face=whole_para_face, color_by_pos=color_by_pos,
             face_by_pos=face_by_pos, size_by_pos=size_by_pos,
-            member_family=member_family,
+            member_family=member_family, rtl_style=rtl_style,
         )
         # 9.A5b: build ONE _Fallback per face key, sorted-face order so the
         # subset names + embedded bytes are deterministic. The whole-para A3
@@ -2518,6 +2949,26 @@ def replace_paragraph_text(
             for key in sorted(fb_by_face, key=_face_sort_key):
                 fam, kbold, kitalic, kfeats, kalt = key
                 chars = "".join(sorted(fb_by_face[key]))
+                if fam == RTL_FAMILY:
+                    # 9.T3: resolve the bundled RTL face, SHAPE every word
+                    # that routed here against it, then embed a subset that
+                    # carries the resulting glyphs. The order is forced: the
+                    # subset has to contain the shaper's output, and the
+                    # shaper needs the face.
+                    from engine.font_fallback import build_shaped_font, resolve_rtl_font
+
+                    face = resolve_rtl_font(
+                        str(font_path), chars, style=style_key(kbold, kitalic)
+                    )
+                    styled, shaped_runs = _shape_styled_runs(styled, key, face)
+                    fdict, fenc, fwidth, genc, gwidth = build_shaped_font(
+                        pdf, face, chars, shaped_runs
+                    )
+                    fallbacks[key] = _Fallback(
+                        None, fdict, fenc, fwidth, face,
+                        glyph_encode=genc, glyph_width=gwidth,
+                    )
+                    continue
                 if kfeats:
                     # 9.K2: apply the OpenType feature. IN PLACE using the
                     # OWNING member's font when it carries the feature AND the
@@ -2607,6 +3058,10 @@ def replace_paragraph_text(
                 # bundled subset when substituted, the document's own font
                 # (embedded program, else its metric twin) otherwise.
                 kerns=_KernSource(resources, font_path, fallbacks),
+                # 9.T3: only a paragraph the listing actually normalized
+                # reorders on the way out — the two halves are the same
+                # decision, taken once.
+                base_level=para.base_level if para.bidi else None,
             ),
             fallbacks,
         )

@@ -81,10 +81,32 @@ $Dest = Join-Path $Root 'resources\fonts'
 # Skip the download entirely only when EVERY face is present and verified
 # (the bundle-ghostscript re-check precedent: a corrupted/wrong file must
 # not silently satisfy the skip).
+#
+# EVERY face means every face the script vendors, not just the two families
+# it started with: the CJK and right-to-left blocks live BELOW this guard, so
+# a repo carrying only Liberation + Libertinus used to short-circuit here and
+# report "all faces present and verified" over a fonts directory with no CJK
+# and no Arabic in it (caught 2026-08-01 running the script for T3). The
+# later blocks read these same tables, so the guard and the download can
+# never again disagree about what the set is.
+$CjkFaces = @(
+    @{ Name = 'NotoSansCJKsc-Regular.otf'; Sha256 = '2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b' }
+    @{ Name = 'NotoSansCJKsc-Bold.otf';    Sha256 = 'b5f0d1a190a7f9b43c310a8850630af12553df32c4c050543f9059732d9b4c0a' }
+)
+$CjkLicense = @{ Name = 'LICENSE-NotoCJK.txt'; Sha256 = '6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2' }
+$RtlWanted = @(
+    @{ Name = 'IBMPlexSansArabic-Regular.ttf'; Sha256 = '8e0f1046c736bf939d4939ee3ae0116acf61cbcd6592deae7656761627080981' }
+    @{ Name = 'IBMPlexSansArabic-Bold.ttf';    Sha256 = 'b74f809dead12442ed56e02a12c3bcc02076c9ad4e32f17d0a9ca6fc1aafc89e' }
+    @{ Name = 'LICENSE-IBMPlexArabic-OFL.txt'; Sha256 = '7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da' }
+    @{ Name = 'NotoSansHebrew-Regular.ttf';    Sha256 = '04272f5600d0ec816d31d0df73b23aa8d3501ea359ebe820da31c11ffcf00853' }
+    @{ Name = 'NotoSansHebrew-Bold.ttf';       Sha256 = 'dfdb3056de1f4542b888c77a1a8a750548a802e271479f56e52152423b64dde8' }
+    @{ Name = 'LICENSE-NotoHebrew-OFL.txt';    Sha256 = '9b9fe028b5ba74d231659a1bbaf0ed09b11e759d1ca6a070999e16d151616b47' }
+)
 $allPresent = $true
-$Wanted = @($Faces + $LibFaces + @(
+$Wanted = @($Faces + $LibFaces + $CjkFaces + $RtlWanted + @(
     @{ Name = $LiberationLicense.Dest; Sha256 = $LiberationLicense.Sha256 }
     @{ Name = $LibertinusLicense.Dest; Sha256 = $LibertinusLicense.Sha256 }
+    $CjkLicense
 ))
 foreach ($face in $Wanted) {
     $t = Join-Path $Dest $face.Name
@@ -180,11 +202,7 @@ Remove-Item $LibExtract -Recurse -Force
 # through font_fallback's text-aware CJK step - never as a silent
 # substitution for text the family face can already express.
 $NotoBase = 'https://github.com/notofonts/noto-cjk/raw/Sans2.004/Sans/OTF/SimplifiedChinese'
-$NotoFaces = @(
-    @{ Name = 'NotoSansCJKsc-Regular.otf'; Sha256 = '2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b' }
-    @{ Name = 'NotoSansCJKsc-Bold.otf';    Sha256 = 'b5f0d1a190a7f9b43c310a8850630af12553df32c4c050543f9059732d9b4c0a' }
-)
-foreach ($face in $NotoFaces) {
+foreach ($face in $CjkFaces) {
     $Target = Join-Path $Dest $face.Name
     Invoke-WebRequest -Uri "$NotoBase/$($face.Name)" -OutFile $Target -UseBasicParsing
     $h = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
@@ -194,11 +212,81 @@ foreach ($face in $NotoFaces) {
     }
     Write-Host "Vendored: $Target"
 }
-$NotoLicense = Join-Path $Dest 'LICENSE-NotoCJK.txt'
+$NotoLicense = Join-Path $Dest $CjkLicense.Name
 Invoke-WebRequest -Uri 'https://github.com/notofonts/noto-cjk/raw/Sans2.004/LICENSE' -OutFile $NotoLicense -UseBasicParsing
 $h = (Get-FileHash -Algorithm SHA256 $NotoLicense).Hash.ToLowerInvariant()
-if ($h -ne '6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2') {
+if ($h -ne $CjkLicense.Sha256) {
     Remove-Item $NotoLicense -Force
-    throw "sha256 mismatch for LICENSE-NotoCJK.txt: $h"
+    throw "sha256 mismatch for $($CjkLicense.Name): $h"
 }
 Write-Host "Vendored: $NotoLicense"
+
+# --- Right-to-left faces (T3, 2026-08-01) ---
+# IBM Plex Sans Arabic (OFL 1.1) is the SHAPING face and Noto Sans Hebrew
+# (OFL 1.1) the coverage face. Both ship Regular + Bold; neither has an
+# italic, so the resolve ladder degrades italic requests to Regular exactly
+# as the CJK map does.
+#
+# IBM Plex rather than Noto Sans Arabic on a MEASURED difference, not taste:
+# Noto's GSUB decomposes each Arabic letter into a dotless skeleton plus
+# separately positioned dots, so one character draws as several glyphs and
+# the letter is spelled by the SEQUENCE - which a per-code /ToUnicode cannot
+# express, making a shaped edit unreadable back. IBM Plex shapes one
+# composite glyph per character, so the round trip is exact by construction.
+# (Verified: 15 glyphs / 15 clusters vs Noto's 19 / 15 on the same string.)
+#
+# Both come from release ZIPs (the Libertinus pattern) because neither
+# repo exposes the built faces in its tag tree. The archive sha256 is
+# pinned AND each extracted face is re-hashed.
+$RtlSources = @(
+    @{
+        Label   = 'IBM Plex Sans Arabic'
+        Url     = 'https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-sans-arabic%401.1.0/ibm-plex-sans-arabic.zip'
+        Sha256  = 'f03915581aea37d82792c188b08064023a73494d679b8e19f85f5971db714013'
+        Faces   = @(
+            @{ In = 'ibm-plex-sans-arabic/fonts/complete/ttf/IBMPlexSansArabic-Regular.ttf'; Out = 'IBMPlexSansArabic-Regular.ttf'; Sha256 = '8e0f1046c736bf939d4939ee3ae0116acf61cbcd6592deae7656761627080981' }
+            @{ In = 'ibm-plex-sans-arabic/fonts/complete/ttf/IBMPlexSansArabic-Bold.ttf';    Out = 'IBMPlexSansArabic-Bold.ttf';    Sha256 = 'b74f809dead12442ed56e02a12c3bcc02076c9ad4e32f17d0a9ca6fc1aafc89e' }
+        )
+        License = @{ In = 'ibm-plex-sans-arabic/LICENSE.txt'; Out = 'LICENSE-IBMPlexArabic-OFL.txt'; Sha256 = '7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da' }
+    }
+    @{
+        Label   = 'Noto Sans Hebrew'
+        Url     = 'https://github.com/notofonts/hebrew/releases/download/NotoSansHebrew-v3.001/NotoSansHebrew-v3.001.zip'
+        Sha256  = 'df0a71814b4e63644cf40fcc4529111b61266b7a2dafbe95068b29a7520cc3cb'
+        Faces   = @(
+            @{ In = 'NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Regular.ttf'; Out = 'NotoSansHebrew-Regular.ttf'; Sha256 = '04272f5600d0ec816d31d0df73b23aa8d3501ea359ebe820da31c11ffcf00853' }
+            @{ In = 'NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Bold.ttf';    Out = 'NotoSansHebrew-Bold.ttf';    Sha256 = 'dfdb3056de1f4542b888c77a1a8a750548a802e271479f56e52152423b64dde8' }
+        )
+        License = @{ In = 'OFL.txt'; Out = 'LICENSE-NotoHebrew-OFL.txt'; Sha256 = '9b9fe028b5ba74d231659a1bbaf0ed09b11e759d1ca6a070999e16d151616b47' }
+    }
+)
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+foreach ($src in $RtlSources) {
+    $Tmp = Join-Path $env:TEMP ("rtl-" + [IO.Path]::GetRandomFileName() + ".zip")
+    Invoke-WebRequest -Uri $src.Url -OutFile $Tmp -UseBasicParsing
+    $h = (Get-FileHash -Algorithm SHA256 $Tmp).Hash.ToLowerInvariant()
+    if ($h -ne $src.Sha256) {
+        Remove-Item $Tmp -Force
+        throw "sha256 mismatch for $($src.Label) archive`n  expected $($src.Sha256)`n  actual   $h"
+    }
+    # Read entries straight out of the archive: these ZIPs carry hundreds of
+    # weights and widths, and only four files are wanted.
+    $zip = [IO.Compression.ZipFile]::OpenRead($Tmp)
+    try {
+        foreach ($item in @($src.Faces) + @($src.License)) {
+            $entry = $zip.Entries | Where-Object { $_.FullName -eq $item.In }
+            if (-not $entry) { throw "$($item.In) not found in $($src.Label) archive" }
+            $Target = Join-Path $Dest $item.Out
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $Target, $true)
+            $h = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
+            if ($h -ne $item.Sha256) {
+                Remove-Item $Target -Force
+                throw "sha256 mismatch for $($item.Out): $h"
+            }
+            Write-Host "Vendored: $Target"
+        }
+    } finally {
+        $zip.Dispose()
+        Remove-Item $Tmp -Force
+    }
+}
