@@ -9,6 +9,9 @@ import {
   recomputedMeasureNote,
   alignEdits,
   distributeEdits,
+  rotateFlipEdits,
+  eraseFromStrokes,
+  strokesBbox,
   sizeMatchEdits,
   nudgeDelta,
   isTransformable,
@@ -167,6 +170,192 @@ describe('resized', () => {
     expect(r.strokes![0][2]).toBeCloseTo(0.6);
     expect(r.strokes![0][3]).toBeCloseTo(0.6);
     expect(r.strokes![1][0]).toBeCloseTo(0.4);
+  });
+});
+
+describe('rotateFlipEdits (N7 residual)', () => {
+  const dims = new Map([
+    ['a.pdf#p0', { width: 600, height: 800, rotation: 0 }],
+  ]);
+  const placed = (a: PageAnnotation) => ({ annotation: a, pageId: 'a.pdf#p0' });
+
+  it('rotates a line a quarter turn in PIXEL space (no aspect shear)', () => {
+    // Horizontal 120px line centered at (180, 400): CW it becomes a
+    // VERTICAL 120px line through the same center — in the normalized
+    // frame that is a DIFFERENT span per axis (page is 600x800).
+    const line = annot('l', {
+      kind: 'shape', shapeType: 'line',
+      x: 0.2, y: 0.5, w: 0.2, h: 0,
+      points: [0.2, 0.5, 0.4, 0.5],
+    });
+    const [e] = rotateFlipEdits([placed(line)], { rotate: 'cw' }, dims);
+    expect(e.points![0]).toBeCloseTo(0.3);
+    expect(e.points![1]).toBeCloseTo(0.425); // 340/800
+    expect(e.points![2]).toBeCloseTo(0.3);
+    expect(e.points![3]).toBeCloseTo(0.575); // 460/800
+    expect(e.w).toBeCloseTo(0);
+    expect(e.h).toBeCloseTo(0.15);
+    // CCW from there returns to the original.
+    const back = rotateFlipEdits(
+      [placed({ ...line, ...e, points: e.points })], { rotate: 'ccw' }, dims,
+    )[0];
+    expect(back.points![0]).toBeCloseTo(0.2);
+    expect(back.points![1]).toBeCloseTo(0.5);
+  });
+
+  it('flips mirror about the center; ink strokes ride', () => {
+    const ink = annot('i', {
+      kind: 'ink', x: 0.2, y: 0.2, w: 0.2, h: 0.1,
+      strokes: [[0.2, 0.2, 0.4, 0.3]],
+    });
+    const [e] = rotateFlipEdits([placed(ink)], { flip: 'h' }, dims);
+    expect(e.strokes![0][0]).toBeCloseTo(0.4);
+    expect(e.strokes![0][1]).toBeCloseTo(0.2); // y untouched by H flip
+    expect(e.strokes![0][2]).toBeCloseTo(0.2);
+  });
+
+  it('a group rotates about ONE shared pivot, keeping the arrangement', () => {
+    const l1 = annot('l1', {
+      kind: 'shape', shapeType: 'line',
+      x: 0.1, y: 0.5, w: 0.1, h: 0, points: [0.1, 0.5, 0.2, 0.5],
+    });
+    const l2 = annot('l2', {
+      kind: 'shape', shapeType: 'line',
+      x: 0.3, y: 0.5, w: 0.1, h: 0, points: [0.3, 0.5, 0.4, 0.5],
+    });
+    const edits = rotateFlipEdits([placed(l1), placed(l2)], { rotate: 'cw' }, dims);
+    expect(edits).toHaveLength(2);
+    // Shared pivot: both lines land on the same vertical, stacked — l1's
+    // points map ABOVE l2's (l1 was left of the pivot).
+    expect(edits[0].points![0]).toBeCloseTo(edits[1].points![0]);
+    expect(Math.max(...edits[0].points!.filter((_, i) => i % 2 === 1)))
+      .toBeLessThanOrEqual(Math.min(...edits[1].points!.filter((_, i) => i % 2 === 1)) + 1e-9);
+  });
+
+  it('clamps the rotated group back onto the page as a whole', () => {
+    const tall = annot('t', {
+      kind: 'shape', shapeType: 'line',
+      x: 0.05, y: 0.1, w: 0, h: 0.8, points: [0.05, 0.1, 0.05, 0.9],
+    });
+    // A 640px vertical near the left edge rotates to a 640px horizontal —
+    // wider than x allows at that center; the shift keeps it on-page.
+    const [e] = rotateFlipEdits([placed(tall)], { rotate: 'cw' }, dims);
+    const xs = e.points!.filter((_, i) => i % 2 === 0);
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(1);
+  });
+
+  it('non-rotatable kinds are excluded (box shapes cannot carry rotation)', () => {
+    const rect = annot('r', { kind: 'shape', shapeType: 'rect' });
+    const box = annot('h'); // highlight
+    expect(rotateFlipEdits([placed(rect), placed(box)], { rotate: 'cw' }, dims)).toEqual([]);
+  });
+
+  it('a rotated measurement keeps its value (pixel length is preserved)', () => {
+    const meas = annot('m', {
+      kind: 'measure', measureKind: 'distance',
+      measureUnitsPerPt: 1, measureUnit: 'pt',
+      x: 0.2, y: 0.5, w: 0.2, h: 0,
+      points: [0.2, 0.5, 0.4, 0.5],
+      note: '120.0 pt',
+    });
+    const [e] = rotateFlipEdits([placed(meas)], { rotate: 'cw' }, dims);
+    expect(e.note).toContain('120');
+  });
+});
+
+describe('eraseFromStrokes (N5b)', () => {
+  const R = { x: 0.02, y: 0.02 };
+
+  it('a mid-stroke cut SPLITS the stroke into two AT the eraser edge', () => {
+    // Horizontal stroke sampled every 0.1; eraser dabs its middle. The cut
+    // lands at the dab's EDGE (0.35 ± r = 0.33/0.37), interpolated into the
+    // crossed segment — whole-segment deletion would eat 0.30–0.40 and, on
+    // a coarse 3-sample stroke, the entire drawing (the e2e catch).
+    const stroke = [0.1, 0.5, 0.2, 0.5, 0.3, 0.5, 0.4, 0.5, 0.5, 0.5, 0.6, 0.5];
+    const out = eraseFromStrokes([stroke], [0.35, 0.5], R);
+    expect(out).not.toBeNull();
+    expect(out!).toHaveLength(2);
+    expect(out![0].map((v) => Math.round(v * 100) / 100)).toEqual([
+      0.1, 0.5, 0.2, 0.5, 0.3, 0.5, 0.33, 0.5,
+    ]);
+    expect(out![1].map((v) => Math.round(v * 100) / 100)).toEqual([
+      0.37, 0.5, 0.4, 0.5, 0.5, 0.5, 0.6, 0.5,
+    ]);
+  });
+
+  it('a coarse ERASER path is a capsule chain, not isolated dabs', () => {
+    // Two pointer samples 0.4 apart with r=0.02: disk-only geometry leaves
+    // everything between them untouched (a fast flick erases confetti).
+    // The densified swath erases the connected band the screen draws —
+    // a vertical stroke crossing BETWEEN the samples splits.
+    const stroke = [0.5, 0.3, 0.5, 0.7];
+    const out = eraseFromStrokes([stroke], [0.3, 0.5, 0.7, 0.5], R);
+    expect(out).not.toBeNull();
+    expect(out!).toHaveLength(2);
+    expect(out![0][3]).toBeCloseTo(0.48, 2); // upper piece ends at the band edge
+    expect(out![1][1]).toBeCloseTo(0.52, 2); // lower piece starts past it
+  });
+
+  it('a coarse 3-sample stroke erased at its junction leaves TWO halves', () => {
+    // The e2e catch pinned: both segments meet at the dab point, so
+    // whole-segment deletion killed both and the drawing vanished. The
+    // edge-cut keeps everything outside the eraser.
+    const stroke = [0.15, 0.15, 0.375, 0.15, 0.6, 0.15];
+    const out = eraseFromStrokes([stroke], [0.375, 0.15], { x: 0.015, y: 0.015 });
+    expect(out).not.toBeNull();
+    expect(out!).toHaveLength(2);
+    expect(out![0][0]).toBeCloseTo(0.15, 5);
+    expect(out![0][out![0].length - 2]).toBeCloseTo(0.36, 3);
+    expect(out![1][0]).toBeCloseTo(0.39, 3);
+    expect(out![1][out![1].length - 2]).toBeCloseTo(0.6, 5);
+  });
+
+  it('an untouched drawing returns null (no dispatch, no undo step)', () => {
+    const stroke = [0.1, 0.1, 0.2, 0.1];
+    expect(eraseFromStrokes([stroke], [0.8, 0.8, 0.85, 0.85], R)).toBeNull();
+  });
+
+  it('a swath crossing BETWEEN samples still cuts (no tunnelling) — and only at the edge', () => {
+    // One long segment; the eraser sample sits near its middle, far from
+    // either stroke endpoint — a point-only test would miss it entirely,
+    // and whole-segment deletion would erase all 0.8 of the line for a
+    // 0.04-wide dab. The interval cut removes exactly the crossed window.
+    const stroke = [0.1, 0.5, 0.9, 0.5];
+    const out = eraseFromStrokes([stroke], [0.5, 0.505], R);
+    expect(out).not.toBeNull();
+    expect(out!).toHaveLength(2);
+    expect(out![0][0]).toBeCloseTo(0.1, 5);
+    expect(out![0][2]).toBeCloseTo(0.4806, 3);
+    expect(out![1][0]).toBeCloseTo(0.5194, 3);
+    expect(out![1][2]).toBeCloseTo(0.9, 5);
+  });
+
+  it('erasing everything returns [] and orphan single points are dropped', () => {
+    const strokes = [
+      [0.3, 0.3, 0.32, 0.3],
+      [0.3, 0.35, 0.32, 0.35],
+    ];
+    const out = eraseFromStrokes(
+      strokes,
+      [0.28, 0.28, 0.33, 0.37], // sweeps the lot
+      { x: 0.06, y: 0.06 },
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('the eraser is elliptical in the normalized frame (aspect-corrected)', () => {
+    // Vertical radius twice the horizontal: a dab 0.03 away in x misses
+    // (rx=0.02) while 0.03 away in y hits (ry=0.04).
+    const stroke = [0.5, 0.5, 0.52, 0.5];
+    const r = { x: 0.02, y: 0.04 };
+    expect(eraseFromStrokes([stroke], [0.55, 0.5], r)).toBeNull();
+    expect(eraseFromStrokes([stroke], [0.51, 0.53], r)).not.toBeNull();
+  });
+
+  it('strokesBbox frames the survivors; empty input has no frame', () => {
+    expect(strokesBbox([[0.1, 0.2, 0.5, 0.4]])).toEqual({ x: 0.1, y: 0.2, w: 0.4, h: 0.2 });
+    expect(strokesBbox([])).toBeNull();
   });
 });
 

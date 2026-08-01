@@ -76,6 +76,8 @@ export interface CanvasRedactionHandlers {
     h: number;
   }) => { markId: string; docId: string; pageId: string } | null;
   apply: () => Promise<string[]>;
+  /** F10: persist the pending marks as the file's /Redact set. */
+  save: () => Promise<string[]>;
   clear: () => void;
   count: () => number;
 }
@@ -677,6 +679,9 @@ export interface TestHarness {
   clearRedactionMarks: () => void;
   /** Number of pending redaction marks the canvas currently shows. */
   getRedactionMarkCount: () => number;
+  /** F10: persist the pending marks as the file's /Redact set (the status
+   * bar's Save-marks path). */
+  saveRedactionMarks: () => Promise<void>;
   /** Place a visible-signature box on the active file's first canvas page
    * (display-normalized rect), waiting for the canvas + indexer like
    * addRedactionMark. */
@@ -1266,6 +1271,20 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     clearRedactionMarks: () => canvasRedaction?.clear(),
     getRedactionMarkCount: () => canvasRedaction?.count() ?? 0,
+    saveRedactionMarks: async () => {
+      if (!canvasRedaction) {
+        const msg = 'saveRedactionMarks: canvas view not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        const failures = await canvasRedaction.save();
+        if (failures.length > 0) throw new Error(failures.join('; '));
+      } catch (err) {
+        captureError('saveRedactionMarks', err);
+        throw err;
+      }
+    },
     placeSignature: async (rect, timeoutMs = 10_000) => {
       const deadline = Date.now() + timeoutMs;
       let placed = canvasSignature?.placeOnFirstPage(rect) ?? false;

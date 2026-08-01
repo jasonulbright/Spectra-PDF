@@ -134,6 +134,7 @@ export interface DocumentViewProps {
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onSignFieldRequest: (path: string, fieldName: string) => void;
+  onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => void;
   newFieldPlacement: SignaturePlacement | null;
   onSetNewFieldRect: (
     docId: string,
@@ -719,6 +720,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           formValues={props.formValuesByPath.get(page.sourceDocId)}
           onSetFormValue={props.onSetFormValue}
           onSignFieldRequest={props.onSignFieldRequest}
+          onFormButton={props.onFormButton}
           newFieldPlacement={props.newFieldPlacement?.pageId === page.id ? props.newFieldPlacement : null}
           onSetNewFieldRect={props.onSetNewFieldRect}
           onClearNewFieldPlacement={props.onClearNewFieldPlacement}

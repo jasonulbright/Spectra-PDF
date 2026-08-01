@@ -70,7 +70,7 @@ from engine.document_js import list_document_js, set_document_js
 from engine.redact import redact
 from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
-from engine.forms import read_form_fields, fill_form_fields
+from engine.forms import read_form_fields, fill_form_fields, reset_form_fields
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
 from engine.batch_ocr import batch_ocr, ocr_file
@@ -102,6 +102,7 @@ from engine.text_paragraphs import (
 from engine.text_runs import convert_text_run, list_text_runs, replace_text_run
 from engine.printer import print_pdf, print_preview, print_preview_cleanup
 from engine.incremental import transplant_incremental
+from engine.redact_marks import list_redact_annotations, save_redaction_marks
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
 from engine.struct_tree import (
     add_struct_node,
@@ -188,6 +189,7 @@ def main() -> None:
     server.register("compare_visual", compare_visual)
     server.register("read_form_fields", read_form_fields)
     server.register("fill_form_fields", fill_form_fields)
+    server.register("reset_form_fields", reset_form_fields)
     server.register("apply_ocr_layer", apply_ocr_layer)
     server.register("recognize", recognize)
     server.register("batch_ocr", batch_ocr)
@@ -222,6 +224,8 @@ def main() -> None:
     server.register("sign_pdf", sign_pdf)
     server.register("generate_signer", generate_signer)
     server.register("transplant_incremental", transplant_incremental)
+    server.register("save_redaction_marks", save_redaction_marks)
+    server.register("list_redact_annotations", list_redact_annotations)
 
     # Signal readiness on stderr so the Tauri backend knows we're alive
     print("engine: ready", file=sys.stderr, flush=True)

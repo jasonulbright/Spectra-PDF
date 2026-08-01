@@ -158,6 +158,10 @@ export interface CanvasServices {
    * when the box isn't on screen (organize view) — the command's `when`
    * gates on the view mode, this is the belt for the render race. */
   goToPage(): boolean;
+  /** F6: arm the canvas's visible-signature placement from a PANEL, with the
+   * panel's signer details prefilled into the canvas sign card. Optional —
+   * present only while the canvas view is mounted with a document. */
+  startVisibleSignature?(prefill?: import('../components/SignerSourceFields').SignerSource): void;
 }
 
 export interface CommandContext {

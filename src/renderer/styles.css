@@ -1856,6 +1856,24 @@
   border-color: #a78bfa;
 }
 
+/* F8 pushbuttons: the page raster draws the button's own face, so the
+ * overlay is a bare click surface — native button chrome stripped, a faint
+ * hover tint as the only affordance. */
+.page-form-button {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.page-form-button:hover {
+  background: rgba(16, 185, 129, 0.14);
+  outline: 1px solid rgba(16, 185, 129, 0.7);
+  outline-offset: -1px;
+  border-radius: 1px;
+}
+
 .page-annot-band.band-formfield {
   background: rgba(16, 185, 129, 0.16);
   border-color: #10b981;
