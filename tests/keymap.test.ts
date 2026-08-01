@@ -160,7 +160,11 @@ describe('resolveBinding', () => {
   });
 
   it('returns null for unbound keys', () => {
-    expect(resolveBinding(fakeEvent({ key: 'z' }))).toBeNull(); // bare z: single-key accelerators are M6, default off
+    // bare 'z' RESOLVES since N3 (marquee zoom) — pref-gated, so the
+    // dispatcher still refuses it until the accelerators switch is on; a
+    // genuinely unbound letter proves the null path instead.
+    expect(resolveBinding(fakeEvent({ key: 'q' }))).toBeNull();
+    expect(resolveBinding(fakeEvent({ key: 'z' }))?.requiresPref).toBe('singleKeyAccelerators');
   });
 });
 
@@ -374,9 +378,13 @@ describe('single-key accelerators (M6.4 — pref-gated, default OFF)', () => {
     expect(resolveBinding(fakeEvent({ key: 'x' }))?.command).toBe('tools.freetext');
     expect(resolveBinding(fakeEvent({ key: 'd' }))?.command).toBe('tools.ink');
     expect(resolveBinding(fakeEvent({ key: 'k' }))?.command).toBe('tools.stamp');
+    // N3/N6: the reserve-don't-remap trio binds now that its features exist.
+    expect(resolveBinding(fakeEvent({ key: 's' }))?.command).toBe('tools.note');
+    expect(resolveBinding(fakeEvent({ key: 'z' }))?.command).toBe('tools.zoommarquee');
+    expect(resolveBinding(fakeEvent({ key: 'e' }))?.command).toBe('tools.open.edit');
     // Every one is pref-gated — the dispatcher refuses them until the
     // Settings switch is on.
-    for (const k of ['h', 'v', 'u', 'x', 'd', 'k']) {
+    for (const k of ['h', 'v', 'u', 'x', 'd', 'k', 's', 'z', 'e']) {
       expect(resolveBinding(fakeEvent({ key: k }))?.requiresPref).toBe('singleKeyAccelerators');
     }
   });
@@ -388,10 +396,16 @@ describe('single-key accelerators (M6.4 — pref-gated, default OFF)', () => {
     expect(resolveBinding(fakeEvent({ key: 'H', shift: true }))).toBeNull();
   });
 
-  it('reserved letters stay dead: Z (no zoom device), S, E (unshipped kinds)', () => {
-    expect(resolveBinding(fakeEvent({ key: 'z' }))).toBeNull();
-    expect(resolveBinding(fakeEvent({ key: 's' }))).toBeNull();
-    expect(resolveBinding(fakeEvent({ key: 'e' }))).toBeNull();
+  it('N3/N6 INVERSION — Z/S/E bind (their features shipped); modified forms stay dead', () => {
+    // This test used to pin the trio as RESERVED (no zoom device, no note
+    // kind, no content editing). All three exist now, so reserve-don't-
+    // remap resolves to BINDING them — while the modifier discipline that
+    // motivated the reservation still holds.
+    expect(resolveBinding(fakeEvent({ key: 'z' }))?.command).toBe('tools.zoommarquee');
+    expect(resolveBinding(fakeEvent({ key: 's' }))?.command).toBe('tools.note');
+    expect(resolveBinding(fakeEvent({ key: 'e' }))?.command).toBe('tools.open.edit');
+    expect(resolveBinding(fakeEvent({ key: 's', alt: true }))).toBeNull();
+    expect(resolveBinding(fakeEvent({ key: 'S', shift: true }))).toBeNull();
   });
 
   it('pref-gated bindings never DISPLAY as menu shortcuts', () => {

@@ -24,6 +24,9 @@ export interface SignatureEntry {
   timestamped?: boolean;
   timestamp_time?: string | null;
   timestamp_valid?: boolean;
+  /** 1-based page carrying the signature's widget (F7) — absent when the
+   * engine could not place it, in which case no jump is offered. */
+  page?: number;
   error?: string;
 }
 

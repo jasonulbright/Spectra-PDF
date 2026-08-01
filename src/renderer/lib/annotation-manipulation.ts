@@ -23,6 +23,7 @@ export interface AnnotationTransform {
   w: number;
   h: number;
   points?: number[];
+  strokes?: number[][];
   note?: string;
   calloutBox?: [number, number, number, number];
 }
@@ -60,6 +61,7 @@ export function translated(
   x: number;
   y: number;
   points?: number[];
+  strokes?: number[][];
   calloutBox?: [number, number, number, number];
   dx: number;
   dy: number;
@@ -73,6 +75,9 @@ export function translated(
     y,
     ...(a.points
       ? { points: a.points.map((v, i) => (i % 2 === 0 ? v + adx : v + ady)) }
+      : {}),
+    ...(a.strokes
+      ? { strokes: a.strokes.map((s) => s.map((v, i) => (i % 2 === 0 ? v + adx : v + ady))) }
       : {}),
     ...(a.calloutBox
       ? { calloutBox: [a.calloutBox[0] + adx, a.calloutBox[1] + ady, a.calloutBox[2], a.calloutBox[3]] as [number, number, number, number] }
@@ -89,12 +94,13 @@ export function translatedBy(
   a: PageAnnotation,
   dx: number,
   dy: number,
-): { x: number; y: number; points?: number[]; calloutBox?: [number, number, number, number] } {
+): { x: number; y: number; points?: number[]; strokes?: number[][]; calloutBox?: [number, number, number, number] } {
   const t = translated(a, dx, dy);
   return {
     x: t.x,
     y: t.y,
     ...(t.points ? { points: t.points } : {}),
+    ...(t.strokes ? { strokes: t.strokes } : {}),
     ...(t.calloutBox ? { calloutBox: t.calloutBox } : {}),
   };
 }
@@ -111,7 +117,7 @@ export function resized(
   px: number,
   py: number,
   keepAspect: boolean,
-): { x: number; y: number; w: number; h: number; points?: number[] } {
+): { x: number; y: number; w: number; h: number; points?: number[]; strokes?: number[][] } {
   // Anchor = the box corner/edge opposite the dragged handle; it never moves.
   const left = a.x;
   const top = a.y;
@@ -166,6 +172,7 @@ export function resized(
   return {
     ...out,
     ...(a.points ? { points: scaledPoints(a, out) } : {}),
+    ...(a.strokes ? { strokes: scaledStrokes(a, out) } : {}),
     ...(a.calloutBox ? { calloutBox: scaledCalloutBox(a, out) } : {}),
   };
 }
@@ -260,6 +267,20 @@ export function scaledPoints(
   const sy = a.h > 0 ? box.h / a.h : 1;
   return pts.map((v, i) =>
     i % 2 === 0 ? box.x + (v - a.x) * sx : box.y + (v - a.y) * sy,
+  );
+}
+
+/** Per-stroke scaledPoints — ink's strokes all scale with the one box. */
+export function scaledStrokes(
+  a: PageAnnotation,
+  box: { x: number; y: number; w: number; h: number },
+): number[][] {
+  const sx = a.w > 0 ? box.w / a.w : 1;
+  const sy = a.h > 0 ? box.h / a.h : 1;
+  return (a.strokes ?? []).map((stroke) =>
+    stroke.map((v, i) =>
+      i % 2 === 0 ? box.x + (v - a.x) * sx : box.y + (v - a.y) * sy,
+    ),
   );
 }
 
@@ -362,6 +383,7 @@ export function alignEdits(members: Placed[], mode: AlignMode): AnnotationTransf
       w: a.w,
       h: a.h,
       ...(t.points ? { points: t.points } : {}),
+      ...(t.strokes ? { strokes: t.strokes } : {}),
     });
   }
   return out;
@@ -401,6 +423,7 @@ export function distributeEdits(members: Placed[], mode: DistributeMode): Annota
       w: a.w,
       h: a.h,
       ...(t.points ? { points: t.points } : {}),
+      ...(t.strokes ? { strokes: t.strokes } : {}),
     });
   }
   return out;
@@ -432,6 +455,7 @@ export function sizeMatchEdits(
     box.h = Math.min(box.h, 1 - box.y);
     if (box.x === a.x && box.y === a.y && box.w === a.w && box.h === a.h) continue;
     const points = a.points ? scaledPoints(a, box) : undefined;
+    const strokes = a.strokes ? scaledStrokes(a, box) : undefined;
     const dims = pageDims.get(m.pageId);
     const note =
       points && dims
@@ -442,6 +466,7 @@ export function sizeMatchEdits(
       annotationId: a.id,
       ...box,
       ...(points ? { points } : {}),
+      ...(strokes ? { strokes } : {}),
       ...(note !== undefined ? { note } : {}),
     });
   }

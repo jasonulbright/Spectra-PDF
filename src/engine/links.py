@@ -116,8 +116,11 @@ def set_link_url(file: str, output: str, page: int, index: int, url: str) -> dic
         annot["/A"] = Dictionary(Type=Name.Action, S=Name.URI, URI=String(str(url)))
         if "/Dest" in annot:
             del annot["/Dest"]
-        _save(pdf, input_path, output_path, same_file)
-    return {"output": str(output_path), "page": int(page), "index": int(index), "url": str(url)}
+        preserved = _save(pdf, input_path, output_path, same_file)
+    out = {"output": str(output_path), "page": int(page), "index": int(index), "url": str(url)}
+    if preserved:
+        out["signatures_preserved"] = True
+    return out
 
 
 def add_links(file: str, output: str, links: list) -> dict:
@@ -164,8 +167,11 @@ def add_links(file: str, output: str, links: list) -> dict:
             existing = pg.obj.get("/Annots")
             pg.obj["/Annots"] = pikepdf.Array([*existing, annot]) if existing is not None else pikepdf.Array([annot])
             added += 1
-        _save(pdf, input_path, output_path, same_file)
-    return {"output": str(output_path), "added": added}
+        preserved = _save(pdf, input_path, output_path, same_file)
+    out = {"output": str(output_path), "added": added}
+    if preserved:
+        out["signatures_preserved"] = True
+    return out
 
 
 def delete_link(file: str, output: str, page: int, index: int) -> dict:
@@ -181,15 +187,26 @@ def delete_link(file: str, output: str, page: int, index: int) -> dict:
             pg.obj["/Annots"] = pikepdf.Array(kept)
         elif "/Annots" in pg.obj:
             del pg.obj["/Annots"]
-        _save(pdf, input_path, output_path, same_file)
-    return {"output": str(output_path), "page": int(page), "index": int(index)}
+        preserved = _save(pdf, input_path, output_path, same_file)
+    out = {"output": str(output_path), "page": int(page), "index": int(index)}
+    if preserved:
+        out["signatures_preserved"] = True
+    return out
 
 
-def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> None:
+def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> bool:
+    """Land the rewrite; on a SIGNED input the landed bytes become an
+    incremental append instead (O5b), so link edits never break the
+    signature they ride beside. Returns whether that preservation ran."""
+    from engine.incremental import finalize_preserving_signatures
+
     if same_file:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=str(input_path.parent)) as tmp:
             tmp_path = tmp.name
         pdf.save(tmp_path)
+        preserved = finalize_preserving_signatures(str(input_path), tmp_path)
         shutil.move(tmp_path, str(output_path))
     else:
         pdf.save(output_path)
+        preserved = finalize_preserving_signatures(str(input_path), str(output_path))
+    return bool(preserved.get("preserved"))
