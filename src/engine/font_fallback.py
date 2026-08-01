@@ -194,8 +194,40 @@ def synthetic_family_font(family: str):
     )
 
 
-def resolve_fallback_font(font_path: str, original_font=None, style: str = "regular") -> str:
-    """Resolve the concrete fallback .ttf to embed. `font_path` may be a
+# T5: the CJK-capable faces (Noto Sans CJK SC — OFL, vendored by
+# sync-edit-fonts.ps1). No CJK italic exists; the style map degrades
+# italic requests to Regular exactly like a missing family face.
+_CJK_FACES = {
+    "regular": "NotoSansCJKsc-Regular.otf",
+    "bold": "NotoSansCJKsc-Bold.otf",
+    "italic": "NotoSansCJKsc-Regular.otf",
+    "bolditalic": "NotoSansCJKsc-Bold.otf",
+}
+
+
+def face_covers(face_path: str, text: str) -> bool:
+    """Whether the face's cmap maps every DRAWN character of `text`
+    (structural whitespace excluded — it never embeds)."""
+    needed = {ch for ch in text if ch not in ("\n", "\r", "\t")}
+    if not needed:
+        return True
+    try:
+        from fontTools.ttLib import TTFont
+
+        tt = TTFont(str(face_path), fontNumber=0, lazy=True)
+        try:
+            cmap = tt.getBestCmap()
+        finally:
+            tt.close()
+    except Exception:
+        return False
+    return all(ord(ch) in cmap for ch in needed)
+
+
+def resolve_fallback_font(
+    font_path: str, original_font=None, style: str = "regular", text: str | None = None
+) -> str:
+    """Resolve the concrete fallback face to embed. `font_path` may be a
     DIRECTORY (the vendored `resources/fonts` — the real app passes this,
     and the family matching the original font is chosen) or a FILE (a
     specific face — the test/back-compat path, used verbatim). `style`
@@ -204,20 +236,38 @@ def resolve_fallback_font(font_path: str, original_font=None, style: str = "regu
     Regular → whatever single .ttf is present — face identity beats
     weight (a missing Bold lands on the family's Regular, never another
     family's Bold), and a partially provisioned bundle degrades instead
-    of crashing."""
+    of crashing.
+
+    T5: when `text` is given and the family face cannot express it, the
+    CJK-capable face (Noto Sans CJK, full Latin included so mixed strings
+    stay one face) takes over — a text-DRIVEN switch, never a silent
+    substitution for text the family face already covers. Text neither
+    face covers still refuses downstream (the honest floor)."""
     if not os.path.isdir(font_path):
         return font_path
     family = classify_font_family(original_font) if original_font is not None else "sans"
     faces = _FACE_FILES[family]
     st = style if style in faces else "regular"
+    resolved = None
     for candidate_name in (faces[st], faces["regular"], _FACE_FILES["sans"]["regular"]):
         candidate = os.path.join(font_path, candidate_name)
         if os.path.isfile(candidate):
-            return candidate
-    for name in sorted(os.listdir(font_path)):
-        if name.lower().endswith(".ttf"):
-            return os.path.join(font_path, name)
-    raise ValueError(f"no fallback font found in {font_path}")
+            resolved = candidate
+            break
+    if resolved is None:
+        for name in sorted(os.listdir(font_path)):
+            if name.lower().endswith(".ttf"):
+                resolved = os.path.join(font_path, name)
+                break
+    if resolved is None:
+        raise ValueError(f"no fallback font found in {font_path}")
+    if text is not None and not face_covers(resolved, text):
+        cjk_name = _CJK_FACES.get(st, _CJK_FACES["regular"])
+        for candidate_name in (cjk_name, _CJK_FACES["regular"]):
+            cjk = os.path.join(font_path, candidate_name)
+            if os.path.isfile(cjk) and face_covers(cjk, text):
+                return cjk
+    return resolved
 
 
 def resolve_feature_font(font_path: str, style: str = "regular") -> str:

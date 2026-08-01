@@ -1420,15 +1420,19 @@ class TestFamilySwap:
         assert any("This one stays untouched" in p["text"] for p in _paras(out))
 
     @_needs_faces
-    def test_family_refuses_chars_outside_liberation(self, tmp_dir):
-        # Liberation has no CJK — the swap must refuse with the char
-        # named, never emit a missing glyph.
+    def test_family_swap_with_cjk_lands_on_the_cjk_face(self, tmp_dir):
+        # T5 INVERSION (was: refusal). The text-driven CJK step serves the
+        # char Liberation lacks; without the Noto faces the refusal stands.
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello world) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
         para = _paras(src)[0]
         new = "Hello 你 world"
-        with pytest.raises(ValueError, match="cannot express"):
-            _apply(src, out, para, new, family="serif", font_path=FONTS_DIR)
+        if not os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")):
+            with pytest.raises(ValueError, match="cannot express"):
+                _apply(src, out, para, new, family="serif", font_path=FONTS_DIR)
+            return
+        _apply(src, out, para, new, family="serif", font_path=FONTS_DIR)
+        assert "你" in _paras(out)[0]["text"]
 
     def test_invalid_family_refuses(self, tmp_dir):
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Whatever text) Tj ET")
@@ -2861,18 +2865,23 @@ class TestPerSpanFace:
         assert not any("Liberation" in b for b in _page_base_fonts(out))
 
     @_needs_faces
-    def test_per_span_substitution_of_missing_char_refuses(self, tmp_dir):
-        # A per-span face on a char the Liberation face lacks (CJK) refuses
-        # with the stated coverage reason — the A3 boundary, now per-span.
+    def test_per_span_cjk_lands_on_the_cjk_face(self, tmp_dir):
+        # T5 INVERSION (was: refusal). The per-span fallback path takes the
+        # same text-driven CJK step; absent Noto, the refusal stands.
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello world) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
         p = _paras(src)[0]
         new = "Hello 你 world"
         assert new[6] == "你"  # hand-verified position
         spans = [{"start": 0, "end": len(new), "run": p["runs"][0]}]
-        with pytest.raises(ValueError, match="cannot express"):
-            _apply(src, out, p, new, spans, font_path=FONTS_DIR,
-                   span_styles=[{"start": 6, "end": 7, "bold": True}])
+        if not os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")):
+            with pytest.raises(ValueError, match="cannot express"):
+                _apply(src, out, p, new, spans, font_path=FONTS_DIR,
+                       span_styles=[{"start": 6, "end": 7, "bold": True}])
+            return
+        _apply(src, out, p, new, spans, font_path=FONTS_DIR,
+               span_styles=[{"start": 6, "end": 7, "bold": True}])
+        assert "你" in _paras(out)[0]["text"]
 
     @_needs_faces
     def test_per_span_face_keeps_other_paragraphs_unmoved(self, tmp_dir):

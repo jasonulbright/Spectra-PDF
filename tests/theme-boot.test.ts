@@ -26,3 +26,18 @@ describe('resolveInitialTheme', () => {
     expect(resolveInitialTheme(JSON.stringify(null), true)).toBe('light');
   });
 });
+
+describe('N14 — high-contrast is a stored explicit theme', () => {
+  it('stamps high-contrast before first render like the other explicit themes', () => {
+    expect(
+      resolveInitialTheme(JSON.stringify({ theme: 'high-contrast' }), false),
+    ).toBe('high-contrast');
+    expect(
+      resolveInitialTheme(JSON.stringify({ theme: 'high-contrast' }), true),
+    ).toBe('high-contrast');
+  });
+
+  it('unknown theme values still fall back to the system preference', () => {
+    expect(resolveInitialTheme(JSON.stringify({ theme: 'sepia' }), true)).toBe('light');
+  });
+});
