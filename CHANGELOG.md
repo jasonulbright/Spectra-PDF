@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.0.2 — Print the way print shops do
+
+The Print dialog grows from four controls to the full professional surface —
+two-sided printing, paper selection, booklets, posters, and more — driven by
+what your printer actually supports.
+
+### Choose how it prints
+- **Two-sided printing.** One side only, flip on the long edge, or flip on
+  the short edge — offered when the printer has a duplexer, left to the
+  printer's own default otherwise.
+- **Paper size, orientation, and colour.** Pick any paper the driver offers,
+  force portrait or landscape (Auto rotates landscape pages for you), and
+  print in colour or grayscale.
+- **Odd or even pages, reverse order, collation.** Print the odd pages, flip
+  the stack, print the even — manual two-sided that lines up. Uncollated
+  copies (1,1,2,2,…) spool as a single job.
+- **Up to 999 copies.** The old 99-copy cap is gone.
+
+### Lay pages out on the sheet
+- **Multiple pages per sheet.** Up to 4×4, in any reading order, with
+  optional page borders and automatic rotation into each cell.
+- **Booklet printing.** Saddle-stitched order on landscape sheets, left or
+  right binding, and front-only / back-only passes for printers without a
+  duplexer.
+- **Poster tiling.** Print a large page across multiple sheets at any scale,
+  with overlap, hairline cut marks, and assembly labels.
+- **Custom scale.** Exactly 50%? 130%? Type the percentage.
+
+### Control what prints
+- **Comments and forms.** Print the document with its markups, the document
+  alone (form fields still print), or document plus stamps.
+- **Print as image.** A compatibility mode that rasterizes pages (150, 300,
+  or 600 dpi) before spooling — for the rare driver that mangles vector
+  content.
+- **What you see is what prints.** Cropped documents now print their visible
+  area, exactly as displayed on screen.
+
+All of it works from the command line too — `print` gained the same option
+set, and `printers --capabilities` reports any printer's papers, duplexer,
+and colour support as JSON.
+
 ## 1.0.1 — Comments you can move, shapes you can draw, measurements you can trust
 
 Annotations grow up: everything you place can now be moved, resized, and
