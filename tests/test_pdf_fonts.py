@@ -985,3 +985,74 @@ class TestT9BareProgramFonts:
         assert cap.editable
         assert cap.decode(b"\x41") == "A"
         assert cap.char_width("A") > 0
+
+
+class TestT7Type3Fonts:
+    """T7: Type3 glyph-procedure fonts — the text model is a simple font's;
+    widths scale through /FontMatrix (glyph space, not per-mille)."""
+
+    def _type3(self, pdf, *, matrix=(0.01, 0, 0, 0.01, 0, 0), base=None,
+               diffs=(65, "/A", "/B"), widths=(60, 55), first=65, tou=None):
+        proc = pdf.make_stream(b"60 0 0 0 60 60 d1")
+        enc = Dictionary()
+        if base is not None:
+            enc["/BaseEncoding"] = Name(base)
+        if diffs is not None:
+            enc["/Differences"] = Array(
+                [d if isinstance(d, int) else Name(d) for d in diffs]
+            )
+        font = Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type3"),
+            FontBBox=Array([0, 0, 100, 100]),
+            FontMatrix=Array(list(matrix)),
+            CharProcs=Dictionary(A=proc, B=proc),
+            Encoding=enc,
+            FirstChar=first,
+            LastChar=first + len(widths) - 1,
+            Widths=Array(list(widths)),
+        )
+        if tou is not None:
+            font["/ToUnicode"] = _tounicode_stream(pdf, tou)
+        return pdf.make_indirect(font)
+
+    def test_type3_edits_with_matrix_scaled_widths(self):
+        pdf = pikepdf.new()
+        cap = font_capability(self._type3(pdf))
+        assert cap.editable
+        assert cap.decode(b"AB") == "AB"
+        assert cap.encode("AB") == b"AB"
+        # 60 glyph units × (0.01 × 1000) = 600 per-mille.
+        assert cap.char_width("A") == 600
+        assert cap.char_width("B") == 550
+
+    def test_baseless_differences_never_overclaim(self):
+        # Codes OUTSIDE the /Differences must not decode via a Standard
+        # fallback the font never declared.
+        pdf = pikepdf.new()
+        cap = font_capability(self._type3(pdf))
+        assert cap.editable
+        assert cap.decode(b"\x43") == "�"  # 'C' is not defined here
+        with pytest.raises(ValueError):
+            cap.encode("C")
+
+    def test_unresolvable_encoding_refuses_then_tounicode_recovers(self):
+        # NB: names like /g0 resolve via pdfminer's digit-strip heuristic
+        # ('g0'→'g') — the same rule every simple font already gets. These
+        # names have no such fallback and genuinely resolve to nothing.
+        pdf = pikepdf.new()
+        cap = font_capability(self._type3(pdf, diffs=(65, "/qqz1", "/qqz2")))
+        assert not cap.editable and "Type3" in (cap.reason or "")
+        # The same font WITH a ToUnicode recovers.
+        cap2 = font_capability(
+            self._type3(pdf, diffs=(65, "/qqz1", "/qqz2"), tou={65: "A", 66: "B"})
+        )
+        assert cap2.editable
+        assert cap2.decode(b"A") == "A"
+
+    def test_malformed_fontmatrix_refuses(self):
+        pdf = pikepdf.new()
+        font = self._type3(pdf)
+        del font["/FontMatrix"]
+        cap = font_capability(font)
+        assert not cap.editable and "FontMatrix" in (cap.reason or "")

@@ -1856,6 +1856,42 @@
   border-color: #a78bfa;
 }
 
+/* T14: the run editor's style row — size + colour for one run. */
+.page-edittext-stylerow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.page-edittext-stylerow input[type='number'] {
+  width: 58px;
+  padding: 1px 4px;
+  font-size: 11px;
+  background: #262626;
+  border: 1px solid #404040;
+  border-radius: 2px;
+  color: #e5e5e5;
+}
+
+.page-edittext-stylerow input.invalid {
+  border-color: #f87171;
+}
+
+.page-edittext-colorchip {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid #525252;
+  padding: 0;
+  cursor: pointer;
+}
+
+.page-edittext-colorchip.selected {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
+}
+
 /* F8 pushbuttons: the page raster draws the button's own face, so the
  * overlay is a bare click surface — native button chrome stripped, a faint
  * hover tint as the only affordance. */

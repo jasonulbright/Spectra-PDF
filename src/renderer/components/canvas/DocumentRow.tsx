@@ -73,6 +73,7 @@ interface DocumentRowProps {
   onSelectEditText: (pageId: string, index: number) => void;
   onOpenTextEditor: (pageId: string, index: number) => void;
   onCommitTextEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
+  onRestyleTextEdit: (pageId: string, index: number, style: { size?: number; color?: [number, number, number] }) => void;
   onCancelTextEdit: () => void;
   onSelectEditParagraph: (pageId: string, index: number) => void;
   onOpenParagraphEditor: (pageId: string, index: number) => void;
@@ -183,6 +184,7 @@ function DocumentRowImpl({
   onSelectEditText,
   onOpenTextEditor,
   onCommitTextEdit,
+  onRestyleTextEdit,
   onCancelTextEdit,
   onSelectEditParagraph,
   onOpenParagraphEditor,
@@ -298,6 +300,7 @@ function DocumentRowImpl({
         onSelectEditText={onSelectEditText}
         onOpenTextEditor={onOpenTextEditor}
         onCommitTextEdit={onCommitTextEdit}
+        onRestyleTextEdit={onRestyleTextEdit}
         onCancelTextEdit={onCancelTextEdit}
         onSelectEditParagraph={onSelectEditParagraph}
         onOpenParagraphEditor={onOpenParagraphEditor}

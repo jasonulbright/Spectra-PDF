@@ -929,6 +929,27 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
+  // T14: run-scoped size/color restyle — same signed-doc gate, text unchanged.
+  const handleRestyleText = useCallback(
+    async (
+      path: string,
+      page: number,
+      index: number,
+      style: { size?: number; color?: [number, number, number] },
+    ): Promise<string | void> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      await performOperation(path, 'restyle_text_run', {
+        page,
+        index,
+        ...(style.size != null ? { size: style.size } : {}),
+        ...(style.color ? { color: style.color } : {}),
+      });
+    },
+    [state.files, performOperation, confirmEditOfSignedDoc],
+  );
+
   const handleEditParagraph = useCallback(
     async (
       path: string,
@@ -1921,6 +1942,7 @@ function AppContent(): React.ReactElement {
                   onEditImage={handleEditImage}
                   onEditVector={handleEditVector}
                   onEditText={handleEditText}
+                  onRestyleText={handleRestyleText}
                   onEditParagraph={handleEditParagraph}
                   onMergeParagraph={handleMergeParagraph}
                   onAddText={handleAddText}

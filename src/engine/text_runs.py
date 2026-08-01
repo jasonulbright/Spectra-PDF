@@ -384,6 +384,13 @@ class _TextEditState:
         # -> (instructions, new_raw_width). None = re-encode in the run's
         # own font (7.2's path).
         self.builder = builder
+        # T14 run restyle: an optional size (pt) and/or fill color
+        # ([r,g,b] 0..1) applied to THIS run only. The emission wraps the
+        # show op in q…Q — font/size/fill are graphics state and revert at
+        # Q, while the text matrix (NOT graphics state per spec) keeps the
+        # advance — so neighbors are untouched by construction.
+        self.style_size: float | None = None
+        self.style_color: list | None = None
         self.seen = 0
         self.done = False
         # Set at the edit site; consumed by the same-line anchor pass.
@@ -535,13 +542,33 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     kept.extend(new_instructions)
                 else:
                     encoded = cap.encode(edit.new_text)
+                    eff_size = (
+                        edit.style_size if edit.style_size is not None else gts.font_size
+                    )
                     new_raw = (
-                        cap.decoded_width(encoded) / 1000.0 * gts.font_size
+                        cap.decoded_width(encoded) / 1000.0 * eff_size
                         + gts.char_spacing
                         * (len(encoded) if cap._code_bytes == 1 else len(encoded) // 2)
                         + gts.word_spacing * _spaces_in(encoded, cap)
                     )
+                    styled = edit.style_size is not None or edit.style_color is not None
+                    if styled:
+                        kept.append(_instruction([], "q"))
+                        if edit.style_color is not None:
+                            kept.append(
+                                _instruction(
+                                    [round(float(c), 4) for c in edit.style_color], "rg"
+                                )
+                            )
+                        if edit.style_size is not None and gts.font_name:
+                            kept.append(
+                                _instruction(
+                                    [Name(gts.font_name), round(float(eff_size), 4)], "Tf"
+                                )
+                            )
                     kept.append(_instruction([pikepdf.String(encoded)], "Tj"))
+                    if styled:
+                        kept.append(_instruction([], "Q"))
                 # 9.B4a: Tz never scales vertical advances, so the vertical
                 # Δ is unscaled.
                 edit.delta_scaled = (new_raw - old_raw) * (
@@ -710,6 +737,90 @@ def replace_text_run(file: str, output: str, page: int, index: int, new_text: st
         _finalize_page_rewrite(p, kept, edit.superseded_forms)
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(index)}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def restyle_text_run(
+    file: str,
+    output: str,
+    page: int,
+    index: int,
+    size: float | None = None,
+    color: list | None = None,
+) -> dict:
+    """T14: restyle ONE run — size (pt) and/or fill color — text unchanged.
+
+    Rides the replace machinery end to end (same targeting, Δ math for the
+    size-driven advance change, same-line anchors, form copy-on-edit); the
+    emission wraps the re-shown run in q…Q so font/size/fill revert after it
+    (graphics state) while the advance stays (the text matrix is not part of
+    the saved state). FAMILY stays out deliberately: switching a run's font
+    is the paragraph machinery's job — this surface is the fallback for text
+    that cannot take that machinery, and size+color are what it can carry
+    honestly.
+    """
+    if size is None and color is None:
+        raise ValueError("nothing to restyle — give a size and/or a color")
+    if size is not None:
+        size = float(size)
+        if not (0.1 <= size <= 1000):
+            raise ValueError("size must be between 0.1 and 1000 points")
+    if color is not None:
+        color = [float(c) for c in color]
+        if len(color) != 3 or any(c < 0 or c > 1 for c in color):
+            raise ValueError("color must be [r, g, b] with components in 0..1")
+
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        resources = _resolve_resources(p)
+        fonts = _FontCache()
+        pre_runs = _walk_runs(
+            pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False, fonts
+        )
+        count = len(pre_runs)
+        if not (0 <= int(index) < count):
+            raise ValueError(f"text run index {index} is out of range (page has {count})")
+
+        # Same text, new style — the edit state re-encodes the run's own
+        # decoded text through its own font, so encodability is a no-op.
+        edit = _TextEditState(int(index), str(pre_runs[int(index)]["text"]))
+        edit.style_size = size
+        edit.style_color = color
+        kept, changed, new_forms = _rewrite_runs(
+            pdf,
+            pikepdf.parse_content_stream(p),
+            resources,
+            0,
+            None,
+            edit,
+            fonts,
+            [0],
+            set(),
+        )
+        if not changed:
+            raise ValueError("restyle did not apply (run not found)")
+        for nm, st in new_forms.items():
+            _register_xobject(pdf, resources, nm, st)
+        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        _finalize_page_rewrite(p, kept, edit.superseded_forms)
+        _save(pdf, input_path, output_path)
+        return {
+            "output": str(output_path),
+            "page": int(page),
+            "index": int(index),
+            **({"size": size} if size is not None else {}),
+            **({"color": color} if color is not None else {}),
+        }
     finally:
         try:
             pdf.close()
