@@ -12,6 +12,7 @@ import { EDIT_DECLINED } from './lib/edit-text';
 import type { ParagraphEditOpts } from './lib/edit-paragraphs';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
 import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
+import { CertUnlockDialog, CertUnlockResult } from './components/CertUnlockDialog';
 import { SplitPanel } from './panels/SplitPanel';
 import { RotatePanel } from './panels/RotatePanel';
 import { DeletePanel } from './panels/DeletePanel';
@@ -230,6 +231,32 @@ function AppContent(): React.ReactElement {
     }
   }, [passwordState]);
 
+  // Certificate-unlock prompt (F9) — the pubkey sibling of the password one.
+  const [certUnlockState, setCertUnlockState] = useState<{
+    fileName: string;
+    error?: string;
+    resolve: (result: CertUnlockResult) => void;
+  } | null>(null);
+
+  const showCertUnlockPrompt = useCallback(
+    (fileName: string, error?: string): Promise<CertUnlockResult> => {
+      return new Promise((resolve) => {
+        setCertUnlockState({ fileName, error, resolve });
+      });
+    },
+    [],
+  );
+
+  const handleCertUnlockResult = useCallback(
+    (result: CertUnlockResult) => {
+      if (certUnlockState) {
+        certUnlockState.resolve(result);
+        setCertUnlockState(null);
+      }
+    },
+    [certUnlockState],
+  );
+
   const showConfirm = useCallback((message: string): Promise<ConfirmResult> => {
     return new Promise((resolve) => {
       setConfirmState({ message, resolve });
@@ -386,13 +413,33 @@ function AppContent(): React.ReactElement {
         let unlocked = false;
         let error: string | undefined;
         while (!unlocked) {
-          const result = await showPasswordPrompt(name, error);
-          if (result === 'cancel') return null;
-          try {
-            await call('unlock', { file: workingPath, password: result.password });
-            unlocked = true;
-          } catch {
-            error = 'Incorrect password. Please try again.';
+          if (encStatus.kind === 'pubkey') {
+            // F9: certificate-encrypted (Adobe.PubSec) — unlock with the
+            // user's PKCS#12 key. The engine's refusals are already honest
+            // ("does not match any recipient" / "check the file and its
+            // password"), so they surface verbatim.
+            const result = await showCertUnlockPrompt(name, error);
+            if (result === 'cancel') return null;
+            try {
+              await call('decrypt_pubkey', {
+                file: workingPath,
+                output: workingPath,
+                pfx: result.pfx,
+                password: result.password,
+              });
+              unlocked = true;
+            } catch (e) {
+              error = e instanceof Error ? e.message : String(e);
+            }
+          } else {
+            const result = await showPasswordPrompt(name, error);
+            if (result === 'cancel') return null;
+            try {
+              await call('unlock', { file: workingPath, password: result.password });
+              unlocked = true;
+            } catch {
+              error = 'Incorrect password. Please try again.';
+            }
           }
         }
       }
@@ -400,7 +447,7 @@ function AppContent(): React.ReactElement {
       const info = await call('get_page_count', { file: workingPath });
       return { workingPath, name, buffer, pageCount: info.pages };
     },
-    [call, showPasswordPrompt],
+    [call, showPasswordPrompt, showCertUnlockPrompt],
   );
 
   const stateRef = useRef(state);
@@ -1955,6 +2002,12 @@ function AppContent(): React.ReactElement {
         fileName={passwordState?.fileName ?? ''}
         error={passwordState?.error}
         onResult={handlePasswordResult}
+      />
+      <CertUnlockDialog
+        open={certUnlockState !== null}
+        fileName={certUnlockState?.fileName ?? ''}
+        error={certUnlockState?.error}
+        onResult={handleCertUnlockResult}
       />
     </div>
     </DropZone>

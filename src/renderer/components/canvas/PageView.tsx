@@ -87,10 +87,7 @@ function PageViewImpl({
     const root = rootRef.current;
     const detailCanvas = detailRef.current;
     if (!root || !detailCanvas) return;
-    // The detail raster's visibility geometry isn't rotation-aware; skip it
-    // while a rotation is pending (the base raster carries the page, and the
-    // rotation is baked into the file at commit, after which detail returns).
-    if (!detail || rotation !== 0) {
+    if (!detail) {
       detailCanvas.style.display = 'none';
       return;
     }
@@ -106,7 +103,15 @@ function PageViewImpl({
     const visW = visRight - visLeft;
     const visH = visBottom - visTop;
 
-    const baseDevicePx = (BASE_RASTER / Math.max(naturalWidth, naturalHeight)) * naturalWidth;
+    // P11: with a pending 90°/270° turn the page's natural HEIGHT runs along
+    // the display x-axis — both the render scale and the "is the base raster
+    // already enough" threshold measure in display orientation. The pending
+    // turn itself is baked into the detail viewport (renderDetail's
+    // rotationExtra), so its pixels land display-oriented while the BASE
+    // raster keeps its unrotated-render-plus-CSS-transform presentation.
+    const rotSwapped = rotation === 90 || rotation === 270;
+    const displayNaturalW = rotSwapped ? naturalHeight : naturalWidth;
+    const baseDevicePx = (BASE_RASTER / Math.max(naturalWidth, naturalHeight)) * displayNaturalW;
     if (visW <= 0 || visH <= 0 || rect.width * dpr() <= baseDevicePx * 1.05) {
       detailCanvas.style.display = 'none';
       return;
@@ -117,11 +122,12 @@ function PageViewImpl({
     void renderDetail({
       pdf,
       pageNumber,
-      naturalWidth,
+      naturalWidth: displayNaturalW,
       geometry: { rect, layoutW, visLeft, visTop, visW, visH },
       detailCanvas,
       isCancelled: () => cancelled,
       onTask: (t) => (task = t),
+      rotationExtra: rotation,
     }).catch(logRenderError(`Failed to render detail for page ${pageNumber}`));
     return () => {
       cancelled = true;

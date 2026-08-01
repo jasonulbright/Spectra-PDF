@@ -28,10 +28,11 @@ from engine.rotate import rotate
 from engine.delete import delete
 from engine.compress import compress
 from engine.grayscale import grayscale
-from engine.prepress import convert_cmyk
+from engine.prepress import convert_cmyk, convert_pdfx
 from engine.optimize import optimize
 from engine.pdfa import convert_pdfa
 from engine.encrypt import encrypt, decrypt
+from engine.pubkey_crypt import decrypt_with_pfx, encrypt_with_certs
 from engine.extract_text import extract_text
 from engine.search_in_files import search_in_files
 from engine.headers import add_header_footer
@@ -127,10 +128,13 @@ def main() -> None:
     server.register("compress", compress)
     server.register("grayscale", grayscale)
     server.register("convert_cmyk", convert_cmyk)
+    server.register("convert_pdfx", convert_pdfx)
     server.register("optimize", optimize)
     server.register("convert_pdfa", convert_pdfa)
     server.register("encrypt", encrypt)
     server.register("decrypt", decrypt)
+    server.register("encrypt_pubkey", encrypt_with_certs)
+    server.register("decrypt_pubkey", decrypt_with_pfx)
     server.register("extract_text", extract_text)
     server.register("search_in_files", search_in_files)
     server.register("add_header_footer", add_header_footer)

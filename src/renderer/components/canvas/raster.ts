@@ -125,11 +125,18 @@ interface DetailGeometry {
 interface DetailParams {
   pdf: PDFDocumentProxy;
   pageNumber: number;
+  /** The page's natural extent along the DISPLAY x-axis — the caller swaps
+   *  width/height when a pending 90°/270° rotation is in play. */
   naturalWidth: number;
   geometry: DetailGeometry;
   detailCanvas: HTMLCanvasElement;
   isCancelled: () => boolean;
   onTask: (task: RenderTask) => void;
+  /** Pending page-tier quarter-turn (P11). Baked into the pdf.js viewport on
+   *  TOP of the page's own /Rotate, so the detail pixels arrive
+   *  display-oriented and need no CSS rotation — unlike the base raster,
+   *  whose crop-free geometry tolerates a CSS transform. */
+  rotationExtra?: number;
 }
 
 export async function renderDetail({
@@ -140,6 +147,7 @@ export async function renderDetail({
   detailCanvas,
   isCancelled,
   onTask,
+  rotationExtra = 0,
 }: DetailParams): Promise<void> {
   const { rect, layoutW, visLeft, visTop, visW, visH } = geometry;
   const d = dpr();
@@ -148,7 +156,10 @@ export async function renderDetail({
 
   const page = await pdf.getPage(pageNumber);
   if (isCancelled()) return;
-  const viewport = page.getViewport({ scale: renderScale });
+  const viewport = page.getViewport({
+    scale: renderScale,
+    rotation: ((((page.rotate ?? 0) + rotationExtra) % 360) + 360) % 360,
+  });
   const fx0 = (visLeft - rect.left) / rect.width;
   const fy0 = (visTop - rect.top) / rect.height;
   const backingW = Math.max(1, Math.round(visW * d * capFactor));

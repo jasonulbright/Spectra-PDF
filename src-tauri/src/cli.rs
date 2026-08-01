@@ -43,8 +43,16 @@ pub enum CliCommand {
     Encrypt(EncryptArgs),
     /// Decrypt a password-protected PDF
     Decrypt(DecryptArgs),
+    /// Encrypt a PDF to recipient certificates (no shared password)
+    EncryptCerts(EncryptCertsArgs),
+    /// Decrypt a certificate-encrypted PDF with a PKCS#12 key file
+    DecryptCert(DecryptCertArgs),
     /// Convert a PDF to PDF/A archival format
     Pdfa(PdfaArgs),
+    /// Convert a PDF's colour to DeviceCMYK (ICC-managed)
+    ConvertCmyk(ConvertCmykArgs),
+    /// Produce a PDF/X print master with an output intent
+    ConvertPdfx(ConvertPdfxArgs),
     /// Extract text from a PDF
     ExtractText(ExtractTextArgs),
     /// Delete pages from a PDF
@@ -362,6 +370,83 @@ pub struct DecryptArgs {
     /// Password to decrypt
     #[arg(short, long)]
     pub password: String,
+}
+
+#[derive(Args)]
+pub struct EncryptCertsArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Recipient certificate file (.cer/.crt/.pem/.der) — repeat for multiple
+    #[arg(short = 'c', long = "cert", required = true)]
+    pub certs: Vec<PathBuf>,
+    /// Disallow printing
+    #[arg(long)]
+    pub no_print: bool,
+    /// Disallow copying text/graphics
+    #[arg(long)]
+    pub no_copy: bool,
+    /// Disallow changing the document
+    #[arg(long)]
+    pub no_modify: bool,
+    /// Disallow commenting and form filling
+    #[arg(long)]
+    pub no_annotate: bool,
+}
+
+#[derive(Args)]
+pub struct DecryptCertArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// PKCS#12 key bundle (.pfx/.p12) holding a recipient's private key
+    #[arg(long)]
+    pub pfx: PathBuf,
+    /// Password of the key bundle itself
+    #[arg(short, long, default_value = "")]
+    pub password: String,
+}
+
+#[derive(Args)]
+pub struct ConvertCmykArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// ICC rendering intent: perceptual | relative | saturation | absolute
+    #[arg(long, default_value = "relative")]
+    pub render_intent: String,
+    /// Destination ICC profile: a .icc file, or a bundled Ghostscript
+    /// profile name like default_cmyk.icc. Omit for the built-in default.
+    #[arg(long, default_value = "")]
+    pub dest_profile: String,
+}
+
+#[derive(Args)]
+pub struct ConvertPdfxArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// PDF/X standard: 1 (X-1a), 3 (X-3), 4 (X-4)
+    #[arg(long, default_value_t = 3)]
+    pub version: u32,
+    /// Destination ICC profile to embed in the output intent (.icc file or a
+    /// bundled Ghostscript profile name). Omit to name the condition only.
+    #[arg(long, default_value = "")]
+    pub dest_profile: String,
+    /// Human-readable output condition
+    #[arg(long, default_value = "Commercial and specialty printing")]
+    pub condition: String,
+    /// Registered characterization identifier (e.g. CGATS TR001, FOGRA39)
+    #[arg(long, default_value = "CGATS TR001")]
+    pub identifier: String,
 }
 
 #[derive(Args)]
@@ -1694,6 +1779,40 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             engine.call("encrypt", params)
         }
 
+        CliCommand::EncryptCerts(args) => {
+            let certs: Vec<String> = args
+                .certs
+                .iter()
+                .map(|p| abs(p).to_string_lossy().to_string())
+                .collect();
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "certs": certs,
+            });
+            if args.no_print || args.no_copy || args.no_modify || args.no_annotate {
+                params["permissions"] = json!({
+                    "print": !args.no_print,
+                    "copy": !args.no_copy,
+                    "modify": !args.no_modify,
+                    "annotate": !args.no_annotate,
+                });
+            }
+            engine.call("encrypt_pubkey", params)
+        }
+
+        CliCommand::DecryptCert(args) => {
+            engine.call(
+                "decrypt_pubkey",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "pfx": abs(&args.pfx).to_string_lossy(),
+                    "password": args.password,
+                }),
+            )
+        }
+
         CliCommand::Decrypt(args) => {
             engine.call(
                 "decrypt",
@@ -1713,6 +1832,51 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
                     "level": args.level,
+                    "gs_path": gs.to_string_lossy(),
+                }),
+            )
+        }
+
+        CliCommand::ConvertCmyk(args) => {
+            let gs = resolve_gs();
+            // A bare bundled-profile name passes through; a path is absolutized.
+            let profile = if args.dest_profile.is_empty()
+                || !(args.dest_profile.contains('/') || args.dest_profile.contains('\\'))
+            {
+                args.dest_profile.clone()
+            } else {
+                abs(&PathBuf::from(&args.dest_profile)).to_string_lossy().to_string()
+            };
+            engine.call(
+                "convert_cmyk",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "render_intent": args.render_intent,
+                    "dest_profile": profile,
+                    "gs_path": gs.to_string_lossy(),
+                }),
+            )
+        }
+
+        CliCommand::ConvertPdfx(args) => {
+            let gs = resolve_gs();
+            let profile = if args.dest_profile.is_empty()
+                || !(args.dest_profile.contains('/') || args.dest_profile.contains('\\'))
+            {
+                args.dest_profile.clone()
+            } else {
+                abs(&PathBuf::from(&args.dest_profile)).to_string_lossy().to_string()
+            };
+            engine.call(
+                "convert_pdfx",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "version": args.version,
+                    "dest_profile": profile,
+                    "condition": args.condition,
+                    "identifier": args.identifier,
                     "gs_path": gs.to_string_lossy(),
                 }),
             )

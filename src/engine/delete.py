@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pikepdf
 
-from engine.acroform import prune_form_to_pages
+from engine.acroform import prune_form_to_pages, refuse_if_xfa
 
 
 def delete(file: str, pages: list[int], output: str) -> dict:
@@ -22,6 +22,7 @@ def delete(file: str, pages: list[int], output: str) -> dict:
     same_file = input_path.resolve() == output_path.resolve()
 
     with pikepdf.open(file) as pdf:
+        refuse_if_xfa(pdf, file, "deleting pages")
         total = len(pdf.pages)
         indices = sorted(set(p - 1 for p in pages if 0 < p <= total), reverse=True)
         for idx in indices:

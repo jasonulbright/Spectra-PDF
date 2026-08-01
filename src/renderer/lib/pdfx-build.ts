@@ -2,7 +2,7 @@ import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFPage, PDFStri
 
 import { MANIFEST_NAME, PDFX_VERSION } from './pdfx-format';
 import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from './pdfx-format';
-import { carryAcroForm, prepareSourceForms } from './acroform-carry';
+import { carryAcroForm, prepareSourceForms, sourceHasXfa } from './acroform-carry';
 import type { FormContribution } from './acroform-carry';
 import { carryEmbeddedFiles } from './embedded-files-carry';
 import { carryDocumentCatalog } from './catalog-carry';
@@ -925,6 +925,17 @@ async function assemblePages(
   const contributions: FormContribution[] = [];
   for (const [key, g] of groups) {
     const doc = await PDFDocument.load(g.bytes, { ignoreEncryption: true });
+    if (sourceHasXfa(doc)) {
+      // F11: page surgery on an XFA form detaches the form from its pages
+      // (the XFA template lays out its own) — refuse with the reason rather
+      // than silently dropping the packet (the old behavior) or carrying a
+      // lie. Same refusal the engine ops make (acroform.py refuse_if_xfa).
+      const file = key.split('#')[0].split(/[\\/]/).pop() || key;
+      throw new Error(
+        `${file} contains an XML form (XFA). Page edits would detach the ` +
+          'form from its pages, so they are not available for this document.',
+      );
+    }
     prepareSourceForms(doc, g.indices);
     const copied = await output.copyPages(doc, g.indices);
     const copiedByIndex = new Map<number, PDFPage>();
