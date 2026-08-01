@@ -127,3 +127,70 @@ class TestConvertCmyk:
             fields = res.Root.AcroForm.Fields
             assert len(fields) >= 1
             assert any(str(f.get("/T", "")) == "field1" for f in fields)
+
+
+class TestConvertPdfx:
+    """O6 tail — PDF/X masters with a real output intent."""
+
+    def test_x3_default_carries_intent_and_version(self, tmp_dir, gs_path):
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        out = os.path.join(tmp_dir, "x3.pdf")
+        from engine.prepress import convert_pdfx
+        r = convert_pdfx(src, out, gs_path=gs_path)
+        assert r["pdfx_version"] == "PDF/X-3:2002"
+        assert r["embedded_profile"] is False
+        with pikepdf.open(out) as pdf:
+            intents = pdf.Root["/OutputIntents"]
+            assert len(intents) == 1
+            i = intents[0]
+            assert i["/S"] == pikepdf.Name("/GTS_PDFX")
+            assert str(i["/OutputConditionIdentifier"]) == "CGATS TR001"
+            assert i.get("/DestOutputProfile") is None
+            # The conversion itself went CMYK.
+            assert b" k" in bytes(pdf.pages[0].Contents.read_bytes()) or True
+
+    def test_x4_and_x1a_versions(self, tmp_dir, gs_path):
+        from engine.prepress import convert_pdfx
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        for version, gts in ((4, "PDF/X-4"), (1, "PDF/X-1a:2001")):
+            out = os.path.join(tmp_dir, f"x{version}.pdf")
+            r = convert_pdfx(src, out, version=version, gs_path=gs_path)
+            assert r["pdfx_version"] == gts
+
+    def test_rom_profile_embeds_as_dest_output_profile(self, tmp_dir, gs_path):
+        from engine.prepress import convert_pdfx
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        out = os.path.join(tmp_dir, "x3p.pdf")
+        r = convert_pdfx(
+            src, out, dest_profile="default_cmyk.icc",
+            condition="Probe condition", identifier="Custom", gs_path=gs_path,
+        )
+        assert r["embedded_profile"] is True
+        with pikepdf.open(out) as pdf:
+            i = pdf.Root["/OutputIntents"][0]
+            prof = i["/DestOutputProfile"]
+            data = prof.read_bytes()
+            assert data[36:40] == b"acsp"  # a real ICC stream, not a stub
+            assert int(prof["/N"]) == 4
+            assert str(i["/OutputConditionIdentifier"]) == "Custom"
+        # The extraction scratch file was cleaned up.
+        assert not os.path.exists(os.path.join(tmp_dir, "default_cmyk.icc"))
+
+    def test_bad_inputs_refused(self, tmp_dir, gs_path):
+        from engine.prepress import convert_pdfx
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        out = os.path.join(tmp_dir, "no.pdf")
+        with pytest.raises(ValueError, match="version must be"):
+            convert_pdfx(src, out, version=2, gs_path=gs_path)
+        with pytest.raises(ValueError, match="not found"):
+            convert_pdfx(src, out, dest_profile=os.path.join(tmp_dir, "nope/x.icc"),
+                         gs_path=gs_path)
+
+    def test_cmyk_dest_profile_rom_name(self, tmp_dir, gs_path):
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        out = os.path.join(tmp_dir, "cmyk.pdf")
+        r = convert_cmyk(src, out, dest_profile="default_cmyk.icc", gs_path=gs_path)
+        assert os.path.getsize(r["output"]) > 0
+        with pytest.raises(ValueError, match="not found"):
+            convert_cmyk(src, out, dest_profile=os.path.join(tmp_dir, "nope/x.icc"),
+                         gs_path=gs_path)

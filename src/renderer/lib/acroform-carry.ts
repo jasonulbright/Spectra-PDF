@@ -27,14 +27,23 @@
 //      and removes the markers. No marked root anywhere -> no /AcroForm is
 //      added (a non-form rebuild stays byte-clean).
 //
-// Documented boundaries (deliberate): /XFA does not survive a rebuild (the
-// app's pure-AcroForm posture since 2f — every fill output already strips
-// it); document-level form scripts (/CO, /AA) do not survive page-structure
-// rebuilds — carrying blind references through arbitrary page surgery is
-// worse than dropping them. Field-level keys (incl. per-field /AA) travel
-// with the field objects untouched. /SigFlags bit 1 (SignaturesExist) is
-// recomputed from the kept fields; bit 2 (AppendOnly) is dropped — its
-// precondition, an unbroken signature, cannot survive a rebuild.
+// Document-level form behavior (F11, 2026-08-01 — the old boundary that
+// dropped these is closed): /CO (calculation order) is RECONCILED, not
+// blind-carried — each entry resolves to its fully-qualified name
+// source-side, follows this module's own collision renames, and re-binds to
+// the copied output field; dead entries drop. The document catalog's /AA
+// rides catalog-carry.ts (own-source-only, like bookmarks). /XFA documents
+// never reach this module: the rebuild REFUSES them upfront
+// (sourceHasXfa + pdfx-build's guard) because a restructured page tree and
+// a carried-verbatim XFA packet describe two different documents — the
+// industry-standard editor refuses page operations on XFA forms for the
+// same reason. (Fill's pure-AcroForm posture — /XFA stripped, detected and
+// stated — is a separate, unchanged boundary.) Field-level keys (incl.
+// per-field /AA) travel with the field objects untouched. /SigFlags bit 1
+// (SignaturesExist) is recomputed from the kept fields; bit 2 (AppendOnly)
+// is dropped — correct here because a rebuild only runs when signatures are
+// already forfeit; the O5b incremental path preserves live-signature docs
+// byte-for-byte, /SigFlags included (engine/incremental.py _ACRO_KEEP).
 import {
   PDFArray,
   PDFBool,
@@ -72,6 +81,7 @@ const NAME_SIG = PDFName.of('Sig');
 const NAME_P = PDFName.of('P');
 const NAME_SIGFLAGS = PDFName.of('SigFlags');
 const NAME_NEEDAPPEARANCES = PDFName.of('NeedAppearances');
+const NAME_CO = PDFName.of('CO');
 const NAME_BASEFONT = PDFName.of('BaseFont');
 const NAME_ENCODING = PDFName.of('Encoding');
 const NAME_FONTDESCRIPTOR = PDFName.of('FontDescriptor');
@@ -116,6 +126,13 @@ function acroFormOf(doc: PDFDocument): PDFDict | null {
   } catch {
     return null;
   }
+}
+
+/** Whether this loaded source carries an XFA form packet — the rebuild
+ * refuses such documents upfront (module-header rationale). */
+export function sourceHasXfa(doc: PDFDocument): boolean {
+  const acro = acroFormOf(doc);
+  return acro !== null && acro.get(PDFName.of('XFA')) !== undefined;
 }
 
 function isWidget(dict: PDFDict): boolean {
@@ -444,6 +461,9 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
   // same name+1 convention pikepdf's add_pages_from uses engine-side, so a
   // canvas import and a CLI merge of the same files agree.
   const takenNames = new Set<string>();
+  // Per-contribution ROOT renames — /CO reconciliation must follow them
+  // (a renamed root rewrites every descendant's FQ prefix).
+  const rootRenames = new Map<number, Map<string, string>>();
   for (const root of roots) {
     const name = fieldName(root.dict);
     if (name === null) continue; // nameless root — nothing to collide on
@@ -456,6 +476,9 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
     const renamed = `${name}+${n}`;
     takenNames.add(renamed);
     root.dict.set(NAME_T, PDFHexString.fromText(renamed));
+    const forContribution = rootRenames.get(root.contribution) ?? new Map<string, string>();
+    forContribution.set(name, renamed);
+    rootRenames.set(root.contribution, forContribution);
   }
 
   // ---- merge /DR across contributing sources -----------------------------
@@ -573,6 +596,69 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
   }
   const hasSig = roots.some((r) => treeHasSigField(output, r.dict));
 
+  // ---- /CO reconciled to the surviving copied fields (F11) ----------------
+  // Output-side index: FQ name → the field's indirect ref, walked from the
+  // final (post-rename) roots. Only nodes carrying their own /T add entries —
+  // a /T-less kid shares its parent's partial name and can't be a /CO target
+  // distinct from it.
+  const fqIndex = new Map<string, PDFRef>();
+  for (const root of roots) {
+    const walk = (entry: unknown, prefix: string, depth: number): void => {
+      if (depth > MAX_DEPTH) return;
+      const dict = asDict(output, entry);
+      if (!dict) return;
+      const t = fieldName(dict);
+      const name = t === null ? prefix : prefix ? `${prefix}.${t}` : t;
+      if (t !== null && name && !fqIndex.has(name)) {
+        let ref = entry instanceof PDFRef ? entry : null;
+        if (ref === null) ref = output.context.register(dict);
+        fqIndex.set(name, ref);
+      }
+      const kids = asArray(output, dict.get(NAME_KIDS));
+      if (!kids) return;
+      for (let i = 0; i < kids.size(); i++) walk(kids.get(i), name, depth + 1);
+    };
+    walk(root.ref, '', 0);
+  }
+  // Source-side FQ name of a /CO entry: climb /Parent collecting /T segments.
+  const sourceFqName = (doc: PDFDocument, entry: unknown): string | null => {
+    const parts: string[] = [];
+    const seen = new Set<PDFDict>();
+    let cur = asDict(doc, entry);
+    for (let depth = 0; cur && depth <= MAX_DEPTH; depth++) {
+      if (seen.has(cur)) return null; // cyclic — refuse to name it
+      seen.add(cur);
+      const t = fieldName(cur);
+      if (t !== null) parts.unshift(t);
+      cur = asDict(doc, cur.get(NAME_PARENT));
+    }
+    return parts.length ? parts.join('.') : null;
+  };
+  const coRefs: PDFRef[] = [];
+  const coSeen = new Set<string>();
+  for (const ci of [...contributing].sort((a, b) => a - b)) {
+    const srcAcro = acroFormOf(contributions[ci].source);
+    if (!srcAcro) continue;
+    const co = asArray(contributions[ci].source, srcAcro.get(NAME_CO));
+    if (!co) continue;
+    const renames = rootRenames.get(ci);
+    for (let i = 0; i < co.size(); i++) {
+      let name = sourceFqName(contributions[ci].source, co.get(i));
+      if (name === null) continue;
+      if (renames) {
+        for (const [oldRoot, newRoot] of renames) {
+          if (name === oldRoot) name = newRoot;
+          else if (name.startsWith(`${oldRoot}.`)) name = newRoot + name.slice(oldRoot.length);
+        }
+      }
+      const ref = fqIndex.get(name);
+      if (ref && !coSeen.has(ref.tag)) {
+        coSeen.add(ref.tag);
+        coRefs.push(ref);
+      }
+    }
+  }
+
   // ---- strip markers and assemble -----------------------------------------
   for (const root of roots) root.dict.delete(ROOT_MARKER);
 
@@ -584,5 +670,6 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
   if (first.q !== null) acroDict.set(NAME_Q, PDFNumber.of(first.q));
   if (needAppearances) acroDict.set(NAME_NEEDAPPEARANCES, PDFBool.True);
   if (hasSig) acroDict.set(NAME_SIGFLAGS, PDFNumber.of(1));
+  if (coRefs.length > 0) acroDict.set(NAME_CO, output.context.obj(coRefs));
   output.catalog.set(NAME_ACROFORM, output.context.register(acroDict));
 }

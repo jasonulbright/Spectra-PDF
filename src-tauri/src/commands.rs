@@ -297,6 +297,29 @@ pub async fn pick_pem_file(
     }
 }
 
+/// Pick an ICC colour profile — the prepress destination-profile picker
+/// (O6 tail). .icm is the same format under Windows' preferred extension.
+#[tauri::command]
+pub async fn pick_icc_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("ICC colour profile", &["icc", "icm"])
+        .add_filter("All files", &["*"])
+        .blocking_pick_file();
+    match result {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
 /// Pick a folder — Batch OCR's source/destination pickers (Phase 6).
 /// Canonicalized like every other Rust path producer (the M7 path rule).
 #[tauri::command]

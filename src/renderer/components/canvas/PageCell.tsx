@@ -1922,6 +1922,11 @@ function PageCellImpl({
   return (
     <div
       data-page-id={page.id}
+      // P10: the page's natural DISPLAYED extents in PDF points (rotation-
+      // swapped) — the board camera's Actual Size / Fit Width solve their
+      // zoom from these against the cell's world-unit box.
+      data-natural-w={page.rotation === 90 || page.rotation === 270 ? page.height : page.width}
+      data-natural-h={page.rotation === 90 || page.rotation === 270 ? page.width : page.height}
       className={
         'page' +
         (selected ? ' selected' : '') +

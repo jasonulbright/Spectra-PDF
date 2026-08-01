@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pikepdf
 
-from engine.acroform import carry_pure_data_fields, refresh_sig_flags
+from engine.acroform import (
+    carry_doc_form_extras,
+    carry_pure_data_fields,
+    refresh_sig_flags,
+    refuse_if_xfa,
+)
 
 
 def merge(files: list[str], output: str) -> dict:
@@ -28,9 +33,17 @@ def merge(files: list[str], output: str) -> dict:
     with ExitStack() as stack:
         for file_path in files:
             pdf = stack.enter_context(pikepdf.open(file_path))
+            refuse_if_xfa(pdf, file_path, "merging")
             result = merged.add_pages_from(pdf)
             renamed.extend({"from": old, "to": new} for old, new in result.renamed_fields.items())
-            renamed.extend(carry_pure_data_fields(merged, pdf))
+            pure_renames = carry_pure_data_fields(merged, pdf)
+            renamed.extend(pure_renames)
+            # /CO reconciliation must see EVERY rename this source suffered —
+            # add_pages_from's report AND the pure-data carry's (a calc field
+            # can be widget-less).
+            source_renames = dict(result.renamed_fields)
+            source_renames.update({r["from"]: r["to"] for r in pure_renames})
+            carry_doc_form_extras(merged, pdf, source_renames)
             total_pages += result.pages_added
         refresh_sig_flags(merged)
         # Sources stay open through the save — qpdf resolves foreign copies

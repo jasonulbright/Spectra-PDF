@@ -31,18 +31,64 @@ upstream does NOT:
   dropped — its precondition, an unbroken signature, cannot survive page
   surgery.
 
-Deliberate boundary (matching the renderer): document-level form scripts
-(/CO, doc /AA) do not survive these operations — carrying blind references
-through page surgery is worse than dropping them. Field-level keys (incl.
-per-field /AA) travel with the field objects untouched.
+Document-level form behavior (F11, 2026-08-01 — the old "deliberate
+boundary" that dropped these is closed):
+
+- ``carry_doc_form_extras`` — /CO (calculation order) is RECONCILED, not
+  blind-carried: each entry resolves to its fully-qualified field name
+  source-side, follows ``add_pages_from``'s rename report, and re-binds to
+  the destination's copied field object; entries whose field did not
+  survive drop out. The document catalog's /AA (document-action scripts)
+  is document-scoped, not page-scoped — it carries whole, first source
+  with one wins (the /DA//Q first-contributor rule).
+- ``prune_form_to_pages`` reconciles an in-place /CO the same way after
+  pruning (delete's path).
+- ``reattach_acroform`` (the 1:1 gs-regeneration path) carries /CO, the
+  catalog /AA, AND /XFA verbatim — page identity is preserved there, so
+  the XFA packet still agrees with the pages.
+- ``refuse_if_xfa`` — page SURGERY (merge/split/delete, the renderer's
+  commit rebuild) REFUSES XFA documents outright: the XFA template lays
+  out its own pages, so a restructured PDF page tree and a carried-verbatim
+  XFA packet describe two different documents (a reader that honors XFA
+  shows the un-edited layout — silent cross-reader divergence, the worst
+  class). The industry-standard editor refuses page operations on XFA
+  forms for the same reason; a stated refusal beats both silent /XFA loss
+  (the old behavior) and a carried lie. Fill's pure-AcroForm posture
+  (/XFA stripped by pdf-lib, detected and stated) is a separate,
+  unchanged boundary.
+
+Field-level keys (incl. per-field /AA) travel with the field objects
+untouched, as always.
 
 Design: docs/architecture/16-phase2n-canvas-completeness.md § 2n.4(a).
 """
+
+from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 
 MAX_FIELD_DEPTH = 32
+
+
+def has_xfa(pdf: pikepdf.Pdf) -> bool:
+    """Whether the document carries an XFA form packet."""
+    acro = pdf.Root.get("/AcroForm")
+    try:
+        return acro is not None and acro.get("/XFA") is not None
+    except Exception:
+        return False
+
+
+def refuse_if_xfa(pdf: pikepdf.Pdf, path, operation: str) -> None:
+    """Refuse page surgery on an XFA document (module docstring rationale)."""
+    if has_xfa(pdf):
+        raise ValueError(
+            f"{Path(str(path)).name} contains an XML form (XFA). Page "
+            f"operations would detach the form from its pages, so {operation} "
+            "is not available for this document. Fill the form, or flatten "
+            "it with another tool first."
+        )
 
 
 def _fields_of(pdf: pikepdf.Pdf):
@@ -165,6 +211,7 @@ def prune_form_to_pages(pdf: pikepdf.Pdf, kept_indices) -> None:
             acro["/SigFlags"] = 1
         else:
             del acro["/SigFlags"]
+    _reconcile_co_in_place(pdf)
 
 
 def carry_pure_data_fields(dst: pikepdf.Pdf, src: pikepdf.Pdf) -> list[dict]:
@@ -221,6 +268,122 @@ def carry_pure_data_fields(dst: pikepdf.Pdf, src: pikepdf.Pdf) -> list[dict]:
                 taken.add(name)
         dst_fields.append(copied)
     return renamed
+
+
+def _fq_name(node) -> str | None:
+    """Fully-qualified field name: /T segments joined with '.', climbing
+    /Parent. None when no segment carries a /T (nameless — nothing stable to
+    reconcile on)."""
+    parts: list[str] = []
+    seen: set = set()
+    depth = 0
+    while isinstance(node, Dictionary) and depth <= MAX_FIELD_DEPTH:
+        try:
+            og = node.objgen if node.is_indirect else None
+        except Exception:
+            og = None
+        if og is not None:
+            if og in seen:
+                return None  # cyclic /Parent chain — refuse to name it
+            seen.add(og)
+        t = node.get("/T")
+        if t is not None:
+            parts.append(str(t))
+        node = node.get("/Parent")
+        depth += 1
+    if not parts:
+        return None
+    return ".".join(reversed(parts))
+
+
+def _forest_names(pdf: pikepdf.Pdf) -> dict:
+    """FQ name → field object for every node of the /Fields forest (interior
+    nodes included — /CO may legally reference any field with a /C action)."""
+    out: dict = {}
+    fields = _fields_of(pdf)
+    if fields is None:
+        return out
+
+    def walk(node, prefix: str, depth: int) -> None:
+        if depth > MAX_FIELD_DEPTH or not isinstance(node, Dictionary):
+            return
+        t = node.get("/T")
+        name = prefix if t is None else (f"{prefix}.{t}" if prefix else str(t))
+        if name:
+            out.setdefault(name, node)
+        kids = node.get("/Kids")
+        if kids is not None and isinstance(kids, Array):
+            for kid in kids:
+                walk(kid, name, depth + 1)
+
+    for f in fields:
+        walk(f, "", 0)
+    return out
+
+
+def _apply_renames(name: str, renamed: dict) -> str:
+    """Map a source-side FQ name through add_pages_from's rename report. The
+    report renames ROOT names, so a renamed root rewrites every descendant's
+    prefix."""
+    for old, new in renamed.items():
+        if name == old:
+            return new
+        if name.startswith(old + "."):
+            return new + name[len(old):]
+    return name
+
+
+def carry_doc_form_extras(dst: pikepdf.Pdf, src: pikepdf.Pdf, renamed: dict) -> None:
+    """Carry document-level form behavior after an ``add_pages_from`` copy:
+    /CO reconciled by FQ name (module docstring), catalog /AA first-wins.
+    Call per source, in input order, with that source's rename report."""
+    src_acro = src.Root.get("/AcroForm")
+    if src_acro is not None:
+        co = src_acro.get("/CO")
+        if co is not None and isinstance(co, Array) and len(co) > 0:
+            dst_names = _forest_names(dst)
+            resolved = []
+            for entry in co:
+                name = _fq_name(entry)
+                if name is None:
+                    continue
+                target = dst_names.get(_apply_renames(name, renamed))
+                if target is not None:
+                    resolved.append(target)
+            if resolved:
+                dst_acro = dst.Root.get("/AcroForm")
+                if dst_acro is not None:
+                    existing = dst_acro.get("/CO")
+                    if existing is not None and isinstance(existing, Array):
+                        existing.extend(resolved)
+                    else:
+                        dst_acro["/CO"] = Array(resolved)
+    if dst.Root.get("/AA") is None:
+        src_aa = src.Root.get("/AA")
+        if src_aa is not None and isinstance(src_aa, Dictionary):
+            handle = src_aa if src_aa.is_indirect else src.make_indirect(src_aa)
+            dst.Root["/AA"] = dst.copy_foreign(handle)
+
+
+def _reconcile_co_in_place(pdf: pikepdf.Pdf) -> None:
+    """Drop /CO entries whose field no longer sits under the (pruned) /Fields
+    forest; remove an emptied /CO."""
+    acro = pdf.Root.get("/AcroForm")
+    if acro is None:
+        return
+    co = acro.get("/CO")
+    if co is None or not isinstance(co, Array):
+        return
+    live = _forest_names(pdf)
+    keep = []
+    for entry in co:
+        name = _fq_name(entry)
+        if name is not None and live.get(name) is not None:
+            keep.append(entry)
+    if not keep:
+        del acro["/CO"]
+    elif len(keep) != len(co):
+        acro["/CO"] = Array(keep)
 
 
 def refresh_sig_flags(pdf: pikepdf.Pdf) -> None:
@@ -322,16 +485,27 @@ def reattach_acroform(original: pikepdf.Pdf, regenerated: pikepdf.Pdf) -> bool:
 
     acro_src = original.Root["/AcroForm"]
     acro_new = Dictionary(Fields=Array(copied_roots))
-    for key in ("/DA", "/Q", "/DR", "/NeedAppearances", "/SigFlags"):
+    # /CO and /XFA ride the 1:1 path verbatim (F11): copy_foreign caches per
+    # source, so /CO's field refs resolve to the SAME copied field objects the
+    # roots walk produced, and page identity is preserved so the XFA packet
+    # still agrees with the pages (page SURGERY refuses XFA instead — module
+    # docstring).
+    for key in ("/DA", "/Q", "/DR", "/NeedAppearances", "/SigFlags", "/CO", "/XFA"):
         v = acro_src.get(key)
         if v is None:
             continue
-        if isinstance(v, (Dictionary, Array)):
+        if isinstance(v, (Dictionary, Array, pikepdf.Stream)):
             handle = v if v.is_indirect else original.make_indirect(v)
             acro_new[key] = regenerated.copy_foreign(handle)
         else:
             acro_new[key] = v  # scalars (String/int/bool) copy by value
     regenerated.Root["/AcroForm"] = regenerated.make_indirect(acro_new)
+    # The catalog's /AA (document-action scripts) is document-scoped and gs
+    # drops it with everything else — carry it whole (F11).
+    src_aa = original.Root.get("/AA")
+    if src_aa is not None and isinstance(src_aa, Dictionary) and regenerated.Root.get("/AA") is None:
+        handle = src_aa if src_aa.is_indirect else original.make_indirect(src_aa)
+        regenerated.Root["/AA"] = regenerated.copy_foreign(handle)
     return True
 
 

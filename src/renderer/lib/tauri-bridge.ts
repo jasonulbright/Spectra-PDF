@@ -71,6 +71,7 @@ export const dialog = {
     return psDialogInflight;
   },
   pickPemFile: () => invoke<string | null>('pick_pem_file'),
+  pickIccFile: () => invoke<string | null>('pick_icc_file'),
   /** Pick ANY file to embed as a PDF attachment (no extension filter). */
   pickAnyFile: () => invoke<string | null>('pick_any_file'),
   /** Pick MULTIPLE files of any type (portfolio members). Empty if cancelled. */

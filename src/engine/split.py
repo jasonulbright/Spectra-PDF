@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pikepdf
 
-from engine.acroform import carry_pure_data_fields, prune_form_to_pages, refresh_sig_flags
+from engine.acroform import (
+    carry_doc_form_extras,
+    carry_pure_data_fields,
+    prune_form_to_pages,
+    refresh_sig_flags,
+    refuse_if_xfa,
+)
 
 
 def parse_ranges(range_str: str, max_page: int) -> list[int]:
@@ -29,6 +35,7 @@ def split(file: str, ranges: str, output_dir: str) -> dict:
     outputs: list[str] = []
 
     with pikepdf.open(file) as pdf:
+        refuse_if_xfa(pdf, file, "splitting")
         page_indices = parse_ranges(ranges, len(pdf.pages))
         # Prune form-field trees to the kept pages BEFORE copying — a
         # partially-selected multi-widget field would otherwise carry its
@@ -40,9 +47,15 @@ def split(file: str, ranges: str, output_dir: str) -> dict:
         # /AcroForm — a plain pages.append leaves every field orphaned
         # (rendered, dead). Widget-less pure-data fields and /SigFlags are
         # covered by the acroform helpers.
-        result.add_pages_from(pdf, pages=page_indices)
-        carry_pure_data_fields(result, pdf)
+        copy = result.add_pages_from(pdf, pages=page_indices)
+        pure_renames = carry_pure_data_fields(result, pdf)
         refresh_sig_flags(result)
+        # /CO reconciled to the surviving copied fields; catalog /AA carried
+        # whole (F11). Single source, but same-name single-source fields can
+        # still rename — feed both reports.
+        split_renames = dict(copy.renamed_fields)
+        split_renames.update({r["from"]: r["to"] for r in pure_renames})
+        carry_doc_form_extras(result, pdf, split_renames)
 
         out_file = output_path / f"split_{ranges.replace(',', '_')}.pdf"
         result.save(out_file)

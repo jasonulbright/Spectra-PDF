@@ -8,12 +8,19 @@ import pikepdf
 
 
 def check_encrypted(file: str) -> dict:
-    """Check if a PDF requires a password to open."""
-    try:
-        with pikepdf.open(file) as pdf:
-            return {"encrypted": False}
-    except pikepdf.PasswordError:
-        return {"encrypted": True}
+    """Check if a PDF requires credentials to open, and which kind.
+
+    ``kind`` is "password" (standard security handler) or "pubkey"
+    (certificate-encrypted, Adobe.PubSec) — the open funnel routes the
+    prompt on it. F9: pikepdf raises a generic PdfError for Adobe.PubSec,
+    so the classification lives in pubkey_crypt.classify_encryption.
+    """
+    from engine.pubkey_crypt import classify_encryption
+
+    kind = classify_encryption(file)
+    if kind == "none":
+        return {"encrypted": False}
+    return {"encrypted": True, "kind": kind}
 
 
 def unlock(file: str, password: str) -> dict:
