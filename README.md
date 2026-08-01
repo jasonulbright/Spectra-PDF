@@ -79,7 +79,12 @@ spectrapdf delete input.pdf -o trimmed.pdf --pages 3,7
 
 # Print — to any installed Windows printer, via the bundled Ghostscript
 spectrapdf printers                       # list printers (JSON, with the default)
+spectrapdf printers --capabilities "Brother HL-L2400D"   # papers/duplex/colour as JSON
 spectrapdf print input.pdf --printer "Brother HL-L2400D" --pages 1-3 --copies 2 --fit fit
+# full option surface: --subset odd|even --reverse --no-collate --duplex long|short|simplex
+#   --paper <id> --orientation portrait|landscape --color gray --comments document|stamps
+#   --as-image --image-dpi 300 --layout nup|booklet|poster (each with its own flags; see --help)
+spectrapdf print big-drawing.pdf --printer "Brother HL-L2400D" --layout poster --poster-scale 200 --poster-cut-marks
 
 # Create PDF from PostScript/EPS (distill)
 spectrapdf distill input.ps -o output.pdf --preset printer
@@ -275,7 +280,7 @@ spectrapdf/
 │   │   ├── lib.rs             # App setup, tray, single-instance, events
 │   │   ├── cli.rs             # CLI arg parsing, headless engine, batch mode
 │   │   ├── commands.rs        # IPC command handlers (dialogs, paths, printers…)
-│   │   ├── printers.rs        # winspool printer enumeration
+│   │   ├── printers.rs        # winspool printer enumeration + capabilities
 │   │   └── engine.rs          # Python sidecar lifecycle
 │   ├── tauri.conf.json        # Tauri config, NSIS, resources, plugins
 │   └── nsis-hooks.nsh         # Context menu, registry, enterprise policy

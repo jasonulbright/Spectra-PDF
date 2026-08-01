@@ -1,21 +1,98 @@
-// Print parameter assembly + range validation (M-P, § 3.4). Pure, so the
-// wire contract the dialog sends is unit-testable: the engine's `print_pdf`
+// Print parameter assembly + validation (M-P + O2). Pure, so the wire
+// contract the dialog sends is unit-testable: the engine's `print_pdf`
 // accepts exactly these keys, and `tests/print-params.test.ts` pins them —
 // a renamed key here would otherwise only surface as every print failing
-// with an unexpected-argument error at run time.
+// with an unexpected-argument error at run time. The Python side pins the
+// same set from its signature (TestPrintPdf.test_wire_contract...).
 
-export const MAX_COPIES = 99;
+export const MAX_COPIES = 999;
 
-export type FitMode = 'fit' | 'actual';
+export type FitMode = 'fit' | 'actual' | 'scale';
+export type PageSubset = 'all' | 'odd' | 'even';
+export type DuplexMode = 'printer' | 'simplex' | 'long' | 'short';
+export type OrientationMode = 'auto' | 'portrait' | 'landscape';
+export type ColorMode = 'printer' | 'color' | 'gray';
+export type AnnotsMode = 'all' | 'document' | 'stamps';
+export type PrintLayout = 'single' | 'nup' | 'booklet' | 'poster';
+export type NupOrder =
+  | 'horizontal'
+  | 'horizontal-reversed'
+  | 'vertical'
+  | 'vertical-reversed';
+export type BookletSubset = 'both' | 'front' | 'back';
+export type BookletBinding = 'left' | 'right';
 
-export interface PrintParams extends Record<string, unknown> {
+export const IMAGE_DPI_CHOICES = [150, 300, 600] as const;
+
+export interface PrintOptions {
   file: string;
   printer: string;
-  gs_path: string;
-  /** Normalized range like "1-3,5"; empty string = all pages. */
+  gsPath: string;
   pages: string;
   copies: number;
+  collate: boolean;
+  subset: PageSubset;
+  reverse: boolean;
   fit: FitMode;
+  scalePercent: number;
+  duplex: DuplexMode;
+  /** DMPAPER id, null = printer default. */
+  paper: number | null;
+  orientation: OrientationMode;
+  color: ColorMode;
+  annots: AnnotsMode;
+  asImage: boolean;
+  imageDpi: number;
+  layout: PrintLayout;
+  nupRows: number;
+  nupCols: number;
+  nupOrder: NupOrder;
+  nupBorder: boolean;
+  nupAutoRotate: boolean;
+  bookletSubset: BookletSubset;
+  bookletBinding: BookletBinding;
+  posterScale: number;
+  posterOverlap: number;
+  posterCutMarks: boolean;
+  posterLabels: boolean;
+  /** Portrait paper size in points — required by the layout modes and
+   *  custom scale; resolved from the printer's capability report. */
+  sheetWidth: number | null;
+  sheetHeight: number | null;
+}
+
+/** The dialog's initial state: every option at its engine default. */
+export function defaultPrintOptions(): Omit<PrintOptions, 'file' | 'printer' | 'gsPath'> {
+  return {
+    pages: '',
+    copies: 1,
+    collate: true,
+    subset: 'all',
+    reverse: false,
+    fit: 'fit',
+    scalePercent: 100,
+    duplex: 'printer',
+    paper: null,
+    orientation: 'auto',
+    color: 'printer',
+    annots: 'all',
+    asImage: false,
+    imageDpi: 300,
+    layout: 'single',
+    nupRows: 2,
+    nupCols: 2,
+    nupOrder: 'horizontal',
+    nupBorder: false,
+    nupAutoRotate: true,
+    bookletSubset: 'both',
+    bookletBinding: 'left',
+    posterScale: 100,
+    posterOverlap: 0,
+    posterCutMarks: false,
+    posterLabels: false,
+    sheetWidth: null,
+    sheetHeight: null,
+  };
 }
 
 /**
@@ -47,7 +124,7 @@ export function normalizePageRange(spec: string): string {
   return spec.replace(/\s+/g, '');
 }
 
-/** Copies must be a whole number 1..99; returns an error message or null. */
+/** Copies must be a whole number 1..999; returns an error message or null. */
 export function copiesError(raw: string): string | null {
   if (!/^\d+$/.test(raw.trim())) return 'Copies must be a whole number';
   const n = Number(raw.trim());
@@ -55,15 +132,54 @@ export function copiesError(raw: string): string | null {
   return null;
 }
 
-export function buildPrintParams(opts: {
+/** Custom scale 1..1000 percent. */
+export function scaleError(raw: string): string | null {
+  const n = Number(raw.trim());
+  if (!Number.isFinite(n) || raw.trim() === '') return 'Scale must be a number';
+  if (n < 1 || n > 1000) return 'Scale must be between 1 and 1000 percent';
+  return null;
+}
+
+/** Poster tile scale 1..2000 percent. */
+export function posterScaleError(raw: string): string | null {
+  const n = Number(raw.trim());
+  if (!Number.isFinite(n) || raw.trim() === '') return 'Tile scale must be a number';
+  if (n < 1 || n > 2000) return 'Tile scale must be between 1 and 2000 percent';
+  return null;
+}
+
+/** Poster overlap in points, 0..half the smaller sheet edge. */
+export function posterOverlapError(
+  raw: string,
+  sheetWidth: number | null,
+  sheetHeight: number | null,
+): string | null {
+  const n = Number(raw.trim());
+  if (!Number.isFinite(n) || raw.trim() === '') return 'Overlap must be a number';
+  if (n < 0) return 'Overlap cannot be negative';
+  if (sheetWidth !== null && sheetHeight !== null && n >= Math.min(sheetWidth, sheetHeight) / 2) {
+    return 'Overlap must be smaller than half the paper';
+  }
+  return null;
+}
+
+/** The engine wire object — snake_case keys exactly matching print_pdf. */
+export interface PrintParams extends Record<string, unknown> {
   file: string;
   printer: string;
-  gsPath: string;
+  gs_path: string;
   pages: string;
   copies: number;
   fit: FitMode;
-}): PrintParams {
-  return {
+}
+
+/**
+ * Assemble the engine call. Defaulted options are OMITTED so the wire stays
+ * minimal and the engine's own defaults are the single source of truth —
+ * the pinned exception being the six original keys, always present.
+ */
+export function buildPrintParams(opts: PrintOptions): PrintParams {
+  const p: PrintParams = {
     file: opts.file,
     printer: opts.printer,
     gs_path: opts.gsPath,
@@ -71,4 +187,40 @@ export function buildPrintParams(opts: {
     copies: opts.copies,
     fit: opts.fit,
   };
+  if (!opts.collate) p.collate = false;
+  if (opts.subset !== 'all') p.subset = opts.subset;
+  if (opts.reverse) p.reverse = true;
+  if (opts.fit === 'scale') p.scale_percent = opts.scalePercent;
+  if (opts.duplex !== 'printer') p.duplex = opts.duplex;
+  if (opts.paper !== null) p.paper = opts.paper;
+  if (opts.orientation !== 'auto') p.orientation = opts.orientation;
+  if (opts.color !== 'printer') p.color = opts.color;
+  if (opts.annots !== 'all') p.annots = opts.annots;
+  if (opts.asImage) {
+    p.as_image = true;
+    p.image_dpi = opts.imageDpi;
+  }
+  if (opts.layout !== 'single') p.layout = opts.layout;
+  if (opts.layout === 'nup') {
+    p.nup_rows = opts.nupRows;
+    p.nup_cols = opts.nupCols;
+    p.nup_order = opts.nupOrder;
+    p.nup_border = opts.nupBorder;
+    p.nup_auto_rotate = opts.nupAutoRotate;
+  }
+  if (opts.layout === 'booklet') {
+    p.booklet_subset = opts.bookletSubset;
+    p.booklet_binding = opts.bookletBinding;
+  }
+  if (opts.layout === 'poster') {
+    p.poster_scale = opts.posterScale;
+    p.poster_overlap = opts.posterOverlap;
+    p.poster_cut_marks = opts.posterCutMarks;
+    p.poster_labels = opts.posterLabels;
+  }
+  if (opts.layout !== 'single' || opts.fit === 'scale') {
+    if (opts.sheetWidth !== null) p.sheet_width = opts.sheetWidth;
+    if (opts.sheetHeight !== null) p.sheet_height = opts.sheetHeight;
+  }
+  return p;
 }

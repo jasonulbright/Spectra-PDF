@@ -114,6 +114,7 @@ pub fn run() {
             commands::get_soffice_path,
             commands::get_edit_font_path,
             commands::list_printers,
+            commands::printer_capabilities,
             commands::canonicalize_paths,
             commands::portfolio_member_dir,
             commands::open_portfolio_member_file,
