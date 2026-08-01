@@ -158,3 +158,49 @@ class TestDistill:
         out = os.path.join(tmp_dir, "hostile.pdf")
         with pytest.raises(RuntimeError, match="Ghostscript"):
             distill(src, out, gs_path=gs_path)
+
+
+# O8: Distiller-style form-field pdfmarks. gs lands the /ANN Widget
+# annotations with field keys intact but never writes /AcroForm — the
+# distill op ADOPTS them (engine/acroform.adopt_orphan_widget_fields).
+FORMS_PS_FIXTURE = b"""%!PS-Adobe-3.0
+/pdfmark where { pop } { userdict /pdfmark /cleartomark load put } ifelse
+/Helvetica findfont 14 scalefont setfont
+72 700 moveto (Form probe) show
+[ /Rect [72 600 300 630] /Subtype /Widget /T (name-field) /FT /Tx
+  /V (typed in PostScript) /DA (/Helv 0 Tf 0 g) /F 4 /ANN pdfmark
+[ /Rect [72 540 92 560] /Subtype /Widget /T (agree) /FT /Btn
+  /V /Off /AS /Off /F 4 /ANN pdfmark
+showpage
+%%EOF
+"""
+
+
+class TestDistillForms:
+    def test_pdfmark_fields_adopt_and_fill(self, tmp_dir, gs_path):
+        from engine.forms import fill_form_fields, read_form_fields
+
+        src = _write(tmp_dir, "form.ps", FORMS_PS_FIXTURE)
+        out = os.path.join(tmp_dir, "form.pdf")
+        r = distill(src, out, gs_path=gs_path)
+        assert r["form_fields_adopted"] == 2
+        with pikepdf.open(out) as pdf:
+            acro = pdf.Root["/AcroForm"]
+            assert len(acro["/Fields"]) == 2
+            assert acro.get("/NeedAppearances") == True  # noqa: E712 — pikepdf bool
+        by_name = {f["name"]: f for f in read_form_fields(out)["fields"]}
+        assert by_name["name-field"]["value"] == "typed in PostScript"
+        assert by_name["agree"]["type"] == "checkbox"
+        # The adopted form is a REAL form: a fill round-trips.
+        filled = os.path.join(tmp_dir, "filled.pdf")
+        fill_form_fields(out, filled, {"name-field": "edited after distill"})
+        refreshed = {f["name"]: f for f in read_form_fields(filled)["fields"]}
+        assert refreshed["name-field"]["value"] == "edited after distill"
+
+    def test_formless_ps_gains_no_acroform(self, tmp_dir, gs_path):
+        src = _write(tmp_dir, "plain.ps", PS_FIXTURE)
+        out = os.path.join(tmp_dir, "plain.pdf")
+        r = distill(src, out, gs_path=gs_path)
+        assert "form_fields_adopted" not in r
+        with pikepdf.open(out) as pdf:
+            assert pdf.Root.get("/AcroForm") is None
