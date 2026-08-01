@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.8 — Style the spans, read every script
+
+Added text gains per-selection styling, Chinese, Japanese and Korean text
+becomes fully writable, and a high-contrast theme joins the app.
+
+### Text
+- **Style parts of added text.** Select any part of the text in the Add
+  Text card and give it its own size, colour, bold, or italic — mixed
+  sizes lay out with correct line heights, and the fit indicator measures
+  exactly what will be drawn.
+- **Chinese, Japanese, Korean.** Text in CJK scripts can now be added,
+  edited, and filled into forms. A CJK-capable font ships with the app
+  and steps in exactly when the standard fonts can't express the text —
+  never otherwise. Mixed CJK-and-Latin strings stay in one font.
+
+### Accessibility
+- **High-contrast theme.** Settings ▸ Theme gains a high-contrast option:
+  black backgrounds, full-white text, bright accents, and strong gold
+  focus outlines — applied from the first frame, with document pages
+  left exactly as the file renders them.
+
 ## 1.0.7 — Every font edits, every image too
 
 The last font-format refusals fall, inline images join the image tools,
