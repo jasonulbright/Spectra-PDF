@@ -113,6 +113,19 @@ License text shipped at: `resources/fonts/LICENSE-Libertinus-OFL.txt` (vendored
 hash-pinned from the same pinned release as the faces; upstream copy:
 <https://github.com/alerque/libertinus/blob/master/OFL.txt>)
 
+**Noto Sans CJK SC** (Regular, Bold) —
+© Adobe (as Source Han Sans) / Google, licensed under the **SIL Open Font
+License 1.1**. Bundled (vendored by `scripts/sync-edit-fonts.ps1`,
+hash-pinned from the `Sans2.004` release of
+<https://github.com/notofonts/noto-cjk>) as the **CJK-capable** fallback
+face: text the Liberation families cannot express — CJK ideographs, kana,
+hangul, and their astral-plane extensions — is authored, edited, and
+form-filled through these faces instead of being refused. The switch is
+text-driven and never substitutes for text Liberation already covers.
+License text shipped at: `resources/fonts/LICENSE-NotoCJK.txt` (vendored
+hash-pinned from the same tagged tree; upstream copy:
+<https://github.com/notofonts/noto-cjk/blob/main/LICENSE>)
+
 ## OCR — Tesseract + language data
 
 - **Tesseract OCR** — **Apache-2.0** — <https://github.com/tesseract-ocr/tesseract>
