@@ -71,6 +71,12 @@ export interface EditParagraph {
    * but REFUSE substitution restyles and convert — the bundled faces are
    * horizontal — so the editor disables those controls. */
   vertical: boolean;
+  /** 9.T3: the paragraph's bidi base direction. The page draws right-to-left
+   * text in VISUAL order (a PDF pen only moves one way); the engine
+   * normalizes it to logical order for editing, so the textarea must be told
+   * which way to read — caret motion, selection and typing all follow `dir`,
+   * and an RTL paragraph edited in an LTR box is unusable. */
+  rtl: boolean;
   /** 9.A5c: the distinct font sizes among the paragraph's member runs
    * (rounded points) — a per-span size bump surfaces here (a mixed-size
    * paragraph lists more than one). */
@@ -180,6 +186,8 @@ interface EngineParagraphListing {
     bold: boolean;
     italic: boolean;
     vertical?: boolean;
+    /** 9.T3: base direction is right-to-left. */
+    rtl?: boolean;
     /** 9-§I.0-S8: EVERY member clipped away → the paragraph is invisible.
      * Skipped below (not offered as editable); its runs, all clipped, are
      * filtered from the run-box fallback too. */
@@ -253,6 +261,7 @@ export async function fetchEditTextListing(
       bold: Boolean(p.bold),
       italic: Boolean(p.italic),
       vertical: Boolean(p.vertical),
+      rtl: Boolean(p.rtl),
       runSizes: Array.from(
         new Set(
           p.runs

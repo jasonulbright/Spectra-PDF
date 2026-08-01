@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { engine, dialog } from '../lib/tauri-bridge';
 import { runCommitGate } from '../lib/commit-gate';
+import { lockKeysFor, withFileLock } from '../lib/engine-lock';
 import { useOperationQueue, isTrackableMethod, getFriendlyName } from './useOperationQueue';
 
 interface PendingRequest {
@@ -118,7 +119,16 @@ export function useEngine() {
       // A gate failure rejects here, so the operation aborts instead of
       // running against bytes that don't match what the user sees.
       await runCommitGate();
-      return track(getFriendlyName(method, params), () => rawCall(method, params)) as Promise<EngineResult>;
+      // P17: the gate runs OUTSIDE the lock, deliberately — it writes files
+      // itself, so gating from inside would have this operation wait on a
+      // commit that is waiting on this operation. Once the gate is clear,
+      // the call serializes against any other operation naming the same
+      // file: two whole-file rewrites of one path each write a temp and
+      // rename, so without this the later rename silently wins and the
+      // earlier operation's work is gone with no error anywhere.
+      return withFileLock(lockKeysFor(params), () =>
+        track(getFriendlyName(method, params), () => rawCall(method, params)),
+      ) as Promise<EngineResult>;
     }
     return rawCall(method, params);
   }, [rawCall, track]);

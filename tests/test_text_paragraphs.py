@@ -161,6 +161,26 @@ def _hebrew(pdf) -> pikepdf.Object:
     )
 
 
+def _hebrew3(pdf) -> pikepdf.Object:
+    """Simple font mapping 'A'/'B'/'C' to א/ב/ג — three distinct strong-RTL
+    letters, so a reordering is observable rather than a no-op."""
+    tounicode = (
+        b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
+        b"1 begincodespacerange <00> <ff> endcodespacerange\n"
+        b"3 beginbfchar <41> <05D0> <42> <05D1> <43> <05D2> endbfchar\n"
+        b"endcmap end end\n"
+    )
+    return pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/TrueType"),
+            BaseFont=Name("/Helvetica"),
+            Encoding=Name("/WinAnsiEncoding"),
+            ToUnicode=pdf.make_stream(tounicode),
+        )
+    )
+
+
 def _identity_v(pdf, mapping: dict[int, str], w2: list) -> pikepdf.Object:
     """Identity-V + ToUnicode + /W2 — the 9.B4a vertical-run producer."""
     from tests.test_pdf_fonts import _tounicode_stream
@@ -469,7 +489,10 @@ class TestGrouping:
         assert paras[0]["editable"] is False
         assert "Type3" in paras[0]["reason"]
 
-    def test_rtl_text_refuses_reflow(self, tmp_dir):
+    def test_rtl_text_reflows(self, tmp_dir):
+        # 9.T3 INVERTED: this pinned "right-to-left text does not reflow"
+        # from Phase 7.5 until 2026-08-01. RTL now reorders through UAX #9,
+        # so the paragraph is editable and reports its base direction.
         src = os.path.join(tmp_dir, "rtl.pdf")
         pdf = pikepdf.new()
         _page(pdf, b"BT /F1 12 Tf 72 700 Td (A) Tj ET", {"/F1": _hebrew(pdf)})
@@ -477,8 +500,29 @@ class TestGrouping:
         pdf.close()
         paras = _paras(src)
         assert len(paras) == 1
-        assert paras[0]["editable"] is False
-        assert "right-to-left" in paras[0]["reason"]
+        assert paras[0]["editable"] is True
+        assert paras[0]["reason"] is None
+        assert paras[0]["rtl"] is True
+        assert paras[0]["bidi"] is True
+
+    def test_rtl_line_lists_in_logical_order(self, tmp_dir):
+        # The page draws Hebrew LEFT TO RIGHT (that is the only direction a
+        # PDF pen moves), so 'A','B','C' on the page spell א,ב,ג in visual
+        # order — whose logical order is the reverse.
+        src = os.path.join(tmp_dir, "rtl-order.pdf")
+        pdf = pikepdf.new()
+        _page(pdf, b"BT /F1 12 Tf 72 700 Td (ABC) Tj ET", {"/F1": _hebrew3(pdf)})
+        pdf.save(src)
+        pdf.close()
+        para = _paras(src)[0]
+        assert para["text"] == "גבא"  # ג ב א — reading order
+        assert para["rtl"] is True
+
+    def test_ltr_paragraph_is_not_marked_bidi(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello world) Tj ET")
+        para = _paras(src)[0]
+        assert para["bidi"] is False
+        assert para["rtl"] is False
 
 
 class TestReplaceParagraphText:
@@ -738,8 +782,16 @@ class TestReplaceParagraphText:
         pdf.close()
         out = os.path.join(tmp_dir, "o.pdf")
         para = _paras(src)[0]
-        with pytest.raises(ValueError, match="right-to-left"):
-            _apply(src, out, para, "B")
+        # 9.T3 INVERTED: the RTL refusal is gone, so this reflows. What still
+        # refuses — with a reason, which is what this test is for — is an
+        # explicit directional-formatting code. It never reaches the layout's
+        # own X9 guard, because no font can encode one: the character
+        # refusal is the outer of two honest gates and fires first.
+        _apply(src, out, para, "א")
+        assert _paras(out)[0]["text"] == "א"
+        out2 = os.path.join(tmp_dir, "o2.pdf")
+        with pytest.raises(ValueError, match="cannot"):
+            _apply(src, out2, para, "‮א")
 
     def test_unencodable_without_convert_names_the_char(self, tmp_dir):
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello world) Tj ET")

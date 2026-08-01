@@ -3896,6 +3896,13 @@ function ParagraphEditor({
           aria-multiline="true"
           aria-label="Paragraph text"
           spellCheck={false}
+          /* 9.T3: the engine hands back LOGICAL (reading) order for a
+             right-to-left paragraph, so the box has to read that way too —
+             `dir` is what puts the caret, the selection, Home/End and the
+             typing direction the right way round. Explicit "ltr" rather
+             than absent: the editor sits inside the app shell, and letting
+             an LTR paragraph inherit a direction would be a different bug. */
+          dir={para.rtl ? 'rtl' : 'ltr'}
           style={{
             fontSize: `${fontPx}px`,
             lineHeight: 1.25,

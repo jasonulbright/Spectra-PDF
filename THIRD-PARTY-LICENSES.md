@@ -75,6 +75,7 @@ below were read from those wheels' METADATA):
 | pyhanko-certvalidator | MIT | <https://github.com/MatthiasValvekens/pyHanko/tree/master/pkgs/pyhanko-certvalidator> |
 | requests | Apache-2.0 (its NOTICE file ships in its dist-info) | <https://github.com/psf/requests> |
 | tzdata | Apache-2.0 | <https://github.com/python/tzdata> |
+| uharfbuzz | Apache-2.0 (embeds HarfBuzz, MIT-0) | <https://github.com/harfbuzz/uharfbuzz> |
 | tzlocal | MIT | <https://github.com/regebro/tzlocal> |
 | uritools | MIT | <https://github.com/tkem/uritools> |
 | urllib3 | MIT | <https://github.com/urllib3/urllib3> |
@@ -125,6 +126,30 @@ text-driven and never substitutes for text Liberation already covers.
 License text shipped at: `resources/fonts/LICENSE-NotoCJK.txt` (vendored
 hash-pinned from the same tagged tree; upstream copy:
 <https://github.com/notofonts/noto-cjk/blob/main/LICENSE>)
+
+**IBM Plex Sans Arabic** (Regular, Bold) —
+© IBM Corp., licensed under the **SIL Open Font License 1.1**. Bundled
+(vendored by `scripts/sync-edit-fonts.ps1`, hash-pinned from the
+`@ibm/plex-sans-arabic@1.1.0` release of <https://github.com/IBM/plex>)
+as the **shaping** face for right-to-left reflow: a PDF's own Arabic
+subset has committed to final glyph ids and keeps neither the cmap nor
+the OpenType joining rules needed to re-form them, so an edited Arabic
+paragraph is re-shaped and re-embedded through this face.
+License text shipped at: `resources/fonts/LICENSE-IBMPlexArabic-OFL.txt`
+(vendored hash-pinned from the same release; upstream copy:
+<https://github.com/IBM/plex/blob/master/LICENSE.txt>)
+
+**Noto Sans Hebrew** (Regular, Bold) —
+© Google, licensed under the **SIL Open Font License 1.1**. Bundled
+(vendored by `scripts/sync-edit-fonts.ps1`, hash-pinned from the
+`NotoSansHebrew-v3.001` release of
+<https://github.com/notofonts/hebrew>) as the right-to-left **coverage**
+face: Hebrew joins nothing, so it needs no shaping — this face exists so
+Hebrew text the Liberation families cannot express still edits instead of
+being refused.
+License text shipped at: `resources/fonts/LICENSE-NotoHebrew-OFL.txt`
+(vendored hash-pinned from the same release; upstream copy:
+<https://github.com/notofonts/hebrew/blob/main/OFL.txt>)
 
 ## OCR — Tesseract + language data
 

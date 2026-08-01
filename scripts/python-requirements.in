@@ -15,3 +15,9 @@ fonttools==4.63.0
 # F3 PKCS#11 token signing: pyHanko's pkcs11 arm needs python-pkcs11
 # (MIT; import name `pkcs11`). Wheel available for the embedded CPython.
 python-pkcs11==0.9.5
+# 9.T3 right-to-left reflow: HarfBuzz (Apache-2.0) shapes cursively joining
+# scripts. A PDF viewer never shapes -- the content stream carries final
+# glyph choices -- so re-emitting Arabic per character draws every letter in
+# its isolated form. The bidi half is engine/bidi.py, ours, because the
+# reflow needs the reordering PERMUTATION and no binding exposes it.
+uharfbuzz==0.56.0
