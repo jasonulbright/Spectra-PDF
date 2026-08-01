@@ -516,10 +516,24 @@ describe('AcroForm flags and boundaries', () => {
     return new TextEncoder().encode(body + xref + trailer);
   }
 
-  it('drops /XFA (pure-AcroForm posture) but carries /NeedAppearances', async () => {
-    const rebuilt = await buildPdf(pagesOf(rawFormWithXfaAndNeedAppearances(), 'a', [0]));
+  it('F11 INVERSION — an XFA document REFUSES the rebuild instead of silently dropping the packet', async () => {
+    // This pinned the old behavior: rebuild anyway, /XFA silently gone. A
+    // restructured page tree and a carried XFA packet describe two different
+    // documents, so the honest move — and the industry-standard editor's —
+    // is refusing page surgery on XFA forms outright.
+    await expect(
+      buildPdf(pagesOf(rawFormWithXfaAndNeedAppearances(), 'a', [0])),
+    ).rejects.toThrow(/XML form/);
+  });
+
+  it('carries /NeedAppearances through a rebuild (non-XFA raw form)', async () => {
+    const bytes = rawFormWithXfaAndNeedAppearances();
+    // Strip the XFA packet so the same raw fixture exercises the carry path.
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const srcAcro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
+    srcAcro.delete(PDFName.of('XFA'));
+    const rebuilt = await buildPdf(pagesOf(await doc.save(), 'a', [0]));
     const acro = (await acroFormDictOf(rebuilt))!;
-    expect(acro.get(PDFName.of('XFA'))).toBeUndefined();
     expect(acro.get(PDFName.of('NeedAppearances'))).toBe(PDFBool.True);
     const m = await fieldMap(rebuilt);
     expect(m.get('raw-field')).toMatchObject({ type: 'text', value: 'raw-value' });
@@ -582,5 +596,100 @@ describe('AcroForm flags and boundaries', () => {
     const m = await fieldMap(rebuilt);
     expect(m.has('real')).toBe(true);
     expect(m.has('orphan')).toBe(false);
+  });
+});
+
+// ── F11: /CO reconciliation and the XFA refusal ─────────────────────────────
+
+// Decorate a pdf-lib-authored form with /CO listing the given root names (in
+// that order) plus a per-field calculation /AA — pdf-lib's high-level API
+// can't author either.
+async function withCalcOrder(bytes: Uint8Array, names: string[]): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
+  const fields = acro.lookup(PDFName.of('Fields'), PDFArray);
+  const byName = new Map<string, PDFRef>();
+  for (let i = 0; i < fields.size(); i++) {
+    const ref = fields.get(i);
+    if (!(ref instanceof PDFRef)) continue;
+    const d = doc.context.lookup(ref);
+    if (!(d instanceof PDFDict)) continue;
+    const t = d.get(PDFName.of('T'));
+    if (t instanceof PDFString || t instanceof PDFHexString) {
+      byName.set(t.decodeText(), ref);
+      const calc = doc.context.obj({}) as PDFDict;
+      const c = doc.context.obj({}) as PDFDict;
+      c.set(PDFName.of('S'), PDFName.of('JavaScript'));
+      c.set(PDFName.of('JS'), PDFHexString.fromText("AFSimple_Calculate('SUM');"));
+      calc.set(PDFName.of('C'), c);
+      d.set(PDFName.of('AA'), calc);
+    }
+  }
+  acro.set(
+    PDFName.of('CO'),
+    doc.context.obj(names.map((n) => byName.get(n)!)),
+  );
+  return doc.save();
+}
+
+async function withXfaPacket(bytes: Uint8Array): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
+  acro.set(
+    PDFName.of('XFA'),
+    doc.context.obj([PDFHexString.fromText('template'), PDFHexString.fromText('<template/>')]),
+  );
+  return doc.save();
+}
+
+// FQ names of the rebuilt /CO entries, climbing /Parent.
+async function coNamesOf(bytes: Uint8Array): Promise<string[]> {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  const co = acro?.lookupMaybe(PDFName.of('CO'), PDFArray);
+  if (!co) return [];
+  const names: string[] = [];
+  for (let i = 0; i < co.size(); i++) {
+    let d = co.get(i) instanceof PDFRef ? doc.context.lookup(co.get(i)) : co.get(i);
+    const parts: string[] = [];
+    for (let depth = 0; d instanceof PDFDict && depth < 32; depth++) {
+      const t = d.get(PDFName.of('T'));
+      if (t instanceof PDFString || t instanceof PDFHexString) parts.unshift(t.decodeText());
+      const parent = d.get(PDFName.of('Parent'));
+      d = parent instanceof PDFRef ? doc.context.lookup(parent) : parent;
+    }
+    names.push(parts.join('.'));
+  }
+  return names;
+}
+
+describe('F11 — document-level form behavior', () => {
+  it('carries /CO through a full rebuild, order preserved, refs re-bound', async () => {
+    const src = await withCalcOrder(await makeMultiPageForm(), ['only-p2', 'title']);
+    const rebuilt = await buildPdf(pagesOf(src, 'a', [0, 1, 2]));
+    expect(await coNamesOf(rebuilt)).toEqual(['only-p2', 'title']);
+  });
+
+  it('drops /CO entries whose field did not survive the page subset', async () => {
+    const src = await withCalcOrder(await makeMultiPageForm(), ['only-p2', 'title']);
+    // Keep pages 0-1: 'only-p2' (page 2 only) dies, 'title' survives.
+    const rebuilt = await buildPdf(pagesOf(src, 'a', [0, 1]));
+    expect(await coNamesOf(rebuilt)).toEqual(['title']);
+  });
+
+  it('follows cross-source collision renames', async () => {
+    const src = await withCalcOrder(await makeMultiPageForm(), ['title']);
+    // Same bytes twice under two source keys: the second source's roots all
+    // rename (+1); its /CO entry must follow to the RENAMED field.
+    const rebuilt = await buildPdf([
+      ...pagesOf(src, 'a', [0]),
+      ...pagesOf(src, 'b', [0]),
+    ]);
+    expect(await coNamesOf(rebuilt)).toEqual(['title', 'title+1']);
+  });
+
+  it('REFUSES the rebuild outright for an XFA document', async () => {
+    const src = await withXfaPacket(await makeMultiPageForm());
+    await expect(buildPdf(pagesOf(src, 'a', [0, 1, 2]))).rejects.toThrow(/XML form/);
   });
 });

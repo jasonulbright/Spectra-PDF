@@ -39,6 +39,14 @@ export interface EngineResult {
   level: string;
   encryption: string;
   encrypted: boolean;
+  /** check_encrypted (F9): which credentials open it — "password" | "pubkey". */
+  kind: string;
+  /** encrypt_pubkey: how many recipient certificates the file is locked to. */
+  recipients: number;
+  /** convert_pdfx (O6): the GTS version string the output actually carries. */
+  pdfx_version: string;
+  /** convert_pdfx: whether the output intent embeds a destination profile. */
+  embedded_profile: boolean;
   has_user_password: boolean;
   recovered: number;
   total_pages: number;

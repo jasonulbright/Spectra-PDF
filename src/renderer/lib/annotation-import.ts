@@ -20,7 +20,6 @@ import type { PDFPageProxy } from 'pdfjs-dist';
 import type { ImportedAnnotationFingerprint, PageAnnotation, TextMarkupType } from '../state/types';
 import { pdfPointToDisplay, pdfRectToDisplay } from './pdfx-build';
 import { takeRawStyle, type RawAnnotStyle } from './annotation-raw-style';
-import { paddedPointsBbox } from './annotation-manipulation';
 
 type ImportedSubtype = ImportedAnnotationFingerprint['subtype'];
 

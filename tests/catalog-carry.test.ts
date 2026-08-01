@@ -237,3 +237,50 @@ describe('catalog carry — own-source only', () => {
     expect(out.catalog.get(N('Lang'))).toBeUndefined();
   });
 });
+
+// ── F11: document actions (/AA) ─────────────────────────────────────────────
+
+async function withDocActions(bytes: Uint8Array, opts?: { gotoPage?: boolean }): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const js = doc.context.obj({}) as PDFDict;
+  js.set(N('S'), N('JavaScript'));
+  js.set(N('JS'), PDFHexString.fromText("app.alert('closing');"));
+  const aa = doc.context.obj({}) as PDFDict;
+  aa.set(N('WC'), js);
+  if (opts?.gotoPage) {
+    // A /Next chain ending in a GoTo whose destination references a PAGE —
+    // the copier-hazard shape the carry must refuse.
+    const dest = doc.context.obj([doc.getPage(0).ref, N('Fit')]);
+    const gotoAction = doc.context.obj({}) as PDFDict;
+    gotoAction.set(N('S'), N('GoTo'));
+    gotoAction.set(N('D'), dest);
+    js.set(N('Next'), gotoAction);
+  }
+  doc.catalog.set(N('AA'), doc.context.register(aa));
+  return doc.save();
+}
+
+describe('catalog carry — /AA document actions (F11)', () => {
+  it('carries the own document\'s /AA whole', async () => {
+    const src = await withDocActions(await plainSource());
+    const out = await rebuild([pageOf(src, 0)]);
+    const aa = out.catalog.lookupMaybe(N('AA'), PDFDict);
+    expect(aa).toBeDefined();
+    const wc = aa!.lookupMaybe(N('WC'), PDFDict);
+    expect(text(wc!.lookup(N('JS')))).toBe("app.alert('closing');");
+  });
+
+  it("a donor's /AA is not imported (own-source only)", async () => {
+    const own = await plainSource();
+    const donor = await withDocActions(await plainSource());
+    const out = await rebuild([pageOf(own, 0), pageOf(donor, 0, 'donor')]);
+    expect(out.catalog.get(N('AA'))).toBeUndefined();
+  });
+
+  it('an /AA chain that reaches a page drops instead of dragging a page copy', async () => {
+    const src = await withDocActions(await plainSource(), { gotoPage: true });
+    const out = await rebuild([pageOf(src, 0)]);
+    expect(out.catalog.get(N('AA'))).toBeUndefined();
+    expect(out.getPageCount()).toBe(1);
+  });
+});

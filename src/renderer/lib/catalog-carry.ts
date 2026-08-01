@@ -1,6 +1,7 @@
 // Carries document-level catalog state through the from-scratch rebuild in
 // pdfx-build.ts: /Lang, /ViewerPreferences, /Outlines (bookmarks),
-// /PageLabels, and /OCProperties (layers). Same loss class as the /AcroForm
+// /PageLabels, /OCProperties (layers), and /AA (document-action scripts —
+// F11). Same loss class as the /AcroForm
 // and /Names /EmbeddedFiles drops (acroform-carry.ts, embedded-files-carry.ts):
 // pdf-lib's copyPages copies page subtrees only, so before this module ONE
 // committed page edit silently deleted every bookmark, page label, the
@@ -537,6 +538,54 @@ function carryOcProperties(
   output.catalog.set(N('OCProperties'), rebuilt);
 }
 
+// ── document actions (/AA) — F11 ──────────────────────────────────────────
+// Document-scoped scripts (will/did save, will/did print, will close).
+// Carried whole via a copier UNLESS the subtree reaches a page or page-tree
+// object — an action chain ending in a GoTo destination would make the
+// copier re-copy a page copyPages already copied (the module-header hazard).
+// Real-world doc /AA is JavaScript actions, which reach no pages; the rare
+// page-destination chain drops with its reason stated here rather than
+// duplicating a page graph. (The app never EXECUTES AcroJS — this preserves
+// the document's behavior for readers that do.)
+
+function aaReachesPage(
+  doc: PDFDocument,
+  value: unknown,
+  depth: number,
+  seen: Set<string>,
+): boolean {
+  if (depth > 8) return true; // over-deep — fail toward not carrying
+  if (value instanceof PDFRef) {
+    if (seen.has(value.tag)) return false;
+    seen.add(value.tag);
+    return aaReachesPage(doc, doc.context.lookup(value), depth + 1, seen);
+  }
+  if (value instanceof PDFDict) {
+    const type = value.get(N('Type'));
+    if (type === N('Page') || type === N('Pages')) return true;
+    for (const [, v] of value.entries()) {
+      if (aaReachesPage(doc, v, depth + 1, seen)) return true;
+    }
+    return false;
+  }
+  if (value instanceof PDFArray) {
+    for (let i = 0; i < value.size(); i++) {
+      if (aaReachesPage(doc, value.get(i), depth + 1, seen)) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+function carryDocActions(output: PDFDocument, src: PDFDocument): void {
+  const aa = src.catalog.get(N('AA'));
+  const aaDict = aa instanceof PDFRef ? src.context.lookup(aa) : aa;
+  if (!(aaDict instanceof PDFDict)) return;
+  if (aaReachesPage(src, aaDict, 0, new Set<string>())) return; // stated boundary above
+  const copier = PDFObjectCopier.for(src.context, output.context);
+  output.catalog.set(N('AA'), output.context.register(copier.copy(aaDict)));
+}
+
 // ── entry point ────────────────────────────────────────────────────────────
 
 /**
@@ -553,4 +602,5 @@ export function carryDocumentCatalog(output: PDFDocument, source: CarriedSourceP
   carryPageLabels(output, source);
   const objectMap = buildInPageObjectMap(source, output);
   carryOcProperties(output, source.doc, objectMap);
+  carryDocActions(output, source.doc);
 }
