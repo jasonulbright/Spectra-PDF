@@ -322,15 +322,27 @@ export async function applyRedactions(): Promise<void> {
   }
 }
 
-export async function clearRedactionMarks(): Promise<void> {
-  await browser.execute(function () {
-    (window as any).__SPECTRA_TEST__.clearRedactionMarks();
+/** F10: persist the pending marks as the file's /Redact set. */
+export async function saveRedactionMarks(): Promise<void> {
+  const result = await browser.executeAsync<string | null, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.saveRedactionMarks()
+      .then(() => done(null))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
   });
+  if (typeof result === 'string') {
+    throw new Error(`saveRedactionMarks failed: ${result.replace(ERROR_TAG, '')}`);
+  }
 }
 
 export async function getRedactionMarkCount(): Promise<number> {
-  return await browser.execute<number, []>(function () {
+  return await browser.execute(function () {
     return (window as any).__SPECTRA_TEST__.getRedactionMarkCount();
+  });
+}
+
+export async function clearRedactionMarks(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.clearRedactionMarks();
   });
 }
 

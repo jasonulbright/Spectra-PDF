@@ -67,7 +67,7 @@ MIN_FONT_SIZE = 4.0
 DEFAULT_FONT_SIZE = 12.0
 LINE_SPACING = 1.2
 
-INHERITABLE_KEYS = ("/FT", "/Ff", "/V", "/DA", "/Q", "/Opt")
+INHERITABLE_KEYS = ("/FT", "/Ff", "/V", "/DV", "/DA", "/Q", "/Opt")
 MAX_FIELD_DEPTH = 32
 
 
@@ -453,6 +453,58 @@ def _widget_geometry(
     return out
 
 
+def _button_action(field: _Field) -> dict | None:
+    """A pushbutton's /A action, classified for the fill overlay (F8).
+
+    The renderer acts only on what it can act on HONESTLY: reset runs for
+    real (reset_form_fields), a URI is SHOWN (this app deliberately has no
+    general shell-open — the notify-only-updates posture), and the rest
+    report their kind. The /A is read from the field or its first widget.
+    """
+    node = field.attr("/A")
+    if node is None:
+        for w in field.widgets:
+            try:
+                node = w.get("/A")
+            except Exception:
+                node = None
+            if node is not None:
+                break
+    if node is None:
+        return None
+    try:
+        s = str(node.get("/S"))
+    except Exception:
+        return {"kind": "other"}
+    if s == "/URI":
+        uri = node.get("/URI")
+        return {"kind": "uri", "uri": str(uri) if uri is not None else ""}
+    if s == "/ResetForm":
+        # /Fields lists targets (names or refs); bit 1 of /Flags inverts it
+        # to an EXCLUDE list. Refs are skipped best-effort — a reset scoped
+        # by refs degrades to all-fields, never to a crash.
+        names: list[str] = []
+        try:
+            for entry in node.get("/Fields") or []:
+                if isinstance(entry, pikepdf.String):
+                    names.append(str(entry))
+        except Exception:
+            names = []
+        try:
+            exclude = bool(int(node.get("/Flags") or 0) & 1)
+        except Exception:
+            exclude = False
+        return {"kind": "reset", "fields": names or None, "exclude": exclude}
+    if s == "/JavaScript":
+        return {"kind": "javascript"}
+    if s == "/SubmitForm":
+        return {"kind": "submit"}
+    if s == "/Named":
+        n = node.get("/N")
+        return {"kind": "named", "name": str(n) if n is not None else ""}
+    return {"kind": "other"}
+
+
 def read_form_fields(file: str) -> dict:
     """Enumerate AcroForm fields (read-only)."""
     with pikepdf.open(file) as pdf:
@@ -484,6 +536,10 @@ def read_form_fields(file: str) -> dict:
             if ftype == "signature":
                 # The overlay badges a signed vs empty signature field.
                 entry["filled"] = field.attr("/V") is not None
+            if ftype == "button":
+                action = _button_action(field)
+                if action is not None:
+                    entry["action"] = action
             fields.append(entry)
         return {"has_xfa": _has_xfa(pdf), "fields": fields, "count": len(fields)}
 
@@ -815,6 +871,82 @@ def _text_value_problem(name: str, text: str, da: str | None, font_dir: str) -> 
         pretty = " ".join(f"'{c}'" for c in sorted(set(missing)))
         return f"value for {name} contains characters no available font can render ({pretty})"
     return None
+
+
+def reset_form_fields(
+    file: str,
+    output: str,
+    fields: list | None = None,
+    exclude: bool = False,
+    font_dir: str = "",
+) -> dict:
+    """ResetForm (F8): restore fields to their /DV defaults, else clear them.
+
+    ``fields`` scopes the reset by fully-qualified name (a name also covers
+    its children); ``exclude=True`` inverts it to everything-but — the two
+    shapes /ResetForm's /Fields + /Flags bit 1 encode. Buttons, signatures,
+    and read-only fields are never touched (the spec's own boundary).
+
+    Implemented as a DELEGATED FILL with DV-derived values — one setter
+    machinery, so reset inherits appearance regeneration, per-widget
+    checkbox on-states, choice clearing, Unicode handling, and the O5b
+    signature preservation without a second implementation to drift.
+    """
+    named = [str(n) for n in fields] if fields else None
+
+    def _chosen(name: str) -> bool:
+        if named is None:
+            return True
+        hit = any(name == n or name.startswith(n + ".") for n in named)
+        return hit != bool(exclude)
+
+    values: dict = {}
+    skipped_bad_dv: list[str] = []
+    with pikepdf.open(file) as pdf:
+        for f in _all_fields(pdf):
+            ftype = _classify(f)
+            if ftype in ("button", "signature", "unknown"):
+                continue
+            if f.flags & FF_READ_ONLY:
+                continue
+            if not _chosen(f.name):
+                continue
+            dv = f.attr("/DV")
+            try:
+                if ftype == "text":
+                    values[f.name] = str(dv) if dv is not None else ""
+                elif ftype == "checkbox":
+                    values[f.name] = dv is not None and str(dv) != "/Off"
+                elif ftype == "radio":
+                    values[f.name] = (
+                        str(dv)[1:] if isinstance(dv, pikepdf.Name) and str(dv) != "/Off" else ""
+                    )
+                elif ftype == "optionlist":
+                    if isinstance(dv, pikepdf.Array):
+                        values[f.name] = [str(x) for x in dv]
+                    elif dv is not None:
+                        values[f.name] = [str(dv)]
+                    else:
+                        values[f.name] = []
+                else:  # dropdown
+                    values[f.name] = str(dv) if dv is not None else ""
+            except Exception:
+                skipped_bad_dv.append(f.name)
+
+    if not values:
+        # Nothing to reset is a RESULT (the button did its job on an empty
+        # scope), not an error — but the output must still exist.
+        if Path(file).resolve() != Path(output).resolve():
+            shutil.copyfile(file, output)
+        return {"output": str(output), "reset": 0}
+
+    result = fill_form_fields(file, output, values, font_dir=font_dir)
+    out = {"output": result["output"], "reset": result["filled"]}
+    if skipped_bad_dv:
+        out["skipped"] = skipped_bad_dv
+    if result.get("signatures_preserved"):
+        out["signatures_preserved"] = True
+    return out
 
 
 def fill_form_fields(

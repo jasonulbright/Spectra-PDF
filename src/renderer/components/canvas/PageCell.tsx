@@ -73,6 +73,8 @@ import {
   vertexDragged,
   cloudBumps,
   paddedPointsBbox,
+  eraseFromStrokes,
+  strokesBbox,
   type AnnotationTransform,
   type ResizeHandle,
 } from '../../lib/annotation-manipulation';
@@ -222,6 +224,7 @@ function FormWidgetView({
   fontPx,
   onSetFormValue,
   onSignFieldRequest,
+  onFormButton,
 }: {
   widget: OverlayWidget;
   rotation: 0 | 90 | 180 | 270;
@@ -230,6 +233,7 @@ function FormWidgetView({
   fontPx: number;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onSignFieldRequest: (path: string, fieldName: string) => void;
+  onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => void;
 }): React.JSX.Element | null {
   const hasPending = pending !== undefined;
   if (!formsMode && !hasPending) return null;
@@ -296,6 +300,33 @@ function FormWidgetView({
       >
         <span>{widget.sigFilled ? 'SIGNED' : 'SIGNATURE'}</span>
       </div>
+    );
+  }
+  if (widget.type === 'button') {
+    // F8: pushbuttons ACT — the page raster already draws the button's own
+    // face, so the overlay is a transparent click surface. What the click
+    // does is the classified /A action; App runs reset for real and stays
+    // honest about the rest (no shell-open, no JS engine).
+    const label =
+      widget.action?.kind === 'reset'
+        ? 'resets form fields'
+        : widget.action?.kind === 'uri'
+          ? `links to ${widget.action.uri}`
+          : widget.action
+            ? `${widget.action.kind} action`
+            : 'no action';
+    return (
+      <button
+        {...common}
+        type="button"
+        className="page-form-widget page-form-button"
+        style={style}
+        title={`${widget.fieldName} — ${label}`}
+        onClick={(e) => {
+          stop(e);
+          onFormButton(widget.path, widget.fieldName, widget.action ?? null);
+        }}
+      />
     );
   }
   if (!widget.editable) {
@@ -528,6 +559,8 @@ interface PageCellProps {
   // Clicking an empty signature widget in forms mode targets it for signing
   // (2n.4d — the sign card opens in fill-this-field mode).
   onSignFieldRequest: (path: string, fieldName: string) => void;
+  // F8: a pushbutton widget's click, with its classified /A action.
+  onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => void;
   // band instead of being inert on empty page area.
   // Pending new-field placement, when it sits on THIS page (transient view
   // state with the signature-placement lifecycle).
@@ -774,6 +807,7 @@ function PageCellImpl({
   formValues,
   onSetFormValue,
   onSignFieldRequest,
+  onFormButton,
   newFieldPlacement,
   onSetNewFieldRect,
   addTextPlacement,
@@ -1335,6 +1369,68 @@ function PageCellImpl({
   // N5 stroke merging: the last ink annotation this cell created/extended.
   const lastInkRef = useRef<{ id: string; pageId: string; color: string; time: number } | null>(null);
 
+  // N5b eraser: swath samples (display frame) for the live feedback stroke.
+  const [eraseSwath, setEraseSwath] = useState<number[] | null>(null);
+  const ERASER_PX = 10;
+
+  const handleEraseDown = (e: React.PointerEvent<HTMLElement>): void => {
+    bandActive.current = true;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const norm = (cx: number, cy: number): { x: number; y: number } => ({
+      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
+    });
+    const start = norm(e.clientX, e.clientY);
+    let path = [start.x, start.y];
+    setEraseSwath(path);
+    const onMove = (ev: PointerEvent): void => {
+      const p = norm(ev.clientX, ev.clientY);
+      path = [...path, p.x, p.y];
+      setEraseSwath(path);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      bandActive.current = false;
+      cancelBand.current = null;
+      setEraseSwath(null);
+      if (!commit) return;
+      // The cut runs in the STORED frame (strokes live there): un-project
+      // the swath like any capture, and swap the per-axis radius when the
+      // effective rotation swaps the axes.
+      const storedPath = toStoredPoints(path);
+      const rxDisp = ERASER_PX / rect.width;
+      const ryDisp = ERASER_PX / rect.height;
+      const swapped = page.rotation === 90 || page.rotation === 270;
+      const radius = swapped ? { x: ryDisp, y: rxDisp } : { x: rxDisp, y: ryDisp };
+      const edits: AnnotationTransform[] = [];
+      const emptied: string[] = [];
+      for (const a of page.annotations ?? []) {
+        if (a.kind !== 'ink' || !a.strokes) continue;
+        const remaining = eraseFromStrokes(a.strokes, storedPath, radius);
+        if (remaining === null) continue;
+        const box = strokesBbox(remaining);
+        if (!box) {
+          emptied.push(a.id);
+          continue;
+        }
+        edits.push({ pageId: page.id, annotationId: a.id, ...box, strokes: remaining });
+      }
+      // One undo step for the cuts; a fully-erased annotation removes
+      // separately (TRANSFORM cannot delete — the rare gesture that both
+      // trims one drawing and finishes another costs one extra Ctrl+Z).
+      if (edits.length > 0) onTransformAnnotations(docId, edits);
+      for (const id of emptied) onRemoveAnnotation(docId, page.id, id);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    cancelBand.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  };
+
   const handleInkDown = (e: React.PointerEvent<HTMLElement>): void => {
     bandActive.current = true;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -1606,6 +1702,10 @@ function PageCellImpl({
     e.stopPropagation();
     if (tool === 'ink') {
       handleInkDown(e);
+      return;
+    }
+    if (tool === 'inkerase') {
+      handleEraseDown(e);
       return;
     }
     if (tool === 'measuredist' || tool === 'measurecal') {
@@ -2678,6 +2778,7 @@ function PageCellImpl({
           fontPx={freetextFontPx * (10 / 12)}
           onSetFormValue={onSetFormValue}
           onSignFieldRequest={onSignFieldRequest}
+          onFormButton={onFormButton}
         />
       ))}
       {signaturePlacement && (
@@ -2825,6 +2926,26 @@ function PageCellImpl({
             }, []).join(' ')}
             fill="none"
             stroke={annotationColor ?? INK_COLOR}
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      )}
+      {eraseSwath && (
+        // N5b feedback: the eraser's swath, wide and translucent — the cut
+        // itself lands on release (one undo step).
+        <svg className="page-annot-ink-svg page-annot-ink-live" viewBox="0 0 1 1" preserveAspectRatio="none">
+          <polyline
+            points={eraseSwath.reduce<string[]>((acc, v, i) => {
+              if (i % 2 === 0) acc.push(`${v}`);
+              else acc[acc.length - 1] += `,${v}`;
+              return acc;
+            }, []).join(' ')}
+            fill="none"
+            stroke="#9aa0a6"
+            strokeOpacity={0.4}
+            strokeWidth={ERASER_PX * 2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
           />
         </svg>

@@ -262,6 +262,10 @@ export type CanvasTool =
   // its editor. Comment's mode; the note keeps its fixed icon size (rung 1's
   // kind rule) so placement is the only geometry.
   | 'note'
+  // Ink eraser (N5b): drag cuts stroke segments out of ink annotations —
+  // partial, like the king's pencil eraser (a mid-stroke cut SPLITS the
+  // stroke, which the per-stroke model holds exactly). Comment's mode.
+  | 'inkerase'
   // Zoom marquee (N3, Acrobat's Z): band a region, the reading view zooms to
   // it. The THIRD ownerless mode beside select/hand — pure navigation, no
   // tool, commits nothing.
@@ -539,7 +543,16 @@ export type AppAction =
       docId: string;
       pageId: string;
       annotationIds: string[];
-      style: { strokeWidth?: number; fillColor?: string | null; opacity?: number };
+      style: {
+        strokeWidth?: number;
+        fillColor?: string | null;
+        opacity?: number;
+        // Kind-specific sheet fields (N7 residual): the reducer applies
+        // each only to kinds that carry it — endings to line/arrow/
+        // polyline, cloud intensity to clouds.
+        lineEndings?: [string, string];
+        cloudIntensity?: number;
+      };
     }
   | {
       type: 'REORDER_ANNOTATIONS';
