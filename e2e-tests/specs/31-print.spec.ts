@@ -112,6 +112,74 @@ describe('print (M-P)', () => {
     });
   });
 
+  it('exposes the O2 option surface, capability-gated', async () => {
+    await browser.keys(['Control', 'p']);
+    await $('[data-testid="print-dialog"]').waitForDisplayed();
+
+    // Page subset + reverse + collate (collate only means anything >1 copy).
+    await expect($('[data-testid="print-subset"]')).toBeDisplayed();
+    await expect($('[data-testid="print-reverse"]')).toBeDisplayed();
+    expect(await $('[data-testid="print-collate"]').isEnabled()).toBe(false);
+    await setReactInputValue('[data-testid="print-copies"]', '2');
+    await browser.waitUntil(
+      async () => await $('[data-testid="print-collate"]').isEnabled(),
+      { timeoutMsg: 'collate never enabled at 2 copies' },
+    );
+
+    // Layout modes swap their option groups; booklet forces landscape.
+    const layout = $('[data-testid="print-layout"]');
+    expect(await layout.getValue()).toBe('single');
+    await expect($('[data-testid="print-fit-scale"]')).toBeDisplayed();
+    await layout.selectByAttribute('value', 'nup');
+    await expect($('[data-testid="print-nup-rows"]')).toBeDisplayed();
+    await expect($('[data-testid="print-nup-order"]')).toBeDisplayed();
+    await layout.selectByAttribute('value', 'booklet');
+    await expect($('[data-testid="print-booklet-subset"]')).toBeDisplayed();
+    expect(await $('[data-testid="print-orientation"]').isEnabled()).toBe(false);
+    expect(await $('[data-testid="print-orientation"]').getValue()).toBe('landscape');
+    await layout.selectByAttribute('value', 'poster');
+    await expect($('[data-testid="print-poster-scale"]')).toBeDisplayed();
+    await layout.selectByAttribute('value', 'single');
+    await expect($('[data-testid="print-fit-fit"]')).toBeSelected();
+
+    // Comments & forms + print-as-image (dpi appears with the checkbox).
+    await expect($('[data-testid="print-annots"]')).toBeDisplayed();
+    await expect($('[data-testid="print-image-dpi"]')).not.toBeExisting();
+    await $('[data-testid="print-as-image"]').click();
+    await expect($('[data-testid="print-image-dpi"]')).toBeDisplayed();
+
+    // The paper picker fills from the driver's real capability report.
+    await browser.waitUntil(
+      async () => await $('[data-testid="print-paper"]').isEnabled(),
+      { timeoutMsg: 'paper capabilities never arrived' },
+    );
+    const papers = await $$('[data-testid="print-paper"] option');
+    expect(papers.length).toBeGreaterThan(1); // "Printer default" + real papers
+
+    await $('[data-testid="print-cancel"]').click();
+    await $('[data-testid="print-dialog"]').waitForDisplayed({ reverse: true });
+  });
+
+  it('CLI printers --capabilities reports the same driver facts', async () => {
+    const list = JSON.parse(
+      execFileSync(BINARY, ['printers'], { encoding: 'utf8' }),
+    ) as { printers: string[]; default: string | null };
+    const target = list.default ?? list.printers[0];
+    const caps = JSON.parse(
+      execFileSync(BINARY, ['printers', '--capabilities', target], { encoding: 'utf8' }),
+    ) as {
+      papers: { id: number; name: string; width_pt: number; height_pt: number }[];
+      duplex: boolean; color: boolean;
+    };
+    expect(caps.papers.length).toBeGreaterThan(0);
+    expect(typeof caps.duplex).toBe('boolean');
+    // Letter or A4 exists on every real Windows driver, with sane points.
+    const letterish = caps.papers.find((p) => p.id === 1 || p.id === 9);
+    expect(letterish).toBeDefined();
+    expect(letterish!.width_pt).toBeGreaterThan(400);
+    expect(letterish!.height_pt).toBeGreaterThan(letterish!.width_pt);
+  });
+
   it('File ▸ Print… opens it from the real menu, labeled Ctrl+P', async () => {
     await $('[data-testid="menu-file"]').click();
     const item = $('[data-testid="menuitem-file-print"]');

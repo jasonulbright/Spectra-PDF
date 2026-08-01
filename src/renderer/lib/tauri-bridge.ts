@@ -308,6 +308,22 @@ export interface PrinterList {
   default: string | null;
 }
 
+export interface PaperOption {
+  id: number;
+  name: string;
+  width_pt: number;
+  height_pt: number;
+}
+
+export interface PrinterCapabilities {
+  papers: PaperOption[];
+  default_paper: number | null;
+  duplex: boolean;
+  color: boolean;
+  collate: boolean;
+  max_copies: number;
+}
+
 export const app = {
   getGsPath: () => invoke<string>('get_gs_path'),
   /** File ▸ Send To ▸ Email (owner-ruled in 2026-07-31). Stage a copy of the
@@ -328,6 +344,10 @@ export const app = {
   getEditFontPath: () => invoke<string>('get_edit_font_path'),
   /** Installed Windows printers + the default (the Print dialog's picker). */
   listPrinters: () => invoke<PrinterList>('list_printers'),
+  /** One printer's papers/duplex/color — gates the Print dialog's option
+   *  surface and resolves sheet sizes for the layout modes. */
+  printerCapabilities: (name: string) =>
+    invoke<PrinterCapabilities>('printer_capabilities', { name }),
   /** The path-identity gate (M7): file identity is the raw path string
    * app-wide, so every path entering the open/import funnels resolves to ONE
    * canonical spelling first. Rust producers (dialogs, argv, second

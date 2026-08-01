@@ -17,7 +17,29 @@ from engine.encrypt import encrypt, decrypt
 from engine.extract_text import extract_text
 from engine.grayscale import grayscale
 from engine.metadata import get_metadata, set_metadata, strip_metadata
-from engine.printer import FIT_SWITCHES, MAX_COPIES, build_gs_args, parse_page_spec, print_pdf
+from engine.printer import (
+    DUPLEX_SWITCHES,
+    FIT_SWITCHES,
+    MAX_COPIES,
+    build_gs_args,
+    build_setpagedevice_ps,
+    parse_page_spec,
+    print_pdf,
+)
+from engine.print_layout import (
+    apply_subset,
+    booklet_sides,
+    build_sequence,
+    expand_page_spec,
+    flatten_pdf,
+    impose_poster,
+    impose_sheets,
+    nup_cells,
+    place_in_cell,
+    poster_tiles,
+    rasterize_pdf,
+    strip_annotations,
+)
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
 from engine.reversion import get_pdf_version, set_pdf_version
 from engine.validate import validate_pdf
@@ -2516,6 +2538,7 @@ class TestPrintArgs:
             "-sDEVICE=mswinpr2",
             "-dNoCancel",
             "-sOutputFile=%printer%My Printer",
+            "-dUseCropBox",
             "-dFIXEDMEDIA",
             "-dFitPage",
             "C:\\in.pdf",
@@ -2532,10 +2555,54 @@ class TestPrintArgs:
             "-sDEVICE=mswinpr2",
             "-dNoCancel",
             "-sOutputFile=%printer%P",
+            "-dUseCropBox",
             "-dFIXEDMEDIA",
             "-sPageList=1-3,5",
             "in.pdf",
         ]
+
+    def test_exact_argv_duplex_and_setpagedevice(self):
+        ps = build_setpagedevice_ps(9, 2, 1, "report (final).pdf")
+        assert ps == (
+            "<< /UserSettings << /Paper 9 /Orientation 2 /Color 1 "
+            "/DocumentName (report \\(final\\).pdf) >> >> setpagedevice"
+        )
+        args = build_gs_args("in.pdf", "P", "", "actual", "gs", "short", ps)
+        assert args == [
+            "gs",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-dQUIET",
+            "-dSAFER",
+            "-sDEVICE=mswinpr2",
+            "-dNoCancel",
+            "-sOutputFile=%printer%P",
+            "-dUseCropBox",
+            "-dFIXEDMEDIA",
+            "-dDuplex=true",
+            "-dTumble=true",
+            "-c",
+            ps,
+            "-f",
+            "in.pdf",
+        ]
+
+    def test_duplex_switch_table(self):
+        assert DUPLEX_SWITCHES == {
+            "printer": [],
+            "simplex": ["-dDuplex=false"],
+            "long": ["-dDuplex=true", "-dTumble=false"],
+            "short": ["-dDuplex=true", "-dTumble=true"],
+        }
+
+    def test_setpagedevice_ps_defaults_to_name_only_and_none(self):
+        # Only the document name -> prolog carries just that; a non-ASCII
+        # name is OMITTED (never mojibake'd into the spooler queue).
+        assert build_setpagedevice_ps(None, None, None, "brief.pdf") == (
+            "<< /UserSettings << /DocumentName (brief.pdf) >> >> setpagedevice"
+        )
+        assert build_setpagedevice_ps(None, None, None, "простой.pdf") is None
+        assert build_setpagedevice_ps(None, None, None, None) is None
 
 
 class TestPrintPdf:
@@ -2547,7 +2614,17 @@ class TestPrintPdf:
         import inspect as _inspect
 
         params = set(_inspect.signature(print_pdf).parameters)
-        assert {"file", "printer", "gs_path", "pages", "copies", "fit"} <= params
+        assert {
+            "file", "printer", "gs_path", "pages", "copies", "fit",
+            # The O2 widening — every dialog control has a wire key.
+            "scale_percent", "collate", "subset", "reverse", "duplex",
+            "paper", "orientation", "color", "annots", "as_image",
+            "image_dpi", "layout", "nup_rows", "nup_cols", "nup_order",
+            "nup_border", "nup_auto_rotate", "booklet_subset",
+            "booklet_binding", "poster_scale", "poster_overlap",
+            "poster_cut_marks", "poster_labels", "sheet_width",
+            "sheet_height",
+        } <= params
 
     def test_refuses_empty_printer(self, sample_pdf):
         # An empty name would make mswinpr2 raise its OWN printer dialog —
@@ -2557,8 +2634,9 @@ class TestPrintPdf:
         with pytest.raises(ValueError, match="printer"):
             print_pdf(file=sample_pdf, printer="   ")
 
-    @pytest.mark.parametrize("bad", [0, -1, 100, 2.5, "2", True])
+    @pytest.mark.parametrize("bad", [0, -1, 1000, 2.5, "2", True])
     def test_refuses_bad_copies(self, sample_pdf, bad):
+        # 100 became legal when the cap moved to 999 (O4); 1000 is out.
         with pytest.raises(ValueError, match="[Cc]opies"):
             print_pdf(file=sample_pdf, printer="P", copies=bad)
 
@@ -2616,16 +2694,31 @@ class TestPrintPdf:
             pages="1-2, 4", copies=3, fit="actual",
         )
         assert len(calls) == 3
-        expected = build_gs_args(sample_pdf, "My Printer", "1-2,4", "actual", "GS")
+        # The defaulted job is switch-only PLUS the DocumentName prolog (the
+        # spooler shows the real file name) — the plain fast path, no temp.
+        expected = build_gs_args(
+            sample_pdf, "My Printer", "1-2,4", "actual", "GS", "printer",
+            build_setpagedevice_ps(None, None, None, "sample.pdf"),
+        )
         for args, kwargs in calls:
             assert args == expected
             assert kwargs.get("timeout") == printer_mod.JOB_TIMEOUT_S
         assert r == {
             "printer": "My Printer",
             "copies": 3,
+            "collate": True,
             "pages": "1-2,4",
+            "subset": "all",
+            "reverse": False,
             "fit": "actual",
+            "duplex": "printer",
+            "orientation": "auto",
+            "color": "printer",
+            "annots": "all",
+            "layout": "single",
             "page_count": 5,
+            "jobs": 3,
+            "prepass": [],
         }
 
     def test_gs_failure_raises_with_stderr_detail(self, sample_pdf, monkeypatch):
@@ -2774,6 +2867,560 @@ class TestPrintFitSemantics:
         assert 185 <= (y1 - y0 + 1) <= 215, (y0, y1)
         assert x0 <= 5, x0
         assert y1 >= h - 6, (y1, h)
+
+    def test_fit_auto_rotates_landscape_onto_portrait_media(self, tmp_dir, gs_path):
+        # The pin behind orientation="auto": FitPage rotates a landscape page
+        # onto portrait media (ink lands TALL, not a wide letterbox). If this
+        # ever fails on a gs update, print_pdf's auto mode needs the /Rotate
+        # prepass for fit jobs too, not just actual-size ones.
+        src = os.path.join(tmp_dir, "land.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(400, 200))
+        page.Contents = pdf.make_stream(b"0 g 0 0 400 200 re f")
+        pdf.save(src)
+        out = os.path.join(tmp_dir, "land.pgm")
+        self._render(gs_path, src, out, "fit")
+        x0, y0, x1, y1, w, h = _ink_bbox_pgm(out)
+        assert (y1 - y0 + 1) > (x1 - x0 + 1), "expected rotated (tall) ink"
+
+
+class TestPrintOrderMath:
+    """expand/subset/booklet/nup/placement/poster — the pure O2 math."""
+
+    def test_expand_preserves_spec_order(self):
+        assert expand_page_spec("", 3) == [0, 1, 2]
+        assert expand_page_spec("5,1-2", 5) == [4, 0, 1]
+        assert expand_page_spec("2-4", 5) == [1, 2, 3]
+
+    def test_subset_uses_document_page_parity(self):
+        # Parity of the page NUMBER, not the selection position — that is
+        # what makes odd-then-even manual duplexing line up.
+        order = [0, 1, 2, 3, 4]
+        assert apply_subset(order, "odd") == [0, 2, 4]
+        assert apply_subset(order, "even") == [1, 3]
+        # Indices 3 and 1 are pages 4 and 2 — no odd page among them.
+        assert apply_subset([3, 1], "odd") == []
+
+    def test_booklet_sides_classic_and_padded(self):
+        assert booklet_sides(4, "left") == [[3, 0], [1, 2]]
+        assert booklet_sides(8, "left") == [[7, 0], [1, 6], [5, 2], [3, 4]]
+        # 5 pages pad to 8; pads are None.
+        assert booklet_sides(5, "left") == [
+            [None, 0], [1, None], [None, 2], [3, 4],
+        ]
+        assert booklet_sides(4, "right") == [[0, 3], [2, 1]]
+        assert booklet_sides(0, "left") == []
+
+    def test_nup_cells_orders(self):
+        h = nup_cells(100, 200, 2, 2, "horizontal")
+        assert h == [
+            (0, 100, 50, 100), (50, 100, 50, 100),
+            (0, 0, 50, 100), (50, 0, 50, 100),
+        ]
+        assert nup_cells(100, 200, 2, 2, "horizontal-reversed") == [
+            (50, 100, 50, 100), (0, 100, 50, 100),
+            (50, 0, 50, 100), (0, 0, 50, 100),
+        ]
+        assert nup_cells(100, 200, 2, 2, "vertical") == [
+            (0, 100, 50, 100), (0, 0, 50, 100),
+            (50, 100, 50, 100), (50, 0, 50, 100),
+        ]
+        assert nup_cells(100, 200, 2, 2, "vertical-reversed") == [
+            (50, 100, 50, 100), (50, 0, 50, 100),
+            (0, 100, 50, 100), (0, 0, 50, 100),
+        ]
+
+    def test_place_fit_and_center(self):
+        m, rotated = place_in_cell(100, 200, 0, (0, 0, 50, 100), True)
+        assert not rotated
+        assert m == [0.5, 0, 0, 0.5, 0, 0]
+        # Centering: a square page in a tall cell floats to the middle.
+        m, _ = place_in_cell(100, 100, 0, (0, 0, 50, 100), False)
+        assert m == [0.5, 0, 0, 0.5, 0, 25]
+
+    def test_place_auto_rotates_landscape_into_portrait_cell(self):
+        m, rotated = place_in_cell(200, 100, 0, (0, 0, 50, 100), True)
+        assert rotated
+        # 90° clockwise-as-viewed: corners of the 200x100 page land in the
+        # 50x100 cell with the long edge vertical.
+        a, b, c, d, e, f = m
+        def apply(x, y):
+            return (a * x + c * y + e, b * x + d * y + f)
+        assert apply(0, 0) == (0, 100)
+        assert apply(200, 0) == (0, 0)
+        assert apply(200, 100) == (50, 0)
+
+    def test_place_honors_source_rotate(self):
+        # A 100x200 page with /Rotate 90 DISPLAYS 200x100; placed unrotated
+        # into a landscape cell it keeps that display orientation.
+        m, rotated = place_in_cell(100, 200, 90, (0, 0, 100, 50), False)
+        assert not rotated
+        a, b, c, d, e, f = m
+        # Displayed 200x100 into a 100x50 cell -> scale 0.5, rotated matrix.
+        assert (a, b, c, d) == (0, -0.5, 0.5, 0)
+        def apply(x, y):
+            return (a * x + c * y + e, b * x + d * y + f)
+        assert apply(0, 0) == (0, 50)
+        assert apply(100, 0) == (0, 0)
+        assert apply(0, 200) == (100, 50)
+
+    def test_place_scale_override(self):
+        m, _ = place_in_cell(100, 200, 0, (0, 0, 200, 400), False, scale_override=0.5)
+        # Fixed 50% regardless of the cell's fit factor (which would be 2.0).
+        assert m == [0.5, 0, 0, 0.5, 75, 150]
+
+    def test_poster_tiles(self):
+        assert poster_tiles(612, 792, 612, 792, 0) == (1, 1)
+        assert poster_tiles(1224, 792, 612, 792, 0) == (2, 1)
+        # Overlap shrinks the stride: 1224 across 612-wide sheets with 12pt
+        # overlap needs a third column.
+        assert poster_tiles(1224, 792, 612, 792, 12) == (3, 1)
+        with pytest.raises(ValueError, match="overlap"):
+            poster_tiles(2000, 100, 100, 100, 100)
+
+
+def _annotated_pdf(path, with_form=False):
+    """One 612x792 page carrying one annotation of each interesting subtype
+    (AP-backed squares so flatten/keep decisions are pixel-visible)."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    page.Contents = pdf.make_stream(b"")
+
+    def square(rect, subtype, flags=4):
+        ap = pdf.make_stream(b"0 g 0 0 100 100 re f")
+        ap.stream_dict["/Type"] = pikepdf.Name("/XObject")
+        ap.stream_dict["/Subtype"] = pikepdf.Name("/Form")
+        ap.stream_dict["/BBox"] = pikepdf.Array([0, 0, 100, 100])
+        return pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name("/Annot"),
+            Subtype=pikepdf.Name(subtype),
+            Rect=pikepdf.Array(rect),
+            F=flags,
+            AP=pikepdf.Dictionary(N=ap),
+        ))
+
+    annots = [
+        square([50, 600, 150, 700], "/Square"),
+        square([200, 600, 300, 700], "/Stamp"),
+        square([350, 600, 450, 700], "/Text"),
+        square([50, 400, 150, 500], "/Widget"),
+        square([200, 400, 300, 500], "/Link"),
+        square([350, 400, 450, 500], "/Popup"),
+    ]
+    page.obj["/Annots"] = pikepdf.Array(annots)
+    if with_form:
+        pdf.Root["/AcroForm"] = pdf.make_indirect(
+            pikepdf.Dictionary(Fields=pikepdf.Array([annots[3]]))
+        )
+    pdf.save(path)
+
+
+class TestPrintPrepassBuilders:
+    """pikepdf stages: annotation strip, sequencing, imposition, poster."""
+
+    def test_strip_annotations_document_mode(self, tmp_dir):
+        src = os.path.join(tmp_dir, "a.pdf")
+        dst = os.path.join(tmp_dir, "doc.pdf")
+        _annotated_pdf(src)
+        removed = strip_annotations(src, dst, "document")
+        assert removed == 4  # Square, Stamp, Text, Popup
+        with pikepdf.open(dst) as pdf:
+            kept = [str(a.get("/Subtype")) for a in pdf.pages[0].obj["/Annots"]]
+        assert sorted(kept) == ["/Link", "/Widget"]
+
+    def test_strip_annotations_stamps_mode(self, tmp_dir):
+        src = os.path.join(tmp_dir, "a.pdf")
+        dst = os.path.join(tmp_dir, "stamps.pdf")
+        _annotated_pdf(src)
+        assert strip_annotations(src, dst, "stamps") == 3
+        with pikepdf.open(dst) as pdf:
+            kept = [str(a.get("/Subtype")) for a in pdf.pages[0].obj["/Annots"]]
+        assert sorted(kept) == ["/Link", "/Stamp", "/Widget"]
+
+    def _sized_pdf(self, path, widths, annotate_first=False):
+        pdf = pikepdf.new()
+        for w in widths:
+            page = pdf.add_blank_page(page_size=(w, 400))
+            page.Contents = pdf.make_stream(b"")
+        if annotate_first:
+            ap = pdf.make_stream(b"0 g 0 0 10 10 re f")
+            ap.stream_dict["/Type"] = pikepdf.Name("/XObject")
+            ap.stream_dict["/Subtype"] = pikepdf.Name("/Form")
+            ap.stream_dict["/BBox"] = pikepdf.Array([0, 0, 10, 10])
+            pdf.pages[0].obj["/Annots"] = pikepdf.Array([
+                pdf.make_indirect(pikepdf.Dictionary(
+                    Type=pikepdf.Name("/Annot"),
+                    Subtype=pikepdf.Name("/Square"),
+                    Rect=pikepdf.Array([1, 1, 11, 11]),
+                    F=4,
+                    AP=pikepdf.Dictionary(N=ap),
+                ))
+            ])
+        pdf.save(path)
+
+    def test_build_sequence_orders_duplicates_and_blanks(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        dst = os.path.join(tmp_dir, "seq.pdf")
+        self._sized_pdf(src, [101, 102, 103], annotate_first=True)
+        build_sequence(src, dst, [2, 0, 0, None])
+        with pikepdf.open(dst) as pdf:
+            widths = [float(p.mediabox[2]) for p in pdf.pages]
+            assert widths == [103, 101, 101, 101]  # blank takes page 1's size
+            # Annotations ride on EVERY occurrence of the duplicated page.
+            assert len(pdf.pages[1].obj.get("/Annots", [])) == 1
+            assert len(pdf.pages[2].obj.get("/Annots", [])) == 1
+            assert pdf.pages[0].obj.get("/Annots") is None
+
+    def test_build_sequence_rotate_normalization(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        dst = os.path.join(tmp_dir, "rot.pdf")
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(400, 200))   # landscape -> bump
+        pdf.add_blank_page(page_size=(200, 400))   # portrait -> untouched
+        p3 = pdf.add_blank_page(page_size=(200, 400))
+        p3.obj["/Rotate"] = 90                     # displays landscape -> 180
+        pdf.save(src)
+        build_sequence(src, dst, [0, 1, 2], rotate_landscape_to_portrait=True)
+        with pikepdf.open(dst) as out:
+            rotates = [int(p.obj.get("/Rotate", 0)) for p in out.pages]
+        assert rotates == [90, 0, 180]
+
+    def test_impose_sheets_places_and_borders(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        dst = os.path.join(tmp_dir, "imp.pdf")
+        self._sized_pdf(src, [100, 100])
+        # Two 100x400 pages side by side on a 200x400 sheet, with borders.
+        cells = nup_cells(200, 400, 1, 2, "horizontal")
+        n = impose_sheets(src, dst, [[(0, cells[0]), (1, cells[1])]], 200, 400,
+                          border=True, auto_rotate=False)
+        assert n == 1
+        with pikepdf.open(dst) as pdf:
+            assert len(pdf.pages) == 1
+            assert [float(v) for v in pdf.pages[0].mediabox] == [0, 0, 200, 400]
+            content = pdf.pages[0].Contents.read_bytes().decode("ascii")
+            xobjs = pdf.pages[0].obj["/Resources"]["/XObject"]
+            assert "/P0" in xobjs and "/P1" in xobjs
+        assert "q 1 0 0 1 0 0 cm /P0 Do Q" in content
+        assert "q 1 0 0 1 100 0 cm /P1 Do Q" in content
+        assert content.count("re S") == 2  # cell borders
+
+    def test_impose_sheets_honors_crop_origin(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        dst = os.path.join(tmp_dir, "imp.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        page.Contents = pdf.make_stream(b"")
+        page.obj["/CropBox"] = pikepdf.Array([100, 100, 200, 200])
+        pdf.save(src)
+        impose_sheets(src, dst, [[(0, (0.0, 0.0, 100.0, 100.0))]], 100, 100,
+                      auto_rotate=False)
+        with pikepdf.open(dst) as out:
+            content = out.pages[0].Contents.read_bytes().decode("ascii")
+            bbox = [float(v) for v in
+                    out.pages[0].obj["/Resources"]["/XObject"]["/P0"]["/BBox"]]
+        # BBox is the crop box; the matrix translates the crop origin to 0.
+        assert bbox == [100, 100, 200, 200]
+        assert "q 1 0 0 1 -100 -100 cm /P0 Do Q" in content
+
+    def test_impose_sheets_skips_none_cells(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        dst = os.path.join(tmp_dir, "imp.pdf")
+        self._sized_pdf(src, [100])
+        cells = nup_cells(200, 400, 1, 2, "horizontal")
+        impose_sheets(src, dst, [[(None, cells[0]), (0, cells[1])]], 200, 400)
+        with pikepdf.open(dst) as out:
+            content = out.pages[0].Contents.read_bytes().decode("ascii")
+        assert content.count("Do") == 1
+        assert "/P1 Do" in content
+
+    def test_impose_poster_grid_marks_labels(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        dst = os.path.join(tmp_dir, "poster.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.Contents = pdf.make_stream(b"0 g 0 0 612 792 re f")
+        pdf.save(src)
+        r = impose_poster(src, dst, 612, 792, scale=2.0, overlap=12,
+                          cut_marks=True, labels=True)
+        assert r["grid"] == [[3, 3]]  # 1224x1584 over 600-stride tiles
+        assert r["sheets"] == 9
+        with pikepdf.open(dst) as out:
+            assert len(out.pages) == 9
+            first = out.pages[0].Contents.read_bytes().decode("ascii")
+            # Top-left tile: marks only on interior edges (right + bottom).
+            assert first.count("0.24 w") == 2
+            assert "/F0 9 Tf" in first
+            assert "(1,1) of 3x3" in first
+            # Scale is baked into the placement matrix.
+            assert "2 0 0 2" in first
+
+
+class TestPrintPrepassSemantics:
+    """The gs stages, against the REAL bundled Ghostscript."""
+
+    def test_flatten_bakes_print_annotations_only(self, tmp_dir, gs_path):
+        # Two AP squares: print-flagged (left) and viewer-only F=0 (right).
+        src = os.path.join(tmp_dir, "ann.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.Contents = pdf.make_stream(b"")
+
+        def square(rect, flags):
+            ap = pdf.make_stream(b"0 g 0 0 100 100 re f")
+            ap.stream_dict["/Type"] = pikepdf.Name("/XObject")
+            ap.stream_dict["/Subtype"] = pikepdf.Name("/Form")
+            ap.stream_dict["/BBox"] = pikepdf.Array([0, 0, 100, 100])
+            return pdf.make_indirect(pikepdf.Dictionary(
+                Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Square"),
+                Rect=pikepdf.Array(rect), F=flags,
+                AP=pikepdf.Dictionary(N=ap),
+            ))
+
+        page.obj["/Annots"] = pikepdf.Array([
+            square([50, 400, 150, 500], 4),
+            square([400, 400, 500, 500], 0),
+        ])
+        pdf.save(src)
+
+        flat = os.path.join(tmp_dir, "flat.pdf")
+        flatten_pdf(gs_path, src, flat)
+        with pikepdf.open(flat) as out:
+            annots = out.pages[0].obj.get("/Annots")
+            assert annots is None or len(annots) == 0
+        # Render the flattened page: ink on the left square only — the
+        # -dPrinted flag is what keeps viewer-only markups out of print.
+        pgm = os.path.join(tmp_dir, "flat.pgm")
+        import subprocess as sp
+        r = sp.run([gs_path, "-dNOPAUSE", "-dBATCH", "-dQUIET", "-dSAFER",
+                    "-sDEVICE=pgmraw", "-r72",
+                    "-dDEVICEWIDTHPOINTS=612", "-dDEVICEHEIGHTPOINTS=792",
+                    "-dFIXEDMEDIA", f"-sOutputFile={pgm}", flat],
+                   capture_output=True, text=True, timeout=120)
+        assert r.returncode == 0, r.stderr or r.stdout
+        x0, y0, x1, y1, w, h = _ink_bbox_pgm(pgm)
+        assert x1 < 306, "viewer-only annotation leaked into the print flatten"
+
+    def test_rasterize_preserves_dimensions_and_subsets(self, tmp_dir, gs_path):
+        src = os.path.join(tmp_dir, "five.pdf")
+        pdf = pikepdf.new()
+        for _ in range(5):
+            p = pdf.add_blank_page(page_size=(612, 792))
+            p.Contents = pdf.make_stream(b"0 g 100 100 100 100 re f")
+        pdf.save(src)
+        out = os.path.join(tmp_dir, "img.pdf")
+        rasterize_pdf(gs_path, src, out, 150, "2,4")
+        with pikepdf.open(out) as img:
+            assert len(img.pages) == 2
+            # Point dimensions survive rasterization (actual-size safe).
+            assert [float(v) for v in img.pages[0].mediabox] == [0, 0, 612, 792]
+            assert "/XObject" in img.pages[0].obj["/Resources"]
+
+    def test_rasterize_uses_crop_box(self, tmp_dir, gs_path):
+        src = os.path.join(tmp_dir, "crop.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        page.Contents = pdf.make_stream(b"0 g 0 0 300 300 re f")
+        page.obj["/CropBox"] = pikepdf.Array([100, 100, 200, 200])
+        pdf.save(src)
+        out = os.path.join(tmp_dir, "img.pdf")
+        rasterize_pdf(gs_path, src, out, 72)
+        with pikepdf.open(out) as img:
+            mb = [float(v) for v in img.pages[0].mediabox]
+        # What prints is the CropBox framing, exactly what the viewer shows.
+        assert mb[2] - mb[0] == 100 and mb[3] - mb[1] == 100
+
+
+class TestPrintPipeline:
+    """print_pdf end to end with the FINAL mswinpr2 job faked (no printer on
+    a dev box can take a headless job) and every prepass stage real. The
+    fake captures the argv and snapshots the prepared file before the
+    TemporaryDirectory cleans it."""
+
+    def _capture(self, monkeypatch, tmp_dir):
+        # Patch _run_jobs, NOT subprocess.run — the subprocess module object
+        # is shared with print_layout, whose gs prepass stages must run for
+        # real here (patching .run on it would fake them out too; that was a
+        # live test bug, not hypothetical).
+        import engine.printer as printer_mod
+        captured = {"argv": [], "files": []}
+
+        def fake_jobs(args, jobs):
+            for _ in range(jobs):
+                captured["argv"].append(list(args))
+            snap = os.path.join(tmp_dir, f"job-{len(captured['files'])}.pdf")
+            shutil.copyfile(args[-1], snap)
+            captured["files"].append(snap)
+
+        monkeypatch.setattr(printer_mod, "_run_jobs", fake_jobs)
+        monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        return captured
+
+    def _sized(self, tmp_dir, widths, name="in.pdf"):
+        path = os.path.join(tmp_dir, name)
+        pdf = pikepdf.new()
+        for w in widths:
+            page = pdf.add_blank_page(page_size=(w, 400))
+            page.Contents = pdf.make_stream(b"")
+        pdf.save(path)
+        return path
+
+    def test_reverse_and_odd_subset_reorder(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103, 104, 105])
+        r = print_pdf(file=src, printer="P", gs_path="GS",
+                      subset="odd", reverse=True)
+        assert r["prepass"] == ["reorder"]
+        assert r["jobs"] == 1
+        with pikepdf.open(cap["files"][0]) as out:
+            widths = [float(p.mediabox[2]) for p in out.pages]
+        assert widths == [105, 103, 101]
+        # The prepared file is printed whole — no -sPageList on the job.
+        assert not any(a.startswith("-sPageList") for a in cap["argv"][0])
+
+    def test_uncollated_copies_duplicate_into_one_job(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102])
+        r = print_pdf(file=src, printer="P", gs_path="GS",
+                      copies=3, collate=False)
+        assert r["jobs"] == 1
+        assert r["prepass"] == ["uncollated-copies"]
+        assert len(cap["argv"]) == 1
+        with pikepdf.open(cap["files"][0]) as out:
+            widths = [float(p.mediabox[2]) for p in out.pages]
+        assert widths == [101, 101, 101, 102, 102, 102]
+
+    def test_collated_copies_stay_sequential_jobs(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102])
+        r = print_pdf(file=src, printer="P", gs_path="GS", copies=3)
+        assert r["jobs"] == 3
+        assert len(cap["argv"]) == 3
+        assert cap["argv"][0] == cap["argv"][1] == cap["argv"][2]
+
+    def test_annotation_mode_strips_before_the_job(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = os.path.join(tmp_dir, "ann.pdf")
+        _annotated_pdf(src)
+        r = print_pdf(file=src, printer="P", gs_path="GS", annots="document")
+        assert r["prepass"] == ["annotations"]
+        with pikepdf.open(cap["files"][0]) as out:
+            kept = [str(a.get("/Subtype")) for a in out.pages[0].obj["/Annots"]]
+        assert sorted(kept) == ["/Link", "/Widget"]
+
+    def test_auto_orientation_actual_rotates_landscape(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [600])  # 600x400 landscape
+        r = print_pdf(file=src, printer="P", gs_path="GS", fit="actual")
+        assert r["prepass"] == ["reorder+rotate"]
+        with pikepdf.open(cap["files"][0]) as out:
+            assert int(out.pages[0].obj["/Rotate"]) == 90
+
+    def test_driver_options_ride_switches_without_prepass(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300], name="brief.pdf")
+        r = print_pdf(file=src, printer="P", gs_path="GS",
+                      duplex="long", paper=9, orientation="landscape",
+                      color="gray")
+        assert r["prepass"] == []
+        argv = cap["argv"][0]
+        assert "-dDuplex=true" in argv and "-dTumble=false" in argv
+        ps = argv[argv.index("-c") + 1]
+        assert ps == (
+            "<< /UserSettings << /Paper 9 /Orientation 2 /Color 1 "
+            "/DocumentName (brief.pdf) >> >> setpagedevice"
+        )
+        assert argv[-1] == src  # plain path prints the original file
+
+    def test_nup_pipeline(self, tmp_dir, monkeypatch, gs_path):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300, 300, 300, 300])
+        r = print_pdf(file=src, printer="P", gs_path=gs_path,
+                      layout="nup", nup_rows=2, nup_cols=2,
+                      sheet_width=612, sheet_height=792)
+        assert r["prepass"] == ["flatten", "nup2x2"]
+        assert r["sheets"] == 1
+        with pikepdf.open(cap["files"][0]) as out:
+            assert len(out.pages) == 1
+            assert [float(v) for v in out.pages[0].mediabox] == [0, 0, 612, 792]
+        # Imposed sheets print "fit" with explicit portrait orientation.
+        argv = cap["argv"][0]
+        assert "-dFitPage" in argv
+        assert "/Orientation 1" in argv[argv.index("-c") + 1]
+
+    def test_booklet_pipeline_forces_landscape(self, tmp_dir, monkeypatch, gs_path):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300, 300, 300, 300])
+        r = print_pdf(file=src, printer="P", gs_path=gs_path,
+                      layout="booklet", sheet_width=612, sheet_height=792)
+        assert r["sheets"] == 2
+        assert r["orientation"] == "landscape"
+        with pikepdf.open(cap["files"][0]) as out:
+            assert len(out.pages) == 2
+            assert [float(v) for v in out.pages[0].mediabox] == [0, 0, 792, 612]
+        assert "/Orientation 2" in cap["argv"][0][cap["argv"][0].index("-c") + 1]
+
+    def test_booklet_front_subset(self, tmp_dir, monkeypatch, gs_path):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300, 300, 300, 300])
+        r = print_pdf(file=src, printer="P", gs_path=gs_path,
+                      layout="booklet", booklet_subset="front",
+                      sheet_width=612, sheet_height=792)
+        assert r["sheets"] == 1
+        with pikepdf.open(cap["files"][0]) as out:
+            assert len(out.pages) == 1
+
+    def test_custom_scale_pipeline(self, tmp_dir, monkeypatch, gs_path):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300, 300])
+        r = print_pdf(file=src, printer="P", gs_path=gs_path,
+                      fit="scale", scale_percent=50,
+                      sheet_width=612, sheet_height=792)
+        assert r["prepass"] == ["flatten", "scale@50%"]
+        assert r["sheets"] == 2
+        with pikepdf.open(cap["files"][0]) as out:
+            content = out.pages[0].Contents.read_bytes().decode("ascii")
+        assert "0.5 0 0 0.5" in content
+        # Custom scale must print ACTUAL — FitPage would undo the 50%.
+        assert "-dFitPage" not in cap["argv"][0]
+
+    def test_print_as_image_pipeline(self, tmp_dir, monkeypatch, gs_path):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300, 300])
+        r = print_pdf(file=src, printer="P", gs_path=gs_path,
+                      as_image=True, image_dpi=150)
+        assert r["prepass"] == ["rasterize@150dpi"]
+        assert r["as_image"] is True
+        with pikepdf.open(cap["files"][0]) as out:
+            assert len(out.pages) == 2
+            assert "/XObject" in out.pages[0].obj["/Resources"]
+
+    @pytest.mark.parametrize("kwargs,match", [
+        ({"fit": "scale", "layout": "nup", "scale_percent": 50,
+          "sheet_width": 612, "sheet_height": 792}, "single-page layout"),
+        ({"layout": "nup"}, "paper size"),
+        ({"duplex": "both-sides"}, "duplex"),
+        ({"orientation": "sideways"}, "orientation"),
+        ({"color": "cmyk"}, "color"),
+        ({"annots": "none"}, "comments"),
+        ({"layout": "spiral"}, "layout"),
+        ({"subset": "primes"}, "subset"),
+        ({"as_image": True, "image_dpi": 5000}, "DPI"),
+        ({"paper": 0}, "paper"),
+        ({"nup_rows": 9, "layout": "nup", "sheet_width": 612,
+          "sheet_height": 792}, "Rows"),
+        ({"collate": "yes"}, "collate"),
+    ])
+    def test_validation_refusals(self, tmp_dir, monkeypatch, kwargs, match):
+        self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300])
+        with pytest.raises(ValueError, match=match):
+            print_pdf(file=src, printer="P", gs_path="GS", **kwargs)
+
+    def test_empty_selection_refused(self, tmp_dir, monkeypatch):
+        self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300])  # one page; even-pages is empty
+        with pytest.raises(ValueError, match="selection is empty"):
+            print_pdf(file=src, printer="P", gs_path="GS", subset="even")
 
 
 class TestRedactionLeaks:

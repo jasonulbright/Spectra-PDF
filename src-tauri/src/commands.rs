@@ -945,6 +945,16 @@ pub async fn list_printers() -> Result<crate::printers::PrinterList, String> {
     crate::printers::enumerate()
 }
 
+/// One printer's paper list / duplex / color capabilities — what gates the
+/// Print dialog's option surface and resolves sheet sizes for the layout
+/// modes. Read-only DeviceCapabilities; never opens a job.
+#[tauri::command]
+pub async fn printer_capabilities(
+    name: String,
+) -> Result<crate::printers::PrinterCapabilities, String> {
+    crate::printers::capabilities(&name)
+}
+
 // ── System accent color ──────────────────────────────────────────────────
 
 /// Windows accent color as "#RRGGBB".
