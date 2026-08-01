@@ -31,6 +31,18 @@ export function rotateAnnotationRect(a: PageAnnotation, delta: number): PageAnno
       points.push(px, py);
     }
   }
+  // Ink strokes reproject exactly like points, per stroke (N2).
+  let strokes: number[][] | undefined;
+  if (a.strokes) {
+    strokes = a.strokes.map((stroke) => {
+      const out: number[] = [];
+      for (let i = 0; i < stroke.length; i += 2) {
+        const [px, py] = rotatePoint(stroke[i], stroke[i + 1], d);
+        out.push(px, py);
+      }
+      return out;
+    });
+  }
   // textmarkup quads are per-quad [x0,y0,x1,y1] rects: reproject each quad's two
   // corners and re-derive min/max, exactly as the bbox does below.
   let quads: number[] | undefined;
@@ -53,6 +65,7 @@ export function rotateAnnotationRect(a: PageAnnotation, delta: number): PageAnno
   }
   const extra = {
     ...(points ? { points } : {}),
+    ...(strokes ? { strokes } : {}),
     ...(quads ? { quads } : {}),
     ...(calloutBox ? { calloutBox } : {}),
   };
@@ -1107,6 +1120,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
               w: a.kind === 'note' ? a.w : e.w,
               h: a.kind === 'note' ? a.h : e.h,
               ...(e.points && a.points ? { points: e.points } : {}),
+              ...(e.strokes && a.strokes ? { strokes: e.strokes } : {}),
               ...(e.note !== undefined && a.kind === 'measure' ? { note: e.note } : {}),
               ...(e.calloutBox && a.kind === 'callout' ? { calloutBox: e.calloutBox } : {}),
               // A moved IMPORT must render as the overlay's body from now on
@@ -1119,6 +1133,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
               next.w === a.w &&
               next.h === a.h &&
               next.points === a.points &&
+              next.strokes === a.strokes &&
               next.note === a.note &&
               next.calloutBox === a.calloutBox
             )

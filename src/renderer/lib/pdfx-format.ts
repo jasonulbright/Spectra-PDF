@@ -37,7 +37,8 @@ export interface ExportAnnotation {
   h: number;
   color: string; // #rrggbb
   note?: string;
-  points?: number[]; // ink/measure/shape/callout-leader: flat [x0,y0,...] in x/y/w/h space
+  points?: number[]; // measure/shape/callout-leader: flat [x0,y0,...] in x/y/w/h space
+  strokes?: number[][]; // ink only (N2): one flat path per pen lift, same space
   imageData?: string; // stamp only: custom image stamp's data URL (the AP draws it)
   markupType?: 'highlight' | 'underline' | 'strikeout' | 'squiggly'; // textmarkup only
   quads?: number[]; // textmarkup only: flat [x0,y0,x1,y1,...] per quad, in x/y/w/h space

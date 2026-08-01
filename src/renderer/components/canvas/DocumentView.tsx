@@ -173,6 +173,9 @@ export interface DocumentViewProps {
   onCalibrate: (lengthPts: number) => void;
   onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
+  // N3 marquee zoom applied locally — the split layer syncs sibling panes'
+  // zoom to the returned value (quad zoom must stay equal).
+  onMarqueeZoomApplied?: (zoom: number) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -538,6 +541,57 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     setZoom(clampZoom(z, rowCountRef.current, widestAtBaseRef.current));
   }, [currentPage]);
 
+  // N3 marquee zoom: zoom so the banded page region fills the pane, then
+  // scroll it centered. The scroll runs after the new layout exists (double
+  // rAF), computed analytically from the applied zoom — same row math the
+  // virtualizer uses. Returns the applied zoom so the split layer can sync
+  // sibling panes (quad zoom must stay equal; their scroll follows the
+  // frozen-pane DOM links on their own).
+  const zoomToPageRect = useCallback(
+    (pageId: string, rect: { x: number; y: number; w: number; h: number }): number | null => {
+      const el = scrollRef.current;
+      const idx = doc.pages.findIndex((p) => p.id === pageId);
+      if (!el || idx < 0 || rect.w <= 0 || rect.h <= 0) return null;
+      const page = viewPages[idx];
+      const z0 = zoomRef.current;
+      const bandW = rect.w * displayWidthAt(page, READING_BASE_HEIGHT) * z0;
+      const bandH = rect.h * pageHeightAt(z0);
+      if (bandW <= 0 || bandH <= 0) return null;
+      const factor = Math.min(el.clientWidth / bandW, el.clientHeight / bandH);
+      const z = clampZoom(z0 * factor, rowCountRef.current, widestAtBaseRef.current);
+      setZoom(z);
+      const cxNorm = rect.x + rect.w / 2;
+      const cyNorm = rect.y + rect.h / 2;
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const elc = scrollRef.current;
+          if (!elc) return;
+          const pageH = pageHeightAt(z);
+          const rowHz = pageH + PAGE_GAP * z;
+          const row = rowOfPage(idx, pageLayout, twoUpCover);
+          const rowTop = row * rowHz;
+          elc.scrollTop = Math.max(0, rowTop + cyNorm * pageH - elc.clientHeight / 2);
+          // Horizontal: rows centre in the spacer; walk the row for this
+          // page's offset (two-up pairs included).
+          const idxs = pagesInRow(row, pageLayout, twoUpCover, viewPages.length);
+          let before = 0;
+          let rowW = 0;
+          for (const i of idxs) {
+            const w = displayWidthAt(viewPages[i], READING_BASE_HEIGHT) * z;
+            if (i < idx) before += w + PAGE_GAP * z;
+            rowW += w;
+          }
+          rowW += PAGE_GAP * z * (idxs.length - 1);
+          const pageW = displayWidthAt(page, READING_BASE_HEIGHT) * z;
+          const rowLeft = Math.max(0, (elc.scrollWidth - rowW) / 2);
+          elc.scrollLeft = Math.max(0, rowLeft + before + cxNorm * pageW - elc.clientWidth / 2);
+        }),
+      );
+      return z;
+    },
+    [doc.pages, viewPages, pageLayout, twoUpCover],
+  );
+
   useImperativeHandle(
     ref,
     (): CanvasHandle => ({
@@ -557,8 +611,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       // meaningful here.
       clientToWorld: () => null,
       centerOn,
+      zoomToPageRect,
+      setZoomAbsolute: (z: number) =>
+        setZoom(clampZoom(z, rowCountRef.current, widestAtBaseRef.current)),
     }),
-    [centerOn, actualSize, fitWidth],
+    [centerOn, actualSize, fitWidth, zoomToPageRect],
   );
 
   // Rows are computed inline each render (PageCell is memo'd, so unchanged
@@ -682,6 +739,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onCalibrate={props.onCalibrate}
           onMeasureContextMenu={props.onMeasureContextMenu}
           onMarqueeSelect={props.onMarqueeSelect}
+          onZoomToRect={(pid, r) => {
+            const z = zoomToPageRect(pid, r);
+            if (z != null) props.onMarqueeZoomApplied?.(z);
+          }}
           onAddRedactionMark={props.onAddRedactionMark}
           onRemoveRedactionMark={props.onRemoveRedactionMark}
           onSetSignaturePlacement={props.onSetSignaturePlacement}

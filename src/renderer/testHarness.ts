@@ -53,6 +53,9 @@ export interface TestAnnotationInput {
   color: string;
   note?: string;
   points?: number[];
+  /** ink only (N2): per-pen-lift paths. An ink given `points` instead is
+   *  normalized to one stroke, so pre-N2 specs keep working. */
+  strokes?: number[][];
   /** stamp only: a custom image stamp's data URL. */
   imageData?: string;
 }
@@ -634,6 +637,8 @@ export interface TestHarness {
     /** textmarkup only: the style, and how many quads it carries. */
     markupType?: string;
     quadCount?: number;
+    /** ink only: how many pen strokes it carries (N2). */
+    strokeCount?: number;
     /** stamp only: whether it carries a custom image. */
     hasImage?: boolean;
   } | null>;
@@ -979,6 +984,7 @@ export interface TestHarnessDeps {
     note?: string;
     markupType?: string;
     quadCount?: number;
+    strokeCount?: number;
     hasImage?: boolean;
   } | null;
   /** Every pending annotation on one page, workspace order (= z-order) —
@@ -1174,7 +1180,11 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
       const annotationId = `e2e-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
       try {
-        deps.dispatchAddAnnotation(page.docId, page.pageId, { ...annotation, id: annotationId });
+        const normalized =
+          annotation.kind === 'ink' && annotation.points && !annotation.strokes
+            ? { ...annotation, strokes: [annotation.points], points: undefined }
+            : annotation;
+        deps.dispatchAddAnnotation(page.docId, page.pageId, { ...normalized, id: annotationId });
       } catch (err) {
         captureError('addAnnotation', err);
         throw err;
