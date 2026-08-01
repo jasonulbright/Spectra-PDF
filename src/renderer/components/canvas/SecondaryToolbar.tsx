@@ -109,9 +109,6 @@ export interface SecondaryToolbarProps {
    * (null = no image selected), commit-on-release, the crop-mode toggle,
    * and the rotate-90 steps (routed through the C1 transform). */
   editImageOpacity: number | null;
-  /** C4: the selected placement's kind — inline draws can't replace or
-   * extract (the engine refuses; the buttons disable with the reason). */
-  editImageKind: 'inline' | 'xobject' | null;
   onSetImageOpacity: (value: number) => void;
   imageCropArmed: boolean;
   onToggleImageCrop: () => void;
@@ -195,7 +192,7 @@ export function SecondaryToolbar({
   onEditAction,
   onEditTextOpen,
   editImageOpacity,
-  editImageKind,
+
   onSetImageOpacity,
   imageCropArmed,
   onToggleImageCrop,
@@ -446,16 +443,13 @@ export function SecondaryToolbar({
               {editNotice.text}
             </span>
           )}
+          {/* P6: inline images replace (promoted to an ordinary embedded
+              image) and extract like any other — the old disable is gone. */}
           <button
             type="button"
             data-testid="edit-action-replace"
             className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editBusy || editImageKind === 'inline'}
-            title={
-              editImageKind === 'inline'
-                ? 'An inline image cannot be replaced — delete it and add an image instead'
-                : undefined
-            }
+            disabled={editSelectionKind !== 'image' || editBusy}
             onClick={() => onEditAction('replace')}
           >
             Replace…
@@ -464,10 +458,7 @@ export function SecondaryToolbar({
             type="button"
             data-testid="edit-action-extract"
             className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editBusy || editImageKind === 'inline'}
-            title={
-              editImageKind === 'inline' ? 'An inline image cannot be extracted' : undefined
-            }
+            disabled={editSelectionKind !== 'image' || editBusy}
             onClick={() => onEditAction('extract')}
           >
             Extract…

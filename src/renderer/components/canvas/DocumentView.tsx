@@ -121,6 +121,7 @@ export interface DocumentViewProps {
   onSelectEditText: (pageId: string, index: number) => void;
   onOpenTextEditor: (pageId: string, index: number) => void;
   onCommitTextEdit: (pageId: string, index: number, newText: string, opts?: { convert?: boolean }) => void;
+  onRestyleTextEdit: (pageId: string, index: number, style: { size?: number; color?: [number, number, number] }) => void;
   onCancelTextEdit: () => void;
   onSelectEditParagraph: (pageId: string, index: number) => void;
   onOpenParagraphEditor: (pageId: string, index: number) => void;
@@ -707,6 +708,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onSelectEditText={props.onSelectEditText}
           onOpenTextEditor={props.onOpenTextEditor}
           onCommitTextEdit={props.onCommitTextEdit}
+          onRestyleTextEdit={props.onRestyleTextEdit}
           onCancelTextEdit={props.onCancelTextEdit}
           onSelectEditParagraph={props.onSelectEditParagraph}
           onOpenParagraphEditor={props.onOpenParagraphEditor}

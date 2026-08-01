@@ -513,9 +513,13 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                 elif not _emit_wrap(
                     kept, instruction, state, resources, fallback_resources, reserved
                 ):
-                    # replace targets an XObject draw; the op refuses
-                    # upstream — this is the belt.
-                    raise ValueError("an inline image cannot be replaced")
+                    # P6: replace PROMOTES the inline draw to an XObject Do —
+                    # one instruction for one instruction, so every later
+                    # placement keeps its counted slot, and the new image is
+                    # an ordinary placement afterward (list/delete/replace/
+                    # transform all see it with no special case). The old
+                    # inline bytes vanish with the dropped instruction.
+                    kept.append(_do_instruction(state.replacement_name))
             else:
                 kept.append(instruction)
             state.seen += 1
@@ -1075,12 +1079,6 @@ def replace_page_image(file: str, output: str, page: int, index: int, source: di
         count = len(placements)
         if not (0 <= int(index) < count):
             raise ValueError(f"image index {index} is out of range (page has {count})")
-        if placements[int(index)].get("kind") == "inline":
-            # C4 v1 boundary: replacing would need inline re-encoding whose
-            # value is near-zero for this rare class; delete + add covers it.
-            raise ValueError(
-                "an inline image cannot be replaced — delete it and add an image instead"
-            )
         name_counter = [0]
         reserved: set = set()
         state = _EditState(
@@ -1193,21 +1191,18 @@ def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> 
         if not (0 <= int(index) < len(placements)):
             raise ValueError(f"image index {index} is out of range (page has {len(placements)})")
         target = placements[int(index)]
-        if target.get("kind") == "inline":
-            # C4 v1 boundary: inline extraction needs its own decode
-            # machinery; the class is rare and the honest refusal names it.
-            raise ValueError("an inline image cannot be extracted")
 
-        # Re-walk to the owning xobject: the lister records the NAME and
+        # Re-walk to the owning object: the lister records the NAME and
         # nesting; resolve the actual object by replaying the same order.
-        # Inline draws occupy listing slots (C4) — placehold them so
-        # holder[index] stays aligned with the listing on mixed pages.
+        # Inline draws occupy listing slots (C4) and carry their own image
+        # object (P6 — pikepdf's PdfInlineImage), so holder[index] stays
+        # aligned with the listing on mixed pages AND inline targets extract.
         holder: list = []
 
         def _collect(instructions, res, depth, fallback):
             for instruction in instructions:
                 if str(instruction.operator) == "INLINE IMAGE":
-                    holder.append(None)
+                    holder.append(instruction.iimage)
                     continue
                 if str(instruction.operator) != "Do" or not instruction.operands:
                     continue
@@ -1225,6 +1220,16 @@ def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> 
                         res,
                     )
 
+        if target.get("kind") == "inline":
+            # P6: qpdf's own inline→XObject externalization (min_size=0 —
+            # inline images are small BY nature; a size floor here would
+            # re-refuse the exact class this serves) rewrites the draw as an
+            # ordinary /Do in the SAME slot, so the collection below finds a
+            # real stream there and the standard extraction takes over —
+            # natural format picking included. The mutation lives on this
+            # PRIVATE read-only open; nothing saves it.
+            p.externalize_inline_images(min_size=0)
+            resources = _resolve_resources(p)  # the new /XObject entry lives here
         _collect(pikepdf.parse_content_stream(p), resources, 0, None)
         xobj = holder[int(index)]
         image = pikepdf.PdfImage(xobj)
