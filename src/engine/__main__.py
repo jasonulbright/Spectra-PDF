@@ -100,7 +100,7 @@ from engine.text_paragraphs import (
     merge_paragraph_with_previous,
     replace_paragraph_text,
 )
-from engine.text_runs import convert_text_run, list_text_runs, replace_text_run
+from engine.text_runs import convert_text_run, list_text_runs, replace_text_run, restyle_text_run
 from engine.printer import print_pdf, print_preview, print_preview_cleanup
 from engine.incremental import transplant_incremental
 from engine.redact_marks import list_redact_annotations, save_redaction_marks
@@ -214,6 +214,7 @@ def main() -> None:
     server.register("set_image_opacity", set_image_opacity)
     server.register("list_text_runs", list_text_runs)
     server.register("replace_text_run", replace_text_run)
+    server.register("restyle_text_run", restyle_text_run)
     server.register("convert_text_run", convert_text_run)
     server.register("list_text_paragraphs", list_text_paragraphs)
     server.register("replace_paragraph_text", replace_paragraph_text)

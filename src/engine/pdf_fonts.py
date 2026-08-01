@@ -723,7 +723,68 @@ def font_capability(font_obj) -> FontCapability:
     subtype = str(font_obj.get("/Subtype", "")).lstrip("/")
 
     if subtype == "Type3":
-        return _refused("Type3 fonts (glyph procedures) are not editable")
+        # T7: the GLYPHS are procedures (the renderer's concern — pdf.js
+        # runs them), but the TEXT MODEL is a simple font's: /Encoding
+        # names the codes and /Widths the advances. Two Type3-specific
+        # rules: widths live in GLYPH SPACE, so /FontMatrix scales them to
+        # text space (×1000 for the per-mille convention every other width
+        # here uses), and a base-less /Differences encoding maps ONLY the
+        # codes it lists — falling back to StandardEncoding for the rest
+        # would claim characters the font never defined.
+        enc = font_obj.get("/Encoding")
+        base_less_diffs = None
+        if isinstance(enc, pikepdf.Dictionary) and enc.get("/BaseEncoding") is None:
+            base_less_diffs = enc.get("/Differences")
+        if base_less_diffs is not None:
+            # Build STRICTLY from the Differences names: pdfminer's merge
+            # keeps the Standard-base value when a name fails to resolve
+            # (probe-caught — /qqz1 at 65 came back as 'A'), which would
+            # claim characters the font never defined.
+            from pdfminer.encodingdb import name2unicode
+
+            code2uni = {}
+            code = 0
+            for el in base_less_diffs:
+                try:
+                    code = int(el)
+                    continue
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    code2uni[code] = name2unicode(str(el).lstrip("/"))
+                except Exception:
+                    pass
+                code += 1
+        else:
+            code2uni = _simple_encoding_map(font_obj) or {}
+        if not code2uni:
+            tou3 = font_obj.get("/ToUnicode")
+            if tou3 is not None:
+                try:
+                    code2uni = _parse_tounicode(tou3.read_bytes())
+                except Exception:
+                    code2uni = {}
+        if not code2uni:
+            return _refused("Type3 font with no resolvable encoding")
+        try:
+            matrix = [float(x) for x in font_obj.get("/FontMatrix")]
+            t3_scale = matrix[0] * 1000.0
+        except Exception:
+            return _refused("Type3 font with a malformed /FontMatrix")
+        if t3_scale <= 0:
+            return _refused("Type3 font with a degenerate /FontMatrix")
+        widths, default = _simple_widths(font_obj, code2uni)
+        widths = {c: w * t3_scale for c, w in widths.items()}
+        return FontCapability(
+            True,
+            None,
+            code2uni,
+            _reverse(code2uni),
+            widths,
+            default * t3_scale,
+            1,
+            sequences=_ligatures(code2uni, code2uni),
+        )
 
     if subtype == "Type0":
         enc = str(font_obj.get("/Encoding", "")).lstrip("/")

@@ -3,6 +3,36 @@ import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 export const BASE_RASTER = 1100;
 export const MAX_DETAIL = 4096;
 
+// ── Render timing (N13) ──────────────────────────────────────────────────
+// A ring buffer of completed pdf.js render durations, harness-read via
+// __SPECTRA_TEST__.getRenderTimings(). Recording is unconditional (a
+// float+push per page render — nanoscale next to the render itself); the
+// only CONSUMER is the e2e-build harness, so release behavior is one dead
+// array. The perf harness (e2e spec) opens fixtures, drains this, and the
+// recorded baseline lives in the punchlist dev notes.
+
+export interface RenderTiming {
+  kind: 'base' | 'detail';
+  pageNumber: number;
+  ms: number;
+}
+
+const MAX_TIMINGS = 512;
+const renderTimings: RenderTiming[] = [];
+
+function recordTiming(kind: 'base' | 'detail', pageNumber: number, ms: number): void {
+  renderTimings.push({ kind, pageNumber, ms });
+  if (renderTimings.length > MAX_TIMINGS) renderTimings.splice(0, renderTimings.length - MAX_TIMINGS);
+}
+
+export function getRenderTimings(): RenderTiming[] {
+  return [...renderTimings];
+}
+
+export function clearRenderTimings(): void {
+  renderTimings.length = 0;
+}
+
 export const dpr = (): number => Math.min(window.devicePixelRatio || 1, 2);
 
 export const logRenderError =
@@ -91,9 +121,11 @@ export async function renderBase({
   const off = document.createElement('canvas');
   off.width = Math.max(1, Math.floor(viewport.width));
   off.height = Math.max(1, Math.floor(viewport.height));
+  const renderStart = performance.now();
   const task = page.render({ canvas: off, canvasContext: off.getContext('2d')!, viewport });
   onTask(task);
   await task.promise;
+  recordTiming('base', pageNumber, performance.now() - renderStart);
   if (isCancelled()) return;
   const paint = (): void => {
     // Re-checked at flush time — the effect may have been cancelled (or the
@@ -168,6 +200,7 @@ export async function renderDetail({
   const off = document.createElement('canvas');
   off.width = backingW;
   off.height = backingH;
+  const renderStart = performance.now();
   const task = page.render({
     canvas: off,
     canvasContext: off.getContext('2d')!,
@@ -176,6 +209,7 @@ export async function renderDetail({
   });
   onTask(task);
   await task.promise;
+  recordTiming('detail', pageNumber, performance.now() - renderStart);
   if (isCancelled()) return;
 
   detailCanvas.width = backingW;
