@@ -410,6 +410,21 @@ export function WorkspaceCanvasView({
             : documentViewRefD.current,
     [],
   );
+  // N3 marquee zoom: the gesture's DocumentView applied its own zoom+scroll;
+  // sibling panes sync to the SAME zoom (quad's equal-zoom invariant — see
+  // activeCanvasHandle's broadcast note below). Their scroll follows the
+  // frozen-pane DOM links, exactly as with any active-pane navigation.
+  const syncMarqueeZoom = useCallback(
+    (z: number) => {
+      if (splitModeRef.current === 'off') return;
+      const active = paneHandleOf(activePaneRef.current);
+      for (const p of ['a', 'b', 'c', 'd'] as const) {
+        const h = paneHandleOf(p);
+        if (h && h !== active) h.setZoomAbsolute?.(z);
+      }
+    },
+    [paneHandleOf],
+  );
   const activeCanvasHandle = useCallback((): CanvasHandle | null => {
     if (docViewModeRef.current !== 'document') return canvasRef.current;
     const mode = splitModeRef.current;
@@ -3713,6 +3728,7 @@ export function WorkspaceCanvasView({
             measureScale,
             measureLeaveMarkup,
             onMeasureResult: setMeasureResult,
+            onMarqueeZoomApplied: syncMarqueeZoom,
             redactionMarksByPage,
             editImagesByPage,
             editVectorsByPage,

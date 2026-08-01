@@ -104,6 +104,41 @@ describe('importPageAnnotations', () => {
     expect(imported).toEqual([]);
     await pdf.loadingTask.destroy();
   });
+
+  it('N2 — a multi-stroke /Ink (a signature) imports WHOLE, one stroke per pen lift', async () => {
+    // Before N2 this exact shape was refused outright (the model held one
+    // stroke); now every /InkList sub-path arrives as its own stroke.
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const annot = ctx.obj({
+      Type: 'Annot',
+      Subtype: 'Ink',
+      Rect: [30, 200, 210, 300],
+      C: [0.2, 0.4, 0.9],
+      F: 4,
+      InkList: [
+        [30, 200, 90, 300],
+        [90, 200, 150, 300, 180, 250],
+        [180, 200, 210, 200],
+      ],
+    });
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(annot)]));
+    const bytes = await doc.save();
+    const pdf = await loadPdf(bytes);
+    const imported = await importPageAnnotations(await pdf.getPage(1));
+    expect(imported).toHaveLength(1);
+    expect(imported[0].kind).toBe('ink');
+    expect(imported[0].strokes).toHaveLength(3);
+    expect(imported[0].strokes![1]).toHaveLength(6);
+    // First stroke's first point: (30, 200) → display space (y from the top).
+    expect(imported[0].strokes![0][0]).toBeCloseTo(30 / 300, 5);
+    expect(imported[0].strokes![0][1]).toBeCloseTo((400 - 200) / 400, 5);
+    // The bbox spans ALL strokes, not just the first.
+    expect(imported[0].x).toBeCloseTo(30 / 300, 5);
+    expect(imported[0].w).toBeCloseTo(180 / 300, 5);
+    await pdf.loadingTask.destroy();
+  });
 });
 
 describe('imported annotation commit round trip', () => {
@@ -257,7 +292,11 @@ describe('imported annotation commit round trip', () => {
     await rebuilt.loadingTask.destroy();
   });
 
-  it('does not import a multi-stroke Ink annotation (would lose strokes after the first on edit)', async () => {
+  it('N2 INVERSION — a multi-stroke Ink imports whole and round-trips all strokes', async () => {
+    // This test used to pin the REFUSAL ("would lose strokes after the
+    // first on edit") — the no-degradation rule under a single-stroke
+    // model. The model now holds per-stroke paths, so the same rule is
+    // satisfied by fidelity: import, commit, and every stroke survives.
     const doc = await PDFDocument.create();
     const page = doc.addPage([300, 400]);
     const ctx = doc.context;
@@ -275,8 +314,31 @@ describe('imported annotation commit round trip', () => {
     const bytes = await doc.save();
     const pdf = await loadPdf(bytes);
     const imported = await importPageAnnotations(await pdf.getPage(1));
-    expect(imported).toEqual([]); // skipped entirely, left untouched for safety
+    expect(imported).toHaveLength(1);
+    expect(imported[0].kind).toBe('ink');
+    expect(imported[0].strokes).toHaveLength(2);
     await pdf.loadingTask.destroy();
+
+    // Commit the import back out: ONE /Ink, both strokes, no duplicate.
+    const file = makeFile('a.pdf', bytes);
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a.pdf#0', file, [
+          { ...pageRef('a.pdf'), annotations: imported },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, new Map([['a.pdf', file]]), ['a.pdf']);
+    const rebuilt = await loadPdf(await buildCommitBytes(plan));
+    const rebuiltPage = await rebuilt.getPage(1);
+    const annots = (await rebuiltPage.getAnnotations()) as {
+      subtype: string;
+      inkLists?: Float32Array[];
+    }[];
+    expect(annots).toHaveLength(1);
+    expect(annots[0].subtype).toBe('Ink');
+    expect(annots[0].inkLists).toHaveLength(2);
+    await rebuilt.loadingTask.destroy();
   });
 
   it('flags an AP-less annotation as hasAppearance:false so the overlay does not hide it', async () => {

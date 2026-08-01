@@ -230,23 +230,24 @@ export async function importPageAnnotations(
     }
 
     if (kind === 'ink') {
-      // PageAnnotation.points holds exactly one stroke — a multi-stroke Ink
-      // (InkList with more than one sub-path, e.g. a signature made of
-      // several pen lifts) can't be represented without lossily dropping
-      // strokes after the first. Rather than import-then-silently-destroy
-      // extra strokes the moment the annotation is edited, don't import it
-      // at all: it's left exactly as-is, same as any other unrecognized
-      // annotation (never touched, never stripped, never editable here).
-      if ((a.inkLists?.length ?? 0) > 1) continue;
-      const path = a.inkLists?.[0];
-      if (!path || path.length < 2) continue; // no usable stroke — skip rather than import a degenerate one
-      const points: number[] = [];
-      for (let i = 0; i < path.length; i += 2) {
-        const [u, v] = pdfPointToDisplay(path[i], path[i + 1], box, rotation);
-        points.push(u, v);
+      // N2: every /InkList sub-path imports as one stroke — a signature
+      // made of several pen lifts arrives WHOLE. (This gate used to refuse
+      // multi-stroke inks outright because the model held a single stroke;
+      // `strokes` is the model now, so the no-degradation rule is
+      // satisfied by fidelity instead of refusal.)
+      const strokes: number[][] = [];
+      for (const path of a.inkLists ?? []) {
+        if (!path || path.length < 2) continue;
+        const stroke: number[] = [];
+        for (let i = 0; i < path.length; i += 2) {
+          const [u, v] = pdfPointToDisplay(path[i], path[i + 1], box, rotation);
+          stroke.push(u, v);
+        }
+        strokes.push(stroke);
       }
-      const xs = points.filter((_, i) => i % 2 === 0);
-      const ys = points.filter((_, i) => i % 2 === 1);
+      if (strokes.length === 0) continue; // nothing usable — skip rather than import a degenerate one
+      const xs = strokes.flatMap((s) => s.filter((_, i) => i % 2 === 0));
+      const ys = strokes.flatMap((s) => s.filter((_, i) => i % 2 === 1));
       const x = Math.min(...xs);
       const y = Math.min(...ys);
       imported.push({
@@ -258,7 +259,7 @@ export async function importPageAnnotations(
         h: Math.max(...ys) - y,
         color,
         note: contents,
-        points,
+        strokes,
         importedOriginal,
       });
       continue;

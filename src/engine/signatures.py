@@ -223,6 +223,37 @@ def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
         except Exception:
             has_dss = False
 
+    # F7: each signature's PAGE (1-based) via its widget's location — a
+    # pikepdf pass, since pyHanko's object model offers no page lookup.
+    # Best-effort: a signature whose widget can't be placed simply carries
+    # no page (the panel then offers no jump, never a wrong one).
+    try:
+        import pikepdf
+
+        from engine.incremental import _widget_field_name
+
+        page_by_name: dict[str, int] = {}
+        with pikepdf.open(file) as pdf:
+            for i, page in enumerate(pdf.pages):
+                annots = page.obj.get("/Annots")
+                if annots is None:
+                    continue
+                for a in annots:
+                    try:
+                        if a.get("/Subtype") != pikepdf.Name("/Widget"):
+                            continue
+                        name = _widget_field_name(a)
+                        if name:
+                            page_by_name.setdefault(name, i + 1)
+                    except Exception:
+                        continue
+        for s in signatures:
+            page_no = page_by_name.get(s.get("field") or "")
+            if page_no is not None:
+                s["page"] = page_no
+    except Exception:
+        pass
+
     return {
         "signed": len(signatures) > 0,
         "signature_count": len(signatures),

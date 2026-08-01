@@ -74,11 +74,28 @@ describe('single-key accelerators (M6.4)', () => {
     await browser.keys(['Escape']);
   });
 
-  it('reserved letters stay dead even with the pref on', async () => {
-    for (const k of ['z', 's', 'e']) {
-      await browser.keys([k]);
-    }
-    await browser.pause(150);
-    expect((await getState()).tool).toBe('select');
+  it('N3/N6 INVERSION — Z, S, and E arm their shipped features', async () => {
+    // This leg used to pin the trio as RESERVED-dead; their features exist
+    // now (marquee zoom, sticky note, content editing), so reserve-don't-
+    // remap resolves to binding them.
+    await browser.keys(['z']);
+    await browser.waitUntil(async () => (await getState()).tool === 'zoommarquee', {
+      timeoutMsg: 'Z did not arm marquee zoom',
+    });
+    await browser.keys(['s']);
+    await browser.waitUntil(async () => (await getState()).tool === 'note', {
+      timeoutMsg: 'S did not arm the sticky-note mode',
+    });
+    // S arms a Comment mode, so Comment opens (the M5.3 invariant).
+    expect((await getState()).activeToolId).toBe('comment');
+    await browser.keys(['e']);
+    await browser.waitUntil(async () => (await getState()).activeToolId === 'edit', {
+      timeoutMsg: 'E did not open the Edit tool',
+    });
+    // Leave the canvas armed with nothing for the next spec.
+    await browser.keys(['v']);
+    await browser.waitUntil(async () => (await getState()).tool === 'select', {
+      timeoutMsg: 'V did not return to Select',
+    });
   });
 });

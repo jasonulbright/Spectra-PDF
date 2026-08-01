@@ -197,7 +197,7 @@ function AppContent(): React.ReactElement {
   const [extractPage, setExtractPage] = useState<number | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const recentFiles = state.ui.recentFiles;
-  const { call, openFiles, saveFile } = useEngine();
+  const { call, callRaw, openFiles, saveFile } = useEngine();
   useWorkspaceIndexer();
 
   // Confirm dialog state — 3-choice unsaved (Save / Don't Save / Cancel),
@@ -310,6 +310,20 @@ function AppContent(): React.ReactElement {
           writeBuffer: file.writeBuffer,
           rename: file.rename,
           remove: file.remove,
+          // O5b: callRaw, deliberately — this runs INSIDE the commit, so
+          // the gated `call` would re-enter commitPageEdits (loud throw).
+          // The gate's guarantee ("engine reads bytes matching what the
+          // user sees") holds by construction here: we ARE the commit,
+          // reading the working copy plus the temp this very run staged.
+          preserveSignatures: async (workingPath, stagedPath) => {
+            const r = (await callRaw('transplant_incremental', {
+              original: workingPath,
+              modified: stagedPath,
+              output: stagedPath,
+            })) as { applied?: boolean };
+            return r.applied === true;
+          },
+          readBack: batch.readFileBuffer,
         });
         setCommitError(null);
       } finally {
@@ -318,7 +332,7 @@ function AppContent(): React.ReactElement {
     })();
     inflightCommit.current = run;
     return run;
-  }, [state.pageDirtyPaths, state.workspace, state.files, dispatch]);
+  }, [state.pageDirtyPaths, state.workspace, state.files, dispatch, callRaw]);
   const commitRef = useRef(commitIfNeeded);
   commitRef.current = commitIfNeeded;
 
@@ -1592,6 +1606,7 @@ function AppContent(): React.ReactElement {
       note?: string;
       markupType?: string;
       quadCount?: number;
+      strokeCount?: number;
       hasImage?: boolean;
     } | null
   >(() => null);
@@ -1609,6 +1624,7 @@ function AppContent(): React.ReactElement {
           note: annotation.note,
           markupType: annotation.markupType,
           quadCount: annotation.quads ? annotation.quads.length / 4 : undefined,
+          strokeCount: annotation.strokes ? annotation.strokes.length : undefined,
           hasImage: annotation.imageData !== undefined,
         }
       : null;

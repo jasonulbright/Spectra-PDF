@@ -341,7 +341,7 @@ describe('annotations round-trip', () => {
           {
             ...pageRef('a.pdf', 0, rotation),
             annotations: [
-              { id: 'k1', kind: 'ink' as const, x: 0.2, y: 0.3, w: 0.3, h: 0, color: '#2f6fed', points: inkPoints },
+              { id: 'k1', kind: 'ink' as const, x: 0.2, y: 0.3, w: 0.3, h: 0, color: '#2f6fed', strokes: [inkPoints] },
             ],
           },
         ]),
@@ -373,6 +373,50 @@ describe('annotations round-trip', () => {
   it('ink lands where authored at rotation 90', () => inkRoundTrip(90));
   it('ink lands where authored at rotation 180', () => inkRoundTrip(180));
   it('ink lands where authored at rotation 270', () => inkRoundTrip(270));
+
+  it('multi-stroke ink bakes ONE /Ink with one InkList entry per stroke (N2)', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const strokes = [
+      [0.2, 0.3, 0.5, 0.3],
+      [0.25, 0.5, 0.45, 0.55, 0.5, 0.5],
+      [0.6, 0.3, 0.6, 0.55],
+    ];
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', a, 'a', [
+          {
+            ...pageRef('a.pdf', 0, 0),
+            annotations: [
+              { id: 'sig', kind: 'ink' as const, x: 0.2, y: 0.3, w: 0.4, h: 0.25, color: '#2f6fed', strokes },
+            ],
+          },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const pdf = await loadPdf(await buildCommitBytes(plan));
+    const page = await pdf.getPage(1);
+    const annots = (await page.getAnnotations()) as {
+      subtype: string;
+      inkLists?: Float32Array[];
+    }[];
+    expect(annots).toHaveLength(1);
+    expect(annots[0].subtype).toBe('Ink');
+    expect(annots[0].inkLists).toHaveLength(3);
+    // Every stroke lands where authored — per-stroke, not just the first.
+    const viewport = page.getViewport({ scale: 1 });
+    strokes.forEach((expected, si) => {
+      const got = annots[0].inkLists![si];
+      expect(got.length).toBe(expected.length);
+      for (let i = 0; i < expected.length; i += 2) {
+        const p = viewport.convertToViewportPoint(got[i], got[i + 1]);
+        expect(p[0] / viewport.width).toBeCloseTo(expected[i], 3);
+        expect(p[1] / viewport.height).toBeCloseTo(expected[i + 1], 3);
+      }
+    });
+    await pdf.loadingTask.destroy();
+  });
 });
 
 describe('commitPageEdits (transactional)', () => {
@@ -512,6 +556,68 @@ describe('commitPageEdits (transactional)', () => {
     });
     expect(fs.writes).toEqual([]);
     expect(fs.dispatched).toEqual([{ type: 'CLEAR_PAGE_EDITS' }]);
+  });
+
+  // O5b — the signature-preserving transplant dep. The dep rewrites the
+  // staged temp engine-side; the state buffer must then carry the
+  // TRANSPLANTED bytes (buffer identity keys the reindex), and any failure
+  // must degrade to the plain rewrite, never block the commit.
+  describe('signature-preserving transplant dep', () => {
+    it('replaces the dispatched buffer with the read-back bytes when applied', async () => {
+      const { files, workspace, dirtyPaths } = await crossFileState();
+      const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+      const transplanted = new Uint8Array([9, 9, 9, 9]);
+      const calls: [string, string][] = [];
+      await commitPageEdits({
+        workspace, files, dirtyPaths, ...makeDeps(fs),
+        preserveSignatures: async (workingPath, stagedPath) => {
+          calls.push([workingPath, stagedPath]);
+          return workingPath === 'a.pdf.working'; // only a.pdf is "signed"
+        },
+        readBack: async () => transplanted,
+      });
+      expect(calls).toHaveLength(2);
+      expect(calls[0][0]).toBe('a.pdf.working');
+      expect(calls[0][1]).toMatch(TMP);
+      const action = fs.dispatched[0];
+      expect(action.type).toBe('COMMIT_PAGE_EDITS');
+      if (action.type === 'COMMIT_PAGE_EDITS') {
+        expect(action.updates[0].buffer).toBe(transplanted);
+        expect(action.updates[1].buffer).not.toBe(transplanted);
+      }
+    });
+
+    it('keeps the rebuilt bytes when the transplant does not apply', async () => {
+      const { files, workspace, dirtyPaths } = await crossFileState();
+      const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+      let readBackCalled = false;
+      await commitPageEdits({
+        workspace, files, dirtyPaths, ...makeDeps(fs),
+        preserveSignatures: async () => false,
+        readBack: async () => {
+          readBackCalled = true;
+          return new Uint8Array();
+        },
+      });
+      expect(readBackCalled).toBe(false);
+      expect(fs.dispatched[0].type).toBe('COMMIT_PAGE_EDITS');
+    });
+
+    it('a throwing transplant degrades to the plain rewrite instead of failing the commit', async () => {
+      const { files, workspace, dirtyPaths } = await crossFileState();
+      const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+      await commitPageEdits({
+        workspace, files, dirtyPaths, ...makeDeps(fs),
+        preserveSignatures: async () => {
+          throw new Error('engine unavailable');
+        },
+        readBack: async () => new Uint8Array(),
+      });
+      // Commit landed normally: staged, renamed, one atomic dispatch.
+      expect(fs.renames).toHaveLength(2);
+      expect(fs.dispatched).toHaveLength(1);
+      expect(fs.dispatched[0].type).toBe('COMMIT_PAGE_EDITS');
+    });
   });
 });
 

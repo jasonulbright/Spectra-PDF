@@ -461,7 +461,11 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
                 unresolved += 1
         # In-place safe: pikepdf can't save over its own open input — stage
         # beside it and swap (the attachments/_save pattern; the CLI's
-        # in-place bug class).
+        # in-place bug class). O5b: a signed input's landed bytes become an
+        # incremental append, so importing a review file onto a signed
+        # document keeps its signature verifiable.
+        from engine.incremental import finalize_preserving_signatures
+
         in_path = Path(file)
         out_path = Path(output)
         if in_path.resolve() == out_path.resolve():
@@ -470,10 +474,14 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
             ) as tmp:
                 tmp_path = tmp.name
             pdf.save(tmp_path)
+            preserved = finalize_preserving_signatures(str(in_path), tmp_path)
             shutil.move(tmp_path, str(out_path))
         else:
             pdf.save(output)
+            preserved = finalize_preserving_signatures(str(in_path), str(out_path))
     out: dict = {"output": output, "added": added, "skipped": skipped}
     if unresolved:
         out["unresolved_replies"] = unresolved
+    if preserved.get("preserved"):
+        out["signatures_preserved"] = True
     return out
