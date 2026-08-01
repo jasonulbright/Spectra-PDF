@@ -4,6 +4,12 @@ import { usePdfProxies } from '../../hooks/usePdfProxies';
 import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
 import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
+import {
+  hasCustomLabels,
+  labelFor,
+  resolvePageEntry,
+  sanitizePageEntry,
+} from '../../lib/page-labels';
 import { getDocumentProxy } from '../../lib/pdfDocCache';
 import { buildRedactionRegions } from '../../lib/redaction';
 import { pdfRectToDisplay } from '../../lib/pdfx-build';
@@ -514,9 +520,16 @@ export function WorkspaceCanvasView({
   // just focusing + wheel-scrolling (no typing) resyncs the readout instead of
   // teleporting back to the frozen number (review-caught).
   const pageBoxDirty = useRef(false);
+  // P5 follow-on: the document's own page LABELS, so the readout counts the
+  // way the printed thing does (i, ii, iii, then a body restarting at 1) and
+  // typing "iv" goes where a reader means. Empty for a document with no
+  // /PageLabels, which keeps every path below on the plain sheet number.
+  const [pageLabels, setPageLabels] = useState<string[]>([]);
+  const labelsCustom = hasCustomLabels(pageLabels);
+  // (the fetch lives below, where the engine handle is in scope)
   useEffect(() => {
-    if (!pageBoxFocused.current) setPageBox(String(currentPage));
-  }, [currentPage]);
+    if (!pageBoxFocused.current) setPageBox(labelFor(currentPage, pageLabels));
+  }, [currentPage, pageLabels]);
   // Reset the readout when entering Read mode or switching the focused doc: a
   // fresh DocumentView starts at page 1, and until it reports back the box would
   // otherwise show the previous doc's page (e.g. "40 / 3") (review-caught).
@@ -644,6 +657,51 @@ export function WorkspaceCanvasView({
   const [signError, setSignError] = useState<string | null>(null);
   const [signDone, setSignDone] = useState<{ signer: string | null; output: string; ok: boolean } | null>(null);
   const { call: engineCall, callRaw: engineCallRaw } = useEngine();
+  // P5 follow-on: fetch the focused document's page labels. Declared HERE
+  // rather than beside `pageLabels` because the engine handle is only in
+  // scope from this line down.
+  const focusedPath = focusedDoc?.path;
+  // Resolve to the working PATH — a stable string — and depend on that, never
+  // on `state.files`. The Map gets a fresh identity on every dispatch, so a
+  // `state.files` dependency re-fires this effect on every state change: it
+  // put a `get_page_labels` in front of the STRICTLY SERIAL engine queue for
+  // each one, and an image transform (which dispatches many times) starved
+  // behind the flood — e2e 47 timed out at 30s waiting for a rotate that was
+  // simply still queued. The engine is FIFO; an effect that fires per
+  // dispatch is a denial of service on it.
+  const focusedFile = focusedPath ? state.files.get(focusedPath) : undefined;
+  const focusedWorkingPath = focusedFile?.workingPath;
+  // BUFFER IDENTITY is the refresh trigger, the workspace's own rule: any
+  // edit that could re-number the pages replaces the buffer object, and
+  // nothing else does. Page count alone would miss a labels EDIT (the Page
+  // Labels panel rewrites the ranges without touching the page count).
+  const focusedBuffer = focusedFile?.buffer;
+  useEffect(() => {
+    let stale = false;
+    setPageLabels([]);
+    if (!focusedWorkingPath) return;
+    // Read-only, so it rides the ungated method list; a document with no
+    // /PageLabels answers with the plain numbers and `hasCustomLabels`
+    // says no, which keeps every path on the shipped sheet-number readout.
+    void engineCall('get_page_labels', { file: focusedWorkingPath })
+      .then((res) => {
+        const labels = (res as unknown as { labels?: unknown }).labels;
+        if (!stale && Array.isArray(labels)) {
+          setPageLabels(labels.map((l) => (typeof l === 'string' ? l : '')));
+        }
+      })
+      .catch(() => {
+        /* Labels are a convenience — a document that cannot answer keeps
+           the sheet-number readout it has always had. */
+      });
+    return () => {
+      stale = true;
+    };
+    // The page COUNT is a dependency deliberately: deleting or inserting
+    // pages re-numbers the labels, and a stale list would send the reader to
+    // the wrong sheet (`resolvePageEntry` refuses an out-of-range one, but
+    // an in-range wrong one it cannot see).
+  }, [focusedWorkingPath, focusedBuffer, engineCall]);
   // Find/OCR (2m): the ONE workspace search index, lifted to a provider so the
   // Search nav panel shares it (Phase 4 M3.3 — double-instantiating would
   // double the OCR work and desync results). Ctrl+F opens the bar.
@@ -4368,8 +4426,10 @@ export function WorkspaceCanvasView({
                   inputRef: pageBoxRef,
                   value: pageBox,
                   total: focusedDoc.pages.length,
+                  labelled: labelsCustom,
+                  sheet: currentPage,
                   onChange: (e) => {
-                    setPageBox(e.target.value.replace(/[^0-9]/g, ''));
+                    setPageBox(sanitizePageEntry(e.target.value, labelsCustom));
                     pageBoxDirty.current = true;
                   },
                   onFocus: (e) => {
@@ -4382,12 +4442,14 @@ export function WorkspaceCanvasView({
                     // Only navigate if the user actually typed a new page — a
                     // blur after just focusing + scrolling must not snap back.
                     if (pageBoxDirty.current) {
-                      const max = focusedDoc.pages.length;
-                      const n = Math.max(1, Math.min(max, parseInt(pageBox, 10) || currentPage));
-                      activeCanvasHandle()?.centerOn(focusedDoc.pages[n - 1].id);
-                      setPageBox(String(n));
+                      // A label first, then the sheet number; an entry that
+                      // is neither leaves the reading position alone and
+                      // resyncs the box (typing nonsense must not navigate).
+                      const n = resolvePageEntry(pageBox, pageLabels, focusedDoc.pages.length);
+                      if (n !== null) activeCanvasHandle()?.centerOn(focusedDoc.pages[n - 1].id);
+                      setPageBox(labelFor(n ?? currentPage, pageLabels));
                     } else {
-                      setPageBox(String(currentPage));
+                      setPageBox(labelFor(currentPage, pageLabels));
                     }
                   },
                   onKeyDown: (e) => {
