@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.0.4 — Marks that keep, buttons that work
+
+Redaction marks now survive closing the file. Form buttons do what they
+say. Shapes rotate and flip, pen drawings get an eraser, and visible
+signatures start straight from the panel.
+
+### Redaction you can put down and pick up
+- **Save your marks.** A new "Save marks" button stores redaction marks in
+  the document as standard redaction annotations — close the file, reopen
+  it next week, and the marks are waiting. Other PDF tools see them too,
+  because they're saved in the format's own interchange form.
+- Marks never print, and saving them keeps existing signatures valid.
+  Applying the redaction consumes them, exactly as before.
+
+### Forms: buttons act, and reset means reset
+- **Push buttons respond.** Reset buttons actually clear the form back to
+  its designed defaults. Link buttons show you the address and offer to
+  copy it — the app never opens the web on its own. Buttons wired to
+  scripts or submissions say so honestly instead of doing nothing.
+- **Reset from the panel or button** re-renders every field's appearance
+  and keeps signatures intact.
+
+### Drawing and shape polish
+- **An eraser for pen drawings.** The comment toolbar's new Eraser removes
+  exactly what it touches — cut a stroke in the middle and both ends
+  survive, trimmed at the eraser's edge. One undo restores the scrub.
+- **Rotate and flip shapes.** Lines, arrows, polygons, clouds, drawings,
+  and measurements rotate in quarter turns and mirror horizontally or
+  vertically — group selections turn as one.
+- **Line endings and cloud style.** Arrowheads on either end of lines and
+  polylines, and cloud bumpiness, are now editable in the properties bar.
+
+### Signing
+- **Visible signature, straight from the panel.** The Signatures panel's
+  sign form now hands off to on-page placement with your certificate
+  details carried over — pick the spot, sign, done.
+
 ## 1.0.3 — Signed documents stay signed
 
 The headline: you can now comment on, fill in, and add pages to a signed
