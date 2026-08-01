@@ -158,7 +158,14 @@ pub enum CliCommand {
     /// Print a PDF to a Windows printer (via bundled Ghostscript)
     Print(PrintArgs),
     /// List installed Windows printers (JSON: names + default)
-    Printers,
+    Printers(PrintersArgs),
+}
+
+#[derive(Args)]
+pub struct PrintersArgs {
+    /// Also report one printer's capabilities (papers/duplex/color) as JSON
+    #[arg(long, value_name = "PRINTER")]
+    pub capabilities: Option<String>,
 }
 
 #[derive(Args)]
@@ -171,12 +178,86 @@ pub struct PrintArgs {
     /// Page range like "1-3,5" (default: all pages)
     #[arg(long, default_value = "")]
     pub pages: String,
-    /// Number of copies (1-99)
+    /// Number of copies (1-999)
     #[arg(long, default_value_t = 1)]
     pub copies: u32,
-    /// Scale mode: "fit" (scale to paper) or "actual" (100%)
+    /// Scale mode: "fit" (scale to paper), "actual" (100%), or "scale"
+    /// (custom percentage via --scale)
     #[arg(long, default_value = "fit")]
     pub fit: String,
+    /// Custom scale percentage (with --fit scale)
+    #[arg(long, default_value_t = 100.0)]
+    pub scale: f64,
+    /// Print copies uncollated (1,1,2,2,... instead of 1,2,1,2,...)
+    #[arg(long)]
+    pub no_collate: bool,
+    /// Page subset by document page number: all | odd | even
+    #[arg(long, default_value = "all")]
+    pub subset: String,
+    /// Print back to front
+    #[arg(long)]
+    pub reverse: bool,
+    /// Two-sided printing: printer | simplex | long | short
+    #[arg(long, default_value = "printer")]
+    pub duplex: String,
+    /// Paper by DMPAPER id (see `printers --capabilities`)
+    #[arg(long)]
+    pub paper: Option<u16>,
+    /// Page orientation: auto | portrait | landscape
+    #[arg(long, default_value = "auto")]
+    pub orientation: String,
+    /// Color mode: printer | color | gray
+    #[arg(long, default_value = "printer")]
+    pub color: String,
+    /// Comments & forms: all | document | stamps
+    #[arg(long, default_value = "all")]
+    pub comments: String,
+    /// Rasterize before printing (compatibility mode)
+    #[arg(long)]
+    pub as_image: bool,
+    /// Rasterization resolution for --as-image
+    #[arg(long, default_value_t = 300)]
+    pub image_dpi: u32,
+    /// Page layout: single | nup | booklet | poster
+    #[arg(long, default_value = "single")]
+    pub layout: String,
+    /// Rows per sheet (with --layout nup)
+    #[arg(long, default_value_t = 2)]
+    pub nup_rows: u32,
+    /// Columns per sheet (with --layout nup)
+    #[arg(long, default_value_t = 2)]
+    pub nup_cols: u32,
+    /// Cell order: horizontal | horizontal-reversed | vertical | vertical-reversed
+    #[arg(long, default_value = "horizontal")]
+    pub nup_order: String,
+    /// Draw a border around each placed page
+    #[arg(long)]
+    pub nup_border: bool,
+    /// Disable rotating pages to fit their cells better
+    #[arg(long)]
+    pub no_nup_auto_rotate: bool,
+    /// Booklet sheet subset: both | front | back
+    #[arg(long, default_value = "both")]
+    pub booklet_subset: String,
+    /// Booklet binding edge: left | right
+    #[arg(long, default_value = "left")]
+    pub booklet_binding: String,
+    /// Poster tile scale percentage
+    #[arg(long, default_value_t = 100.0)]
+    pub poster_scale: f64,
+    /// Poster tile overlap in points
+    #[arg(long, default_value_t = 0.0)]
+    pub poster_overlap: f64,
+    /// Draw hairline cut marks on poster tiles
+    #[arg(long)]
+    pub poster_cut_marks: bool,
+    /// Label poster tiles with their grid position
+    #[arg(long)]
+    pub poster_labels: bool,
+    /// Sheet size override "WxH" in points (layout modes; default: the
+    /// printer's chosen/default paper via DeviceCapabilities)
+    #[arg(long, value_name = "WxH")]
+    pub sheet: Option<String>,
 }
 
 #[derive(Args)]
@@ -1365,18 +1446,56 @@ fn collect_pdfs(dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(pdfs)
 }
 
+/// Sheet size in points for the print layout modes: an explicit "WxH"
+/// override wins; otherwise the chosen (or default) paper's size from the
+/// printer's own capability report.
+fn resolve_sheet(
+    printer: &str,
+    paper: Option<u16>,
+    sheet: Option<&str>,
+) -> Result<(f64, f64), String> {
+    if let Some(spec) = sheet {
+        let (w, h) = spec
+            .split_once(['x', 'X'])
+            .ok_or_else(|| format!("--sheet expects WxH in points, got '{spec}'"))?;
+        let w: f64 = w.trim().parse().map_err(|_| format!("Bad sheet width '{w}'"))?;
+        let h: f64 = h.trim().parse().map_err(|_| format!("Bad sheet height '{h}'"))?;
+        return Ok((w, h));
+    }
+    let caps = crate::printers::capabilities(printer)?;
+    let id = paper.or(caps.default_paper);
+    if let Some(id) = id {
+        if let Some(p) = caps.papers.iter().find(|p| p.id == id) {
+            return Ok((p.width_pt, p.height_pt));
+        }
+    }
+    if let Some(p) = caps.papers.first() {
+        return Ok((p.width_pt, p.height_pt));
+    }
+    Err("Could not resolve the paper size for this layout; pass --sheet WxH (points)".into())
+}
+
 // ── Main CLI entry point ────────────────────────────────────────────────────
 
 /// Run the CLI. Returns the exit code.
 pub fn run(command: CliCommand) -> i32 {
-    // Printer enumeration is pure winspool — no Python engine to spawn.
-    if matches!(command, CliCommand::Printers) {
-        return match crate::printers::enumerate() {
-            Ok(list) => {
-                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+    // Printer enumeration/capabilities are pure winspool — no Python engine
+    // to spawn.
+    if let CliCommand::Printers(args) = &command {
+        let result = match &args.capabilities {
+            Some(name) => crate::printers::capabilities(name)
+                .map(|caps| serde_json::to_string_pretty(&caps).unwrap()),
+            None => crate::printers::enumerate().map(|list| {
+                serde_json::to_string_pretty(&serde_json::json!({
                     "printers": list.printers,
                     "default": list.default,
-                })).unwrap());
+                }))
+                .unwrap()
+            }),
+        };
+        return match result {
+            Ok(json) => {
+                println!("{}", json);
                 0
             }
             Err(msg) => {
@@ -1428,21 +1547,63 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
 
         CliCommand::Print(args) => {
             let gs = resolve_gs();
-            engine.call(
-                "print",
-                json!({
-                    "file": abs(&args.input).to_string_lossy(),
-                    "printer": args.printer,
-                    "pages": args.pages,
-                    "copies": args.copies,
-                    "fit": args.fit,
-                    "gs_path": gs.to_string_lossy(),
-                }),
-            )
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "printer": args.printer,
+                "pages": args.pages,
+                "copies": args.copies,
+                "fit": args.fit,
+                "gs_path": gs.to_string_lossy(),
+                "collate": !args.no_collate,
+                "subset": args.subset,
+                "reverse": args.reverse,
+                "duplex": args.duplex,
+                "orientation": args.orientation,
+                "color": args.color,
+                "annots": args.comments,
+                "as_image": args.as_image,
+                "image_dpi": args.image_dpi,
+                "layout": args.layout,
+            });
+            if let Some(paper) = args.paper {
+                params["paper"] = json!(paper);
+            }
+            if args.fit == "scale" {
+                params["scale_percent"] = json!(args.scale);
+            }
+            match args.layout.as_str() {
+                "nup" => {
+                    params["nup_rows"] = json!(args.nup_rows);
+                    params["nup_cols"] = json!(args.nup_cols);
+                    params["nup_order"] = json!(args.nup_order);
+                    params["nup_border"] = json!(args.nup_border);
+                    params["nup_auto_rotate"] = json!(!args.no_nup_auto_rotate);
+                }
+                "booklet" => {
+                    params["booklet_subset"] = json!(args.booklet_subset);
+                    params["booklet_binding"] = json!(args.booklet_binding);
+                }
+                "poster" => {
+                    params["poster_scale"] = json!(args.poster_scale);
+                    params["poster_overlap"] = json!(args.poster_overlap);
+                    params["poster_cut_marks"] = json!(args.poster_cut_marks);
+                    params["poster_labels"] = json!(args.poster_labels);
+                }
+                _ => {}
+            }
+            // The layout modes need real sheet geometry; resolve it the
+            // same way the dialog does (chosen paper -> capabilities ->
+            // default paper), with --sheet as the explicit override.
+            if args.layout != "single" || args.fit == "scale" {
+                let (w, h) = resolve_sheet(&args.printer, args.paper, args.sheet.as_deref())?;
+                params["sheet_width"] = json!(w);
+                params["sheet_height"] = json!(h);
+            }
+            engine.call("print", params)
         }
 
         // Handled in run() before the engine spawns.
-        CliCommand::Printers => unreachable!("printers is dispatched before engine start"),
+        CliCommand::Printers(_) => unreachable!("printers is dispatched before engine start"),
 
         CliCommand::Rotate(args) => {
             engine.call(

@@ -4,32 +4,83 @@ Same arm's-length-subprocess posture as compress/grayscale/PDF-A (the AGPL
 boundary is the process boundary). mswinpr2 renders through the installed
 Windows printer driver, so anything the driver can print, this can.
 
-Copies are printed as N sequential Ghostscript jobs, NOT -dNumCopies: the
-documented mswinpr2 surface (OutputFile/NoCancel + PostScript UserSettings)
-does not include a copies control, and a driver-dependent flag that silently
-prints one copy where it isn't honored is a broken feature. N identical jobs
-are deterministic on every driver, and arrive collated as a bonus.
+The O2 contract (2026-07-31) widens the original {file, printer, gs_path,
+pages, copies, fit} to the full dialog: subset/reverse/collate, duplex,
+paper size, orientation, color, comments modes, print-as-image, and the
+layout modes (multiple-per-sheet, booklet, poster, custom scale). Two
+mechanism families implement it:
+
+- DRIVER (DEVMODE) options ride the job's Ghostscript switches. Duplex is
+  the standard page-device pair (-dDuplex/-dTumble -> dmDuplex; documented
+  for mswinpr2). Paper / orientation / color / document name go through the
+  device's /UserSettings dictionary via a setpagedevice prolog — the old
+  ``finddevice putdeviceprops`` incantation is REMOVED in gs 10.x
+  (probe-verified); setpagedevice forwards because mswinpr2 exports
+  /UserSettings. The key->DEVMODE mapping (Paper->dmPaperSize,
+  Orientation->dmOrientation, Color->dmColor) is source-verified against
+  the bundled 10.07.1. Paper TRAY selection is NOT possible on this device
+  (dmDefaultSource is hard-forced to automatic in gdevwpr2.c) — recorded in
+  § I as blocked-external, not silently faked.
+- PAGE-LEVEL options (order, subsets, duplication, annotation modes,
+  flatten/rasterize, imposition) build a temporary, exactly-prepared PDF in
+  print_layout.py and print THAT verbatim — deterministic on every driver.
+
+Copies are printed as N sequential Ghostscript jobs when collated: the
+UserSettings /Copies key exists but rides dmCopies, which a driver that
+ignores it silently turns into ONE copy — N identical jobs are deterministic
+on every driver and arrive collated by construction. Uncollated copies
+duplicate pages (1,1,2,2,...) into the prepared file instead — one job.
+The N-job trade-off is N renders; explicit and bounded.
+
+DEVMODE effects cannot be integration-tested headlessly (every dialog-free
+printer on a dev box is either real paper or raises a file prompt), so the
+switch/prolog strings are pinned byte-exact by unit tests, the key mapping
+is source-verified, and everything renderable is proven through raster
+devices with the same switch lists (TestPrintFitSemantics and friends).
+
+All print renders pass -dUseCropBox: the CropBox is what the viewer shows,
+and printing the MediaBox of a cropped document would silently print
+content the user cannot see (the § I.0 class).
 """
 
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pikepdf
 
+from .print_layout import (
+    NUP_ORDERS,
+    apply_subset,
+    booklet_sides,
+    build_sequence,
+    expand_page_spec,
+    flatten_pdf,
+    impose_poster,
+    impose_sheets,
+    nup_cells,
+    page_geometry,
+    rasterize_pdf,
+    strip_annotations,
+)
 from .validate import validate_pdf
 
 # Per-job timeout. A print job renders every page through the driver at its
 # native resolution; generous, but not unbounded.
 JOB_TIMEOUT_S = 600
 
-MAX_COPIES = 99
+# O4: was 99; Acrobat's own cap. Sequential jobs make large counts slow but
+# correct — the count is explicit user intent, never silently clamped.
+MAX_COPIES = 999
 
 # Scale-mode switches (§ 3.4's fit/actual). Both pin the media to the
 # printer's paper (-dFIXEDMEDIA); the PDF page-size request must never win
 # over the physical paper.
-#   fit    — scale the page to the paper (Acrobat's "Fit").
+#   fit    — scale the page to the paper (Acrobat's "Fit"). Probe-pinned
+#            bonus: FitPage also auto-rotates a landscape page onto portrait
+#            media, which is what makes orientation="auto" free here.
 #   actual — 1:1 at the printable origin; content larger than the paper
 #            clips, by design. NOT centered: Ghostscript has no sound switch
 #            for centering under FIXEDMEDIA (-dCenterPages is silently
@@ -43,6 +94,28 @@ FIT_SWITCHES: dict[str, list[str]] = {
     "fit": ["-dFIXEDMEDIA", "-dFitPage"],
     "actual": ["-dFIXEDMEDIA"],
 }
+
+# Duplex -> standard gs page-device params (mswinpr2: dev->Duplex/tumble ->
+# dmDuplex, DMDUP_VERTICAL = flip on the long edge). "printer" omits the
+# pair entirely so the driver's default (or the user's printer preferences)
+# stays in charge.
+DUPLEX_SWITCHES: dict[str, list[str]] = {
+    "printer": [],
+    "simplex": ["-dDuplex=false"],
+    "long": ["-dDuplex=true", "-dTumble=false"],
+    "short": ["-dDuplex=true", "-dTumble=true"],
+}
+
+# UserSettings integer values (DEVMODE constants).
+_ORIENT_VALUES = {"portrait": 1, "landscape": 2}
+_COLOR_VALUES = {"gray": 1, "color": 2}
+
+_ANNOT_MODES = ("all", "document", "stamps")
+_SUBSETS = ("all", "odd", "even")
+_LAYOUTS = ("single", "nup", "booklet", "poster")
+
+MIN_IMAGE_DPI, MAX_IMAGE_DPI = 72, 1200
+MIN_SHEET_PT, MAX_SHEET_PT = 72.0, 14400.0
 
 
 def parse_page_spec(spec: str, page_count: int) -> str:
@@ -110,12 +183,53 @@ def printer_exists(name: str) -> bool:
     return True
 
 
+def _ps_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def build_setpagedevice_ps(
+    paper: int | None,
+    orientation_value: int | None,
+    color_value: int | None,
+    document_name: str | None,
+) -> str | None:
+    """The -c setpagedevice prolog carrying mswinpr2 /UserSettings.
+
+    Returns None when every entry is defaulted (no prolog — the argv stays
+    switch-only, byte-identical to the original contract). DocumentName is
+    what the spooler queue shows; kept printable-ASCII (a name the DEVMODE
+    round-trip could garble is omitted rather than mojibake'd) and PS-escaped.
+    """
+    parts: list[str] = []
+    if paper is not None:
+        parts.append(f"/Paper {int(paper)}")
+    if orientation_value is not None:
+        parts.append(f"/Orientation {int(orientation_value)}")
+    if color_value is not None:
+        parts.append(f"/Color {int(color_value)}")
+    if document_name:
+        name = document_name[:200]
+        if all(32 <= ord(c) < 127 for c in name):
+            parts.append(f"/DocumentName ({_ps_escape(name)})")
+    if not parts:
+        return None
+    return "<< /UserSettings << " + " ".join(parts) + " >> >> setpagedevice"
+
+
 def build_gs_args(
-    file: str, printer: str, pages: str, fit: str, gs_path: str
+    file: str,
+    printer: str,
+    pages: str,
+    fit: str,
+    gs_path: str,
+    duplex: str = "printer",
+    setpagedevice_ps: str | None = None,
 ) -> list[str]:
     """The exact Ghostscript argv for one print job (pure; unit-tested).
 
-    `pages` must already be validated/normalized by parse_page_spec.
+    `pages` must already be validated/normalized by parse_page_spec, and
+    `fit` must be a FIT_SWITCHES key (the scale/layout modes bake their
+    geometry into the prepared file and print it "fit" or "actual").
     """
     args = [
         gs_path,
@@ -128,52 +242,42 @@ def build_gs_args(
         # the OutputFile — gs must never raise its own printer-picker dialog.
         "-dNoCancel",
         f"-sOutputFile=%printer%{printer}",
+        # Print what the viewer shows: the CropBox, not the MediaBox.
+        "-dUseCropBox",
         *FIT_SWITCHES[fit],
+        *DUPLEX_SWITCHES[duplex],
     ]
     if pages:
         args.append(f"-sPageList={pages}")
+    if setpagedevice_ps:
+        args += ["-c", setpagedevice_ps, "-f"]
     args.append(str(Path(file)))
     return args
 
 
-def print_pdf(
-    file: str,
-    printer: str,
-    gs_path: str = "gs",
-    pages: str = "",
-    copies: int = 1,
-    fit: str = "fit",
-) -> dict:
-    """Print a PDF to a named Windows printer.
+def _choice(name: str, value, options) -> None:
+    if value not in options:
+        raise ValueError(
+            f"Unknown {name} {value!r} (expected one of {', '.join(map(str, options))})"
+        )
 
-    Args:
-        file: Input PDF path.
-        printer: Exact Windows printer name (never empty — an empty name
-            would make mswinpr2 prompt with its own dialog).
-        gs_path: Path to the Ghostscript executable.
-        pages: Page range like "1-3,5"; empty = all pages.
-        copies: 1..99; printed as that many sequential jobs (see module doc).
-        fit: "fit" (scale to paper) or "actual" (1:1).
-    """
-    validate_pdf(file)
 
-    if not printer or not printer.strip():
-        raise ValueError("No printer specified")
-    if not isinstance(copies, int) or isinstance(copies, bool):
-        raise ValueError(f"Copies must be a whole number, got {copies!r}")
-    if not 1 <= copies <= MAX_COPIES:
-        raise ValueError(f"Copies must be between 1 and {MAX_COPIES}, got {copies}")
-    if fit not in FIT_SWITCHES:
-        raise ValueError(f"Unknown fit mode '{fit}' (expected 'fit' or 'actual')")
-    if not printer_exists(printer):
-        raise ValueError(f"Unknown printer: '{printer}'")
+def _require_bool(name: str, value) -> None:
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be true or false, got {value!r}")
 
-    with pikepdf.open(file) as pdf:
-        page_count = len(pdf.pages)
-    page_list = parse_page_spec(pages, page_count)
 
-    args = build_gs_args(file, printer, page_list, fit, gs_path)
-    for _ in range(copies):
+def _num(name: str, value, lo, hi) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number, got {value!r}")
+    v = float(value)
+    if not (lo <= v <= hi):
+        raise ValueError(f"{name} must be between {lo:g} and {hi:g}, got {value!r}")
+    return v
+
+
+def _run_jobs(args: list[str], jobs: int) -> None:
+    for _ in range(jobs):
         try:
             result = subprocess.run(
                 args,
@@ -195,10 +299,315 @@ def print_pdf(
             detail = (result.stderr or "").strip() or (result.stdout or "").strip()
             raise RuntimeError(f"Ghostscript print failed: {detail or 'unknown error'}")
 
-    return {
+
+def print_pdf(
+    file: str,
+    printer: str,
+    gs_path: str = "gs",
+    pages: str = "",
+    copies: int = 1,
+    fit: str = "fit",
+    scale_percent: float = 100,
+    collate: bool = True,
+    subset: str = "all",
+    reverse: bool = False,
+    duplex: str = "printer",
+    paper: int | None = None,
+    orientation: str = "auto",
+    color: str = "printer",
+    annots: str = "all",
+    as_image: bool = False,
+    image_dpi: int = 300,
+    layout: str = "single",
+    nup_rows: int = 2,
+    nup_cols: int = 2,
+    nup_order: str = "horizontal",
+    nup_border: bool = False,
+    nup_auto_rotate: bool = True,
+    booklet_subset: str = "both",
+    booklet_binding: str = "left",
+    poster_scale: float = 100,
+    poster_overlap: float = 0,
+    poster_cut_marks: bool = False,
+    poster_labels: bool = False,
+    sheet_width: float | None = None,
+    sheet_height: float | None = None,
+) -> dict:
+    """Print a PDF to a named Windows printer (full O2 contract).
+
+    Args (beyond the original six):
+        scale_percent: custom scale (fit="scale", layout "single" only).
+        collate: False duplicates pages (1,1,2,2,...) into ONE job.
+        subset: "all" | "odd" | "even" — document page-number parity.
+        reverse: print back to front.
+        duplex: "printer" | "simplex" | "long" | "short".
+        paper: DMPAPER id from the printer's capability list; None = default.
+        orientation: "auto" | "portrait" | "landscape".
+        color: "printer" | "color" | "gray" (driver dmColor).
+        annots: "all" | "document" | "stamps" (Acrobat's Comments & Forms).
+        as_image / image_dpi: rasterize before spooling.
+        layout: "single" | "nup" | "booklet" | "poster".
+        sheet_width/height: PORTRAIT paper size in points — required for the
+            layout modes and custom scale (the caller resolves the real
+            paper; this module never guesses).
+    """
+    validate_pdf(file)
+
+    if not printer or not printer.strip():
+        raise ValueError("No printer specified")
+    if not isinstance(copies, int) or isinstance(copies, bool):
+        raise ValueError(f"Copies must be a whole number, got {copies!r}")
+    if not 1 <= copies <= MAX_COPIES:
+        raise ValueError(f"Copies must be between 1 and {MAX_COPIES}, got {copies}")
+    _choice("fit mode", fit, ("fit", "actual", "scale"))
+    _choice("subset", subset, _SUBSETS)
+    _choice("duplex mode", duplex, tuple(DUPLEX_SWITCHES))
+    _choice("orientation", orientation, ("auto", "portrait", "landscape"))
+    _choice("color mode", color, ("printer", "color", "gray"))
+    _choice("comments mode", annots, _ANNOT_MODES)
+    _choice("layout", layout, _LAYOUTS)
+    _require_bool("collate", collate)
+    _require_bool("reverse", reverse)
+    _require_bool("as_image", as_image)
+    if paper is not None:
+        if isinstance(paper, bool) or not isinstance(paper, int) or not 1 <= paper <= 32767:
+            raise ValueError(f"Unknown paper id {paper!r}")
+    if as_image:
+        if isinstance(image_dpi, bool) or not isinstance(image_dpi, int):
+            raise ValueError(f"Image DPI must be a whole number, got {image_dpi!r}")
+        if not MIN_IMAGE_DPI <= image_dpi <= MAX_IMAGE_DPI:
+            raise ValueError(
+                f"Image DPI must be between {MIN_IMAGE_DPI} and {MAX_IMAGE_DPI}, got {image_dpi}"
+            )
+    if fit == "scale":
+        if layout != "single":
+            raise ValueError("Custom scale applies to the single-page layout only")
+        scale_percent = _num("Scale percent", scale_percent, 1, 1000)
+    if layout == "nup":
+        for label, v in (("Rows", nup_rows), ("Columns", nup_cols)):
+            if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 8:
+                raise ValueError(f"{label} per sheet must be 1-8, got {v!r}")
+        _choice("page order", nup_order, NUP_ORDERS)
+        _require_bool("nup_border", nup_border)
+        _require_bool("nup_auto_rotate", nup_auto_rotate)
+    if layout == "booklet":
+        _choice("booklet subset", booklet_subset, ("both", "front", "back"))
+        _choice("booklet binding", booklet_binding, ("left", "right"))
+    if layout == "poster":
+        poster_scale = _num("Poster scale", poster_scale, 1, 2000)
+        _require_bool("poster_cut_marks", poster_cut_marks)
+        _require_bool("poster_labels", poster_labels)
+
+    imposition = layout != "single" or fit == "scale"
+    if imposition:
+        if sheet_width is None or sheet_height is None:
+            raise ValueError("This layout needs the paper size (sheet_width/sheet_height)")
+        sheet_width = _num("Sheet width", sheet_width, MIN_SHEET_PT, MAX_SHEET_PT)
+        sheet_height = _num("Sheet height", sheet_height, MIN_SHEET_PT, MAX_SHEET_PT)
+        if layout == "poster":
+            poster_overlap = _num(
+                "Poster overlap", poster_overlap, 0, min(sheet_width, sheet_height) / 2
+            )
+    if not printer_exists(printer):
+        raise ValueError(f"Unknown printer: '{printer}'")
+
+    with pikepdf.open(file) as pdf:
+        page_count = len(pdf.pages)
+    page_list = parse_page_spec(pages, page_count)
+
+    order = apply_subset(expand_page_spec(page_list, page_count), subset)
+    if not order:
+        raise ValueError("The page selection is empty (no pages match)")
+    if reverse:
+        order = list(reversed(order))
+
+    doc_name = Path(file).name
+    uncollated_dup = (not collate) and copies > 1
+
+    # Resolve orientation. Imposition authors the sheet shape, so DEVMODE
+    # must match it explicitly; booklet is always 2-up on landscape sheets.
+    if layout == "booklet":
+        resolved_orient = "landscape"
+    elif imposition:
+        resolved_orient = orientation if orientation != "auto" else "portrait"
+    else:
+        resolved_orient = orientation  # may stay "auto" (no DEVMODE override)
+
+    # The plain fast path — byte-stable with the original contract when the
+    # new options are defaulted (plus any pure-switch options the driver
+    # applies): no temp file, -sPageList carries the (ascending) selection.
+    needs_reorder = order != sorted(set(order)) or uncollated_dup
+    plain = (
+        annots == "all"
+        and not as_image
+        and not imposition
+        and not needs_reorder
+    )
+    rotate_prepass = False
+    if orientation == "auto" and fit == "actual":
+        # FitPage auto-rotates; bare FIXEDMEDIA does not — a landscape page
+        # at actual size would print sideways-clipped. Normalize via /Rotate.
+        geo = page_geometry(file)
+        rotate_prepass = any(geo[i]["display_landscape"] for i in order)
+        if rotate_prepass:
+            plain = False
+
+    us_ps = build_setpagedevice_ps(
+        paper,
+        _ORIENT_VALUES.get(resolved_orient),
+        _COLOR_VALUES.get(color),
+        doc_name,
+    )
+
+    stages: list[str] = []
+    sheets_out: int | None = None
+
+    if plain:
+        args = build_gs_args(file, printer, page_list, fit, gs_path, duplex, us_ps)
+        jobs = copies
+        _run_jobs(args, jobs)
+    else:
+        with tempfile.TemporaryDirectory(prefix="spectra-print-") as td:
+            tdp = Path(td)
+            current = file
+
+            if annots != "all":
+                stripped = str(tdp / "stripped.pdf")
+                strip_annotations(current, stripped, annots)
+                current = stripped
+                stages.append("annotations")
+
+            # Render stage (raster or flatten) consumes the ascending page
+            # subset; positions in `order` remap into the rendered file.
+            asc = sorted(set(order))
+            asc_spec = ",".join(str(i + 1) for i in asc)
+            remap = {p: i for i, p in enumerate(asc)}
+            if as_image:
+                rendered = str(tdp / "raster.pdf")
+                rasterize_pdf(
+                    gs_path, current, rendered, image_dpi, asc_spec,
+                    gray=(color == "gray"),
+                )
+                current = rendered
+                order = [remap[p] for p in order]
+                stages.append(f"rasterize@{image_dpi}dpi")
+            elif imposition:
+                flat = str(tdp / "flat.pdf")
+                flatten_pdf(gs_path, current, flat, asc_spec)
+                current = flat
+                order = [remap[p] for p in order]
+                stages.append("flatten")
+
+            if imposition:
+                sw, sh = float(sheet_width), float(sheet_height)
+                if resolved_orient == "landscape":
+                    sw, sh = max(sw, sh), min(sw, sh)
+                imposed = str(tdp / "imposed.pdf")
+                if layout == "nup":
+                    cells = nup_cells(sw, sh, nup_rows, nup_cols, nup_order)
+                    per = len(cells)
+                    sheet_defs = [
+                        list(zip(order[i : i + per], cells))
+                        for i in range(0, len(order), per)
+                    ]
+                    sheets_out = impose_sheets(
+                        current, imposed, sheet_defs, sw, sh,
+                        border=nup_border, auto_rotate=nup_auto_rotate,
+                    )
+                    stages.append(f"nup{nup_rows}x{nup_cols}")
+                elif layout == "booklet":
+                    sides = booklet_sides(len(order), booklet_binding)
+                    if booklet_subset == "front":
+                        sides = sides[0::2]
+                    elif booklet_subset == "back":
+                        sides = sides[1::2]
+                    half = sw / 2
+                    cells = [(0.0, 0.0, half, sh), (half, 0.0, half, sh)]
+                    sheet_defs = [
+                        [
+                            (order[pos] if pos is not None else None, cells[ci])
+                            for ci, pos in enumerate(side)
+                        ]
+                        for side in sides
+                    ]
+                    sheets_out = impose_sheets(
+                        current, imposed, sheet_defs, sw, sh, auto_rotate=True,
+                    )
+                    stages.append("booklet")
+                elif layout == "poster":
+                    if order != list(range(len(order))):
+                        seq = str(tdp / "sequence.pdf")
+                        build_sequence(current, seq, order)
+                        current = seq
+                        stages.append("reorder")
+                    result = impose_poster(
+                        current, imposed, sw, sh,
+                        scale=poster_scale / 100.0,
+                        overlap=poster_overlap,
+                        cut_marks=poster_cut_marks,
+                        labels=poster_labels,
+                    )
+                    sheets_out = result["sheets"]
+                    stages.append("poster")
+                else:  # fit == "scale", 1-up
+                    cell = (0.0, 0.0, sw, sh)
+                    sheet_defs = [[(i, cell)] for i in order]
+                    sheets_out = impose_sheets(
+                        current, imposed, sheet_defs, sw, sh,
+                        auto_rotate=False, scale_override=scale_percent / 100.0,
+                    )
+                    stages.append(f"scale@{scale_percent:g}%")
+                current = imposed
+            elif order != list(range(len(order) if as_image else page_count)) or rotate_prepass:
+                # Pure reorder / rotate normalization (no imposition).
+                seq = str(tdp / "sequence.pdf")
+                build_sequence(
+                    current, seq, order,
+                    rotate_landscape_to_portrait=rotate_prepass,
+                )
+                current = seq
+                stages.append("reorder" if not rotate_prepass else "reorder+rotate")
+
+            if uncollated_dup:
+                with pikepdf.open(current) as prepared:
+                    n_prepared = len(prepared.pages)
+                dup_order = [p for p in range(n_prepared) for _ in range(copies)]
+                dup = str(tdp / "uncollated.pdf")
+                build_sequence(current, dup, dup_order)
+                current = dup
+                stages.append("uncollated-copies")
+
+            final_fit = (
+                "fit" if layout in ("nup", "booklet")
+                else "actual" if (layout == "poster" or fit == "scale")
+                else fit
+            )
+            args = build_gs_args(current, printer, "", final_fit, gs_path, duplex, us_ps)
+            jobs = 1 if uncollated_dup else copies
+            _run_jobs(args, jobs)
+
+    result = {
         "printer": printer,
         "copies": copies,
+        "collate": collate,
         "pages": page_list or "all",
+        "subset": subset,
+        "reverse": reverse,
         "fit": fit,
+        "duplex": duplex,
+        "orientation": resolved_orient,
+        "color": color,
+        "annots": annots,
+        "layout": layout,
         "page_count": page_count,
+        "jobs": jobs,
+        "prepass": stages,
     }
+    if sheets_out is not None:
+        result["sheets"] = sheets_out
+    if paper is not None:
+        result["paper"] = paper
+    if as_image:
+        result["as_image"] = True
+        result["image_dpi"] = image_dpi
+    return result
