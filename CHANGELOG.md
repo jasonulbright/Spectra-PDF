@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.7 — Every font edits, every image too
+
+The last font-format refusals fall, inline images join the image tools,
+and text runs gain styling.
+
+### Text
+- **Type 3 fonts edit.** Documents using glyph-procedure fonts — common in
+  TeX output and older generators — now edit like any other text.
+- **Style a text run.** The text-run editor gains size and colour: change
+  one run's size or colour without touching its text, with neighboring
+  text staying exactly where it was.
+
+### Images
+- **Inline images are full citizens.** Images embedded directly in page
+  content streams — previously visible but untouchable — can now be
+  replaced and extracted like any other image.
+
+### Under the hood
+- **Render-performance tracking.** The test build now measures page
+  rendering, so future releases can prove they got faster — or catch
+  themselves getting slower.
+
 ## 1.0.6 — Sign with hardware, edit more fonts
 
 Signing gains hardware-token support, PostScript forms distill into working
