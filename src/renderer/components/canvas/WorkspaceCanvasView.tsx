@@ -147,6 +147,14 @@ interface WorkspaceCanvasViewProps {
     newText: string,
     opts?: { convert?: boolean },
   ) => Promise<string | void>;
+  /** T14: run-scoped size/color restyle (text unchanged) — same App routing
+   * and EDIT_DECLINED contract as onEditText. */
+  onRestyleText: (
+    path: string,
+    page: number,
+    index: number,
+    style: { size?: number; color?: [number, number, number] },
+  ) => Promise<string | void>;
   // Edit ▸ Paragraphs (7.5): replace a paragraph's text and re-lay-out
   // inside its box — same one-snapshot, undoable App routing (engine
   // replace_paragraph_text), same EDIT_DECLINED contract. The canvas
@@ -349,6 +357,7 @@ export function WorkspaceCanvasView({
   onEditImage,
   onEditVector,
   onEditText,
+  onRestyleText,
   onEditParagraph,
   onMergeParagraph,
   onAddText,
@@ -2531,6 +2540,60 @@ export function WorkspaceCanvasView({
     [focusedDoc, docs, editTextByPage, onEditText],
   );
 
+  // T14: the run editor's style commit — same stale-window + restore-on-
+  // decline discipline as the text commit above, engine restyle_text_run.
+  const handleRestyleTextEdit = useCallback(
+    async (
+      pageId: string,
+      index: number,
+      style: { size?: number; color?: [number, number, number] },
+    ): Promise<void> => {
+      if (!focusedDoc || committingTextRef.current) return;
+      const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
+      if (pageNumber == null) return;
+      committingTextRef.current = true;
+      setEditingText(null);
+      setEditSel(null);
+      setEditBusy(true);
+      setEditNotice(null);
+      const previousListing = editTextByPage.get(pageId);
+      setEditTextByPage((prev) => {
+        const next = new Map(prev);
+        next.delete(pageId);
+        return next;
+      });
+      try {
+        const result = await onRestyleText(focusedDoc.path, pageNumber, index, style);
+        if (result === EDIT_DECLINED) {
+          if (previousListing) {
+            setEditTextByPage((prev) => {
+              const next = new Map(prev);
+              next.set(pageId, previousListing);
+              return next;
+            });
+          }
+          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+        }
+      } catch (err) {
+        if (previousListing) {
+          setEditTextByPage((prev) => {
+            const next = new Map(prev);
+            next.set(pageId, previousListing);
+            return next;
+          });
+        }
+        setEditNotice({
+          text: err instanceof Error ? err.message : String(err),
+          error: true,
+        });
+      } finally {
+        committingTextRef.current = false;
+        setEditBusy(false);
+      }
+    },
+    [focusedDoc, docs, editTextByPage, onRestyleText],
+  );
+
   const handleCommitParagraphEdit = useCallback(
     async (
       pageId: string,
@@ -2839,13 +2902,6 @@ export function WorkspaceCanvasView({
 
   // C4: the selected placement's kind — replace/extract disable for an
   // inline draw (honest disable at the control, engine refusal as belt).
-  const editImageKind = useMemo(() => {
-    if (!editSel || editSel.kind !== 'image') return null;
-    return (
-      editImagesByPage.get(editSel.pageId)?.find((pl) => pl.index === editSel.index)?.kind ?? null
-    );
-  }, [editSel, editImagesByPage]);
-
   // The selected placement's current opacity — the slider's honest seed.
   const editImageOpacity = useMemo(() => {
     if (!editSel || editSel.kind !== 'image') return null;
@@ -3843,7 +3899,7 @@ export function WorkspaceCanvasView({
         editNotice={editNotice}
         onEditAction={(kind) => void runEditAction(kind)}
         editImageOpacity={editImageOpacity}
-        editImageKind={editImageKind}
+
         onSetImageOpacity={commitImageOpacity}
         imageCropArmed={imageCropArmed}
         onToggleImageCrop={() => setImageCropArmed((a) => !a)}
@@ -3948,6 +4004,11 @@ export function WorkspaceCanvasView({
               text: string,
               opts?: { convert?: boolean },
             ) => void handleCommitTextEdit(pageId, index, text, opts),
+            onRestyleTextEdit: (
+              pageId: string,
+              index: number,
+              style: { size?: number; color?: [number, number, number] },
+            ) => void handleRestyleTextEdit(pageId, index, style),
             onCancelTextEdit: handleCancelTextEdit,
             onSelectEditParagraph: handleSelectEditParagraph,
             onOpenParagraphEditor: handleOpenParagraphEditor,
@@ -4176,6 +4237,9 @@ export function WorkspaceCanvasView({
           onOpenTextEditor={handleOpenTextEditor}
           onCommitTextEdit={(pageId, index, text, opts) =>
             void handleCommitTextEdit(pageId, index, text, opts)
+          }
+          onRestyleTextEdit={(pageId, index, style) =>
+            void handleRestyleTextEdit(pageId, index, style)
           }
           onCancelTextEdit={handleCancelTextEdit}
           onSelectEditParagraph={handleSelectEditParagraph}

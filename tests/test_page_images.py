@@ -593,21 +593,40 @@ class TestInlineImages:
         names = _names_in_page_stream(out)
         assert names[0] != "/Fm1" and names[1] == "/Fm1"  # copy-on-edit
 
-    def test_replace_and_extract_refuse_inline(self, tmp_dir):
-        from engine.page_images import extract_page_image
-
+    def test_replace_promotes_inline_to_xobject(self, tmp_dir):
+        # P6 INVERSION (was: refusal). Replace PROMOTES the inline draw to
+        # an XObject Do — one instruction for one slot, so later placements
+        # keep their ids, and the result is an ordinary placement.
         src = self._mixed_page(tmp_dir)
         out = os.path.join(tmp_dir, "o.pdf")
         raw = os.path.join(tmp_dir, "px.raw")
         with open(raw, "wb") as f:
             f.write(bytes([9, 9, 9]) * 4)
-        with pytest.raises(ValueError, match="cannot be replaced"):
-            replace_page_image(
-                src, out, 1, 0, {"raw_path": raw, "width": 2, "height": 2, "channels": 3}
-            )
-        with pytest.raises(ValueError, match="cannot be extracted"):
-            extract_page_image(src, 1, 0, os.path.join(tmp_dir, "x"))
-        assert not os.path.exists(out)
+        replace_page_image(
+            src, out, 1, 0, {"raw_path": raw, "width": 2, "height": 2, "channels": 3}
+        )
+        imgs = list_page_images(out, 1)["images"]
+        assert [i["kind"] for i in imgs] == ["xobject", "xobject"]
+        assert imgs[0]["native_width"] == 2  # the new image, in the old slot
+        assert imgs[1]["name"] == "/ImA"  # the neighbor kept its identity
+        with pikepdf.open(out) as pdf:
+            content = pdf.pages[0].Contents.read_bytes()
+            assert b"BI" not in content  # the inline bytes went with the draw
+
+    def test_extract_decodes_the_inline_image(self, tmp_dir):
+        # P6 INVERSION (was: refusal). Inline extraction decodes through
+        # PIL and saves lossless PNG.
+        from engine.page_images import extract_page_image
+
+        src = self._mixed_page(tmp_dir)
+        r = extract_page_image(src, 1, 0, os.path.join(tmp_dir, "x"))
+        assert r["output"].endswith(".png")
+        from PIL import Image
+
+        with Image.open(r["output"]) as im:
+            assert im.size == (1, 1)
+            # The fixture's single gray sample is 0x7f.
+            assert im.convert("L").getpixel((0, 0)) == 0x7F
 
     def test_extract_of_the_xobject_on_a_mixed_page_stays_aligned(self, tmp_dir):
         # The inline draw occupies listing slot 0; extracting slot 1 must

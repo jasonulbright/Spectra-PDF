@@ -523,6 +523,12 @@ interface PageCellProps {
     newText: string,
     opts?: { convert?: boolean },
   ) => void;
+  /** T14: run-scoped size/color restyle from the run editor. */
+  onRestyleTextEdit?: (
+    pageId: string,
+    index: number,
+    style: { size?: number; color?: [number, number, number] },
+  ) => void;
   onCancelTextEdit?: () => void;
   /** Edit-mode paragraph boxes (7.5) — the PRIMARY text surface. */
   editParagraphs?: EditParagraph[];
@@ -791,6 +797,7 @@ function PageCellImpl({
   onSelectEditText,
   onOpenTextEditor,
   onCommitTextEdit,
+  onRestyleTextEdit,
   onCancelTextEdit,
   editParagraphs,
   editParaSelectedIndex,
@@ -2684,6 +2691,7 @@ function PageCellImpl({
                 // (not counter-rotated) at a readable size — the v1 call.
                 heightPx={Math.min(r.h, r.w) * pageHeight}
                 onCommit={(value, opts) => onCommitTextEdit?.(page.id, run.index, value, opts)}
+                onRestyle={(style) => onRestyleTextEdit?.(page.id, run.index, style)}
                 onCancel={() => onCancelTextEdit?.()}
               />
             );
@@ -3970,15 +3978,29 @@ function TextRunEditor({
   rect,
   heightPx,
   onCommit,
+  onRestyle,
   onCancel,
 }: {
   run: EditTextRun;
   rect: { x: number; y: number; w: number; h: number };
   heightPx: number;
   onCommit: (value: string, opts?: { convert?: boolean }) => void;
+  /** T14: commit a size/color restyle instead of a text change. */
+  onRestyle?: (style: { size?: number; color?: [number, number, number] }) => void;
   onCancel: () => void;
 }): React.JSX.Element {
   const [value, setValue] = useState(run.text);
+  // T14 style row state: blank size = keep; null color = keep.
+  const [styleSize, setStyleSize] = useState('');
+  const [styleColor, setStyleColor] = useState<string | null>(null);
+  const parsedSize = parseFloat(styleSize);
+  const sizeValid = styleSize === '' || (Number.isFinite(parsedSize) && parsedSize > 0);
+  const styleChanged = (styleSize !== '' && sizeValid) || styleColor !== null;
+  const hexToRgb = (hex: string): [number, number, number] => [
+    parseInt(hex.slice(1, 3), 16) / 255,
+    parseInt(hex.slice(3, 5), 16) / 255,
+    parseInt(hex.slice(5, 7), 16) / 255,
+  ];
   const inputRef = useRef<HTMLInputElement>(null);
   // The same one-outcome rule as ParagraphEditor (see its comment): the
   // unmount-blur refire must never convert an Escape-cancel into a
@@ -4058,6 +4080,54 @@ function TextRunEditor({
             onClick={() => settle(() => onCommit(value, { convert: true }))}
           >
             Use a compatible font
+          </button>
+        </div>
+      )}
+      {onRestyle && !changed && (
+        // T14: the style row — size + colour for THIS run, text unchanged
+        // (it hides the moment the text differs: one commit, one meaning).
+        // Family deliberately stays off this surface: run restyle is the
+        // fallback for text the paragraph machinery can't take, and a font
+        // switch IS that machinery.
+        <div className="page-edittext-stylerow" data-testid="edit-text-stylerow">
+          <input
+            type="number"
+            data-testid="edit-text-style-size"
+            min={1}
+            max={999}
+            step="0.5"
+            placeholder={`${Math.round(run.fontSize ?? 12)}pt`}
+            value={styleSize}
+            className={sizeValid ? '' : 'invalid'}
+            onChange={(e) => setStyleSize(e.target.value)}
+          />
+          {['#000000', '#c62828', '#1565c0', '#2e7d32'].map((hex) => (
+            <button
+              key={hex}
+              type="button"
+              className={
+                'page-edittext-colorchip' + (styleColor === hex ? ' selected' : '')
+              }
+              style={{ background: hex }}
+              title={styleColor === hex ? 'Keep current colour' : `Colour ${hex}`}
+              onClick={() => setStyleColor((cur) => (cur === hex ? null : hex))}
+            />
+          ))}
+          <button
+            type="button"
+            data-testid="edit-text-style-apply"
+            className="page-edittext-convert"
+            disabled={!styleChanged}
+            onClick={() =>
+              settle(() =>
+                onRestyle({
+                  ...(styleSize !== '' && sizeValid ? { size: parsedSize } : {}),
+                  ...(styleColor ? { color: hexToRgb(styleColor) } : {}),
+                }),
+              )
+            }
+          >
+            Apply style
           </button>
         </div>
       )}

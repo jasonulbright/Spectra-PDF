@@ -10,6 +10,7 @@
  * scriptable remote control over the public IPC surface.
  */
 import { app, file, engine } from './lib/tauri-bridge';
+import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import { invokeCommand as invokeRegisteredCommand } from './commands/context';
 import { COMMANDS, type CommandId } from './commands/registry';
 import type { FocusedTab } from './state/types';
@@ -679,6 +680,9 @@ export interface TestHarness {
   clearRedactionMarks: () => void;
   /** Number of pending redaction marks the canvas currently shows. */
   getRedactionMarkCount: () => number;
+  /** N13: completed pdf.js render durations (base + detail rasters). */
+  getRenderTimings: () => { kind: string; pageNumber: number; ms: number }[];
+  clearRenderTimings: () => void;
   /** F10: persist the pending marks as the file's /Redact set (the status
    * bar's Save-marks path). */
   saveRedactionMarks: () => Promise<void>;
@@ -1271,6 +1275,8 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     clearRedactionMarks: () => canvasRedaction?.clear(),
     getRedactionMarkCount: () => canvasRedaction?.count() ?? 0,
+    getRenderTimings: () => getRenderTimings(),
+    clearRenderTimings: () => clearRenderTimings(),
     saveRedactionMarks: async () => {
       if (!canvasRedaction) {
         const msg = 'saveRedactionMarks: canvas view not mounted';

@@ -781,3 +781,69 @@ class TestOffPageRetypeGuard:
         out = os.path.join(tmp_dir, "o.pdf")
         replace_text_run(src, out, 1, 0, "Still hanging off the page edge, longer even")
         assert any("Still hanging" in r["text"] for r in list_text_runs(out, 1)["runs"])
+
+
+class TestRestyleTextRun:
+    """T14: size + color restyle of ONE run, text unchanged — the q…Q wrap
+    reverts graphics state after the run while the advance stays."""
+
+    def _two_word_pdf(self, tmp_dir):
+        src = os.path.join(tmp_dir, "restyle.pdf")
+        pdf = pikepdf.new()
+        _page(
+            pdf,
+            b"BT /F1 12 Tf 72 700 Td (Hello) Tj 40 0 Td (World) Tj ET",
+            {"/F1": _helv(pdf)},
+        )
+        pdf.save(src)
+        pdf.close()
+        return src
+
+    def test_size_and_color_apply_to_one_run_only(self, tmp_dir):
+        from engine.text_runs import restyle_text_run
+
+        src = self._two_word_pdf(tmp_dir)
+        out = os.path.join(tmp_dir, "styled.pdf")
+        r = restyle_text_run(src, out, 1, 0, size=18, color=[1, 0, 0])
+        assert r["size"] == 18 and r["color"] == [1.0, 0.0, 0.0]
+        with pikepdf.open(out) as pdf:
+            content = pdf.pages[0].Contents.read_bytes()
+        # The wrap: q, the fill, the run-scoped Tf, the text, Q.
+        assert b"q" in content and b"1 0 0 rg" in content
+        assert b"/F1 18 Tf" in content and b"Q" in content
+        # The neighbor still renders under the ORIGINAL 12pt Tf.
+        assert content.count(b"/F1 12 Tf") == 1
+        # Both words survive with their text intact.
+        runs = list_text_runs(out, 1)["runs"]
+        assert [x["text"] for x in runs] == ["Hello", "World"]
+        # The follower shifted: 'Hello' at 18pt is wider than at 12pt, and
+        # the same-line anchor pass moves 'World' by exactly that delta.
+        w_before = _char_x0(src, "W")
+        w_after = _char_x0(out, "W")
+        hello_w = sum((722, 556, 222, 222, 556)) / 1000.0  # H e l l o
+        assert w_after - w_before == pytest.approx(hello_w * (18 - 12), abs=0.5)
+
+    def test_color_only_leaves_size_alone(self, tmp_dir):
+        from engine.text_runs import restyle_text_run
+
+        src = self._two_word_pdf(tmp_dir)
+        out = os.path.join(tmp_dir, "c.pdf")
+        restyle_text_run(src, out, 1, 1, color=[0, 0.5, 1])
+        with pikepdf.open(out) as pdf:
+            content = pdf.pages[0].Contents.read_bytes()
+        assert b"0 0.5 1 rg" in content
+        assert content.count(b"Tf") == 1  # no run-scoped Tf injected
+        # No advance change → the follower math is untouched (same text).
+        assert [x["text"] for x in list_text_runs(out, 1)["runs"]] == ["Hello", "World"]
+
+    def test_bad_inputs_refused(self, tmp_dir):
+        from engine.text_runs import restyle_text_run
+
+        src = self._two_word_pdf(tmp_dir)
+        out = os.path.join(tmp_dir, "no.pdf")
+        with pytest.raises(ValueError, match="nothing to restyle"):
+            restyle_text_run(src, out, 1, 0)
+        with pytest.raises(ValueError, match="size must be"):
+            restyle_text_run(src, out, 1, 0, size=0)
+        with pytest.raises(ValueError, match="color must be"):
+            restyle_text_run(src, out, 1, 0, color=[2, 0, 0])
