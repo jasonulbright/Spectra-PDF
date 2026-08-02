@@ -106,6 +106,25 @@ export interface CanvasSignatureHandlers {
   has: () => boolean;
 }
 
+/**
+ * P5b crop draw. The band-to-insets ARITHMETIC has direct vitest coverage,
+ * but the wiring either side of it — canvas handler resolves the page
+ * geometry, publishes on the module channel, dock panel subscribes and fills
+ * its fields — has none, because there is no DOM test environment. That
+ * whole path is hand-written, so it gets driven here for real instead of
+ * being assumed: same shape as the signature placement, which exists for the
+ * same reason.
+ */
+export interface CanvasCropHandlers {
+  drawOnFirstPage: (rect: { x: number; y: number; w: number; h: number }) => boolean;
+}
+
+let canvasCrop: CanvasCropHandlers | null = null;
+
+export function registerCanvasCrop(handlers: CanvasCropHandlers | null): void {
+  canvasCrop = handlers;
+}
+
 let canvasSignature: CanvasSignatureHandlers | null = null;
 
 export function registerCanvasSignature(handlers: CanvasSignatureHandlers | null): void {
@@ -689,6 +708,11 @@ export interface TestHarness {
   /** Place a visible-signature box on the active file's first canvas page
    * (display-normalized rect), waiting for the canvas + indexer like
    * addRedactionMark. */
+  /** P5b: drive the crop band the canvas gesture produces. */
+  drawCropRect: (
+    rect: { x: number; y: number; w: number; h: number },
+    timeoutMs?: number,
+  ) => Promise<void>;
   placeSignature: (
     rect: { x: number; y: number; w: number; h: number },
     timeoutMs?: number,
@@ -1315,6 +1339,19 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       } catch (err) {
         captureError('buildSignatureAppearance', err);
         throw err;
+      }
+    },
+    drawCropRect: async (rect, timeoutMs = 10_000) => {
+      const deadline = Date.now() + timeoutMs;
+      let drawn = canvasCrop?.drawOnFirstPage(rect) ?? false;
+      while (!drawn && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        drawn = canvasCrop?.drawOnFirstPage(rect) ?? false;
+      }
+      if (!drawn) {
+        const msg = `drawCropRect: no canvas page appeared within ${timeoutMs}ms`;
+        lastError = msg;
+        throw new Error(msg);
       }
     },
     clearSignaturePlacement: () => canvasSignature?.clear(),

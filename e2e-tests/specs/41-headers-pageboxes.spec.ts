@@ -16,6 +16,7 @@ import {
   getState,
   saveActiveAs,
   setReactInputValue,
+  drawCropRect,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -125,5 +126,55 @@ describe('header/footer + page-box panels (P5)', () => {
     const labels = await pdf.getPageLabels();
     await pdf.loadingTask.destroy();
     expect(labels).toEqual(['i', 'ii']);
+  });
+});
+
+describe('on-canvas crop draw (P5b)', () => {
+  let tmp: string;
+  let source: string;
+
+  before(async () => {
+    tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-p5b-'));
+    source = resolve(tmp, 'src.pdf');
+    await makeFixture(source);
+    await waitForHarness();
+  });
+
+  after(() => {
+    if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('a band drawn on the page fills the panel and crops on Apply', async () => {
+    await openByPaths([source]);
+    await setView('operations');
+    await setActiveOp('pagebox');
+
+    // The band is the region to KEEP: the top-left quarter of a 612x792
+    // page, so 306pt comes off the right and 594pt off the bottom.
+    await drawCropRect({ x: 0, y: 0, w: 0.5, h: 0.25 });
+
+    // The panel's own fields must carry it — that is the whole handoff, and
+    // the arithmetic tests cannot see any of it.
+    await browser.waitUntil(
+      async () => (await $('[data-testid="pagebox-right"]').getValue()) === '306',
+      { timeout: 10_000, timeoutMsg: 'the drawn crop never reached the panel' },
+    );
+    expect(await $('[data-testid="pagebox-top"]').getValue()).toBe('0');
+    expect(await $('[data-testid="pagebox-left"]').getValue()).toBe('0');
+    expect(await $('[data-testid="pagebox-bottom"]').getValue()).toBe('594');
+    // Scoped to the page it was drawn on, not silently to every page.
+    expect(await $('[data-testid="pagebox-pages"]').getValue()).toBe('1');
+
+    // And Apply is still what changes the file — the drawn crop goes through
+    // the identical set_page_boxes call a typed one does.
+    await $('[data-testid="pagebox-apply"]').click();
+    const dest = resolve(tmp, 'drawn.pdf');
+    await applyAndSave(dest);
+    const box = await cropBox(dest, 1);
+    expect(Math.round(box[2] - box[0])).toBe(306);
+    expect(Math.round(box[3] - box[1])).toBe(198);
+    // Page 2 was never in scope.
+    const untouched = await cropBox(dest, 2);
+    expect(Math.round(untouched[3] - untouched[1])).toBe(792);
   });
 });
