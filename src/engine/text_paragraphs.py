@@ -1540,7 +1540,7 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
         # char_width; an atomic ligature entry measures as its ONE code's
         # width with ONE char_spacing (one rendered glyph).
         w = m.cap.text_width(ch) / 1000.0 * s["size"] + s["char_spacing"]
-        if ch == " " and m.cap._code_bytes == 1:
+        if ch == " " and m.cap.single_byte_codes():
             try:
                 if m.cap.encode(" ") == b" ":
                     w += s["word_spacing"]

@@ -56,6 +56,62 @@ def _strip_subset_prefix(base_font: str) -> str:
     return base_font
 
 
+def _code_lengths(trie: dict) -> dict[int, int]:
+    """{code integer → its byte length} for a CMap trie. The length is a
+    property of the code's PREFIX, so it has to be read off the trie rather
+    than assumed — that is the whole difference between these encodings and
+    the fixed-width ones (9.T10/T11)."""
+    out: dict[int, int] = {}
+
+    def walk(node, prefix: int, depth: int) -> None:
+        for byte, value in node.items():
+            code = (prefix << 8) | byte
+            if isinstance(value, dict):
+                walk(value, code, depth + 1)
+            else:
+                out[code] = depth + 1
+
+    walk(trie, 0, 0)
+    return out
+
+
+def _split_codes(data: bytes, trie: dict) -> list[tuple[int, int]]:
+    """[(code integer, byte length)] for `data` under a CMap trie.
+
+    A byte sequence that falls off the trie is emitted as a ONE-BYTE code —
+    the same recovery pdfminer makes, and the honest one: the alternative is
+    to resynchronize by guessing a length, which silently shifts every later
+    code in the string."""
+    out: list[tuple[int, int]] = []
+    i = 0
+    n = len(data)
+    while i < n:
+        node = trie
+        code = 0
+        length = 0
+        matched = None
+        j = i
+        while j < n:
+            value = node.get(data[j])
+            code = (code << 8) | data[j]
+            length += 1
+            j += 1
+            if value is None:
+                break
+            if isinstance(value, dict):
+                node = value
+                continue
+            matched = (code, length)
+            break
+        if matched is None:
+            out.append((data[i], 1))
+            i += 1
+        else:
+            out.append(matched)
+            i += matched[1]
+    return out
+
+
 class FontCapability:
     """One font's round-trip surface. Immutable after construction."""
 
@@ -70,6 +126,7 @@ class FontCapability:
         code_bytes: int,
         sequences: Optional[dict[str, int]] = None,
         vertical: bool = False,
+        code_trie: Optional[dict] = None,
     ):
         self.editable = editable
         self.reason = reason
@@ -78,6 +135,19 @@ class FontCapability:
         self._widths = widths
         self._default_width = default_width
         self._code_bytes = code_bytes  # 1 (simple) or 2 (Identity-H CID)
+        # 9.T10/T11: a VARIABLE-WIDTH codespace, as pdfminer's CMap trie —
+        # `{byte: cid | {byte: ...}}`, so a code is 1..4 bytes and its length
+        # is a property of its prefix, not of the font. Present for the
+        # legacy CJK encodings (Shift-JIS/EUC/Big5/GBK, where ASCII is one
+        # byte and everything else is two) and for the UTF-8/16/32 Unicode
+        # CMaps. None keeps the fixed `_code_bytes` walk, byte for byte —
+        # which is every simple font and every Identity-H one.
+        self._code_trie = code_trie
+        # Byte-length per code, for the encode side: unicode → the exact
+        # bytes. Built alongside `uni2code` by the caller.
+        self._code_len: dict[int, int] = {}
+        if code_trie is not None:
+            self._code_len = _code_lengths(code_trie)
         # 9.B5: multi-char sequence → its single ligature code (len 2..4,
         # unambiguous inverse, encode-guard-filtered — see _ligatures).
         # encode()/text_width() match these longest-first; encodable()/
@@ -100,26 +170,35 @@ class FontCapability:
         the two characters of a `لا` ligature that the font drew as ONE glyph
         turns `الله` into `لاله`. The codes know; this reports what they
         said."""
-        out: list[str] = []
+        return [self._code2uni.get(code, "�") for code, _n in self.codes(data)]
+
+    def codes(self, data: bytes) -> list[tuple[int, int]]:
+        """[(code integer, byte length)] — the ONE place the codespace is
+        interpreted, so every measure/decode/count path agrees about where a
+        code begins (9.T10/T11)."""
+        if self._code_trie is not None:
+            return _split_codes(data, self._code_trie)
         if self._code_bytes == 1:
-            for b in data:
-                out.append(self._code2uni.get(b, "�"))
-        else:
-            for i in range(0, len(data) - 1, 2):
-                cid = (data[i] << 8) | data[i + 1]
-                out.append(self._code2uni.get(cid, "�"))
-        return out
+            return [(b, 1) for b in data]
+        return [
+            ((data[i] << 8) | data[i + 1], 2) for i in range(0, len(data) - 1, 2)
+        ]
+
+    def code_count(self, data: bytes) -> int:
+        """How many GLYPHS `data` draws — what `Tc` multiplies. A fixed-width
+        font can divide; a variable-width one has to walk."""
+        if self._code_trie is None:
+            return len(data) if self._code_bytes == 1 else len(data) // 2
+        return len(self.codes(data))
+
+    def single_byte_codes(self) -> bool:
+        """Whether code 32 in the byte stream is the SPACE `Tw` applies to.
+        Spec: word spacing applies to the single-byte code 32 only — never a
+        CID font, and never a multi-byte code that happens to contain 0x20."""
+        return self._code_trie is None and self._code_bytes == 1
 
     def decode(self, data: bytes) -> str:
-        out: list[str] = []
-        if self._code_bytes == 1:
-            for b in data:
-                out.append(self._code2uni.get(b, "�"))
-        else:
-            for i in range(0, len(data) - 1, 2):
-                cid = (data[i] << 8) | data[i + 1]
-                out.append(self._code2uni.get(cid, "�"))
-        return "".join(out)
+        return "".join(self.decode_units(data))
 
     # -- encode ------------------------------------------------------------
     def _sequence_at(self, text: str, i: int) -> Optional[str]:
@@ -149,11 +228,16 @@ class FontCapability:
                 if code is None:
                     raise ValueError(f"font cannot encode {ch!r}")
                 i += 1
-            if self._code_bytes == 1:
-                out.append(code)
-            else:
-                out += bytes(((code >> 8) & 0xFF, code & 0xFF))
+            out += self._code_bytes_for(code)
         return bytes(out)
+
+    def _code_bytes_for(self, code: int) -> bytes:
+        """A code as the bytes that spell it. Variable-width codes carry
+        their own length (from the trie); fixed-width ones use the font's."""
+        n = self._code_len.get(code) if self._code_trie is not None else None
+        if n is None:
+            n = self._code_bytes
+        return code.to_bytes(n, "big")
 
     def encodable(self) -> str:
         """The finite character inventory, sorted — the edit box's local
@@ -200,13 +284,8 @@ class FontCapability:
         """Advance of already-encoded bytes — by CODE, so it works even for
         codes with no unicode mapping."""
         total = 0.0
-        if self._code_bytes == 1:
-            for b in data:
-                total += self._widths.get(b, self._default_width)
-        else:
-            for i in range(0, len(data) - 1, 2):
-                cid = (data[i] << 8) | data[i + 1]
-                total += self._widths.get(cid, self._default_width)
+        for code, _n in self.codes(data):
+            total += self._widths.get(code, self._default_width)
         return total
 
 
@@ -563,16 +642,24 @@ def _simple_widths(font_obj, code2uni: dict[int, str]) -> tuple[dict[int, float]
 
 def _cmap_code_widths(named_cmap, codes, cid_widths: dict[int, float]) -> dict[int, float]:
     """Remap CID-keyed /W to CODE-keyed for a predefined CMap (9.B2):
-    each 2-byte code decodes to a CID via the CMap, whose /W width becomes
-    the code's. A code the CMap can't decode (or an out-of-BMP code) is
-    left to the capability's default width — text still edits, only its
-    same-line Δ is approximate for that glyph."""
+    each code decodes to a CID via the CMap, whose /W width becomes the
+    code's. A code the CMap can't decode is left to the capability's default
+    width — text still edits, only its same-line Δ is approximate for that
+    glyph.
+
+    9.T10/T11: the code's BYTE LENGTH comes from the CMap's own trie rather
+    than being assumed to be 2. Assuming 2 silently dropped every one-byte
+    code of a legacy CJK encoding (the ASCII half of Shift-JIS, EUC and
+    Big5) to the default width, and every code longer than two of a UTF-8
+    or UTF-32 one."""
+    lengths = _code_lengths(getattr(named_cmap, "code2cid", None) or {})
     out: dict[int, float] = {}
     for code in codes:
         try:
-            data = int(code).to_bytes(2, "big")
+            n = lengths.get(int(code), 2)
+            data = int(code).to_bytes(n, "big")
         except (OverflowError, ValueError, TypeError):
-            continue  # not a 2-byte code (astral / malformed) — DW applies
+            continue  # malformed — DW applies
         try:
             cids = list(named_cmap.decode(data))
         except Exception:
@@ -819,34 +906,38 @@ def font_capability(font_obj) -> FontCapability:
         named_cmap = None
         vertical = enc.endswith("-V")
         if enc not in ("Identity-H", "Identity-V"):
-            # ONLY the -UCS2- family: UCS-2 is by DEFINITION a fixed 2-byte
-            # encoding, so our fixed-2-byte decode/encode is exact. The
-            # other Uni* widths are NOT 2-byte — UTF8 is 3 bytes for CJK,
-            # UTF32 is 4, UTF16 uses surrogate pairs for astral — and the
-            # 2-byte pipeline SILENTLY CORRUPTS them (review-reproduced:
-            # dropped/injected chars on decode, truncated codes on encode,
-            # written to disk with no round-trip check). Refuse them; a
-            # UTF16-BMP-only refinement is a documented tail, not B2.
-            if "-UCS2-" in enc and enc.startswith("Uni"):
-                try:
-                    from pdfminer.cmapdb import CMapDB
+            # 9.T10/T11: ANY predefined CMap the bundled tables carry, not
+            # just the -UCS2- family. B2 admitted UCS-2 alone because UCS-2
+            # is by definition fixed 2-byte and the pipeline's fixed-2-byte
+            # walk was exact for it; UTF-8 is 3 bytes for CJK, UTF-32 is 4,
+            # UTF-16 uses surrogate pairs, and the legacy CJK encodings
+            # (Shift-JIS/EUC/Big5/GBK) mix 1 and 2 — all of which the fixed
+            # walk SILENTLY CORRUPTED (dropped/injected characters on decode,
+            # truncated codes on encode). The pipeline now reads the CMap's
+            # own code→CID TRIE, which is the authoritative statement of
+            # where each code begins, so the width of a code stopped being
+            # something this gate has to promise. What remains refused is a
+            # CMap the tables do not carry (an embedded CMap stream), which
+            # is an absence, not a width.
+            try:
+                from pdfminer.cmapdb import CMapDB
 
-                    cm = CMapDB.get_cmap(enc)
-                except Exception:
-                    cm = None
-                # 9.B4a: the loaded CMap's own writing mode must AGREE with
-                # the name's -H/-V suffix (a disagreement is malformed) —
-                # for -H names this is B2's is_vertical() gate unchanged.
-                if cm is None or cm.is_vertical() != vertical:
-                    return _refused(
-                        f"unsupported composite-font encoding ({enc})", code_bytes=2
-                    )
-                named_cmap = cm
-            else:
+                cm = CMapDB.get_cmap(enc) if enc else None
+            except Exception:
+                cm = None
+            # 9.B4a: the loaded CMap's own writing mode must AGREE with
+            # the name's -H/-V suffix (a disagreement is malformed) —
+            # for -H names this is B2's is_vertical() gate unchanged.
+            if cm is None or getattr(cm, "code2cid", None) is None:
                 return _refused(
                     f"unsupported composite-font encoding ({enc or 'embedded CMap'})",
                     code_bytes=2,
                 )
+            if cm.is_vertical() != vertical:
+                return _refused(
+                    f"unsupported composite-font encoding ({enc})", code_bytes=2
+                )
+            named_cmap = cm
         tou = font_obj.get("/ToUnicode")
         if tou is None:
             # T8: recover the mapping WITHOUT /ToUnicode — the registry's
@@ -923,6 +1014,9 @@ def font_capability(font_obj) -> FontCapability:
             2,
             sequences=_ligatures(code2uni, code2uni),
             vertical=vertical,
+            # 9.T10/T11: a named CMap's own code→CID trie IS the codespace.
+            # Identity-H/V pass None and keep the fixed 2-byte walk exactly.
+            code_trie=getattr(named_cmap, "code2cid", None) if named_cmap else None,
         )
 
     # Simple fonts (Type1, MMType1, TrueType).
