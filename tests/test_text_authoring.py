@@ -780,3 +780,134 @@ class TestT5CjkAuthoring:
             names = [str(fonts[k].get("/BaseFont")) for k in fonts.keys()]
         assert all("NotoSansCJK" not in n for n in names)
         assert any("Liberation" in n for n in names)
+
+
+class TestRightToLeftAuthoring:
+    """9.T25 — Add Text authors right-to-left scripts.
+
+    Until this, the bundled Liberation faces could not express them, so
+    `build_fallback_font` refused BY NAME. That refusal was honest but it
+    meant the paragraph editor could reflow Arabic while the Add Text card
+    could not write a word of it.
+    """
+
+    AR = "مرحبا بالعالم"
+    HE = "שלום עולם"
+    MIXED = "قال PDF ثم توقف"
+
+    def _round_trip(self, tmp_dir, text, name):
+        from engine.text_paragraphs import list_text_paragraphs
+
+        src = _blank(tmp_dir, name + "-src.pdf")
+        out = os.path.join(tmp_dir, name + ".pdf")
+        add_text_box(
+            src, out, 1, [72, 600, 520, 720], text, size=18.0,
+            font_path=FONTS_DIR, family="sans",
+        )
+        return [p["text"] for p in list_text_paragraphs(out, 1)["paragraphs"]]
+
+    def test_arabic_authors_and_extracts_back(self, tmp_dir):
+        assert self._round_trip(tmp_dir, self.AR, "ar") == [self.AR]
+
+    def test_hebrew_authors_and_extracts_back(self, tmp_dir):
+        # No shaping — Hebrew does not join — but the LINE still has to be
+        # reordered, so this is the reorder-only path.
+        assert self._round_trip(tmp_dir, self.HE, "he") == [self.HE]
+
+    def test_mixed_direction_keeps_the_latin_run_readable(self, tmp_dir):
+        got = self._round_trip(tmp_dir, self.MIXED, "mixed")
+        assert got == [self.MIXED]
+        assert "PDF" in got[0]  # not "FDP"
+
+    def test_arabic_is_drawn_JOINED(self, tmp_dir):
+        # The point of shaping: an unshaped emission would extract back to
+        # the same letters, so only the drawn glyph ids can tell.
+        import re
+
+        from fontTools.ttLib import TTFont
+
+        from engine import shaping
+
+        face = os.path.join(FONTS_DIR, "IBMPlexSansArabic-Regular.ttf")
+        if not os.path.isfile(face):
+            pytest.skip("RTL faces not provisioned")
+        src = _blank(tmp_dir, "joined-src.pdf")
+        out = os.path.join(tmp_dir, "joined.pdf")
+        add_text_box(
+            src, out, 1, [72, 600, 520, 720], "مرحبا", size=18.0,
+            font_path=FONTS_DIR, family="sans",
+        )
+        gid_of = {n: i for i, n in enumerate(TTFont(face, lazy=True).getGlyphOrder())}
+        joined = [gid_of[n] for n in shaping.shape(face, "مرحبا").glyph_names]
+        isolated = [
+            gid_of[shaping.shape(face, ch).glyph_names[0]] for ch in reversed("مرحبا")
+        ]
+        assert joined != isolated  # the premise
+        content = _page_content(out).decode("latin-1")
+        codes = [int(h, 16) for h in re.findall(r"<([0-9a-fA-F]{4})>", content)]
+
+        def has(seq):
+            return any(codes[i : i + len(seq)] == seq for i in range(len(codes)))
+
+        assert has(joined)
+        assert not has(isolated)
+
+    def test_wrapping_measures_what_it_draws(self, tmp_dir):
+        # A box too narrow for one line must wrap AND still round-trip: the
+        # wrap measures shaped words by the shaper's positioned advance,
+        # which is exactly what the emitted TJ corrections produce.
+        from engine.text_paragraphs import list_text_paragraphs
+
+        long_ar = "مرحبا بالعالم لغة عربية جميلة ونص طويل يحتاج الى اكثر من سطر"
+        src = _blank(tmp_dir, "wrap-src.pdf")
+        out = os.path.join(tmp_dir, "wrap.pdf")
+        res = add_text_box(
+            src, out, 1, [72, 560, 320, 720], long_ar, size=16.0,
+            font_path=FONTS_DIR, family="sans",
+        )
+        assert res["lines"] > 1
+        assert [p["text"] for p in list_text_paragraphs(out, 1)["paragraphs"]] == [long_ar]
+
+    def test_measure_agrees_with_the_commit(self, tmp_dir):
+        # The single-layout discipline: the card's fit indicator runs the
+        # same pass the commit runs, so a right-to-left box cannot report a
+        # line count it then fails to draw.
+        from engine.text_authoring import measure_text_box
+
+        long_ar = "مرحبا بالعالم لغة عربية جميلة ونص طويل يحتاج الى اكثر من سطر"
+        src = _blank(tmp_dir, "measure-src.pdf")
+        out = os.path.join(tmp_dir, "measure.pdf")
+        m = measure_text_box(
+            src, 1, [72, 560, 320, 720], long_ar, size=16.0,
+            font_path=FONTS_DIR, family="sans",
+        )
+        c = add_text_box(
+            src, out, 1, [72, 560, 320, 720], long_ar, size=16.0,
+            font_path=FONTS_DIR, family="sans",
+        )
+        assert m["lines"] == c["lines"]
+
+    def test_per_span_styling_refuses_by_name(self, tmp_dir):
+        # NOT lifted for this direction, and a refusal is the only honest
+        # answer: laying it out left-to-right and unshaped would draw the
+        # words in reverse with the letters disconnected.
+        src = _blank(tmp_dir, "spans-src.pdf")
+        out = os.path.join(tmp_dir, "spans.pdf")
+        with pytest.raises(ValueError, match="right-to-left"):
+            add_text_box(
+                src, out, 1, [72, 600, 520, 720], self.AR, size=18.0,
+                font_path=FONTS_DIR, family="sans",
+                spans=[{"start": 0, "end": 5, "bold": True}],
+            )
+
+    def test_a_left_to_right_box_is_untouched_by_any_of_this(self, tmp_dir):
+        # The gate is `has_strong_rtl`, so an ordinary box never enters the
+        # bidi path at all — asserted through the drawn bytes, not the API.
+        src = _blank(tmp_dir, "ltr-src.pdf")
+        out = os.path.join(tmp_dir, "ltr.pdf")
+        add_text_box(
+            src, out, 1, [72, 680, 400, 720], "Hello authored world",
+            font_path=FONTS_DIR,
+        )
+        content = _page_content(out)
+        assert b"Ts" not in content  # the rise op only the shaped path emits
