@@ -3803,7 +3803,7 @@ dependencies = [
 
 [[package]]
 name = "spectrapdf"
-version = "1.0.12"
+version = "1.0.13"
 dependencies = [
  "clap",
  "dunce",

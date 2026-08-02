@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.0.13 — Every licence in the box, every print accounted for
+
+An outside review of the whole codebase, worked to zero. Two printing
+faults that could quietly lose a document are gone, the notices for every
+bundled component now travel with the app, and a release can no longer be
+published without passing its tests.
+
+### Printing
+- **Two documents printed at the same moment stay two documents.** Jobs
+  arriving within the same second could previously overwrite one another's
+  work in progress — one would be converted twice and the other lost, with
+  nothing reported. Each job now claims its own name before it starts.
+- **A stuck print job no longer disables the printer.** One client that
+  connected and never finished used to block every later print until the
+  app was restarted. Jobs are now handled independently and a stalled one
+  gives up on its own.
+
+### Licensing
+- **The complete third-party notices ship with the OCR engine.** The
+  bundled recognition engine links around fifty further libraries, and only
+  its own licence was travelling with it. Every component is now named,
+  with its licence and where its source lives, installed beside the engine
+  — and the build refuses to produce an installer if anything shipped is
+  missing its notice.
+- **The notices live in the project, not on the internet.** They were
+  collected once for the exact recognition engine build that ships and are
+  stored with the source, so building the app needs no network for them and
+  produces the same notices every time.
+- **The recognition engine's upstream author list ships too**, alongside
+  its licence.
+
+### Building & releasing
+- **A release can't be published without passing its tests.** Publishing
+  now runs the full test suites first — the interface, the engine, and the
+  Windows layer — and refuses to continue if any of them fail, or if the
+  version being published disagrees with the version inside the app.
+- **Build instructions actually work.** The setup steps in the README were
+  missing several of the components a build needs, so following them left
+  the build failing on a missing folder. All of them are listed now.
+
+### Windows appearance
+- **The window looks right when Windows isn't drawing effects.** With
+  transparency effects switched off, or over a remote desktop session, the
+  app now uses its plain window styling instead of styling meant for a
+  translucent backdrop it isn't getting.
+
+### Automation & folders
+- **Scheduled runs no longer expose an account password.** The password for
+  a scheduled task is handed straight to Windows instead of being passed on
+  a command line where other programs on the machine could read it.
+- **Watched folders check their folders more carefully.** A destination
+  that differed from the watched folder only by capitalisation was treated
+  as a separate folder, so processed files could land back in the intake
+  and be processed again.
+
+### Command line
+- **Document JavaScript is scriptable.** `document-js-list` and
+  `document-js-set` read and replace a document's JavaScript, so every
+  whole-file operation in the app now has a command-line equivalent.
+
 ## 1.0.12 — Accents that sit right, crops you can draw
 
 Text with accents and ligatures now sets the way its typeface intends,
