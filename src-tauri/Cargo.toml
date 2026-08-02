@@ -1,6 +1,6 @@
 [package]
 name = "spectrapdf"
-version = "1.0.9"
+version = "1.0.10"
 description = "Modern PDF manipulation studio"
 authors = ["Jason Ulbright"]
 license = "MIT"
