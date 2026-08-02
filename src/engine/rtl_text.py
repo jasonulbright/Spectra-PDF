@@ -39,19 +39,14 @@ class RtlText:
 
     __slots__ = ("font_obj", "_encode", "_width", "_gencode", "_gwidth", "_runs", "_base")
 
-    def __init__(self, pdf, face: str, text: str):
-        from engine import shaping
+    def __init__(self, pdf, face: str, text: str, runs: "dict | None" = None):
         from engine.font_fallback import build_fallback_font, build_shaped_font
 
-        runs: dict = {}
-        for token in text.split():
-            if token and token not in runs and shaping.requires_shaping(token):
-                try:
-                    runs[token] = shaping.shape(face, token, rtl=True)
-                except ValueError:
-                    # The face cannot express this word; the character path
-                    # then refuses it BY NAME rather than draw a `.notdef`.
-                    pass
+        # `runs` is resolved by `build`, BEFORE anything is embedded — whether
+        # this class is used at all depends on whether there are any, and
+        # constructing it to find out would leave an orphaned font object in
+        # the PDF every time the answer is no.
+        runs = shaped_runs(face, text) if runs is None else runs
         unique = "".join(sorted(set(text) - {"\n", "\r", "\t"}))
         if runs:
             (
@@ -165,9 +160,37 @@ class RtlText:
         return b" ".join(parts)
 
 
+def shaped_runs(face: str, text: str) -> dict:
+    """{word: ShapedRun} for every word of `text` that shaping CHANGES.
+
+    `shaping.shape_if_it_changes` is the one gate: a joining word always
+    shapes (there is no correct per-character rendering of one), and anything
+    else only when the shaper produced something the character path cannot —
+    a composed accent, a ligature. A word the face cannot express is absent,
+    and the character path then refuses it BY NAME rather than drawing a
+    `.notdef`."""
+    from engine import shaping
+
+    runs: dict = {}
+    for token in text.split():
+        if token and token not in runs:
+            run = shaping.shape_if_it_changes(face, token)
+            if run is not None:
+                runs[token] = run
+    return runs
+
+
 def build(pdf, face: str, text: str) -> "RtlText | None":
-    """An `RtlText` when `text` is right-to-left, else None — the gate every
-    caller uses, so left-to-right output keeps its shipped emission."""
-    if not bidi.has_strong_rtl(text):
+    """An `RtlText` when this text needs one, else None — the gate every
+    caller uses, so output that needs neither reordering nor shaping keeps
+    its shipped emission byte for byte.
+
+    9.T27: it needs one when the text is right-to-left (the reorder) OR when
+    any word shaped into something the character path cannot draw. The second
+    half is why an accent typed into a watermark or a form field now composes
+    instead of standing beside its letter; ordinary Latin still returns None
+    for every word, so this stays None and nothing changes."""
+    runs = shaped_runs(face, text)
+    if not runs and not bidi.has_strong_rtl(text):
         return None
-    return RtlText(pdf, face, text)
+    return RtlText(pdf, face, text, runs=runs)
