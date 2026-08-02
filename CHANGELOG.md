@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.12 — Accents that sit right, crops you can draw
+
+Text with accents and ligatures now sets the way its typeface intends,
+vertical Chinese, Japanese and Korean text restyles, right-to-left edits
+keep the document's own typeface, and cropping is a rectangle you drag.
+
+### Text
+- **Accents land on their letters.** Text edited with combining accent
+  marks now composes properly instead of leaving the accent stranded
+  beside its letter.
+- **Ligatures form where the typeface has them.** A face that carries
+  ligatures uses them when you edit — and the words still copy, search and
+  extract as ordinary letters.
+- **Right-to-left edits keep the document's own typeface.** When the
+  document's font can carry the edit, Arabic and Hebrew changes are drawn
+  in that font rather than substituted for a bundled one.
+- **Vertical Chinese, Japanese and Korean text restyles.** Size, colour
+  and weight now apply to text set in columns, using the upright letter
+  forms and column spacing the font provides.
+
+### Pages
+- **Draw a crop.** Pick Crop & Page Boxes and drag a rectangle on the page
+  to mark what to keep; the margins fill in, and Apply crops as before.
+  Typing the margins still works exactly the same way.
+
 ## 1.0.11 — Every font, every encoding
 
 The font list is now the one on your machine, the last text encodings that
