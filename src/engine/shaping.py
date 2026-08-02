@@ -209,6 +209,68 @@ def shape(face_path: str, text: str, rtl: bool = True) -> ShapedRun:
     return ShapedRun(text, glyphs, advance, clusters)
 
 
+def changed_it(run: ShapedRun, word: str) -> bool:
+    """9.T22/T23 — did shaping this word produce anything the per-character
+    path cannot?
+
+    Three ways it can, and they are the whole point:
+      * a LIGATURE formed (fewer glyphs than characters — `liga`, or `ccmp`
+        composing a base and a combining mark into one precomposed glyph);
+      * a glyph carries a positioning OFFSET (`mark`/`mkmk` attaching a
+        diacritic, contextual GPOS);
+      * a cluster spells something other than its own single character (the
+        general form of the first — one glyph standing for several
+        characters).
+
+    Everything else is a glyph-per-character run whose only difference is the
+    GPOS advance deltas, i.e. KERNING — which the character paths already
+    apply from the same font (9.K1b). Answering "no" there is not a shortcut:
+    it keeps the emission byte-identical for the overwhelming majority of
+    text, so shaping changes output exactly where the old output was WRONG (a
+    combining acute drawn as a spacing glyph beside its letter) and nowhere
+    else. That property is what lets every surface adopt this unconditionally
+    instead of behind a switch.
+
+    The spelling test is deliberately ORDER-FREE — "does every glyph spell
+    exactly one character?" rather than "does glyph i spell word[i]?". A
+    right-to-left run comes back in visual order, so a positional comparison
+    calls plain Hebrew a change, and the caller then draws a reversed word
+    that the reorder was already going to handle correctly (pin-caught:
+    `שלום` authored as `םולש`). What actually matters is whether any glyph
+    stands for more or fewer than one character."""
+    if len(run.glyphs) != len(word):
+        return True
+    if any(x_off or y_off for _n, _a, x_off, y_off in run.glyphs):
+        return True
+    return any(len(spells) != 1 for _n, spells in run.clusters)
+
+
+def shape_if_it_changes(face_path: str, word: str) -> "ShapedRun | None":
+    """The word shaped, or None to leave it on the per-character path.
+
+    ONE gate for every emitter, because "when is shaping worth it?" must have
+    one answer: a joining script has no correct per-character rendering at
+    all, so its shaped run always wins; anything else wins only when
+    `changed_it` says so. A face that cannot express the word returns None —
+    the character path then refuses it BY NAME, which is the honest floor and
+    not this function's call to make."""
+    if not word:
+        return None
+    from engine import bidi
+
+    joins = requires_shaping(word)
+    # Direction comes from the TEXT, never from "does it join". Hebrew joins
+    # nothing but is still right-to-left, and shaping it left-to-right hands
+    # back a reversed glyph stream.
+    try:
+        run = shape(face_path, word, rtl=joins or bidi.has_strong_rtl(word))
+    except ValueError:
+        return None
+    if joins:
+        return run
+    return run if changed_it(run, word) else None
+
+
 def can_shape_in_place(font_dict) -> bool:
     """Whether a document's own font can drive the shaper AND accept the
     result as character codes: it must be Type0/Identity-H with an Identity

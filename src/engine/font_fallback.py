@@ -792,6 +792,18 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
     metrics = _font_metrics(font)
     scale = metrics["scale"]
     sub_order = font.getGlyphOrder()
+    # A CFF descendant is a CIDFontType0, and /CIDToGIDMap is defined for
+    # CIDFontType2 ONLY — `_embed_identity_h` correctly refuses to write one,
+    # which means the indirection this function is built on DOES NOT EXIST
+    # for a CFF face and the CID must simply BE the glyph index (exactly the
+    # scheme `build_fallback_font` already ships for both flavours).
+    #
+    # Found the hard way (9.T27): T3 only ever reached here with TrueType RTL
+    # faces, so a CFF face silently lost its mapping and drew whatever glyph
+    # the arbitrary code happened to hit. Libertinus and Noto Sans CJK — the
+    # two bundled faces that actually carry `liga` — are both OTF, so the
+    # ligature capability was landing on precisely the fonts this broke.
+    is_cff = getattr(font, "sfntVersion", "") == "OTTO"
 
     def gid_width(g: int) -> float:
         if g >= len(sub_order):
@@ -808,13 +820,29 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
     def code_for(name: str, spells: str) -> int:
         key = (name, spells)
         code = code_of.get(key)
-        if code is None:
+        if code is not None:
+            return code
+        g = full_gid_of[name]
+        if is_cff:
+            # No mapping table to point several codes at one glyph, so a
+            # glyph carries exactly ONE spelling. A collision REFUSES rather
+            # than letting the second spelling overwrite the first — the
+            # T25/T26 rule, which is why a fatha does not come back a sukun.
+            # The caller drops to the unshaped path, whose output is correct
+            # (just without the ligature), never to wrong glyphs.
+            code = g
+            prior = unicode_of.get(code)
+            if prior is not None and prior != spells:
+                raise ValueError(
+                    "this font cannot carry both spellings of one glyph "
+                    f"({prior!r} and {spells!r})"
+                )
+        else:
             code = len(code_of) + 1
-            code_of[key] = code
-            g = full_gid_of[name]
-            gid_of_code[code] = g
-            widths[code] = gid_width(g)
-            unicode_of[code] = spells
+        code_of[key] = code
+        gid_of_code[code] = g
+        widths[code] = gid_width(g)
+        unicode_of[code] = spells
         return code
 
     used: dict[str, int] = {}
@@ -844,13 +872,17 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
         return widths[code_for(name, spells)]
 
     # /CIDToGIDMap as a STREAM: two big-endian bytes per CID, indexed by CID.
-    top = max(gid_of_code) if gid_of_code else 0
-    cid_to_gid = bytearray((top + 1) * 2)
-    for code, g in gid_of_code.items():
-        cid_to_gid[code * 2] = (g >> 8) & 0xFF
-        cid_to_gid[code * 2 + 1] = g & 0xFF
+    # CFF took the code==gid branch above, so it needs none and gets none.
+    cid_to_gid = None
+    if not is_cff:
+        top = max(gid_of_code) if gid_of_code else 0
+        buf = bytearray((top + 1) * 2)
+        for code, g in gid_of_code.items():
+            buf[code * 2] = (g >> 8) & 0xFF
+            buf[code * 2 + 1] = g & 0xFF
+        cid_to_gid = bytes(buf)
 
     return _embed_identity_h(
         pdf, ttf_bytes, font, font_path, metrics, widths,
-        sorted(unicode_of.items()), cid_to_gid=bytes(cid_to_gid),
+        sorted(unicode_of.items()), cid_to_gid=cid_to_gid,
     ) + (encode, width_1000, glyph_encode, glyph_width)
