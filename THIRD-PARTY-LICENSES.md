@@ -160,15 +160,74 @@ License text shipped at: `resources/fonts/LICENSE-NotoHebrew-OFL.txt`
   - **Bundled at:** `resources/tesseract/` (vendored by
     `scripts/bundle-tesseract.ps1`: pinned version, SHA-256 verified, extracted
     from the NSIS installer with 7-Zip and never executed as an installer).
-  - **License text shipped at:** `resources/tesseract/LICENSE-Tesseract.txt`
-  - Includes **Leptonica** (BSD-2-Clause) and the supporting imaging libraries
-    the upstream build links (libtiff, libpng, libjpeg-turbo, zlib, libwebp,
-    OpenJPEG, giflib, Cairo, ICU and others), redistributed unmodified as
-    shipped by that build.
+  - **License text shipped at:** `resources/tesseract/LICENSE-Tesseract.txt`,
+    with the upstream author list at
+    `resources/tesseract/AUTHORS-Tesseract.txt`.
+  - That build links ~50 further libraries, all redistributed unmodified.
+    They are enumerated individually below — see **Bundled OCR runtime
+    components**.
 - **Tesseract traineddata** (the `@tesseract.js-data/<lang>` packages,
   `4.0.0_best_int` models) — **Apache-2.0** — trained models from the Tesseract
   OCR project (<https://github.com/tesseract-ocr/tessdata>). Only the DATA
   packages are used; the tesseract.js WASM engine itself is no longer shipped.
+
+### Bundled OCR runtime components
+
+`bundle-tesseract.ps1` ships `tesseract.exe` plus **every DLL beside it** — 51
+today — enumerated rather than hand-listed so the copy set cannot go stale when
+upstream changes its dependencies. The upstream installer supplies notices for
+only two of those 52 binaries, so the rest are fetched from their canonical
+upstreams by `scripts/fetch-tesseract-licenses.ps1`, pinned by SHA-256, and
+shipped at **`resources/tesseract/licenses/`**.
+
+The mapping from each shipped file to its component and notice is
+`scripts/tesseract-licenses.tsv`, and **the build refuses to produce an
+installer if any shipped binary lacks a row there or its notice file is
+absent** — so this list cannot silently drift from what is actually in the box.
+
+Several components are copyleft. They are listed here on exactly the same
+footing as the permissive ones: Spectra PDF is MIT-licensed open source with a
+public repository, and each entry names the upstream the corresponding source
+comes from.
+
+- **Brotli** — MIT — <https://github.com/google/brotli> — `licenses/LICENSE-brotli.txt`
+- **bzip2** — bzip2-1.0.6 — <https://gitlab.com/bzip2/bzip2> — `licenses/LICENSE-bzip2.txt`
+- **Cairo** — LGPL-2.1-only OR MPL-1.1 — <https://gitlab.freedesktop.org/cairo/cairo> — `licenses/LICENSE-cairo.txt`
+- **Expat** — MIT — <https://github.com/libexpat/libexpat> — `licenses/LICENSE-expat.txt`
+- **fontconfig** — MIT — <https://gitlab.freedesktop.org/fontconfig/fontconfig> — `licenses/LICENSE-fontconfig.txt`
+- **FreeType** — FTL OR GPL-2.0-or-later — <https://gitlab.freedesktop.org/freetype/freetype> — `licenses/LICENSE-freetype.txt`
+- **GCC runtime library** (libgcc, libstdc++) — GPL-3.0-or-later WITH GCC-exception-3.1 — <https://gcc.gnu.org/> — `licenses/LICENSE-gcc-runtime.txt`
+- **giflib** — MIT — <https://sourceforge.net/projects/giflib/> — `licenses/LICENSE-giflib.txt`
+- **GLib** (glib, gio, gobject, gmodule) — LGPL-2.1-or-later — <https://gitlab.gnome.org/GNOME/glib> — `licenses/LICENSE-glib.txt`
+- **GNU FriBidi** — LGPL-2.1-or-later — <https://github.com/fribidi/fribidi> — `licenses/LICENSE-fribidi.txt`
+- **GNU gettext** (libintl) — LGPL-2.1-or-later — <https://savannah.gnu.org/projects/gettext/> — `licenses/LICENSE-gettext-runtime.txt`
+- **GNU libiconv** — LGPL-2.1-or-later — <https://savannah.gnu.org/projects/libiconv/> — `licenses/LICENSE-libiconv.txt`
+- **Graphite2** — LGPL-2.1-or-later OR MPL-2.0 OR GPL-2.0-or-later — <https://github.com/silnrsi/graphite> — `licenses/LICENSE-graphite2.txt`
+- **HarfBuzz** — MIT — <https://github.com/harfbuzz/harfbuzz> — `licenses/LICENSE-harfbuzz.txt`
+- **ICU** — Unicode-DFS-2016 — <https://github.com/unicode-org/icu> — `licenses/LICENSE-icu.txt`
+- **JBIG-KIT** — GPL-2.0-or-later — <https://www.cl.cam.ac.uk/~mgk25/jbigkit/> — `licenses/LICENSE-jbigkit.txt`
+- **Leptonica** — BSD-2-Clause — <https://github.com/DanBloomberg/leptonica> — `licenses/LICENSE-leptonica.txt`
+- **LERC** — Apache-2.0 — <https://github.com/Esri/lerc> — `licenses/LICENSE-LERC.txt`
+- **libarchive** — BSD-2-Clause — <https://github.com/libarchive/libarchive> — `licenses/LICENSE-libarchive.txt`
+- **libb2 (BLAKE2)** — CC0-1.0 — <https://github.com/BLAKE2/libb2> — `licenses/LICENSE-libb2.txt`
+- **libdatrie** — LGPL-2.1-or-later — <https://github.com/tlwg/libdatrie> — `licenses/LICENSE-libdatrie.txt`
+- **libdeflate** — MIT — <https://github.com/ebiggers/libdeflate> — `licenses/LICENSE-libdeflate.txt`
+- **libffi** — MIT — <https://github.com/libffi/libffi> — `licenses/LICENSE-libffi.txt`
+- **libjpeg-turbo** — IJG AND BSD-3-Clause AND Zlib — <https://github.com/libjpeg-turbo/libjpeg-turbo> — `licenses/LICENSE-libjpeg-turbo.txt`
+- **libpng** — libpng-2.0 — <https://github.com/pnggroup/libpng> — `licenses/LICENSE-libpng.txt`
+- **libthai** — LGPL-2.1-or-later — <https://github.com/tlwg/libthai> — `licenses/LICENSE-libthai.txt`
+- **libtiff** — libtiff — <https://gitlab.com/libtiff/libtiff> — `licenses/LICENSE-libtiff.txt`
+- **libwebp** (webp, webpmux, sharpyuv) — BSD-3-Clause — <https://github.com/webmproject/libwebp> — `licenses/LICENSE-libwebp.txt`
+- **LZ4** — BSD-2-Clause — <https://github.com/lz4/lz4> — `licenses/LICENSE-lz4.txt`
+- **mingw-w64** (winpthreads) — MIT AND Zope-2.1 — <https://www.mingw-w64.org/> — `licenses/LICENSE-mingw-w64.txt`
+- **OpenJPEG** — BSD-2-Clause — <https://github.com/uclouvain/openjpeg> — `licenses/LICENSE-openjpeg.txt`
+- **OpenSSL** — Apache-2.0 — <https://github.com/openssl/openssl> — `licenses/LICENSE-openssl.txt`
+- **Pango** (pango, pangocairo, pangoft2, pangowin32) — LGPL-2.1-or-later — <https://gitlab.gnome.org/GNOME/pango> — `licenses/LICENSE-pango.txt`
+- **PCRE2** — BSD-3-Clause — <https://github.com/PCRE2Project/pcre2> — `licenses/LICENSE-pcre2.txt`
+- **Pixman** — MIT — <https://gitlab.freedesktop.org/pixman/pixman> — `licenses/LICENSE-pixman.txt`
+- **XZ Utils** (liblzma) — 0BSD — <https://github.com/tukaani-project/xz> — `licenses/LICENSE-xz.txt`
+- **zlib** — Zlib — <https://github.com/madler/zlib> — `licenses/LICENSE-zlib.txt`
+- **Zstandard** — BSD-3-Clause OR GPL-2.0-only — <https://github.com/facebook/zstd> — `licenses/LICENSE-zstd.txt`
 
 Spectra PDF invokes `tesseract.exe` as an independent program (mere
 aggregation) — it is unmodified upstream Tesseract. The language models for all

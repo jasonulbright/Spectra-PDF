@@ -148,6 +148,102 @@ fn schtasks() -> Command {
     cmd
 }
 
+/// Register (or replace) a task through the Task Scheduler COM API.
+///
+/// Keeps the account password off a command line. `schtasks /RP <password>` is
+/// readable from any local process listing for the life of the child;
+/// `RegisterTask` takes the credential as an in-process VARIANT.
+///
+/// Not done by piping a PowerShell script to stdin: the secret would sit in a
+/// script body, and environments with ScriptBlock logging enabled -- common
+/// where named service accounts are used -- would write it to an event log,
+/// trading a transient exposure for a durable one.
+///
+/// `logon_type` must agree with the `<LogonType>` in the XML's Principal;
+/// disagreeing registers a task that never runs.
+///
+/// Runs on its own thread so COM initialisation cannot collide with the async
+/// runtime's thread reuse, and the apartment is torn down deterministically.
+#[cfg(windows)]
+fn register_task_com(
+    task_path: String,
+    xml: String,
+    account: String,
+    password: Option<String>,
+) -> Result<(), String> {
+    std::thread::spawn(move || -> Result<(), String> {
+        use windows::core::BSTR;
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+            COINIT_APARTMENTTHREADED,
+        };
+        use windows::Win32::System::Variant::VARIANT;
+        use windows::Win32::System::TaskScheduler::{
+            ITaskService, TaskScheduler, TASK_CREATE_OR_UPDATE, TASK_LOGON_INTERACTIVE_TOKEN,
+            TASK_LOGON_PASSWORD, TASK_LOGON_S4U,
+        };
+
+        unsafe {
+            let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let owned = init.is_ok();
+            let outcome = (|| -> Result<(), String> {
+                let service: ITaskService =
+                    CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER)
+                        .map_err(|e| format!("Task Scheduler is unavailable: {}", e.message()))?;
+                service
+                    .Connect(
+                        &VARIANT::default(),
+                        &VARIANT::default(),
+                        &VARIANT::default(),
+                        &VARIANT::default(),
+                    )
+                    .map_err(|e| format!("Could not connect to Task Scheduler: {}", e.message()))?;
+                let root = service
+                    .GetFolder(&BSTR::from("\\"))
+                    .map_err(|e| format!("Could not open the task folder: {}", e.message()))?;
+
+                let account = account.trim();
+                let (logon, user_v, pw_v) = if account.is_empty() {
+                    (
+                        TASK_LOGON_INTERACTIVE_TOKEN,
+                        VARIANT::default(),
+                        VARIANT::default(),
+                    )
+                } else {
+                    match password.as_deref() {
+                        Some(pw) if !pw.is_empty() => (
+                            TASK_LOGON_PASSWORD,
+                            VARIANT::from(account),
+                            VARIANT::from(pw),
+                        ),
+                        // No password for a named account is the (g)MSA shape:
+                        // S4U needs no secret.
+                        _ => (TASK_LOGON_S4U, VARIANT::from(account), VARIANT::default()),
+                    }
+                };
+
+                root.RegisterTask(
+                    &BSTR::from(task_path.as_str()),
+                    &BSTR::from(xml.as_str()),
+                    TASK_CREATE_OR_UPDATE.0,
+                    &user_v,
+                    &pw_v,
+                    logon,
+                    &VARIANT::default(),
+                )
+                .map(|_| ())
+                .map_err(|e| e.message().to_string())
+            })();
+            if owned {
+                CoUninitialize();
+            }
+            outcome
+        }
+    })
+    .join()
+    .map_err(|_| "The task registration thread panicked.".to_string())?
+}
+
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd
         .output()
@@ -295,39 +391,16 @@ pub async fn create_scheduled_run(
     // past that immediately. Found the hard way — the first cut registered
     // fine for short paths and failed for realistic ones.
     let xml = build_task_xml(&exe, &profile, password.as_deref())?;
-    let tmp = std::env::temp_dir().join(format!("opdfs-task-{}.xml", std::process::id()));
-    // schtasks requires UTF-16 for /XML; a UTF-8 file is rejected as malformed.
-    let mut bytes: Vec<u8> = vec![0xFF, 0xFE];
-    for unit in xml.encode_utf16() {
-        bytes.extend_from_slice(&unit.to_le_bytes());
-    }
-    std::fs::write(&tmp, &bytes).map_err(|e| format!("Could not stage the task file: {e}"))?;
 
-    let mut cmd = schtasks();
-    cmd.args([
-        "/Create",
-        "/F",
-        "/TN",
-        &task_path(&profile.name),
-        "/XML",
-        &tmp.to_string_lossy(),
-    ]);
-    if !profile.account.trim().is_empty() {
-        cmd.args(["/RU", profile.account.trim()]);
-        match password.as_deref() {
-            Some(pw) if !pw.is_empty() => {
-                cmd.args(["/RP", pw]);
-            }
-            // No password for a named account is the (g)MSA shape: schtasks
-            // reads an empty /RP as "this account needs no password".
-            _ => {
-                cmd.args(["/RP", ""]);
-            }
-        }
-    }
-
-    let outcome = run(&mut cmd);
-    let _ = std::fs::remove_file(&tmp);
+    // COM takes the XML as a string, so no staged temp file and no
+    // UTF-16-with-BOM encoding (both were schtasks requirements). The
+    // 261-character `/TR` cap above is still why the definition is XML.
+    let outcome = register_task_com(
+        task_path(&profile.name),
+        xml,
+        profile.account.trim().to_string(),
+        password.clone(),
+    );
     if outcome.is_err() {
         if let Some((staging, _)) = &staged_action {
             let _ = std::fs::remove_file(staging);
@@ -788,6 +861,67 @@ mod tests {
             action_file: r"C:\ProgramData\Spectra PDF\scheduled-actions\Nightly Strip.json"
                 .into(),
         }
+    }
+
+    /// The password belongs in exactly one place: the in-process VARIANT handed
+    /// to `RegisterTask`. It must not reach the task definition, which Windows
+    /// stores on disk and `schtasks /Query /XML` reads back; `password` is
+    /// consulted only to pick the LogonType.
+    #[test]
+    fn the_password_never_reaches_the_task_definition() {
+        const SECRET: &str = "correct-horse-battery-staple";
+        let mut p = action_profile();
+        p.account = r"CONTOSO\svc_pdf".into();
+
+        let xml = build_task_xml(r"C:\app.exe", &p, Some(SECRET)).unwrap();
+        assert!(
+            !xml.contains(SECRET),
+            "the password leaked into the task XML"
+        );
+        assert!(
+            xml.contains("<LogonType>Password</LogonType>"),
+            "a supplied password must select Password logon, or the task never runs"
+        );
+        assert!(xml.contains(r"CONTOSO\svc_pdf"));
+
+        // No password on a named account is the (g)MSA shape: S4U, no secret.
+        let xml = build_task_xml(r"C:\app.exe", &p, None).unwrap();
+        assert!(xml.contains("<LogonType>S4U</LogonType>"));
+
+        // No account at all runs as the interactive user.
+        p.account = String::new();
+        let xml = build_task_xml(r"C:\app.exe", &p, None).unwrap();
+        assert!(xml.contains("<LogonType>InteractiveToken</LogonType>"));
+    }
+
+    /// Exercises the COM registration end to end. `#[ignore]`d because it
+    /// touches the machine's task store; run it deliberately with:
+    ///
+    ///   cargo test scheduler::tests::com_registration_round_trip -- --ignored
+    ///
+    /// The other tests are compile-time or string-level, and a COM call that
+    /// compiles can still fail at runtime on a CLSID, an apartment or a VARIANT
+    /// type. Registers under the app's own folder, then deletes.
+    ///
+    /// Covers the InteractiveToken path. The Password path is the same call
+    /// with a populated VARIANT and needs real domain credentials.
+    #[test]
+    #[ignore]
+    fn com_registration_round_trip() {
+        let mut p = action_profile();
+        p.name = "ZZ Probe DELETE ME".into();
+        let xml = build_task_xml(r"C:\Windows\System32\cmd.exe", &p, None).unwrap();
+        let full = task_path(&p.name);
+
+        register_task_com(full.clone(), xml, String::new(), None)
+            .expect("COM registration failed");
+
+        let listed = run(schtasks().args(["/Query", "/TN", &full]));
+        let found = listed.is_ok();
+
+        let _ = run(schtasks().args(["/Delete", "/F", "/TN", &full]));
+
+        assert!(found, "task registered via COM but schtasks could not see it");
     }
 
     #[test]
