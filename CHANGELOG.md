@@ -7,9 +7,10 @@ vertical Chinese, Japanese and Korean text restyles, right-to-left edits
 keep the document's own typeface, and cropping is a rectangle you drag.
 
 ### Text
-- **Accents land on their letters.** Text edited with combining accent
-  marks now composes properly instead of leaving the accent stranded
-  beside its letter.
+- **Accents land on their letters.** Text with combining accent marks now
+  composes properly instead of leaving the accent stranded beside its
+  letter — when you edit a paragraph, add a text box, stamp a watermark or
+  fill in a form field.
 - **Ligatures form where the typeface has them.** A face that carries
   ligatures uses them when you edit — and the words still copy, search and
   extract as ordinary letters.
