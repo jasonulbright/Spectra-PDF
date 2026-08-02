@@ -91,14 +91,81 @@ fn write_config(app: &AppHandle, folders: &[WatchedFolder]) -> Result<(), String
     std::fs::write(&path, body).map_err(|e| format!("Cannot write {CONFIG_FILE}: {e}"))
 }
 
+/// Canonicalize as far as the path actually EXISTS, then re-append the rest.
+/// `canonical_path` returns its input untouched when it cannot resolve, and a
+/// destination/processed folder legitimately does not exist yet at save time —
+/// so canonicalizing the whole path would silently do nothing for exactly the
+/// paths this check exists to compare.
+fn canonical_prefix(p: &Path) -> PathBuf {
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = p.to_path_buf();
+    loop {
+        if cur.exists() {
+            let mut base = PathBuf::from(crate::commands::canonical_path(&cur.to_string_lossy()));
+            for part in tail.iter().rev() {
+                base.push(part);
+            }
+            return base;
+        }
+        match cur.file_name() {
+            Some(n) => tail.push(n.to_os_string()),
+            None => return p.to_path_buf(),
+        }
+        if !cur.pop() {
+            return p.to_path_buf();
+        }
+    }
+}
+
+/// True when `candidate` is at or inside `root`.
+///
+/// `Path::starts_with` is component-wise but lexical and case-sensitive, so
+/// source `C:\Watch` with dest `C:\watch\out` passes it: processed output then
+/// lands back in the intake and is reprocessed every tick. Windows spells one
+/// directory many ways, so this canonicalizes at the Rust boundary and compares
+/// identity rather than strings, as the rest of the app does.
 fn inside(root: &Path, candidate: &Path) -> bool {
-    candidate.starts_with(root)
+    // True identity first: catches UNC-vs-mapped-drive and junction aliases
+    // that no amount of string canonicalization can see. Needs both to exist,
+    // so a not-yet-created folder falls through to the comparison below.
+    if same_file::is_same_file(root, candidate).unwrap_or(false) {
+        return true;
+    }
+    let r = canonical_prefix(root);
+    let c = canonical_prefix(candidate);
+    let lower = |p: &Path| -> Vec<String> {
+        p.components()
+            .map(|x| x.as_os_str().to_string_lossy().to_lowercase())
+            .collect()
+    };
+    let (rc, cc) = (lower(&r), lower(&c));
+    // Case-insensitive because this app is Windows-only (register row P13).
+    cc.len() >= rc.len() && rc.iter().zip(cc.iter()).all(|(a, b)| a == b)
+}
+
+/// A watcher id becomes a filename (`watched-actions/{id}.json`), so it is a
+/// path-injection surface. Enforced inside `action_file_for` rather than at
+/// each caller, so every call site is covered by construction.
+///
+/// The UI generates UUIDs; this accepts those and nothing exotic.
+pub fn validate_watcher_id(id: &str) -> Result<(), String> {
+    let ok = !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if ok {
+        Ok(())
+    } else {
+        Err("A watched folder's id must be 1-64 characters of letters, digits, '-' or '_'.".into())
+    }
 }
 
 pub fn validate_folder(f: &WatchedFolder) -> Result<(), String> {
     if f.id.trim().is_empty() || f.name.trim().is_empty() {
         return Err("A watched folder needs a name.".into());
     }
+    validate_watcher_id(f.id.trim())?;
     let source = Path::new(&f.source);
     if !source.is_dir() {
         return Err(format!("Watch folder not found: {}", f.source));
@@ -153,14 +220,25 @@ fn scan_pdfs(dir: &Path) -> HashMap<String, u64> {
     out
 }
 
+/// The ONE place a watcher id becomes a path. Validation lives here so every
+/// caller — present and future — is covered by construction; a per-call-site
+/// check only ever covers the call sites you thought of.
 fn action_file_for(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    validate_watcher_id(id)?;
     let dir = app
         .path()
         .app_config_dir()
         .map_err(|e| format!("Cannot resolve the config folder: {e}"))?
         .join("watched-actions");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create the actions folder: {e}"))?;
-    Ok(dir.join(format!("{id}.json")))
+    let file = dir.join(format!("{id}.json"));
+    // Belt and braces: even with the charset check above, assert the result
+    // really is a direct child of the actions folder before anyone writes or
+    // deletes through it.
+    if file.parent() != Some(dir.as_path()) {
+        return Err("Refusing a watched-folder id that escapes its folder.".into());
+    }
+    Ok(file)
 }
 
 fn run_once(exe: &Path, folder: &WatchedFolder, action_file: &Path) {
@@ -306,6 +384,8 @@ pub async fn upsert_watched_folder(app: AppHandle, folder: WatchedFolder) -> Res
 
 #[tauri::command]
 pub async fn delete_watched_folder(app: AppHandle, id: String) -> Result<(), String> {
+    // A renderer-supplied string otherwise reaches `remove_file` unchecked.
+    validate_watcher_id(&id)?;
     stop_watcher(&app, &id);
     let mut folders = read_config(&app)?;
     folders.retain(|f| f.id != id);
@@ -359,6 +439,62 @@ mod tests {
         let mut missing = ok;
         missing.source = format!("{s}\\nope");
         assert!(validate_folder(&missing).unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn watcher_ids_cannot_escape_their_folder() {
+        // The UI's shape must keep working.
+        assert!(validate_watcher_id("3f2b9c1e-4a55-4d7e-9f11-0a1b2c3d4e5f").is_ok());
+        assert!(validate_watcher_id("w1").is_ok());
+        assert!(validate_watcher_id("a_b-C9").is_ok());
+
+        // Each of these would resolve to a path outside watched-actions/.
+        for bad in [
+            "",
+            "..",
+            "../x",
+            "..\\x",
+            "a/b",
+            "a\\b",
+            "C:\\evil",
+            "\\\\server\\share\\x",
+            "x.json",
+            "a b",
+        ] {
+            assert!(
+                validate_watcher_id(bad).is_err(),
+                "id {bad:?} should be refused"
+            );
+        }
+        assert!(validate_watcher_id(&"a".repeat(65)).is_err(), "over-long id");
+        assert!(validate_watcher_id(&"a".repeat(64)).is_ok(), "64 is allowed");
+    }
+
+    #[test]
+    fn containment_survives_windows_spelling() {
+        let tmp = std::env::temp_dir().join("opdfs-watch-case");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let src = tmp.join("Watch");
+        std::fs::create_dir_all(&src).unwrap();
+
+        // The live bug: `starts_with` is case-SENSITIVE, so this passed
+        // validation, processed output landed back in the intake, and the
+        // watcher reprocessed its own output every tick.
+        let differing_case = tmp.join("watch").join("out");
+        assert!(
+            inside(&src, &differing_case),
+            "a differently-cased child must still count as inside"
+        );
+
+        // A sibling whose name merely starts with the same letters is NOT
+        // inside — the component-wise property that must not regress.
+        assert!(!inside(&src, &tmp.join("Watching").join("out")));
+
+        // Same directory, spelled with a redundant traversal.
+        std::fs::create_dir_all(tmp.join("other")).unwrap();
+        assert!(inside(&src, &tmp.join("other").join("..").join("Watch")));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

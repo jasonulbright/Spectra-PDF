@@ -30,6 +30,35 @@ fn backdrop_supported(build: u32) -> bool {
     build >= 22000
 }
 
+/// Is "Transparency effects" on? (Settings ▸ Personalization ▸ Colours.)
+/// Absent value means the Windows default, which is ON.
+fn transparency_effects_enabled() -> bool {
+    winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|k| k.get_value::<u32, _>("EnableTransparency"))
+        .map(|v| v != 0)
+        .unwrap_or(true)
+}
+
+fn is_remote_session() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTESESSION};
+    unsafe { GetSystemMetrics(SM_REMOTESESSION) != 0 }
+}
+
+/// Whether DWM will compose a backdrop, as opposed to accepting the request.
+///
+/// `apply_mica` wraps `DwmSetWindowAttribute`, whose success means the
+/// attribute was recorded, not that the effect was drawn. DWM records and does
+/// not draw when transparency effects are switched off (a local, supported
+/// Win11 machine) or in a remote session. Reporting "mica" in either case
+/// applies translucent shell styling over a material that was never painted;
+/// the opaque fallback is the correct presentation there.
+///
+/// Pure so it can be pinned; the three environment reads stay outside it.
+fn wants_backdrop(build: u32, remote: bool, transparency_on: bool) -> bool {
+    backdrop_supported(build) && !remote && transparency_on
+}
+
 /// When true, the binary is running under end-to-end test control:
 /// single-instance hijacking and tray-persistence are disabled so each WDIO
 /// session gets a clean launch and exit. Enabled via the SPECTRAPDF_E2E
@@ -165,8 +194,15 @@ pub fn run() {
             // windowEffects/set_effects path discards the vibrancy Result,
             // so Mica is applied directly and the outcome recorded for the
             // renderer to key translucent styling on.
-            let wants_backdrop =
-                backdrop_supported(windows_version::OsVersion::current().build);
+            // Both halves are required: the OS must HAVE Mica, and DWM must be
+            // going to draw it. Checking only the first is what let a
+            // transparency-effects-off machine get chrome styled for a
+            // backdrop that was never composed.
+            let wants_backdrop = wants_backdrop(
+                windows_version::OsVersion::current().build,
+                is_remote_session(),
+                transparency_effects_enabled(),
+            );
             let window =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                     .title("Spectra PDF")
@@ -318,7 +354,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::backdrop_supported;
+    use super::{backdrop_supported, wants_backdrop};
 
     #[test]
     fn backdrop_gate_is_the_win11_floor() {
@@ -326,6 +362,27 @@ mod tests {
         assert!(!backdrop_supported(21999));
         assert!(backdrop_supported(22000)); // Win11 21H2 (fallback attribute)
         assert!(backdrop_supported(22631)); // Win11 23H2 (documented backdrop API)
+    }
+
+    #[test]
+    fn translucent_styling_needs_composition_not_just_support() {
+        // The OS build alone is not enough: DWM records the attribute without
+        // drawing in both of these cases.
+        assert!(
+            !wants_backdrop(26200, false, false),
+            "transparency effects OFF on a supported build must fall back"
+        );
+        assert!(
+            !wants_backdrop(26200, true, true),
+            "a remote session must fall back"
+        );
+
+        // Composing local Win11: unchanged, still translucent.
+        assert!(wants_backdrop(26200, false, true));
+        assert!(wants_backdrop(22000, false, true));
+
+        // Below the floor stays opaque whatever the other signals say.
+        assert!(!wants_backdrop(19045, false, true));
     }
 
     #[test]
