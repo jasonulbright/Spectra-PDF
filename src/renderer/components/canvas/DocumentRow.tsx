@@ -100,6 +100,15 @@ interface DocumentRowProps {
   onClearNewFieldPlacement: () => void;
   // Add-text placement (9.A2).
   addTextPlacement: SignaturePlacement | null;
+  /** P5b: the pending crop rectangle, drawn on the page. */
+  cropPlacement: SignaturePlacement | null;
+  onClearCropPlacement: () => void;
+  onSetCropRect?: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   onSetAddTextRect: (
     docId: string,
     pageId: string,
@@ -203,7 +212,10 @@ function DocumentRowImpl({
   onSetNewFieldRect,
   onClearNewFieldPlacement,
   addTextPlacement,
+  cropPlacement,
+  onClearCropPlacement,
   onSetAddTextRect,
+  onSetCropRect,
   onClearAddTextPlacement,
   onAddImageRect,
   onPageContextMenu,
@@ -319,7 +331,10 @@ function DocumentRowImpl({
         onSetNewFieldRect={onSetNewFieldRect}
         onClearNewFieldPlacement={onClearNewFieldPlacement}
         addTextPlacement={addTextPlacement?.pageId === page.id ? addTextPlacement : null}
+        cropPlacement={cropPlacement?.pageId === page.id ? cropPlacement : null}
+        onClearCropPlacement={onClearCropPlacement}
         onSetAddTextRect={onSetAddTextRect}
+        onSetCropRect={onSetCropRect}
         onAddImageRect={onAddImageRect}
         onClearAddTextPlacement={onClearAddTextPlacement}
         onPageContextMenu={onPageContextMenu}
