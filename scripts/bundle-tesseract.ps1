@@ -34,16 +34,71 @@ Write-Host "Vendoring Tesseract $TessVersion (UB Mannheim build, Apache-2.0)..."
 # leaves a correct-versioned tesseract.exe beside an incomplete tessdata, and a
 # presence-only check would then skip forever and never repair it. Verify the
 # pieces recognition genuinely needs -- the TSV config and at least one model.
+# ---------------------------------------------------------------------------
+# The notice gate. A function because it runs on both paths: at the end of a
+# fresh vendoring, and against an already-vendored tree before skipping, so an
+# incomplete tree is repaired rather than skipped past. Returns a list of
+# problems; callers decide whether that means "re-vendor" or "fail the build".
+# ---------------------------------------------------------------------------
+function Get-NoticeProblems {
+    param([string]$Root)
+    $manifest = Join-Path $PSScriptRoot "tesseract-licenses.tsv"
+    if (-not (Test-Path $manifest)) { return @("  notice manifest missing: $manifest") }
+
+    $rows = @{}
+    Get-Content $manifest |
+        Where-Object { $_ -and $_ -notmatch '^\s*#' } |
+        Select-Object -Skip 1 |
+        ForEach-Object {
+            $c = $_ -split "`t"
+            if ($c.Count -ge 4 -and $c[0]) { $rows[$c[0].Trim()] = $c[3].Trim() }
+        }
+
+    $licenseDir = Join-Path $Root "licenses"
+    $problems = @()
+    $bins = @(Get-ChildItem $Root -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Extension -in @(".dll", ".exe") })
+    if ($bins.Count -eq 0) { return @("  no binaries found in $Root") }
+
+    foreach ($bin in $bins) {
+        if (-not $rows.ContainsKey($bin.Name)) {
+            $problems += "  $($bin.Name): shipped but has NO ROW in tesseract-licenses.tsv"
+            continue
+        }
+        $notice = $rows[$bin.Name]
+        $noticePath = if ($notice -eq "LICENSE-Tesseract.txt") {
+            Join-Path $Root $notice
+        } else {
+            Join-Path $licenseDir $notice
+        }
+        if (-not (Test-Path $noticePath)) {
+            $problems += "  $($bin.Name): manifest names '$notice' but that notice is not present"
+        }
+    }
+    if (-not (Test-Path (Join-Path $Root "AUTHORS-Tesseract.txt"))) {
+        $problems += "  AUTHORS-Tesseract.txt missing (the installer supplies it)"
+    }
+    return $problems
+}
+
 $tessExe = Join-Path $DestDir "tesseract.exe"
 if (Test-Path $tessExe) {
     $current = (& $tessExe --version 2>$null | Select-Object -First 1)
     $hasTsv = Test-Path (Join-Path $DestDir "tessdata\configs\tsv")
     $hasModel = @(Get-ChildItem (Join-Path $DestDir "tessdata\*.traineddata") -File -ErrorAction SilentlyContinue).Count -gt 0
-    if ($current -eq "tesseract v$TessVersion" -and $hasTsv -and $hasModel) {
-        Write-Host "Tesseract $TessVersion already vendored at $DestDir"
+    # Notices are a piece the tree needs, like tsv and the models. Run the full
+    # gate rather than a presence check: a missing individual notice must
+    # trigger a re-vendor, not a silent skip past the gate below.
+    $noticeProblems = @(Get-NoticeProblems -Root $DestDir)
+    $hasNotices = $noticeProblems.Count -eq 0
+    if ($current -eq "tesseract v$TessVersion" -and $hasTsv -and $hasModel -and $hasNotices) {
+        Write-Host "Tesseract $TessVersion already vendored at $DestDir (notices complete)"
         return
     }
-    Write-Host "Re-vendoring: existing tree is incomplete (tsv=$hasTsv models=$hasModel)"
+    Write-Host "Re-vendoring: existing tree is incomplete (tsv=$hasTsv models=$hasModel notices=$hasNotices)"
+    if (-not $hasNotices) {
+        $noticeProblems | Select-Object -First 5 | ForEach-Object { Write-Host $_ }
+    }
 }
 
 # Locate 7-Zip (preinstalled on GitHub windows-latest runners).
@@ -170,6 +225,62 @@ foreach ($cand in @("LICENSE", "doc\LICENSE", "LICENSE.txt")) {
         break
     }
 }
+# AUTHORS is the other notice the installer supplies; the loop above breaks on
+# the first LICENSE hit and would not reach it. These two are the complete set
+# upstream provides for the 52 binaries we redistribute; the rest come from the
+# checked-in store.
+foreach ($cand in @("AUTHORS", "doc\AUTHORS")) {
+    $authors = Join-Path $Extracted $cand
+    if (Test-Path $authors) {
+        Copy-Item $authors -Destination (Join-Path $DestDir "AUTHORS-Tesseract.txt") -Force
+        Write-Host "  Copied AUTHORS-Tesseract.txt"
+        break
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Redistribution notices for the ~50 third-party DLLs shipped beside
+# tesseract.exe. Upstream supplies NOTHING for these (verified by sweeping the
+# extracted installer), so they are fetched from their canonical upstreams and
+# pinned by SHA-256.
+# ---------------------------------------------------------------------------
+$LicenseDir = Join-Path $DestDir "licenses"
+$LicenseSrc = Join-Path $PSScriptRoot "tesseract-licenses"
+# COPY from the checked-in store; do NOT fetch. The Tesseract build is
+# SHA-256-pinned, so the licences that apply are the ones for the library
+# versions frozen inside that binary -- they cannot change, because the binary
+# cannot change. Re-downloading on every build was worse than unnecessary:
+# upstream HEAD can carry the licence for a DIFFERENT version than the one we
+# redistribute, so a refresh could replace a correct notice with an
+# inapplicable one, and it made every build depend on ~38 external hosts.
+# fetch-tesseract-licenses.ps1 is the maintenance tool, run only when the pin
+# moves; its output is reviewed and committed.
+if (-not (Test-Path $LicenseSrc)) {
+    Write-Error "Licence store missing: $LicenseSrc -- run fetch-tesseract-licenses.ps1 and commit the result."
+    exit 1
+}
+New-Item -ItemType Directory -Force $LicenseDir | Out-Null
+Copy-Item (Join-Path $LicenseSrc "*.txt") -Destination $LicenseDir -Force
+$copied = @(Get-ChildItem $LicenseDir -Filter *.txt -File).Count
+Write-Host "  Copied $copied third-party licence texts (offline, from the checked-in store)"
+
+# ---------------------------------------------------------------------------
+# The gate. Every shipped binary must resolve to a manifest row and a notice
+# file that exists -- the same refusal shape as the configs/tsv and <10-DLLs
+# checks above. The copy set is enumerated rather than hand-listed, so an
+# upstream build that adds a DLL lands it in the shipped tree automatically;
+# without this, it would ship unnotified.
+# ---------------------------------------------------------------------------
+$shipped = @(Get-ChildItem $DestDir -File | Where-Object { $_.Extension -in @(".dll", ".exe") })
+$problems = @(Get-NoticeProblems -Root $DestDir)
+if ($problems) {
+    Write-Error ("Redistribution-notice gate FAILED -- refusing to ship:`n" +
+                 ($problems -join "`n") +
+                 "`n`nAdd the component to scripts/tesseract-licenses.tsv (and a source URL to" +
+                 "`nfetch-tesseract-licenses.ps1) before shipping this build.")
+    exit 1
+}
+Write-Host "  Notice gate: all $($shipped.Count) shipped binaries resolve to a present notice."
 
 # Keep the directory tracked even when binaries are gitignored.
 New-Item -ItemType File -Force (Join-Path $DestDir ".gitkeep") | Out-Null
