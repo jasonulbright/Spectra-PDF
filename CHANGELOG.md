@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.13 — Every licence in the box, every print accounted for
+## 1.0.14 — Every licence in the box, every print accounted for
 
 An outside review of the whole codebase, worked to zero. Two printing
 faults that could quietly lose a document are gone, the notices for every
