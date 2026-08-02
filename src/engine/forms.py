@@ -683,8 +683,14 @@ def _unicode_face(font_dir: str, da: str | None, value: str = "") -> str | None:
     try:
         # T5: the VALUE drives the CJK step — a CJK form value lands on
         # the CJK-capable face instead of the coverage refusal.
+        # T25c: and the right-to-left step, opted into because the appearance
+        # builder below now reorders and shapes. Opting in without that would
+        # turn an honest "cannot express" into a field drawn backwards.
+        from engine import bidi
+
         return resolve_fallback_font(
-            font_dir, synthetic_family_font(_family_for_da(da)), text=value or None
+            font_dir, synthetic_family_font(_family_for_da(da)), text=value or None,
+            rtl_ok=bidi.has_strong_rtl(value or ""),
         )
     except (ValueError, OSError):
         return None
@@ -761,17 +767,37 @@ def _text_appearance(
         # value would crash inside the fill (gauntlet HIGH — broadened to all
         # control chars, not just \n/\r/\t, matching S4).
         layout_value = flatten_control_chars(value, keep_newline=True)
-        font_obj, encode, width_1000 = build_fallback_font(
-            pdf, unicode_face, layout_value.replace("\n", " ")
-        )
+        # T25c: a right-to-left value shapes and reorders through the shared
+        # builder; everything else keeps the shipped single-`Tj` emission
+        # byte for byte. Built ONCE over the whole value so one subset
+        # carries every glyph any wrapped line will draw.
+        from engine import rtl_text
+
+        rtl = rtl_text.build(pdf, unicode_face, layout_value.replace("\n", " "))
         font_name = "TxU"  # one font per appearance stream, in its own /Resources
         substituted = False  # an intentional embed, not a /DR-missing fallback
+        if rtl is not None:
+            font_obj = rtl.font_obj
 
-        def width_em(s: str, _w=width_1000) -> float:
-            return _w(s) / 1000.0
+            def width_em(s: str, _r=rtl) -> float:
+                return _r.width_em(s)
 
-        def emit(line: str, _e=encode) -> bytes:
-            return b"<" + _e(line).hex().encode("ascii") + b"> Tj"
+            def emit(line: str, _r=rtl) -> bytes:
+                # `size` is read at CALL time, after `_fit_font_size` has
+                # resolved it — `Ts` is in unscaled text-space units, so a
+                # mark's rise has to be scaled by the font size here rather
+                # than by the Tf that follows it.
+                return _r.show(line, size)
+        else:
+            font_obj, encode, width_1000 = build_fallback_font(
+                pdf, unicode_face, layout_value.replace("\n", " ")
+            )
+
+            def width_em(s: str, _w=width_1000) -> float:
+                return _w(s) / 1000.0
+
+            def emit(line: str, _e=encode) -> bytes:
+                return b"<" + _e(line).hex().encode("ascii") + b"> Tj"
 
     if size <= 0:
         # Single-line width is measured on the flattened text (no `\n`); the

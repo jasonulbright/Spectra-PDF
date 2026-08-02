@@ -166,18 +166,43 @@ def _n(v: float) -> str:
     return f"{v:.4f}".rstrip("0").rstrip(".") or "0"
 
 
-def _unicode_watermark_face(font_dir: str) -> str | None:
+def _unicode_watermark_face(font_dir: str, text: str = "") -> str | None:
     """The bundled fallback .ttf to embed for a non-Latin-1 watermark (sans,
     matching the WinAnsi Helvetica shape). None when no fonts DIR is available
-    → the text is refused (never crashed on a bogus path)."""
+    → the text is refused (never crashed on a bogus path).
+
+    T25b: `text` opts into the text-driven step, so a right-to-left stamp
+    lands on a face that can express it. Passing the text is only correct
+    because the stamp emitter now reorders and shapes (`_rtl_stamp`) — an
+    emitter that did neither would draw the words reversed and the letters
+    disconnected, which is why the step is opt-in in the first place."""
     if not font_dir or not Path(font_dir).is_dir():
         return None
     from engine.font_fallback import resolve_fallback_font
 
     try:
-        return resolve_fallback_font(font_dir)  # original=None → sans
+        from engine import bidi
+
+        rtl = bidi.has_strong_rtl(text)
+        return resolve_fallback_font(font_dir, text=text or None, rtl_ok=rtl)
     except (ValueError, OSError):
         return None
+
+
+def _rtl_stamp(pdf, face: str, draw_text: str):
+    """T25b — (font object, em width, show bytes) for a right-to-left stamp,
+    or None when the text is not right-to-left.
+
+    A stamp is a SINGLE line, so there is no wrap to interact with and the
+    shared `rtl_text` builder does the whole job: shape the joining words,
+    permute the line into visual order, emit. The form draws at 1 em (the
+    caller's Tf carries the size), so the rise scale is 1.0."""
+    from engine import rtl_text
+
+    built = rtl_text.build(pdf, face, draw_text)
+    if built is None:
+        return None
+    return built.font_obj, built.width_em(draw_text), built.show(draw_text, 1.0)
 
 
 def _face_glyph_height_em(face_path: str) -> float:
@@ -326,7 +351,7 @@ def watermark(
             text.encode("latin-1")
         except UnicodeEncodeError:
             needs_unicode = True
-            face = _unicode_watermark_face(font_dir) or ""
+            face = _unicode_watermark_face(font_dir, text) or ""
             if not face:
                 raise ValueError(
                     "watermark text contains characters outside Latin-1 and no "
@@ -350,12 +375,19 @@ def watermark(
             if width <= 0 or height <= 0:
                 continue
             if needs_unicode and uni is None:
-                from engine.font_fallback import build_fallback_font
+                # T25b: a right-to-left stamp reorders (and shapes, where the
+                # script joins) before it is drawn; everything else keeps the
+                # shipped single-`Tj` emission byte for byte.
+                rtl_built = _rtl_stamp(pdf, face, draw_text)
+                if rtl_built is not None:
+                    font_obj, auto_em, show = rtl_built
+                else:
+                    from engine.font_fallback import build_fallback_font
 
-                font_obj, encode, width_1000 = build_fallback_font(pdf, face, draw_text)
-                auto_em = width_1000(draw_text) / 1000.0
+                    font_obj, encode, width_1000 = build_fallback_font(pdf, face, draw_text)
+                    auto_em = width_1000(draw_text) / 1000.0
+                    show = b"<" + encode(draw_text).hex().encode("ascii") + b"> Tj"
                 auto_gh = glyph_height
-                show = b"<" + encode(draw_text).hex().encode("ascii") + b"> Tj"
                 uni = (font_obj, auto_em, show)
             size = float(font_size) if float(font_size) > 0 else _auto_font_size(
                 text, width, height, rotate, angle, em_width=auto_em, glyph_height_em=auto_gh

@@ -481,7 +481,8 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for
     ) + (encode, width_1000)
 
 
-def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicode_pairs):
+def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicode_pairs,
+                      cid_to_gid=None):
     """The Type0/Identity-H embed shared by the character and the SHAPED
     builders — descriptor, descendant CIDFont, /W, ToUnicode. Returns a
     1-tuple so the callers can concatenate their own encode/measure pair
@@ -550,8 +551,21 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
             # /CIDToGIDMap is defined for CIDFontType2 ONLY; for a CFF
             # descendant the CID-to-glyph mapping comes from the embedded
             # font, so emitting it here would be meaningless (and is what
-            # trips strict validators).
-            **({} if is_cff else {"CIDToGIDMap": Name("/Identity")}),
+            # trips strict validators). 9.T25: a SHAPED subset passes a
+            # stream, because several codes may point at one glyph — that is
+            # how one base glyph spells `مَ` under one code and `مْ` under
+            # another. The character path passes nothing and keeps /Identity.
+            **(
+                {}
+                if is_cff
+                else {
+                    "CIDToGIDMap": (
+                        pdf.make_stream(cid_to_gid)
+                        if cid_to_gid is not None
+                        else Name("/Identity")
+                    )
+                }
+            ),
         )
     )
 
@@ -591,13 +605,23 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
     lam-alef ligature, an attached mark).
 
     `shaped` is a list of `engine.shaping.ShapedRun`. The subset RETAINS the
-    source glyph ids, so a shaped glyph's id in the embedded font is the id
-    the shaper handed back and the two-byte Identity-H code is that id — no
-    name round trip, which matters because the subsetter drops `post` names.
+    source glyph ids so a glyph can be addressed by the id the shaper handed
+    back (the subsetter drops the `post` names that would otherwise let us
+    re-find it), and a **/CIDToGIDMap STREAM** then maps character codes onto
+    those ids.
 
-    ToUnicode: each cluster's CARRIER glyph takes that cluster's characters
-    and its companions take the EMPTY string, so an Arabic letter drawn as
-    dotless-base-plus-dot still extracts as exactly one character. That is
+    That indirection is the whole point, and it is not optional. What a glyph
+    SPELLS is a property of the (glyph, cluster) PAIR, not of the glyph:
+    HarfBuzz folds a combining mark into its base's cluster, so one base
+    glyph spells `مَ` here and `مْ` three words later. /ToUnicode is keyed by
+    CODE, so giving each distinct pair its own code lets both spellings
+    coexist — where keying by glyph id silently let the second overwrite the
+    first, and a fatha came back as a sukun. Several codes mapping to one
+    glyph is exactly what a CIDToGIDMap stream is for.
+
+    Each cluster's CARRIER code takes that cluster's characters and its
+    companions map to the EMPTY string, so an Arabic letter drawn as
+    base-plus-mark still extracts as exactly its characters, once. That is
     what keeps a shaped edit re-editable — the round trip is the feature,
     not a nicety."""
     if not Path(font_path).is_file():
@@ -621,56 +645,65 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
     metrics = _font_metrics(font)
     scale = metrics["scale"]
     sub_order = font.getGlyphOrder()
-    widths: dict[int, float] = {}
 
-    def width_of(g: int) -> float:
-        if g not in widths:
-            if g >= len(sub_order):
-                raise ValueError(f"the fallback font lost glyph {g} while subsetting")
-            widths[g] = round(hmtx[sub_order[g]][0] * scale, 2)
-        return widths[g]
+    def gid_width(g: int) -> float:
+        if g >= len(sub_order):
+            raise ValueError(f"the fallback font lost glyph {g} while subsetting")
+        return round(hmtx[sub_order[g]][0] * scale, 2)
+
+    # code → gid, code → spelling, code → width. Codes start at 1: CID 0 is
+    # `.notdef` by convention and nothing should ever draw it.
+    gid_of_code: dict[int, int] = {}
+    unicode_of: dict[int, str] = {}
+    widths: dict[int, float] = {}
+    code_of: dict[tuple, int] = {}  # (glyph name, spelling) → code
+
+    def code_for(name: str, spells: str) -> int:
+        key = (name, spells)
+        code = code_of.get(key)
+        if code is None:
+            code = len(code_of) + 1
+            code_of[key] = code
+            g = full_gid_of[name]
+            gid_of_code[code] = g
+            widths[code] = gid_width(g)
+            unicode_of[code] = spells
+        return code
 
     used: dict[str, int] = {}
     for ch in sorted(set(text)):
-        g = full_gid_of[full_cmap[ord(ch)]]
-        width_of(g)
-        used[ch] = g
-    # A glyph may be reached BOTH ways (an isolated form is often also the
-    # cmap glyph); the shaped attribution wins, because it is the one that
-    # has to spell a whole cluster.
-    unicode_of: dict[int, str] = {g: ch for ch, g in used.items()}
+        used[ch] = code_for(full_cmap[ord(ch)], ch)
     for run in shaped:
         for name, cluster in run.clusters:
-            g = full_gid_of[name]
-            width_of(g)
-            if cluster:
-                unicode_of[g] = cluster  # a carrier is a carrier everywhere
-            else:
-                unicode_of.setdefault(g, "")
+            code_for(name, cluster)
 
     def encode(s: str) -> bytes:
         out = bytearray()
         for ch in s:
-            g = used.get(ch)
-            if g is None:
+            code = used.get(ch)
+            if code is None:
                 raise ValueError(f"the fallback font cannot express {ch!r}")
-            out += bytes(((g >> 8) & 0xFF, g & 0xFF))
+            out += bytes(((code >> 8) & 0xFF, code & 0xFF))
         return bytes(out)
 
     def width_1000(s: str) -> float:
         return sum(widths[used[ch]] for ch in s if ch in used)
 
-    def glyph_encode(names) -> bytes:
-        out = bytearray()
-        for name in names:
-            g = full_gid_of[name]
-            out += bytes(((g >> 8) & 0xFF, g & 0xFF))
-        return bytes(out)
+    def glyph_encode(name: str, spells: str) -> bytes:
+        code = code_for(name, spells)
+        return bytes(((code >> 8) & 0xFF, code & 0xFF))
 
-    def glyph_width(names) -> float:
-        return sum(widths.get(full_gid_of[name], 0.0) for name in names)
+    def glyph_width(name: str, spells: str) -> float:
+        return widths[code_for(name, spells)]
+
+    # /CIDToGIDMap as a STREAM: two big-endian bytes per CID, indexed by CID.
+    top = max(gid_of_code) if gid_of_code else 0
+    cid_to_gid = bytearray((top + 1) * 2)
+    for code, g in gid_of_code.items():
+        cid_to_gid[code * 2] = (g >> 8) & 0xFF
+        cid_to_gid[code * 2 + 1] = g & 0xFF
 
     return _embed_identity_h(
         pdf, ttf_bytes, font, font_path, metrics, widths,
-        sorted(unicode_of.items()),
+        sorted(unicode_of.items()), cid_to_gid=bytes(cid_to_gid),
     ) + (encode, width_1000, glyph_encode, glyph_width)

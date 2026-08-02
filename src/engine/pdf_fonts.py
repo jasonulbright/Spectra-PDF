@@ -90,6 +90,26 @@ class FontCapability:
         self.vertical = vertical
 
     # -- decode ------------------------------------------------------------
+    def decode_units(self, data: bytes) -> list[str]:
+        """One string per CODE — the true unit boundaries of the drawn text.
+
+        9.T25: `decode` joins these, and a caller that then has to re-split
+        them can only guess (the `_sequences` table is deliberately filtered
+        to UNAMBIGUOUS inverses, so a ligature also expressible as separate
+        codes is absent from it). The bidi reorder must not guess: reversing
+        the two characters of a `لا` ligature that the font drew as ONE glyph
+        turns `الله` into `لاله`. The codes know; this reports what they
+        said."""
+        out: list[str] = []
+        if self._code_bytes == 1:
+            for b in data:
+                out.append(self._code2uni.get(b, "�"))
+        else:
+            for i in range(0, len(data) - 1, 2):
+                cid = (data[i] << 8) | data[i + 1]
+                out.append(self._code2uni.get(cid, "�"))
+        return out
+
     def decode(self, data: bytes) -> str:
         out: list[str] = []
         if self._code_bytes == 1:

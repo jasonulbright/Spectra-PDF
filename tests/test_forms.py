@@ -1,6 +1,7 @@
 """Tests for the engine-side AcroForm read/fill/flatten (Phase 2l — the CLI
 parity implementation; the GUI path is renderer-side pdf-lib)."""
 
+import re
 import os
 
 import pikepdf
@@ -932,3 +933,115 @@ class TestButtonActionsAndReset:
         r = reset_form_fields(src, out, fields=["no.such.field"])
         assert r["reset"] == 0
         assert os.path.isfile(out)  # the output exists even with nothing to do
+
+
+def _drawn_gids(pdf_path, content: str):
+    """The GLYPH ids the content stream actually draws, resolved through the
+    embedded font's /CIDToGIDMap.
+
+    9.T25: a shaped subset addresses glyphs by CID, not by glyph id — several
+    CIDs may point at ONE glyph, which is how a base glyph spells one cluster
+    under one code and a different cluster under another. A test that wants to
+    know which GLYPHS were drawn therefore has to go through the map;
+    comparing codes to source glyph ids only worked before the map existed."""
+    import pikepdf
+
+    codes = [int(h, 16) for h in re.findall(r"<([0-9a-fA-F]{4})>", content)]
+    table = None
+    with pikepdf.open(pdf_path) as pdf:
+        for obj in pdf.objects:
+            if not isinstance(obj, pikepdf.Dictionary):
+                continue
+            if str(obj.get("/Subtype", "")) != "/CIDFontType2":
+                continue
+            c2g = obj.get("/CIDToGIDMap")
+            if c2g is not None and not isinstance(c2g, pikepdf.Name):
+                table = bytes(c2g.read_bytes())
+                break
+    if table is None:
+        return codes  # /Identity: the code IS the glyph id
+    return [
+        (table[c * 2] << 8) | table[c * 2 + 1]
+        for c in codes
+        if c * 2 + 1 < len(table)
+    ]
+
+
+def _contains_run(haystack, needle) -> bool:
+    n = len(needle)
+    return any(haystack[i : i + n] == needle for i in range(len(haystack) - n + 1))
+
+
+class TestRightToLeftFill:
+    """9.T25c — right-to-left form values fill instead of being refused."""
+
+    AR = "مرحبا بالعالم"
+    HE = "שלום עולם"
+
+    @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_arabic_value_fills(self, tmp_dir):
+        rtl_present = os.path.isfile(os.path.join(FONTS_DIR, "IBMPlexSansArabic-Regular.ttf"))
+        out = os.path.join(tmp_dir, "ar.pdf")
+        if not rtl_present:
+            # The refusal survives on an unprovisioned bundle — honestly.
+            with pytest.raises(ValueError, match="no available font can render"):
+                fill_form_fields(PDFLIB_FORM, out, {"applicant.name": self.AR},
+                                 font_dir=FONTS_DIR)
+            return
+        fill_form_fields(PDFLIB_FORM, out, {"applicant.name": self.AR}, font_dir=FONTS_DIR)
+        fields = {f["name"]: f for f in read_form_fields(out)["fields"]}
+        # The stored VALUE is always logical — /V is a string, not a drawing.
+        assert fields["applicant.name"]["value"] == self.AR
+
+    @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_hebrew_value_fills(self, tmp_dir):
+        rtl_present = os.path.isfile(os.path.join(FONTS_DIR, "NotoSansHebrew-Regular.ttf"))
+        if not rtl_present:
+            pytest.skip("RTL faces not provisioned")
+        out = os.path.join(tmp_dir, "he.pdf")
+        fill_form_fields(PDFLIB_FORM, out, {"applicant.name": self.HE}, font_dir=FONTS_DIR)
+        fields = {f["name"]: f for f in read_form_fields(out)["fields"]}
+        assert fields["applicant.name"]["value"] == self.HE
+
+    @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_the_APPEARANCE_is_reordered_and_shaped(self, tmp_dir):
+        # /V holds logical text either way, so only the drawn APPEARANCE can
+        # show that the reorder and the shaping happened: an unshaped
+        # emission would be one `Tj` of isolated forms in logical order.
+        from fontTools.ttLib import TTFont
+
+        from engine import shaping
+
+        face = os.path.join(FONTS_DIR, "IBMPlexSansArabic-Regular.ttf")
+        if not os.path.isfile(face):
+            pytest.skip("RTL faces not provisioned")
+        out = os.path.join(tmp_dir, "ap.pdf")
+        fill_form_fields(PDFLIB_FORM, out, {"applicant.name": "مرحبا"}, font_dir=FONTS_DIR)
+        with pikepdf.open(out) as pdf:
+            # The embedded-font resource name marks the appearance this fill
+            # wrote; /AP /N can be a sub-dictionary on other widgets.
+            streams = [
+                bytes(o.read_bytes())
+                for o in pdf.objects
+                if isinstance(o, pikepdf.Stream) and b"/TxU" in bytes(o.read_bytes())
+            ]
+        body = b"".join(streams).decode("latin-1")
+        gid_of = {n: i for i, n in enumerate(TTFont(face, lazy=True).getGlyphOrder())}
+        joined = [gid_of[n] for n in shaping.shape(face, "مرحبا").glyph_names]
+        isolated = [gid_of[shaping.shape(face, c).glyph_names[0]] for c in reversed("مرحبا")]
+        assert joined != isolated  # the premise
+        drawn = _drawn_gids(out, body)
+        assert _contains_run(drawn, joined)
+        assert not _contains_run(drawn, isolated)
+
+    @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_multiline_rtl_wraps(self, tmp_dir):
+        face = os.path.join(FONTS_DIR, "IBMPlexSansArabic-Regular.ttf")
+        if not os.path.isfile(face):
+            pytest.skip("RTL faces not provisioned")
+        out = os.path.join(tmp_dir, "ml.pdf")
+        value = ("مرحبا بالعالم " * 8).strip()
+        r = fill_form_fields(PDFLIB_FORM, out, {"notes": value}, font_dir=FONTS_DIR)
+        assert r["filled"] == 1
+        fields = {f["name"]: f for f in read_form_fields(out)["fields"]}
+        assert fields["notes"]["value"] == value
