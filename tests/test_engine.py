@@ -1192,15 +1192,50 @@ class TestWatermark:
             assert b"> Tj" in form.read_bytes()  # hex-string show
 
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
-    def test_watermark_cjk_refused_atomically(self, tmp_dir):
-        # Liberation covers Latin/Cyrillic/Greek but not CJK — a CJK watermark
-        # is refused (the B2 boundary), nothing written, even WITH font_dir.
+    def test_watermark_cjk_stamps(self, tmp_dir):
+        # 9.T25b INVERTED: this pinned the B2 boundary — "Liberation covers
+        # Latin/Cyrillic/Greek but not CJK, so a CJK watermark is refused".
+        # The stamp now passes its TEXT to the face resolver, so the CJK
+        # step T5 added picks the face that can express it. CJK needs no
+        # reordering and no shaping, so the plain character path draws it.
         src = os.path.join(tmp_dir, "wc_in.pdf")
         out = os.path.join(tmp_dir, "wc_out.pdf")
         _make_watermark_fixture(src, page_count=1)
-        with pytest.raises(ValueError, match="cannot express|no available|not found"):
-            watermark(file=src, output=out, text="日本語", font_dir=_WM_FONTS_DIR)
-        assert not os.path.exists(out)
+        res = watermark(file=src, output=out, text="日本語", font_dir=_WM_FONTS_DIR)
+        assert res["pages_watermarked"] == 1
+        from engine.extract_text import extract_text
+
+        assert "日本語" in extract_text(out)["text"]
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_right_to_left(self, tmp_dir):
+        # 9.T25b: an Arabic stamp shapes and reorders. Checked through the
+        # BIDI-AWARE lister, because that is the only reader that undoes the
+        # visual order a PDF necessarily stores — a plain extractor returns
+        # the drawn order, which is exactly what every real RTL PDF gives.
+        from engine.text_paragraphs import list_text_paragraphs
+
+        src = os.path.join(tmp_dir, "wr_in.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        for text in ("سري للغاية", "סודי"):
+            out = os.path.join(tmp_dir, f"wr_{len(text)}.pdf")
+            watermark(file=src, output=out, text=text, font_dir=_WM_FONTS_DIR, angle=0)
+            listed = [p["text"] for p in list_text_paragraphs(out, 1)["paragraphs"]]
+            # The fixture page carries its own text; the stamp is the addition.
+            assert text in listed, listed
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_latin_emission_is_unchanged(self, tmp_dir):
+        # The RTL work is gated on `has_strong_rtl`, so an ordinary stamp
+        # never enters it — asserted on the drawn ops, not the API.
+        src = os.path.join(tmp_dir, "wl_in.pdf")
+        out = os.path.join(tmp_dir, "wl_out.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        watermark(file=src, output=out, text="DRAFT", font_dir=_WM_FONTS_DIR)
+        with pikepdf.open(out) as pdf:
+            xo = pdf.pages[0].obj["/Resources"]["/XObject"]
+            body = next(xo[k] for k in xo.keys()).read_bytes()
+        assert b" Tj" in body and b" TJ" not in body and b" Ts" not in body
 
     def test_watermark_unicode_without_font_dir_refused(self, tmp_dir):
         # Without a fonts dir, a non-Latin-1 watermark is refused (not silently

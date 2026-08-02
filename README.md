@@ -27,7 +27,7 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 ### The twenty-four tools
 - **Organize Pages** — reorder, rotate, delete, split, extract — and merge pages between open files by dragging
 - **Comment** — highlights, text boxes, ink, and stamps, with notes and recoloring on each; existing PDF annotations import as editable; one list of every comment in the document — jump to it, edit its note, recolour or delete it, or clear them all
-- **Edit** — select an image, a paragraph, or a line of text on the page: move, resize, rotate, crop, dim, replace, extract or delete images and place new ones; rewrite text in place in the document's own font with live validation, kerned like a typesetter; edit whole paragraphs with true rewrap, split and merge, restyle size, colour, family, bold and italic — plus real OpenType small caps and stylistic alternates — for a whole paragraph or a selected range; move, resize, recolour, re-width or delete drawn vector shapes, even inside groups; add brand-new text boxes
+- **Edit** — select an image, a paragraph, or a line of text on the page: move, resize, rotate, crop, dim, replace, extract or delete images and place new ones; rewrite text in place in the document's own font with live validation, kerned like a typesetter; edit whole paragraphs with true rewrap, split and merge, restyle size, colour, family, bold and italic — plus real OpenType small caps and stylistic alternates — for a whole paragraph or a selected range; move, resize, recolour, re-width or delete drawn vector shapes, even inside groups; add brand-new text boxes. Right-to-left scripts — Arabic, Hebrew, Persian, Urdu — reflow and author like any other, with cursive letters joined correctly; Chinese, Japanese and Korean too
 - **Fill & Sign** — AcroForm fill on the page; digital signatures: verify with your own trust anchors, sign with PFX/PEM including PAdES baseline-through-LTA profiles with timestamping, visible stamps, sign-into-field, counter-signing
 - **Prepare Form** — draw new fields on the page; view and edit the document's JavaScript
 - **Redact** — true content removal
@@ -41,7 +41,7 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - **Watermark**
 - **Header & Footer** — six positions, page-number and auto-incrementing Bates tokens
 - **Crop & Page Boxes** — crop/bleed/trim/art
-- **Page Labels** — front matter as i, ii, iii; prefixed appendices
+- **Page Labels** — front matter as i, ii, iii; prefixed appendices, and the page box navigates by them
 - **Attachments** — embed, extract, remove
 - **Portfolio** — open a portfolio and work its files; create one from any files on disk, or convert the open document; add, open, save out, update, and remove member files
 - **Layers** — show/hide optional content
@@ -219,7 +219,7 @@ npm run dev
 npm run package
 ```
 
-This runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it), `scripts/sync-edit-fonts.ps1` (the hash-pinned Liberation + Libertinus faces and their OFL licence texts), and `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it) — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, produces the NSIS installer). Every one of those four is a `tauri.conf.json` resource, so all four must have run before a build can succeed.
+This runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it), `scripts/sync-edit-fonts.ps1` (the hash-pinned edit faces and their OFL licence texts — Liberation, Libertinus, Noto Sans CJK SC, IBM Plex Sans Arabic and Noto Sans Hebrew), and `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it) — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, produces the NSIS installer). Every one of those four is a `tauri.conf.json` resource, so all four must have run before a build can succeed.
 
 Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 
@@ -273,6 +273,9 @@ versions: [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 | Compress, grayscale, PDF/A, print rasterization, page-image export, repair tier 2, **Create PDF from PostScript (distilling)** | Ghostscript (vendored upstream, separate process) | AGPL-3.0 |
 | Export to Word / RTF / ODT / HTML | LibreOffice (bundled, separate process) | MPL-2.0 |
 | Compatible-font fallback and OpenType features for text editing | Liberation + Libertinus faces, fontTools | SIL OFL 1.1 / MIT |
+| Chinese, Japanese and Korean text editing and authoring | Noto Sans CJK SC | SIL OFL 1.1 |
+| Right-to-left text — Arabic, Hebrew, Persian, Urdu | IBM Plex Sans Arabic + Noto Sans Hebrew | SIL OFL 1.1 |
+| Cursive letter joining (shaping) for right-to-left scripts | HarfBuzz via uharfbuzz | Apache-2.0 (HarfBuzz: MIT-0) |
 | Window shell, native dialogs, IPC, updater | Tauri v2 + Rust crates | MIT / Apache-2.0 |
 
 ## Project Structure

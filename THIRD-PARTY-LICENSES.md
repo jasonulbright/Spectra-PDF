@@ -73,6 +73,7 @@ below were read from those wheels' METADATA):
 | pycparser | BSD-3-Clause | <https://github.com/eliben/pycparser> |
 | pyHanko | MIT | <https://github.com/MatthiasValvekens/pyHanko> |
 | pyhanko-certvalidator | MIT | <https://github.com/MatthiasValvekens/pyHanko/tree/master/pkgs/pyhanko-certvalidator> |
+| python-pkcs11 | MIT | <https://github.com/pyauth/python-pkcs11> |
 | requests | Apache-2.0 (its NOTICE file ships in its dist-info) | <https://github.com/psf/requests> |
 | tzdata | Apache-2.0 | <https://github.com/python/tzdata> |
 | uharfbuzz | Apache-2.0 (embeds HarfBuzz, MIT-0) | <https://github.com/harfbuzz/uharfbuzz> |
