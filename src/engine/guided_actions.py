@@ -28,7 +28,7 @@ import pikepdf
 from engine.batch_ocr import (
     _format_duration,
     _format_timestamp,
-    _list_pdfs,
+    _list_sources,
     _move_file,
     _pad,
     dest_conflicts_with_source,
@@ -194,7 +194,9 @@ def run_action(
     tool_paths = {"gs_path": gs_path, "tesseract_path": tesseract_path, "font_dir": font_dir}
 
     started_at = datetime.now()
-    entries, skipped_dirs = _list_pdfs(source_path)
+    # Guided actions run PDF steps; image sources are the batch-OCR
+    # sweep's own option (P3) and would have nothing to run against here.
+    entries, skipped_dirs = _list_sources(source_path, False)
     results: list[dict] = []
     for index, (abs_path, rel) in enumerate(entries):
         if progress:
