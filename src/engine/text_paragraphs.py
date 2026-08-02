@@ -3099,7 +3099,14 @@ def replace_paragraph_text(
         # user who wants a different vertical face picks an installed one
         # (T6), which is checked for vertical machinery before it is used.
         vertical_face = None
-        if substituting and para.vertical:
+        # `convert` counts as well as a style request. A column whose own
+        # font cannot express a typed character needs the vertical face for
+        # exactly the reason a restyle does, and without this it raised
+        # "vertical text cannot be converted to the fallback font" — the
+        # refusal T4 was supposed to have lifted. It survived because the
+        # shipped pin for the escape hatch passes `bold=True`, which sets
+        # `substituting` on its own and hid the plain-convert case.
+        if (substituting or convert) and para.vertical:
             # `style_key` is imported again below, inside the fallback-build
             # block — naming it there makes it a FUNCTION-LOCAL, so this
             # earlier use must bring its own or it reads as unassigned.
