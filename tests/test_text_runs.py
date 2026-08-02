@@ -697,6 +697,22 @@ class TestVerticalRunEditing:
         with pytest.raises(ValueError, match="vertical"):
             convert_text_run(src, out, 1, 0, "X", fonts_dir)
 
+# This class AUTHORS its fixture with `add_text_box`, which embeds a real face,
+# so it needs the vendored edit fonts. Same guard as test_font_fallback.py and
+# test_ltr_shaping.py; a recorded gate count must come from a provisioned run
+# with no skips.
+_EDIT_FONT = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "resources",
+    "fonts",
+    "LiberationSans-Regular.ttf",
+)
+
+
+@pytest.mark.skipif(
+    not os.path.isfile(_EDIT_FONT),
+    reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
+)
 class TestOffPageRetypeGuard:
     """Round 30 (A2-tail lens): a retype re-anchors at the original
     position, so longer text marched off the page silently — success
