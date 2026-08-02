@@ -181,6 +181,91 @@ class _Bidi:
         return out
 
 
+def _span_units(segments, styles) -> list:
+    """T25a — one line's `(text, style)` segments as UNITS in logical order:
+    `("glyphs", word, style)` for a shaped word, `("text", ch, style)` per
+    character otherwise. Same rule as the whole-box path, carrying the style
+    index through the reorder so a recoloured word stays recoloured."""
+    out: list = []
+    for text, st in segments:
+        runs = styles[st].get("runs") or {}
+        for i, token in enumerate(text.split(" ")):
+            if i:
+                out.append(("text", " ", st))
+            if token and token in runs:
+                out.append(("glyphs", token, st))
+            else:
+                out.extend(("text", ch, st) for ch in token)
+    return out
+
+
+def _span_pieces(segments, styles, base_level: int) -> list:
+    """Those units reordered into VISUAL order and merged back into
+    `(kind, payload, style)` show pieces."""
+    units = _span_units(segments, styles)
+    ordered = bidi.reorder_to_visual(
+        units, base_level, key=lambda u: (u[1][:1] or " ")
+    )
+    if len(ordered) != len(units):
+        raise ValueError(
+            "directional formatting characters cannot be laid out in a text box"
+        )
+    out: list = []
+    for kind, payload, st in ordered:
+        if kind == "text" and out and out[-1][0] == "text" and out[-1][2] == st:
+            out[-1] = ("text", out[-1][1] + payload, st)
+        elif kind == "text":
+            out.append(("text", payload, st))
+        else:
+            out.append(("glyphs", styles[st]["runs"][payload], st))
+    return out
+
+
+def _span_show(piece, style, csi, Array) -> list:
+    """The instructions for ONE visual piece — a list, because a shaped
+    word's vertical mark offsets need `Ts` between shows (see `_bidi_show`,
+    which states the sign discipline this shares)."""
+    kind, payload, _st = piece
+    if kind == "text":
+        return [_show_instruction(payload, style["encode"], style["kern_pairs"], csi, Array)]
+    out: list = []
+    parts: list = []
+    rise = 0.0
+    sz = style["size"]
+
+    def flush() -> None:
+        if not parts:
+            return
+        if len(parts) == 1 and not isinstance(parts[0], float):
+            out.append(csi([parts[0]], "Tj"))
+        else:
+            out.append(csi([Array(list(parts))], "TJ"))
+        parts.clear()
+
+    def set_rise(v: float) -> None:
+        nonlocal rise
+        if abs(v - rise) <= 1e-9:
+            return
+        flush()
+        out.append(csi([round(v, 4)], "Ts"))
+        rise = v
+
+    for (name, advance, x_off, y_off), (_n2, spells) in zip(
+        payload.glyphs, payload.clusters
+    ):
+        set_rise(y_off / 1000.0 * sz)
+        width = style["glyph_width"](name, spells)
+        if x_off:
+            parts.append(round(-x_off, 3))
+        parts.append(String(style["glyph_encode"](name, spells)))
+        trailing = x_off + width - advance
+        if abs(trailing) > 1e-9:
+            parts.append(round(trailing, 3))
+    set_rise(0.0)
+    flush()
+    return out
+
+
 def _prepare_bidi(face: str, body: str, pdf, unique: str, glyph_for):
     """(_Bidi | None, font_dict, encode, width_1000) for an authored box.
 
@@ -263,12 +348,14 @@ def _bidi_show(pieces, encode, bd: "_Bidi", sz: float, csi, Array) -> list:
             set_rise(0.0)
             parts.append(String(encode(payload)))
             continue
-        for name, advance, x_off, y_off in payload.glyphs:
+        for (name, advance, x_off, y_off), (_n2, spells) in zip(
+            payload.glyphs, payload.clusters
+        ):
             set_rise(y_off / 1000.0 * sz)
-            width = bd.glyph_width([name])
+            width = bd.glyph_width(name, spells)
             if x_off:
                 parts.append(round(-x_off, 3))
-            parts.append(String(bd.glyph_encode([name])))
+            parts.append(String(bd.glyph_encode(name, spells)))
             trailing = x_off + width - advance
             if abs(trailing) > 1e-9:
                 parts.append(round(trailing, 3))
@@ -378,6 +465,25 @@ def _layout_box_spans(
             char_style[pos] = idx
 
     feats = _normalize_features(features)
+    # T25a: right-to-left per-span styling. A style boundary INSIDE a
+    # cursively joining word is refused rather than drawn: the two halves
+    # would embed in two different subsets and each would take its own
+    # initial/final joining forms, so the word would visibly break at the
+    # seam. Styling whole words — what the card's selection actually
+    # produces — works. (The T15 cross-style KERN gap is a hairline; this
+    # one would be a hole in the middle of a word.)
+    rtl = bidi.has_strong_rtl(body)
+    if rtl:
+        from engine import shaping
+
+        for m in __import__("re").finditer(r"\S+", body):
+            if not shaping.requires_shaping(m.group()):
+                continue
+            if len(set(char_style[m.start() : m.end()])) > 1:
+                raise ValueError(
+                    "a style change inside a joined word cannot be drawn — "
+                    "style whole words in this script"
+                )
 
     def resolve_face(b: bool, i: bool):
         skey = style_key(b, i)
@@ -386,8 +492,13 @@ def _layout_box_spans(
 
             return resolve_feature_font(str(font_path), style=skey)
         if family in ("serif", "mono", "sans"):
-            return resolve_fallback_font(str(font_path), synthetic_family_font(family), style=skey, text=body)
-        return resolve_fallback_font(str(font_path), None, style=skey, text=body)
+            return resolve_fallback_font(
+                str(font_path), synthetic_family_font(family), style=skey, text=body,
+                rtl_ok=rtl,
+            )
+        return resolve_fallback_font(
+            str(font_path), None, style=skey, text=body, rtl_ok=rtl
+        )
 
     # Chars per style (drawn chars only), then one subset font per style.
     drawn_by_style: dict[int, set] = {}
@@ -408,7 +519,8 @@ def _layout_box_spans(
         chars = "".join(sorted(style_chars))
         if not chars:
             styles.append({"size": s_size, "color": s_color, "font_dict": None,
-                           "encode": None, "width_1000": None, "kern_pairs": {}})
+                           "encode": None, "width_1000": None, "kern_pairs": {},
+                           "runs": {}, "glyph_encode": None, "glyph_width": None})
             continue
         face = resolve_face(s_bold, s_italic)
         glyph_for = None
@@ -423,9 +535,39 @@ def _layout_box_spans(
             finally:
                 _ff.close()
             glyph_for = {ch: nm for ch, nm in zip(chars, names) if nm is not None}
-        font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars, glyph_for=glyph_for)
+        # T25a: the joining words drawn WHOLLY in this style (guaranteed
+        # whole by the boundary refusal above), shaped against THIS style's
+        # face so its glyphs land in THIS style's subset.
+        runs: dict = {}
+        glyph_encode = glyph_width = None
+        if rtl:
+            from engine import shaping
+
+            for m in __import__("re").finditer(r"\S+", body):
+                word = m.group()
+                if word in runs or char_style[m.start()] != idx:
+                    continue
+                if not shaping.requires_shaping(word):
+                    continue
+                try:
+                    runs[word] = shaping.shape(face, word, rtl=True)
+                except ValueError:
+                    pass  # the character path refuses it BY NAME instead
+        if runs:
+            if glyph_for is not None:
+                raise ValueError("small caps and alternates do not apply to this script")
+            font_dict, encode, width_1000, glyph_encode, glyph_width = build_shaped_font(
+                pdf, face, chars, list(runs.values())
+            )
+        else:
+            font_dict, encode, width_1000 = build_fallback_font(
+                pdf, face, chars, glyph_for=glyph_for
+            )
         pairs: dict = {}
-        if kern:
+        # A shaped run carries its own GPOS; kerning is per STYLE here, so
+        # this must be a local — assigning `kern` would silently disable
+        # kerning for every style built after the first shaped one.
+        if kern and not runs:
             from engine.font_kerning import kern_pairs as _kern_pairs, kerned_width
 
             pairs = _kern_pairs(str(face))
@@ -436,7 +578,9 @@ def _layout_box_spans(
                     return _b(t) + kerned_width(_p, t)
 
         styles.append({"size": s_size, "color": s_color, "font_dict": font_dict,
-                       "encode": encode, "width_1000": width_1000, "kern_pairs": pairs})
+                       "encode": encode, "width_1000": width_1000, "kern_pairs": pairs,
+                       "runs": runs, "glyph_encode": glyph_encode,
+                       "glyph_width": glyph_width})
 
     def seg_split(a: int, b: int) -> list[tuple[str, int]]:
         """[a,b) of body → (text, style) segments grouped by style."""
@@ -453,10 +597,18 @@ def _layout_box_spans(
 
     def range_width(a: int, b: int) -> float:
         """Points width of body[a:b) under its styles (cross-style kern
-        deliberately not attempted — an honest hairline)."""
+        deliberately not attempted — an honest hairline).
+
+        T25a: a SHAPED word measures by the shaper's positioned advance,
+        which is exactly what the emitted glyph widths plus their TJ
+        corrections sum to — the wrap and the drawing stay one number."""
         w = 0.0
         for text, st in seg_split(a, b):
             s = styles[st]
+            run = (s.get("runs") or {}).get(text)
+            if run is not None:
+                w += run.advance_1000 / 1000.0 * s["size"]
+                continue
             if s["width_1000"] is None:
                 continue
             w += s["width_1000"](text) / 1000.0 * s["size"]
@@ -537,6 +689,7 @@ def _layout_box_spans(
         frame=frame, left=left, right=right, top=top, bottom=bottom,
         font_dict=None, encode=None, width_1000=None, kern_pairs={},
         styled_lines=styled_lines, styles=styles, line_leadings=line_leadings,
+        bidi=bidi.paragraph_level(body) if rtl else None,
     )
 
 
@@ -644,15 +797,6 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     leading = sz * _LEADING_EM
 
     if spans:
-        # T25: per-span styling has its own per-line segment machinery and
-        # has NOT been lifted for right-to-left text. Refuse by name rather
-        # than lay it out left-to-right and unshaped — a text box drawn with
-        # its words in reverse and its letters disconnected is broken output,
-        # which is the one thing a refusal is better than. The whole-box path
-        # below authors this text correctly; dropping the span styling is the
-        # user's call to make, not a silent one.
-        if bidi.has_strong_rtl(body):
-            raise ValueError("per-span styling is not available for right-to-left text")
         # T15: the per-span path builds its own styles/segments; the
         # whole-box path below stays byte-identical when spans is absent.
         return _layout_box_spans(
@@ -774,7 +918,16 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
 
     def seg_width(text, st):
         s = styles[st]
+        run = (s.get("runs") or {}).get(text)
+        if run is not None:
+            return run.advance_1000 / 1000.0 * s["size"]
         return (s["width_1000"](text) / 1000.0 * s["size"]) if s["width_1000"] else 0.0
+
+    def piece_width(piece) -> float:
+        kind, payload, st = piece
+        if kind == "text":
+            return seg_width(payload, st)
+        return payload.advance_1000 / 1000.0 * styles[st]["size"]
 
     first_size = max((styles[st]["size"] for _t, st in styled_lines[0]), default=lay.sz) \
         if styled_lines and styled_lines[0] else lay.sz
@@ -820,7 +973,14 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
     for i, segments in enumerate(styled_lines):
         if not segments:
             continue
-        line_w = sum(seg_width(t, st) for t, st in segments)
+        # T25a: the line permutes into visual order HERE, after the wrap —
+        # line breaks are a logical-order decision. Pieces carry their style
+        # through the reorder, so a recoloured or resized word stays so.
+        pieces = _span_pieces(segments, styles, lay.bidi) if lay.bidi is not None else None
+        line_w = (
+            sum(piece_width(p) for p in pieces) if pieces is not None
+            else sum(seg_width(t, st) for t, st in segments)
+        )
         if align == "center":
             lx = l_left + (l_w - line_w) / 2
         elif align == "right":
@@ -828,7 +988,9 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
         else:
             lx = l_left
         instrs.append(csi([1, 0, 0, 1, round(lx, 4), round(baselines[i], 4)], "Tm"))
-        for text, st in segments:
+        emit = pieces if pieces is not None else [("text", t, st) for t, st in segments]
+        for piece in emit:
+            st = piece[2]
             s = styles[st]
             if st not in names:
                 continue  # whitespace-only style with no drawn chars
@@ -840,9 +1002,7 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
             if want_rgb != cur_rgb:
                 instrs.append(csi(list(want_rgb), "rg"))
                 cur_rgb = want_rgb
-            instrs.append(
-                _show_instruction(text, s["encode"], s["kern_pairs"], csi, pikepdf.Array)
-            )
+            instrs.extend(_span_show(piece, s, csi, pikepdf.Array))
     instrs.append(csi([], "ET"))
     instrs.append(csi([], "Q"))
     if frame is not None:

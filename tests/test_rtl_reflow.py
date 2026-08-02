@@ -151,6 +151,43 @@ def _subseq(haystack, needle) -> bool:
     return any(haystack[i : i + n] == needle for i in range(len(haystack) - n + 1))
 
 
+def _drawn_gids(pdf_path, content: str):
+    """The GLYPH ids the content stream actually draws, resolved through the
+    embedded font's /CIDToGIDMap.
+
+    9.T25: a shaped subset addresses glyphs by CID, not by glyph id — several
+    CIDs may point at ONE glyph, which is how a base glyph spells one cluster
+    under one code and a different cluster under another. A test that wants to
+    know which GLYPHS were drawn therefore has to go through the map;
+    comparing codes to source glyph ids only worked before the map existed."""
+    import pikepdf
+
+    codes = [int(h, 16) for h in re.findall(r"<([0-9a-fA-F]{4})>", content)]
+    table = None
+    with pikepdf.open(pdf_path) as pdf:
+        for obj in pdf.objects:
+            if not isinstance(obj, pikepdf.Dictionary):
+                continue
+            if str(obj.get("/Subtype", "")) != "/CIDFontType2":
+                continue
+            c2g = obj.get("/CIDToGIDMap")
+            if c2g is not None and not isinstance(c2g, pikepdf.Name):
+                table = bytes(c2g.read_bytes())
+                break
+    if table is None:
+        return codes  # /Identity: the code IS the glyph id
+    return [
+        (table[c * 2] << 8) | table[c * 2 + 1]
+        for c in codes
+        if c * 2 + 1 < len(table)
+    ]
+
+
+def _contains_run(haystack, needle) -> bool:
+    n = len(needle)
+    return any(haystack[i : i + n] == needle for i in range(len(haystack) - n + 1))
+
+
 def _paras(path):
     return list_text_paragraphs(path, 1)["paragraphs"]
 
@@ -268,9 +305,9 @@ class TestReflow:
         assert joined != isolated  # the premise: joining changes the glyphs
         with pikepdf.open(out) as pdf:
             content = pdf.pages[0].Contents.read_bytes().decode("latin-1")
-        codes = [int(h, 16) for h in re.findall(r"<([0-9a-fA-F]{4})>", content)]
-        assert _subseq(codes, [gid_of[n] for n in joined])
-        assert not _subseq(codes, [gid_of[n] for n in isolated])
+        drawn = _drawn_gids(out, content)
+        assert _contains_run(drawn, [gid_of[n] for n in joined])
+        assert not _contains_run(drawn, [gid_of[n] for n in isolated])
 
     def test_following_content_in_the_SAME_stream_is_resynced(self, tmp_dir):
         # The 7.5 correctness property, exercised in the one direction it had

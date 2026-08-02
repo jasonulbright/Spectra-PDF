@@ -123,6 +123,9 @@ class _Member:
         "space_w",
         "rect",
         "ptext",
+        # 9.T25: the run's text as UNITS — one per drawn code, so the bidi
+        # reorder permutes what the font actually drew rather than a guess.
+        "punits",
         "gaps_1000",
         "editable",
         "blocking_reason",
@@ -148,11 +151,15 @@ def _linear_key(m) -> tuple:
     return (round(a, 4), round(b, 4), round(c, 4), round(d, 4))
 
 
-def _ptext_and_gaps(det) -> tuple[str, list[float]]:
-    """The run's paragraph-text (synthetic spaces at TJ word gaps) plus the
-    observed gap widths (1000ths of em) for the paragraph's median."""
+def _ptext_and_gaps(det) -> tuple[str, list[float], list[str]]:
+    """The run's paragraph-text (synthetic spaces at TJ word gaps), the
+    observed gap widths (1000ths of em) for the paragraph's median, and the
+    text as UNITS — one entry per drawn code, which is what the 9.T25 bidi
+    reorder permutes. A ligature the font drew as one glyph is one unit, so
+    its characters can never be reversed against each other."""
     cap = det["cap"]
     parts: list[str] = []
+    units: list[str] = []
     gaps: list[float] = []
     space_1000 = (
         cap.char_width(" ")
@@ -160,15 +167,33 @@ def _ptext_and_gaps(det) -> tuple[str, list[float]]:
         else FALLBACK_SPACE_1000
     )
     threshold = WORD_GAP_FRACTION * space_1000
-    for seg in det["segments"]:
+    segments = det["segments"]
+    for i, seg in enumerate(segments):
         if isinstance(seg, float):
             gap = -seg  # negative TJ numbers push the pen RIGHT
-            if gap >= threshold:
+            # A forward jump that lands on a glyph SPELLING NOTHING is mark
+            # positioning, not a word gap: a combining mark carries its
+            # horizontal offset as exactly this shape — jump, draw a
+            # zero-advance glyph whose /ToUnicode is empty, jump back. Reading
+            # it as a space put one inside every vocalised Arabic word
+            # (`مَرْحَبًا` extracted as `مَ رْحَبًا`). True of any producer's
+            # marks, not just ours — the jump is bounded by the mark's own
+            # offset, which routinely exceeds half a space.
+            nxt = segments[i + 1] if i + 1 < len(segments) else None
+            spells_nothing = (
+                isinstance(nxt, bytes) and cap is not None and cap.decode(nxt) == ""
+            )
+            if gap >= threshold and not spells_nothing:
                 parts.append(" ")
+                units.append(" ")
                 gaps.append(gap)
             continue
-        parts.append(cap.decode(seg) if cap is not None else "")
-    return "".join(parts), gaps
+        if cap is None:
+            continue
+        chunk = cap.decode_units(seg)
+        parts.extend(chunk)
+        units.extend(u for u in chunk if u)
+    return "".join(parts), gaps, units
 
 
 def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
@@ -219,7 +244,7 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         # REAL (untransposed) rect in both modes — paragraph boxes union
         # these, so the listing draws real page rects with no un-mapping.
         mem.rect = det["rect"]
-        mem.ptext, mem.gaps_1000 = _ptext_and_gaps(det)
+        mem.ptext, mem.gaps_1000, mem.punits = _ptext_and_gaps(det)
         mem.editable = bool(run["editable"])
         # 9-§I.0-S8: the run's clip flag rides through so a paragraph whose
         # every member is clipped away lists as invisible (aggregated in
@@ -457,11 +482,24 @@ def _line_pieces(line: _Line, gaps: list[float]) -> list[tuple[str, int]]:
     pieces: list[tuple[str, int]] = []
     prev: _Member | None = None
     for mem in line.members:
+        if not mem.ptext:
+            # A run that draws no TEXT cannot be one side of a word gap, and
+            # letting it be one is not hypothetical: a zero-advance combining
+            # mark (Arabic harakat, emitted as its own show because its
+            # vertical offset needs a `Ts`) has `space_w` 0, which collapses
+            # the threshold below to `gap >= 0` — so the ZERO gap to the next
+            # glyph read as a word break and vocalised text extracted with a
+            # space inside every word. Skip it entirely: `prev` stays the last
+            # run that actually drew something.
+            gaps.extend(mem.gaps_1000)
+            continue
         if prev is not None:
             gap = mem.x0 - prev.x1
-            if gap >= WORD_GAP_FRACTION * prev.space_w:
+            # A gap must be POSITIVE to be a word gap — belt to the same
+            # class, for any other run whose space width reads as zero.
+            if gap > 0 and gap >= WORD_GAP_FRACTION * prev.space_w:
                 if not (pieces and pieces[-1][0].endswith(" ")):
-                    pieces.append((" ", prev.index))
+                    pieces.append((" ", prev.index, [" "]))
                 # 9.B4b: the gap converts to 1000ths at the ADVANCE
                 # axis's user scale — d for vertical (Tz never applies
                 # vertically), h_scale×a for horizontal (unchanged).
@@ -470,7 +508,7 @@ def _line_pieces(line: _Line, gaps: list[float]) -> list[tuple[str, int]]:
                 if denom > 1e-9:
                     gaps.append(gap / denom * 1000.0)
         if mem.ptext:
-            pieces.append((mem.ptext, mem.index))
+            pieces.append((mem.ptext, mem.index, mem.punits))
         gaps.extend(mem.gaps_1000)
         prev = mem
     return pieces
@@ -493,21 +531,19 @@ def _to_logical(pieces: list[tuple[str, int]], base_level: int, cap_of):
     characters — an Arabic lam-alef, a Latin `fi` — and those characters are
     already in logical order inside the glyph's ToUnicode entry; reversing
     them individually would scramble the very word the reordering is meant
-    to restore. `cap_of(run)` supplies the font's own ligature matcher, the
-    SAME one the emission uses to form atomic entries, so both halves agree
-    on where a unit begins."""
+    to restore. The units come from the DRAWN CODES (`decode_units`), not
+    from the font's `_sequences` table: that table is filtered to
+    unambiguous inverses, so a ligature also expressible as separate codes
+    is absent from it — and guessing from it turned `الله` into `لاله`."""
     units: list[tuple[str, int]] = []
-    for text, run in pieces:
-        cap = cap_of(run)
-        i = 0
-        while i < len(text):
-            seq = cap._sequence_at(text, i) if cap is not None else None
-            if seq is not None:
-                units.append((seq, run))
-                i += len(seq)
-            else:
-                units.append((text[i], run))
-                i += 1
+    for text, run, punits in pieces:
+        if punits and "".join(punits) == text:
+            units.extend((u, run) for u in punits)
+        else:
+            # A piece whose units do not reconstruct it (a synthetic space
+            # merged in, or a caller without unit data) falls back to
+            # characters — safe, because such a piece is whitespace or plain.
+            units.extend((ch, run) for ch in text)
     # A unit's bidi class is its FIRST character's; a ligature's characters
     # always share one (they are glyphs of a single script).
     visual = "".join(u[0][0] for u in units)
@@ -518,13 +554,13 @@ def _to_logical(pieces: list[tuple[str, int]], base_level: int, cap_of):
     _lvl, forward = bidi.visual_order(logical, base_level)
     if len(forward) != len(units) or any(back[forward[v]] != v for v in range(len(units))):
         return None
-    out: list[tuple[str, int]] = []
+    out: list[tuple[str, int, list]] = []
     for i in back:
         text, run = units[i]
         if out and out[-1][1] == run:
-            out[-1] = (out[-1][0] + text, run)
+            out[-1] = (out[-1][0] + text, run, out[-1][2] + [text])
         else:
-            out.append((text, run))
+            out.append((text, run, [text]))
     return out
 
 
@@ -562,7 +598,7 @@ def _assemble_text(
             pieces = _to_logical(pieces, base_level, caps.get)
             if pieces is None:
                 return None
-        next_first = next((t[0] for t, _r in pieces if t), "")
+        next_first = next((piece[0][0] for piece in pieces if piece[0]), "")
         if (
             li > 0
             and last_char not in ("-", " ", "")
@@ -574,8 +610,8 @@ def _assemble_text(
             # separators; inserting one would corrupt the round-trip). The
             # separator rides the PREVIOUS span (style continuity).
             emit(" ", spans[-1]["run"] if spans else line.members[0].index)
-        for text, run in pieces:
-            emit(text, run)
+        for piece in pieces:
+            emit(piece[0], piece[1])
     return "".join(parts), spans, gaps
 
 
@@ -1485,7 +1521,11 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
         # exactly. Tc applies once per GLYPH, Tw never (no space inside a
         # word).
         fb = fallbacks.get(st.fallback)
-        total = fb.glyph_width(st.shaped.glyph_names) if fb is not None else 0.0
+        total = (
+            sum(fb.glyph_width(n, s) for (n, _a, _x, _y), (_n2, s)
+                in zip(st.shaped.glyphs, st.shaped.clusters))
+            if fb is not None else 0.0
+        )
         w = total / 1000.0 * s["size"] + s["char_spacing"] * len(st.shaped.glyphs)
         return w * (s["h_scale"] * m.a)
     if st.fallback is not None:
@@ -2082,8 +2122,10 @@ class _Emission:
             items = []
             piece_raw = 0.0
 
-        for name, advance, x_off, y_off in st.shaped.glyphs:
-            width = fb.glyph_width([name])
+        for (name, advance, x_off, y_off), (_n2, spells) in zip(
+            st.shaped.glyphs, st.shaped.clusters
+        ):
+            width = fb.glyph_width(name, spells)
             dy = y_off / 1000.0 * size * lin_d
             if items and abs(dy - piece_dy) > 1e-9:
                 flush()
@@ -2092,7 +2134,7 @@ class _Emission:
                 piece_dy = dy
             if x_off:
                 items.append(-x_off)  # a negative TJ number moves the pen right
-            items.append(fb.glyph_encode([name]))
+            items.append(fb.glyph_encode(name, spells))
             trailing = x_off + width - advance
             if abs(trailing) > 1e-9:
                 items.append(trailing)

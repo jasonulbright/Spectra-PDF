@@ -4,6 +4,7 @@ gs-independent but font-dependent: gated on the vendored fallback family
 (scripts/sync-edit-fonts.ps1), like test_font_fallback."""
 
 import os
+import re
 
 import pikepdf
 import pytest
@@ -782,6 +783,43 @@ class TestT5CjkAuthoring:
         assert any("Liberation" in n for n in names)
 
 
+def _drawn_gids(pdf_path, content: str):
+    """The GLYPH ids the content stream actually draws, resolved through the
+    embedded font's /CIDToGIDMap.
+
+    9.T25: a shaped subset addresses glyphs by CID, not by glyph id — several
+    CIDs may point at ONE glyph, which is how a base glyph spells one cluster
+    under one code and a different cluster under another. A test that wants to
+    know which GLYPHS were drawn therefore has to go through the map;
+    comparing codes to source glyph ids only worked before the map existed."""
+    import pikepdf
+
+    codes = [int(h, 16) for h in re.findall(r"<([0-9a-fA-F]{4})>", content)]
+    table = None
+    with pikepdf.open(pdf_path) as pdf:
+        for obj in pdf.objects:
+            if not isinstance(obj, pikepdf.Dictionary):
+                continue
+            if str(obj.get("/Subtype", "")) != "/CIDFontType2":
+                continue
+            c2g = obj.get("/CIDToGIDMap")
+            if c2g is not None and not isinstance(c2g, pikepdf.Name):
+                table = bytes(c2g.read_bytes())
+                break
+    if table is None:
+        return codes  # /Identity: the code IS the glyph id
+    return [
+        (table[c * 2] << 8) | table[c * 2 + 1]
+        for c in codes
+        if c * 2 + 1 < len(table)
+    ]
+
+
+def _contains_run(haystack, needle) -> bool:
+    n = len(needle)
+    return any(haystack[i : i + n] == needle for i in range(len(haystack) - n + 1))
+
+
 class TestRightToLeftAuthoring:
     """9.T25 — Add Text authors right-to-left scripts.
 
@@ -843,14 +881,9 @@ class TestRightToLeftAuthoring:
             gid_of[shaping.shape(face, ch).glyph_names[0]] for ch in reversed("مرحبا")
         ]
         assert joined != isolated  # the premise
-        content = _page_content(out).decode("latin-1")
-        codes = [int(h, 16) for h in re.findall(r"<([0-9a-fA-F]{4})>", content)]
-
-        def has(seq):
-            return any(codes[i : i + len(seq)] == seq for i in range(len(codes)))
-
-        assert has(joined)
-        assert not has(isolated)
+        drawn = _drawn_gids(out, _page_content(out).decode("latin-1"))
+        assert _contains_run(drawn, joined)
+        assert not _contains_run(drawn, isolated)
 
     def test_wrapping_measures_what_it_draws(self, tmp_dir):
         # A box too narrow for one line must wrap AND still round-trip: the
@@ -887,18 +920,69 @@ class TestRightToLeftAuthoring:
         )
         assert m["lines"] == c["lines"]
 
-    def test_per_span_styling_refuses_by_name(self, tmp_dir):
-        # NOT lifted for this direction, and a refusal is the only honest
-        # answer: laying it out left-to-right and unshaped would draw the
-        # words in reverse with the letters disconnected.
+    def test_per_span_styling_on_whole_words(self, tmp_dir):
+        # 9.T25a: styling a whole word — what the card's selection actually
+        # produces — reorders and shapes like the rest of the line.
+        from engine.text_paragraphs import list_text_paragraphs
+
         src = _blank(tmp_dir, "spans-src.pdf")
         out = os.path.join(tmp_dir, "spans.pdf")
-        with pytest.raises(ValueError, match="right-to-left"):
+        res = add_text_box(
+            src, out, 1, [72, 600, 520, 720], self.AR, size=18.0,
+            font_path=FONTS_DIR, family="sans",
+            spans=[{"start": 0, "end": 5, "bold": True, "color": [1.0, 0.0, 0.0]}],
+        )
+        assert res["styles"] == 2  # the box's own style plus the span's
+        assert [p["text"] for p in list_text_paragraphs(out, 1)["paragraphs"]] == [self.AR]
+
+    def test_a_style_change_inside_a_joined_word_refuses(self, tmp_dir):
+        # The one thing per-span styling cannot do in a cursive script: the
+        # two halves would embed in two different subsets and each take its
+        # own initial/final joining forms, so the word would break open at
+        # the seam. Refuse by name rather than draw the hole.
+        src = _blank(tmp_dir, "split-src.pdf")
+        out = os.path.join(tmp_dir, "split.pdf")
+        with pytest.raises(ValueError, match="joined word"):
             add_text_box(
                 src, out, 1, [72, 600, 520, 720], self.AR, size=18.0,
                 font_path=FONTS_DIR, family="sans",
-                spans=[{"start": 0, "end": 5, "bold": True}],
+                spans=[{"start": 0, "end": 3, "bold": True}],
             )
+
+    def test_spans_wrap_and_keep_every_word(self, tmp_dir):
+        # Wrapping under per-span styling measures shaped words by the
+        # shaper's advance, so the drawn lines and the text agree. The
+        # RE-LISTING may report two paragraphs rather than one — a per-span
+        # size can make the styled word the WIDEST on its line, which trips
+        # the grouper's dominant-size break — so assert the TEXT, which is
+        # what must survive, not the grouping heuristic's verdict.
+        from engine.text_paragraphs import list_text_paragraphs
+
+        long_ar = "مرحبا بالعالم لغة عربية جميلة ونص طويل يحتاج الى اكثر من سطر"
+        src = _blank(tmp_dir, "spanwrap-src.pdf")
+        out = os.path.join(tmp_dir, "spanwrap.pdf")
+        res = add_text_box(
+            src, out, 1, [72, 540, 330, 720], long_ar, size=16.0,
+            font_path=FONTS_DIR, family="sans",
+            spans=[{"start": 0, "end": 5, "size": 24.0}],
+        )
+        assert res["lines"] > 1
+        got = " ".join(p["text"] for p in list_text_paragraphs(out, 1)["paragraphs"])
+        assert got == long_ar
+
+    def test_a_style_change_inside_a_HEBREW_word_is_fine(self, tmp_dir):
+        # Hebrew does not join, so there is no seam to break — the refusal
+        # above is about cursive joining, not about direction.
+        from engine.text_paragraphs import list_text_paragraphs
+
+        src = _blank(tmp_dir, "hesplit-src.pdf")
+        out = os.path.join(tmp_dir, "hesplit.pdf")
+        add_text_box(
+            src, out, 1, [72, 600, 520, 720], self.HE, size=18.0,
+            font_path=FONTS_DIR, family="sans",
+            spans=[{"start": 0, "end": 2, "color": [0.0, 0.0, 1.0]}],
+        )
+        assert [p["text"] for p in list_text_paragraphs(out, 1)["paragraphs"]] == [self.HE]
 
     def test_a_left_to_right_box_is_untouched_by_any_of_this(self, tmp_dir):
         # The gate is `has_strong_rtl`, so an ordinary box never enters the
