@@ -37,9 +37,18 @@ export interface EditSpan {
    * straight into the sent ranges.) */
   bold?: boolean;
   italic?: boolean;
-  family?: 'serif' | 'sans' | 'mono';
+  family?: FaceSelector;
   size?: number;
 }
+
+/**
+ * A face selector, as the ENGINE defines it (9.T6): one of the three
+ * bundled family names, or an ABSOLUTE PATH to an installed font file.
+ * Deliberately one type rather than a union of "bundled" and "installed" —
+ * both travel the same parameter, the engine validates either, and giving
+ * the picker a second shape to pack would be a place for the two to drift.
+ */
+export type FaceSelector = string;
 
 export interface EditParagraph {
   /** Engine paragraph id (listing order). */
@@ -94,7 +103,7 @@ export interface ParagraphEditOpts {
    * family (an honest face replacement; undefined = keep the original
    * fonts). With any substitution the members' own coverage is
    * irrelevant — every character re-renders in the chosen face. */
-  family?: 'serif' | 'sans' | 'mono';
+  family?: FaceSelector;
   /** A3b: absolute weight/slant of the substituted face. Sent as a PAIR
    * whenever a substitution happens (family picked or a toggle changed
    * from its seed); undefined = no style substitution. */
@@ -125,7 +134,7 @@ export interface ParagraphEditOpts {
     color?: [number, number, number];
     bold?: boolean;
     italic?: boolean;
-    family?: 'serif' | 'sans' | 'mono';
+    family?: FaceSelector;
     size?: number;
     small_caps?: boolean;
     alternates?: boolean;
@@ -174,7 +183,7 @@ interface EngineParagraphListing {
       // 9.A5-tails-a: per-span DISPLAY seeds (the span's OWN face/size).
       bold?: boolean;
       italic?: boolean;
-      family?: 'serif' | 'sans' | 'mono';
+      family?: FaceSelector;
       size?: number;
     }[];
     alignment: string;
@@ -353,7 +362,7 @@ export interface SpanFace {
   end: number;
   bold: boolean;
   italic: boolean;
-  family?: 'serif' | 'sans' | 'mono';
+  family?: FaceSelector;
   smallCaps?: boolean;
   alternates?: boolean;
   altIndex?: number;
@@ -447,7 +456,7 @@ export const applySpanFace = (
   face: {
     bold: boolean;
     italic: boolean;
-    family?: 'serif' | 'sans' | 'mono';
+    family?: FaceSelector;
     smallCaps?: boolean;
     alternates?: boolean;
     altIndex?: number;
@@ -471,7 +480,7 @@ export const applySpanFace = (
 type FaceValue = {
   bold: boolean;
   italic: boolean;
-  family?: 'serif' | 'sans' | 'mono';
+  family?: FaceSelector;
   smallCaps?: boolean;
   alternates?: boolean;
   altIndex?: number;
@@ -578,7 +587,7 @@ export function setSpanFaceFamily(
   view: SpanFace[],
   start: number,
   end: number,
-  family: 'serif' | 'sans' | 'mono' | undefined,
+  family: FaceSelector | undefined,
 ): SpanFace[] {
   return segmentedFaceApply(preserve, view, start, end, (base) => ({ ...base, family }));
 }
@@ -708,7 +717,7 @@ export function styledSegments(
   color: string | null;
   bold: boolean;
   italic: boolean;
-  family?: 'serif' | 'sans' | 'mono';
+  family?: FaceSelector;
   size: number | null;
   smallCaps: boolean;
 }> {
@@ -720,7 +729,7 @@ export function styledSegments(
   }
   const boldAt: boolean[] = new Array(n).fill(false);
   const italicAt: boolean[] = new Array(n).fill(false);
-  const familyAt: (('serif' | 'sans' | 'mono') | undefined)[] = new Array(n).fill(undefined);
+  const familyAt: (FaceSelector | undefined)[] = new Array(n).fill(undefined);
   // 9.K2: small caps renders in the preview (alternates cannot — no CSS
   // reaches an arbitrary salt index without the loaded font — so they show as
   // base glyphs and the committed page is the authority, exactly as family/
@@ -743,7 +752,7 @@ export function styledSegments(
     color: string | null;
     bold: boolean;
     italic: boolean;
-    family?: 'serif' | 'sans' | 'mono';
+    family?: FaceSelector;
     size: number | null;
     smallCaps: boolean;
   }> = [];
@@ -786,7 +795,13 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-const HTML_FAMILY: Record<'serif' | 'sans' | 'mono', string> = {
+// 9.T6: the editor's PREVIEW stack, keyed by the three bundled selectors.
+// An installed face has no entry and falls through to the box's own font:
+// the browser cannot render a file path, and naming the family in CSS
+// would preview whatever the SYSTEM resolves that name to, which is not
+// necessarily the face being embedded. An honest no-preview beats a
+// preview that lies about the result.
+const HTML_FAMILY: Record<string, string> = {
   serif: 'Liberation Serif, Times New Roman, Times, serif',
   sans: 'Liberation Sans, Arial, Helvetica, sans-serif',
   mono: 'Liberation Mono, Courier New, Courier, monospace',
@@ -817,7 +832,7 @@ export function segmentsToHtml(
     color: string | null;
     bold: boolean;
     italic: boolean;
-    family?: 'serif' | 'sans' | 'mono';
+    family?: FaceSelector;
     size: number | null;
     smallCaps?: boolean;
   }>,
@@ -912,7 +927,7 @@ export function spanFacesToStyles(
   end: number;
   bold: boolean;
   italic: boolean;
-  family?: 'serif' | 'sans' | 'mono';
+  family?: FaceSelector;
   small_caps?: boolean;
   alternates?: boolean;
   alt_index?: number;

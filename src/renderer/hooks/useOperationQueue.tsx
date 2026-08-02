@@ -88,6 +88,11 @@ const INTERNAL_METHODS = new Set([
   // Reading /PageLabels to seed the editor panel — a lookup, not an edit;
   // set_page_labels stays gated.
   'get_page_labels',
+  // 9.T6: enumerating the machine's installed fonts touches no document at
+  // all — it names no file, so the commit gate and the per-file lock have
+  // nothing to gate, and running it through them would put a font-picker
+  // open in front of the user's actual work in the serial engine queue.
+  'list_system_fonts',
   // Listing embedded attachments to seed the panel — a read; add/remove
   // (mutations) stay gated.
   'list_attachments',
