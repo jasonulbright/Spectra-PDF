@@ -49,7 +49,7 @@ import { placementDocsCurrent, pruneFormValues, valueShapeMatches } from '../../
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
-import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
+import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasCrop, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
 import { invokeCommand, registerCanvasServices, pushEscapeInterceptor } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { ContextMenu } from '../ContextMenu';
@@ -3704,6 +3704,21 @@ export function WorkspaceCanvasView({
     });
     return true;
   };
+  // P5b: the crop band, driven the way the gesture drives it — through the
+  // REAL `onSetCropRect`, so the geometry read, the rotation-aware inset
+  // conversion and the publish to the panel are all exercised rather than
+  // simulated.
+  const harnessDrawCropRef = useRef<
+    (rect: { x: number; y: number; w: number; h: number }) => boolean
+  >(() => false);
+  harnessDrawCropRef.current = (rect) => {
+    const doc = docs.find((d) => d.path === state.activeFileId);
+    const page = doc?.pages[0];
+    if (!doc || !page) return false;
+    if (!placementDocsCurrent(state.files, docs, doc.path)) return false;
+    onSetCropRect(doc.id, page.id, rect, page.rotation);
+    return true;
+  };
   const harnessBuildSigRef = useRef<
     () => Promise<{ path: string; appearance: { page: number; rect: [number, number, number, number] } } | null>
   >(async () => null);
@@ -3728,6 +3743,11 @@ export function WorkspaceCanvasView({
       has: () => liveSigRef.current != null,
     });
     return () => registerCanvasSignature(null);
+  }, []);
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerCanvasCrop({ drawOnFirstPage: (rect) => harnessDrawCropRef.current(rect) });
+    return () => registerCanvasCrop(null);
   }, []);
 
   // Which pages travel with a drag that grabs `grabbedPageId`: the whole

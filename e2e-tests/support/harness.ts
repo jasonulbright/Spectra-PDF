@@ -636,6 +636,22 @@ export async function placeSignature(rect: { x: number; y: number; w: number; h:
   }
 }
 
+/** P5b: draw a crop band on the first page of the active document, through
+ * the real canvas handler. */
+export async function drawCropRect(rect: { x: number; y: number; w: number; h: number }): Promise<void> {
+  const result = await browser.executeAsync<string | null, [{ x: number; y: number; w: number; h: number }]>(
+    function (r, done) {
+      (window as any).__SPECTRA_TEST__.drawCropRect(r)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    rect,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`drawCropRect failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
 /** The engine appearance payload the canvas Sign button would send for the
  * pending placement — produced by the REAL display→PDF conversion path. */
 export async function buildSignatureAppearance(): Promise<{
