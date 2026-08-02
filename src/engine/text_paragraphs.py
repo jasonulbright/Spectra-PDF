@@ -1227,6 +1227,7 @@ def _styled_chars(
     size_by_pos=None,
     member_family=None,
     rtl_style=None,
+    vertical_ok: bool = False,
 ) -> tuple[list[tuple[str, _StyleRef]], dict]:
     """Map every char of the new text to its style source; returns the
     styled stream plus `fb_by_face` — a dict {face key → the char-set that
@@ -1396,9 +1397,11 @@ def _styled_chars(
                 i += 1
                 continue
             if fk is not None:
-                if member.vertical:
-                    # 9.B4b belt (the para-level substitution refusal is
-                    # the surface): the fallback faces are horizontal.
+                if member.vertical and not vertical_ok:
+                    # The belt behind the paragraph-level routing: a
+                    # horizontal face dropped into a column lays out on the
+                    # wrong axis. Lifted (T4) when the caller resolved a
+                    # vertical-capable face for it.
                     raise ValueError(
                         "vertical text cannot be converted to the fallback font"
                     )
@@ -1419,11 +1422,11 @@ def _styled_chars(
             if ch == " " or member.cap.can_encode(ch):
                 styled.append((ch, ref(member, None, col, siz)))
             elif convert:
-                if member.vertical:
-                    # 9.B4b: the 7.4 fallback embeds a HORIZONTAL
-                    # Identity-H face — dropped into a column it would
-                    # render on the wrong axis (the B4a convert-refusal
-                    # rule, held here for the per-char path).
+                if member.vertical and not vertical_ok:
+                    # The 7.4 fallback embeds a HORIZONTAL Identity-H face —
+                    # dropped into a column it would render on the wrong
+                    # axis. T4 lifts this exactly when a vertical-capable
+                    # face was resolved for the paragraph.
                     raise ValueError(
                         "vertical text cannot be converted to the fallback font"
                     )
@@ -2838,11 +2841,45 @@ def replace_paragraph_text(
         substituting = (
             family_override is not None or style_override is not None or bool(para_feats)
         )
-        # 9.B4b: the bundled Liberation faces are horizontal — substituted
-        # into a column their glyphs would lay out on the wrong axis.
-        # Refuse outright (the B4a convert-refusal honesty; v1 boundary).
+        # 9.T4: a VERTICAL paragraph substitutes into a vertical-capable
+        # face. This used to refuse outright ("vertical text cannot
+        # substitute a horizontal face") because the bundled Liberation
+        # faces are horizontal and nothing else was vendored — a true
+        # statement that stopped being true when T5 bundled Noto Sans CJK
+        # (which carries `vert`/`vrt2` and `vmtx`) and T3 brought the shaper
+        # that can reach those features. Family serif/sans/mono has nothing
+        # honest to resolve to for a column, so it is IGNORED here rather
+        # than obeyed into a sideways result; the weight axis is real, and a
+        # user who wants a different vertical face picks an installed one
+        # (T6), which is checked for vertical machinery before it is used.
+        vertical_face = None
         if substituting and para.vertical:
-            raise ValueError("vertical text cannot substitute a horizontal face")
+            # `style_key` is imported again below, inside the fallback-build
+            # block — naming it there makes it a FUNCTION-LOCAL, so this
+            # earlier use must bring its own or it reads as unassigned.
+            from engine.font_fallback import (
+                face_shapes_vertically,
+                resolve_vertical_font,
+            )
+            from engine.font_fallback import style_key as _style_key
+
+            if not font_path:
+                raise ValueError("fallback font path is required to restyle")
+            if isinstance(family_override, str) and os.path.isabs(family_override):
+                if not face_shapes_vertically(family_override, para.text):
+                    raise ValueError(
+                        "that font has no vertical forms — pick one that does"
+                    )
+                vertical_face = family_override
+            else:
+                vertical_face = resolve_vertical_font(
+                    str(font_path),
+                    para.text,
+                    style=_style_key(
+                        bool(style_override[0]) if style_override else False,
+                        bool(style_override[1]) if style_override else False,
+                    ),
+                )
         # A4 split: an explicit selector — a caret offset outside the open
         # interval refuses (a "split" that splits nothing would be a
         # success that lied). Code points: Python strings index them
@@ -2982,6 +3019,7 @@ def replace_paragraph_text(
             whole_para_face=whole_para_face, color_by_pos=color_by_pos,
             face_by_pos=face_by_pos, size_by_pos=size_by_pos,
             member_family=member_family, rtl_style=rtl_style,
+            vertical_ok=vertical_face is not None,
         )
         # 9.A5b: build ONE _Fallback per face key, sorted-face order so the
         # subset names + embedded bytes are deterministic. The whole-para A3
@@ -3009,6 +3047,20 @@ def replace_paragraph_text(
             for key in sorted(fb_by_face, key=_face_sort_key):
                 fam, kbold, kitalic, kfeats, kalt = key
                 chars = "".join(sorted(fb_by_face[key]))
+                if vertical_face is not None:
+                    # 9.T4: ONE vertical face serves the whole paragraph —
+                    # the weight was resolved with it, and a column cannot
+                    # mix writing modes anyway (the writing mode rides in
+                    # lkey, so a mixed-mode paragraph never groups).
+                    from engine.font_fallback import build_vertical_font
+
+                    font_dict, encode, width_1000 = build_vertical_font(
+                        pdf, vertical_face, chars
+                    )
+                    fallbacks[key] = _Fallback(
+                        None, font_dict, encode, width_1000, vertical_face
+                    )
+                    continue
                 if fam == RTL_FAMILY:
                     # 9.T3: resolve the bundled RTL face, SHAPE every word
                     # that routed here against it, then embed a subset that
