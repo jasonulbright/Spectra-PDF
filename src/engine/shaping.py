@@ -181,19 +181,30 @@ def shape(face_path: str, text: str, rtl: bool = True) -> ShapedRun:
         ))
         advance += pos.x_advance * scale
 
-    # One CARRIER glyph per cluster: the widest advance in that cluster (a
-    # zero-advance mark never spells anything), first in stream order on a
-    # tie. Keyed by the cluster's START OFFSET, never by its text — a word
-    # with the same letter twice has two clusters spelling the same thing.
-    carrier: dict[int, int] = {}
+    # Attribute the source characters to glyphs. Keyed by the cluster's START
+    # OFFSET, never by its text — a word with the same letter twice has two
+    # clusters spelling the same thing.
+    members: dict[int, list[int]] = {}
     for gi, info in enumerate(infos):
-        best = carrier.get(info.cluster)
-        if best is None or glyphs[gi][1] > glyphs[best][1]:
-            carrier[info.cluster] = gi
-    clusters = [
-        (glyphs[gi][0], span[info.cluster] if carrier[info.cluster] == gi else "")
-        for gi, info in enumerate(infos)
-    ]
+        members.setdefault(info.cluster, []).append(gi)
+    spelled: dict[int, str] = {}
+    for start, gis in members.items():
+        # ONE carrier per cluster takes the WHOLE cluster's characters: the
+        # widest advance (a zero-advance mark never spells anything), first
+        # in stream order on a tie. HarfBuzz folds a combining mark into its
+        # base's cluster, so `مَ` is one cluster of two glyphs and the base
+        # spells both characters.
+        #
+        # That makes the spelling a property of the (glyph, cluster) PAIR,
+        # not of the glyph — the same base appears elsewhere carrying a
+        # different mark — which is why `build_shaped_font` gives each
+        # distinct pair its own character CODE rather than keying /ToUnicode
+        # by glyph id. Attempting a 1:1 split here instead was tried and is
+        # worse: it makes every mark spell something, which puts the mark's
+        # horizontal offset back in play as a word gap.
+        carrier = max(gis, key=lambda g: (glyphs[g][1], -g))
+        spelled[carrier] = span[start]
+    clusters = [(glyphs[gi][0], spelled.get(gi, "")) for gi in range(len(infos))]
     return ShapedRun(text, glyphs, advance, clusters)
 
 
