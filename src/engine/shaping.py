@@ -252,6 +252,43 @@ def program_bytes(font_dict) -> bytes | None:
     return None
 
 
+def shape_vertical(face_path: str, ch: str):
+    """(glyph name, vertical advance per 1000/em) for ONE character drawn
+    top-to-bottom, or None when the face cannot express it — 9.T4.
+
+    Shaping with the buffer running `ttb` is what reaches the font's
+    vertical machinery: the `vert`/`vrt2` GSUB features swap in the upright
+    forms (a comma becomes its vertical variant, brackets rotate) and the
+    advance comes from `vmtx` as a NEGATIVE `y_advance`. Neither is
+    reachable by a cmap lookup, which is why "no vertical face is bundled"
+    stayed true for as long as there was no shaper to ask.
+
+    Per CHARACTER on purpose: vertical text advances glyph by glyph and
+    forms no cross-character ligatures, so this is exact and keeps the
+    code→character map one to one — which is what lets the embed carry an
+    ordinary /ToUnicode."""
+    import uharfbuzz as hb
+
+    font, upem = _hb_font(face_path)
+    order = _glyph_order(face_path)
+    buf = hb.Buffer()
+    buf.add_str(ch)
+    buf.guess_segment_properties()
+    buf.direction = "ttb"
+    hb.shape(font, buf)
+    infos = list(buf.glyph_infos)
+    positions = list(buf.glyph_positions)
+    if len(infos) != 1 or infos[0].codepoint == 0 or infos[0].codepoint >= len(order):
+        return None
+    scale = 1000.0 / (upem or 1000)
+    advance = positions[0].y_advance * scale
+    if advance == 0:
+        # A zero vertical advance would stack every glyph on one spot. The
+        # face's em is the honest default and what a CJK face's `DW2` says.
+        advance = -1000.0
+    return order[infos[0].codepoint], advance
+
+
 def face_can_shape(face_path: str, text: str) -> bool:
     """Whether `face_path` shapes `text` without hitting `.notdef` — the
     ladder's probe, so a face that merely CONTAINS the letters but not their

@@ -2211,19 +2211,69 @@ class TestVerticalParagraphs:
             _merge(src, out, paras, 1)
         assert not os.path.exists(out)
 
-    def test_substitution_and_convert_refuse_on_vertical(self, tmp_dir):
-        # The Liberation faces are horizontal — family/bold/italic
-        # substitution refuses outright, and the convert=True per-char
-        # fallback fails closed the same way (the B4a rule). Both fire
-        # before any font file is touched, so no faces guard is needed.
+    @pytest.mark.skipif(
+        not os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Bold.otf")),
+        reason="CJK faces not provisioned",
+    )
+    def test_vertical_restyles_into_a_vertical_face(self, tmp_dir):
+        # 9.T4 INVERSION. This pinned "vertical text cannot substitute a
+        # horizontal face" — true while the only bundled faces WERE
+        # horizontal, and false since T5 bundled Noto Sans CJK (which
+        # carries `vert`/`vrt2` and `vmtx`) and T3 brought the shaper that
+        # can reach those features.
         src = _vpage(tmp_dir, b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
         para = _paras(src)[0]
-        for kw in ({"family": "serif"}, {"bold": True}, {"italic": True}):
-            with pytest.raises(ValueError, match="vertical text cannot substitute"):
-                _apply(src, out, para, para["text"], font_path=FONTS_DIR, **kw)
-        with pytest.raises(ValueError, match="vertical text cannot be converted"):
-            _apply(src, out, para, para["text"] + "Z", convert=True, font_path=FONTS_DIR)
+        assert para["vertical"] is True
+        _apply(src, out, para, para["text"], font_path=FONTS_DIR, bold=True)
+        after = _paras(out)[0]
+        # Still a column, still the same text.
+        assert after["vertical"] is True
+        assert after["text"] == para["text"]
+        # Read INSIDE the context: a pikepdf object does not outlive its Pdf.
+        with pikepdf.open(out) as pdf:
+            fonts = pdf.pages[0]["/Resources"]["/Font"]
+            embedded = [
+                fonts[k] for k in fonts.keys()
+                if "NotoSansCJK" in str(fonts[k].get("/BaseFont", ""))
+            ]
+            assert embedded, "the vertical face was not embedded"
+            face = embedded[0]
+            # The things that make an embed vertical rather than horizontal:
+            # the CMap the VIEWER reads, and the vertical metrics.
+            assert str(face["/Encoding"]) == "/Identity-V"
+            descendant = face["/DescendantFonts"][0]
+            assert "/W2" in descendant
+            assert "/DW2" in descendant
+            # The weight axis is real — Bold asked for, Bold embedded.
+            assert "Bold" in str(face["/BaseFont"])
+
+    @pytest.mark.skipif(
+        not os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")),
+        reason="CJK faces not provisioned",
+    )
+    def test_vertical_convert_reaches_the_vertical_face(self, tmp_dir):
+        # The convert escape hatch was withheld for the same reason and
+        # lifts with it: a character the column's own font cannot express
+        # now converts into the vertical face instead of refusing.
+        src = _vpage(tmp_dir, b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"] + "京", convert=True,
+               font_path=FONTS_DIR, bold=True)
+        assert _paras(out)[0]["text"] == para["text"] + "京"
+
+    def test_vertical_refuses_a_font_with_no_vertical_forms(self, tmp_dir):
+        # An INSTALLED face (T6) is allowed on a column only if it actually
+        # has vertical machinery — a Latin face would draw sideways.
+        latin = os.path.join(FONTS_DIR, "LiberationSans-Regular.ttf")
+        if not os.path.isfile(latin):
+            pytest.skip("bundled fonts not provisioned")
+        src = _vpage(tmp_dir, b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        with pytest.raises(ValueError, match="no vertical forms"):
+            _apply(src, out, para, para["text"], font_path=FONTS_DIR, family=latin)
         assert not os.path.exists(out)
 
     def test_transposition_round_trip_on_member_geometry(self, tmp_dir):
