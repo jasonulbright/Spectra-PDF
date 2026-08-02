@@ -347,6 +347,49 @@ def resolve_fallback_font(
     return resolved
 
 
+def resolve_vertical_font(font_path: str, text: str, style: str = "regular") -> str:
+    """The bundled face that can draw `text` VERTICALLY — 9.T4.
+
+    One family, deliberately: the CJK face is the only bundled one carrying
+    `vert`/`vrt2` and `vmtx`, and a serif/mono request has nothing honest to
+    resolve to. That is an ABSENCE (we vendor no vertical serif), not a
+    refusal to look — a user who wants another vertical face picks one of
+    their own installed ones, which T6 made a first-class choice.
+
+    Raises ValueError naming the text when nothing bundled can draw it,
+    which the caller turns into the same honest refusal it had before."""
+    from engine.shaping import shape_vertical
+
+    if not os.path.isdir(font_path):
+        return font_path
+    st = style if style in _CJK_FACES else "regular"
+    for name in (_CJK_FACES[st], _CJK_FACES["regular"]):
+        candidate = os.path.join(font_path, name)
+        if not os.path.isfile(candidate):
+            continue
+        drawn = [c for c in text if c not in ("\n", "\r", "\t")]
+        if all(shape_vertical(candidate, ch) is not None for ch in drawn):
+            return candidate
+        break
+    raise ValueError(f"no bundled vertical font can express {text!r}")
+
+
+def face_shapes_vertically(face_path: str, text: str) -> bool:
+    """Whether `face_path` can draw every character of `text` vertically —
+    the gate for an INSTALLED face (T6) used on vertical text. A font with
+    no vertical machinery answers False rather than drawing sideways."""
+    from engine.shaping import shape_vertical
+
+    try:
+        return all(
+            shape_vertical(face_path, ch) is not None
+            for ch in text
+            if ch not in ("\n", "\r", "\t")
+        )
+    except Exception:
+        return False
+
+
 def resolve_feature_font(font_path: str, style: str = "regular") -> str:
     """The bundled FEATURE-BEARING face (Libertinus Serif OTF) for `style`.
     9.K2 — opt-in only; never returned by the automatic ladder above, so it
@@ -482,7 +525,7 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for
 
 
 def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicode_pairs,
-                      cid_to_gid=None):
+                      cid_to_gid=None, vertical_advances=None):
     """The Type0/Identity-H embed shared by the character and the SHAPED
     builders — descriptor, descendant CIDFont, /W, ToUnicode. Returns a
     1-tuple so the callers can concatenate their own encode/measure pair
@@ -548,6 +591,32 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
             FontDescriptor=descriptor,
             DW=1000,
             W=Array(w_array),
+            # 9.T4: a VERTICAL embed carries /W2 (the vertical advances, as
+            # `c [w1y vx vy]` triplets) and /DW2. Per spec w1y is NEGATIVE —
+            # the advance runs DOWN the page — while every width table in
+            # this engine stores magnitudes, so the sign is applied here, at
+            # the one place the PDF is written.
+            **(
+                {
+                    "W2": Array(
+                        [
+                            item
+                            for gid in sorted(vertical_advances)
+                            for item in (
+                                gid,
+                                Array([
+                                    -vertical_advances[gid],
+                                    round(metrics["bbox"][2] / 2.0, 2),
+                                    round(metrics["ascent"], 2),
+                                ]),
+                            )
+                        ]
+                    ),
+                    "DW2": Array([880, -1000]),
+                }
+                if vertical_advances
+                else {}
+            ),
             # /CIDToGIDMap is defined for CIDFontType2 ONLY; for a CFF
             # descendant the CID-to-glyph mapping comes from the embedded
             # font, so emitting it here would be meaningless (and is what
@@ -589,12 +658,90 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
             Type=Name("/Font"),
             Subtype=Name("/Type0"),
             BaseFont=Name("/" + base_name),
-            Encoding=Name("/Identity-H"),
+            Encoding=Name("/Identity-V" if vertical_advances else "/Identity-H"),
             DescendantFonts=Array([descendant]),
             ToUnicode=pdf.make_stream(tounicode.encode("ascii")),
         )
     )
     return (font_dict,)
+
+
+def build_vertical_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
+    """Embed a subset for VERTICAL writing — 9.T4.
+
+    Vertical CJK could not be restyled at all because "no vertical face is
+    bundled". T5 bundled one (Noto Sans CJK carries `vert`/`vrt2`, `vmtx`
+    and `VORG`) and T3 brought the shaper that can reach those features, so
+    the stated reason stopped being true and this is what replaces it.
+
+    Three things make an embed vertical rather than horizontal, and all
+    three come from the font rather than from an assumption:
+
+      - the glyphs are the VERTICAL forms, which is a GSUB substitution the
+        shaper applies when the buffer runs top-to-bottom (a comma becomes
+        its upright variant; brackets rotate);
+      - the advance is the vertical one from `vmtx`, reported by the shaper
+        as a negative `y_advance` — `/W2` carries its magnitude;
+      - the /Encoding is **Identity-V**, which is what tells the VIEWER to
+        advance downward. Emitting vertical glyphs under a horizontal CMap
+        would draw the right shapes marching across the page.
+
+    Returns (font_dict, encode, width_1000) with the same shape as
+    `build_fallback_font`, so every caller's width and emission code is
+    unchanged — `width_1000` reports the vertical advance, which is exactly
+    the convention `FontCapability` already uses for a vertical font."""
+    from engine import shaping
+
+    if not Path(font_path).is_file():
+        raise ValueError(f"bundled fallback font not found: {font_path}")
+    drawn = [ch for ch in dict.fromkeys(text) if ch not in ("\n", "\r", "\t")]
+    if not drawn:
+        raise ValueError("no text to embed")
+    full = TTFont(font_path, fontNumber=0, lazy=True)
+    try:
+        full_gid_of = {name: i for i, name in enumerate(full.getGlyphOrder())}
+    finally:
+        full.close()
+
+    # Shape each character on its own: vertical text advances per glyph and
+    # forms no cross-character ligatures, so a per-character shape is exact
+    # and keeps the code→character map one to one.
+    per_char: dict[str, tuple[str, float]] = {}
+    for ch in drawn:
+        run = shaping.shape_vertical(font_path, ch)
+        if run is None:
+            raise ValueError(f"the vertical fallback font cannot express {ch!r}")
+        per_char[ch] = run
+
+    want = {name for name, _adv in per_char.values()}
+    ttf_bytes, font = _subset_font(font_path, "".join(drawn), glyphs=want, retain_gids=True)
+    metrics = _font_metrics(font)
+    used: dict[str, int] = {}
+    advances: dict[int, float] = {}
+    for ch, (name, advance) in per_char.items():
+        gid = full_gid_of[name]
+        used[ch] = gid
+        advances[gid] = round(abs(advance), 2)
+
+    def encode(s: str) -> bytes:
+        out = bytearray()
+        for ch in s:
+            gid = used.get(ch)
+            if gid is None:
+                raise ValueError(f"the fallback font cannot express {ch!r}")
+            out += bytes(((gid >> 8) & 0xFF, gid & 0xFF))
+        return bytes(out)
+
+    def width_1000(s: str) -> float:
+        # The VERTICAL advance — the 9.B4a convention: magnitudes only, the
+        # caller applies the downward direction.
+        return sum(advances.get(used[ch], 1000.0) for ch in s if ch in used)
+
+    return _embed_identity_h(
+        pdf, ttf_bytes, font, font_path, metrics, {},
+        sorted((gid, ch) for ch, gid in used.items()),
+        vertical_advances=advances,
+    ) + (encode, width_1000)
 
 
 def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
