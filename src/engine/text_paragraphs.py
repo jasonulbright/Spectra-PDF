@@ -1550,19 +1550,26 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
     m = st.member
     s = st.style()
     if st.shaped is not None:
-        # 9.T3: a shaped word measures as the GLYPHS the shaper chose. The
-        # advance is the /W total (that is what the viewer adds up), not
-        # HarfBuzz's positioned advance — the difference is a GPOS kern the
-        # emission puts into the TJ array, so measured and drawn still agree
-        # exactly. Tc applies once per GLYPH, Tw never (no space inside a
-        # word).
-        fb = fallbacks.get(st.fallback)
-        total = (
-            sum(fb.glyph_width(n, s) for (n, _a, _x, _y), (_n2, s)
-                in zip(st.shaped.glyphs, st.shaped.clusters))
-            if fb is not None else 0.0
+        # 9.T3: a shaped word measures as the GLYPHS the shaper chose, and
+        # the number to sum is the shaper's POSITIONED advance — because that
+        # is exactly what the emission steps by. `_pieces` writes each glyph
+        # as [-x_off, glyph, x_off + width - advance]: the pen moves x_off,
+        # then the /W width, then back by the correction, netting `advance`.
+        #
+        # 9.T22 fix: this used to sum the /W widths instead, on the reasoning
+        # that /W is what the viewer adds up. Per glyph it is — but the TJ
+        # correction is part of the same pen walk, so the DRAWN advance is
+        # the shaper's, and measuring by /W disagreed by exactly the GPOS
+        # advance deltas. Probe-caught before the Latin path could reach it,
+        # and it was already live: IBM Plex Sans Arabic carries `kern`, and
+        # `مرحبا` measured 40/1000 em narrower than it drew — a wrap and
+        # justify error on shipped RTL. Latin makes it unmissable (Liberation
+        # Sans kerns `AVATAR` by ~297/1000). Tc applies once per GLYPH, Tw
+        # never (no space inside a word).
+        w = (
+            st.shaped.advance_1000 / 1000.0 * s["size"]
+            + s["char_spacing"] * len(st.shaped.glyphs)
         )
-        w = total / 1000.0 * s["size"] + s["char_spacing"] * len(st.shaped.glyphs)
         return w * (s["h_scale"] * m.a)
     if st.fallback is not None:
         fb = fallbacks.get(st.fallback)
@@ -1647,6 +1654,128 @@ def _shape_styled_runs(styled: list, key: tuple, face: str) -> tuple[list, list]
         ))
         i = j
     return out, runs
+
+
+def _shaping_changed_it(run, word: str) -> bool:
+    """9.T22/T23 — did shaping this word produce anything the per-character
+    path cannot?
+
+    Three ways it can, and they are the whole point:
+      * a LIGATURE formed (fewer glyphs than characters — `liga`, or `ccmp`
+        composing a base and a combining mark into one precomposed glyph);
+      * a glyph carries a positioning OFFSET (`mark`/`mkmk` attaching a
+        diacritic, contextual GPOS);
+      * a cluster spells something other than its own single character (the
+        general form of the first — a glyph standing for several characters).
+
+    Everything else is a glyph-per-character run whose only difference is the
+    GPOS advance deltas, i.e. KERNING — which the character path already
+    applies from the same font (9.K1b). Saying "trivial" there is not a
+    shortcut: it keeps the emission byte-identical for the overwhelming
+    majority of text, so shaping changes output exactly where the old output
+    was WRONG (a combining acute drawn as a spacing glyph after its letter)
+    and nowhere else."""
+    if len(run.glyphs) != len(word):
+        return True
+    if any(x_off or y_off for _n, _a, x_off, y_off in run.glyphs):
+        return True
+    return any(spells != ch for (_n, spells), ch in zip(run.clusters, word))
+
+
+def _shape_ltr_runs(styled: list, key: tuple, face: str) -> tuple[list, list]:
+    """9.T22/T23 — shape same-style LEFT-TO-RIGHT words against the face this
+    style is about to embed, keeping only the runs shaping actually changes.
+
+    The mirror of `_shape_styled_runs` (which serves joining scripts), with
+    two differences that matter. It runs the buffer `ltr`, and it is
+    SELECTIVE: a joining script has no correct per-character rendering at all,
+    so there the shaper's answer always wins, whereas Latin renders correctly
+    per character until a ligature or a mark is involved. `_shaping_changed_it`
+    is that line.
+
+    Chunks break at spaces (nothing shapes across one) and at CJK characters,
+    because the line breaker wraps AFTER any CJK character and a collapsed run
+    is atomic — swallowing a CJK stretch into one word would take away every
+    break opportunity inside it. CJK shapes trivially anyway, so nothing is
+    lost by keeping it on the character path."""
+    from engine import shaping
+
+    out: list = []
+    runs: list = []
+    i = 0
+    while i < len(styled):
+        text, st = styled[i]
+        if (
+            st.fallback != key
+            or st.shaped is not None
+            or not text
+            or text == " "
+            or (text and _cjk(text[0]))
+            or shaping.requires_shaping(text)
+        ):
+            out.append((text, st))
+            i += 1
+            continue
+        j = i
+        chunk: list[str] = []
+        while j < len(styled):
+            t2, s2 = styled[j]
+            if (
+                s2.key != st.key
+                or t2 == " "
+                or s2.shaped is not None
+                or not t2
+                or _cjk(t2[0])  # safe: `not t2` short-circuits above
+            ):
+                break
+            chunk.append(t2)
+            j += 1
+        word = "".join(chunk)
+        try:
+            run = shaping.shape(face, word, rtl=False)
+        except Exception:
+            # The face cannot express the word. The character path refuses it
+            # by name if it truly cannot be drawn — the honest floor, and not
+            # this function's call to make.
+            out.extend(styled[i:j])
+            i = j
+            continue
+        if not _shaping_changed_it(run, word):
+            out.extend(styled[i:j])
+            i = j
+            continue
+        runs.append(run)
+        out.append((
+            word,
+            _StyleRef(st.member, st.fallback, st.size_override, st.color_override, shaped=run),
+        ))
+        i = j
+    return out, runs
+
+
+def _embed_shaping_aware(pdf, face: str, chars: str, styled: list, key: tuple):
+    """9.T22/T23 — embed the subset this style needs, shaped when shaping
+    changes the result and a plain simple font when it does not.
+
+    Returns `(styled, _Fallback)`; `styled` comes back with any shaped word
+    collapsed into one entry, exactly as the joining-script path returns it.
+
+    Which builder runs is decided by the TEXT, not by the font's feature
+    list: a face may carry `liga` and the paragraph contain nothing that
+    forms one. When nothing changed, `build_fallback_font` runs and the
+    output is byte-identical to what shipped before shaping reached this
+    path — which is the property that lets this be applied everywhere rather
+    than behind a switch."""
+    from engine.font_fallback import build_fallback_font, build_shaped_font
+
+    shaped_styled, runs = _shape_ltr_runs(styled, key, face)
+    if not runs:
+        font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars)
+        return styled, _Fallback(None, font_dict, encode, width_1000, face)
+    fdict, fenc, fwidth, genc, gwidth = build_shaped_font(pdf, face, chars, runs)
+    return shaped_styled, _Fallback(
+        None, fdict, fenc, fwidth, face, glyph_encode=genc, glyph_width=gwidth,
+    )
 
 
 def _tokenize(
@@ -3383,8 +3512,9 @@ def replace_paragraph_text(
                     from engine.system_fonts import resolve_face
 
                     face = resolve_face(fam)
-                    font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars)
-                    fallbacks[key] = _Fallback(None, font_dict, encode, width_1000, face)
+                    styled, fallbacks[key] = _embed_shaping_aware(
+                        pdf, face, chars, styled, key
+                    )
                     continue
                 if fam is not None:
                     original = synthetic_family_font(fam)
@@ -3395,8 +3525,9 @@ def replace_paragraph_text(
                 face = resolve_fallback_font(
                     str(font_path), original, style=style_key(kbold, kitalic), text=chars
                 )
-                font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars)
-                fallbacks[key] = _Fallback(None, font_dict, encode, width_1000, face)
+                styled, fallbacks[key] = _embed_shaping_aware(
+                    pdf, face, chars, styled, key
+                )
 
         member_set = set(para.run_indexes)
         per_stream_counts: dict[tuple, int] = defaultdict(int)
