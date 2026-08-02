@@ -28,8 +28,10 @@ import pikepdf
 from pikepdf import ContentStreamInstruction as _CSI
 from pikepdf import Dictionary, Name, Operator, String
 
+from engine import bidi
 from engine.font_fallback import (
     build_fallback_font,
+    build_shaped_font,
     resolve_fallback_font,
     style_key,
     synthetic_family_font,
@@ -101,6 +103,180 @@ def _wrap(words, width_1000, size: float, max_width: float) -> list[str]:
     return lines
 
 
+class _Bidi:
+    """T25 — the right-to-left half of authoring, in one object.
+
+    Authoring has the same two problems the paragraph reflow had, and takes
+    the same two answers: text is TYPED in reading (logical) order but a PDF
+    pen only draws left to right, so each wrapped line has to be permuted
+    into visual order; and a viewer never shapes, so a cursively joining
+    script has to be shaped here or it draws as disconnected stumps.
+
+    What is NOT the same: authoring already owns its face (there is no
+    document font to preserve) and already re-embeds a subset, so there is
+    no substitution question — the only decision is which bundled face, and
+    `resolve_fallback_font`'s text-driven step has already made it.
+
+    Shaping is per WORD, because cursive joining never crosses a space; that
+    is what lets the greedy wrap move words between lines without
+    invalidating a glyph. A shaped word is then ONE atomic unit in the
+    reorder (its glyphs are already visual, straight from the shaper) while
+    everything else splits to single characters — which is exactly what a
+    non-joining right-to-left script like Hebrew needs, since its letters
+    mirror individually."""
+
+    __slots__ = ("base_level", "runs", "glyph_encode", "glyph_width", "width_1000")
+
+    def __init__(self, base_level: int, runs: dict, glyph_encode, glyph_width, width_1000):
+        self.base_level = base_level
+        self.runs = runs  # word -> ShapedRun
+        self.glyph_encode = glyph_encode
+        self.glyph_width = glyph_width
+        self.width_1000 = width_1000
+
+    def units(self, line: str) -> list:
+        """One line's units in LOGICAL order: `("glyphs", word)` for a shaped
+        word, `("text", ch)` per character otherwise."""
+        out: list = []
+        for i, token in enumerate(line.split(" ")):
+            if i:
+                out.append(("text", " "))
+            if token in self.runs:
+                out.append(("glyphs", token))
+            else:
+                out.extend(("text", ch) for ch in token)
+        return out
+
+    def unit_width(self, unit) -> float:
+        kind, payload = unit
+        if kind == "glyphs":
+            # The shaper's positioned advance, which is what the emission
+            # actually produces: the /W widths plus the TJ corrections the
+            # piece builder writes sum to exactly this.
+            return self.runs[payload].advance_1000
+        return self.width_1000(payload)
+
+    def line_width_1000(self, line: str) -> float:
+        return sum(self.unit_width(u) for u in self.units(line))
+
+    def pieces(self, line: str) -> list:
+        """The line's units reordered into VISUAL order and merged into show
+        pieces: `("text", str)` runs and `("glyphs", ShapedRun)` words."""
+        units = self.units(line)
+        ordered = bidi.reorder_to_visual(
+            units, self.base_level, key=lambda u: (u[1][:1] or " ")
+        )
+        if len(ordered) != len(units):
+            raise ValueError(
+                "directional formatting characters cannot be laid out in a text box"
+            )
+        out: list = []
+        for kind, payload in ordered:
+            if kind == "text" and out and out[-1][0] == "text":
+                out[-1] = ("text", out[-1][1] + payload)
+            elif kind == "text":
+                out.append(("text", payload))
+            else:
+                out.append(("glyphs", self.runs[payload]))
+        return out
+
+
+def _prepare_bidi(face: str, body: str, pdf, unique: str, glyph_for):
+    """(_Bidi | None, font_dict, encode, width_1000) for an authored box.
+
+    None — and the shipped `build_fallback_font` output byte for byte — for
+    every left-to-right box, which is the overwhelming majority and the one
+    the existing pins measure."""
+    if not bidi.has_strong_rtl(body):
+        return (None,) + build_fallback_font(pdf, face, unique, glyph_for=glyph_for)
+
+    from engine import shaping
+
+    runs: dict = {}
+    for token in body.split():
+        if token and token not in runs and shaping.requires_shaping(token):
+            try:
+                runs[token] = shaping.shape(face, token, rtl=True)
+            except ValueError:
+                # The face cannot express this word; leave it to the ordinary
+                # character path, which refuses BY NAME rather than silently
+                # drawing a `.notdef`.
+                pass
+    if not runs:
+        # A non-joining right-to-left script (Hebrew): no shaping needed, but
+        # the reorder still is.
+        font_dict, encode, width_1000 = build_fallback_font(
+            pdf, face, unique, glyph_for=glyph_for
+        )
+        return (
+            _Bidi(bidi.paragraph_level(body), {}, None, None, width_1000),
+            font_dict, encode, width_1000,
+        )
+    if glyph_for is not None:
+        # A shaped script and an OpenType feature request are two different
+        # glyph selections for one run; honouring both is not defined.
+        raise ValueError("small caps and alternates do not apply to this script")
+    font_dict, encode, width_1000, glyph_encode, glyph_width = build_shaped_font(
+        pdf, face, unique, list(runs.values())
+    )
+    return (
+        _Bidi(bidi.paragraph_level(body), runs, glyph_encode, glyph_width, width_1000),
+        font_dict, encode, width_1000,
+    )
+
+
+def _bidi_show(pieces, encode, bd: "_Bidi", sz: float, csi, Array) -> list:
+    """The instructions for one visual-ordered line — a LIST, because a
+    vertical mark offset needs a `Ts` between shows.
+
+    Text pieces encode through the subset's cmap; a shaped word writes its
+    glyph ids directly. The shaper's horizontal mark offsets and its GPOS
+    advance deltas become TJ numbers (a NEGATIVE number moves the pen right
+    — the same sign discipline `_show_instruction` states), and its VERTICAL
+    offsets become text rise, which a TJ array structurally cannot carry.
+    Dropping them instead would leave a vowel mark sitting on the baseline
+    rather than under its letter, so the show splits and `Ts` returns to 0
+    before the line ends."""
+    out: list = []
+    parts: list = []
+    rise = 0.0
+
+    def flush() -> None:
+        if not parts:
+            return
+        if len(parts) == 1 and not isinstance(parts[0], float):
+            out.append(csi([parts[0]], "Tj"))
+        else:
+            out.append(csi([Array(list(parts))], "TJ"))
+        parts.clear()
+
+    def set_rise(v: float) -> None:
+        nonlocal rise
+        if abs(v - rise) <= 1e-9:
+            return
+        flush()
+        out.append(csi([round(v, 4)], "Ts"))
+        rise = v
+
+    for kind, payload in pieces:
+        if kind == "text":
+            set_rise(0.0)
+            parts.append(String(encode(payload)))
+            continue
+        for name, advance, x_off, y_off in payload.glyphs:
+            set_rise(y_off / 1000.0 * sz)
+            width = bd.glyph_width([name])
+            if x_off:
+                parts.append(round(-x_off, 3))
+            parts.append(String(bd.glyph_encode([name])))
+            trailing = x_off + width - advance
+            if abs(trailing) > 1e-9:
+                parts.append(round(trailing, 3))
+    set_rise(0.0)
+    flush()
+    return out
+
+
 def _show_instruction(line: str, encode, pairs, csi, Array) -> object:
     """The show op for one line: a plain `Tj`, or a `TJ` array carrying the
     face's pair kerning (9.K1).
@@ -167,6 +343,9 @@ class _BoxLayout(NamedTuple):
     styled_lines: list | None = None
     styles: list | None = None
     line_leadings: list | None = None
+    # T25: the right-to-left half. None for every left-to-right box, which is
+    # what keeps the shipped emission byte-identical.
+    bidi: object | None = None
 
 
 def _layout_box_spans(
@@ -465,6 +644,15 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     leading = sz * _LEADING_EM
 
     if spans:
+        # T25: per-span styling has its own per-line segment machinery and
+        # has NOT been lifted for right-to-left text. Refuse by name rather
+        # than lay it out left-to-right and unshaped — a text box drawn with
+        # its words in reverse and its letters disconnected is broken output,
+        # which is the one thing a refusal is better than. The whole-box path
+        # below authors this text correctly; dropping the span styling is the
+        # user's call to make, not a silent one.
+        if bidi.has_strong_rtl(body):
+            raise ValueError("per-span styling is not available for right-to-left text")
         # T15: the per-span path builds its own styles/segments; the
         # whole-box path below stays byte-identical when spans is absent.
         return _layout_box_spans(
@@ -490,9 +678,11 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
 
         face = resolve_feature_font(str(font_path), style=sk)
     elif family in ("serif", "mono", "sans"):
-        face = resolve_fallback_font(str(font_path), synthetic_family_font(family), style=sk, text=body)
+        face = resolve_fallback_font(
+            str(font_path), synthetic_family_font(family), style=sk, text=body, rtl_ok=True
+        )
     else:
-        face = resolve_fallback_font(str(font_path), None, style=sk, text=body)
+        face = resolve_fallback_font(str(font_path), None, style=sk, text=body, rtl_ok=True)
 
     # Chars actually DRAWN — control whitespace is structural (the line
     # breaks handled just below), never a glyph, so it stays out of the
@@ -513,7 +703,15 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         finally:
             _ff.close()
         glyph_for = {ch: nm for ch, nm in zip(unique, names) if nm is not None}
-    font_dict, encode, width_1000 = build_fallback_font(pdf, face, unique, glyph_for=glyph_for)
+    bd, font_dict, encode, width_1000 = _prepare_bidi(face, body, pdf, unique, glyph_for)
+    if bd is not None:
+        # T25: measure through the SAME units the emission draws — shaped
+        # words by the shaper's positioned advance, everything else by the
+        # subset's widths. Pair kerning is off in this direction: a shaped
+        # run carries its own GPOS, and a pair straddling a shaped word and a
+        # plain one is not a pair either side has an opinion about.
+        width_1000 = bd.line_width_1000
+        kern = False
 
     # 9.K1: pair kerning from the resolved face. Wrapping, centring and
     # justification all read `width_1000`, so folding the kern INTO it is what
@@ -550,7 +748,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         l_left=l_left, l_right=l_right, l_top=l_top, l_w=l_w, l_h=l_h,
         frame=frame, left=left, right=right, top=top, bottom=bottom,
         font_dict=font_dict, encode=encode, width_1000=width_1000,
-        kern_pairs=pairs,
+        kern_pairs=pairs, bidi=bd,
     )
 
 
@@ -797,6 +995,15 @@ def add_text_box(
                 lx = l_left
             ly = y_top - i * leading
             instrs.append(csi([1, 0, 0, 1, round(lx, 4), round(ly, 4)], "Tm"))
+            if lay.bidi is not None:
+                # T25: the line permutes into visual order HERE, after the
+                # wrap — line breaks are a logical-order decision, and rule
+                # L1's line-end handling is meaningless before the lines
+                # exist. Same two boundaries as the paragraph reflow.
+                instrs.extend(
+                    _bidi_show(lay.bidi.pieces(line), encode, lay.bidi, sz, csi, pikepdf.Array)
+                )
+                continue
             # 9.K1: a TJ array carrying the face's pair kerning; falls back to
             # the shipped Tj when nothing kerns (kern=False, or a face like
             # Liberation Mono that has no pairs at all).

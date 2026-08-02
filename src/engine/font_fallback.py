@@ -286,7 +286,8 @@ def face_covers(face_path: str, text: str) -> bool:
 
 
 def resolve_fallback_font(
-    font_path: str, original_font=None, style: str = "regular", text: str | None = None
+    font_path: str, original_font=None, style: str = "regular", text: str | None = None,
+    rtl_ok: bool = False,
 ) -> str:
     """Resolve the concrete fallback face to embed. `font_path` may be a
     DIRECTORY (the vendored `resources/fonts` — the real app passes this,
@@ -328,6 +329,21 @@ def resolve_fallback_font(
             cjk = os.path.join(font_path, candidate_name)
             if os.path.isfile(cjk) and face_covers(cjk, text):
                 return cjk
+        # T25: the same text-driven step for right-to-left scripts — but
+        # OPT-IN, unlike the CJK one, and that difference is the whole
+        # safety property. Resolving an RTL face is only correct for a
+        # caller that also REORDERS the line and SHAPES the joining runs;
+        # handing one to a caller that does neither would turn today's
+        # honest "the fallback font cannot express 'ب'" refusal into
+        # silently broken output — disconnected letters in reverse. So each
+        # emitter opts in as it is lifted (Add Text is; per-span styling,
+        # watermarks and form fill are not yet — § I rows T25a/b/c), and
+        # everything else keeps the refusal it has today.
+        if rtl_ok:
+            try:
+                return resolve_rtl_font(font_path, text, style=st)
+            except ValueError:
+                pass
     return resolved
 
 
