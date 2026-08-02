@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.11 — Every font, every encoding
+
+The font list is now the one on your machine, the last text encodings that
+refused to open now edit, and batch OCR takes loose images and locked files.
+
+### Text
+- **Use any font you have installed.** The Add Text card and the paragraph
+  editor now list every font on this machine alongside the bundled
+  families. Fonts whose licence forbids embedding are not offered, and the
+  picker says how many were left out rather than leaving you hunting.
+- **Older Chinese, Japanese and Korean encodings edit.** Documents using
+  Shift-JIS, EUC, Big5 or GBK text — which mix one- and two-byte
+  characters in the same line — open for editing instead of being
+  declined, as do documents using UTF-8, UTF-16 and UTF-32 text.
+
+### Scan & OCR
+- **OCR loose images in a batch.** Point a batch run at a folder and it
+  can now take PNG, JPEG, TIFF and BMP files alongside the PDFs, turning
+  each into a searchable PDF.
+- **Batch past a password.** Supply the password for an encrypted file
+  with the run and it is processed like any other; without one it is
+  skipped and named in the report, exactly as before.
+
 ## 1.0.10 — Write it in any direction
 
 Right-to-left text is no longer something the app can only read and
