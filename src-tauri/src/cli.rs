@@ -1260,6 +1260,17 @@ pub struct BatchOcrArgs {
     /// Print per-file progress
     #[arg(short, long)]
     pub verbose: bool,
+    /// OPT-IN: also OCR loose image files (png/jpg/tif/bmp) into searchable
+    /// PDFs. The mirrored name GAINS .pdf, so scan.tif becomes scan.tif.pdf
+    /// and cannot collide with a scan.pdf beside it.
+    #[arg(long)]
+    pub images: bool,
+    /// Password for an encrypted source, as FILE=PASSWORD (repeatable).
+    /// FILE is the path relative to SOURCE, or just the file name. Supplied
+    /// up front because a batch has nobody to prompt -- a scheduled run
+    /// under a service account has no desktop.
+    #[arg(long = "password", value_name = "FILE=PASSWORD")]
+    pub passwords: Vec<String>,
 }
 
 #[derive(Args)]
@@ -2768,6 +2779,17 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "log_dir": args.log_dir.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
                     "progress": args.verbose,
                     "in_place": args.in_place,
+                    "include_images": args.images,
+                    "passwords": args
+                        .passwords
+                        .iter()
+                        .filter_map(|entry| {
+                            // FIRST '=' only: a password may itself contain one.
+                            entry.split_once('=').map(|(file, pw)| {
+                                (file.to_string(), serde_json::Value::from(pw))
+                            })
+                        })
+                        .collect::<serde_json::Map<_, _>>(),
                 }),
             )
         }

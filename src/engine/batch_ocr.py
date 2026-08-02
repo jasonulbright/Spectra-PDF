@@ -114,6 +114,11 @@ def _paints_raster(page) -> bool:
     return False
 
 
+class _AlreadyHandled(Exception):
+    """This entry already has a result — skip the open without
+    reclassifying it (an image that would not wrap, so far)."""
+
+
 def _classify_load_error(exc: Exception) -> str:
     if isinstance(exc, pikepdf.PasswordError):
         return "password-protected"
@@ -132,17 +137,54 @@ def dest_conflicts_with_source(source_root: str, dest_root: str) -> bool:
     return dst == src or dst.startswith(src + "\\")
 
 
-def _list_pdfs(root: Path) -> tuple[list[tuple[Path, str]], list[str]]:
-    """Every *.pdf under root, with its path RELATIVE to root, plus unreadable dirs."""
+# P3: image files a scan folder routinely holds beside its PDFs. Each is
+# wrapped into a one-page PDF and then OCR'd exactly like any other page —
+# the recognizer never learns there was no PDF to begin with.
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
+
+
+def _list_sources(root: Path, images: bool) -> tuple[list[tuple[Path, str]], list[str]]:
+    """Every source under root, with its path RELATIVE to root, plus
+    unreadable dirs. PDFs always; image files when `images` is on (P3).
+
+    An image's mirrored name gains `.pdf` rather than replacing the
+    extension: `invoice.tif` and `invoice.pdf` in one folder must not
+    collide, and the original name stays legible in the output."""
     files: list[tuple[Path, str]] = []
     skipped: list[str] = []
+    wanted = (".pdf",) + (IMAGE_SUFFIXES if images else ())
     for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: skipped.append(str(e))):
         dirnames.sort()
         for name in sorted(filenames):
-            if name.lower().endswith(".pdf"):
+            if name.lower().endswith(wanted):
                 abs_path = Path(dirpath) / name
                 files.append((abs_path, str(abs_path.relative_to(root))))
     return files, skipped
+
+
+def _is_image(path: Path) -> bool:
+    return path.suffix.lower() in IMAGE_SUFFIXES
+
+
+def _image_to_pdf(src: Path, dest: Path) -> None:
+    """Wrap ONE image into a one-page PDF at its own natural size.
+
+    The page is sized from the image's stored DPI so a 300-dpi scan becomes
+    a physically correct page rather than a giant one — that matters here
+    because the OCR raster is taken FROM the page, so a wrong page size
+    would rescale the text and cost accuracy."""
+    from PIL import Image
+
+    with Image.open(src) as im:
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        dpi = im.info.get("dpi")
+        try:
+            resolution = float(dpi[0]) if dpi and float(dpi[0]) > 1 else 200.0
+        except (TypeError, ValueError, IndexError):
+            resolution = 200.0
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        im.save(str(dest), "PDF", resolution=resolution)
 
 
 def _unique_destination(dest: Path) -> Path:
@@ -291,12 +333,28 @@ def batch_ocr(
     log_dir: str = "",
     progress: bool = False,
     in_place: bool = False,
+    passwords: dict | None = None,
+    include_images: bool = False,
 ) -> dict:
     """Mirror a folder of PDFs into searchable copies — or, with `in_place`,
     REPLACE each original with its searchable version (O7 in-place batch
     mode). In-place output goes through a staged temp beside the original
     and only replaces it after the verify-read succeeds, so a crash or a bad
-    write can never leave a half-written original. Returns the report."""
+    write can never leave a half-written original. Returns the report.
+
+    P3 — `passwords` maps a source's RELATIVE path (or its bare file name) to
+    the password that opens it. Supplied UP FRONT rather than prompted:
+    a batch is exactly the run that has nobody to ask — a scheduled job under
+    a service account has no desktop — so the credential has to arrive with
+    the request. A file with no entry keeps the shipped behaviour and is
+    skipped as `password-protected`, which is what lets a caller run once,
+    read the report, and re-run just the files it now has passwords for.
+
+    P3 — `include_images` adds loose image files (PNG/JPEG/TIFF/BMP) to the
+    sweep. Each is wrapped into a one-page PDF at its own natural size and
+    then travels the identical path; the mirrored name gains `.pdf` rather
+    than replacing the extension, so `invoice.tif` and `invoice.pdf` in one
+    folder cannot collide."""
     source_path = Path(source).resolve()
     if not source_path.is_dir():
         raise ValueError(f"Source folder not found: {source}")
@@ -327,7 +385,13 @@ def batch_ocr(
             raise ValueError(f"The {label} folder must be outside the destination folder.")
 
     started_at = datetime.now()
-    entries, skipped_dirs = _list_pdfs(source_path)
+    pw_map = {}
+    for key, value in (passwords or {}).items():
+        # Accept a relative path in either slash idiom, or a bare file name.
+        norm = str(key).replace("/", os.sep).replace("\\", os.sep)
+        pw_map[os.path.normcase(norm)] = str(value)
+        pw_map.setdefault(os.path.normcase(os.path.basename(norm)), str(value))
+    entries, skipped_dirs = _list_sources(source_path, bool(include_images))
     results: list[dict] = []
 
     for index, (abs_path, rel) in enumerate(entries):
@@ -335,16 +399,53 @@ def batch_ocr(
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
         # In place: write to a staged temp BESIDE the original; the tail
         # replaces the original only after the verify-read succeeds.
+        # P3: an image's mirrored name GAINS `.pdf` rather than replacing the
+        # extension — `invoice.tif` and `invoice.pdf` in one folder must not
+        # collide, and the original name stays legible in the output.
+        out_rel = rel + ".pdf" if _is_image(abs_path) else rel
         out_path = (
-            abs_path.parent / f".{abs_path.name}.inplace.tmp" if in_place else dest_path / rel
+            abs_path.parent / f".{abs_path.name}.inplace.tmp" if in_place else dest_path / out_rel
         )
         result: dict | None = None
         scratch: Path | None = None
         expected_pages = 0
         pdf = None
         try:
+            source_for_open = abs_path
+            if in_place and _is_image(abs_path):
+                # In place means REPLACE the original. An image cannot be
+                # replaced by a PDF without becoming a different kind of
+                # file — leaving a `.png` that is secretly a PDF is worse
+                # than not touching it. Say so and move on.
+                result = {
+                    "rel": rel,
+                    "status": "skipped",
+                    "reason": "in-place mode cannot replace an image with a PDF",
+                }
+            elif _is_image(abs_path):
+                # P3: an image becomes a one-page PDF FIRST, so everything
+                # after this line is the shipped PDF path with no branch.
+                scratch = out_path.parent / f".{out_path.stem}.image.tmp"
+                try:
+                    _image_to_pdf(abs_path, scratch)
+                    source_for_open = scratch
+                except Exception as exc:
+                    scratch = None
+                    result = {"rel": rel, "status": "skipped",
+                              "reason": f"unreadable image: {exc}"}
+            password = pw_map.get(os.path.normcase(rel)) or pw_map.get(
+                os.path.normcase(os.path.basename(rel))
+            )
             try:
-                pdf = pikepdf.open(str(abs_path))
+                if result is not None:
+                    raise _AlreadyHandled()
+                pdf = (
+                    pikepdf.open(str(source_for_open), password=password)
+                    if password
+                    else pikepdf.open(str(source_for_open))
+                )
+            except _AlreadyHandled:
+                pdf = None
             except Exception as exc:
                 classification = _classify_load_error(exc)
                 # A password failure is not a repair candidate: a structural
