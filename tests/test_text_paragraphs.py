@@ -2263,6 +2263,84 @@ class TestVerticalParagraphs:
                font_path=FONTS_DIR, bold=True)
         assert _paras(out)[0]["text"] == para["text"] + "京"
 
+        # …and WITHOUT a style request, which is the case that was broken:
+        # `bold=True` sets `substituting` by itself, so this pin passed
+        # while a plain convert on a column still refused.
+        plain = os.path.join(tmp_dir, "o-plain.pdf")
+        _apply(src, plain, para, para["text"] + "京", convert=True, font_path=FONTS_DIR)
+        assert _paras(plain)[0]["text"] == para["text"] + "京"
+
+    @pytest.mark.skipif(
+        not os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")),
+        reason="CJK faces not provisioned",
+    )
+    def test_the_VERTICAL_glyph_forms_are_what_get_drawn(self, tmp_dir):
+        """The pin the other T4 checks cannot be.
+
+        /Identity-V, /W2, /DW2 and the BaseFont weight are all real and all
+        structural — and every one of them would still pass if the embed
+        carried the HORIZONTAL glyphs, which in a column is a visible defect.
+        So resolve what is actually drawn: a CJK comma's vertical form sits
+        in a different corner of the em box from its horizontal one, and only
+        the `vert` GSUB substitution reaches it (a cmap lookup cannot).
+        """
+        import re as _re
+
+        from fontTools.ttLib import TTFont
+
+        from engine import shaping as _shaping
+
+        face = os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")
+        mark = "、"  # IDEOGRAPHIC COMMA
+        vert_name, _adv = _shaping.shape_vertical(face, mark)
+        full = TTFont(face, fontNumber=0, lazy=True)
+        try:
+            order = full.getGlyphOrder()
+            horiz_name = (full.getBestCmap() or {}).get(ord(mark))
+        finally:
+            full.close()
+        assert vert_name != horiz_name, "face no longer has a vertical comma"
+
+        src = _vpage(tmp_dir, b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET")
+        out = os.path.join(tmp_dir, "vglyph.pdf")
+        para = _paras(src)[0]
+        # No style request: a plain convert must reach the vertical face on
+        # its own. Passing bold here would set `substituting` and prove
+        # nothing about the escape hatch.
+        _apply(src, out, para, para["text"] + mark, convert=True, font_path=FONTS_DIR)
+
+        with pikepdf.open(out) as pdf:
+            page = pdf.pages[0]
+            contents = page.Contents
+            stream = b"".join(
+                bytes(x.read_bytes())
+                for x in (contents if isinstance(contents, pikepdf.Array) else [contents])
+            )
+            fonts = page["/Resources"]["/Font"]
+            name = next(
+                (str(k) for k in fonts.keys()
+                 if "NotoSansCJK" in str(fonts[k].get("/BaseFont", ""))),
+                None,
+            )
+            assert name, "the vertical face was not embedded"
+
+        # Only what is shown under THIS font — the fixture draws its own run
+        # in /FV, and counting that would prove nothing about the embed.
+        shown = _re.findall(
+            (name + r"\s+[\d.]+\s+Tf(.*?)(?=/[A-Za-z0-9]+\s+[\d.]+\s+Tf|ET)").encode(),
+            stream, _re.S,
+        )
+        codes = []
+        for chunk in shown:
+            for hexed in _re.findall(rb"<([0-9A-Fa-f]+)>", chunk):
+                raw = bytes.fromhex(hexed.decode("ascii"))
+                codes += [
+                    int.from_bytes(raw[i:i + 2], "big") for i in range(0, len(raw), 2)
+                ]
+        drawn = {order[c] for c in codes if c < len(order)}
+        assert vert_name in drawn, f"the vertical comma is not drawn ({drawn})"
+        assert horiz_name not in drawn, "the HORIZONTAL comma is on the page"
+
     def test_vertical_refuses_a_font_with_no_vertical_forms(self, tmp_dir):
         # An INSTALLED face (T6) is allowed on a column only if it actually
         # has vertical machinery — a Latin face would draw sideways.
