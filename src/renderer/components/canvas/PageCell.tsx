@@ -587,6 +587,8 @@ interface PageCellProps {
   // Pending Add-Text placement (9.A2), same lifecycle as newFieldPlacement:
   // single, transient view state, dies on buffer-identity change.
   addTextPlacement?: SignaturePlacement | null;
+  cropPlacement?: SignaturePlacement | null;
+  onClearCropPlacement?: () => void;
   onSetAddTextRect: (
     docId: string,
     pageId: string,
@@ -594,6 +596,15 @@ interface PageCellProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearAddTextPlacement: () => void;
+  // P5b: a crop band. Display-normalised like every other banded gesture,
+  // with the rotation AT DRAW — the insets are computed against the page as
+  // the user saw it, so a landscape scan trims the edges they pointed at.
+  onSetCropRect?: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   // Add-Image band release (9.C2): converts + hands off to App's picker+embed.
   onAddImageRect: (
     docId: string,
@@ -824,7 +835,10 @@ function PageCellImpl({
   newFieldPlacement,
   onSetNewFieldRect,
   addTextPlacement,
+  cropPlacement,
+  onClearCropPlacement,
   onSetAddTextRect,
+  onSetCropRect,
   onClearAddTextPlacement,
   onAddImageRect,
   onClearNewFieldPlacement,
@@ -1846,6 +1860,10 @@ function PageCellImpl({
         } else if (tool === 'formfields') {
           // Add-field placement (2n.4c) — single, drawing again replaces it.
           onSetNewFieldRect(docId, page.id, latest, page.rotation);
+        } else if (tool === 'cropdraw') {
+          // P5b: the band is the region to KEEP. Nothing commits here —
+          // the panel turns it into insets and the user applies.
+          onSetCropRect?.(docId, page.id, latest, page.rotation);
         } else if (tool === 'addtext') {
           // Add-text placement (9.A2) — single, drawing again replaces it.
           onSetAddTextRect(docId, page.id, latest, page.rotation);
@@ -2911,6 +2929,39 @@ function PageCellImpl({
           );
         })()
       )}
+      {cropPlacement && (
+        (() => {
+          // Follows in-memory rotation like every other placement: the rect
+          // was stored in the frame it was drawn in, projectMarkRect puts it
+          // back in the frame shown now.
+          const r = projectMarkRect(cropPlacement, page.rotation);
+          return (
+            <div
+              data-testid="crop-placement"
+              className="page-crop-placement"
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+            >
+              <span className="page-crop-label">KEEP</span>
+              <button
+                className="page-annot-x"
+                title="Remove crop rectangle"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClearCropPlacement?.();
+                }}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })()
+      )}
       {band && (
         <div
           className={
@@ -2925,7 +2976,9 @@ function PageCellImpl({
                     ? ' band-addtext'
                     : tool === 'addimage'
                       ? ' band-addimage'
-                      : '')
+                      : tool === 'cropdraw'
+                        ? ' band-cropdraw'
+                        : '')
           }
           style={{
             left: `${band.x * 100}%`,

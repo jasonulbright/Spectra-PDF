@@ -196,6 +196,10 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Crop & Page Boxes',
     description: 'Crop pages and edit the crop/bleed/trim/art boxes.',
     ops: ['pagebox'],
+    // P5b: opening the tool arms the draw mode, so the crop cursor is live on
+    // the page the moment you pick Crop — the numeric fields in the dock are
+    // where the drag LANDS, not a second way to do the same job.
+    canvasTools: ['cropdraw'],
   },
   {
     id: 'pagelabels',
