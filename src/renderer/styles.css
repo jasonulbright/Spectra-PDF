@@ -1927,6 +1927,39 @@
   border-color: #a78bfa;
 }
 
+/* Crop band + the placement it leaves behind (P5b): amber, and UNFILLED —
+   the rectangle marks what is KEPT, so shading its interior would read as the
+   part being taken away. Every other band means the opposite, which is
+   exactly why this one states it in a label. */
+.page-annot-band.band-cropdraw {
+  background: transparent;
+  border-color: #f59e0b;
+  border-style: dashed;
+}
+
+.page-crop-placement {
+  position: absolute;
+  background: transparent;
+  border: 1.5px dashed #f59e0b;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.page-crop-placement .page-annot-x {
+  pointer-events: auto;
+}
+
+.page-crop-label {
+  position: absolute;
+  top: -0.95rem;
+  left: 0;
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: #f59e0b;
+  white-space: nowrap;
+}
+
 /* Pending new-field placement (2n.4c): emerald frame, same pointer contract
    as .page-signature — only the × takes events. */
 .page-form-new {

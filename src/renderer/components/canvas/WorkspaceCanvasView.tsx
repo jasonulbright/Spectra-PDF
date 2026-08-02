@@ -5,6 +5,7 @@ import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_D
 import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
 import { primeSystemFonts } from '../../lib/system-fonts';
+import { insetsFromBand, publishDrawnCrop, roundInsets } from '../../lib/crop-draw';
 import {
   hasCustomLabels,
   labelFor,
@@ -994,6 +995,63 @@ export function WorkspaceCanvasView({
     },
     [docs, state.files, atRotate],
   );
+  // --- P5b Crop draw ------------------------------------------------------
+  // The band is the region to KEEP. Nothing commits here: the insets are
+  // computed where the page's own view box and baked rotation are reachable,
+  // then published to the Page Boxes panel, which owns Apply — so a drawn
+  // crop and a typed one go through the identical `set_page_boxes` call and a
+  // mis-drag costs a redraw rather than an undo. The placement card is the
+  // same transient, single, page-anchored lifecycle as Add-Text's.
+  const [cropPlacement, setCropPlacement] = useState<SignaturePlacement | null>(null);
+  const onSetCropRect = useCallback(
+    (
+      docId: string,
+      pageId: string,
+      rect: { x: number; y: number; w: number; h: number },
+      rotationAtDraw: 0 | 90 | 180 | 270,
+    ) => {
+      const doc = docs.find((d) => d.id === docId);
+      const page = doc?.pages.find((p) => p.id === pageId);
+      if (!doc || !page) return;
+      // Anchor only to CURRENT ids — the onSetNewFieldRect rule.
+      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
+      const f = state.files.get(page.sourceDocId);
+      if (!f?.buffer) return;
+      const buffer = f.buffer;
+      void (async () => {
+        const proxy = await getDocumentProxy(page.sourceDocId, buffer);
+        const p = await proxy.getPage(page.sourcePageIndex + 1);
+        const [vx0, vy0, vx1, vy1] = p.view;
+        // The band was drawn on the page AS DISPLAYED, so the conversion
+        // measures against the displayed extents — which swap under a
+        // quarter turn. `rotationAtDraw` is the in-memory delta; the baked
+        // /Rotate is already in `p.view`'s orientation via the same
+        // composition every placement uses.
+        const turned = rotationAtDraw === 90 || rotationAtDraw === 270;
+        const dw = turned ? vy1 - vy0 : vx1 - vx0;
+        const dh = turned ? vx1 - vx0 : vy1 - vy0;
+        const insets = insetsFromBand(rect, dw, dh, rotationAtDraw);
+        if (!insets) return; // a click, not a crop
+        // The page NUMBER and the target path are the workspace doc's — the
+        // panel crops `activeFile`, which is that file, not the file an
+        // imported page's bytes happen to come from. Only the geometry read
+        // above uses sourceDocId.
+        const number = workspacePageNumber(docs, doc, page.id);
+        if (number === null) return;
+        publishDrawnCrop({ ...roundInsets(insets), page: number, path: doc.path });
+        setCropPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
+      })();
+    },
+    [docs, state.files],
+  );
+  const onClearCropPlacement = useCallback(() => setCropPlacement(null), []);
+  // Placement whose page still exists (mirrors liveAddTextPlacement).
+  const liveCropPlacement = useMemo(() => {
+    if (!cropPlacement) return null;
+    return docs.some((d) => d.pages.some((p) => p.id === cropPlacement.pageId))
+      ? cropPlacement
+      : null;
+  }, [cropPlacement, docs]);
   const onClearAddTextPlacement = useCallback(() => {
     setAddTextPlacement(null);
     setAtError(null);
@@ -4130,6 +4188,8 @@ export function WorkspaceCanvasView({
             onSetNewFieldRect,
             onClearNewFieldPlacement,
             addTextPlacement: liveAddTextPlacement,
+            cropPlacement: liveCropPlacement,
+            onClearCropPlacement,
             onSetAddTextRect,
             onAddImageRect,
             onClearAddTextPlacement,
@@ -4156,6 +4216,8 @@ export function WorkspaceCanvasView({
             signaturePlacement: null,
             newFieldPlacement: null,
             addTextPlacement: null,
+            cropPlacement: null,
+            onClearCropPlacement,
           };
           if (!splitView) {
             return (
@@ -4359,6 +4421,9 @@ export function WorkspaceCanvasView({
           onClearNewFieldPlacement={onClearNewFieldPlacement}
           addTextPlacement={liveAddTextPlacement}
           onSetAddTextRect={onSetAddTextRect}
+          onSetCropRect={onSetCropRect}
+          cropPlacement={liveCropPlacement}
+          onClearCropPlacement={onClearCropPlacement}
           onAddImageRect={onAddImageRect}
           onClearAddTextPlacement={onClearAddTextPlacement}
           onPageContextMenu={onPageContextMenu}

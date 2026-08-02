@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { consumeDrawnCrop, subscribeDrawnCrop, type DrawnCrop } from '../lib/crop-draw';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { file } from '../lib/tauri-bridge';
@@ -23,6 +24,34 @@ export function PageBoxesPanel(): React.ReactElement {
   const [pageInput, setPageInput] = useState('all');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // P5b: a crop dragged on the page lands in these fields. The panel still
+  // owns the commit — drawing fills the form, Apply is what changes the file,
+  // so a drawn crop and a typed one go through the identical call and a
+  // mis-drag costs a redraw rather than an undo.
+  const activePath = activeFile?.path;
+  useEffect(() => {
+    if (!activePath) return;
+    const apply = (c: DrawnCrop): void => {
+      // A publish from a document the user has since switched away from must
+      // not fill the fields of the one they are looking at now.
+      if (c.path !== activePath) return;
+      setTop(c.top);
+      setBottom(c.bottom);
+      setLeft(c.left);
+      setRight(c.right);
+      // The band was drawn on ONE page — scope to it rather than silently
+      // widening the crop to every page in the file.
+      setPageInput(String(c.page));
+      setStatus(`Crop drawn on page ${c.page} — review the margins, then Apply`);
+    };
+    const pending = consumeDrawnCrop();
+    if (pending) apply(pending);
+    return subscribeDrawnCrop((c) => {
+      consumeDrawnCrop();
+      apply(c);
+    });
+  }, [activePath]);
 
   const handleApply = useCallback(async () => {
     if (!activeFile) return;
@@ -91,8 +120,9 @@ export function PageBoxesPanel(): React.ReactElement {
         Working on: <span className="text-neutral-200">{activeFile.name}</span> ({activeFile.pageCount} pages)
       </div>
       <p className="text-xs text-neutral-500">
-        Trim points from each edge of the chosen box. Cropping only hides content — nothing is deleted, and the
-        crop can never fall outside the media box.
+        Drag a rectangle on the page to set the area to keep, or trim points from each edge of the chosen box
+        below. Cropping only hides content — nothing is deleted, and the crop can never fall outside the media
+        box.
       </p>
       <div>
         <label className="block text-sm text-neutral-400 mb-1">Box</label>

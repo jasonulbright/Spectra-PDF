@@ -94,6 +94,15 @@ interface DocLayerProps {
   onClearNewFieldPlacement: () => void;
   // Add-text placement (9.A2).
   addTextPlacement: SignaturePlacement | null;
+  /** P5b: the pending crop rectangle, drawn on the page. */
+  cropPlacement: SignaturePlacement | null;
+  onClearCropPlacement: () => void;
+  onSetCropRect?: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   onSetAddTextRect: (
     docId: string,
     pageId: string,
@@ -219,7 +228,10 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onSetNewFieldRect={props.onSetNewFieldRect}
               onClearNewFieldPlacement={props.onClearNewFieldPlacement}
               addTextPlacement={props.addTextPlacement}
+              cropPlacement={props.cropPlacement}
+              onClearCropPlacement={props.onClearCropPlacement}
               onSetAddTextRect={props.onSetAddTextRect}
+              onSetCropRect={props.onSetCropRect}
               onAddImageRect={props.onAddImageRect}
               onClearAddTextPlacement={props.onClearAddTextPlacement}
               onPageContextMenu={props.onPageContextMenu}
