@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.0.10 — Write it in any direction
+
+Right-to-left text is no longer something the app can only read and
+reflow — you can now write it: new text boxes, styled selections,
+watermarks and form fields all take Arabic, Hebrew, Persian and Urdu.
+
+### Text
+- **Add Text writes right-to-left.** Type Arabic or Hebrew into a new
+  text box and it lays out in reading order, wraps, and draws with
+  cursive letters properly joined. Mixed text keeps embedded Latin words
+  and numbers the right way round.
+- **Style a selection in right-to-left text.** Size, colour, bold and
+  italic apply to a selected word or phrase, the same as anywhere else.
+  A style change in the *middle* of a joined word is declined with a
+  note rather than drawn — the word would break open at the seam.
+
+### Watermarks
+- **Right-to-left watermarks**, shaped and laid out correctly.
+- **Chinese, Japanese and Korean watermarks**, which were previously
+  declined.
+
+### Forms
+- **Right-to-left form values.** Filling a field with Arabic or Hebrew
+  now produces a properly shaped, correctly ordered appearance, on one
+  line or wrapped across several.
+
+### Under the hood
+- **Fully vocalised Arabic round-trips.** Text carrying vowel marks —
+  harakat — is written, read back, and re-edited exactly as typed,
+  including words that form ligatures.
+
 ## 1.0.9 — Right to left, and it reads back
 
 Arabic, Hebrew and Persian paragraphs edit and reflow like any others.
