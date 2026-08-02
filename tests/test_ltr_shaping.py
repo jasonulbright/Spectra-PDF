@@ -14,11 +14,8 @@ import pikepdf
 import pytest
 
 from engine import shaping
-from engine.text_paragraphs import (
-    _shaping_changed_it,
-    list_text_paragraphs,
-    replace_paragraph_text,
-)
+from engine.shaping import changed_it as _shaping_changed_it
+from engine.text_paragraphs import list_text_paragraphs, replace_paragraph_text
 
 FONTS = os.path.join(os.path.dirname(__file__), "..", "resources", "fonts")
 LIGA_FACE = os.path.join(FONTS, "LibertinusSerif-Regular.otf")
@@ -66,22 +63,16 @@ def _edit(tmp_path, text, family=None):
         para["runs"], para["text"], convert=True, font_path=FONTS,
         **({"family": family} if family else {}),
     )
-    with pikepdf.open(str(out)) as pdf:
-        fonts = pdf.pages[0]["/Resources"]["/Font"]
-        subtypes = {str(k): str(fonts[k].get("/Subtype")) for k in fonts.keys()}
     listed = list_text_paragraphs(str(out), 1)["paragraphs"]
-    return subtypes, (listed[0]["text"] if listed else None)
+    return _is_shaped(out), (listed[0]["text"] if listed else None)
 
 
 class TestCombiningMarks:
     """T22 — a combining mark must not draw as a spacing glyph."""
 
     def test_combining_acute_composes_and_round_trips(self, tmp_path):
-        subtypes, text = _edit(tmp_path, COMBINING)
-        # A shaped subset is a Type0 font: the (glyph, cluster) coding needs
-        # two-byte codes and a CIDToGIDMap, which a simple font has no room
-        # for. Its presence is the observable proof the shaper ran.
-        assert "/Type0" in subtypes.values()
+        shaped, text = _edit(tmp_path, COMBINING)
+        assert shaped
         # And the round trip is exact — the decomposed sequence comes back
         # decomposed. A shaped edit that could not be re-listed would be a
         # one-way trip, which is the whole reason clusters carry spellings.
@@ -122,8 +113,8 @@ class TestLigatureSynthesis:
         run = shaping.shape(LIGA_FACE, "office", rtl=False)
         assert len(run.glyphs) < len("office"), "face no longer forms ffi"
 
-        subtypes, text = _edit(tmp_path, LIGATURE, family=LIGA_FACE)
-        assert "/Type0" in subtypes.values()
+        shaped, text = _edit(tmp_path, LIGATURE, family=LIGA_FACE)
+        assert shaped
         # Drawn as ligatures, extracted as letters — a search for "office"
         # must still find it.
         assert text == LIGATURE
@@ -132,8 +123,8 @@ class TestLigatureSynthesis:
         """Liberation has no `liga`, so `office` stays six glyphs — and the
         edit must therefore stay on the old per-character path entirely."""
         assert len(shaping.shape(SANS_FACE, "office", rtl=False).glyphs) == 6
-        subtypes, text = _edit(tmp_path, LIGATURE)
-        assert "/Type0" not in subtypes.values()
+        shaped, text = _edit(tmp_path, LIGATURE)
+        assert not shaped
         assert text == LIGATURE
 
 
@@ -141,8 +132,8 @@ class TestTheLineBetweenThem:
     """The gate that keeps ordinary text on the shipped emission."""
 
     def test_plain_text_does_not_shape(self, tmp_path):
-        subtypes, text = _edit(tmp_path, "the quick brown fox")
-        assert "/Type0" not in subtypes.values()
+        shaped, text = _edit(tmp_path, "the quick brown fox")
+        assert not shaped
         assert text == "the quick brown fox"
 
     def test_kerning_alone_is_not_a_reason_to_shape(self):
@@ -211,3 +202,137 @@ class TestShapedMeasureMatchesTheDraw:
         st = _StyleRef(_Member(), ("sans", False, False, (), 0), shaped=run)
         got = _char_width_user("AVATAR", st, {}, 0.0)
         assert got == pytest.approx(run.advance_1000 / 1000.0 * 10.0)
+
+
+class TestAuthoredTextShapes:
+    """9.T27 — the AUTHORING surfaces shape left-to-right too.
+
+    Add Text, watermarks and form-field appearances used to gate all shaping
+    on `bidi.has_strong_rtl`, so an accent typed into any of them drew as a
+    spacing glyph beside its letter while the paragraph editor composed it
+    correctly. One document, two answers, decided by which control you used.
+    """
+
+    def _blank(self, tmp_path, name="blank.pdf"):
+        src = tmp_path / name
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(612, 792))
+        pdf.save(str(src))
+        pdf.close()
+        return str(src)
+
+    def test_add_text_composes_a_combining_accent(self, tmp_path):
+        from engine.text_authoring import add_text_box
+
+        src = self._blank(tmp_path, "at-src.pdf")
+        out = str(tmp_path / "at.pdf")
+        add_text_box(
+            src, out, 1, [72, 600, 520, 720], COMBINING, size=18.0,
+            font_path=FONTS, family="sans",
+        )
+        assert _is_shaped(out)
+        assert [p["text"] for p in list_text_paragraphs(out, 1)["paragraphs"]] == [
+            COMBINING
+        ]
+
+    def test_plain_add_text_keeps_the_shipped_emission(self, tmp_path):
+        from engine.text_authoring import add_text_box
+
+        src = self._blank(tmp_path, "plain-src.pdf")
+        out = str(tmp_path / "plain.pdf")
+        add_text_box(
+            src, out, 1, [72, 600, 520, 720], "the quick brown fox", size=18.0,
+            font_path=FONTS, family="sans",
+        )
+        # No CIDToGIDMap stream means `_prepare_bidi` returned None and the
+        # shipped `build_fallback_font` path ran — the byte-identity property.
+        assert not _is_shaped(out)
+
+    def test_a_styled_span_composes_too(self, tmp_path):
+        """The span path is a second emitter; it must not disagree."""
+        from engine.text_authoring import add_text_box
+
+        src = self._blank(tmp_path, "span-src.pdf")
+        out = str(tmp_path / "span.pdf")
+        add_text_box(
+            src, out, 1, [72, 600, 520, 720], COMBINING, size=18.0,
+            font_path=FONTS, family="sans",
+            spans=[{"start": 0, "end": 5, "color": [0.8, 0.1, 0.1]}],
+        )
+        assert _is_shaped(out)
+        assert [p["text"] for p in list_text_paragraphs(out, 1)["paragraphs"]] == [
+            COMBINING
+        ]
+
+    def test_a_style_change_inside_a_word_declines_to_shape(self, tmp_path):
+        """A shaped word is drawn WHOLLY in one style, so a word split across
+        two cannot be shaped. Declining is the correct answer — the accent
+        then draws the way it always did rather than in the wrong colour."""
+        from engine.text_authoring import add_text_box
+
+        src = self._blank(tmp_path, "split-src.pdf")
+        out = str(tmp_path / "split.pdf")
+        add_text_box(
+            src, out, 1, [72, 600, 520, 720], COMBINING, size=18.0,
+            font_path=FONTS, family="sans",
+            # Ends INSIDE "café", between the e and its accent.
+            spans=[{"start": 0, "end": 4, "color": [0.8, 0.1, 0.1]}],
+        )
+        assert not _is_shaped(out)
+
+
+def _walk_fonts(pdf):
+    """Every font dict reachable from page 1, including inside form XObjects
+    (a watermark's appearance lives in one)."""
+    seen = set()
+
+    def visit(res):
+        if res is None:
+            return
+        fonts = res.get("/Font")
+        if fonts is not None:
+            for k in fonts.keys():
+                yield str(k), fonts[k]
+        xo = res.get("/XObject")
+        if xo is None:
+            return
+        for k in xo.keys():
+            obj = xo[k]
+            if obj.objgen in seen:
+                continue
+            seen.add(obj.objgen)
+            yield from visit(obj.get("/Resources"))
+
+    yield from visit(pdf.pages[0].obj.get("/Resources"))
+
+
+def _is_shaped(path) -> bool:
+    """Did shaping actually happen — judged by the OUTCOME, not the plumbing.
+
+    A shaped run produces at least one glyph standing for more than one
+    character (a ligature, or a base composed with its combining mark), and
+    that shows up in /ToUnicode as a single code mapping to a multi-character
+    string. Nothing on the per-character path can produce one.
+
+    Two earlier discriminators were wrong and both hid real defects: "is
+    there a Type0 font" is true of `build_fallback_font` too, so it only
+    proved a subset was embedded; "is /CIDToGIDMap a stream" is true only of
+    TrueType, because a CFF descendant is a CIDFontType0 and cannot carry one
+    at all. This asks the question the feature is actually about.
+    """
+    import re
+
+    with pikepdf.open(str(path)) as pdf:
+        for _name, font in _walk_fonts(pdf):
+            tou = font.get("/ToUnicode")
+            if tou is None:
+                continue
+            data = bytes(tou.read_bytes()).decode("latin-1")
+            for _code, dest in re.findall(r"<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>", data):
+                try:
+                    text = bytes.fromhex(dest).decode("utf-16-be")
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if len(text) > 1:
+                    return True
+    return False

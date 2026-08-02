@@ -47,6 +47,7 @@ asserted directly by the test suite's dual-walk harness.
 import os
 import re
 import statistics
+import unicodedata
 from collections import defaultdict
 from pathlib import Path
 
@@ -1448,6 +1449,11 @@ def _styled_chars(
                 # the shipped single convert subset. 9.K2: no feature ⇒
                 # `((), 0)`, so the convert key is unchanged in effect.
                 ck = (None, False, False, (), 0)
+                # T27: a mark falling back drags its base with it, or the two
+                # end up in different fonts and the accent draws beside the
+                # letter instead of on it.
+                if unicodedata.combining(ch):
+                    _pull_base_into_fallback(styled, fb_by_face, ck)
                 fb_by_face.setdefault(ck, set()).add(ch)
                 styled.append((ch, ref(member, ck, col, siz)))
             else:
@@ -1656,30 +1662,39 @@ def _shape_styled_runs(styled: list, key: tuple, face: str) -> tuple[list, list]
     return out, runs
 
 
-def _shaping_changed_it(run, word: str) -> bool:
-    """9.T22/T23 — did shaping this word produce anything the per-character
-    path cannot?
+def _pull_base_into_fallback(styled: list, fb_by_face: dict, key: tuple) -> None:
+    """9.T27 — a combining mark cannot render in a different font from the
+    letter it sits on, so move that letter into the mark's face.
 
-    Three ways it can, and they are the whole point:
-      * a LIGATURE formed (fewer glyphs than characters — `liga`, or `ccmp`
-        composing a base and a combining mark into one precomposed glyph);
-      * a glyph carries a positioning OFFSET (`mark`/`mkmk` attaching a
-        diacritic, contextual GPOS);
-      * a cluster spells something other than its own single character (the
-        general form of the first — a glyph standing for several characters).
+    The convert path routes ONE CHARACTER AT A TIME: it keeps whatever the
+    document's own font can encode and falls back only for what it cannot.
+    For `cafe` + COMBINING ACUTE that puts the `e` in the document font and
+    the accent in a substitute subset — two fonts, so the shaper never sees
+    them together and the accent draws as a spacing glyph after the letter.
+    (This is why the shaping work looked like it fired and did not: the mark
+    was alone in its chunk, with nothing to compose with.)
 
-    Everything else is a glyph-per-character run whose only difference is the
-    GPOS advance deltas, i.e. KERNING — which the character path already
-    applies from the same font (9.K1b). Saying "trivial" there is not a
-    shortcut: it keeps the emission byte-identical for the overwhelming
-    majority of text, so shaping changes output exactly where the old output
-    was WRONG (a combining acute drawn as a spacing glyph after its letter)
-    and nowhere else."""
-    if len(run.glyphs) != len(word):
-        return True
-    if any(x_off or y_off for _n, _a, x_off, y_off in run.glyphs):
-        return True
-    return any(spells != ch for (_n, spells), ch in zip(run.clusters, word))
+    Pulling the base across makes the pair ONE unit in ONE face, which is
+    both what shaping needs and independently correct — a mark positioned by
+    one font's metrics over a glyph drawn from another is wrong even
+    unshaped. Only a single preceding character is moved, and only when it
+    is genuinely a base in the document font: a space, an atomic ligature
+    entry (9.B5) or a slice already substituted is left alone rather than
+    guessed at."""
+    j = len(styled) - 1
+    # Marks already pulled across for this same cluster.
+    while j >= 0 and len(styled[j][0]) == 1 and unicodedata.combining(styled[j][0]):
+        j -= 1
+    if j < 0:
+        return
+    text, st = styled[j]
+    if len(text) != 1 or text == " " or st.fallback is not None:
+        return
+    fb_by_face.setdefault(key, set()).add(text)
+    styled[j] = (
+        text,
+        _StyleRef(st.member, key, st.size_override, st.color_override),
+    )
 
 
 def _shape_ltr_runs(styled: list, key: tuple, face: str) -> tuple[list, list]:
@@ -1731,16 +1746,8 @@ def _shape_ltr_runs(styled: list, key: tuple, face: str) -> tuple[list, list]:
             chunk.append(t2)
             j += 1
         word = "".join(chunk)
-        try:
-            run = shaping.shape(face, word, rtl=False)
-        except Exception:
-            # The face cannot express the word. The character path refuses it
-            # by name if it truly cannot be drawn — the honest floor, and not
-            # this function's call to make.
-            out.extend(styled[i:j])
-            i = j
-            continue
-        if not _shaping_changed_it(run, word):
+        run = shaping.shape_if_it_changes(face, word)
+        if run is None:
             out.extend(styled[i:j])
             i = j
             continue
@@ -1769,10 +1776,20 @@ def _embed_shaping_aware(pdf, face: str, chars: str, styled: list, key: tuple):
     from engine.font_fallback import build_fallback_font, build_shaped_font
 
     shaped_styled, runs = _shape_ltr_runs(styled, key, face)
+    if runs:
+        try:
+            fdict, fenc, fwidth, genc, gwidth = build_shaped_font(
+                pdf, face, chars, runs
+            )
+        except ValueError:
+            # A CFF face that cannot carry two spellings of one glyph (see
+            # `build_shaped_font`). The unshaped path's output is CORRECT —
+            # it just forms no ligature — so take it rather than draw the
+            # wrong glyphs.
+            runs = []
     if not runs:
         font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars)
         return styled, _Fallback(None, font_dict, encode, width_1000, face)
-    fdict, fenc, fwidth, genc, gwidth = build_shaped_font(pdf, face, chars, runs)
     return shaped_styled, _Fallback(
         None, fdict, fenc, fwidth, face, glyph_encode=genc, glyph_width=gwidth,
     )

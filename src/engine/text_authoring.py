@@ -294,23 +294,32 @@ def _prepare_bidi(face: str, body: str, pdf, unique: str, glyph_for):
     """(_Bidi | None, font_dict, encode, width_1000) for an authored box.
 
     None — and the shipped `build_fallback_font` output byte for byte — for
-    every left-to-right box, which is the overwhelming majority and the one
-    the existing pins measure."""
-    if not bidi.has_strong_rtl(body):
-        return (None,) + build_fallback_font(pdf, face, unique, glyph_for=glyph_for)
-
+    a left-to-right box that needs no shaping, which is the overwhelming
+    majority and the one the existing pins measure."""
     from engine import shaping
 
+    rtl = bidi.has_strong_rtl(body)
+    # 9.T27: shaping is no longer an RTL-only question. A left-to-right box
+    # needs it exactly when the shaper produces something the character path
+    # cannot — a composed accent, a ligature — which is what
+    # `shape_if_it_changes` answers; ordinary Latin returns None for every
+    # word, `runs` stays empty, and the shipped `build_fallback_font` output
+    # comes back byte for byte, which is why this can be unconditional.
+    #
+    # An OpenType feature request opts OUT: `glyph_for` is already a glyph
+    # selection for the run, and honouring two of them is not defined. RTL
+    # raises on the same collision below; left-to-right simply keeps the
+    # feature path it had, because that path works.
     runs: dict = {}
-    for token in body.split():
-        if token and token not in runs and shaping.requires_shaping(token):
-            try:
-                runs[token] = shaping.shape(face, token, rtl=True)
-            except ValueError:
-                # The face cannot express this word; leave it to the ordinary
-                # character path, which refuses BY NAME rather than silently
-                # drawing a `.notdef`.
-                pass
+    if glyph_for is None or rtl:
+        for token in body.split():
+            if token and token not in runs:
+                run = shaping.shape_if_it_changes(face, token)
+                if run is not None:
+                    runs[token] = run
+    if not runs and not rtl:
+        # Nothing to shape and nothing to reorder: the shipped path exactly.
+        return (None,) + build_fallback_font(pdf, face, unique, glyph_for=glyph_for)
     if not runs:
         # A non-joining right-to-left script (Hebrew): no shaping needed, but
         # the reorder still is.
@@ -567,19 +576,28 @@ def _layout_box_spans(
         # face so its glyphs land in THIS style's subset.
         runs: dict = {}
         glyph_encode = glyph_width = None
-        if rtl:
+        # 9.T27: left-to-right words shape here too, on the same selective
+        # gate the box path uses — so an accent typed into a styled span
+        # composes instead of standing beside its letter. `feats` opts out
+        # (two glyph selections for one run are not defined; the refusal
+        # below is the RTL half of the same rule).
+        if not feats:
             from engine import shaping
 
             for m in __import__("re").finditer(r"\S+", body):
                 word = m.group()
                 if word in runs or char_style[m.start()] != idx:
                     continue
-                if not shaping.requires_shaping(word):
+                # A shaped word is drawn WHOLLY in one style, so it may only
+                # be shaped when the word IS one style. RTL already refuses a
+                # mid-word style change outright (a joined word would break
+                # visibly at the seam); left-to-right just declines to shape
+                # it, because a ligature that does not form is not a defect.
+                if len(set(char_style[m.start() : m.end()])) > 1:
                     continue
-                try:
-                    runs[word] = shaping.shape(face, word, rtl=True)
-                except ValueError:
-                    pass  # the character path refuses it BY NAME instead
+                run = shaping.shape_if_it_changes(face, word)
+                if run is not None:
+                    runs[word] = run
         if runs:
             if glyph_for is not None:
                 raise ValueError("small caps and alternates do not apply to this script")
@@ -716,7 +734,14 @@ def _layout_box_spans(
         frame=frame, left=left, right=right, top=top, bottom=bottom,
         font_dict=None, encode=None, width_1000=None, kern_pairs={},
         styled_lines=styled_lines, styles=styles, line_leadings=line_leadings,
-        bidi=bidi.paragraph_level(body) if rtl else None,
+        # T27: the reorder is the identity for a left-to-right box, but the
+        # SHAPED emission lives on the same branch — so a box that shaped
+        # anything takes it too, at base level 0.
+        bidi=(
+            bidi.paragraph_level(body)
+            if (rtl or any(st.get("runs") for st in styles))
+            else None
+        ),
     )
 
 
