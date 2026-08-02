@@ -496,6 +496,59 @@ class TestShapeInPlace:
         assert text3 in [p["text"] for p in _paras(out)]
         assert list(self._fonts_of(out).values()) == ["/DocOwnFace"]
 
+    def test_the_new_words_are_drawn_JOINED_in_the_document_font(self, tmp_dir):
+        """The pin the font-identity checks cannot be.
+
+        "One font, still /DocOwnFace" proves nothing was substituted, and the
+        round trip proves /ToUnicode is right — and BOTH would still pass if
+        the edit drew isolated letter forms, which is broken output wearing a
+        working font's name and the exact thing T26's GSUB half exists to
+        prevent. /ToUnicode round-trips perfectly over wrong glyphs, so only
+        the drawn glyph ids can tell.
+
+        In-place addresses glyphs by their own id (Identity-H with an
+        Identity CIDToGIDMap is the gate's PDF half), so a drawn code IS a
+        glyph id here — no map to walk.
+        """
+        import re as _re
+
+        word = "ونص"  # a new word the document never drew
+        src = build_inplace_pdf(os.path.join(tmp_dir, "ip.pdf"))
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        new_text = AR_HELLO + " " + word
+        _apply(src, out, para, new_text)
+
+        tt = TTFont(ARABIC_FACE, lazy=True)
+        try:
+            gid_of = {n: i for i, n in enumerate(tt.getGlyphOrder())}
+        finally:
+            tt.close()
+        joined = [gid_of[n] for n in shaping.shape(ARABIC_FACE, word).glyph_names]
+        isolated = [
+            gid_of[shaping.shape(ARABIC_FACE, ch).glyph_names[0]]
+            for ch in reversed(word)
+        ]
+        assert joined != isolated, "the premise: this word joins"
+
+        with pikepdf.open(out) as pdf:
+            contents = pdf.pages[0].Contents
+            stream = b"".join(
+                bytes(x.read_bytes())
+                for x in (contents if isinstance(contents, pikepdf.Array) else [contents])
+            )
+        codes = []
+        for hexed in _re.findall(rb"<([0-9a-fA-F]+)>", stream):
+            raw = bytes.fromhex(hexed.decode("ascii"))
+            codes += [int.from_bytes(raw[i:i + 2], "big") for i in range(0, len(raw), 2)]
+
+        def contains(hay, needle):
+            n = len(needle)
+            return any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
+
+        assert contains(codes, joined), f"joined forms not drawn: {codes}"
+        assert not contains(codes, isolated), "ISOLATED forms are on the page"
+
     def test_a_gsub_stripped_subset_still_substitutes(self, tmp_dir):
         # The gate's other half: the standard fixture drops GSUB the way
         # real subsetters do, so the edit must NOT keep that font — shaping
