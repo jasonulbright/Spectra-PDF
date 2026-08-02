@@ -1228,6 +1228,7 @@ def _styled_chars(
     member_family=None,
     rtl_style=None,
     vertical_ok: bool = False,
+    inplace_ok: bool = False,
 ) -> tuple[list[tuple[str, _StyleRef]], dict]:
     """Map every char of the new text to its style source; returns the
     styled stream plus `fb_by_face` — a dict {face key → the char-set that
@@ -1378,15 +1379,27 @@ def _styled_chars(
             siz = size_at(pos)
             fk = face_at(pos, member)
             if rtl_style is not None and _requires_shaping(ch):
-                # 9.T3: a cursively joining character ALWAYS routes to the
-                # bundled shaping face, whatever `convert` says and whatever
-                # face was asked for. This is not a conversion the user opts
-                # into: the document's own subset has committed to final
-                # glyph ids and kept neither the cmap nor the GSUB needed to
-                # re-join them, so re-emitting per character would draw a row
-                # of disconnected isolated forms. Broken output is not an
-                # option the completeness standard leaves open; the visible
-                # substitution is. A requested weight/slant is honoured.
+                # 9.T3: a cursively joining character ALWAYS routes to a
+                # SHAPING path, whatever `convert` says and whatever face was
+                # asked for. This is not a conversion the user opts into:
+                # the character cannot be re-emitted per code without drawing
+                # a row of disconnected isolated forms, and broken output is
+                # not an option the completeness standard leaves open.
+                #
+                # 9.T26: WHICH shaping path is the fidelity question. When
+                # the caller qualified the document's own font (its embedded
+                # program still carries the cmap and GSUB most subsetters
+                # strip), the character keeps that font — the edit preserves
+                # the document's typeface. Otherwise the bundled face
+                # substitutes, exactly as T3 shipped. An explicit face
+                # request (fk) always substitutes: asking for bold IS asking
+                # to leave the document font.
+                if fk is None and inplace_ok:
+                    ik = (INPLACE_FAMILY, False, False, (), 0)
+                    fb_by_face.setdefault(ik, set()).add(ch)
+                    styled.append((ch, ref(member, ik, col, siz)))
+                    i += 1
+                    continue
                 if fk is not None:
                     rb, ri = bool(fk[1]), bool(fk[2])
                 else:
@@ -1585,6 +1598,11 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
 # automatic, TEXT-driven switch a joining script forces, the same shape T5's
 # CJK switch has. `_face_sort_key` orders it with the named families.
 RTL_FAMILY = "rtl"
+# 9.T26: the face key meaning "shape with the DOCUMENT'S OWN embedded
+# program" — reachable only when the paragraph's font passes the in-place
+# gate, never from user input (`_validated_family` refuses anything that is
+# not the bundled trio or an absolute path).
+INPLACE_FAMILY = "inplace"
 
 
 def _shape_styled_runs(styled: list, key: tuple, face: str) -> tuple[list, list]:
@@ -2592,7 +2610,11 @@ def _rewrite_paragraph_stream(
                     # collect the ones the build actually emitted. One key →
                     # one `/EditFb0`, byte-identical to the shipped A3 path.
                     for key in sorted(edit.fallbacks, key=_face_sort_key):
-                        edit.fallbacks[key].name = _fresh_font_name(resources, counter, reserved)
+                        # 9.T26: an in-place entry IS the document's own font
+                        # — it carries that font's name from construction and
+                        # registers nothing, so allocation must not rename it.
+                        if edit.fallbacks[key].font_dict is not None:
+                            edit.fallbacks[key].name = _fresh_font_name(resources, counter, reserved)
                     for kind, ins, raw_w in edit.emission.build(orig.ctm):
                         kept.append(ins)
                         if kind == "show":
@@ -2601,7 +2623,7 @@ def _rewrite_paragraph_stream(
                             emit_feed(ins)
                     for key in sorted(edit.fallbacks, key=_face_sort_key):
                         fb = edit.fallbacks[key]
-                        if fb.used:
+                        if fb.used and fb.font_dict is not None:
                             edit.pending_fonts.append((fb.name, fb.font_dict))
                 edit.changed = True
                 changed = True
@@ -2686,6 +2708,77 @@ def _rewrite_paragraph_stream(
     return kept, changed, new_forms
 
 
+def _augment_cid_widths(font_dict, additions: dict[int, float]) -> None:
+    """Append `/W` entries for the gids an in-place edit introduced — 9.T26.
+
+    Only gids `/W` does not already cover (the caller filtered), each with
+    its PROGRAM advance, so the viewer's advance, the layout's measurement
+    and the re-listing's width model are the same number. Without this the
+    new forms fell to `/DW` and the correcting TJ jumps read as word gaps."""
+    try:
+        descendant = font_dict["/DescendantFonts"][0]
+    except Exception:
+        return
+    w = descendant.get("/W")
+    items = list(w) if w is not None else []
+    for gid in sorted(additions):
+        items.append(gid)
+        items.append(pikepdf.Array([additions[gid]]))
+    descendant["/W"] = pikepdf.Array(items)
+
+
+def _augment_tounicode(pdf, font_dict, additions: dict[int, str]) -> None:
+    """Extend a font's /ToUnicode with the shaped glyphs an in-place edit
+    drew — 9.T26.
+
+    Additive ONLY: the prequalification and the build both refuse a glyph
+    that would need a DIFFERENT spelling than the document already gives it
+    (code == gid under Identity-H, so one glyph gets one entry — the T25
+    collision, closed at the gate rather than papered over here). The whole
+    map is re-emitted as bfchar entries, chunked at the CMap spec's 100 per
+    block; semantically identical to whatever mix of bfchar/bfrange the
+    producer wrote."""
+    from engine.pdf_fonts import _parse_tounicode
+
+    merged: dict[int, str] = {}
+    tou = font_dict.get("/ToUnicode")
+    if tou is not None:
+        try:
+            merged = dict(_parse_tounicode(tou.read_bytes()))
+        except Exception:
+            merged = {}
+    for gid, spells in additions.items():
+        merged.setdefault(gid, spells)
+    entries = sorted(merged.items())
+    nl = chr(10)
+    blocks = []
+    for i in range(0, len(entries), 100):
+        chunk = entries[i : i + 100]
+        lines = nl.join(
+            f"<{code:04x}> <{text.encode('utf-16-be').hex()}>" for code, text in chunk
+        )
+        blocks.append(f"{len(chunk)} beginbfchar{nl}{lines}{nl}endbfchar")
+    body = nl.join(
+        [
+            "/CIDInit /ProcSet findresource begin",
+            "12 dict begin",
+            "begincmap",
+            "/CMapName /Adobe-Identity-UCS def",
+            "/CMapType 2 def",
+            "1 begincodespacerange",
+            "<0000> <ffff>",
+            "endcodespacerange",
+            *blocks,
+            "endcmap",
+            "CMapName currentdict /CMap defineresource pop",
+            "end",
+            "end",
+            "",
+        ]
+    )
+    font_dict["/ToUnicode"] = pdf.make_stream(body.encode("ascii"))
+
+
 def replace_paragraph_text(
     file: str,
     output: str,
@@ -2766,6 +2859,13 @@ def replace_paragraph_text(
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
+    # 9.T26: initialized BEFORE any refusal can raise — the finally block
+    # reads these, and a validation error firing earlier would otherwise
+    # turn into an UnboundLocalError that buries the real message.
+    inplace_face = None
+    inplace_font_dict = None
+    inplace_tounicode: dict[int, str] = {}
+    inplace_widths: dict[int, float] = {}
     try:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -3013,6 +3113,76 @@ def replace_paragraph_text(
                     rtl_style[m.index] = classify_font_style(fd) if fd is not None else (False, False)
                 except Exception:
                     rtl_style[m.index] = (False, False)
+
+        # 9.T26: qualify the document's OWN font for in-place shaping, so an
+        # RTL edit keeps the document's typeface instead of substituting the
+        # bundled face. Every condition below is a correctness gate, not a
+        # preference:
+        #   - no substitution/feature request and no per-span face — asking
+        #     for bold IS asking to leave the document font;
+        #   - ONE font across the members — a per-member split would seam a
+        #     word at a member boundary;
+        #   - the PDF-side shape (Identity-H + Identity CIDToGIDMap: a glyph
+        #     id IS the code) and the program-side one (cmap + GSUB still
+        #     present) both hold — `in_place_face` checks them;
+        #   - every joining word of the NEW text shapes without `.notdef`
+        #     (a subset keeps only the glyphs it drew, and a form the new
+        #     text needs may be gone);
+        #   - no glyph SPELLING collision: code == gid here, so one glyph
+        #     gets exactly one ToUnicode entry — a shaped cluster that wants
+        #     gid G to spell Y when the document already has it spelling X
+        #     cannot be expressed, and the T25 fatha-as-sukun lesson says
+        #     never to try. Any failed condition falls back to the bundled
+        #     face, which is the shipped, correct behaviour.
+        if (
+            rtl_style is not None
+            and not substituting
+            and font_path
+            and len({m.style["font_name"] for m in para.members}) == 1
+        ):
+            from engine import shaping as _shaping
+            from engine.text_runs import _lookup_font as _lf
+
+            first_m = min(para.members, key=lambda m: m.index)
+            fd0 = _lf(first_m.style["font_name"], first_m.resources or resources, resources)
+            candidate = _shaping.in_place_face(fd0) if fd0 is not None else None
+            if candidate is not None:
+                cap0 = first_m.cap
+                ok = True
+                additions: dict[int, str] = {}
+                try:
+                    from fontTools.ttLib import TTFont as _TT
+
+                    _tt = _TT(candidate, fontNumber=0, lazy=True)
+                    try:
+                        gid_of0 = {n: i for i, n in enumerate(_tt.getGlyphOrder())}
+                    finally:
+                        _tt.close()
+                    for token in str(new_text).split():
+                        if not _shaping.requires_shaping(token):
+                            continue
+                        run0 = _shaping.shape(candidate, token, rtl=True)
+                        for name, spells in run0.clusters:
+                            gid = gid_of0[name]
+                            existing = cap0._code2uni.get(gid)
+                            if existing is None:
+                                additions[gid] = spells
+                            elif spells and existing != spells:
+                                ok = False
+                                break
+                        if not ok:
+                            break
+                except Exception:
+                    ok = False
+                if ok:
+                    inplace_face = candidate
+                    inplace_font_dict = fd0
+                    inplace_tounicode = additions
+                else:
+                    try:
+                        os.unlink(candidate)
+                    except OSError:
+                        pass
         styled, fb_by_face = _styled_chars(
             str(new_text), list(spans), members_by_index, bool(convert),
             size_override=size_override, color_override=color_override,
@@ -3020,6 +3190,7 @@ def replace_paragraph_text(
             face_by_pos=face_by_pos, size_by_pos=size_by_pos,
             member_family=member_family, rtl_style=rtl_style,
             vertical_ok=vertical_face is not None,
+            inplace_ok=inplace_face is not None,
         )
         # 9.A5b: build ONE _Fallback per face key, sorted-face order so the
         # subset names + embedded bytes are deterministic. The whole-para A3
@@ -3059,6 +3230,83 @@ def replace_paragraph_text(
                     )
                     fallbacks[key] = _Fallback(
                         None, font_dict, encode, width_1000, vertical_face
+                    )
+                    continue
+                if fam == INPLACE_FAMILY:
+                    # 9.T26: shape with the DOCUMENT'S OWN program and emit
+                    # its own glyph ids — Identity-H makes a gid the two-byte
+                    # code, so nothing new embeds, no name allocates, and the
+                    # Tf the emission writes is the font the paragraph
+                    # already uses.
+                    #
+                    # Widths: /W is what the VIEWER advances by, so a gid /W
+                    # already covers keeps that number. A gid the edit
+                    # INTRODUCES (a joining form the subset never drew) is
+                    # absent from /W and would fall to DW — and papering over
+                    # that with TJ corrections put a forward jump between two
+                    # real glyphs, which the word-gap heuristic then read as
+                    # a SPACE INSIDE THE WORD (probe-caught: `ونص` came back
+                    # `ون ص`). So the new gids take their PROGRAM advance
+                    # here, and `/W` itself is AUGMENTED with the same
+                    # numbers after the edit — measured, drawn, and re-read
+                    # all become the one number.
+                    from fontTools.ttLib import TTFont as _TT
+
+                    styled, shaped_runs = _shape_styled_runs(styled, key, inplace_face)
+                    _tt = _TT(inplace_face, fontNumber=0, lazy=True)
+                    try:
+                        _order = _tt.getGlyphOrder()
+                        _gid_of = {n: i for i, n in enumerate(_order)}
+                        _hmtx = _tt["hmtx"]
+                        _upem = _tt["head"].unitsPerEm or 1000
+                        _prog_adv = {
+                            _gid_of[n]: round(_hmtx[n][0] * 1000.0 / _upem, 2)
+                            for run2 in shaped_runs
+                            for n in run2.glyph_names
+                        }
+                    finally:
+                        _tt.close()
+                    _cap = min(para.members, key=lambda m: m.index).cap
+                    for _g, _adv in _prog_adv.items():
+                        if _g not in _cap._widths:
+                            inplace_widths[_g] = _adv
+
+                    def _ip_encode(text, _c=_cap):
+                        return _c.encode(text)
+
+                    def _ip_width(text, _c=_cap):
+                        return _c.text_width(text)
+
+                    def _ip_genc(name, spells, _g=_gid_of):
+                        return _g[name].to_bytes(2, "big")
+
+                    def _ip_gwidth(name, spells, _g=_gid_of, _c=_cap, _w=dict(inplace_widths)):
+                        gid = _g[name]
+                        if gid in _w:
+                            return _w[gid]
+                        return _c.decoded_width(gid.to_bytes(2, "big"))
+
+                    # The ToUnicode additions the augmentation writes, taken
+                    # from the ACTUAL emitted runs (word fragments can pick
+                    # forms the prequalification's whole-word pass did not).
+                    inplace_tounicode = {}
+                    for run2 in shaped_runs:
+                        for name, spells in run2.clusters:
+                            gid = _gid_of[name]
+                            existing = _cap._code2uni.get(gid)
+                            if existing is None:
+                                inplace_tounicode[gid] = spells
+                            elif spells and existing != spells:
+                                # The T25 lesson, held as a refusal: one code
+                                # cannot spell two things, and here code==gid.
+                                raise ValueError(
+                                    "this edit cannot keep the document font — "
+                                    "retry, or restyle to another face"
+                                )
+                    fallbacks[key] = _Fallback(
+                        min(para.members, key=lambda m: m.index).style["font_name"],
+                        None, _ip_encode, _ip_width, inplace_face,
+                        glyph_encode=_ip_genc, glyph_width=_ip_gwidth,
                     )
                     continue
                 if fam == RTL_FAMILY:
@@ -3211,9 +3459,18 @@ def replace_paragraph_text(
         if edit.pending_fonts and edit.target_stream == ():
             for fname, fdict in edit.pending_fonts:
                 _register_font(pdf, resources, fname, fdict)
+        if inplace_font_dict is not None and inplace_tounicode:
+            _augment_tounicode(pdf, inplace_font_dict, inplace_tounicode)
+        if inplace_font_dict is not None and inplace_widths:
+            _augment_cid_widths(inplace_font_dict, inplace_widths)
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(paragraph_index)}
     finally:
+        if inplace_face is not None:
+            try:
+                os.unlink(inplace_face)
+            except OSError:
+                pass
         try:
             pdf.close()
         except Exception:

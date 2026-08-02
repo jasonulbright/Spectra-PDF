@@ -393,3 +393,125 @@ class TestShaping:
     def test_advance_is_per_thousand_em(self):
         run = shaping.shape(ARABIC_FACE, "م")
         assert 100.0 < run.advance_1000 < 2000.0
+
+
+def build_inplace_pdf(path, text=AR_HELLO, face_path=ARABIC_FACE):
+    """A page whose Arabic embeds the FULL program (cmap + GSUB intact) —
+    the 9.T26 qualifying case, unlike `build_rtl_pdf` which drops GSUB the
+    way real subsetters do."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    tt = TTFont(face_path, lazy=True)
+    order = tt.getGlyphOrder()
+    upem = tt["head"].unitsPerEm
+    hmtx = tt["hmtx"]
+    gid_of = {n: i for i, n in enumerate(order)}
+    tt.close()
+    run = shaping.shape(face_path, text, rtl=True)
+    gids = [gid_of[n] for n in run.glyph_names]
+    gid_text = {}
+    for name, cluster in run.clusters:
+        gid_text.setdefault(gid_of[name], cluster)
+    with open(face_path, "rb") as fh:
+        raw = fh.read()
+    prog = pdf.make_stream(raw)
+    prog["/Length1"] = len(raw)
+    widths = {g: round(hmtx[order[g]][0] * 1000.0 / upem, 2) for g in set(gids)}
+    desc = pdf.make_indirect(Dictionary(
+        Type=Name("/FontDescriptor"), FontName=Name("/DocOwnFace"), Flags=4,
+        FontBBox=Array([-1000, -500, 2000, 1200]), ItalicAngle=0,
+        Ascent=900, Descent=-200, CapHeight=700, StemV=80, FontFile2=prog,
+    ))
+    w = []
+    for g in sorted(widths):
+        w += [g, Array([widths[g]])]
+    descendant = pdf.make_indirect(Dictionary(
+        Type=Name("/Font"), Subtype=Name("/CIDFontType2"), BaseFont=Name("/DocOwnFace"),
+        CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+        FontDescriptor=desc, DW=1000, W=Array(w), CIDToGIDMap=Name("/Identity"),
+    ))
+    entries = "\n".join(
+        f"<{g:04x}> <{t.encode('utf-16-be').hex()}>" for g, t in sorted(gid_text.items())
+    )
+    tou = (
+        "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+        "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n"
+        "1 begincodespacerange\n<0000> <ffff>\nendcodespacerange\n"
+        f"{len(gid_text)} beginbfchar\n{entries}\nendbfchar\nendcmap\n"
+        "CMapName currentdict /CMap defineresource pop\nend\nend\n"
+    )
+    font = pdf.make_indirect(Dictionary(
+        Type=Name("/Font"), Subtype=Name("/Type0"), BaseFont=Name("/DocOwnFace"),
+        Encoding=Name("/Identity-H"), DescendantFonts=Array([descendant]),
+        ToUnicode=pdf.make_stream(tou.encode("ascii")),
+    ))
+    hexes = "".join(f"{g:04x}" for g in gids)
+    page.Contents = pdf.make_stream(
+        f"BT /PF1 16 Tf 1 0 0 1 72 700 Tm <{hexes}> Tj ET".encode("ascii")
+    )
+    page.Resources = Dictionary(Font=Dictionary(PF1=font))
+    pdf.save(path)
+    pdf.close()
+    return path
+
+
+class TestShapeInPlace:
+    """9.T26 — an RTL edit keeps the document's own typeface when its
+    embedded program still carries the cmap and GSUB most subsetters strip."""
+
+    def _fonts_of(self, path):
+        with pikepdf.open(path) as pdf:
+            fonts = pdf.pages[0]["/Resources"]["/Font"]
+            return {str(k): str(fonts[k].get("/BaseFont")) for k in fonts.keys()}
+
+    def test_edit_keeps_the_document_font(self, tmp_dir):
+        src = build_inplace_pdf(os.path.join(tmp_dir, "ip.pdf"))
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        new_text = AR_HELLO + " ونص جديد"
+        _apply(src, out, para, new_text)
+        names = self._fonts_of(out)
+        # ONE font, the document's own — no substitute subset embedded.
+        assert list(names.values()) == ["/DocOwnFace"], names
+        # …and the new words (whose forms the doc never drew) round-trip,
+        # which is the ToUnicode + /W augmentation working.
+        assert [p["text"] for p in _paras(out)] == [new_text]
+
+    def test_repeat_edit_still_round_trips(self, tmp_dir):
+        # The augmented ToUnicode/W are what the SECOND edit reads — an
+        # in-place edit must stay in-place-editable.
+        src = build_inplace_pdf(os.path.join(tmp_dir, "ip.pdf"))
+        mid = os.path.join(tmp_dir, "mid.pdf")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        text2 = AR_HELLO + " ونص"
+        _apply(src, mid, para, text2)
+        para2 = next(p for p in _paras(mid) if p["text"] == text2)
+        text3 = text2 + " ثالث"
+        replace_paragraph_text(
+            mid, out, 1, para2["index"], text3,
+            [{"start": 0, "end": len(text3), "run": para2["runs"][0]}],
+            para2["runs"], para2["text"], convert=True, font_path=FONTS,
+        )
+        assert text3 in [p["text"] for p in _paras(out)]
+        assert list(self._fonts_of(out).values()) == ["/DocOwnFace"]
+
+    def test_a_gsub_stripped_subset_still_substitutes(self, tmp_dir):
+        # The gate's other half: the standard fixture drops GSUB the way
+        # real subsetters do, so the edit must NOT keep that font — shaping
+        # against it would produce isolated forms wearing a working font's
+        # name. The bundled face substitutes, exactly as T3 shipped.
+        src = build_rtl_pdf(os.path.join(tmp_dir, "sub.pdf"), [AR_HELLO])
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, _paras(src)[0], AR_HELLO + " ونص")
+        names = self._fonts_of(out)
+        assert any("ABCDEF+" in n for n in names.values()), names
+
+    def test_a_style_request_substitutes_even_when_in_place_qualifies(self, tmp_dir):
+        # Asking for bold IS asking to leave the document font (it has no
+        # bold variant to switch to) — the explicit request wins.
+        src = build_inplace_pdf(os.path.join(tmp_dir, "ip.pdf"))
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, _paras(src)[0], AR_HELLO, bold=True)
+        names = self._fonts_of(out)
+        assert any("ABCDEF+" in n for n in names.values()), names
