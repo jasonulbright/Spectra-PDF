@@ -13,6 +13,12 @@ import type { EditTextRun } from '../../lib/edit-text';
 import { unencodableChars } from '../../lib/edit-text';
 import type { EditParagraph, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import {
+  getSystemFonts,
+  pickFace,
+  subscribeSystemFonts,
+  type SystemFontListing,
+} from '../../lib/system-fonts';
+import {
   applySpanColor,
   applySpanSize,
   styledSegments,
@@ -3158,7 +3164,13 @@ function ParagraphEditor({
   // A3a family swap — '' = keep the original fonts. The options name the
   // ACTUAL substitute faces (Liberation …): the swap is an honest
   // substitution, not a style toggle on the foundry font.
-  const [family, setFamily] = useState<'' | 'serif' | 'sans' | 'mono'>('');
+  // 9.T6: '' keeps the original fonts, the three names are the bundled
+  // families, and anything else is an ABSOLUTE PATH to an installed face —
+  // the engine's own selector grammar, so the picker sends exactly what the
+  // op accepts with nothing in between to get out of step.
+  const [family, setFamily] = useState<string>('');
+  const [installed, setInstalled] = useState<SystemFontListing | null>(getSystemFonts);
+  useEffect(() => subscribeSystemFonts(() => setInstalled(getSystemFonts())), []);
   // A3b style toggles, seeded from the paragraph's own weight/slant.
   // Toggling substitutes the whole paragraph into the styled Liberation
   // face (same honesty as the family swap).
@@ -3243,7 +3255,7 @@ function ParagraphEditor({
   ): {
     bold: boolean;
     italic: boolean;
-    family?: 'serif' | 'sans' | 'mono';
+    family?: string;
     smallCaps: boolean;
     alternates: boolean;
   } => {
@@ -3666,7 +3678,7 @@ function ParagraphEditor({
               // A5b dual role: a real family + a PARTIAL selection → per-span
               // face on that range; otherwise the shipped whole-paragraph
               // family swap.
-              const fam = e.target.value as '' | 'serif' | 'sans' | 'mono';
+              const fam = e.target.value;
               const sel = spanTarget();
               if (fam !== '' && sel) {
                 // 9.A5-tails-a: PER SEGMENT, like the B/I toggles — each piece
@@ -3680,9 +3692,33 @@ function ParagraphEditor({
             }}
           >
             <option value="">Keep original font</option>
-            <option value="sans">Liberation Sans</option>
-            <option value="serif">Liberation Serif</option>
-            <option value="mono">Liberation Mono</option>
+            <optgroup label="Bundled">
+              <option value="sans">Liberation Sans</option>
+              <option value="serif">Liberation Serif</option>
+              <option value="mono">Liberation Mono</option>
+            </optgroup>
+            {installed && installed.families.length > 0 && (
+              <optgroup
+                label={
+                  installed.restricted > 0
+                    ? `Installed (${installed.restricted} not shown — licence)`
+                    : 'Installed'
+                }
+              >
+                {installed.families.map((fam) => {
+                  // The FAMILY is the choice; the face within it follows the
+                  // bold/italic toggles, the same shape the bundled ladder
+                  // has. Sending a face path directly would freeze the
+                  // weight at whatever the picker happened to list first.
+                  const face = pickFace(fam, bold, italic);
+                  return face ? (
+                    <option key={fam.family} value={face.path}>
+                      {fam.family}
+                    </option>
+                  ) : null;
+                })}
+              </optgroup>
+            )}
           </select>
         </label>
         <button

@@ -763,6 +763,26 @@ def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
     return paragraphs
 
 
+def _validated_family(family) -> str:
+    """A face selector: one of the three bundled families, or an ABSOLUTE
+    PATH to an installed font file (9.T6).
+
+    An explicit selector, so garbage REFUSES rather than silently keeping
+    the original — a swap that did nothing would be a success that lied.
+    A path is validated by `system_fonts.resolve_face`, which is also where
+    the foundry's embedding permission is checked: a licence-restricted
+    font is refused BY NAME here rather than embedded and shipped."""
+    raw = str(family).strip()
+    lowered = raw.lower()
+    if lowered in ("serif", "sans", "mono"):
+        return lowered
+    if os.path.isabs(raw):
+        from engine.system_fonts import resolve_face
+
+        return resolve_face(raw)
+    raise ValueError("family must be serif, sans, mono, or an installed font file")
+
+
 def _fill_color_hex(color) -> str:
     """Best-effort #rrggbb for the A1 colour swatch seed. Device gray/rgb
     convert exactly; k (CMYK) approximates; anything else (the default,
@@ -2799,10 +2819,7 @@ def replace_paragraph_text(
         # be a success that lied).
         family_override = None
         if family is not None:
-            fam = str(family).strip().lower()
-            if fam not in ("serif", "sans", "mono"):
-                raise ValueError("family must be serif, sans, or mono")
-            family_override = fam
+            family_override = _validated_family(family)
         # A3b style axis: a PRESENT bold/italic is the substituted face's
         # absolute weight/slant; both None = no style substitution.
         style_override = None
@@ -2887,9 +2904,10 @@ def replace_paragraph_text(
                     # A3b weight/slant semantics, now per span).
                     fam = entry.get("family")
                     if fam is not None:
-                        fam = str(fam).strip().lower()
-                        if fam not in ("serif", "sans", "mono"):
-                            raise ValueError("span style family must be serif, sans, or mono")
+                        try:
+                            fam = _validated_family(fam)
+                        except ValueError as exc:
+                            raise ValueError(f"span style {exc}") from None
                     # 9.K2: a per-span OpenType feature request (small caps /
                     # alternates) rides the SAME face key. small_caps expands
                     # to smcp+c2sc; a feature forces a feature-bearing face
@@ -3054,6 +3072,19 @@ def replace_paragraph_text(
                     fallbacks[key] = _Fallback(
                         None, font_dict, encode, width_1000, face, kern_pairs=feat_kern
                     )
+                    continue
+                if isinstance(fam, str) and os.path.isabs(fam):
+                    # 9.T6: an INSTALLED font, chosen by the user. It bypasses
+                    # the family ladder entirely — the ladder exists to pick a
+                    # bundled stand-in, and there is nothing to stand in for
+                    # when the face itself was named. Coverage still decides
+                    # the outcome: `build_fallback_font` refuses by character
+                    # if the chosen face cannot express the text.
+                    from engine.system_fonts import resolve_face
+
+                    face = resolve_face(fam)
+                    font_dict, encode, width_1000 = build_fallback_font(pdf, face, chars)
+                    fallbacks[key] = _Fallback(None, font_dict, encode, width_1000, face)
                     continue
                 if fam is not None:
                     original = synthetic_family_font(fam)

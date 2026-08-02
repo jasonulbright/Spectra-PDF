@@ -21,6 +21,7 @@ walker-agreement discipline), so the card's fit indicator can never
 disagree with the commit.
 """
 
+import os
 from pathlib import Path
 from typing import NamedTuple
 
@@ -68,6 +69,29 @@ def _normalize_features(features) -> list:
             seen.add(f); uniq.append(f)
     return uniq
 
+
+
+def _explicit_face(family, style_key_name: str):
+    """9.T6 — an ABSOLUTE PATH family selector resolves to that installed
+    face, bypassing the bundled ladder entirely: the ladder exists to pick a
+    stand-in, and there is nothing to stand in for once the user has named
+    the face. None for the three bundled family names (and for no family at
+    all), which keeps every shipped path untouched.
+
+    `system_fonts.resolve_face` is where the foundry's embedding permission
+    is checked, so a licence-restricted font is refused BY NAME here rather
+    than embedded and shipped."""
+    if not isinstance(family, str):
+        return None
+    raw = family.strip()
+    if raw.lower() in ("serif", "sans", "mono") or not raw:
+        return None
+    if not os.path.isabs(raw):
+        raise ValueError("family must be serif, sans, mono, or an installed font file")
+    from engine.system_fonts import resolve_face
+
+    del style_key_name  # an explicit face carries its own weight and slant
+    return resolve_face(raw)
 
 
 def _fresh_font_name(fonts) -> str:
@@ -487,6 +511,9 @@ def _layout_box_spans(
 
     def resolve_face(b: bool, i: bool):
         skey = style_key(b, i)
+        explicit = _explicit_face(family, skey)
+        if explicit is not None:
+            return explicit
         if feats:
             from engine.font_fallback import resolve_feature_font
 
@@ -817,7 +844,10 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # this is the only bundled face that can do it. No feature => the shipped
     # Liberation path, byte-identical.
     feats = _normalize_features(features)
-    if feats:
+    explicit = _explicit_face(family, sk)
+    if explicit is not None:
+        face = explicit
+    elif feats:
         from engine.font_fallback import resolve_feature_font
 
         face = resolve_feature_font(str(font_path), style=sk)
