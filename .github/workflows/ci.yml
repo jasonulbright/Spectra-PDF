@@ -66,8 +66,11 @@ jobs:
           mkdir -p resources/tesseract
         shell: bash
 
-      - name: Check Rust compilation
-        run: cd src-tauri && cargo check
+      # `cargo test` rather than `cargo check`: check compiles without running
+      # the tests, so the printer, watched-folder and scheduler assertions never
+      # execute here. `cargo test` compiles too, so it supersedes the check.
+      - name: Rust tests
+        run: cd src-tauri && cargo test
 
   test-engine:
     name: Python Engine Tests
@@ -81,14 +84,15 @@ jobs:
           python-version: "3.14"
 
       - name: Install Python dependencies
-        # Versions pinned to the shipped engine runtime (scripts/python-requirements.in)
-        # so tests exercise what actually ships. pyHanko is required — the engine's
-        # signatures handler imports it at module load, so test_engine.py fails to
-        # collect without it (pyHanko pulls cryptography/certvalidator transitively).
-        run: pip install pikepdf==10.10.0 pdfminer.six==20260107 pyHanko==0.36.1 pytest
+        # The shipped, hash-pinned set rather than a hand-listed subset: a
+        # hand-listed one caps what can collect, and installing what ships means
+        # a new test file needs no CI edit.
+        run: |
+          pip install -r scripts/python-requirements.txt
+          pip install pytest
 
-      - name: Run engine + validation tests
-        run: python -m pytest tests/test_engine.py tests/test_validation.py -v
+      - name: Run engine tests (full suite)
+        run: python -m pytest tests/ -q
 
   audit:
     name: Dependency Audit
@@ -144,7 +148,7 @@ jobs:
     # the regression only gates elevated debugger attach), so a pinned CI
     # runtime tests what nobody runs and rots (see CLAUDE.md's never-pin
     # rule, written after the last stale-pin e2e breakage).
-    # The full 39-spec suite remains the release gate, run locally on the
+    # The full 101-spec suite remains the release gate, run locally on the
     # rebuilt binary; its green is recorded per milestone in the punchlist.
     #
     # EXPERIMENT RUN AND FAILED, 2026-07-30. Correcting the note above first:
@@ -168,13 +172,13 @@ jobs:
     #
     # Realistic options if this is ever revisited: a SELF-HOSTED runner running
     # as a normal user (our local suite proves the stack is fine non-elevated),
-    # or leave the local 79-spec suite as the release gate, which is the
+    # or leave the local 101-spec suite as the release gate, which is the
     # status quo. Do NOT pin a Fixed Version 149 runtime (never-pin rule).
     if: false
     runs-on: windows-latest
     # The job cap is a backstop, not the failure detector — the pre-flight
     # step below is what catches "no session can be created at all" (runner
-    # image drift) in minutes instead of grinding 39 specs' worth of session
+    # image drift) in minutes instead of grinding 101 specs' worth of session
     # retries into this cap and reporting a useless grey "cancelled".
     timeout-minutes: 50
     steps:

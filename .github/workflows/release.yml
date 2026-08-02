@@ -13,8 +13,105 @@ permissions:
   contents: write
 
 jobs:
+  # The gate for `release`. A tag can be pushed at any commit, so CI running on
+  # push/PR does not establish that the tagged commit passed anything.
+  #
+  # Self-contained rather than keyed off CI's status: a workflow that reads
+  # another workflow's conclusion is one API shape away from silently passing,
+  # and re-running the suites costs minutes on a job that already takes ~35.
+  #
+  # E2E is not here and must not be faked: register row P16, BLOCKED-EXTERNAL
+  # upstream (see ci.yml). The full local suite on the built binary is the
+  # release gate, a manual precondition recorded per milestone in the punchlist.
+  verify:
+    name: Verify (gates + version consistency)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The tag IS the version claim. A tag that disagrees with the manifests
+      # publishes an installer whose in-app version, updater manifest and
+      # filename do not match the release it lives in -- and the updater
+      # compares version NUMBERS, so a mismatch strands users.
+      - name: Tag matches every version surface
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v',''
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $conf = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' |
+                    Select-Object -First 1).Matches.Groups[1].Value
+          Write-Host "tag=$tag package.json=$pkg tauri.conf.json=$conf Cargo.toml=$cargo"
+          $bad = @()
+          if ($pkg   -ne $tag) { $bad += "package.json ($pkg)" }
+          if ($conf  -ne $tag) { $bad += "tauri.conf.json ($conf)" }
+          if ($cargo -ne $tag) { $bad += "Cargo.toml ($cargo)" }
+          if ($bad) { throw "Tag $tag disagrees with: $($bad -join ', ')" }
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint -- --quiet
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: Build renderer (Vite)
+        run: npm run build:renderer
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-verify-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Create resource stubs for Tauri build script
+        run: |
+          mkdir -p resources/python
+          mkdir -p resources/ghostscript
+          mkdir -p resources/fonts
+          mkdir -p resources/libreoffice
+          mkdir -p resources/tesseract
+        shell: bash
+
+      # `cargo check` never RUNS anything. The Rust tests cover the virtual
+      # printer's job naming, the watched-folder validation and the scheduler --
+      # all of which decide what lands on a user's disk.
+      - name: Rust tests
+        run: cd src-tauri && cargo test
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install Python dependencies (the SHIPPED, hash-pinned set)
+        run: |
+          pip install -r scripts/python-requirements.txt
+          pip install pytest
+
+      - name: Engine tests (full suite)
+        run: python -m pytest tests/ -q
+
   release:
     name: Build & publish (Windows)
+    needs: verify
     runs-on: windows-latest
     # Without this the job inherits GitHub's 6-hour default. The vendoring
     # steps download large artifacts from volunteer mirrors, and a mirror that

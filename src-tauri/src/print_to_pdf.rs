@@ -21,8 +21,10 @@
 
 use std::io::Read;
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -31,6 +33,27 @@ pub const PORT_NAME: &str = "SpectraPDF_9100";
 pub const PORT: u16 = 9100;
 /// A print job larger than this is refused (a runaway client, not a page).
 const MAX_JOB_BYTES: u64 = 512 * 1024 * 1024;
+/// Idle read timeout for one connection. RAW/JetDirect clients stream and
+/// close; a spooler may pause mid-job, so this is generous. Without it a
+/// client that connects and never writes holds the socket forever.
+const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Concurrent job cap. The accept loop does not serialise reads, so
+/// thread-per-connection needs a bound.
+const MAX_CONCURRENT_JOBS: usize = 8;
+
+/// Distinguishes jobs arriving within the same second. Only one process binds
+/// the port, so a process-local counter suffices; `create_new` is what
+/// guarantees uniqueness.
+static JOB_SEQ: AtomicU64 = AtomicU64::new(0);
+static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// Releases the slot however the job thread leaves, including a panic.
+struct JobSlot;
+impl Drop for JobSlot {
+    fn drop(&mut self) {
+        IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
+    }
+}
 
 pub struct PrinterState {
     /// "listening" once the loopback socket is up, else the bind error —
@@ -53,8 +76,8 @@ fn printed_dir() -> PathBuf {
 }
 
 fn timestamp_name() -> String {
-    // Seconds-precision local time keeps names sortable and human; a
-    // same-second collision falls back to the counter suffix below.
+    // Seconds precision keeps names sortable and human. Not unique; `claim`
+    // guarantees that.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -62,18 +85,61 @@ fn timestamp_name() -> String {
     format!("Printed {now}")
 }
 
-fn unique_pdf(dir: &PathBuf, stem: &str) -> PathBuf {
-    let first = dir.join(format!("{stem}.pdf"));
-    if !first.exists() {
-        return first;
-    }
-    for n in 2.. {
-        let candidate = dir.join(format!("{stem} ({n}).pdf"));
-        if !candidate.exists() {
-            return candidate;
+/// Create a path atomically, failing if anything is already there.
+///
+/// `exists()`-then-create is a race: two jobs naming themselves in the same
+/// second resolve to the same `.ps` and `.pdf`, and the second overwrites the
+/// first's staged PostScript with no error reported. `create_new` cannot race.
+fn claim(path: &Path) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map(|_| ())
+}
+
+/// Reserve the staging path for one job's PostScript. Internal; never seen.
+fn claim_staging(dir: &Path, stem: &str) -> std::io::Result<PathBuf> {
+    let seq = JOB_SEQ.fetch_add(1, Ordering::Relaxed);
+    for extra in 0..1000u64 {
+        let candidate = dir.join(format!("{stem}-{}.ps", seq + extra));
+        match claim(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
         }
     }
-    unreachable!()
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not claim a staging path",
+    ))
+}
+
+/// Reserve the user-facing pdf name, keeping the readable `(2)`/`(3)` suffixes.
+/// The reservation is a real zero-byte file, so a concurrent job sees it and
+/// takes the next number. Ghostscript writes a `.part` sibling renamed over it;
+/// on Windows `fs::rename` is `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING`, so
+/// that step is atomic too.
+fn reserve_pdf(dir: &Path, stem: &str) -> std::io::Result<PathBuf> {
+    let first = dir.join(format!("{stem}.pdf"));
+    match claim(&first) {
+        Ok(()) => return Ok(first),
+        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => return Err(e),
+        _ => {}
+    }
+    // Bounded: an open range overflows rather than terminating.
+    for n in 2..10_000u32 {
+        let candidate = dir.join(format!("{stem} ({n}).pdf"));
+        match claim(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "too many printed files with the same name",
+    ))
 }
 
 fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
@@ -88,19 +154,37 @@ fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
         return record_error(format!("cannot create the printed-jobs folder: {e}"));
     }
     let stem = timestamp_name();
-    let ps_path = dir.join(format!("{stem}.ps"));
+    let ps_path = match claim_staging(&dir, &stem) {
+        Ok(p) => p,
+        Err(e) => return record_error(format!("cannot stage the print job: {e}")),
+    };
     if let Err(e) = std::fs::write(&ps_path, &bytes) {
+        let _ = std::fs::remove_file(&ps_path);
         return record_error(format!("cannot stage the print job: {e}"));
     }
-    let pdf_path = unique_pdf(&dir, &stem);
+    let pdf_path = match reserve_pdf(&dir, &stem) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = std::fs::remove_file(&ps_path);
+            return record_error(format!("cannot name the printed file: {e}"));
+        }
+    };
+    // Distil to a sibling and rename over the reservation, so a reader never
+    // sees a half-written PDF at the final name.
+    let part_path = dir.join(format!(
+        "{}.part",
+        pdf_path.file_name().unwrap_or_default().to_string_lossy()
+    ));
     let Ok(exe) = std::env::current_exe() else {
+        let _ = std::fs::remove_file(&ps_path);
+        let _ = std::fs::remove_file(&pdf_path);
         return record_error("cannot resolve the app path".to_string());
     };
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("distill")
         .arg(&ps_path)
         .arg("--output")
-        .arg(&pdf_path)
+        .arg(&part_path)
         .arg("--preset")
         .arg("printer");
     #[cfg(windows)]
@@ -110,7 +194,16 @@ fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let ok = match cmd.output() {
-        Ok(out) if out.status.success() && pdf_path.is_file() => true,
+        Ok(out) if out.status.success() && part_path.is_file() => {
+            // Replace the reservation with the finished file.
+            match std::fs::rename(&part_path, &pdf_path) {
+                Ok(()) => true,
+                Err(e) => {
+                    record_error(format!("could not finalize the printed file: {e}"));
+                    false
+                }
+            }
+        }
         Ok(out) => {
             record_error(format!(
                 "the print job could not be converted: {}",
@@ -125,6 +218,10 @@ fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
     };
     let _ = std::fs::remove_file(&ps_path);
     if !ok {
+        // Release the reserved name: a zero-byte PDF would look like a
+        // successful print and consume the name permanently.
+        let _ = std::fs::remove_file(&part_path);
+        let _ = std::fs::remove_file(&pdf_path);
         return;
     }
     if let Some(state) = app.try_state::<PrinterState>() {
@@ -159,23 +256,42 @@ pub fn start_listener(app: &AppHandle) {
             *state.listener_status.lock().unwrap() = "listening".to_string();
         }
         for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            // RAW/JetDirect: the client streams the job and closes. Reads are
-            // capped so a runaway writer cannot exhaust the disk staging.
-            let mut bytes = Vec::new();
-            let mut capped = std::io::Read::take(&mut stream, MAX_JOB_BYTES + 1);
-            if capped.read_to_end(&mut bytes).is_err() {
+            let Ok(stream) = stream else { continue };
+            // The read happens on the job thread. On the accept loop, one
+            // client that connects and never closes blocks every later print
+            // until restart.
+            if IN_FLIGHT.load(Ordering::Relaxed) >= MAX_CONCURRENT_JOBS {
+                eprintln!("virtual printer: {MAX_CONCURRENT_JOBS} jobs already in flight, refused");
+                drop(stream);
                 continue;
             }
-            if bytes.is_empty() {
-                continue; // port probes (and the spooler's SNMP pokes) are not jobs
-            }
-            if bytes.len() as u64 > MAX_JOB_BYTES {
-                eprintln!("virtual printer: job over the {MAX_JOB_BYTES}-byte cap, refused");
-                continue;
-            }
+            IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
             let job_app = handle.clone();
-            std::thread::spawn(move || handle_job(&job_app, bytes));
+            std::thread::spawn(move || {
+                let _slot = JobSlot;
+                let mut stream = stream;
+                // Per-read idle timeout: a half-open connection dies on its own
+                // thread instead of holding the listener.
+                let _ = stream.set_read_timeout(Some(READ_IDLE_TIMEOUT));
+                // RAW/JetDirect: the client streams the job and closes. Reads
+                // are capped so a runaway writer cannot exhaust disk staging.
+                let mut bytes = Vec::new();
+                let mut capped = std::io::Read::take(&mut stream, MAX_JOB_BYTES + 1);
+                if capped.read_to_end(&mut bytes).is_err() {
+                    // On timeout `read_to_end` leaves partial bytes in the
+                    // buffer. Distilling a truncated stream yields a
+                    // plausible-looking wrong document, so drop it.
+                    return;
+                }
+                if bytes.is_empty() {
+                    return; // port probes (and the spooler's SNMP pokes) are not jobs
+                }
+                if bytes.len() as u64 > MAX_JOB_BYTES {
+                    eprintln!("virtual printer: job over the {MAX_JOB_BYTES}-byte cap, refused");
+                    return;
+                }
+                handle_job(&job_app, bytes);
+            });
         }
     });
 }
@@ -202,7 +318,12 @@ fn run_powershell(args: &[&str]) -> Result<String, String> {
 
 /// Stage a pure-ASCII script and run it through ONE visible UAC elevation.
 fn run_elevated_script(script_body: &str, label: &str) -> Result<(), String> {
-    let path = std::env::temp_dir().join(format!("opdfs-printer-{label}.ps1"));
+    // Pid-suffixed, as scheduler.rs stages its task XML: a fixed path executed
+    // under RunAs leaves a same-user swap window between write and read.
+    let path = std::env::temp_dir().join(format!(
+        "opdfs-printer-{label}-{}.ps1",
+        std::process::id()
+    ));
     if !script_body.is_ascii() {
         return Err("internal: the printer script must be pure ASCII".to_string());
     }
@@ -283,10 +404,46 @@ mod tests {
         let dir = std::env::temp_dir().join("opdfs-vprint-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let first = unique_pdf(&dir, "Printed 1");
-        std::fs::write(&first, b"x").unwrap();
-        let second = unique_pdf(&dir, "Printed 1");
+        let first = reserve_pdf(&dir, "Printed 1").unwrap();
+        assert_eq!(first.file_name().unwrap(), "Printed 1.pdf");
+        // The reservation is a real file, so the next caller sees it.
+        let second = reserve_pdf(&dir, "Printed 1").unwrap();
         assert_eq!(second.file_name().unwrap(), "Printed 1 (2).pdf");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// N jobs naming themselves in the same second: each must get its own
+    /// staging path and its own output name.
+    #[test]
+    fn concurrent_jobs_never_share_a_path() {
+        let dir = std::env::temp_dir().join("opdfs-vprint-concurrent");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        const N: usize = 16;
+        let stem = "Printed 1700000000"; // one fixed second, on purpose
+        let mut handles = Vec::new();
+        for _ in 0..N {
+            let d = dir.clone();
+            handles.push(std::thread::spawn(move || {
+                let ps = claim_staging(&d, stem).expect("staging");
+                let pdf = reserve_pdf(&d, stem).expect("pdf");
+                (ps, pdf)
+            }));
+        }
+        let claimed: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        let mut ps_paths: Vec<_> = claimed.iter().map(|(p, _)| p.clone()).collect();
+        let mut pdf_paths: Vec<_> = claimed.iter().map(|(_, p)| p.clone()).collect();
+        ps_paths.sort();
+        ps_paths.dedup();
+        pdf_paths.sort();
+        pdf_paths.dedup();
+        assert_eq!(ps_paths.len(), N, "two jobs shared a staging path");
+        assert_eq!(pdf_paths.len(), N, "two jobs shared an output name");
+        for p in &pdf_paths {
+            assert!(p.is_file(), "reservation not actually on disk: {p:?}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

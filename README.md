@@ -159,6 +159,11 @@ spectrapdf tags-list input.pdf
 spectrapdf tags-set input.pdf -o out.pdf --path 0,0 --type H1 --alt "Chart of quarterly totals"
 spectrapdf preflight input.pdf
 
+# Document-level JavaScript — read it, or replace the whole set
+spectrapdf document-js-list input.pdf
+spectrapdf document-js-set input.pdf -o out.pdf --from-json scripts.json
+echo [] | spectrapdf document-js-set input.pdf -o clean.pdf --from-json -   # remove all
+
 # Batch — process every PDF in a directory
 spectrapdf batch C:\pdfs\ -o C:\out\ compress --quality ebook
 ```
@@ -205,12 +210,19 @@ Python 3.14 is embedded automatically — no system install needed.
 # Install Node.js dependencies
 npm install
 
-# Set up embedded Python (first time only)
-powershell -ExecutionPolicy Bypass -File scripts\setup-python-embed.ps1
+# Vendor every bundled runtime (first time only). Each one is a
+# tauri.conf.json resource and must EXIST before a build or `npm run dev`
+# will succeed, so this is not optional — provisioning only Python leaves
+# the build failing on a missing resource directory.
+npm run prepackage
 
 # Start development (Tauri dev server — launches Vite + Rust backend)
 npm run dev
 ```
+
+`npm run prepackage` runs the six provisioning steps in order: embedded Python,
+Ghostscript, the edit fonts, LibreOffice, native Tesseract, and the OCR
+language models. To run one on its own, see **Individual steps** below.
 
 ## Build
 
@@ -219,7 +231,7 @@ npm run dev
 npm run package
 ```
 
-This runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it), `scripts/sync-edit-fonts.ps1` (the hash-pinned edit faces and their OFL licence texts — Liberation, Libertinus, Noto Sans CJK SC, IBM Plex Sans Arabic and Noto Sans Hebrew), and `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it) — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, produces the NSIS installer). Every one of those four is a `tauri.conf.json` resource, so all four must have run before a build can succeed.
+This runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it), `scripts/sync-edit-fonts.ps1` (the hash-pinned edit faces and their OFL licence texts — Liberation, Libertinus, Noto Sans CJK SC, IBM Plex Sans Arabic and Noto Sans Hebrew), `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it), `scripts/bundle-tesseract.ps1` (the pinned, SHA-256-verified native OCR engine, plus every redistribution notice for the ~50 libraries it links — the build REFUSES if any shipped binary lacks one), and `scripts/sync-ocr-assets.mjs` (the 47 pinned OCR language models) — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, produces the NSIS installer). Five of those produce a `tauri.conf.json` resource directory (`python`, `ghostscript`, `fonts`, `libreoffice`, `tesseract`), and **every one must exist before a build can succeed** — Tauri validates resource paths even with `--no-bundle`.
 
 Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 
@@ -227,7 +239,7 @@ Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 
 | Command | What it does |
 |---------|-------------|
-| `npm run prepackage` | Vendors all four runtimes — embedded Python, Ghostscript, edit fonts, LibreOffice (no compile) |
+| `npm run prepackage` | Vendors every bundled runtime — embedded Python, Ghostscript, edit fonts, LibreOffice, native Tesseract + OCR models (no compile) |
 | `npm run build:renderer` | Vite production build of the React frontend |
 | `npm run build` | `cargo tauri build` — Rust compile + NSIS installer (assumes prepackage already ran) |
 | `npm run package` | All of the above in sequence |
@@ -269,7 +281,7 @@ versions: [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 | Structural operations (merge, split, rotate, delete), redaction, in-place text & paragraph editing, watermarks, encryption, repair tiers 1/3 | pikepdf / QPDF | MPL-2.0 / Apache-2.0 |
 | Text extraction, font metrics & encodings for the text editor | pdfminer.six | MIT |
 | Digital signatures — signing and verification | pyHanko + cryptography | MIT / Apache-2.0+BSD |
-| OCR — single documents and batch folder mirroring | Tesseract via tesseract.js | Apache-2.0 |
+| OCR — single documents and batch folder mirroring | Native Tesseract (bundled, separate process) | Apache-2.0 |
 | Compress, grayscale, PDF/A, print rasterization, page-image export, repair tier 2, **Create PDF from PostScript (distilling)** | Ghostscript (vendored upstream, separate process) | AGPL-3.0 |
 | Export to Word / RTF / ODT / HTML | LibreOffice (bundled, separate process) | MPL-2.0 |
 | Compatible-font fallback and OpenType features for text editing | Liberation + Libertinus faces, fontTools | SIL OFL 1.1 / MIT |
@@ -300,7 +312,7 @@ spectrapdf/
 │   │   │   ├── canvas/        #   the reading view + organize board
 │   │   │   └── navpane/       #   the navigation pane panels
 │   │   ├── panels/            # One tool panel per operation (shown in the right dock)
-│   │   ├── search/, ocr/      # Find/Search engine, tesseract.js OCR
+│   │   ├── search/, ocr/      # Find/Search engine, OCR language model UI
 │   │   ├── hooks/, lib/       # Engine bridge, commit gate, pdf builders
 │   │   └── testHarness.ts     # e2e hooks (compiled in only with VITE_E2E)
 │   └── engine/                # Python PDF engine (one file per operation)

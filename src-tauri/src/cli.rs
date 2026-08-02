@@ -121,6 +121,10 @@ pub enum CliCommand {
     TagsDelete(TagsDeleteArgs),
     /// Create an empty structure tag under a parent
     TagsAdd(TagsAddArgs),
+    /// List document-level JavaScript (the /Names /JavaScript tree) as JSON
+    DocumentJsList(AccessibilityArgs),
+    /// Replace the document-level JavaScript set from a JSON file ('-' = stdin)
+    DocumentJsSet(DocumentJsSetArgs),
     /// Export a PDF to Word/HTML/RTF/ODT via bundled LibreOffice
     Export(ExportArgs),
     /// Export PDF pages as raster images (PNG/JPEG per page, or multi-page TIFF)
@@ -639,6 +643,19 @@ pub struct LayerListArgs {
 pub struct AccessibilityArgs {
     /// Input PDF file
     pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct DocumentJsSetArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// JSON array of {"name","js"} objects, from a file or '-' for stdin.
+    /// An empty array removes every document-level script.
+    #[arg(long = "from-json")]
+    pub from_json: String,
 }
 
 #[derive(Args)]
@@ -2552,6 +2569,40 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "edits": edits,
                     "flatten": args.flatten,
                     "font_dir": resolve_fonts().to_string_lossy().to_string(),
+                }),
+            )
+        }
+
+        CliCommand::DocumentJsList(args) => engine.call(
+            "list_document_js",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::DocumentJsSet(args) => {
+            let raw = if args.from_json == "-" {
+                use std::io::Read;
+                let mut s = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut s)
+                    .map_err(|e| format!("failed to read JSON from stdin: {}", e))?;
+                s
+            } else {
+                std::fs::read_to_string(&args.from_json)
+                    .map_err(|e| format!("failed to read {}: {}", args.from_json, e))?
+            };
+            let parsed: Value = serde_json::from_str(&raw)
+                .map_err(|e| format!("invalid document-JavaScript JSON: {}", e))?;
+            // An empty array is meaningful (remove every script), so only a
+            // non-array is refused.
+            if !parsed.is_array() {
+                return Err("document-js-set: the JSON must be an array of {name, js}".to_string());
+            }
+            engine.call(
+                "set_document_js",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "scripts": parsed,
                 }),
             )
         }
