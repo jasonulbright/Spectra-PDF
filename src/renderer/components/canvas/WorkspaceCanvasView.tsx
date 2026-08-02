@@ -4,6 +4,7 @@ import { usePdfProxies } from '../../hooks/usePdfProxies';
 import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
 import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
+import { primeSystemFonts } from '../../lib/system-fonts';
 import {
   hasCustomLabels,
   labelFor,
@@ -657,6 +658,13 @@ export function WorkspaceCanvasView({
   const [signError, setSignError] = useState<string | null>(null);
   const [signDone, setSignDone] = useState<{ signer: string | null; output: string; ok: boolean } | null>(null);
   const { call: engineCall, callRaw: engineCallRaw } = useEngine();
+  // 9.T6: prime the installed-font listing ONCE per session. It is a
+  // property of the machine, not of any document, so it is fetched here
+  // (where the engine handle lives) and read from the module cache by the
+  // pickers deep in the page tree.
+  useEffect(() => {
+    primeSystemFonts(engineCall);
+  }, [engineCall]);
   // P5 follow-on: fetch the focused document's page labels. Declared HERE
   // rather than beside `pageLabels` because the engine handle is only in
   // scope from this line down.
