@@ -281,31 +281,6 @@ class TestAuthoredTextShapes:
         assert not _is_shaped(out)
 
 
-def _walk_fonts(pdf):
-    """Every font dict reachable from page 1, including inside form XObjects
-    (a watermark's appearance lives in one)."""
-    seen = set()
-
-    def visit(res):
-        if res is None:
-            return
-        fonts = res.get("/Font")
-        if fonts is not None:
-            for k in fonts.keys():
-                yield str(k), fonts[k]
-        xo = res.get("/XObject")
-        if xo is None:
-            return
-        for k in xo.keys():
-            obj = xo[k]
-            if obj.objgen in seen:
-                continue
-            seen.add(obj.objgen)
-            yield from visit(obj.get("/Resources"))
-
-    yield from visit(pdf.pages[0].obj.get("/Resources"))
-
-
 def _is_shaped(path) -> bool:
     """Did shaping actually happen — judged by the OUTCOME, not the plumbing.
 
@@ -323,8 +298,17 @@ def _is_shaped(path) -> bool:
     import re
 
     with pikepdf.open(str(path)) as pdf:
-        for _name, font in _walk_fonts(pdf):
-            tou = font.get("/ToUnicode")
+        # EVERY font in the document, not just the ones page 1's /Resources
+        # can reach: a form-field appearance carries its own /Resources on the
+        # /AP stream, so a page-scoped walk reported the form fill unshaped
+        # when it had composed the accent correctly. Scoping a check more
+        # narrowly than the feature is the same mistake in a smaller hat.
+        for obj in pdf.objects:
+            if not isinstance(obj, pikepdf.Dictionary):
+                continue
+            if str(obj.get("/Type", "")) != "/Font":
+                continue
+            tou = obj.get("/ToUnicode")
             if tou is None:
                 continue
             data = bytes(tou.read_bytes()).decode("latin-1")
@@ -336,3 +320,71 @@ def _is_shaped(path) -> bool:
                 if len(text) > 1:
                     return True
     return False
+
+
+class TestByteEmittersShape:
+    """9.T27 — the two surfaces that write appearance-stream BYTES by hand.
+
+    Watermarks and form-field appearances share `engine/rtl_text.py`, which
+    used to return None for anything left-to-right. Both are claimed in the
+    release notes, so both get a pin: a claim without one is how the first
+    two 1.0.12 releases got cancelled.
+    """
+
+    def _fixture(self, tmp_path):
+        from pikepdf import Dictionary, Name
+
+        src = tmp_path / "wm-src.pdf"
+        doc = pikepdf.new()
+        font = doc.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1,
+                       BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
+        )
+        page = doc.add_blank_page(page_size=(400, 400))
+        page.Resources = Dictionary(Font=Dictionary(F1=font))
+        page.Contents = doc.make_stream(b"BT /F1 12 Tf 50 300 Td (ORIGINAL) Tj ET")
+        doc.save(str(src))
+        doc.close()
+        return str(src)
+
+    def test_a_watermark_composes_a_combining_accent(self, tmp_path):
+        from engine.watermark import watermark
+
+        src = self._fixture(tmp_path)
+        out = str(tmp_path / "wm.pdf")
+        watermark(file=src, output=out, text="cafe\u0301", font_dir=FONTS, angle=0)
+        assert _is_shaped(out)
+
+    def test_a_plain_watermark_is_byte_identical(self, tmp_path):
+        """The other half, and the reason this is safe to apply everywhere:
+        an ordinary stamp must not enter the shaping path at all."""
+        from engine.watermark import watermark
+
+        src = self._fixture(tmp_path)
+        a = str(tmp_path / "a.pdf")
+        watermark(file=src, output=a, text="CONFIDENTIAL", font_dir=FONTS, angle=0)
+        assert not _is_shaped(a)
+
+    def test_a_form_value_composes_a_combining_accent(self, tmp_path):
+        from engine.forms import fill_form_fields
+
+        form = os.path.join(
+            os.path.dirname(__file__), "fixtures", "form-pdflib.pdf"
+        )
+        if not os.path.isfile(form):
+            pytest.skip("form fixture not present")
+        out = str(tmp_path / "filled.pdf")
+        fill_form_fields(form, out, {"applicant.name": "cafe\u0301"}, font_dir=FONTS)
+        assert _is_shaped(out)
+
+    def test_a_plain_form_value_is_byte_identical(self, tmp_path):
+        from engine.forms import fill_form_fields
+
+        form = os.path.join(
+            os.path.dirname(__file__), "fixtures", "form-pdflib.pdf"
+        )
+        if not os.path.isfile(form):
+            pytest.skip("form fixture not present")
+        out = str(tmp_path / "plain.pdf")
+        fill_form_fields(form, out, {"applicant.name": "Jane Doe"}, font_dir=FONTS)
+        assert not _is_shaped(out)
