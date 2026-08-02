@@ -11,6 +11,9 @@ import pytest
 
 from engine.pdf_fonts import font_capability, _strip_subset_prefix
 
+# HIRAGANA LETTER A — kept as a name so the byte literals below stay ASCII.
+KANA = chr(0x3042)
+
 
 def _tounicode_stream(pdf, mapping: dict[int, str]) -> pikepdf.Object:
     """A minimal, valid ToUnicode CMap covering `mapping` (code → unicode)."""
@@ -359,17 +362,50 @@ class TestPredefinedCjkCMaps:
         assert not cap.editable
         assert "no recoverable mapping" in (cap.reason or "")
 
-    def test_legacy_vertical_cmap_still_refuses(self):
-        # Non-Unicode legacy encodings refuse regardless of writing mode —
-        # the 9.B4a acceptance is the Uni*-UCS2-V/Identity-V family only.
+    def test_legacy_vertical_cmap_edits(self):
+        # 9.T10 INVERSION (was: "non-Unicode legacy encodings refuse
+        # regardless of writing mode"). Both refusals were about CODE WIDTH,
+        # not about the encoding family: GBK-EUC mixes 1- and 2-byte codes,
+        # which the fixed-2-byte walk could not read. The pipeline now takes
+        # the CMap's own trie, so the writing mode is the only thing the
+        # -V suffix still decides.
         pdf = pikepdf.new()
         cap = font_capability(self._cjk_font(pdf, {0x41: "A"}, "GBK-EUC-V"))
-        assert not cap.editable and "encoding" in (cap.reason or "")
+        assert cap.editable and cap.vertical is True
+        assert cap.decode(b"A") == "A"
 
-    def test_non_unicode_legacy_cmap_refuses(self):
+    def test_legacy_cmap_edits_with_mixed_code_widths(self):
+        # 9.T10 INVERSION. Shift-JIS is the shape the fixed walk could never
+        # read: ASCII is ONE byte and kana/kanji are TWO, in the same string.
         pdf = pikepdf.new()
-        cap = font_capability(self._cjk_font(pdf, {0x41: "A"}, "GBK-EUC-H"))
-        assert not cap.editable and "encoding" in (cap.reason or "")
+        cap = font_capability(
+            self._cjk_font(pdf, {0x41: "A", 0x82A0: KANA}, "90ms-RKSJ-H")
+        )
+        assert cap.editable
+        assert cap.decode(b"A") == "A"
+        assert cap.decode(b"\x82\xa0") == KANA
+        # ...and MIXED in one string, which is the whole point: a fixed-width
+        # walk splits this into either three codes or one-and-a-half.
+        assert cap.decode(b"A\x82\xa0A") == "A" + KANA + "A"
+        assert cap.codes(b"A\x82\xa0") == [(0x41, 1), (0x82A0, 2)]
+        assert cap.code_count(b"A\x82\xa0") == 2
+        assert cap.encode("A" + KANA) == b"A\x82\xa0"
+
+    def test_legacy_cmap_word_spacing_never_fires_on_a_trail_byte(self):
+        # Tw applies to the SINGLE-BYTE code 32 only. A two-byte code whose
+        # trail byte happens to be 0x20 must not be counted as a space —
+        # `single_byte_codes()` is what keeps a raw byte count from
+        # inventing word spacing mid-character.
+        pdf = pikepdf.new()
+        cap = font_capability(self._cjk_font(pdf, {0x41: "A"}, "90ms-RKSJ-H"))
+        assert cap.single_byte_codes() is False
+        simple = font_capability(
+            pikepdf.Dictionary(
+                Type=Name("/Font"), Subtype=Name("/Type1"),
+                BaseFont=Name("/Helvetica"), Encoding=Name("/WinAnsiEncoding"),
+            )
+        )
+        assert simple.single_byte_codes() is True
 
     def test_unicode_cmap_without_tounicode_RECOVERS_via_registry(self):
         # T8 INVERSION (was: refusal) — Adobe-GB1's registry table stands in
@@ -389,15 +425,27 @@ class TestPredefinedCjkCMaps:
         assert not cap.editable and "encoding" in (cap.reason or "")
 
     @pytest.mark.parametrize("enc", ["UniGB-UTF8-H", "UniGB-UTF16-H", "UniGB-UTF32-H"])
-    def test_non_2byte_unicode_cmaps_refuse_not_corrupt(self, enc):
-        # Review-caught CRITICAL: these are Uni*-H but NOT fixed-2-byte
-        # (UTF8=3B for CJK, UTF32=4B, UTF16=surrogates), so the 2-byte
-        # pipeline would SILENTLY CORRUPT them. Accept boundary is now
-        # UCS2-only — they must refuse, never reach editable=True.
+    def test_non_2byte_unicode_cmaps_now_edit(self, enc):
+        # 9.T11 INVERSION. These are Uni*-H but NOT fixed-2-byte (UTF-8 is
+        # 3 bytes for CJK, UTF-32 is 4, UTF-16 uses surrogate pairs), and
+        # the fixed-2-byte pipeline SILENTLY CORRUPTED them — which is why
+        # B2 refused them rather than accept the corruption. The pipeline
+        # reads the CMap's own trie now, so the width is no longer
+        # something the gate has to promise.
+        # The CODE is the character in the CMap's OWN scheme — which is the
+        # entire point: it is 3 bytes in UTF-8, 4 in UTF-32, 2 in UTF-16.
+        codec = {"UTF8": "utf-8", "UTF16": "utf-16-be", "UTF32": "utf-32-be"}[
+            enc.split("-")[1]
+        ]
+        data = "中".encode(codec)  # noqa: RUF001
+        code = int.from_bytes(data, "big")
         pdf = pikepdf.new()
-        cap = font_capability(self._cjk_font(pdf, {0x4E2D: "中"}, enc))  # noqa: RUF001
-        assert not cap.editable
-        assert "encoding" in (cap.reason or "")
+        cap = font_capability(self._cjk_font(pdf, {code: "中"}, enc))  # noqa: RUF001
+        assert cap.editable, cap.reason
+        assert cap.decode(data) == "中"  # noqa: RUF001
+        assert cap.encode("中") == data  # noqa: RUF001
+        assert cap.code_count(data) == 1
+        assert cap.codes(data) == [(code, len(data))]
 
     def test_ucs2_hw_variant_still_accepts(self):
         # -UCS2-HW-H (half-width) is also fixed 2-byte — must stay editable.

@@ -143,8 +143,11 @@ def _show_segments(operator: str, operands: list) -> list:
 
 
 def _spaces_in(data: bytes, cap: FontCapability) -> int:
-    # Tw applies to the SINGLE-BYTE code 32 only (spec) — never CID fonts.
-    if cap._code_bytes != 1:
+    # Tw applies to the SINGLE-BYTE code 32 only (spec) — never CID fonts,
+    # and never a multi-byte code that merely CONTAINS 0x20 (9.T10: a
+    # Shift-JIS trail byte can be 0x20-adjacent, so counting raw bytes would
+    # invent word spacing mid-character).
+    if not cap.single_byte_codes():
         return 0
     return data.count(0x20)
 
@@ -163,7 +166,7 @@ def _run_metrics(
         if cap is not None:
             text_parts.append(cap.decode(seg))
             width += cap.decoded_width(seg) / 1000.0 * state.font_size
-            n_codes = len(seg) if cap._code_bytes == 1 else len(seg) // 2
+            n_codes = cap.code_count(seg)
             width += state.char_spacing * n_codes
             width += state.word_spacing * _spaces_in(seg, cap)
         else:
@@ -547,8 +550,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     )
                     new_raw = (
                         cap.decoded_width(encoded) / 1000.0 * eff_size
-                        + gts.char_spacing
-                        * (len(encoded) if cap._code_bytes == 1 else len(encoded) // 2)
+                        + gts.char_spacing * cap.code_count(encoded)
                         + gts.word_spacing * _spaces_in(encoded, cap)
                     )
                     styled = edit.style_size is not None or edit.style_color is not None
