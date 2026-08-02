@@ -94,6 +94,7 @@ from engine.page_vectors import (
     transform_page_vector,
 )
 from engine.distill import distill
+from engine.system_fonts import list_system_fonts
 from engine.text_authoring import add_text_box, measure_text_box
 from engine.text_paragraphs import (
     list_text_paragraphs,
@@ -220,6 +221,7 @@ def main() -> None:
     server.register("replace_paragraph_text", replace_paragraph_text)
     server.register("merge_paragraph_with_previous", merge_paragraph_with_previous)
     server.register("distill", distill)
+    server.register("list_system_fonts", list_system_fonts)
     server.register("add_text_box", add_text_box)
     server.register("measure_text_box", measure_text_box)
     server.register("print", print_pdf)
