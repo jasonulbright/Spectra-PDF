@@ -269,7 +269,12 @@ export type CanvasTool =
   // Zoom marquee (N3, Acrobat's Z): band a region, the reading view zooms to
   // it. The THIRD ownerless mode beside select/hand — pure navigation, no
   // tool, commits nothing.
-  | 'zoommarquee';
+  | 'zoommarquee'
+  // Crop draw (P5b): band the region to KEEP; the Page Boxes panel receives
+  // it as per-edge insets and commits through the same `set_page_boxes` op a
+  // typed crop uses. The band is a REQUEST, not page state — nothing changes
+  // until the panel's Apply, so a mis-drag costs a redraw, not an undo.
+  | 'cropdraw';
 
 // The tab-strip model (Phase 4 M2, § 3.1): Home | Tools | one tab per open
 // document. A doc tab focuses that file and shows the document pane (at M2:

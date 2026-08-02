@@ -98,7 +98,7 @@ export function cycledTab(state: AppState, delta: 1 | -1): FocusedTab {
 const CANVAS_TOOLS = [
   'select', 'hand', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
   'formfields', 'edit', 'addtext', 'addimage', 'measuredist', 'measureperim', 'measurearea',
-  'measurecal', 'shape', 'callout', 'note', 'inkerase', 'zoommarquee',
+  'measurecal', 'shape', 'callout', 'note', 'inkerase', 'zoommarquee', 'cropdraw',
 ] as const;
 
 export const TOOL_TITLES: Record<CanvasTool, string> = {
@@ -108,7 +108,7 @@ export const TOOL_TITLES: Record<CanvasTool, string> = {
   addimage: 'Add Image',
   measuredist: 'Distance', measureperim: 'Perimeter', measurearea: 'Area', measurecal: 'Calibrate',
   shape: 'Shape', callout: 'Callout', note: 'Sticky Note', inkerase: 'Eraser',
-  zoommarquee: 'Marquee Zoom',
+  zoommarquee: 'Marquee Zoom', cropdraw: 'Draw Crop',
 };
 
 // CANVAS_TOOLS must be a literal tuple (COMMAND_IDS builds `tools.${t}` from
@@ -303,7 +303,8 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   repair: [],
   watermark: [],
   headerfooter: [],
-  pagebox: [],
+  // P5b: pagebox owns the `cropdraw` mode, so its strip needs a way out.
+  pagebox: ['tools.close'],
   pagelabels: [],
   attachments: [],
   portfolio: [],
