@@ -35,6 +35,7 @@ T22, still open, and dropping the offsets degrades vowel-mark placement on
 fully-vocalised text rather than corrupting the letters.
 """
 
+import os
 from functools import lru_cache
 
 # Cursively joining scripts — the ones whose letters take contextual forms,
@@ -249,6 +250,49 @@ def program_bytes(font_dict) -> bytes | None:
                 return bytes(desc[key].read_bytes())
     except Exception:
         return None
+    return None
+
+
+def in_place_face(font_dict) -> str | None:
+    """The document font's OWN program as a shapeable temp file, or None —
+    9.T26.
+
+    `can_shape_in_place` checks the PDF-side shape (Type0/Identity-H,
+    Identity CIDToGIDMap, an embedded program); this extracts the program
+    and checks the FONT-side half: it must still carry a unicode cmap (to
+    map the letters in) and a GSUB table (to do the joining). Subsetters
+    routinely drop both — a PDF that draws Arabic by glyph id has no use
+    for either — and HarfBuzz without GSUB happily produces ISOLATED forms,
+    which is broken output wearing a working font's name. So GSUB absence
+    means None here, never a degraded shape.
+
+    The caller owns the returned temp file and must unlink it."""
+    import tempfile
+
+    from fontTools.ttLib import TTFont
+
+    if not can_shape_in_place(font_dict):
+        return None
+    raw = program_bytes(font_dict)
+    if not raw:
+        return None
+    tmp = tempfile.NamedTemporaryFile(suffix=".ttf", delete=False)
+    try:
+        tmp.write(raw)
+        tmp.close()
+        tt = TTFont(tmp.name, fontNumber=0, lazy=True)
+        try:
+            ok = "GSUB" in tt and bool(tt.getBestCmap())
+        finally:
+            tt.close()
+        if ok:
+            return tmp.name
+    except Exception:
+        pass
+    try:
+        os.unlink(tmp.name)
+    except OSError:
+        pass
     return None
 
 
