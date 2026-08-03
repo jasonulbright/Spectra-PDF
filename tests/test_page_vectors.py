@@ -493,9 +493,10 @@ class TestNestedVector:
         assert v["line_width"] == 6.0
         assert v["stroke"] == [0.0, 0.0, 1.0]
 
-    def test_depth_2_nesting_lists_but_refuses_edit(self, tmp_dir):
-        # form OUTER draws form INNER, which draws the rect → depth 2. It lists
-        # (visible) but edits refuse in v1 (copying a chain of forms is scope).
+    def _deep_pdf(self, tmp_dir, outer_twice=False, name="deep.pdf"):
+        """form OUTER draws form INNER, which draws the rect → depth 2.
+        `outer_twice` stamps OUTER at two page positions (the shared-form
+        instance test: an edit must touch exactly one)."""
         pdf = pikepdf.new()
         inner = pikepdf.Stream(
             pdf, b"5 5 20 20 re f\n", Type=Name.XObject, Subtype=Name.Form, BBox=[0, 0, 30, 30]
@@ -505,16 +506,68 @@ class TestNestedVector:
             Resources=Dictionary(XObject=Dictionary(In=pdf.make_indirect(inner))),
         )
         pg = pdf.add_blank_page(page_size=(612, 792))
-        pg.Contents = pdf.make_stream(b"q /Out Do Q\n")
+        if outer_twice:
+            pg.Contents = pdf.make_stream(
+                b"q 1 0 0 1 0 0 cm /Out Do Q q 1 0 0 1 200 0 cm /Out Do Q\n"
+            )
+        else:
+            pg.Contents = pdf.make_stream(b"q /Out Do Q\n")
         pg.Resources = Dictionary(XObject=Dictionary(Out=pdf.make_indirect(outer)))
-        path = os.path.join(tmp_dir, "deep.pdf")
+        path = os.path.join(tmp_dir, name)
+        pdf.save(path)
+        pdf.close()
+        return path
+
+    def test_depth_2_delete_works_via_chain_copy(self, tmp_dir):
+        # P8 slice C LIFTED the depth refusal (this pin used to assert
+        # "more than one form deep"): the chain copy-on-write edits any
+        # depth ≤ MAX_FORM_DEPTH.
+        path = self._deep_pdf(tmp_dir)
+        vs = _vecs(path)
+        assert len(vs) == 1 and vs[0]["nested"] is True
+        out = os.path.join(tmp_dir, "o.pdf")
+        delete_page_vector(path, out, 1, 0)
+        assert _vecs(out) == []
+
+    def test_depth_2_edit_touches_one_instance_of_a_shared_chain(self, tmp_dir):
+        # OUTER stamped twice: restyling the first instance's rect must leave
+        # the second instance untouched — the chain copies fork ONLY the
+        # edited path's ancestry.
+        path = self._deep_pdf(tmp_dir, outer_twice=True)
+        vs = _vecs(path)
+        assert len(vs) == 2
+        out = os.path.join(tmp_dir, "o.pdf")
+        restyle_page_vector(path, out, 1, 0, fill=[0, 1, 0])
+        after = _vecs(out)
+        assert len(after) == 2
+        assert after[0]["fill"] == [0.0, 1.0, 0.0]
+        assert after[1]["fill"] == [0.0, 0.0, 0.0]  # the sibling instance kept black
+
+    def test_depth_3_transform_works(self, tmp_dir):
+        pdf = pikepdf.new()
+        core = pikepdf.Stream(
+            pdf, b"5 5 20 20 re f\n", Type=Name.XObject, Subtype=Name.Form, BBox=[0, 0, 30, 30]
+        )
+        mid = pikepdf.Stream(
+            pdf, b"q /C Do Q\n", Type=Name.XObject, Subtype=Name.Form, BBox=[0, 0, 30, 30],
+            Resources=Dictionary(XObject=Dictionary(C=pdf.make_indirect(core))),
+        )
+        top = pikepdf.Stream(
+            pdf, b"q /M Do Q\n", Type=Name.XObject, Subtype=Name.Form, BBox=[0, 0, 30, 30],
+            Resources=Dictionary(XObject=Dictionary(M=pdf.make_indirect(mid))),
+        )
+        pg = pdf.add_blank_page(page_size=(612, 792))
+        pg.Contents = pdf.make_stream(b"q /T Do Q\n")
+        pg.Resources = Dictionary(XObject=Dictionary(T=pdf.make_indirect(top)))
+        path = os.path.join(tmp_dir, "deep3.pdf")
         pdf.save(path)
         pdf.close()
         vs = _vecs(path)
-        assert len(vs) == 1 and vs[0]["nested"] is True  # listed
+        assert len(vs) == 1
         out = os.path.join(tmp_dir, "o.pdf")
-        with pytest.raises(ValueError, match="more than one form deep"):
-            delete_page_vector(path, out, 1, 0)
+        transform_page_vector(path, out, 1, 0, [20.0, 0.0, 0.0, 20.0, 300.0, 300.0])
+        after = _vecs(out)
+        assert after[0]["rect"] == pytest.approx([300, 300, 320, 320])
 
 
 class TestTransformVector:
@@ -751,3 +804,108 @@ class TestRestyleVector:
         restyle_page_vector(a, b, 1, 0, fill=[0, 0, 1])
         assert _ops(b).count("q") == 1
         assert _vecs(b)[0]["fill"] == [0.0, 0.0, 1.0]  # last write wins
+
+
+def _shading_resources(pdf):
+    """A minimal axial /Shading resource table (/Sh0)."""
+    func = Dictionary(
+        FunctionType=2,
+        Domain=pikepdf.Array([0, 1]),
+        C0=pikepdf.Array([0]),
+        C1=pikepdf.Array([1]),
+        N=1,
+    )
+    sh = Dictionary(
+        ShadingType=2,
+        ColorSpace=Name("/DeviceGray"),
+        Coords=pikepdf.Array([0, 0, 1, 0]),
+        Function=func,
+        Extend=pikepdf.Array([True, True]),
+    )
+    return Dictionary(Shading=Dictionary(Sh0=sh))
+
+
+def _sh_pdf(tmp_dir, content: bytes, name="sh.pdf") -> str:
+    path = os.path.join(tmp_dir, name)
+    pdf = pikepdf.new()
+    pg = pdf.add_blank_page(page_size=(612, 792))
+    pg.Contents = pdf.make_stream(content)
+    pg.Resources = _shading_resources(pdf)
+    pdf.save(path)
+    pdf.close()
+    return path
+
+
+class TestShadingObjects:
+    """P8 slice D: `sh` paints are OBJECTS — the king selects gradient
+    fills. The gradient-fill idiom (`q <clip> W n [gs] sh Q`) recognizes as
+    a frame: delete removes it whole (clip included), transform moves clip
+    AND shading together. A bare `sh` lists and deletes but refuses
+    transform by name; restyle always refuses (nothing to recolour)."""
+
+    IDIOM = b"q 100 100 200 150 re W n /Sh0 sh Q\n"
+
+    def test_idiom_lists_with_the_clip_rect(self, tmp_dir):
+        src = _sh_pdf(tmp_dir, self.IDIOM)
+        vs = _vecs(src)
+        assert len(vs) == 1
+        assert vs[0]["kind"] == "shading"
+        assert vs[0]["rect"] == pytest.approx([100, 100, 300, 250])
+        assert vs[0]["fill"] is None and vs[0]["stroke"] is None
+
+    def test_shading_interleaves_the_path_ordinal_space(self, tmp_dir):
+        src = _sh_pdf(
+            tmp_dir,
+            b"1 0 0 rg 10 10 20 20 re f\n" + self.IDIOM + b"0 0 1 rg 400 400 20 20 re f\n",
+        )
+        vs = _vecs(src)
+        assert [v["kind"] for v in vs] == ["fill", "shading", "fill"]
+
+    def test_unclipped_sh_lists_with_the_page_box(self, tmp_dir):
+        src = _sh_pdf(tmp_dir, b"/Sh0 sh\n")
+        vs = _vecs(src)
+        assert vs[0]["kind"] == "shading"
+        assert vs[0]["rect"] == pytest.approx([0, 0, 612, 792])
+
+    def test_framed_delete_removes_the_whole_frame_and_sweeps(self, tmp_dir):
+        src = _sh_pdf(tmp_dir, self.IDIOM + b"1 0 0 rg 400 400 20 20 re f\n")
+        out = os.path.join(tmp_dir, "o.pdf")
+        delete_page_vector(src, out, 1, 0)
+        vs = _vecs(out)
+        assert [v["kind"] for v in vs] == ["fill"]  # the rect survives
+        ops = _ops(out)
+        assert "sh" not in ops and "W" not in ops  # frame gone whole
+        with pikepdf.open(out) as pdf:
+            res = pdf.pages[0].obj["/Resources"]
+            shd = res.get("/Shading")
+            names = {str(k) for k in shd.keys()} if shd is not None else set()
+            assert "/Sh0" not in names  # the orphan shading swept
+
+    def test_bare_sh_deletes_but_refuses_transform(self, tmp_dir):
+        src = _sh_pdf(tmp_dir, b"q 100 100 200 150 re W n /Sh0 sh 0 0 0 rg Q\n")
+        # The trailing `rg` breaks the close-immediately rule → unrecognized.
+        vs = _vecs(src)
+        assert vs[0]["kind"] == "shading"
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="recognized gradient-fill frame"):
+            transform_page_vector(src, out, 1, 0, [200.0, 0.0, 0.0, 150.0, 0.0, 0.0])
+        delete_page_vector(src, out, 1, 0)
+        assert _vecs(out) == []
+        assert "sh" not in _ops(out)  # only the sh op dropped; clip remains
+
+    def test_framed_transform_moves_clip_and_shading_together(self, tmp_dir):
+        src = _sh_pdf(tmp_dir, self.IDIOM)
+        out = os.path.join(tmp_dir, "o.pdf")
+        target = [100.0, 0.0, 0.0, 75.0, 350.0, 400.0]
+        transform_page_vector(src, out, 1, 0, target)
+        vs = _vecs(out)
+        assert vs[0]["kind"] == "shading"
+        # The re-listed rect (the MOVED clip) lands exactly on the target box.
+        assert vs[0]["rect"] == pytest.approx([350, 400, 450, 475])
+
+    def test_restyle_refuses_a_shading(self, tmp_dir):
+        src = _sh_pdf(tmp_dir, self.IDIOM)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="no stroke or fill"):
+            restyle_page_vector(src, out, 1, 0, fill=[1, 0, 0])
+        assert not os.path.exists(out)
