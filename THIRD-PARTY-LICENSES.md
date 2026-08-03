@@ -176,9 +176,14 @@ License text shipped at: `resources/fonts/LICENSE-NotoHebrew-OFL.txt`
 `bundle-tesseract.ps1` ships `tesseract.exe` plus **every DLL beside it** — 51
 today — enumerated rather than hand-listed so the copy set cannot go stale when
 upstream changes its dependencies. The upstream installer supplies notices for
-only two of those 52 binaries, so the rest are fetched from their canonical
-upstreams by `scripts/fetch-tesseract-licenses.ps1`, pinned by SHA-256, and
-shipped at **`resources/tesseract/licenses/`**.
+only two of those 52 binaries. The rest were collected once from their
+canonical upstreams by `scripts/fetch-tesseract-licenses.ps1` — a maintenance
+tool run only when the pinned Tesseract build changes — reviewed, and checked
+in at `scripts/tesseract-licenses/`, each file naming its source URL on its
+first line; the build copies them, offline, to
+**`resources/tesseract/licenses/`**. Git is the integrity record for those
+texts, and the SHA-256 pin on the Tesseract build itself is what freezes which
+library versions the notices apply to.
 
 The mapping from each shipped file to its component and notice is
 `scripts/tesseract-licenses.tsv`, and **the build refuses to produce an

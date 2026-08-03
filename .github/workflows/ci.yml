@@ -72,6 +72,17 @@ jobs:
       - name: Rust tests
         run: cd src-tauri && cargo test
 
+      # The COM scheduler tests are #[ignore]d locally because they write to
+      # the machine's real task store. The hosted runner IS the fresh machine
+      # — no `\Spectra PDF\` folder exists — so this run is the standing
+      # fresh-install acceptance for scheduling, on a Server SKU (the class a
+      # dev machine cannot reproduce: its folder already exists). RegisterTask
+      # is not DOCUMENTED to create missing folders; registration ensures the
+      # folder itself rather than leaning on undocumented behavior, and this
+      # job is what proves that end to end on every push.
+      - name: Rust COM scheduler tests (fresh task store)
+        run: cd src-tauri && cargo test scheduler -- --ignored
+
   test-engine:
     name: Python Engine Tests
     runs-on: windows-latest
