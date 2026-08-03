@@ -252,7 +252,8 @@ is no longer distributed.
 Bundled into the WebView2 renderer (see `package.json` for exact versions):
 React (MIT), pdf.js / pdfjs-dist (Apache-2.0), pdf-lib (MIT),
 d3-selection and d3-zoom (ISC), Radix UI (MIT), the @tauri-apps JS API and
-plugin packages (MIT / Apache-2.0), Tailwind CSS (MIT).
+plugin packages (MIT / Apache-2.0), Tailwind CSS (MIT), i18next and
+react-i18next (MIT).
 
 Rust crates compiled into the backend are listed in `src-tauri/Cargo.toml` /
 `Cargo.lock`; the complete per-crate license and notice listing ships with the
