@@ -43,6 +43,7 @@ from pathlib import Path
 import pikepdf
 
 from engine import color_spaces
+from engine.bezier import cubic_bbox_points
 from engine.content_walk import ClipTracker, DEFAULT_COLOR, GraphicsTextState, mat_mult, transform_point
 from engine.page_images import (
     _do_instruction,
@@ -75,24 +76,64 @@ _PAINT_VISIBLE = _PAINT_FILL | _PAINT_STROKE | _PAINT_BOTH
 _PAINT_ALL = _PAINT_VISIBLE | {"n"}
 
 
-def _points_of(operator: str, operands: list) -> list:
-    """The (x, y) control/corner points a construction op contributes, in
-    USER space (the caller transforms them under the live CTM). Malformed
-    operand shapes yield nothing — a listing never aborts on bad geometry."""
-    try:
-        vals = [float(v) for v in operands]
-    except (TypeError, ValueError):
-        return []
-    if operator in ("m", "l") and len(vals) >= 2:
-        return [(vals[0], vals[1])]
-    if operator == "c" and len(vals) >= 6:
-        return [(vals[0], vals[1]), (vals[2], vals[3]), (vals[4], vals[5])]
-    if operator in ("v", "y") and len(vals) >= 4:
-        return [(vals[0], vals[1]), (vals[2], vals[3])]
-    if operator == "re" and len(vals) >= 4:
-        x, y, w, h = vals[0], vals[1], vals[2], vals[3]
-        return [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]
-    return []
+class _PathPoints:
+    """Device-space bbox points for the path under construction — EXACT for
+    curves (P8 slice A). Control points are transformed to device space
+    FIRST (an affine map of a Bézier is the Bézier of the mapped control
+    points — mapping a user-space bbox would be wrong under rotation),
+    then the curve's true extrema accumulate via the shared `engine.bezier`
+    math. Tracks the current point / subpath start the construction
+    grammar needs (`v` reuses the current point as its first control, `y`
+    duplicates its endpoint, `h` returns to the subpath start — §8.5.2).
+    Malformed operand shapes contribute nothing — a listing never aborts
+    on bad geometry."""
+
+    def __init__(self):
+        self.pts: list = []
+        self.cur = None  # user-space current point
+        self.start = None  # user-space subpath start
+
+    def feed(self, operator: str, operands: list, ctm) -> None:
+        try:
+            vals = [float(v) for v in operands]
+        except (TypeError, ValueError):
+            return
+        dev = lambda p: transform_point(ctm, p[0], p[1])  # noqa: E731
+        if operator == "m" and len(vals) >= 2:
+            self.cur = (vals[0], vals[1])
+            self.start = self.cur
+            self.pts.append(dev(self.cur))
+        elif operator == "l" and len(vals) >= 2:
+            end = (vals[0], vals[1])
+            self.pts.append(dev(end))
+            self.cur = end
+        elif operator in ("c", "v", "y") and len(vals) >= (6 if operator == "c" else 4):
+            if self.cur is None:
+                return  # malformed: a curve with no current point
+            if operator == "c":
+                c1, c2, end = (vals[0], vals[1]), (vals[2], vals[3]), (vals[4], vals[5])
+            elif operator == "v":
+                c1, c2, end = self.cur, (vals[0], vals[1]), (vals[2], vals[3])
+            else:  # y
+                c1, c2, end = (vals[0], vals[1]), (vals[2], vals[3]), (vals[2], vals[3])
+            self.pts.extend(
+                cubic_bbox_points(dev(self.cur), dev(c1), dev(c2), dev(end))
+            )
+            self.cur = end
+        elif operator == "re" and len(vals) >= 4:
+            x, y, w, h = vals[0], vals[1], vals[2], vals[3]
+            for corner in ((x, y), (x + w, y), (x, y + h), (x + w, y + h)):
+                self.pts.append(dev(corner))
+            self.cur = (x, y)
+            self.start = self.cur
+        elif operator == "h":
+            if self.start is not None:
+                self.cur = self.start
+
+    def reset(self) -> None:
+        self.pts = []
+        self.cur = None
+        self.start = None
 
 
 def _color_rgb(color_state, resources=None, pdf=None):
@@ -170,8 +211,9 @@ def _walk_vectors(
     # clip (§8.10.2).
     clips = ClipTracker(base_clip)
     path_start = None  # instruction index of the current path's first construct op
+    start_ctm = None  # CTM at the first construction op (the wrap-start space)
     construct_idxs: list = []  # EXACT indices of this path's construction ops
-    pts: list = []  # device-space points accumulated for the bbox
+    path_pts = _PathPoints()  # device-space bbox points (curve-exact, P8)
     has_clip = False
     line_width = base_line_width  # `w` (PDF default 1.0) — a form inherits the caller's
     w_stack: list = []  # line width IS graphics state — q/Q-scoped like the rest
@@ -199,18 +241,25 @@ def _walk_vectors(
         if operator in _CONSTRUCT:
             if path_start is None:
                 path_start = idx
+                # P8 slice B: the CTM live at the FIRST construction op — the
+                # transform wrap opens HERE, so its conjugated matrix must be
+                # built against THIS space, not the paint-time CTM (they
+                # differ exactly when a `cm` interleaves into the path; a cm
+                # pre-multiplies, so the insert's effect propagates X·M·C0
+                # for every interior composition X, and M = C0·T·C0⁻¹ is
+                # what makes every piece land on target).
+                start_ctm = tuple(state.ctm)
             construct_idxs.append(idx)
-            for px, py in _points_of(operator, operands):
-                pts.append(transform_point(state.ctm, px, py))
+            path_pts.feed(operator, operands, state.ctm)
             continue
         if operator in _CLIP:
             has_clip = True  # this path sets a clip → excluded when painted
             continue
         if operator in _PAINT_ALL:
             visible = operator in _PAINT_VISIBLE
-            if visible and not has_clip and path_start is not None and pts:
-                xs = [p[0] for p in pts]
-                ys = [p[1] for p in pts]
+            if visible and not has_clip and path_start is not None and path_pts.pts:
+                xs = [p[0] for p in path_pts.pts]
+                ys = [p[1] for p in path_pts.pts]
                 if operator in _PAINT_FILL:
                     kind = "fill"
                 elif operator in _PAINT_STROKE:
@@ -232,6 +281,7 @@ def _walk_vectors(
                         "index": len(out),
                         "rect": [vrect[0], vrect[1], vrect[2], vrect[3]],
                         "matrix": list(state.ctm),
+                        "_start_ctm": list(start_ctm if start_ctm is not None else state.ctm),
                         "kind": kind,
                         "fill": _color_rgb(state.fill_color, resources, pdf)
                         if operator not in _PAINT_STROKE
@@ -251,7 +301,8 @@ def _walk_vectors(
                         "clipped": clips.clips_away(vrect),
                     }
                 )
-            path_start, construct_idxs, pts, has_clip = None, [], [], False
+            path_start, start_ctm, construct_idxs, has_clip = None, None, [], False
+            path_pts.reset()
             continue
         # 9.D4: recurse into a Form XObject so its paths list too (page walk
         # only — `pdf` is None for the flat page-content walks the editors run
@@ -294,7 +345,8 @@ def _walk_vectors(
         # Any other operator (a show, Do, sh, inline image, w/d/gs line-state):
         # not part of a path. A path left unpainted before other content is
         # abandoned (malformed input) — reset so a stale path can't attach.
-        path_start, construct_idxs, pts, has_clip = None, [], [], False
+        path_start, start_ctm, construct_idxs, has_clip = None, None, [], False
+        path_pts.reset()
     return out
 
 
@@ -304,7 +356,7 @@ def list_page_vectors(file: str, page: int) -> dict:
     device-space `rect` (bbox for selection), the CTM `matrix` (for a
     transform), `kind` (fill/stroke/fillstroke), best-effort `fill`/`stroke`
     colours, `line_width`, and `nested` (inside a Form XObject)."""
-    _INTERNAL = ("drop_idxs", "_form_name", "_root_do_idx", "_edit_depth")
+    _INTERNAL = ("drop_idxs", "_form_name", "_root_do_idx", "_edit_depth", "_start_ctm")
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -382,6 +434,40 @@ def _resolve_target(pdf, p, index):
     return instructions, obj
 
 
+def _interleaved_indices(instrs, drop: list) -> list:
+    """P8 slice B: the NON-path ops a producer placed inside the object's
+    [first..last] span. A wrap used to refuse these outright (round-36: the
+    wrap's `Q` would scope them away from following content); the lift keeps
+    them in place INSIDE the wrap and REPLAYS them after the closing `Q` —
+    exact, because `Q` restores the pre-frame state, so the replay composes
+    from precisely the state the unwrapped ops composed from (true even for
+    `cm`, which re-applies onto the restored CTM). The one still-refused
+    shape is interior UNBALANCED q/Q: the object's own CTM then varies
+    mid-path with no single frame to wrap, and no one conjugated matrix
+    transforms it."""
+    dropped = set(drop)
+    first, last = drop[0], drop[-1]
+    interleaved = [i for i in range(first, last + 1) if i not in dropped]
+    balance = 0
+    for i in interleaved:
+        op = str(instrs[i].operator)
+        if op == "q":
+            balance += 1
+        elif op == "Q":
+            balance -= 1
+            if balance < 0:
+                raise ValueError(
+                    "vector object spans unbalanced q/Q graphics-state frames "
+                    "and cannot be edited as one unit"
+                )
+    if balance != 0:
+        raise ValueError(
+            "vector object spans unbalanced q/Q graphics-state frames "
+            "and cannot be edited as one unit"
+        )
+    return interleaved
+
+
 def delete_page_vector(file: str, output: str, page: int, index: int) -> dict:
     """Remove one vector path object — drop its construction ops + paint op
     (per-object; surrounding state untouched). A NESTED path is dropped on a
@@ -446,15 +532,11 @@ def transform_page_vector(file: str, output: str, page: int, index: int, matrix:
         instructions, obj = _resolve_target(pdf, p, index)
         drop = obj["drop_idxs"]
         first, last = drop[0], drop[-1]
-        if drop != list(range(first, last + 1)):
-            raise ValueError(
-                "vector object has interleaved graphics-state operators and cannot be transformed"
-            )
         bx0, by0, bx1, by1 = obj["rect"]
         bw, bh = bx1 - bx0, by1 - by0
         if abs(bw) < 1e-6 or abs(bh) < 1e-6:
             raise ValueError("vector object bbox is degenerate and cannot be transformed")
-        c = tuple(obj["matrix"])
+        c = tuple(obj.get("_start_ctm") or obj["matrix"])
         if abs(c[0] * c[3] - c[1] * c[2]) < 1e-9:
             # A rank-deficient object CTM (a shear collapsing the path onto a
             # line) survives the bbox guard but can't be inverted for the
@@ -472,6 +554,13 @@ def transform_page_vector(file: str, output: str, page: int, index: int, matrix:
         cm = _op([round(float(v), 6) for v in m_insert], "cm")
 
         def rewrite(instrs):
+            # P8 slice B: interleaved state ops no longer refuse — validated
+            # (balanced q/Q) and replayed after the wrap's Q. Computed HERE
+            # because `instrs` is the FORM's list for a nested object and the
+            # page's for a top-level one — drop_idxs are stream-local, and
+            # `_edit_nested_vector` runs this before any mutation, so the
+            # validation raise still lands pre-write.
+            interleaved = _interleaved_indices(instrs, drop)
             kept: list = []
             for i, ins in enumerate(instrs):
                 if i == first:
@@ -480,6 +569,12 @@ def transform_page_vector(file: str, output: str, page: int, index: int, matrix:
                 kept.append(ins)
                 if i == last:
                     kept.append(_op([], "Q"))
+                    # The interleave replay: re-apply the ops the wrap's Q
+                    # just scoped away, in original order, so the content
+                    # AFTER this object sees the exact state it always saw.
+                    # Contiguous runs replay nothing.
+                    for j in interleaved:
+                        kept.append(instrs[j])
             return kept
 
         if obj["nested"]:
@@ -551,12 +646,32 @@ def restyle_page_vector(
         instructions, obj = _resolve_target(pdf, p, index)
         drop = obj["drop_idxs"]
         first, last = drop[0], drop[-1]
-        if drop != list(range(first, last + 1)):
-            raise ValueError(
-                "vector object has interleaved graphics-state operators and cannot be restyled"
-            )
+        contiguous = drop == list(range(first, last + 1))
 
         def rewrite(instrs):
+            # P8 slice B: an INTERLEAVED run restyles too — wrap + replay
+            # (validated balanced), with the new setters injected right
+            # BEFORE the paint op, where they beat any interleaved colour a
+            # producer set mid-run (setters at the wrap head would silently
+            # lose to them). The round-38 merge recognition stays
+            # CONTIGUOUS-only — its `q setters run Q` shape can't exist
+            # around an interleaved run, and repeated interleaved restyles
+            # nest bounded by each wrap's own Q (the outer Q discards the
+            # inner replay's state, so downstream stays exact).
+            interleaved = _interleaved_indices(instrs, drop)
+            if not contiguous:
+                kept: list = []
+                for i, ins in enumerate(instrs):
+                    if i == first:
+                        kept.append(_op([], "q"))
+                    if i == last:
+                        kept.extend(ops)  # the new setters, at paint time
+                    kept.append(ins)
+                    if i == last:
+                        kept.append(_op([], "Q"))
+                        for j in interleaved:
+                            kept.append(instrs[j])
+                return kept
             # Round-38 MED: if a PRIOR restyle already wrapped this object in
             # `q <state setters> run Q`, MERGE into that wrap (replace the
             # setters this request overrides, keep the rest) rather than nesting
