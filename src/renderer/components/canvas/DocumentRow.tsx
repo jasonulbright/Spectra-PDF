@@ -60,6 +60,12 @@ interface DocumentRowProps {
   /** 9.C3 crop mode: armed flag + unit-space rect commit. */
   imageCropArmed: boolean;
   onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
+  /** P7 slice E: the overlay's gradient-mask dot commit. */
+  onCommitImageMask: (
+    pageId: string,
+    index: number,
+    mask: import('../../lib/edit-images').EditImageMaskParam,
+  ) => void;
   editTextByPage: ReadonlyMap<string, EditTextListing>;
   editSelection:
     | { kind: 'image'; pageId: string; index: number; indexes: number[] }
@@ -195,6 +201,7 @@ function DocumentRowImpl({
   onCommitVectorTransform,
   imageCropArmed,
   onCommitImageCrop,
+  onCommitImageMask,
   editTextByPage,
   editSelection,
   editingText,
@@ -293,6 +300,7 @@ function DocumentRowImpl({
         onCommitVectorTransform={onCommitVectorTransform}
         imageCropArmed={imageCropArmed}
         onCommitImageCrop={onCommitImageCrop}
+        onCommitImageMask={onCommitImageMask}
         editTextRuns={editTextByPage.get(page.id)?.runBoxes}
         editParagraphs={editTextByPage.get(page.id)?.paragraphs}
         editSelectedIndexes={

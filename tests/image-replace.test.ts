@@ -78,12 +78,16 @@ describe('fetchEditPlacements (7.1)', () => {
     expect(placements).toEqual([
       // opacity defaults to 1 when the engine omits it (9.C3 seed);
       // kind defaults to 'xobject' (9.C4 — inline draws report 'inline');
-      // crop defaults to null (C3-tail — pre-tail engines omit it).
+      // crop defaults to null (C3-tail — pre-tail engines omit it);
+      // blend defaults to 'Normal' and mask to null (P7 seeds).
       {
         index: 0,
         nested: false,
         rect: { x: 0, y: 0, w: 0.25, h: 0.25 },
+        matrix: undefined,
         opacity: 1,
+        blend: 'Normal',
+        mask: null,
         kind: 'xobject',
         crop: null,
       },

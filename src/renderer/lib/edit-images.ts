@@ -7,6 +7,18 @@
 import { pdfRectToDisplay } from './pdfx-build';
 import type { PageGeometry } from './redaction';
 
+/** The mask WIRE shape `set_image_opacity` takes (P7 slice E): the full
+ * gradient params, or {kind:"none"} to clear a carried mask. */
+export type EditImageMaskParam =
+  | { kind: 'none' }
+  | {
+      kind: 'linear' | 'radial';
+      from: [number, number];
+      to: [number, number];
+      start_alpha: number;
+      end_alpha: number;
+    };
+
 export interface EditImagePlacement {
   /** The engine's placement id — depth-first image-draw order on the page. */
   index: number;
@@ -19,6 +31,18 @@ export interface EditImagePlacement {
   matrix: [number, number, number, number, number, number];
   /** Effective fill alpha at the draw (9.C3) — the opacity slider's seed. */
   opacity: number;
+  /** Effective blend mode at the draw (P7) — the blend select's seed. */
+  blend: string;
+  /** The tool gradient mask in scope (P7 slice E), unit space — seeds the
+   * mask controls + the on-canvas from/to dots. Author soft masks are
+   * never reported (there is no tool mask to re-edit). */
+  mask: {
+    kind: 'linear' | 'radial';
+    from: [number, number];
+    to: [number, number];
+    startAlpha: number;
+    endAlpha: number;
+  } | null;
   /** C4: an inline (BI/ID/EI) draw vs a regular XObject placement —
    * replace/extract are XObject-only (the toolbar disables them). */
   kind: 'inline' | 'xobject';
@@ -38,6 +62,10 @@ export interface EditImageTransformCtx {
   matrix: [number, number, number, number, number, number];
   /** C3-tail: the listed tool crop (unit space) — seeds the edge handles. */
   crop: [number, number, number, number] | null;
+  /** P7 slice E: the listed tool gradient mask — the overlay renders its
+   * from/to dots for direct manipulation (null = no dots). The vector
+   * reuse path passes null (vectors don't mask). */
+  mask: EditImagePlacement['mask'];
   box: { x: number; y: number; width: number; height: number };
   bakedRotate: number;
   /** A transform commit is in flight — the overlay refuses to START a new
@@ -52,6 +80,14 @@ interface EngineListing {
     nested: boolean;
     matrix: [number, number, number, number, number, number];
     opacity: number;
+    blend?: string;
+    mask?: {
+      kind: string;
+      from: [number, number];
+      to: [number, number];
+      start_alpha: number;
+      end_alpha: number;
+    } | null;
     kind: 'inline' | 'xobject';
     crop?: [number, number, number, number] | null;
     /** 9-§I.0-S8: the placement is wholly outside the active clip (invisible).
@@ -82,6 +118,20 @@ export async function fetchEditPlacements(
     rect: pdfRectToDisplay(image.rect, geometry.box, geometry.bakedRotate),
     matrix: image.matrix,
     opacity: typeof image.opacity === 'number' ? image.opacity : 1,
+    blend: typeof image.blend === 'string' && image.blend ? image.blend : 'Normal',
+    mask:
+      image.mask &&
+      (image.mask.kind === 'linear' || image.mask.kind === 'radial') &&
+      Array.isArray(image.mask.from) &&
+      Array.isArray(image.mask.to)
+        ? {
+            kind: image.mask.kind,
+            from: [image.mask.from[0], image.mask.from[1]],
+            to: [image.mask.to[0], image.mask.to[1]],
+            startAlpha: image.mask.start_alpha,
+            endAlpha: image.mask.end_alpha,
+          }
+        : null,
     kind: image.kind === 'inline' ? 'inline' : 'xobject',
     // Degenerate guard: a pre-tail file with DISJOINT stacked crops lists
     // an inverted intersection (x0>x1) — no sane handle seed exists, so

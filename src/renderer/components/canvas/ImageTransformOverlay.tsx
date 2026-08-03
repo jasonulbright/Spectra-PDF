@@ -42,6 +42,14 @@ interface Props {
   /** 9.C3: crop mode armed — the body drag draws the crop band. */
   cropArmed: boolean;
   onCommitCrop: (rect: [number, number, number, number]) => void;
+  /** P7 slice E: commit a gradient-mask change (a from/to dot released). */
+  onCommitMask?: (mask: {
+    kind: 'linear' | 'radial';
+    from: [number, number];
+    to: [number, number];
+    start_alpha: number;
+    end_alpha: number;
+  }) => void;
 }
 
 type Compute = (startUser: [number, number], curUser: [number, number], base: Mat) => Mat;
@@ -54,12 +62,18 @@ export default function ImageTransformOverlay({
   onCommit,
   cropArmed,
   onCommitCrop,
+  onCommitMask,
 }: Props): React.ReactElement {
   const rootRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Mat | null>(null);
   const [cropBand, setCropBand] = useState<[number, number, number, number] | null>(null);
   // C3-tail: live preview of an edge-handle drag (null = show ctx.crop).
   const [cropPreview, setCropPreview] = useState<[number, number, number, number] | null>(null);
+  // P7 slice E: live preview of a mask-dot drag (null = show ctx.mask).
+  const [maskPreview, setMaskPreview] = useState<{
+    from: [number, number];
+    to: [number, number];
+  } | null>(null);
   const active = useRef(false);
   // Teardown for an in-flight gesture, so an unmount mid-drag (e.g. a keyboard
   // tool switch) cancels it — a stale window pointerup must not commit against
@@ -196,6 +210,61 @@ export default function ImageTransformOverlay({
       setCropPreview(null);
       // Same no-churn rule as the matrix gesture: a bare click commits nothing.
       if (commit && latest.some((v, i) => Math.abs(v - seed[i]) > 1e-6)) onCommitCrop(latest);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    cancelRef.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  };
+
+  // P7 slice E: drag one gradient-mask dot ('from' | 'to') in the image's
+  // local unit space; commit the FULL mask params on release (the engine
+  // rebuilds the /SMask group from them).
+  const startMaskDot = (e: React.PointerEvent, which: 'from' | 'to'): void => {
+    const seed = ctx.mask;
+    if (ctx.busy || active.current || !seed || !onCommitMask) return;
+    const inv = invert(base);
+    if (!inv) return;
+    e.preventDefault();
+    e.stopPropagation();
+    active.current = true;
+    const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+    const toLocal = (clientX: number, clientY: number): [number, number] => {
+      const [u, v] = normPointer(clientX, clientY);
+      const [ux, uy] = displayToUser(u, v, box, bakedRotate, pendingRotate);
+      const [lx, ly] = transformPoint(inv, ux, uy);
+      return [clamp01(lx), clamp01(ly)];
+    };
+    let latest: [number, number] = which === 'from' ? seed.from : seed.to;
+    const onMove = (ev: PointerEvent): void => {
+      latest = toLocal(ev.clientX, ev.clientY);
+      setMaskPreview({
+        from: which === 'from' ? latest : seed.from,
+        to: which === 'to' ? latest : seed.to,
+      });
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      active.current = false;
+      cancelRef.current = null;
+      setMaskPreview(null);
+      const anchor = which === 'from' ? seed.from : seed.to;
+      const moved = Math.abs(latest[0] - anchor[0]) > 1e-6 || Math.abs(latest[1] - anchor[1]) > 1e-6;
+      const other = which === 'from' ? seed.to : seed.from;
+      const distinct = Math.abs(latest[0] - other[0]) > 1e-4 || Math.abs(latest[1] - other[1]) > 1e-4;
+      if (commit && moved && distinct) {
+        onCommitMask({
+          kind: seed.kind,
+          from: which === 'from' ? latest : seed.from,
+          to: which === 'to' ? latest : seed.to,
+          start_alpha: seed.startAlpha,
+          end_alpha: seed.endAlpha,
+        });
+      }
     };
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
@@ -346,6 +415,47 @@ export default function ImageTransformOverlay({
             onPointerDown={(e) => startCropEdge(e, i as 0 | 1 | 2 | 3)}
           />
         ))}
+      {/* P7 slice E: the gradient mask's from/to dots (unit space → display
+          through the placement matrix), draggable; the axis line joins them. */}
+      {ctx.mask &&
+        !cropArmed &&
+        (() => {
+          const pts = maskPreview ?? { from: ctx.mask.from, to: ctx.mask.to };
+          const proj = (lp: [number, number]): [number, number] => {
+            const [ux, uy] = transformPoint(m, lp[0], lp[1]);
+            return userToDisplay(ux, uy, box, bakedRotate, pendingRotate);
+          };
+          const fp = proj(pts.from);
+          const tp = proj(pts.to);
+          return (
+            <React.Fragment>
+              <svg className="page-imgtx-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <line
+                  x1={fp[0] * 100}
+                  y1={fp[1] * 100}
+                  x2={tp[0] * 100}
+                  y2={tp[1] * 100}
+                  className="page-imgtx-maskaxis"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                className="page-imgtx-maskdot from"
+                data-testid="img-mask-from"
+                title="Gradient start"
+                style={dot(fp)}
+                onPointerDown={(e) => startMaskDot(e, 'from')}
+              />
+              <div
+                className="page-imgtx-maskdot to"
+                data-testid="img-mask-to"
+                title="Gradient end"
+                style={dot(tp)}
+                onPointerDown={(e) => startMaskDot(e, 'to')}
+              />
+            </React.Fragment>
+          );
+        })()}
     </div>
   );
 }

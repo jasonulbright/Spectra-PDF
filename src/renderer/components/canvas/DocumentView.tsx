@@ -109,6 +109,12 @@ export interface DocumentViewProps {
   /** 9.C3 crop mode: armed flag + unit-space rect commit. */
   imageCropArmed: boolean;
   onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
+  /** P7 slice E: the overlay's gradient-mask dot commit. */
+  onCommitImageMask: (
+    pageId: string,
+    index: number,
+    mask: import('../../lib/edit-images').EditImageMaskParam,
+  ) => void;
   editTextByPage: ReadonlyMap<string, EditTextListing>;
   editSelection:
     | { kind: 'image'; pageId: string; index: number; indexes: number[] }
@@ -697,6 +703,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onCommitVectorTransform={props.onCommitVectorTransform}
           imageCropArmed={props.imageCropArmed}
           onCommitImageCrop={props.onCommitImageCrop}
+          onCommitImageMask={props.onCommitImageMask}
           editTextRuns={props.editTextByPage.get(page.id)?.runBoxes}
           editParagraphs={props.editTextByPage.get(page.id)?.paragraphs}
           editSelectedIndexes={
