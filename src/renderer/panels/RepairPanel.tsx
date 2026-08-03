@@ -60,7 +60,7 @@ export function RepairPanel(): React.ReactElement {
         </button>
       </div>
       {checkResult && checkResult.issues && checkResult.issues.length > 0 && (
-        <div className="bg-neutral-800 rounded p-3 text-xs max-h-48 overflow-y-auto">
+        <div className="bg-neutral-800 rounded p-3 text-xs max-h-48 overflow-y-auto" tabIndex={0} role="region" aria-label="Validation report">
           {checkResult.issues.map((issue, i: number) => (
             <div key={i} className={`py-0.5 ${
               issue.severity === 'error' ? 'text-red-400' :

@@ -413,7 +413,7 @@ export function TagsPanel(): React.ReactElement {
               {selected ? 'New child' : 'New tag'}
             </button>
           </div>
-          <ul className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-0.5" data-testid="tags-tree">
+          <ul className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-0.5" data-testid="tags-tree" tabIndex={0} aria-label="Structure tags">
             {tree.root.map(renderNode)}
           </ul>
           {selected && (

@@ -138,6 +138,7 @@ export function PrepressPanel(): React.ReactElement {
         <span className="w-28 shrink-0 text-neutral-400">Destination</span>
         <select
           data-testid="cmyk-dest-profile"
+          aria-label="Destination profile"
           value={profile.kind}
           onChange={(e) => {
             const k = e.target.value;

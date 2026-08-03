@@ -230,7 +230,7 @@ export function CommentsPanel(): React.ReactElement {
             )}
           </div>
 
-          <div className="flex flex-col gap-1 max-h-[26rem] overflow-y-auto" data-testid="comments-list">
+          <div className="flex flex-col gap-1 max-h-[26rem] overflow-y-auto" data-testid="comments-list" tabIndex={0} role="region" aria-label="Comments">
             {rows.map((e) => (
               <div
                 key={e.annotationId}

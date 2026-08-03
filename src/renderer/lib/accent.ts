@@ -8,7 +8,11 @@
 export interface AccentVars {
   /** The accent itself, as given ("#RRGGBB"). */
   accent: string;
-  /** Hover variant — lightened for dark accents, darkened for light ones. */
+  /** Hover variant — shifted AWAY from the text color (darker under white
+   * text, lighter under black), so the hover state never has LESS contrast
+   * than rest. A same-direction shift did: the default Windows blue sits
+   * just under the white-text ceiling, and lightening it pushed white text
+   * to 3.1:1 on hover. */
   hover: string;
   /** 30% alpha wash for selected/active fills. */
   muted: string;
@@ -16,6 +20,10 @@ export interface AccentVars {
   subtle: string;
   /** Text color that keeps contrast on the accent surface. */
   fg: string;
+  /** The accent used AS text on the dark shell (#171717): lightened until
+   * it reaches AA there. Light accents pass as-is; dark ones (navy, maroon)
+   * are illegible unlifted. */
+  text: string;
 }
 
 export function parseHex(hex: string): [number, number, number] | null {
@@ -34,23 +42,60 @@ export function relativeLuminance(rgb: [number, number, number]): number {
   return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
 }
 
-// Above this the accent is light enough that white text loses contrast
-// (Windows itself switches to dark text there — yellow, spring green);
-// saturated mid-tones (default blue, violet, red) stay well below it.
-const LIGHT_ACCENT_LUMINANCE = 0.4;
+/**
+ * The text-color decision is pure WCAG arithmetic, not "when Windows flips":
+ * white text holds 4.5:1 up to background luminance 0.1833, black text holds
+ * it from 0.175 — the bands overlap, so one threshold inside the overlap
+ * gives every accent a passing side. 0.182 keeps white exactly as long as
+ * white passes (the default Windows blue, L≈0.1819, stays white at 4.53:1;
+ * cyan #00B7C3, L≈0.378, flips to black — it shipped at 2.45:1 under the old
+ * 0.4 threshold, which was tuned to Windows' own flip point and left the
+ * brighter half of that range sub-AA). The dark side is PURE black: with a
+ * softened dark (#1a1a1a) there is a luminance band where neither text color
+ * reaches 4.5:1.
+ */
+const CONTRAST_FG_LUMINANCE = 0.182;
+
+/** AA floor for accent-as-text on the dark shell (#171717, L 0.0144):
+ * (L + 0.05) / 0.0644 >= 4.5 needs L >= 0.24. */
+const DARK_SHELL_TEXT_LUMINANCE = 0.24;
+
+const clamp = (v: number) => Math.max(0, Math.min(255, v));
 
 export function deriveAccentVars(hex: string): AccentVars | null {
   const rgb = parseHex(hex);
   if (!rgb) return null;
   const [r, g, b] = rgb;
-  const light = relativeLuminance(rgb) > LIGHT_ACCENT_LUMINANCE;
-  const shift = light ? -30 : 30;
-  const nudge = (v: number) => Math.max(0, Math.min(255, v + shift));
+  const whiteFg = relativeLuminance(rgb) <= CONTRAST_FG_LUMINANCE;
+
+  // Hover: away from the text color; if the accent is already at that end
+  // of the range (pure black under white text), shift the other way — a
+  // hover with no visible change is worse than a slightly brighter one.
+  const away = whiteFg ? -30 : 30;
+  let hover: [number, number, number] = [clamp(r + away), clamp(g + away), clamp(b + away)];
+  if (hover[0] === r && hover[1] === g && hover[2] === b) {
+    hover = [clamp(r - away), clamp(g - away), clamp(b - away)];
+  }
+
+  // Accent as TEXT on the dark shell: lift in steps until it clears AA
+  // there. Bounded — 17 steps of +15 reach white from black.
+  let text: [number, number, number] = [r, g, b];
+  while (relativeLuminance(text) < DARK_SHELL_TEXT_LUMINANCE) {
+    const lifted: [number, number, number] = [
+      clamp(text[0] + 15),
+      clamp(text[1] + 15),
+      clamp(text[2] + 15),
+    ];
+    if (lifted[0] === text[0] && lifted[1] === text[1] && lifted[2] === text[2]) break;
+    text = lifted;
+  }
+
   return {
     accent: hex,
-    hover: `rgb(${nudge(r)}, ${nudge(g)}, ${nudge(b)})`,
+    hover: `rgb(${hover[0]}, ${hover[1]}, ${hover[2]})`,
     muted: `rgba(${r}, ${g}, ${b}, 0.3)`,
     subtle: `rgba(${r}, ${g}, ${b}, 0.2)`,
-    fg: light ? '#1a1a1a' : '#ffffff',
+    fg: whiteFg ? '#ffffff' : '#000000',
+    text: `rgb(${text[0]}, ${text[1]}, ${text[2]})`,
   };
 }
