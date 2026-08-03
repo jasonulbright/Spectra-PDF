@@ -7,9 +7,14 @@ growth downward). The design record is `docs/architecture/21` §7.5; the
 one-line summary of every structural rule:
 
   - Grouping happens HERE (engine), from the SAME `_walk_runs` walk that
-    produces the run listing — index agreement by construction. Runs from
-    different streams (page vs a form instance; two instances of one
-    form) never group, so an apply is one stream rewrite.
+    produces the run listing — index agreement by construction. Lines never
+    mix streams, but a paragraph MAY continue across a stream boundary
+    (page → form, form → form) under strict evidence: the same geometric
+    join tests, plus z-order adjacency — no visible foreign run between the
+    fragments in content order (T17; the false-positive direction is the
+    dangerous one). An apply then runs ONE per-stream rewrite per involved
+    stream — each member's replacement text lands in ITS stream, form-hosted
+    members via copy-on-write of the whole Do chain, one atomic save.
   - Only axis-aligned runs under a SHARED linear matrix group; rotated /
     skewed text simply never forms a paragraph and stays on the 7.2
     run-box surface. Refused paragraphs (uneditable member, RTL) are
@@ -385,6 +390,12 @@ class _Paragraph:
     __slots__ = (
         "lines",
         "stream",
+        # T17: every distinct stream the members live in, ordered by first
+        # appearance in content order. `stream` stays the FIRST of these (the
+        # primary — the listing sort key and the single-stream common case);
+        # a cross-stream paragraph has len(streams) > 1 and its rewrite runs
+        # one per-stream target per entry.
+        "streams",
         "lkey",
         "alignment",
         "leading",
@@ -420,16 +431,28 @@ class _Paragraph:
         return self.lines[0].members[0].vertical
 
 
-def _join_paragraphs(lines: list[_Line]) -> list[list[_Line]]:
+def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
     """Column-aware top-down joining: each line (y-descending) joins the
     OPEN paragraph with the best horizontal overlap whose leading/size
     evidence accepts it, else opens a new one. Strictly sequential joining
     fails the moment two columns interleave in y order — the candidate
-    search is what keeps side-by-side columns separate AND contiguous."""
+    search is what keeps side-by-side columns separate AND contiguous.
+
+    T17: a line never mixes streams (assembly is per-stream), but the pool
+    may hold several streams' lines. A join that would bring a NEW stream
+    into a paragraph passes every geometric test above PLUS `cross_ok(
+    paragraph_member_indexes, line_member_indexes)` — the z-order adjacency
+    gate (no visible foreign run between the fragments in content order).
+    The false-positive direction is the dangerous one: a page paragraph and
+    an unrelated form block that merely align must NOT group, so the gate is
+    strict and a refused cross join simply opens a second paragraph (the
+    shipped behavior)."""
     lines = sorted(lines, key=lambda l: -l.y)
     open_paras: list[dict] = []
     for line in lines:
         bullet = _starts_with_bullet(line)
+        line_stream = line.members[0].stream
+        line_idx = {m.index for m in line.members}
         best: dict | None = None
         best_overlap = 0.0
         if not bullet:
@@ -451,13 +474,26 @@ def _join_paragraphs(lines: list[_Line]) -> list[list[_Line]]:
                 ov = _overlap_ratio(box_x0, box_x1, line.x0, line.x1)
                 if ov < PARA_OVERLAP_MIN:
                     continue
+                if line_stream not in para["streams"] and (
+                    cross_ok is None or not cross_ok(para["idx"], line_idx)
+                ):
+                    continue
                 if ov > best_overlap:
                     best, best_overlap = para, ov
         if best is None:
-            open_paras.append({"lines": [line], "deltas": []})
+            open_paras.append(
+                {
+                    "lines": [line],
+                    "deltas": [],
+                    "streams": {line_stream},
+                    "idx": set(line_idx),
+                }
+            )
         else:
             best["deltas"].append(best["lines"][-1].y - line.y)
             best["lines"].append(line)
+            best["streams"].add(line_stream)
+            best["idx"] |= line_idx
     return [p["lines"] for p in open_paras]
 
 
@@ -658,12 +694,38 @@ def _resolve_bidi_text(lines: list[_Line], visual):
     return None
 
 
-def _analyze(paras: list[list[_Line]], stream: tuple, lkey: tuple) -> list[_Paragraph]:
+def _stream_direction_conflict(lines: list[_Line]) -> bool:
+    """T17: True when two streams of one (bidi-normalized) paragraph resolve
+    to DIFFERENT base directions from their own text. Each per-stream half
+    would reorder against a different base on the way back out, so the
+    reconstruction cannot be trusted — the refusal family of the T3 unproven
+    case. Streams whose text carries no strong character can't disagree."""
+    texts: dict[tuple, list[str]] = defaultdict(list)
+    for line in lines:
+        for m in line.members:
+            texts[m.stream].append(m.ptext)
+    levels = set()
+    for parts in texts.values():
+        t = "".join(parts)
+        if any(bidi.bidi_class(ch) in ("L", "R", "AL") for ch in t):
+            levels.add(bidi.paragraph_level(t))
+    return len(levels) > 1
+
+
+def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
     out: list[_Paragraph] = []
     for lines in paras:
         p = _Paragraph()
         p.lines = lines
-        p.stream = stream
+        # T17: distinct member streams in content order; the first is the
+        # primary (the single-stream `stream` field, unchanged meaning).
+        first_of: dict[tuple, int] = {}
+        for line in lines:
+            for m in line.members:
+                if m.stream not in first_of or m.index < first_of[m.stream]:
+                    first_of[m.stream] = m.index
+        p.streams = tuple(sorted(first_of, key=lambda s: first_of[s]))
+        p.stream = p.streams[0]
         p.lkey = lkey
         p.left = min(l.x0 for l in lines)
         p.right = max(l.x1 for l in lines)
@@ -728,6 +790,15 @@ def _analyze(paras: list[list[_Line]], stream: tuple, lkey: tuple) -> list[_Para
             # silently re-spell the paragraph, so it stays on the run surface.
             p.editable = False
             p.reason = "this paragraph's right-to-left order could not be reconstructed"
+        elif len(p.streams) > 1 and p.bidi and _stream_direction_conflict(lines):
+            # T17: the stated cross-stream refusal — the streams disagree
+            # about the paragraph's base direction, so the per-stream halves
+            # of an edit would reorder against different bases.
+            p.editable = False
+            p.reason = (
+                "this paragraph crosses drawing layers that disagree about "
+                "its text direction"
+            )
         elif p.vertical and any(m.rise_user != 0.0 for m in p.members):
             # 9.B4b review (round 28 HIGH): a vertical member's rise_user
             # carries a REAL-X displacement (its transposed-y offset from
@@ -760,11 +831,31 @@ def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
     groups: dict[tuple, list[_Member]] = defaultdict(list)
     for mem in members:
         groups[(mem.stream, mem.lkey)].append(mem)
+    # T17: line ASSEMBLY stays per (stream, lkey) — a line never mixes
+    # streams — but paragraph JOINING pools every stream's lines under one
+    # lkey, so a paragraph may continue across a stream boundary (page →
+    # form, form → form) when the geometric evidence holds AND the fragments
+    # are z-adjacent: no visible foreign run sits between them in content
+    # order (run indexes are global content order — forms recurse at their
+    # Do). Whitespace-only and clipped-away runs don't block adjacency; any
+    # other text run does. A single-stream page pools to exactly the shipped
+    # grouping.
+    lines_by_lkey: dict[tuple, list[_Line]] = defaultdict(list)
+    for (_stream, lkey), mems in groups.items():
+        lines_by_lkey[lkey].extend(_cluster_lines(mems))
+
+    def _blocks(i: int) -> bool:
+        r = runs[i]
+        return bool(r["text"].strip()) and not r.get("clipped", False)
+
+    def cross_ok(para_idx: set, line_idx: set) -> bool:
+        u = para_idx | line_idx
+        return not any(_blocks(i) for i in range(min(u), max(u) + 1) if i not in u)
+
     paragraphs: list[_Paragraph] = []
-    for (stream, lkey), mems in groups.items():
-        lines = _cluster_lines(mems)
-        for para_lines in _join_paragraphs(lines):
-            paragraphs.extend(_analyze([para_lines], stream, lkey))
+    for lkey, lines in lines_by_lkey.items():
+        for para_lines in _join_paragraphs(lines, cross_ok=cross_ok):
+            paragraphs.extend(_analyze([para_lines], lkey))
     # Whitespace-only clusters offer nothing to edit — no box at all.
     paragraphs = [p for p in paragraphs if p.text.strip()]
     # Reading order on a MIXED page needs a mode-agnostic PRIMARY key:
@@ -2166,14 +2257,40 @@ class _Emission:
         # byte-identical.
         self.box_width = box_width
         self.box_left = box_left
+        # T17: the positioned layout, computed ONCE — a cross-stream edit
+        # calls build once per target stream and every call must see the
+        # SAME lines (same _StyleRef identities, same positions).
+        self._laid: list[_LayoutLine] | None = None
+        # T17: user-space bbox of the pieces the LAST build call emitted
+        # (None when it emitted nothing) — the rewriter expands a target
+        # form copy's /BBox by this so emitted text is never clipped away.
+        self.last_build_bbox: list[float] | None = None
 
-    def build(self, ctm) -> list[tuple]:
+    def build(self, ctm, stream=None, used=None) -> list[tuple]:
         """[(kind, instruction, raw_width|None)]; kind ∈ {'op','show'} —
         the caller feeds ops into its emitted-state machine and advances
-        after shows."""
+        after shows.
+
+        T17: `stream` filters the emission to pieces whose style MEMBER
+        lives in that stream (None = everything, the single-stream path —
+        identical output, since every member then shares the one stream).
+        Segments never span members (`_StyleRef.key` carries the member
+        index), so the routing is exact. `used` (a set) collects the
+        fallback face keys THIS call actually emitted, for the caller's
+        per-stream font registration."""
         para = self.para
+        self.last_build_bbox = None
         if not self.styled:
             return []
+        lines = self._layout()
+        if not lines:
+            return []
+        return self._emit(lines, ctm, stream, used)
+
+    def _layout(self) -> list:
+        if self._laid is not None:
+            return self._laid
+        para = self.para
         body_lefts = [l.x0 for l in para.lines[1:]]
         first_left = para.lines[0].x0
         body_left = min(body_lefts) if body_lefts else first_left
@@ -2309,23 +2426,39 @@ class _Emission:
             if block:
                 prev_last = block[-1]
             lines.extend(block)
-        if not lines:
-            return []
-        if self.base_level is not None:
+        if lines and self.base_level is not None:
             # 9.T3: wrapping happened in LOGICAL order (that is where line
             # breaks live); each finished line now permutes into the visual
             # order the page will draw. Per LINE, after wrapping — rule L1's
             # line-end reset is meaningless before the lines exist.
             for line in lines:
                 line.vis_items = _visual_items(line, self.base_level)
+        self._laid = lines
+        return lines
 
+    def _emit(self, lines: list, ctm, stream, used) -> list[tuple]:
+        para = self.para
         ctm_inv = _invert(ctm)
         base = _widest(para.lines[0].members)
         lin_a, lin_d = base.a, base.d
         out: list[tuple] = []
+        bbox: list[float] | None = None
+
+        def grow(x0: float, y0: float, x1: float, y1: float) -> None:
+            nonlocal bbox
+            if bbox is None:
+                bbox = [x0, y0, x1, y1]
+            else:
+                bbox[0] = min(bbox[0], x0)
+                bbox[1] = min(bbox[1], y0)
+                bbox[2] = max(bbox[2], x1)
+                bbox[3] = max(bbox[3], y1)
+
         for line in lines:
             for seg in self._segments(line):
                 st: _StyleRef = seg["style"]
+                if stream is not None and st.member.stream != stream:
+                    continue
                 for dx, dy, encoded_items, raw in self._pieces(seg, lin_d):
                     # Rise renders via Ts (a state op), never the matrix —
                     # the line target is the BASELINE.
@@ -2340,9 +2473,21 @@ class _Emission:
                     else:
                         tx, ty = line.x + dx, line.y + dy
                     target = (lin_a, 0.0, 0.0, lin_d, tx, ty)
+                    # T17: a CONSERVATIVE user-space envelope of this piece
+                    # (full em above the baseline, 0.35 em below, advance
+                    # along the writing axis) — only ever used to EXPAND a
+                    # target form's /BBox, where over-covering is harmless
+                    # and under-covering clips text away.
+                    eff = st.style()["size"] * abs(lin_d)
+                    if self.vertical:
+                        em = st.style()["size"] * abs(lin_a)
+                        grow(tx - em, ty - raw * abs(lin_d), tx + em, ty)
+                    else:
+                        adv = raw * st.style()["h_scale"] * abs(lin_a)
+                        grow(tx, ty - 0.35 * eff, tx + adv, ty + eff)
                     tm_op = mat_mult(target, ctm_inv)
                     out.append(("op", _instruction([_f(v) for v in tm_op], "Tm"), None))
-                    out.extend(self._state_ops(st))
+                    out.extend(self._state_ops(st, used))
                     if len(encoded_items) == 1 and not isinstance(encoded_items[0], float):
                         out.append(
                             ("show", _instruction([pikepdf.String(encoded_items[0])], "Tj"), raw)
@@ -2355,6 +2500,7 @@ class _Emission:
                             ]
                         )
                         out.append(("show", _instruction([arr], "TJ"), raw))
+        self.last_build_bbox = bbox
         return out
 
     def _pieces(self, seg: dict, lin_d: float) -> list[tuple]:
@@ -2486,13 +2632,15 @@ class _Emission:
             dx += w
         return segments
 
-    def _state_ops(self, st: _StyleRef) -> list[tuple]:
+    def _state_ops(self, st: _StyleRef, used=None) -> list[tuple]:
         m = st.member
         s = st.style()  # A1: effective (possibly size/color-overridden)
         ops: list[tuple] = []
         if st.fallback is not None:
             fb = self.fallbacks[st.fallback]
             fb.used = True  # marks THIS subset for registration (per face)
+            if used is not None:
+                used.add(st.fallback)  # T17: per-STREAM usage for the caller
             font = fb.name
         else:
             font = s["font_name"]
@@ -2654,21 +2802,120 @@ def _state_sync_instructions(orig: GraphicsTextState, emit: GraphicsTextState) -
     return ops
 
 
-class _ParaEditState:
-    def __init__(self, target_stream, member_ordinals, first_ordinal, emission, fallbacks):
-        self.target_stream = target_stream
-        self.member_ordinals = member_ordinals
-        self.first_ordinal = first_ordinal
+def _member_ordinals_by_stream(detail: list[dict], member_set: set) -> dict:
+    """{stream → set of member SHOW ordinals within that stream} — the
+    rewriter's removal targets, one entry per involved stream (T17)."""
+    per_stream_counts: dict[tuple, int] = defaultdict(int)
+    out: dict[tuple, set] = defaultdict(set)
+    for i, det in enumerate(detail):
+        o = per_stream_counts[det["stream"]]
+        per_stream_counts[det["stream"]] = o + 1
+        if i in member_set:
+            out[det["stream"]].add(o)
+    return dict(out)
+
+
+def _allocate_fallback_names(members: list, fallbacks: dict, counter, reserved: set) -> None:
+    """9.A5b naming, hoisted out of the rewriter for T17: allocate each
+    substitute subset's name ONCE, fresh against EVERY involved stream's
+    fonts — one name serves all streams (a cross-stream edit registers the
+    same font dict into each using stream's resources under it). For a
+    single-stream edit the taken-set is exactly the shipped in-rewriter
+    allocation's, so names and bytes are unchanged. 9.T26: an in-place
+    entry IS the document's own font (font_dict None) — it keeps its name
+    from construction and is never renamed."""
+    if not any(fallbacks[k].font_dict is not None for k in fallbacks):
+        return
+    seen: set = set()
+    for m in members:
+        res = m.resources
+        if res is None or id(res) in seen:
+            continue
+        seen.add(id(res))
+        fonts_d = res.get("/Font")
+        if fonts_d is not None:
+            reserved |= {str(k) for k in fonts_d.keys()}
+    for key in sorted(fallbacks, key=_face_sort_key):
+        if fallbacks[key].font_dict is not None:
+            fallbacks[key].name = _fresh_font_name(None, counter, reserved)
+
+
+class _StreamTarget:
+    """T17: one involved stream's share of a paragraph edit — its member
+    show ordinals (within that stream), where its emission lands, the fonts
+    to register into ITS resources, and the user-space extent it emitted
+    (to expand a form copy's /BBox)."""
+
+    __slots__ = (
+        "member_ordinals",
+        "first_ordinal",
+        "last_ordinal",
+        "pending_fonts",
+        "emitted_bbox",
+        "changed",
+    )
+
+    def __init__(self, member_ordinals: set):
+        self.member_ordinals = set(member_ordinals)
+        self.first_ordinal = min(member_ordinals)
         self.last_ordinal = max(member_ordinals)
+        self.pending_fonts: list = []
+        self.emitted_bbox = None
+        self.changed = False
+
+
+class _ParaEditState:
+    def __init__(self, ordinals_by_stream: dict, emission, fallbacks):
+        # T17: one target per involved stream (the single-stream edit is a
+        # dict of one). Each target's portion of the emission lands at ITS
+        # first member; member removal + resync run per stream.
+        self.targets: dict[tuple, _StreamTarget] = {
+            stream: _StreamTarget(ords) for stream, ords in ordinals_by_stream.items()
+        }
         self.emission = emission
         # 9.A5b: {face key → _Fallback} (was the single `fallback`).
         self.fallbacks = fallbacks
-        self.changed = False
         self.superseded_forms: set = set()
-        # 9.A5b: one (name, font_dict) per USED subset (was the single
-        # `pending_font`) — each registered at the top level or into the
-        # nested-form copy.
-        self.pending_fonts: list = []
+
+    @property
+    def changed(self) -> bool:
+        return all(t.changed for t in self.targets.values())
+
+
+def _expand_form_bbox(copy, edit: "_ParaEditState", child: tuple, form_ctm) -> None:
+    """T17: grow a form COPY's /BBox to cover everything emitted into it or
+    into any target beneath it — /BBox clips at EVERY level of a Do chain,
+    and reflowed text may extend past the original's crop. Rewritten only
+    when it must strictly GROW: an unchanged box keeps the original object
+    (byte-identity for edits that stay inside it)."""
+    boxes = [
+        t.emitted_bbox
+        for s, t in edit.targets.items()
+        if s[: len(child)] == child and t.emitted_bbox is not None
+    ]
+    if not boxes:
+        return
+    ub = (
+        min(b[0] for b in boxes),
+        min(b[1] for b in boxes),
+        max(b[2] for b in boxes),
+        max(b[3] for b in boxes),
+    )
+    a, b, c, d, e, f = _invert(form_ctm)
+    xs, ys = [], []
+    for x, y in ((ub[0], ub[1]), (ub[0], ub[3]), (ub[2], ub[1]), (ub[2], ub[3])):
+        xs.append(a * x + c * y + e)
+        ys.append(b * x + d * y + f)
+    try:
+        old = [float(v) for v in copy["/BBox"]]
+    except (TypeError, ValueError, KeyError):
+        return
+    x0, y0 = min(old[0], old[2]), min(old[1], old[3])
+    x1, y1 = max(old[0], old[2]), max(old[1], old[3])
+    nx0, ny0 = min(x0, min(xs)), min(y0, min(ys))
+    nx1, ny1 = max(x1, max(xs)), max(y1, max(ys))
+    if nx0 < x0 - 1e-6 or ny0 < y0 - 1e-6 or nx1 > x1 + 1e-6 or ny1 > y1 + 1e-6:
+        copy["/BBox"] = pikepdf.Array([_f(nx0), _f(ny0), _f(nx1), _f(ny1)])
 
 
 def _rewrite_paragraph_stream(
@@ -2685,11 +2932,15 @@ def _rewrite_paragraph_stream(
     base_ctm=IDENTITY,
     parent_state=None,
 ):
-    """(kept, changed, new_forms). Non-target streams pass through verbatim
-    (descending ONLY along the target path — local form ordinals make that
-    navigable); the target stream gets member removal + emission + the
-    dual-machine resync described in the module docstring."""
-    in_target = path == edit.target_stream
+    """(kept, changed, new_forms). Non-involved streams pass through
+    verbatim (descending ONLY along target paths — local form ordinals make
+    that navigable); every TARGET stream gets member removal + its share of
+    the emission + the dual-machine resync described in the module
+    docstring. T17: `edit.targets` may name several streams (a cross-stream
+    paragraph) — each receives its portion at its own first member, and a
+    target stream can itself host a deeper target's Do."""
+    tgt = edit.targets.get(path)
+    in_target = tgt is not None
     orig = _child_state(base_ctm, parent_state)
     emit = _child_state(base_ctm, parent_state) if in_target else None
     kept: list = []
@@ -2734,70 +2985,80 @@ def _rewrite_paragraph_stream(
         operator = str(instruction.operator)
         operands = list(instruction.operands)
 
-        if not in_target:
-            if operator == "Do":
-                name = str(operands[0]) if operands else None
-                xobj = _lookup_xobject(name, resources, fallback_res)
-                subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
-                if xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
-                    my_ordinal = form_ordinal
-                    form_ordinal += 1
-                    on_path = (
-                        len(edit.target_stream) > len(path)
-                        and edit.target_stream[: len(path)] == path
-                        and edit.target_stream[len(path)] == my_ordinal
+        if operator == "Do":
+            name = str(operands[0]) if operands else None
+            xobj = _lookup_xobject(name, resources, fallback_res)
+            subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
+            if xobj is not None and subtype == "/Form" and depth < MAX_FORM_DEPTH:
+                my_ordinal = form_ordinal
+                form_ordinal += 1
+                child = path + (my_ordinal,)
+                # T17: descend when ANY target lies at or beneath this Do —
+                # a target stream can itself host a deeper target.
+                on_path = any(
+                    len(t) >= len(child) and t[: len(child)] == child
+                    for t in edit.targets
+                )
+                if on_path:
+                    if in_target:
+                        # The Do is a paint that inherits the whole text
+                        # state — flush held setters and resync exactly as
+                        # the kept-Do tail below does.
+                        flush_setters()
+                        if diverged:
+                            sync_state()
+                    form_res = xobj.get("/Resources")
+                    read_res = form_res if form_res is not None else resources
+                    form_matrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
+                    form_ctm = mat_mult(form_matrix, orig.ctm)
+                    inner_kept, inner_changed, inner_new_forms = _rewrite_paragraph_stream(
+                        pdf,
+                        pikepdf.parse_content_stream(xobj),
+                        read_res,
+                        resources,
+                        depth + 1,
+                        edit,
+                        fonts,
+                        counter,
+                        reserved,
+                        child,
+                        base_ctm=form_ctm,
+                        parent_state=orig,
                     )
-                    if on_path:
-                        form_res = xobj.get("/Resources")
-                        read_res = form_res if form_res is not None else resources
-                        form_matrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
-                        inner_kept, inner_changed, inner_new_forms = _rewrite_paragraph_stream(
-                            pdf,
-                            pikepdf.parse_content_stream(xobj),
-                            read_res,
-                            resources,
-                            depth + 1,
-                            edit,
-                            fonts,
-                            counter,
-                            reserved,
-                            path + (my_ordinal,),
-                            base_ctm=mat_mult(form_matrix, orig.ctm),
-                            parent_state=orig,
-                        )
-                        if inner_changed:
-                            changed = True
-                            copy = pdf.make_stream(pikepdf.unparse_content_stream(inner_kept))
-                            for key in xobj.keys():
-                                if key in ("/Length", "/Filter", "/DecodeParms", "/Resources"):
-                                    continue
-                                copy[key] = xobj[key]
-                            copy_res = _copy_resources_for_write(pdf, read_res)
-                            for nm, st in inner_new_forms.items():
-                                copy_res["/XObject"][Name(nm)] = pdf.make_indirect(st)
-                            if (
-                                edit.pending_fonts
-                                and path + (my_ordinal,) == edit.target_stream
-                            ):
-                                # /Font must be DEEP-copied into the copy
-                                # first: _copy_resources_for_write shares
-                                # non-XObject entries by reference (the 7.4
-                                # lesson, test-caught live there).
-                                src_fonts = copy_res.get("/Font")
-                                fresh_fonts = Dictionary()
-                                if src_fonts is not None:
-                                    for k in src_fonts.keys():
-                                        fresh_fonts[k] = src_fonts[k]
-                                copy_res["/Font"] = fresh_fonts
-                                for fname, fdict in edit.pending_fonts:
-                                    _register_font(pdf, copy_res, fname, fdict)
-                            copy["/Resources"] = copy_res
-                            new_name = _fresh_name(resources, counter, reserved)
-                            new_forms[new_name] = copy
-                            kept.append(_instruction([Name(new_name)], "Do"))
-                            if name:
-                                edit.superseded_forms.add(name)
-                            continue
+                    if inner_changed:
+                        changed = True
+                        copy = pdf.make_stream(pikepdf.unparse_content_stream(inner_kept))
+                        for key in xobj.keys():
+                            if key in ("/Length", "/Filter", "/DecodeParms", "/Resources"):
+                                continue
+                            copy[key] = xobj[key]
+                        copy_res = _copy_resources_for_write(pdf, read_res)
+                        for nm, st in inner_new_forms.items():
+                            copy_res["/XObject"][Name(nm)] = pdf.make_indirect(st)
+                        child_tgt = edit.targets.get(child)
+                        if child_tgt is not None and child_tgt.pending_fonts:
+                            # /Font must be DEEP-copied into the copy
+                            # first: _copy_resources_for_write shares
+                            # non-XObject entries by reference (the 7.4
+                            # lesson, test-caught live there).
+                            src_fonts = copy_res.get("/Font")
+                            fresh_fonts = Dictionary()
+                            if src_fonts is not None:
+                                for k in src_fonts.keys():
+                                    fresh_fonts[k] = src_fonts[k]
+                            copy_res["/Font"] = fresh_fonts
+                            for fname, fdict in child_tgt.pending_fonts:
+                                _register_font(pdf, copy_res, fname, fdict)
+                        copy["/Resources"] = copy_res
+                        _expand_form_bbox(copy, edit, child, form_ctm)
+                        new_name = _fresh_name(resources, counter, reserved)
+                        new_forms[new_name] = copy
+                        kept.append(_instruction([Name(new_name)], "Do"))
+                        if name:
+                            edit.superseded_forms.add(name)
+                        continue
+
+        if not in_target:
             orig.feed(operator, operands)
             kept.append(instruction)
             continue
@@ -2809,8 +3070,8 @@ def _rewrite_paragraph_stream(
             in_bt = False
 
         if operator in SHOW_OPS:
-            is_member = show_ordinal in edit.member_ordinals
-            if is_member and show_ordinal == edit.first_ordinal:
+            is_member = show_ordinal in tgt.member_ordinals
+            if is_member and show_ordinal == tgt.first_ordinal:
                 pending_setters.clear()  # they styled the removed member
             else:
                 flush_setters()
@@ -2832,28 +3093,29 @@ def _rewrite_paragraph_stream(
             # axis, so its model matches the emitted shows too.)
             vert = bool(cap is not None and cap.vertical)
             if is_member:
-                if show_ordinal == edit.first_ordinal:
-                    # 9.A5b: allocate a fresh name per subset in sorted-face
-                    # order BEFORE the build (so _state_ops reads it), then
-                    # collect the ones the build actually emitted. One key →
-                    # one `/EditFb0`, byte-identical to the shipped A3 path.
-                    for key in sorted(edit.fallbacks, key=_face_sort_key):
-                        # 9.T26: an in-place entry IS the document's own font
-                        # — it carries that font's name from construction and
-                        # registers nothing, so allocation must not rename it.
-                        if edit.fallbacks[key].font_dict is not None:
-                            edit.fallbacks[key].name = _fresh_font_name(resources, counter, reserved)
-                    for kind, ins, raw_w in edit.emission.build(orig.ctm):
+                if show_ordinal == tgt.first_ordinal:
+                    # T17: THIS stream's share of the emission, anchored at
+                    # its own first member's ctm (fallback names were
+                    # allocated ONCE by the caller — same names in every
+                    # stream). `used_keys` collects the subsets this stream
+                    # actually drew, for registration into ITS resources.
+                    used_keys: set = set()
+                    for kind, ins, raw_w in edit.emission.build(
+                        orig.ctm, stream=path, used=used_keys
+                    ):
                         kept.append(ins)
                         if kind == "show":
                             emit.advance_after_show(raw_w, edit.emission.vertical)
                         else:
                             emit_feed(ins)
-                    for key in sorted(edit.fallbacks, key=_face_sort_key):
+                    for key in sorted(used_keys, key=_face_sort_key):
                         fb = edit.fallbacks[key]
-                        if fb.used and fb.font_dict is not None:
-                            edit.pending_fonts.append((fb.name, fb.font_dict))
-                edit.changed = True
+                        # 9.T26: an in-place entry IS the document's own font
+                        # (font_dict None) — it registers nothing.
+                        if fb.font_dict is not None:
+                            tgt.pending_fonts.append((fb.name, fb.font_dict))
+                    tgt.emitted_bbox = edit.emission.last_build_bbox
+                tgt.changed = True
                 changed = True
                 diverged = True
                 orig.advance_after_show(raw, vert)
@@ -2891,7 +3153,7 @@ def _rewrite_paragraph_stream(
 
         if (
             diverged
-            and show_ordinal <= edit.last_ordinal
+            and show_ordinal <= tgt.last_ordinal
             and operator in _DROPPABLE_IN_SPAN
         ):
             # Inside the member span: this setter served a removed member.
@@ -3769,13 +4031,7 @@ def replace_paragraph_text(
         inplace_widths = prep.inplace_widths
 
         member_set = set(para.run_indexes)
-        per_stream_counts: dict[tuple, int] = defaultdict(int)
-        ordinal_of: dict[int, int] = {}
-        for i, det in enumerate(detail):
-            o = per_stream_counts[det["stream"]]
-            per_stream_counts[det["stream"]] = o + 1
-            if i in member_set:
-                ordinal_of[i] = o
+        ords_by_stream = _member_ordinals_by_stream(detail, member_set)
         try:
             box = [float(v) for v in p.mediabox]
             if para.vertical:
@@ -3789,10 +4045,11 @@ def replace_paragraph_text(
                 page_x0, page_x1 = min(box[0], box[2]), max(box[0], box[2])
         except (TypeError, ValueError):
             page_x0, page_x1 = (-792.0, 0.0) if para.vertical else (0.0, 612.0)
+        counter = [0]
+        reserved: set = set()
+        _allocate_fallback_names(para.members, fallbacks, counter, reserved)
         edit = _ParaEditState(
-            para.stream,
-            set(ordinal_of.values()),
-            ordinal_of[min(member_set)],
+            ords_by_stream,
             _Emission(
                 para, styled, fallbacks, page_x0, page_x1,
                 size_override=size_override, split_at=split_point,
@@ -3817,8 +4074,8 @@ def replace_paragraph_text(
             0,
             edit,
             fonts,
-            [0],
-            set(),
+            counter,
+            reserved,
             (),
         )
         if not (changed and edit.changed):
@@ -3827,8 +4084,9 @@ def replace_paragraph_text(
             _register_xobject(pdf, resources, nm, st)
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         _finalize_page_rewrite(p, kept, edit.superseded_forms)
-        if edit.pending_fonts and edit.target_stream == ():
-            for fname, fdict in edit.pending_fonts:
+        page_tgt = edit.targets.get(())
+        if page_tgt is not None:
+            for fname, fdict in page_tgt.pending_fonts:
                 _register_font(pdf, resources, fname, fdict)
         if inplace_font_dict is not None and inplace_tounicode:
             _augment_tounicode(pdf, inplace_font_dict, inplace_tounicode)
@@ -3925,7 +4183,14 @@ def merge_paragraph_with_previous(
         for para_, label in ((prev, "previous"), (cur, "selected")):
             if not para_.editable:
                 raise ValueError(para_.reason or f"the {label} paragraph is not editable")
-        if prev.stream != cur.stream:
+        # T17 kept this refusal DELIBERATELY (now over stream SETS): the
+        # multi-target rewrite could express a cross-stream merge, but the
+        # merged single-line case lands both fragments on ONE baseline in
+        # different streams — which can never relist as one paragraph
+        # (lines never mix streams), so the "merge" would succeed and lie.
+        # Two cross-stream paragraphs sharing the same stream set merge
+        # fine — their fragments stack, they don't share a band.
+        if prev.streams != cur.streams:
             raise ValueError("the paragraphs are in different content streams and cannot merge")
         if prev.lkey != cur.lkey:
             # Different linear parts (CTM scale) — the emission would lay
@@ -3999,13 +4264,7 @@ def merge_paragraph_with_previous(
         styled = prep.styled
 
         member_set = set(prev.run_indexes) | set(cur.run_indexes)
-        per_stream_counts: dict[tuple, int] = defaultdict(int)
-        ordinal_of: dict[int, int] = {}
-        for i, det in enumerate(detail):
-            o = per_stream_counts[det["stream"]]
-            per_stream_counts[det["stream"]] = o + 1
-            if i in member_set:
-                ordinal_of[i] = o
+        ords_by_stream = _member_ordinals_by_stream(detail, member_set)
         try:
             box = [float(v) for v in p.mediabox]
             if prev.vertical:
@@ -4016,10 +4275,13 @@ def merge_paragraph_with_previous(
                 page_x0, page_x1 = min(box[0], box[2]), max(box[0], box[2])
         except (TypeError, ValueError):
             page_x0, page_x1 = (-792.0, 0.0) if prev.vertical else (0.0, 612.0)
+        counter = [0]
+        reserved: set = set()
+        _allocate_fallback_names(
+            list(prev.members) + list(cur.members), prep.fallbacks, counter, reserved
+        )
         edit = _ParaEditState(
-            prev.stream,
-            set(ordinal_of.values()),
-            ordinal_of[min(member_set)],
+            ords_by_stream,
             _Emission(prev, styled, prep.fallbacks, page_x0, page_x1,
                       size_override=prep.size_override,
                       kerns=_KernSource(resources, font_path, prep.fallbacks)),
@@ -4033,8 +4295,8 @@ def merge_paragraph_with_previous(
             0,
             edit,
             fonts,
-            [0],
-            set(),
+            counter,
+            reserved,
             (),
         )
         if not (changed and edit.changed):
@@ -4046,8 +4308,9 @@ def merge_paragraph_with_previous(
         # T18: a restyled merge can embed a substitute face — register it,
         # exactly as replace does (a Tf naming an unregistered font renders
         # nothing).
-        if edit.pending_fonts and edit.target_stream == ():
-            for fname, fdict in edit.pending_fonts:
+        page_tgt = edit.targets.get(())
+        if page_tgt is not None:
+            for fname, fdict in page_tgt.pending_fonts:
                 _register_font(pdf, resources, fname, fdict)
         _save(pdf, input_path, output_path)
         return {

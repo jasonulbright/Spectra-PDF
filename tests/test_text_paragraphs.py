@@ -3817,3 +3817,260 @@ class TestKinsokuDepth:
         lines = self._tj_lines(out, self.MAP)
         assert lines[0] == "日本語編"
         assert lines[1] == "集」文字列"
+
+
+class TestCrossStreamParagraphs:
+    """T17 — a paragraph's lines may continue across a stream boundary
+    (page → form, form → form) under strict evidence, and an edit lands
+    each member's replacement text back in ITS OWN stream. The
+    false-positive direction is the dangerous one: fragments that merely
+    align must NOT group."""
+
+    PAGE_LINE = b"BT /F1 12 Tf 72 712 Td (First line of the paragraph words) Tj ET"
+    FORM_LINE = b"BT /F1 12 Tf 0 0 Td (Second line of the paragraph words) Tj ET"
+
+    @staticmethod
+    def _form(pdf, content: bytes, matrix, bbox=(0, 0, 300, 20), font=None):
+        form = pdf.make_stream(content)
+        form["/Type"] = Name("/XObject")
+        form["/Subtype"] = Name("/Form")
+        form["/BBox"] = Array(list(bbox))
+        form["/Matrix"] = Array(list(matrix))
+        form["/Resources"] = Dictionary(
+            Font=Dictionary(F1=font if font is not None else _helv(pdf))
+        )
+        return pdf.make_indirect(form)
+
+    def _continuation(self, tmp_dir, name="xs.pdf", form_content=None,
+                      bbox=(0, 0, 300, 20)):
+        """Page line at y=712, form line at y=698 (normal pitch, full
+        x-overlap, Do right after the page text — the grouping evidence)."""
+        src = os.path.join(tmp_dir, name)
+        pdf = pikepdf.new()
+        helv = _helv(pdf)
+        form = self._form(
+            pdf,
+            form_content if form_content is not None else self.FORM_LINE,
+            (1, 0, 0, 1, 72, 698),
+            bbox=bbox,
+        )
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            Font=Dictionary(F1=helv), XObject=Dictionary(Fm1=form)
+        )
+        page.Contents = pdf.make_stream(self.PAGE_LINE + b" /Fm1 Do")
+        pdf.save(src)
+        pdf.close()
+        return src
+
+    def test_page_form_continuation_groups(self, tmp_dir):
+        src = self._continuation(tmp_dir)
+        paras = _paras(src)
+        assert len(paras) == 1
+        assert paras[0]["text"] == (
+            "First line of the paragraph words Second line of the paragraph words"
+        )
+        det = _detail_runs(src)
+        assert det[0]["stream"] == () and det[1]["stream"] == (0,)
+
+    def test_form_form_continuation_groups(self, tmp_dir):
+        src = os.path.join(tmp_dir, "ff.pdf")
+        pdf = pikepdf.new()
+        helv = _helv(pdf)
+        f1 = self._form(pdf, self.FORM_LINE, (1, 0, 0, 1, 72, 712))
+        f2 = self._form(pdf, self.FORM_LINE, (1, 0, 0, 1, 72, 698))
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            Font=Dictionary(F1=helv), XObject=Dictionary(Fm1=f1, Fm2=f2)
+        )
+        page.Contents = pdf.make_stream(b"/Fm1 Do /Fm2 Do")
+        pdf.save(src)
+        pdf.close()
+        paras = _paras(src)
+        assert len(paras) == 1
+        assert len(set(paras[0]["runs"])) == 2
+
+    def test_intervening_visible_run_blocks_grouping(self, tmp_dir):
+        # Same geometry as the grouping fixture, but a HEADER run sits
+        # between the fragments in content order - the z-adjacency gate
+        # must refuse (the false-positive direction).
+        src = os.path.join(tmp_dir, "blocked.pdf")
+        pdf = pikepdf.new()
+        helv = _helv(pdf)
+        form = self._form(pdf, self.FORM_LINE, (1, 0, 0, 1, 72, 698))
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            Font=Dictionary(F1=helv), XObject=Dictionary(Fm1=form)
+        )
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 72 712 Td (First line of the paragraph words) Tj "
+            b"328 38 Td (Header) Tj ET /Fm1 Do"
+        )
+        pdf.save(src)
+        pdf.close()
+        texts = sorted(p["text"] for p in _paras(src))
+        assert texts == [
+            "First line of the paragraph words",
+            "Header",
+            "Second line of the paragraph words",
+        ]
+
+    def test_whitespace_run_does_not_block_grouping(self, tmp_dir):
+        # A standalone space run between the fragments is not evidence of
+        # anything - generators emit them constantly.
+        src = os.path.join(tmp_dir, "ws.pdf")
+        pdf = pikepdf.new()
+        helv = _helv(pdf)
+        form = self._form(pdf, self.FORM_LINE, (1, 0, 0, 1, 72, 698))
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            Font=Dictionary(F1=helv), XObject=Dictionary(Fm1=form)
+        )
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 72 712 Td (First line of the paragraph words) Tj "
+            b"400 0 Td ( ) Tj ET /Fm1 Do"
+        )
+        pdf.save(src)
+        pdf.close()
+        paras = [p for p in _paras(src) if p["text"].strip()]
+        assert len(paras) == 1
+        assert paras[0]["text"] == (
+            "First line of the paragraph words Second line of the paragraph words"
+        )
+
+    def test_cross_stream_edit_round_trips(self, tmp_dir):
+        # Width-preserving edit in each half (wordz for words), so the wrap
+        # keeps the stream boundary at the line break and the output
+        # relists as ONE paragraph through the shipped heuristics.
+        src = self._continuation(
+            tmp_dir,
+            form_content=(
+                b"BT /F1 12 Tf 0 0 Td (Second line of the paragraph words) Tj "
+                b"0 -100 Td (Keep form) Tj ET"
+            ),
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        para = next(p for p in paras if p["text"].startswith("First"))
+        new_text = (
+            "First line of the paragraph wordz Second line of the paragraph wordz"
+        )
+        r0, r1 = para["runs"]
+        spans = [
+            {"start": 0, "end": 34, "run": r0},
+            {"start": 34, "end": len(new_text), "run": r1},
+        ]
+        _apply(src, out, para, new_text, spans=spans)
+        _assert_non_members_unmoved(src, out, para["runs"])
+        relisted = _paras(out)
+        edited = next(p for p in relisted if p["text"].startswith("First"))
+        assert edited["text"] == new_text
+        # Per-stream routing: each half landed back in ITS stream.
+        det = _detail_runs(out)
+        page_text = "".join(r["text"] for r in det if r["stream"] == ())
+        form_text = "".join(r["text"] for r in det if r["stream"] != ())
+        assert "First line of the paragraph wordz" in page_text
+        assert "Second" not in page_text
+        assert "Second line of the paragraph wordz" in form_text
+        assert "First" not in form_text
+
+    def test_twice_drawn_form_edits_one_instance(self, tmp_dir):
+        # Copy-on-write per-instance semantics, pinned as CORRECT: the
+        # paragraph spans page + instance 1; instance 2 keeps the old text
+        # at its own position.
+        src = os.path.join(tmp_dir, "twice.pdf")
+        pdf = pikepdf.new()
+        helv = _helv(pdf)
+        form = self._form(pdf, self.FORM_LINE, (1, 0, 0, 1, 72, 698))
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            Font=Dictionary(F1=helv), XObject=Dictionary(Fm1=form)
+        )
+        page.Contents = pdf.make_stream(
+            self.PAGE_LINE + b" /Fm1 Do q 1 0 0 1 100 -400 cm /Fm1 Do Q"
+        )
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        para = next(p for p in paras if p["text"].startswith("First"))
+        assert len(para["runs"]) == 2
+        new_text = (
+            "First line of the paragraph wordz Second line of the paragraph wordz"
+        )
+        r0, r1 = para["runs"]
+        spans = [
+            {"start": 0, "end": 34, "run": r0},
+            {"start": 34, "end": len(new_text), "run": r1},
+        ]
+        _apply(src, out, para, new_text, spans=spans)
+        relisted = _paras(out)
+        texts = sorted(p["text"] for p in relisted)
+        assert new_text in texts
+        assert "Second line of the paragraph words" in texts  # instance 2
+        # Instance 2's line still renders at its own untouched spot.
+        det = _detail_runs(out)
+        other = [
+            r for r in det
+            if r["text"] == "Second line of the paragraph words"
+        ]
+        assert len(other) == 1
+        assert abs(other[0]["combined"][4] - 172.0) <= 1e-6
+        assert abs(other[0]["combined"][5] - 298.0) <= 1e-6
+
+    def test_form_bbox_expands_to_cover_emitted_text(self, tmp_dir):
+        # The form's share grows past its tight /BBox - the copy's box must
+        # expand or the new text is clipped away by any real viewer.
+        src = self._continuation(tmp_dir, bbox=(0, 0, 200, 15))
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        new_text = (
+            "First line of the paragraph words Second line of the paragraph "
+            "words and considerably more trailing words that must wrap"
+        )
+        r0, r1 = para["runs"]
+        spans = [
+            {"start": 0, "end": 34, "run": r0},
+            {"start": 34, "end": len(new_text), "run": r1},
+        ]
+        _apply(src, out, para, new_text, spans=spans)
+        with pikepdf.open(out) as pdf:
+            page = pdf.pages[0]
+            xobjs = page.obj["/Resources"]["/XObject"]
+            drawn = [
+                str(i.operands[0])
+                for i in pikepdf.parse_content_stream(page)
+                if str(i.operator) == "Do"
+            ]
+            assert len(drawn) == 1
+            bbox = [float(v) for v in xobjs[drawn[0]]["/BBox"]]
+        # Form space puts the original baseline at y=0; wrapped lines land
+        # below it, so the expanded box must dip beneath the original 0.
+        assert bbox[1] < -5.0
+        # And the edit still reads back whole.
+        relisted = _paras(out)
+        assert any(p["text"] == new_text for p in relisted)
+
+    def test_direction_disagreement_refuses(self, tmp_dir):
+        # Page half resolves RTL from its own text, form half LTR - the
+        # stated T17 refusal (each half would reorder against a different
+        # base on the way back out).
+        src = os.path.join(tmp_dir, "dir.pdf")
+        pdf = pikepdf.new()
+        heb = _hebrew3(pdf)
+        form = self._form(pdf, b"BT /F1 12 Tf 0 0 Td (latin words) Tj ET",
+                          (1, 0, 0, 1, 72, 698))
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            Font=Dictionary(F1=heb), XObject=Dictionary(Fm1=form)
+        )
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 72 712 Td (ABC) Tj ET /Fm1 Do"
+        )
+        pdf.save(src)
+        pdf.close()
+        paras = _paras(src)
+        cross = [p for p in paras if len(set(p["runs"])) == 2]
+        assert len(cross) == 1  # the halves DO group (the evidence holds)
+        assert cross[0]["editable"] is False
+        assert "direction" in cross[0]["reason"]
