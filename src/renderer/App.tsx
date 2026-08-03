@@ -983,6 +983,11 @@ function AppContent(): React.ReactElement {
       if (opts?.italic !== undefined) params.italic = opts.italic;
       // A4 split: a code-point offset — the engine lays out two blocks.
       if (opts?.split_at !== undefined) params.split_at = opts.split_at;
+      // T18: a user-chosen split gap (leading multiples) and/or an explicit
+      // box resize (points; box_left rides when the LEFT grip dragged).
+      if (opts?.split_gap !== undefined) params.split_gap = opts.split_gap;
+      if (opts?.box_width !== undefined) params.box_width = opts.box_width;
+      if (opts?.box_left !== undefined) params.box_left = opts.box_left;
       if (opts?.convert) params.convert = true;
       // 9.K2 whole-paragraph OpenType features (small caps / alternates). The
       // engine applies them in place when the paragraph's own font carries the
@@ -1016,17 +1021,36 @@ function AppContent(): React.ReactElement {
       page: number,
       prev: { index: number; runs: number[]; text: string },
       cur: { index: number; runs: number[]; text: string },
+      // T18: `withNext` merges cur (the NEXT paragraph) into prev (the
+      // SELECTED one — prev is always the anchor slot); an edited editor
+      // rides its text in as the selected side's override with the span
+      // map the replace path would have sent.
+      opts?: {
+        withNext?: boolean;
+        overrideText?: string;
+        overrideSpans?: { start: number; end: number; run: number }[];
+      },
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       await performOperation(path, 'merge_paragraph_with_previous', {
         page,
-        paragraph_index: cur.index,
+        // The engine addresses the SELECTED paragraph: for the shipped
+        // previous-merge that is cur (it merges upward); for with_next it
+        // is prev (the next merges into it).
+        paragraph_index: opts?.withNext ? prev.index : cur.index,
         expected_prev_runs: prev.runs,
         expected_prev_text: prev.text,
         expected_runs: cur.runs,
         expected_text: cur.text,
+        ...(opts?.withNext ? { with_next: true } : {}),
+        ...(opts?.overrideText !== undefined
+          ? {
+              selected_text_override: opts.overrideText,
+              selected_spans_override: opts.overrideSpans,
+            }
+          : {}),
         // 9.K1b: a merge re-lays-out text too, so it needs the same kern
         // source an edit gets.
         font_path: await app.getEditFontPath(),

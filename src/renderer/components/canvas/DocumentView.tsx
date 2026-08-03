@@ -127,7 +127,8 @@ export interface DocumentViewProps {
   onOpenParagraphEditor: (pageId: string, index: number) => void;
   onCommitParagraphEdit: (pageId: string, index: number, newText: string, opts?: ParagraphEditOpts) => void;
   onCancelParagraphEdit: () => void;
-  onMergeParagraphPrev: (pageId: string, index: number) => void;
+  onMergeParagraphPrev: (pageId: string, index: number, editedText?: string) => void;
+  onMergeParagraphNext: (pageId: string, index: number, editedText?: string) => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
@@ -724,6 +725,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onCommitParagraphEdit={props.onCommitParagraphEdit}
           onCancelParagraphEdit={props.onCancelParagraphEdit}
           onMergeParagraphPrev={props.onMergeParagraphPrev}
+          onMergeParagraphNext={props.onMergeParagraphNext}
           signaturePlacement={props.signaturePlacement?.pageId === page.id ? props.signaturePlacement : null}
           findMatch={props.findMatchPageIds.has(page.id)}
           findWords={props.findWordsByPage.get(page.id)}
