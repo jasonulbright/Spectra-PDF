@@ -12,6 +12,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { COMMANDS } from '../src/renderer/commands/registry';
 import { MENUS, type MenuNode } from '../src/renderer/commands/menus';
+import { CHROME_STRINGS } from '../src/renderer/i18n-chrome';
 
 const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
@@ -20,7 +21,7 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 const SHIPPED_LOCALES = ['en'];
 
 function expectedCatalog(): Record<string, string> {
-  const out: Record<string, string> = {};
+  const out: Record<string, string> = { ...CHROME_STRINGS };
   for (const [id, cmd] of Object.entries(COMMANDS)) {
     out[`cmd.${id}`] = cmd.title;
   }

@@ -5,6 +5,9 @@ import { ToolsCenter } from './ToolsCenter';
 import { invokeCommand, isCommandEnabled } from '../commands/context';
 import type { CommandId } from '../commands/registry';
 import type { ToolId } from '../commands/tools';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../i18n';
+import type { ChromeKey } from '../i18n-chrome';
 
 // Home (Phase 10 slice E — the redesign the owner asked for: "much cleaner
 // and prettier - even in darkmode", the king's bar). A landing surface you
@@ -31,20 +34,22 @@ function folderOf(path: string): string {
 
 // The king's "recommended tools" strip, from our own command registry — the
 // same ids the menus run, so enablement can never disagree.
-const QUICK_ACTIONS: ReadonlyArray<{ command: CommandId; label: string; icon: Parameters<typeof ChromeIcon>[0]['icon'] }> = [
-  { command: 'document.combineFiles', label: 'Combine files', icon: 'pages' },
-  { command: 'file.createPdfFromPostScript', label: 'Create PDF', icon: 'document' },
-  { command: 'tools.batchOcr', label: 'Batch OCR', icon: 'find' },
+const QUICK_ACTIONS: ReadonlyArray<{ command: CommandId; label: ChromeKey; icon: Parameters<typeof ChromeIcon>[0]['icon'] }> = [
+  { command: 'document.combineFiles', label: 'chrome.home.combineFiles', icon: 'pages' },
+  { command: 'file.createPdfFromPostScript', label: 'chrome.home.createPdf', icon: 'document' },
+  { command: 'tools.batchOcr', label: 'chrome.home.batchOcr', icon: 'find' },
 ];
 
 export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOpenTool }: HomeTabProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   return (
     <div data-testid="home-tab" className="flex-1 overflow-y-auto">
       <div className="home-shell">
         <div className="home-hero">
           <div>
-            <h2 className="home-title">Home</h2>
-            <p className="home-sub">Open a document to start, or pick a tool below.</p>
+            <h2 className="home-title">{tChrome('chrome.home.title')}</h2>
+            <p className="home-sub">{tChrome('chrome.home.subtitle')}</p>
           </div>
           <div className="home-actions" data-testid="home-quick-actions">
             <button
@@ -53,7 +58,7 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOp
               className="home-action home-action-primary"
             >
               <ChromeIcon icon="open" size={15} />
-              Open a PDF
+              {tChrome('chrome.home.openPdf')}
             </button>
             {QUICK_ACTIONS.map((qa) => (
               <button
@@ -64,7 +69,7 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOp
                 className="home-action"
               >
                 <ChromeIcon icon={qa.icon} size={14} />
-                {qa.label}
+                {tChrome(qa.label)}
               </button>
             ))}
           </div>
@@ -72,24 +77,24 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOp
 
         <div data-testid="home-drop-hint" className="home-drop">
           <ChromeIcon icon="document" size={26} className="opacity-40" />
-          <p>Drop PDF files anywhere to open them</p>
+          <p>{tChrome('chrome.home.dropHint')}</p>
         </div>
 
         <div className="home-section-head">
-          <div className="home-section-title">Recent files</div>
+          <div className="home-section-title">{tChrome('chrome.home.recentFiles')}</div>
           {recentFiles.length > 0 && (
             <button
               data-testid="home-clear-recent"
               onClick={onClearRecent}
               className="home-section-action"
             >
-              Clear
+              {tChrome('chrome.home.clear')}
             </button>
           )}
         </div>
 
         {recentFiles.length === 0 ? (
-          <p className="home-empty">No recent files yet — anything you open shows up here.</p>
+          <p className="home-empty">{tChrome('chrome.home.noRecents')}</p>
         ) : (
           <div className="home-recents">
             {recentFiles.map(({ path, openedAt }) => (
@@ -115,7 +120,7 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOp
 
         {/* The tile grid's home since the Tools tab's retirement (slice C). */}
         <div className="home-section-head home-tools-head">
-          <div className="home-section-title">All tools</div>
+          <div className="home-section-title">{tChrome('chrome.home.allTools')}</div>
         </div>
         <ToolsCenter onOpenTool={onOpenTool} embedded />
       </div>

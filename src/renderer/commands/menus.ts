@@ -6,6 +6,7 @@
 // the keymap table (so a menu label can never drift from its binding).
 import { isDocTab } from '../state/types';
 import { tabFiles } from '../state/selectors';
+import { tChrome } from '../i18n';
 import type { CommandContext } from './types';
 import type { CommandId } from './registry';
 import { NAV_PANEL_IDS } from './navpanels';
@@ -49,7 +50,7 @@ const recentSubmenu: MenuNode = {
       build: (ctx) => {
         const recent = ctx.state.ui.recentFiles;
         if (recent.length === 0) {
-          return [{ label: 'No Recent Files', disabled: true, run: () => {} }];
+          return [{ label: tChrome('chrome.menu.noRecentFiles'), disabled: true, run: () => {} }];
         }
         return recent.slice(0, 10).map(({ path }) => ({
           label: path.split(/[\\/]/).pop() || path,
@@ -94,7 +95,8 @@ const windowDocList: MenuNode = {
   id: 'window-docs',
   build: (ctx) => {
     const docs = tabFiles(ctx.state);
-    if (docs.length === 0) return [{ label: 'No Open Documents', disabled: true, run: () => {} }];
+    if (docs.length === 0)
+      return [{ label: tChrome('chrome.menu.noOpenDocuments'), disabled: true, run: () => {} }];
     return docs.map((f, i) => ({
       label: `${i + 1}  ${f.name}`,
       testid: 'menuitem-window-doc',
