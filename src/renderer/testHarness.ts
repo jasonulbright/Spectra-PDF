@@ -328,17 +328,29 @@ export interface CanvasEditImagesHandlers {
     kind: string;
     crop: number[] | null;
   }[];
-  select: (pageId: string, index: number) => void;
+  select: (pageId: string, index: number, additive?: boolean) => void;
   /** Transform (9.C1) the selected image via the real commit path. */
   transformImage: (pageId: string, index: number, matrix: number[]) => Promise<void>;
+  /** P7 multi-select: group transform via the ONE multi engine op. */
+  transformImages: (
+    pageId: string,
+    targets: { index: number; matrix: number[] }[],
+  ) => Promise<void>;
+  /** P7: delete the whole current selection (routes the group op at N>1). */
+  deleteSelected: () => Promise<void>;
   /** Add Image (9.C2): embed a source at a user-space rect via the real
-   * commit path (the native file picker is undrivable — inject the source). */
+   * commit path (the native file picker is undrivable — inject the source).
+   * P7: rect=null with `at` = the natural-size click-place. */
   addImage: (
     page: number,
-    rect: [number, number, number, number],
+    rect: [number, number, number, number] | null,
     source: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
+    at?: [number, number],
   ) => Promise<void>;
-  selection: () => { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
+  selection: () =>
+    | { kind: 'image'; pageId: string; index: number; indexes: number[] }
+    | { kind: 'text' | 'para'; pageId: string; index: number }
+    | null;
   /** Text runs (7.2): listing + opening the REAL inline editor (the input
    * itself is then driven through the DOM — data-testid edit-text-input). */
   textRuns: (
@@ -929,9 +941,21 @@ export interface TestHarness {
     kind: string;
     crop: number[] | null;
   }[];
-  editImageSelect: (pageId: string, index: number) => void;
-  /** The live edit selection (C1-tail: proves the post-op auto-reselect). */
-  editImageSelection: () => { kind: string; pageId: string; index: number } | null;
+  editImageSelect: (pageId: string, index: number, additive?: boolean) => void;
+  /** The live edit selection (C1-tail: proves the post-op auto-reselect).
+   * P7: the image arm also reports `indexes` (the whole group). */
+  editImageSelection: () => {
+    kind: string;
+    pageId: string;
+    index: number;
+    indexes?: number[];
+  } | null;
+  /** P7 multi-select: group transform (one multi op) + delete-selection. */
+  editImageTransformMany: (
+    pageId: string,
+    targets: { index: number; matrix: number[] }[],
+  ) => Promise<void>;
+  editImageDeleteSelected: () => Promise<void>;
   /** 9.D1 vector objects: list, select, delete. */
   editVectorPageIds: () => string[];
   editVectors: (pageId: string) => {
@@ -969,11 +993,13 @@ export interface TestHarness {
       opacity?: number;
     },
   ) => Promise<void>;
-  /** Add Image (9.C2): embed a source at a user-space rect. */
+  /** Add Image (9.C2): embed a source at a user-space rect; P7: rect=null
+   * with `at` places at natural size on the click point. */
   editImageAdd: (
     page: number,
-    rect: [number, number, number, number],
+    rect: [number, number, number, number] | null,
     source: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
+    at?: [number, number],
   ) => Promise<void>;
   /** Add Text (9.A2): place then author. */
   addTextPlace: (rect: { x: number; y: number; w: number; h: number }, timeoutMs?: number) => Promise<void>;
@@ -1670,8 +1696,25 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     editImagePageIds: () => canvasEditImages?.pageIds() ?? [],
     editImagePlacements: (pageId) => canvasEditImages?.placements(pageId) ?? [],
-    editImageSelect: (pageId, index) => canvasEditImages?.select(pageId, index),
+    editImageSelect: (pageId, index, additive) =>
+      canvasEditImages?.select(pageId, index, additive),
     editImageSelection: () => canvasEditImages?.selection() ?? null,
+    editImageTransformMany: async (pageId, targets) => {
+      if (!canvasEditImages) {
+        const msg = 'editImageTransformMany: canvas edit mode not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      await canvasEditImages.transformImages(pageId, targets);
+    },
+    editImageDeleteSelected: async () => {
+      if (!canvasEditImages) {
+        const msg = 'editImageDeleteSelected: canvas edit mode not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      await canvasEditImages.deleteSelected();
+    },
     editVectorPageIds: () => canvasEditImages?.vectorPageIds() ?? [],
     editVectors: (pageId) => canvasEditImages?.vectors(pageId) ?? [],
     editVectorSelect: (pageId, index) => canvasEditImages?.selectVector(pageId, index),
@@ -1726,14 +1769,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
-    editImageAdd: async (page, rect, source) => {
+    editImageAdd: async (page, rect, source, at) => {
       if (!canvasEditImages) {
         const msg = 'editImageAdd: canvas edit mode not mounted';
         lastError = msg;
         throw new Error(msg);
       }
       try {
-        await canvasEditImages.addImage(page, rect, source);
+        await canvasEditImages.addImage(page, rect, source, at);
       } catch (err) {
         captureError('editImageAdd', err);
         throw err;

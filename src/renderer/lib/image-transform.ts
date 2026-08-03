@@ -91,6 +91,47 @@ export function applyResizeCorner(
   return matMul(s, m); // local scale first, then M
 }
 
+/** P7 slice A: skew the placement by dragging one EDGE-mid handle parallel
+ * to its edge, with the OPPOSITE edge pinned. `edge` is 0=left 1=bottom
+ * 2=right 3=top (the applyCropEdge convention). Computed in the placement's
+ * LOCAL frame like resize, so it stays correct for a rotated placement: the
+ * drag delta projects to a local shear factor k (x-delta for the horizontal
+ * edges, y-delta for the vertical ones) and the local shear composes onto M.
+ * Pure shear has determinant 1, so no degeneracy clamp is needed — only a
+ * degenerate BASE (uninvertible M) returns null. */
+export function applySkewEdge(
+  m: Mat,
+  edge: 0 | 1 | 2 | 3,
+  sux: number,
+  suy: number,
+  cux: number,
+  cuy: number,
+): Mat | null {
+  const inv = invert(m);
+  if (!inv) return null;
+  const [slx, sly] = transformPoint(inv, sux, suy);
+  const [clx, cly] = transformPoint(inv, cux, cuy);
+  let s: Mat;
+  if (edge === 3) {
+    // Top edge dragged by k along x; bottom (y=0) pinned: x' = x + k·y.
+    const k = clx - slx;
+    s = [1, 0, k, 1, 0, 0];
+  } else if (edge === 1) {
+    // Bottom edge dragged by k; top (y=1) pinned: x' = x + k·(1−y).
+    const k = clx - slx;
+    s = [1, 0, -k, 1, k, 0];
+  } else if (edge === 2) {
+    // Right edge dragged by k along y; left (x=0) pinned: y' = y + k·x.
+    const k = cly - sly;
+    s = [1, k, 0, 1, 0, 0];
+  } else {
+    // Left edge dragged by k; right (x=1) pinned: y' = y + k·(1−x).
+    const k = cly - sly;
+    s = [1, -k, 0, 1, 0, k];
+  }
+  return matMul(s, m);
+}
+
 /** Rotate the placement about its own center by `angleRad` (CCW in user
  * space). The center is a fixed point, so the image spins in place. */
 export function applyRotate(m: Mat, angleRad: number): Mat {

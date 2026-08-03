@@ -113,6 +113,13 @@ export interface SecondaryToolbarProps {
   imageCropArmed: boolean;
   onToggleImageCrop: () => void;
   onRotateImage: (dir: 1 | -1) => void;
+  /** P7 multi-select: how many images are selected (0 when the selection is
+   * not images). Single-target actions disable above 1; the align/distribute
+   * row appears at 2+ (distribute needs 3+). */
+  editImageCount: number;
+  onAlignImages: (
+    mode: 'left' | 'centerh' | 'right' | 'top' | 'centerv' | 'bottom' | 'disth' | 'distv',
+  ) => void;
 }
 
 /** Rung 3: "Measured N pt = [value][unit] Apply" — the calibration drag's
@@ -192,7 +199,8 @@ export function SecondaryToolbar({
   onEditAction,
   onEditTextOpen,
   editImageOpacity,
-
+  editImageCount,
+  onAlignImages,
   onSetImageOpacity,
   imageCropArmed,
   onToggleImageCrop,
@@ -444,12 +452,14 @@ export function SecondaryToolbar({
             </span>
           )}
           {/* P6: inline images replace (promoted to an ordinary embedded
-              image) and extract like any other — the old disable is gone. */}
+              image) and extract like any other — the old disable is gone.
+              P7: replace/extract/crop are single-target — they disable on a
+              group; delete and rotate act on the whole selection. */}
           <button
             type="button"
             data-testid="edit-action-replace"
             className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editBusy}
+            disabled={editSelectionKind !== 'image' || editImageCount > 1 || editBusy}
             onClick={() => onEditAction('replace')}
           >
             Replace…
@@ -458,7 +468,7 @@ export function SecondaryToolbar({
             type="button"
             data-testid="edit-action-extract"
             className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editBusy}
+            disabled={editSelectionKind !== 'image' || editImageCount > 1 || editBusy}
             onClick={() => onEditAction('extract')}
           >
             Extract…
@@ -478,7 +488,7 @@ export function SecondaryToolbar({
             data-testid="edit-action-crop"
             className="secondary-tool"
             aria-pressed={imageCropArmed}
-            disabled={editSelectionKind !== 'image' || editBusy}
+            disabled={editSelectionKind !== 'image' || editImageCount > 1 || editBusy}
             title="Crop — drag inside the image to keep a region"
             onClick={onToggleImageCrop}
           >
@@ -511,6 +521,58 @@ export function SecondaryToolbar({
               disabled={editBusy}
               onCommit={onSetImageOpacity}
             />
+          )}
+          {/* P7 multi-select: align/distribute the group — per-member
+              translates through the ONE multi commit (one undo entry). */}
+          {editImageCount > 1 && (
+            <span role="group" aria-label="Align images" className="secondary-toolbar-align">
+              {/* Same glyph set as the PropertiesBar's annotation align row —
+                  one visual language for "align" across the product. */}
+              {(
+                [
+                  ['left', 'Align left edges', '⭰'],
+                  ['centerh', 'Align horizontal centers', '⇹'],
+                  ['right', 'Align right edges', '⭲'],
+                  ['top', 'Align top edges', '⭱'],
+                  ['centerv', 'Align vertical centers', '⇳'],
+                  ['bottom', 'Align bottom edges', '⭳'],
+                ] as const
+              ).map(([mode, title, glyph]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  data-testid={`edit-align-${mode}`}
+                  className="secondary-tool"
+                  disabled={editBusy}
+                  title={title}
+                  onClick={() => onAlignImages(mode)}
+                >
+                  {glyph}
+                </button>
+              ))}
+              {editImageCount > 2 &&
+                (
+                  [
+                    ['disth', 'Distribute horizontally (even gaps)', '⇢⇠'],
+                    ['distv', 'Distribute vertically (even gaps)', '⇣⇡'],
+                  ] as const
+                ).map(([mode, title, glyph]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    data-testid={`edit-align-${mode}`}
+                    className="secondary-tool"
+                    disabled={editBusy}
+                    title={title}
+                    onClick={() => onAlignImages(mode)}
+                  >
+                    {glyph}
+                  </button>
+                ))}
+              <span className="secondary-toolbar-hint" data-testid="edit-group-count">
+                {editImageCount} selected
+              </span>
+            </span>
           )}
         </div>
       )}

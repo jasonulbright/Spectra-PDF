@@ -1086,21 +1086,27 @@ export async function editImageTransform(
 }
 
 /** Add Image (9.C2): embed a source at a user-space rect through the REAL
- * commit path (the native picker is undrivable — inject the source). */
+ * commit path (the native picker is undrivable — inject the source).
+ * P7: rect=null with `at` = the natural-size click-place. */
 export async function editImageAdd(
   page: number,
-  rect: [number, number, number, number],
+  rect: [number, number, number, number] | null,
   source: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
+  at?: [number, number],
 ): Promise<void> {
-  const result = await browser.executeAsync<string | null, [number, number[], unknown]>(
-    function (pg, r, s, done) {
-      (window as any).__SPECTRA_TEST__.editImageAdd(pg, r, s)
+  const result = await browser.executeAsync<
+    string | null,
+    [number, number[] | null, unknown, number[] | null]
+  >(
+    function (pg, r, s, a, done) {
+      (window as any).__SPECTRA_TEST__.editImageAdd(pg, r, s, a ?? undefined)
         .then(() => done(null))
         .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
     },
     page,
     rect,
     source,
+    at ?? null,
   );
   if (typeof result === 'string') {
     throw new Error(`editImageAdd failed: ${result.replace(ERROR_TAG, '')}`);
@@ -1108,23 +1114,67 @@ export async function editImageAdd(
 }
 
 export async function editImageSelection(): Promise<
-  { kind: string; pageId: string; index: number } | null
+  { kind: string; pageId: string; index: number; indexes?: number[] } | null
 > {
-  return await browser.execute<{ kind: string; pageId: string; index: number } | null, []>(
+  return await browser.execute<
+    { kind: string; pageId: string; index: number; indexes?: number[] } | null,
+    []
+  >(
     function () {
       return (window as any).__SPECTRA_TEST__.editImageSelection();
     },
   );
 }
 
-export async function editImageSelect(pageId: string, index: number): Promise<void> {
-  await browser.execute<void, [string, number]>(
-    function (p, i) {
-      (window as any).__SPECTRA_TEST__.editImageSelect(p, i);
+export async function editImageSelect(
+  pageId: string,
+  index: number,
+  additive?: boolean,
+): Promise<void> {
+  await browser.execute<void, [string, number, boolean]>(
+    function (p, i, a) {
+      (window as any).__SPECTRA_TEST__.editImageSelect(p, i, a);
     },
     pageId,
     index,
+    Boolean(additive),
   );
+}
+
+/** P7 multi-select: group transform — ONE multi engine op (one undo entry). */
+export async function editImageTransformMany(
+  pageId: string,
+  targets: { index: number; matrix: number[] }[],
+): Promise<void> {
+  const result = await browser.executeAsync<
+    string | null,
+    [string, { index: number; matrix: number[] }[]]
+  >(
+    function (p, t, done) {
+      (window as any).__SPECTRA_TEST__.editImageTransformMany(p, t)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    pageId,
+    targets,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`editImageTransformMany failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+/** P7: delete the CURRENT selection (routes the group op at N>1). */
+export async function editImageDeleteSelected(): Promise<void> {
+  const result = await browser.executeAsync<string | null, []>(
+    function (done) {
+      (window as any).__SPECTRA_TEST__.editImageDeleteSelected()
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+  );
+  if (typeof result === 'string') {
+    throw new Error(`editImageDeleteSelected failed: ${result.replace(ERROR_TAG, '')}`);
+  }
 }
 
 /** Run an edit action through the canvas's REAL handler; opts inject what

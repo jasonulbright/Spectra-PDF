@@ -9,6 +9,7 @@ import type { OcrWord } from '../../ocr/types';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import { rgb01ToHex, hex01ToRgb, type EditVectorObject } from '../../lib/edit-vectors';
 import ImageTransformOverlay from './ImageTransformOverlay';
+import ImageGroupOverlay from './ImageGroupOverlay';
 import type { EditTextRun } from '../../lib/edit-text';
 import { unencodableChars } from '../../lib/edit-text';
 import type { EditParagraph, ParagraphEditOpts , MergeRestyle } from '../../lib/edit-paragraphs';
@@ -485,8 +486,16 @@ interface PageCellProps {
   /** Edit-mode image placements (7.1), display-normalized at baked
    * orientation — pending rotation is applied at render like marks. */
   editImages?: EditImagePlacement[];
-  editSelectedIndex?: number | null;
-  onSelectEditImage?: (pageId: string, index: number) => void;
+  /** P7 multi-select: every selected index on this page (single = one). */
+  editSelectedIndexes?: number[] | null;
+  onSelectEditImage?: (pageId: string, index: number, additive?: boolean) => void;
+  /** P7: the group transform context for THIS page (N>1, pre-filtered by
+   * pageId upstream) + its multi-target commit. */
+  editImageGroup?: import('./ImageGroupOverlay').ImageGroupCtx | null;
+  onCommitImageGroupTransform?: (
+    pageId: string,
+    targets: { index: number; matrix: number[] }[],
+  ) => void;
   /** 9.D1: this page's vector path objects + the selected index (pre-filtered
    * by pageId upstream) + select/delete callbacks. */
   editVectors?: EditVectorObject[];
@@ -798,7 +807,9 @@ function PageCellImpl({
   onMeasureResult,
   redactionMarks,
   editImages,
-  editSelectedIndex,
+  editSelectedIndexes,
+  editImageGroup,
+  onCommitImageGroupTransform,
   editVectors,
   selectedVectorIndex,
   onSelectEditVector,
@@ -1851,7 +1862,17 @@ function PageCellImpl({
       bandActive.current = false;
       cancelBand.current = null;
       setBand(null);
-      if (commit && latest.w > 0.01 && latest.h > 0.01) {
+      if (commit && tool === 'addimage' && (latest.w <= 0.01 || latest.h <= 0.01)) {
+        // P7 (slice C): a bare CLICK places at natural size — the rect
+        // degenerates to the click point (w=h=0) and App routes it to the
+        // engine's `at` placement instead of a drawn box.
+        onAddImageRect(
+          docId,
+          page.id,
+          { x: latest.x + latest.w / 2, y: latest.y + latest.h / 2, w: 0, h: 0 },
+          page.rotation,
+        );
+      } else if (commit && latest.w > 0.01 && latest.h > 0.01) {
         if (tool === 'zoommarquee') {
           // N3: the band is a VIEW request, not an annotation — zoom the
           // reading view until this display-frame region fills it.
@@ -2769,7 +2790,7 @@ function PageCellImpl({
           // pending in-memory rotation just changes the projection (the
           // redaction-mark rule — user space is unmoved by /Rotate).
           const r = rotateNormalizedRect(img.rect, page.rotation);
-          const selected = editSelectedIndex === img.index;
+          const selected = (editSelectedIndexes ?? []).includes(img.index);
           return (
             <button
               key={`ei-${img.index}`}
@@ -2787,7 +2808,12 @@ function PageCellImpl({
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                onSelectEditImage?.(page.id, img.index);
+                // P7: Shift/Ctrl-click grows a same-page group.
+                onSelectEditImage?.(
+                  page.id,
+                  img.index,
+                  e.shiftKey || e.ctrlKey || e.metaKey,
+                );
               }}
             />
           );
@@ -2799,6 +2825,15 @@ function PageCellImpl({
           onCommit={(matrix) => onCommitImageTransform(page.id, editImageTransform.index, matrix)}
           cropArmed={Boolean(imageCropArmed)}
           onCommitCrop={(rect) => onCommitImageCrop?.(page.id, editImageTransform.index, rect)}
+        />
+      )}
+      {tool === 'edit' && editImageGroup && onCommitImageGroupTransform && (
+        <ImageGroupOverlay
+          ctx={editImageGroup}
+          pendingRotate={page.rotation}
+          onCommit={(targets) => onCommitImageGroupTransform(page.id, targets)}
+          onToggleMember={(index) => onSelectEditImage?.(page.id, index, true)}
+          onFocusMember={(index) => onSelectEditImage?.(page.id, index, false)}
         />
       )}
       {(findWords ?? []).map((word, i) => {
