@@ -236,4 +236,133 @@ describe('image adjustments (Phase 9.C3)', () => {
       { timeout: 30_000, timeoutMsg: 'undo did not restore the axis-aligned matrix' },
     );
   });
+
+  it('sets a blend mode (P7): listed back as the seed, merged with opacity, undone', async function () {
+    this.timeout(120_000);
+    await waitForHarness();
+    await invokeAppCommand('tools.open.edit');
+    await browser.waitUntil(async () => (await editImagePageIds()).length > 0, {
+      timeout: 30_000,
+      timeoutMsg: 'edit placements never loaded',
+    });
+    const { pageId, p } = await firstPlacement();
+    expect(p?.blend).toBe('Normal');
+
+    await editImageSelect(pageId, 0);
+    await editImageAct('opacity', { blend: 'Multiply' });
+    await browser.waitUntil(
+      async () => {
+        const { pageId: nowId, p: now } = await firstPlacement();
+        return nowId !== '' && nowId !== pageId && now?.blend === 'Multiply';
+      },
+      { timeout: 30_000, timeoutMsg: 'blend Multiply never listed back' },
+    );
+
+    // A chained opacity set MERGES into the same frame — the blend survives
+    // (the collapse re-emits carried state; losing it was the widened
+    // collapse's failure mode).
+    const midId = (await editImagePageIds())[0];
+    await editImageAct('opacity', { opacity: 0.5 });
+    await browser.waitUntil(
+      async () => {
+        const { pageId: nowId, p: now } = await firstPlacement();
+        return (
+          nowId !== '' &&
+          nowId !== midId &&
+          now?.blend === 'Multiply' &&
+          Math.abs((now?.opacity ?? 0) - 0.5) < 0.01
+        );
+      },
+      { timeout: 30_000, timeoutMsg: 'the opacity re-set lost the blend mode' },
+    );
+
+    // Undo ×2 → Normal / opacity 1.
+    let preUndoId = (await editImagePageIds())[0];
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const ids = await editImagePageIds();
+        if (ids.length === 0 || ids[0] === preUndoId) return false;
+        const now = (await editImagePlacements(ids[0]))[0];
+        return now?.blend === 'Multiply' && Math.abs((now?.opacity ?? 0) - 1) < 0.01;
+      },
+      { timeout: 30_000, timeoutMsg: 'first undo did not drop the opacity set' },
+    );
+    preUndoId = (await editImagePageIds())[0];
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const ids = await editImagePageIds();
+        if (ids.length === 0 || ids[0] === preUndoId) return false;
+        const now = (await editImagePlacements(ids[0]))[0];
+        return now?.blend === 'Normal';
+      },
+      { timeout: 30_000, timeoutMsg: 'second undo did not restore blend Normal' },
+    );
+  });
+
+  it('sets a linear gradient mask (P7): seeded back, cleared, undone', async function () {
+    this.timeout(120_000);
+    await waitForHarness();
+    await invokeAppCommand('tools.open.edit');
+    await browser.waitUntil(async () => (await editImagePageIds()).length > 0, {
+      timeout: 30_000,
+      timeoutMsg: 'edit placements never loaded',
+    });
+    const { pageId, p } = await firstPlacement();
+    expect(p?.mask).toBe(null);
+
+    await editImageSelect(pageId, 0);
+    await editImageAct('opacity', {
+      mask: { kind: 'linear', from: [0, 0.5], to: [1, 0.5], start_alpha: 1, end_alpha: 0 },
+    });
+    await browser.waitUntil(
+      async () => {
+        const { pageId: nowId, p: now } = await firstPlacement();
+        return (
+          nowId !== '' &&
+          nowId !== pageId &&
+          now?.mask?.kind === 'linear' &&
+          Math.abs((now?.mask?.endAlpha ?? 1) - 0) < 0.01
+        );
+      },
+      { timeout: 30_000, timeoutMsg: 'the linear mask never listed back' },
+    );
+
+    // Clear it explicitly ({kind:'none'}) — the mask entry AND its form
+    // must stop being referenced (engine sweep), the seed returns to null.
+    const midId = (await editImagePageIds())[0];
+    await editImageAct('opacity', { mask: { kind: 'none' } });
+    await browser.waitUntil(
+      async () => {
+        const { pageId: nowId, p: now } = await firstPlacement();
+        return nowId !== '' && nowId !== midId && !!now && now.mask === null;
+      },
+      { timeout: 30_000, timeoutMsg: 'the mask clear never applied' },
+    );
+
+    // Undo the clear → the mask is back; undo the set → null again.
+    let preUndoId = (await editImagePageIds())[0];
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const ids = await editImagePageIds();
+        if (ids.length === 0 || ids[0] === preUndoId) return false;
+        const now = (await editImagePlacements(ids[0]))[0];
+        return now?.mask?.kind === 'linear';
+      },
+      { timeout: 30_000, timeoutMsg: 'undo did not restore the mask' },
+    );
+    preUndoId = (await editImagePageIds())[0];
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const ids = await editImagePageIds();
+        if (ids.length === 0 || ids[0] === preUndoId) return false;
+        const now = (await editImagePlacements(ids[0]))[0];
+        return !!now && now.mask === null;
+      },
+      { timeout: 30_000, timeoutMsg: 'undo did not remove the mask' },
+    );
+  });
 });

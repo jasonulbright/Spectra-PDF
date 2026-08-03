@@ -1868,3 +1868,262 @@ class TestAspectHonestPlacement:
             add_page_image(src, out, 1, [0, 0, 10, 10], _raw_source(tmp_dir), fit="cover")
         with pytest.raises(ValueError, match="fit"):
             replace_page_image(src, out, 1, 0, _raw_source(tmp_dir), fit="cover")
+
+
+class TestBlendModes:
+    """P7 slice D: set_image_opacity grows `blend`; the collapse widens to
+    tool-owned {alpha, blend} frames and MERGES their state so a re-set
+    never loses what an earlier set wrote."""
+
+    def _gs_dicts(self, path):
+        """Every /ExtGState entry reachable from page 1's resources."""
+        with pikepdf.open(path) as pdf:
+            egs = pdf.pages[0].obj["/Resources"].get("/ExtGState")
+            return {str(k): dict(egs[k]) for k in egs.keys()} if egs is not None else {}
+
+    def test_set_blend_writes_bm_and_seeds_the_listing(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        r = set_image_opacity(src, out, 1, 0, blend="Multiply")
+        assert r["blend"] == "Multiply"
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["blend"] == "Multiply"
+        assert imgs[1]["blend"] == "Normal"  # untargeted placements unmoved
+        assert imgs[0]["opacity"] == pytest.approx(1.0)  # alpha untouched
+        gs = [d for d in self._gs_dicts(out).values() if "/BM" in d]
+        assert len(gs) == 1
+
+    def test_opacity_then_blend_merges_into_one_frame(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        step1 = os.path.join(tmp_dir, "s1.pdf")
+        set_image_opacity(src, step1, 1, 0, 0.5)
+        out = os.path.join(tmp_dir, "o.pdf")
+        set_image_opacity(step1, out, 1, 0, blend="Screen")
+        # ONE gs op around the draw, carrying BOTH the carried alpha and the
+        # new blend — the merge is what makes the widened collapse safe.
+        ops = _ops_in_page_stream(out)
+        assert sum(1 for op, _ in ops if op == "gs") == 1
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["opacity"] == pytest.approx(0.5)
+        assert imgs[0]["blend"] == "Screen"
+
+    def test_blend_re_set_replaces_not_stacks(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        step1 = os.path.join(tmp_dir, "s1.pdf")
+        set_image_opacity(src, step1, 1, 0, blend="Multiply")
+        out = os.path.join(tmp_dir, "o.pdf")
+        set_image_opacity(step1, out, 1, 0, blend="Normal")
+        ops = _ops_in_page_stream(out)
+        assert sum(1 for op, _ in ops if op == "gs") == 1
+        assert list_page_images(out, 1)["images"][0]["blend"] == "Normal"
+
+    def test_author_alpha_only_frame_now_survives_by_name(self, tmp_dir):
+        # The P7 ownership rule takes BOTH tests (name + content). An
+        # author's PURE-alpha frame used to be collapsible under the
+        # content-only rule; it now survives with our frame nested inside —
+        # the inner value wins per key, so rendering is unchanged and the
+        # author's structure stays intact.
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "s.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.obj["/Resources"] = Dictionary(
+            XObject=Dictionary(ImA=_rgb_image(pdf, 255, 0, 0)),
+            ExtGState=Dictionary(GS1=Dictionary(Type=Name("/ExtGState"), ca=0.4)),
+        )
+        page.Contents = pdf.make_stream(
+            b"q 100 0 0 80 50 600 cm q /GS1 gs /ImA Do Q Q"
+        )
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        set_image_opacity(src, out, 1, 0, 0.9)
+        names = [a[0] for op, a in _ops_in_page_stream(out) if op == "gs"]
+        assert "/GS1" in names
+        assert len(names) == 2
+        # The listing seeds from the INNER (ours) value.
+        assert list_page_images(out, 1)["images"][0]["opacity"] == pytest.approx(0.9)
+
+    def test_blend_validation(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="at least one"):
+            set_image_opacity(src, out, 1, 0)
+        with pytest.raises(ValueError, match="blend"):
+            set_image_opacity(src, out, 1, 0, blend="Dissolve")
+        assert not os.path.exists(out)
+
+
+LINEAR_MASK = {
+    "kind": "linear",
+    "from": [0.0, 0.5],
+    "to": [1.0, 0.5],
+    "start_alpha": 1.0,
+    "end_alpha": 0.0,
+}
+
+
+class TestGradientMask:
+    """P7 slice E: gradient soft masks on a placement — luminosity /SMask
+    over the image's unit square, marker-carried params, merge-preserved."""
+
+    def test_linear_mask_emits_axial_shading_and_seeds_back(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        r = set_image_opacity(src, out, 1, 0, mask=LINEAR_MASK)
+        assert r["mask"]["kind"] == "linear"
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["mask"] == pytest.approx(LINEAR_MASK)
+        assert imgs[1]["mask"] is None  # untargeted placements unmoved
+        # The bytes carry the real structure: gs → /SMask /Luminosity whose
+        # /G paints a ShadingType-2 gradient over BBox [0,0,1,1].
+        with pikepdf.open(out) as pdf:
+            egs = pdf.pages[0].obj["/Resources"]["/ExtGState"]
+            smasks = [egs[k].get("/SMask") for k in egs.keys() if egs[k].get("/SMask")]
+            assert len(smasks) == 1
+            g = smasks[0]["/G"]
+            assert str(smasks[0]["/S"]) == "/Luminosity"
+            assert [float(v) for v in g["/BBox"]] == [0, 0, 1, 1]
+            sh = g["/Resources"]["/Shading"]["/Sh0"]
+            assert int(sh["/ShadingType"]) == 2
+            assert [round(float(v), 4) for v in sh["/Coords"]] == [0, 0.5, 1, 0.5]
+
+    def test_radial_mask_uses_center_and_radius(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        radial = {
+            "kind": "radial",
+            "from": [0.5, 0.5],
+            "to": [1.0, 0.5],
+            "start_alpha": 1.0,
+            "end_alpha": 0.2,
+        }
+        set_image_opacity(src, out, 1, 0, mask=radial)
+        assert list_page_images(out, 1)["images"][0]["mask"] == pytest.approx(radial)
+        with pikepdf.open(out) as pdf:
+            egs = pdf.pages[0].obj["/Resources"]["/ExtGState"]
+            g = next(egs[k]["/SMask"]["/G"] for k in egs.keys() if egs[k].get("/SMask"))
+            sh = g["/Resources"]["/Shading"]["/Sh0"]
+            assert int(sh["/ShadingType"]) == 3
+            # Coords [cx cy 0 cx cy R]: R = |to − from| = 0.5.
+            assert [round(float(v), 4) for v in sh["/Coords"]] == [0.5, 0.5, 0, 0.5, 0.5, 0.5]
+
+    def test_opacity_re_set_preserves_the_mask(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        step1 = os.path.join(tmp_dir, "s1.pdf")
+        set_image_opacity(src, step1, 1, 0, mask=LINEAR_MASK)
+        out = os.path.join(tmp_dir, "o.pdf")
+        set_image_opacity(step1, out, 1, 0, 0.6)
+        ops = _ops_in_page_stream(out)
+        assert sum(1 for op, _ in ops if op == "gs") == 1  # ONE merged frame
+        img = list_page_images(out, 1)["images"][0]
+        assert img["opacity"] == pytest.approx(0.6)
+        assert img["mask"] == pytest.approx(LINEAR_MASK)
+
+    def test_mask_none_clears(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        step1 = os.path.join(tmp_dir, "s1.pdf")
+        set_image_opacity(src, step1, 1, 0, 0.7, mask=LINEAR_MASK)
+        out = os.path.join(tmp_dir, "o.pdf")
+        set_image_opacity(step1, out, 1, 0, mask={"kind": "none"})
+        img = list_page_images(out, 1)["images"][0]
+        assert img["mask"] is None
+        assert img["opacity"] == pytest.approx(0.7)  # carried alpha survives
+        with pikepdf.open(out) as pdf:
+            egs = pdf.pages[0].obj["/Resources"]["/ExtGState"]
+            live = [k for k in egs.keys() if egs[k].get("/SMask")]
+            assert live == []  # nothing still references a mask
+
+    def test_nested_target_registers_mask_on_the_form_copy(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "form.pdf")
+        _page_with_form_image(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        set_image_opacity(src, out, 1, 0, mask=LINEAR_MASK)
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["mask"] == pytest.approx(LINEAR_MASK)
+        assert imgs[1]["mask"] is None  # the sibling form draw untouched
+
+    def test_author_softmask_frame_is_never_collapsed(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "s.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        # An author /SMask (no marker) — under an /EditGS-looking name to
+        # prove the CONTENT half of the ownership test carries its weight.
+        g = pdf.make_stream(b"")
+        g["/Type"] = Name("/XObject")
+        g["/Subtype"] = Name("/Form")
+        g["/BBox"] = pikepdf.Array([0, 0, 1, 1])
+        page.obj["/Resources"] = Dictionary(
+            XObject=Dictionary(ImA=_rgb_image(pdf, 255, 0, 0)),
+            ExtGState=Dictionary(
+                EditGS0=Dictionary(
+                    Type=Name("/ExtGState"),
+                    SMask=Dictionary(S=Name("/Luminosity"), G=pdf.make_indirect(g)),
+                )
+            ),
+        )
+        page.Contents = pdf.make_stream(
+            b"q 100 0 0 80 50 600 cm q /EditGS0 gs /ImA Do Q Q"
+        )
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        set_image_opacity(src, out, 1, 0, 0.9)
+        names = [a[0] for op, a in _ops_in_page_stream(out) if op == "gs"]
+        assert "/EditGS0" in names  # the author's masked frame survived
+        assert len(names) == 2
+
+    def test_mask_validation(self, tmp_dir):
+        from engine.page_images import set_image_opacity
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="kind"):
+            set_image_opacity(src, out, 1, 0, mask={"kind": "conical"})
+        with pytest.raises(ValueError, match="distinct"):
+            set_image_opacity(
+                src,
+                out,
+                1,
+                0,
+                mask={"kind": "linear", "from": [0.5, 0.5], "to": [0.5, 0.5], "start_alpha": 1, "end_alpha": 0},
+            )
+        with pytest.raises(ValueError, match="alphas"):
+            set_image_opacity(
+                src,
+                out,
+                1,
+                0,
+                mask={"kind": "linear", "from": [0, 0], "to": [1, 1], "start_alpha": 2, "end_alpha": 0},
+            )
+        assert not os.path.exists(out)

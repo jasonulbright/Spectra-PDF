@@ -135,19 +135,31 @@ def _listed_crop(instructions, t, enclosing):
 
 
 def _walk_placements(
-    pdf, instructions, resources, base_ctm, depth, fallback_resources, out, nested, base_alpha=1.0, base_clip=None
+    pdf,
+    instructions,
+    resources,
+    base_ctm,
+    depth,
+    fallback_resources,
+    out,
+    nested,
+    base_alpha=1.0,
+    base_clip=None,
+    base_blend="Normal",
+    base_mask=None,
 ):
     """Append one dict per image `Do` to `out`, in encounter order. State
     tracking is the shared GraphicsTextState (7.2 consolidation) — the same
     machine the rewriter's DFS order agreement is proven against.
 
-    Fill alpha (the C3 opacity seed) is tracked LOCALLY: the shared state
-    machine's feed() has no resources access, and `gs` needs the current
-    stream's /ExtGState to resolve — so alpha rides its own q/Q-scoped
-    stack here, inherited into forms at their Do like the CTM. The open-q
-    index stack rides alongside for `crop` (C3-tail): wrapper frames live
-    in the SAME instruction list as their draw (nested edits wrap inside
-    the form copy), so per-level recognition sees every tool frame."""
+    Fill alpha (the C3 opacity seed) and the blend mode (P7's seed) are
+    tracked LOCALLY: the shared state machine's feed() has no resources
+    access, and `gs` needs the current stream's /ExtGState to resolve — so
+    both ride their own q/Q-scoped stack here, inherited into forms at
+    their Do like the CTM. The open-q index stack rides alongside for
+    `crop` (C3-tail): wrapper frames live in the SAME instruction list as
+    their draw (nested edits wrap inside the form copy), so per-level
+    recognition sees every tool frame."""
     instructions = list(instructions)
     state = GraphicsTextState(base_ctm)
     # 9-§I.0-S8: clip tracking beside the state machine — a placement wholly
@@ -156,7 +168,9 @@ def _walk_placements(
     # clip a nested form inherits (§8.10.2).
     clips = ClipTracker(base_clip)
     alpha = float(base_alpha)
-    alpha_stack: list[float] = []
+    blend = str(base_blend)
+    mask: dict | None = base_mask
+    gs_stack: list[tuple[float, str, dict | None]] = []
     q_open: list[int] = []
     for idx, instruction in enumerate(instructions):
         operator = str(instruction.operator)
@@ -164,10 +178,12 @@ def _walk_placements(
         # Fed with the CURRENT ctm BEFORE state.feed (which consumes q/Q/cm).
         clips.feed(operator, operands, state.ctm)
         if operator == "q":
-            alpha_stack.append(alpha)
+            gs_stack.append((alpha, blend, mask))
             q_open.append(idx)
         elif operator == "Q":
-            alpha = alpha_stack.pop() if alpha_stack else float(base_alpha)
+            alpha, blend, mask = (
+                gs_stack.pop() if gs_stack else (float(base_alpha), str(base_blend), base_mask)
+            )
             if q_open:
                 q_open.pop()
         elif operator == "gs" and operands:
@@ -179,11 +195,29 @@ def _walk_placements(
                     egs = res.get("/ExtGState")
                     if egs is None or Name(gs_name) not in egs:
                         continue
-                    ca = egs[Name(gs_name)].get("/ca")
+                    entry = egs[Name(gs_name)]
+                    ca = entry.get("/ca")
                     if ca is not None:
                         alpha = max(0.0, min(1.0, float(ca)))
+                    bm = entry.get("/BM")
+                    if bm is not None:
+                        # /BM may be a name or an array of names (first wins).
+                        try:
+                            bm_name = (
+                                str(bm[0]) if isinstance(bm, pikepdf.Array) else str(bm)
+                            )
+                        except (IndexError, TypeError):
+                            bm_name = ""
+                        if bm_name.startswith("/") and bm_name[1:] in BLEND_MODES:
+                            blend = bm_name[1:]
+                    sm = entry.get("/SMask")
+                    if sm is not None:
+                        # P7 slice E: seed OUR gradient mask; /None clears;
+                        # an author's soft mask seeds nothing (mask: null —
+                        # there is no tool mask to re-edit).
+                        mask = None if str(sm) == "/None" else _mask_params_of(sm)
                 except (TypeError, ValueError, AttributeError, KeyError):
-                    pass  # malformed ExtGState: alpha unchanged, never abort a listing
+                    pass  # malformed ExtGState: state unchanged, never abort a listing
                 break
         if state.feed(operator, operands):
             continue
@@ -210,6 +244,10 @@ def _walk_placements(
                     "native_width": nw,
                     "native_height": nh,
                     "opacity": round(alpha, 4),
+                    # P7: the effective blend mode at this draw (seed).
+                    "blend": blend,
+                    # P7 slice E: the tool gradient mask in scope (seed).
+                    "mask": mask,
                     "crop": _listed_crop(instructions, idx, q_open),
                     # 9-§I.0-S8: True when this placement is wholly outside the
                     # active clip (invisible); renderer filters it out. Index
@@ -240,6 +278,10 @@ def _walk_placements(
                         # C3: effective fill alpha at this draw (the opacity
                         # slider's honest seed).
                         "opacity": round(alpha, 4),
+                        # P7: the effective blend mode at this draw (seed).
+                        "blend": blend,
+                        # P7 slice E: the tool gradient mask in scope (seed).
+                        "mask": mask,
                         # C3-tail: the tool crop rect (crop-handle seed).
                         "crop": _listed_crop(instructions, idx, q_open),
                         # 9-§I.0-S8: True when wholly outside the active clip.
@@ -260,6 +302,8 @@ def _walk_placements(
                     True,
                     base_alpha=alpha,
                     base_clip=clips.clip,
+                    base_blend=blend,
+                    base_mask=mask,
                 )
     return out
 
@@ -356,12 +400,16 @@ class _EditState:
         # as the innermost frame INSIDE the new cm, so the clip travels with
         # the move instead of staying in pre-transform space.
         self.carried_crop = None
-        # 'opacity' only (C3): the ExtGState dict to register. The NAME is
-        # allocated AT the target draw against the resources actually in
-        # scope there (a nested target must never shadow the form's own
-        # /ExtGState names); `registered_nested` records that a form copy
-        # took the registration, so the op function skips the page level.
-        self.pending_gs = pending_gs
+        # 'opacity' only (C3; P7-widened): the caller's REQUEST
+        # ({opacity: float|None, blend: str|None}) — the registered dict is
+        # BUILT at the target draw, where the collapse has just surfaced the
+        # dropped frames' state to merge under it. The NAME is allocated AT
+        # the draw against the resources in scope there (a nested target
+        # must never shadow the form's own /ExtGState names);
+        # `registered_nested` records that a form copy took the
+        # registration, so the op function skips the page level.
+        self.gs_request = pending_gs
+        self.pending_gs = None
         self.gs_name: str | None = None
         self.registered_nested = False
         self.seen = 0
@@ -380,6 +428,34 @@ class _EditState:
         if payload is not None and not self.targets:
             self.done = True
         return payload
+
+    def build_pending_gs(self, pdf, dropped: dict) -> None:
+        """Compose the gs dict to register: the collapse's merged state
+        under the request's explicit values (request wins per key; a mask
+        request of kind "none" CLEARS a carried mask). Called at the target
+        draw, before `_emit_wrap` allocates the name. `pdf` builds the
+        fresh /SMask group when a mask survives the merge."""
+        request = self.gs_request or {}
+        ca = request.get("opacity")
+        if ca is None:
+            ca = dropped.get("ca")
+        bm = request.get("blend")
+        if bm is None:
+            bm = dropped.get("bm")
+        mask = request.get("mask")
+        if mask is None:
+            mask = dropped.get("mask")
+        elif mask.get("kind") == "none":
+            mask = None
+        gs = Dictionary(Type=Name("/ExtGState"))
+        if ca is not None:
+            gs["/ca"] = round(float(ca), 4)
+            gs["/CA"] = round(float(ca), 4)
+        if bm is not None:
+            gs["/BM"] = Name("/" + str(bm))
+        if mask is not None:
+            gs["/SMask"] = _build_gradient_smask(pdf, mask)
+        self.pending_gs = gs
 
     def emit_replacement(self, kept) -> None:
         """The renamed draw, wrapped in the aspect-correction frame when
@@ -561,12 +637,70 @@ def _intersect_crop_rects(rects):
     return [ix0, iy0, ix1, iy1]
 
 
-def _alpha_only_gs(name, resources, fallback_resources) -> bool:
-    """Whether an /ExtGState sets ALPHA AND NOTHING ELSE — the test that
-    makes an opacity frame safe to drop. A shape match alone is not enough
-    here (unlike transform): an author's `q /GS1 gs … Q` has the same
-    shape, and its dictionary may carry a blend mode, a soft mask, a line
-    width — state that vanishing would change the page."""
+# The 16 standard-separable + nonseparable blend modes (§11.3.5 / 11.13.2).
+BLEND_MODES = (
+    "Normal",
+    "Multiply",
+    "Screen",
+    "Overlay",
+    "Darken",
+    "Lighten",
+    "ColorDodge",
+    "ColorBurn",
+    "HardLight",
+    "SoftLight",
+    "Difference",
+    "Exclusion",
+    "Hue",
+    "Saturation",
+    "Color",
+    "Luminosity",
+)
+
+
+def _mask_params_of(smask) -> dict | None:
+    """The P7 gradient-mask params carried by a TOOL-BUILT /SMask (the
+    private /SpectraMask key on its /G form — the lossless round-trip
+    record; parsing shading floats back would be archaeology). None for an
+    author's soft mask, which is exactly what gates the collapse."""
+    try:
+        if smask is None or str(smask.get("/S", "")) != "/Luminosity":
+            return None
+        g = smask.get("/G")
+        marker = g.get("/SpectraMask") if g is not None else None
+        if marker is None:
+            return None
+        kind = str(marker.get("/Kind", ""))[1:].lower()
+        if kind not in ("linear", "radial"):
+            return None
+        frm = [float(v) for v in marker.get("/From")]
+        to = [float(v) for v in marker.get("/To")]
+        return {
+            "kind": kind,
+            "from": frm,
+            "to": to,
+            "start_alpha": float(marker.get("/A0")),
+            "end_alpha": float(marker.get("/A1")),
+        }
+    except Exception:
+        return None
+
+
+def _tool_gs_state(name, resources, fallback_resources):
+    """The {ca, bm, mask} a TOOL-OWNED gs frame carries, or None when the
+    frame is not provably ours. Ownership takes BOTH tests (P7 widening):
+    the name is a `_fresh_gs_name` allocation (/EditGS…) AND the dict
+    carries nothing beyond alpha/blend/our-mask. The old alpha-only content
+    test alone stopped being enough the moment frames can carry different
+    keys — dropping an author's frame whose state the fresh frame didn't
+    re-emit would change the page, and shape alone can't prove authorship
+    (the P9 outermost-transform lesson, applied to gs). An author's
+    pure-alpha frame now simply SURVIVES with our frame nested inside — the
+    inner value wins per key, so rendering is unchanged and author
+    structure stays intact. An /SMask additionally requires OUR marker on
+    its /G (slice E): an author's soft mask is never collapsible."""
+    if not str(name).startswith("/EditGS"):
+        return None
     try:
         gs = None
         for res in (resources, fallback_resources):
@@ -578,21 +712,46 @@ def _alpha_only_gs(name, resources, fallback_resources) -> bool:
             gs = table[name]
             break
         if gs is None:
-            return False
+            return None
         keys = {str(k) for k in gs.keys()}
-        return bool(keys) and keys <= {"/Type", "/ca", "/CA"}
+        if not keys or not keys <= {"/Type", "/ca", "/CA", "/BM", "/SMask"}:
+            return None
+        state: dict = {}
+        ca = gs.get("/ca")
+        if ca is not None:
+            state["ca"] = max(0.0, min(1.0, float(ca)))
+        bm = gs.get("/BM")
+        if bm is not None:
+            # /BM may be a name or an array of names — first entry rules.
+            try:
+                bm_name = str(bm[0]) if isinstance(bm, pikepdf.Array) else str(bm)
+            except (IndexError, TypeError):
+                bm_name = ""
+            if bm_name.startswith("/"):
+                state["bm"] = bm_name[1:]
+        smask = gs.get("/SMask")
+        if smask is not None:
+            mask = _mask_params_of(smask)
+            if mask is None:
+                return None  # a soft mask that isn't ours: fail closed
+            state["mask"] = mask
+        return state
     except Exception:
-        return False
+        return None
 
 
 def _collapse_opacity_frames(kept, instructions, t, open_q, skip_q, resources, fallback_resources):
-    """9-§I.5 P9 — drop the RECOGNIZED opacity frames around the target
-    whose /ExtGState is alpha-only, so setting opacity twice leaves one
-    frame rather than two. The innermost `gs` already won, so removing the
-    outer ones cannot change what is drawn; the alpha-only test is what
-    keeps an author's graphics state out of it."""
+    """9-§I.5 P9 (P7-widened) — drop the RECOGNIZED tool gs frames around
+    the target so a re-set leaves ONE frame, and return their MERGED
+    {ca, bm} state (innermost wins per key). The merge is the widening's
+    safety proof: the fresh frame re-emits every dropped key it doesn't
+    override, so collapsing can never lose rendered state (the old
+    "innermost gs already won" argument only held while every frame
+    carried the same key). A frame that isn't provably ours stops the
+    collapse there — everything outside it stays, fail closed."""
     kept_index = {i: k for i, k in open_q}
     removals: list[int] = []
+    merged: dict = {}
     for frame in _recognized_frames(instructions, t, [i for i, _ in open_q]):
         if frame["kind"] != "opacity":
             continue
@@ -600,15 +759,19 @@ def _collapse_opacity_frames(kept, instructions, t, open_q, skip_q, resources, f
             name = str(instructions[frame["open"] + 1].operands[0])
         except (IndexError, TypeError):
             break
-        if not _alpha_only_gs(name, resources, fallback_resources):
+        gs_state = _tool_gs_state(name, resources, fallback_resources)
+        if gs_state is None:
             break  # fail closed: this frame and everything outside it stay
         kept_at = kept_index.get(frame["open"])
         if kept_at is None:
             continue
         removals.append(kept_at)
         skip_q.add(frame["close"])
+        for key, value in gs_state.items():
+            merged.setdefault(key, value)  # innermost-first: first seen wins
     for kept_at in sorted(removals, reverse=True):
         del kept[kept_at : kept_at + 2]  # the `q` and its `gs`
+    return merged
 
 
 def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, name_counter, reserved):
@@ -666,8 +829,11 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                         kept, instructions, i, open_q, skip_q, payload["delta"]
                     )
                 elif state.action == "opacity":
-                    _collapse_opacity_frames(
-                        kept, instructions, i, open_q, skip_q, resources, fallback_resources
+                    state.build_pending_gs(
+                        pdf,
+                        _collapse_opacity_frames(
+                            kept, instructions, i, open_q, skip_q, resources, fallback_resources
+                        ),
                     )
                 if state.action == "delete":
                     pass  # dropped — inline bytes live in the stream itself
@@ -707,8 +873,11 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                         kept, instructions, i, open_q, skip_q, payload["delta"]
                     )
                 elif state.action == "opacity":
-                    _collapse_opacity_frames(
-                        kept, instructions, i, open_q, skip_q, resources, fallback_resources
+                    state.build_pending_gs(
+                        pdf,
+                        _collapse_opacity_frames(
+                            kept, instructions, i, open_q, skip_q, resources, fallback_resources
+                        ),
                     )
                 if state.action == "delete":
                     state.deleted_name = name
@@ -772,6 +941,9 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     fresh_egs[Name(state.gs_name)] = pdf.make_indirect(state.pending_gs)
                     copy_res["/ExtGState"] = fresh_egs
                     state.registered_nested = True
+                    # Sweep superseded /EditGS entries off the COPY's fresh
+                    # table (the collapse just dropped their frames).
+                    _sweep_orphan_edit_gs(copy, copy_res)
                 copy["/Resources"] = copy_res
                 new_name = _fresh_name(resources, name_counter, reserved)
                 new_forms[new_name] = copy
@@ -783,6 +955,128 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
         else:
             kept.append(instruction)
     return kept, changed, new_forms
+
+
+def _build_gradient_smask(pdf, mask: dict):
+    """The /SMask dict for a P7 gradient mask: a LUMINOSITY soft mask whose
+    /G is a gray Form XObject over BBox [0,0,1,1] — the wrap sits inside
+    the placement's cm, so unit space IS image space and the group lands
+    exactly over the drawn image at any nesting depth (the crop-clip
+    argument, applied to masking). The gradient is painted with `sh`
+    (current-space, placement-relative), NEVER a fill pattern — pattern
+    space is page-anchored, which would pin the fade to the page while the
+    image moves. The /G carries the exact request under /SpectraMask so the
+    lister seeds losslessly and the collapse can re-emit it."""
+    kind = mask["kind"]
+    fx, fy = (float(v) for v in mask["from"])
+    tx, ty = (float(v) for v in mask["to"])
+    a0 = float(mask["start_alpha"])
+    a1 = float(mask["end_alpha"])
+    func = Dictionary(
+        FunctionType=2,
+        Domain=pikepdf.Array([0, 1]),
+        C0=pikepdf.Array([round(a0, 4)]),
+        C1=pikepdf.Array([round(a1, 4)]),
+        N=1,
+    )
+    if kind == "linear":
+        coords = pikepdf.Array([round(fx, 6), round(fy, 6), round(tx, 6), round(ty, 6)])
+        shading = Dictionary(
+            ShadingType=2,
+            ColorSpace=Name("/DeviceGray"),
+            Coords=coords,
+            Function=func,
+            Extend=pikepdf.Array([True, True]),
+        )
+    else:  # radial: from = center, |to − from| = the fade radius
+        radius = ((tx - fx) ** 2 + (ty - fy) ** 2) ** 0.5
+        coords = pikepdf.Array(
+            [round(fx, 6), round(fy, 6), 0, round(fx, 6), round(fy, 6), round(radius, 6)]
+        )
+        shading = Dictionary(
+            ShadingType=3,
+            ColorSpace=Name("/DeviceGray"),
+            Coords=coords,
+            Function=func,
+            Extend=pikepdf.Array([True, True]),
+        )
+    g = pdf.make_stream(b"/Sh0 sh")
+    g["/Type"] = Name("/XObject")
+    g["/Subtype"] = Name("/Form")
+    g["/BBox"] = pikepdf.Array([0, 0, 1, 1])
+    g["/Group"] = Dictionary(
+        Type=Name("/Group"), S=Name("/Transparency"), CS=Name("/DeviceGray")
+    )
+    g["/Resources"] = Dictionary(Shading=Dictionary(Sh0=shading))
+    g["/SpectraMask"] = Dictionary(
+        Kind=Name("/Linear" if kind == "linear" else "/Radial"),
+        From=pikepdf.Array([round(fx, 6), round(fy, 6)]),
+        To=pikepdf.Array([round(tx, 6), round(ty, 6)]),
+        A0=round(a0, 4),
+        A1=round(a1, 4),
+    )
+    return Dictionary(S=Name("/Luminosity"), G=pdf.make_indirect(g))
+
+
+def _sweep_orphan_edit_gs(content_source, resources) -> None:
+    """Drop TOOL-ALLOCATED (/EditGS*) /ExtGState entries nothing references
+    any more. qpdf's `remove_unreferenced_resources` leaves /ExtGState
+    alone (verified — the pin that forced this sweep), so a collapse's or a
+    clear's superseded entry would otherwise stay registered forever — and
+    a gradient mask's entry keeps a whole Form XObject reachable, the exact
+    "removed bytes still embedded" class `_finalize_page_rewrite` exists
+    for. Reference collection walks the source's content stream AND every
+    form reachable from `resources` (cycle-guarded, depth-bounded);
+    OVER-collecting is safe (an unused name kept = no harm), so forms are
+    scanned whether or not anything still draws them. The caller guarantees
+    `resources`' /ExtGState is safe to mutate (page-local COW or a fresh
+    form-copy dict — never a shared table, the C2 sibling rule)."""
+    used: set = set()
+    seen: set = set()
+
+    def collect_stream(obj):
+        try:
+            for ins in pikepdf.parse_content_stream(obj):
+                if str(ins.operator) == "gs" and ins.operands:
+                    used.add(str(ins.operands[0]))
+        except Exception:
+            pass
+
+    def collect_forms(res, depth):
+        if res is None or depth > MAX_FORM_DEPTH:
+            return
+        try:
+            xo = res.get("/XObject")
+        except Exception:
+            return
+        if xo is None:
+            return
+        for k in xo.keys():
+            try:
+                obj = xo[k]
+                if str(obj.get("/Subtype", "")) != "/Form":
+                    continue
+                og = obj.objgen
+                if og != (0, 0):
+                    if og in seen:
+                        continue
+                    seen.add(og)
+                collect_stream(obj)
+                collect_forms(obj.get("/Resources"), depth + 1)
+            except Exception:
+                continue
+
+    collect_stream(content_source)
+    collect_forms(resources, 0)
+    try:
+        egs = resources.get("/ExtGState")
+    except Exception:
+        return
+    if egs is None:
+        return
+    for k in [str(k) for k in egs.keys()]:
+        if k.startswith("/EditGS") and k not in used:
+            del egs[Name(k)]
 
 
 def _fresh_gs_name(resources, fallback_resources, reserved: set) -> str:
@@ -1099,19 +1393,72 @@ def crop_page_image(file: str, output: str, page: int, index: int, rect: list) -
             pass
 
 
-def set_image_opacity(file: str, output: str, page: int, index: int, opacity: float) -> dict:
-    """Set ONE image placement's opacity — Phase 9.C3. The draw is wrapped
-    as `q /EditGSn gs Do Q` with a page-local (or form-copy-local, for a
-    nested target) /ExtGState carrying `/ca` and `/CA` = `opacity`
-    (clamped 0..1). Non-destructive and per-placement; the gs name is
-    allocated against the resources in scope at the draw so it can never
-    shadow an existing entry."""
+def _validated_mask(mask) -> dict | None:
+    """Normalize/validate the P7 mask request. {kind:"none"} passes through
+    (an explicit clear); linear/radial need unit-space from/to (distinct
+    points — a zero axis has no direction) and 0..1 alphas."""
+    if mask is None:
+        return None
+    if not isinstance(mask, dict):
+        raise ValueError("mask must be an object")
+    kind = str(mask.get("kind", "")).lower()
+    if kind == "none":
+        return {"kind": "none"}
+    if kind not in ("linear", "radial"):
+        raise ValueError('mask kind must be "linear", "radial" or "none"')
     try:
-        alpha = float(opacity)
+        fx, fy = (float(v) for v in mask.get("from"))
+        tx, ty = (float(v) for v in mask.get("to"))
+        a0 = float(mask.get("start_alpha"))
+        a1 = float(mask.get("end_alpha"))
     except (TypeError, ValueError):
-        raise ValueError("opacity must be a number between 0 and 1") from None
-    if not (0.0 <= alpha <= 1.0):
-        raise ValueError("opacity must be between 0 and 1")
+        raise ValueError("mask needs from [x,y], to [x,y], start_alpha, end_alpha") from None
+    for v in (fx, fy, tx, ty):
+        if not (-0.5 <= v <= 1.5):  # unit space with a working margin
+            raise ValueError("mask points are unit-space coordinates (0..1)")
+    if abs(fx - tx) < 1e-6 and abs(fy - ty) < 1e-6:
+        raise ValueError("mask from/to must be distinct points")
+    if not (0.0 <= a0 <= 1.0 and 0.0 <= a1 <= 1.0):
+        raise ValueError("mask alphas must be between 0 and 1")
+    return {"kind": kind, "from": [fx, fy], "to": [tx, ty], "start_alpha": a0, "end_alpha": a1}
+
+
+def set_image_opacity(
+    file: str,
+    output: str,
+    page: int,
+    index: int,
+    opacity: float | None = None,
+    blend: str | None = None,
+    mask: dict | None = None,
+) -> dict:
+    """Set ONE image placement's opacity, blend mode and/or gradient soft
+    mask (Phase 9.C3; P7 adds `blend` + `mask`). The draw is wrapped as
+    `q /EditGSn gs Do Q` with a page-local (or form-copy-local, for a
+    nested target) /ExtGState carrying `/ca`+`/CA`, `/BM` and/or a
+    luminosity /SMask (image-unit-space gradient; see
+    `_build_gradient_smask`). A re-set collapses the tool's own earlier
+    frames and MERGES their state under the new values, so one frame always
+    carries the placement's full alpha+blend+mask and nothing set earlier
+    is lost; `mask={"kind": "none"}` explicitly clears a carried mask.
+    Non-destructive and per-placement; the gs name is allocated against the
+    resources in scope at the draw so it can never shadow an existing
+    entry."""
+    mask_req = _validated_mask(mask)
+    if opacity is None and blend is None and mask_req is None:
+        raise ValueError("at least one of opacity / blend / mask is required")
+    alpha = None
+    if opacity is not None:
+        try:
+            alpha = float(opacity)
+        except (TypeError, ValueError):
+            raise ValueError("opacity must be a number between 0 and 1") from None
+        if not (0.0 <= alpha <= 1.0):
+            raise ValueError("opacity must be between 0 and 1")
+    if blend is not None and blend not in BLEND_MODES:
+        raise ValueError(
+            "blend must be one of: " + ", ".join(BLEND_MODES)
+        )
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -1129,10 +1476,12 @@ def set_image_opacity(file: str, output: str, page: int, index: int, opacity: fl
             raise ValueError(
                 f"image index {index} is out of range (page has {len(placements)})"
             )
-        gs_dict = Dictionary(
-            Type=Name("/ExtGState"), ca=round(alpha, 4), CA=round(alpha, 4)
+        state = _EditState(
+            {int(index): {}},
+            "opacity",
+            None,
+            pending_gs={"opacity": alpha, "blend": blend, "mask": mask_req},
         )
-        state = _EditState({int(index): {}}, "opacity", None, pending_gs=gs_dict)
         kept, changed, new_forms = _rewrite(
             pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
         )
@@ -1149,17 +1498,23 @@ def set_image_opacity(file: str, output: str, page: int, index: int, opacity: fl
             if src_egs is not None:
                 for k in src_egs.keys():
                     fresh_egs[k] = src_egs[k]
-            fresh_egs[Name(state.gs_name)] = pdf.make_indirect(gs_dict)
+            fresh_egs[Name(state.gs_name)] = pdf.make_indirect(state.pending_gs)
             resources["/ExtGState"] = fresh_egs
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        if state.gs_name and not state.registered_nested:
+            # The collapse superseded earlier /EditGS entries; the fresh
+            # page-local table is safe to sweep (never the shared one).
+            _sweep_orphan_edit_gs(p, resources)
         _finalize_page_rewrite(p, kept, state.superseded_forms)
         _save(pdf, input_path, output_path)
-        return {
-            "output": str(output_path),
-            "page": int(page),
-            "index": int(index),
-            "opacity": round(alpha, 4),
-        }
+        result = {"output": str(output_path), "page": int(page), "index": int(index)}
+        if alpha is not None:
+            result["opacity"] = round(alpha, 4)
+        if blend is not None:
+            result["blend"] = blend
+        if mask_req is not None:
+            result["mask"] = mask_req
+        return result
     finally:
         try:
             pdf.close()

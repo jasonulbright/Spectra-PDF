@@ -1041,6 +1041,14 @@ export async function editImagePlacements(
     nested: boolean;
     matrix: number[];
     opacity: number;
+    blend: string;
+    mask: {
+      kind: string;
+      from: [number, number];
+      to: [number, number];
+      startAlpha: number;
+      endAlpha: number;
+    } | null;
     kind: string;
     crop: number[] | null;
   }[]
@@ -1187,6 +1195,16 @@ export async function editImageAct(
     outputPrefix?: string;
     rect?: [number, number, number, number];
     opacity?: number;
+    blend?: string;
+    mask?:
+      | { kind: 'none' }
+      | {
+          kind: 'linear' | 'radial';
+          from: [number, number];
+          to: [number, number];
+          start_alpha: number;
+          end_alpha: number;
+        };
   },
 ): Promise<void> {
   const result = await browser.executeAsync<string | null, [string, unknown]>(
