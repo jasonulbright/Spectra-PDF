@@ -13,6 +13,7 @@ import { app, file, engine } from './lib/tauri-bridge';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import { invokeCommand as invokeRegisteredCommand } from './commands/context';
 import { COMMANDS, type CommandId } from './commands/registry';
+import { setAppLanguage } from './i18n';
 import type { FocusedTab } from './state/types';
 
 export interface TestStateSnapshot {
@@ -898,6 +899,10 @@ export interface TestHarness {
   watcherCreate: (folder: Record<string, unknown>) => Promise<void>;
   watcherList: () => Promise<unknown[]>;
   watcherRemove: (id: string) => Promise<void>;
+  /** N12: switch the live UI language ('qps' included — the pseudo-locale
+   * only exists under VITE_E2E/DEV, which is the only place this harness
+   * compiles in). Does NOT touch the persisted preference. */
+  setLanguage: (lang: string) => void;
   /** Edit ▸ Images (7.1; canvas must be mounted with the edit mode armed). */
   editTextPageIds: () => string[];
   editTextRuns: (
@@ -1651,6 +1656,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       if (!scheduledRuns) throw new Error('scheduleRemove: Scheduled Runs dialog not mounted');
       return scheduledRuns.remove(name);
     },
+    setLanguage: (lang) => setAppLanguage(lang),
     editTextPageIds: () => canvasEditImages?.textPageIds() ?? [],
     editTextRuns: (pageId) => canvasEditImages?.textRuns(pageId) ?? [],
     editTextOpen: (pageId, index) => canvasEditImages?.openTextEditor(pageId, index),
