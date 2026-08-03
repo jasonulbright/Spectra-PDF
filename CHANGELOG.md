@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.0.16 — Deeper image, vector, and paragraph editing
+
+Images gain skew, multi-select groups, blend modes, and gradient fades —
+and SVG artwork now places as real vector content. Vector editing reaches
+paths and gradients it used to refuse, at any nesting depth. Text editing
+learns finer Japanese line breaking, free-angle authoring, and paragraphs
+that flow between a page and its embedded drawings edit as one.
+
+### Images
+- **Skew.** Edge handles shear a placed image; rotation and resize compose
+  with it naturally.
+- **Multi-select.** Shift/Ctrl-click builds a group on a page — move,
+  scale, rotate, align, distribute, or delete the whole group as one
+  operation and one undo step.
+- **Placement respects proportions.** Replacing an image fits the new one
+  inside the old frame instead of stretching it; adding an image contains
+  it in the box you drag, and a bare click places it at natural size.
+- **Blend modes and fades.** Each image takes any of the sixteen standard
+  blend modes, and a draggable linear or radial fade dissolves an image
+  into the page. Both survive later moves and re-edits.
+- **SVG places as vectors.** Vector artwork drops onto a page as true
+  vector content — it scales cleanly at any zoom and moves, transforms,
+  groups, and deletes exactly like an image placement. Files using
+  features outside the supported set are refused with a stated reason
+  rather than drawn wrong.
+
+### Vector objects
+- **Tight selection boxes on curves.** A curve's selection box now hugs
+  the drawn shape, not its control points — even under rotation.
+- **Busier paths are editable.** Paths whose producers interleaved colour
+  and transform changes mid-path — previously refused — now move and
+  restyle exactly, with downstream content proven unmoved.
+- **Any nesting depth.** Vector objects inside forms within forms edit at
+  any depth; a form stamped elsewhere on the page is never disturbed.
+- **Gradient paints are objects.** Gradient fills list, move, and delete
+  like any other vector object, and deleting one removes its definition
+  from the file instead of leaving it embedded.
+
+### Text
+- **Finer Japanese line breaking.** Opening brackets no longer end a line,
+  small kana and prolonged-sound marks no longer start one, and leader
+  runs stay together — the fuller set of kinsoku rules.
+- **Text at any angle.** New text boxes take any rotation, not just
+  quarter turns — the box turns about its own center and the text lays
+  out inside it unchanged.
+- **Validation follows the reflow.** The paragraph editor now checks each
+  character against the font of the span it will actually land in after
+  the edit, so characters near a style boundary stop being refused
+  spuriously. Genuinely unwritable characters still refuse by name.
+- **Paragraphs cross drawing boundaries.** A paragraph whose lines are
+  split between the page and an embedded drawing — or between two
+  drawings — now groups and edits as a single paragraph, with each part
+  written back where it lives. The evidence bar is strict, so unrelated
+  blocks that merely line up stay separate; a drawing reused elsewhere on
+  the page keeps its other appearances untouched.
+
 ## 1.0.15 — Paragraphs take shape, styling comes along
 
 Paragraph editing grows real geometry — resize a paragraph's box by
