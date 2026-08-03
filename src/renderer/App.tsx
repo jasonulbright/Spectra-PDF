@@ -1085,7 +1085,7 @@ function AppContent(): React.ReactElement {
         size?: number;
         color?: [number, number, number];
         family?: 'serif' | 'sans' | 'mono';
-        rotate?: 0 | 90 | 180 | 270;
+        rotate?: number;
         bold?: boolean;
         italic?: boolean;
         /** 9.K1: pair kerning. Defaults ON engine-side, so only an explicit

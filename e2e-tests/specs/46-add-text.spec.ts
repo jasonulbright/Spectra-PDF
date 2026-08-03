@@ -154,6 +154,46 @@ describe('add text (Phase 9.A2)', () => {
     );
   });
 
+  it('authors FREE-ANGLE text (T19): a 37° block lists as a run box; undo removes', async function () {
+    this.timeout(120_000);
+    await waitForHarness();
+    await invokeAppCommand('tools.addtext');
+    await placeAddText({ x: 0.2, y: 0.55, w: 0.4, h: 0.2 });
+    await $('[data-testid="add-text-form"]').waitForDisplayed({ timeout: 10_000 });
+
+    const phrase = 'Angled banner';
+    // T19: any finite angle rides the same authored-op wire; the engine
+    // emits one cos/sin frame about the box center. Rotated text stays on
+    // the run surface (the standing boundary — same proof as the 90° case).
+    await commitAddText({ text: phrase, size: 14, rotate: 37 });
+
+    expect(await invokeAppCommand('tools.edit')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        for (const id of await editTextPageIds()) {
+          const runs = await editTextRuns(id);
+          if (runs.some((r) => r.text.includes('Angled'))) {
+            const para = await authoredParagraph('Angled');
+            return para === null;
+          }
+        }
+        return false;
+      },
+      { timeout: 30_000, timeoutMsg: 'the free-angle authored run never listed' },
+    );
+
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        for (const id of await editTextPageIds()) {
+          if ((await editTextRuns(id)).some((r) => r.text.includes('Angled'))) return false;
+        }
+        return true;
+      },
+      { timeout: 30_000, timeoutMsg: 'undo did not remove the free-angle text' },
+    );
+  });
+
   it('authors BOLD text via the style toggle params; undo removes (A2-tail-2)', async function () {
     this.timeout(120_000);
     await waitForHarness();

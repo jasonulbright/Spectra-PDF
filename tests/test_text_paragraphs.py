@@ -3689,3 +3689,131 @@ class TestDocumentFontKerning:
         _apply(src, out, para, para["text"], para["spans"], font_path=FONTS_DIR)
         # Two members, two styles: the A|V pair spans them, so no kern rides.
         assert self._tj_numbers(out) is None
+
+
+class TestKinsokuDepth:
+    """T16 — kinsoku beyond the lite line-start pull-back: opening brackets
+    glue FORWARD (行末禁則), small kana / prolonged-sound marks join the
+    line-start prohibition set (行頭禁則). The break-opportunity suppression
+    lives in `_tokenize`; these pins drive the FULL pipeline and assert the
+    emitted per-line codes."""
+
+    def _fixture(self, tmp_dir, mapping, lines_codes, name="kinsoku.pdf"):
+        """The test-877 CJK fixture shape, parameterized: Identity-H font,
+        DW=1000, `mapping` code→char, one Tj per line of codes."""
+        src = os.path.join(tmp_dir, name)
+        pdf = pikepdf.new()
+        tounicode_entries = "\n".join(
+            f"<{code:04x}> <{ord(ch):04x}>" for code, ch in mapping.items()
+        )
+        tounicode = (
+            "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
+            "1 begincodespacerange <0000> <ffff> endcodespacerange\n"
+            f"{len(mapping)} beginbfchar\n{tounicode_entries}\nendbfchar\n"
+            "endcmap end end\n"
+        ).encode("ascii")
+        desc = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/CIDFontType2"),
+                BaseFont=Name("/AAAAAA+CJK"),
+                CIDSystemInfo=Dictionary(
+                    Registry=b"Adobe", Ordering=b"Identity", Supplement=0
+                ),
+                DW=1000,
+            )
+        )
+        cid_font = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/AAAAAA+CJK"),
+                Encoding=Name("/Identity-H"),
+                DescendantFonts=Array([desc]),
+                ToUnicode=pdf.make_stream(tounicode),
+            )
+        )
+        parts = [b"BT /F1 12 Tf 72 700 Td "]
+        for i, codes in enumerate(lines_codes):
+            if i > 0:
+                parts.append(b"0 -14 Td ")
+            hexes = "".join(f"{c:04x}" for c in codes)
+            parts.append(f"<{hexes}> Tj ".encode("ascii"))
+        parts.append(b"ET")
+        _page(pdf, b"".join(parts), {"/F1": cid_font})
+        pdf.save(src)
+        pdf.close()
+        return src
+
+    def _tj_lines(self, path, mapping):
+        """Each emitted Tj/TJ's decoded text, in stream order."""
+        rev = {code: ch for code, ch in mapping.items()}
+        lines = []
+        with pikepdf.open(path) as pdf:
+            for ins in pikepdf.parse_content_stream(pdf.pages[0]):
+                op = str(ins.operator)
+                if op not in ("Tj", "TJ"):
+                    continue
+                chunks = []
+                operands = (
+                    ins.operands[0] if op == "TJ" and ins.operands else ins.operands
+                )
+                for item in operands:
+                    if isinstance(item, (int, float)):
+                        continue
+                    try:
+                        raw = bytes(item)
+                    except (TypeError, ValueError):
+                        continue
+                    for j in range(0, len(raw) - 1, 2):
+                        code = (raw[j] << 8) | raw[j + 1]
+                        chunks.append(rev.get(code, "?"))
+                if chunks:
+                    lines.append("".join(chunks))
+        return lines
+
+    MAP = {
+        1: "日", 2: "本", 3: "語", 4: "編", 5: "集", 6: "文", 7: "字", 8: "列",
+        9: "「", 10: "っ", 11: "ー", 12: "」",
+    }
+
+    def test_opening_bracket_never_ends_a_wrapped_line(self, tmp_dir):
+        # Box = 5 chars (60pt). Naive wrap of 日本語編「集文字列 puts 「 at
+        # the END of line 1; 行末禁則 pulls it forward to open line 2.
+        src = self._fixture(tmp_dir, self.MAP, [[1, 2, 3, 4, 5], [6, 7, 8]])
+        para = _paras(src)[0]
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, "日本語編「集文字列")
+        lines = self._tj_lines(out, self.MAP)
+        assert lines[0] == "日本語編"
+        assert lines[1] == "「集文字列"
+
+    def test_small_kana_never_starts_a_wrapped_line(self, tmp_dir):
+        # Naive wrap of 日本語編集っ文字列 starts line 2 with っ; the
+        # deepened 行頭禁則 glues it to its base syllable.
+        src = self._fixture(tmp_dir, self.MAP, [[1, 2, 3, 4, 5], [6, 7, 8]])
+        para = _paras(src)[0]
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, "日本語編集っ文字列")
+        lines = self._tj_lines(out, self.MAP)
+        assert lines[0] == "日本語編"
+        assert lines[1] == "集っ文字列"
+
+    def test_prolonged_sound_mark_glues_to_its_base(self, tmp_dir):
+        src = self._fixture(tmp_dir, self.MAP, [[1, 2, 3, 4, 5], [6, 7, 8]])
+        para = _paras(src)[0]
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, "日本語編集ー文字列")
+        lines = self._tj_lines(out, self.MAP)
+        assert lines[0] == "日本語編"
+        assert lines[1] == "集ー文字列"
+
+    def test_closing_bracket_still_pulls_back(self, tmp_dir):
+        # The lite behavior regression-pin: 」 never starts a line.
+        src = self._fixture(tmp_dir, self.MAP, [[1, 2, 3, 4, 5], [6, 7, 8]])
+        para = _paras(src)[0]
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, "日本語編集」文字列")
+        lines = self._tj_lines(out, self.MAP)
+        assert lines[0] == "日本語編"
+        assert lines[1] == "集」文字列"

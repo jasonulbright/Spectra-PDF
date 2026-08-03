@@ -25,8 +25,9 @@ export interface SignaturePlacement {
   rotationAtDraw: 0 | 90 | 180 | 270;
   /** A2-tail, Add-Text placements only: the authoring rotation the card
    * currently shows — drives the box preview's reading-direction arrow.
+   * T19: any degree value (quarter turns keep the step layout).
    * Signature/new-field placements never set it. */
-  rotate?: 0 | 90 | 180 | 270;
+  rotate?: number;
 }
 
 export interface SignatureAppearance {
