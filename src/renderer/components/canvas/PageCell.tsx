@@ -18,8 +18,10 @@ import {
   subscribeSystemFonts,
   type SystemFontListing,
 } from '../../lib/system-fonts';
+import { parseRichHtml, type RichPasteResult } from '../../lib/rich-paste';
 import {
   applySpanColor,
+  applySpanFace,
   applySpanSize,
   styledSegments,
   segmentsToHtml,
@@ -4222,16 +4224,71 @@ function ParagraphEditor({
             applyText(sanitizeParagraphInput(el.textContent ?? ''), readCaret(el));
           }}
           onPaste={(e) => {
-            // Plain text only — styles come from the controls, never from
-            // pasted content, and the value must stay a plain string.
             e.preventDefault();
-            const text = sanitizeParagraphInput(e.clipboardData.getData('text/plain'));
             const sel = liveSel();
             const chars = Array.from(value);
+            // T20 rich paste: clipboard HTML whose styling the engine can
+            // express lands as the SAME per-span overlays the toolbar
+            // writes (colour/face/size ranges → span_styles on commit).
+            // Plain payloads — and rich ones that sanitization would have
+            // to reshape, which would shear the range offsets — take the
+            // shipped plain path unchanged.
+            let rich: RichPasteResult | null = null;
+            const html = e.clipboardData.getData('text/html');
+            if (html) {
+              try {
+                rich = parseRichHtml(html);
+              } catch {
+                rich = null;
+              }
+            }
+            if (
+              rich &&
+              rich.spans.length > 0 &&
+              sanitizeParagraphInput(rich.text) !== rich.text
+            ) {
+              rich = null;
+            }
+            const pasted =
+              rich && rich.spans.length > 0
+                ? rich.text
+                : sanitizeParagraphInput(e.clipboardData.getData('text/plain'));
             const next = sanitizeParagraphInput(
-              chars.slice(0, sel.start).join('') + text + chars.slice(sel.end).join(''),
+              chars.slice(0, sel.start).join('') + pasted + chars.slice(sel.end).join(''),
             );
-            applyText(next, sel.start + Array.from(text).length);
+            applyText(next, sel.start + Array.from(pasted).length);
+            if (rich && rich.spans.length > 0) {
+              // After applyText's remap the pasted range sits at
+              // [sel.start, sel.start + len) in the NEW text — the styled
+              // ranges land there through the ordinary apply helpers, so
+              // preview, flattening, and the commit all treat them exactly
+              // like toolbar edits.
+              for (const sp of rich.spans) {
+                const st = sel.start + sp.start;
+                const en = sel.start + sp.end;
+                if (sp.style.color) {
+                  const [r, g, b] = sp.style.color;
+                  const hex = `#${[r, g, b]
+                    .map((c) => Math.round(c * 255).toString(16).padStart(2, '0'))
+                    .join('')}`;
+                  setSpanColors((prev) => mergeSpanColors(applySpanColor(prev, st, en, hex)));
+                }
+                if (sp.style.size !== undefined) {
+                  setSpanSizes((prev) => mergeSpanSizes(applySpanSize(prev, st, en, sp.style.size!)));
+                }
+                if (sp.style.bold || sp.style.italic || sp.style.family) {
+                  setSpanFaces((prev) =>
+                    mergeSpanFaces(
+                      applySpanFace(prev, st, en, {
+                        bold: Boolean(sp.style.bold),
+                        italic: Boolean(sp.style.italic),
+                        ...(sp.style.family ? { family: sp.style.family } : {}),
+                      }),
+                    ),
+                  );
+                }
+              }
+            }
           }}
           onSelect={captureSelection}
           onKeyUp={captureSelection}
