@@ -4,6 +4,8 @@ import { app, batch, dialog, virtualPrinter, type GsInfo, type VirtualPrinterSta
 import { deriveAccentVars } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
+import { useTranslation } from 'react-i18next';
+import { tChrome, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
 // Re-exported for the ~6 existing panel consumers; the implementation is the
 // leaf module (the keymap reads it too — see lib/app-settings.ts).
 export { getSettings } from '../lib/app-settings';
@@ -168,6 +170,8 @@ export interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProps = {}): React.ReactElement {
+  // N12: re-render on language change (the Language select switches live).
+  useTranslation();
   const [category, setCategory] = useState<PrefCategory>(initialCategory);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [status, setStatus] = useState('');
@@ -402,6 +406,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       )}
 
       {category === 'appearance' && (
+      <>
       <div>
         <label className="block text-sm text-neutral-400 mb-1">Theme</label>
         <select
@@ -416,6 +421,32 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           <option value="high-contrast">High contrast</option>
         </select>
       </div>
+      <div>
+        {/* N12: the UI language. Options show each locale's NATIVE name (the
+            picker convention); 'system' re-resolves against the OS locale.
+            The switch is LIVE — react-i18next re-renders hooked chrome. */}
+        <label className="block text-sm text-neutral-400 mb-1">
+          {tChrome('chrome.prefs.language')}
+        </label>
+        <select
+          data-testid="prefs-language"
+          aria-label={tChrome('chrome.prefs.language')}
+          value={settings.language}
+          onChange={(e) => {
+            update('language', e.target.value);
+            setAppLanguage(e.target.value);
+          }}
+          className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+        >
+          <option value="system">{tChrome('chrome.prefs.languageSystem')}</option>
+          {SHIPPED_LOCALES.map((l) => (
+            <option key={l} value={l}>
+              {LOCALE_NATIVE_NAMES[l] ?? l}
+            </option>
+          ))}
+        </select>
+      </div>
+      </>
       )}
 
       {category === 'tray' && (

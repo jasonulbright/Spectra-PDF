@@ -63,6 +63,8 @@ export const CHROME_STRINGS = {
   'chrome.home.allTools': 'All tools',
   'chrome.recent.today': 'Today {{time}}',
   'chrome.recent.yesterday': 'Yesterday {{time}}',
+  'chrome.prefs.language': 'Language',
+  'chrome.prefs.languageSystem': 'System default',
 } as const;
 
 export type ChromeKey = keyof typeof CHROME_STRINGS;
