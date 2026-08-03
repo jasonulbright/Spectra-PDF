@@ -183,8 +183,7 @@ def _walk_vectors(
     resources=None,
     base_ctm=IDENTITY,
     depth: int = 0,
-    root_do_idx=None,
-    form_name=None,
+    do_chain=(),
     base_line_width: float = 1.0,
     base_fill=DEFAULT_COLOR,
     base_stroke=DEFAULT_COLOR,
@@ -217,6 +216,7 @@ def _walk_vectors(
     has_clip = False
     line_width = base_line_width  # `w` (PDF default 1.0) — a form inherits the caller's
     w_stack: list = []  # line width IS graphics state — q/Q-scoped like the rest
+    q_meta: list = []  # P8 slice D: open-frame metadata for `sh` recognition
     for idx, instruction in enumerate(instructions):
         operator = str(instruction.operator)
         operands = list(instruction.operands)
@@ -228,8 +228,21 @@ def _walk_vectors(
         # inside a q…Q otherwise leaked forward and mis-inflated later strokes).
         if operator == "q":
             w_stack.append(line_width)
-        elif operator == "Q" and w_stack:
-            line_width = w_stack.pop()
+            # P8 slice D: per-frame metadata for `sh` recognition. A frame is
+            # CLEAN while it contains only pure state (constructs, clips, gs,
+            # cm/colour/text-state, w) — the gradient-fill idiom's exact
+            # ingredient list. Opening a NESTED frame makes the parent
+            # unclean (the idiom has none).
+            if q_meta:
+                q_meta[-1]["clean"] = False
+            q_meta.append(
+                {"idx": idx, "ctm": tuple(state.ctm), "clean": True, "saw_sh": False}
+            )
+        elif operator == "Q":
+            if w_stack:
+                line_width = w_stack.pop()
+            if q_meta:
+                q_meta.pop()
         if state.feed(operator, operands):
             continue  # q/Q/cm/colour/Tf/BT/Tm/… — state, not a path op
         if operator == "w":
@@ -294,8 +307,10 @@ def _walk_vectors(
                         "line_width": round(line_width, 4),
                         "nested": depth > 0,
                         "drop_idxs": construct_idxs + [idx],
-                        "_form_name": form_name,
-                        "_root_do_idx": root_do_idx,
+                        # P8 slice C: the FULL Do chain (page-outward) —
+                        # [(form name, Do index in its PARENT's stream), …];
+                        # the chain copy-on-write edits any depth.
+                        "_do_chain": list(do_chain),
                         "_edit_depth": depth,
                         # 9-§I.0-S8: True when wholly outside the ambient clip.
                         "clipped": clips.clips_away(vrect),
@@ -334,17 +349,70 @@ def _walk_vectors(
                     resources=fres if fres is not None else resources,
                     base_ctm=mat_mult(fmatrix, state.ctm),
                     depth=depth + 1,
-                    root_do_idx=idx if depth == 0 else root_do_idx,
-                    form_name=fname if depth == 0 else form_name,
+                    do_chain=tuple(do_chain) + ((fname, idx),),
                     base_line_width=line_width,
                     base_fill=state.fill_color,
                     base_stroke=state.stroke_color,
                     out=out,
                     base_clip=clips.clip,
                 )
-        # Any other operator (a show, Do, sh, inline image, w/d/gs line-state):
-        # not part of a path. A path left unpainted before other content is
-        # abandoned (malformed input) — reset so a stale path can't attach.
+        if operator == "sh":
+            # P8 slice D: a shading paint is an OBJECT (the king selects
+            # gradient fills). Its extent is the ambient clip at the op —
+            # the frame's own clip already fed the tracker, so `clips.clip`
+            # IS the visible box (None = unclipped: the lister substitutes
+            # the page box). Frame recognition gates transform + whole-frame
+            # delete: the enclosing q-frame is CLEAN (pure state + this one
+            # sh) and closes immediately after — then dropping [q..Q] removes
+            # the paint AND its orphan clip with zero state leakage (a
+            # complete balanced frame scopes everything it contains).
+            frame = q_meta[-1] if q_meta else None
+            recognized = (
+                frame is not None
+                and frame["clean"]
+                and not frame["saw_sh"]
+                and idx + 1 < len(instructions)
+                and str(instructions[idx + 1].operator) == "Q"
+            )
+            if frame is not None:
+                frame["saw_sh"] = True
+            rect = list(clips.clip) if clips.clip is not None else None
+            out.append(
+                {
+                    "index": len(out),
+                    "rect": rect,
+                    "matrix": list(state.ctm),
+                    "_start_ctm": list(frame["ctm"] if recognized else state.ctm),
+                    "kind": "shading",
+                    "fill": None,
+                    "stroke": None,
+                    "line_width": 0,
+                    "nested": depth > 0,
+                    "drop_idxs": (
+                        list(range(frame["idx"], idx + 2)) if recognized else [idx]
+                    ),
+                    "_do_chain": list(do_chain),
+                    "_edit_depth": depth,
+                    "_sh_frame": {"open": frame["idx"]} if recognized else None,
+                    "_sh_name": str(operands[0]) if operands else None,
+                    "clipped": clips.clips_away(tuple(rect)) if rect else False,
+                }
+            )
+            path_start, start_ctm, construct_idxs, has_clip = None, None, [], False
+            path_pts.reset()
+            continue
+        if operator == "gs":
+            # Pure graphics state — clean-preserving for `sh` frames, but
+            # still a path-buffer reset like every non-path op.
+            path_start, start_ctm, construct_idxs, has_clip = None, None, [], False
+            path_pts.reset()
+            continue
+        # Any other operator (a show, Do, inline image, d line-state): not
+        # part of a path — and not part of a clean `sh` frame either. A path
+        # left unpainted before other content is abandoned (malformed input)
+        # — reset so a stale path can't attach.
+        if q_meta:
+            q_meta[-1]["clean"] = False
         path_start, start_ctm, construct_idxs, has_clip = None, None, [], False
         path_pts.reset()
     return out
@@ -356,7 +424,7 @@ def list_page_vectors(file: str, page: int) -> dict:
     device-space `rect` (bbox for selection), the CTM `matrix` (for a
     transform), `kind` (fill/stroke/fillstroke), best-effort `fill`/`stroke`
     colours, `line_width`, and `nested` (inside a Form XObject)."""
-    _INTERNAL = ("drop_idxs", "_form_name", "_root_do_idx", "_edit_depth", "_start_ctm")
+    _INTERNAL = ("drop_idxs", "_do_chain", "_edit_depth", "_start_ctm", "_sh_frame", "_sh_name")
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
@@ -365,10 +433,89 @@ def list_page_vectors(file: str, page: int) -> dict:
         vectors = _walk_vectors(
             list(pikepdf.parse_content_stream(p)), pdf=pdf, resources=_resolve_resources(p)
         )
+        # P8 slice D: an UNCLIPPED shading floods the visible page — its
+        # honest extent is the page's crop (or media) box.
+        page_box = None
+        try:
+            crop = p.obj.get("/CropBox", p.obj.get("/MediaBox"))
+            bx = [float(v) for v in crop]
+            page_box = [min(bx[0], bx[2]), min(bx[1], bx[3]), max(bx[0], bx[2]), max(bx[1], bx[3])]
+        except (TypeError, ValueError):
+            page_box = [0.0, 0.0, 612.0, 792.0]
         for v in vectors:
+            if v["rect"] is None:
+                v["rect"] = list(page_box)
             for k in _INTERNAL:
                 v.pop(k, None)  # internal to the walk; the public listing omits them
         return {"page": int(page), "vectors": vectors}
+
+
+def _sh_names_used(content_source, resources) -> set:
+    """Every name any reachable `sh` still draws — the page/form stream plus
+    every form reachable from `resources` (cycle-guarded, depth-bounded;
+    OVER-collecting is safe, an unused name kept = dead weight, not a leak).
+    The P7 `_sweep_orphan_edit_gs` recipe, for /Shading — qpdf's GC leaves
+    that table alone too (probe-verified), and a swept gradient's /Function
+    can be a large sampled stream, the removed-bytes-still-embedded class."""
+    used: set = set()
+    seen: set = set()
+
+    def collect_stream(obj):
+        try:
+            for ins in pikepdf.parse_content_stream(obj):
+                if str(ins.operator) == "sh" and ins.operands:
+                    used.add(str(ins.operands[0]))
+        except Exception:
+            pass
+
+    def collect_forms(res, depth):
+        if res is None or depth > MAX_FORM_DEPTH:
+            return
+        try:
+            xo = res.get("/XObject")
+        except Exception:
+            return
+        if xo is None:
+            return
+        for k in xo.keys():
+            try:
+                obj = xo[k]
+                if str(obj.get("/Subtype", "")) != "/Form":
+                    continue
+                og = obj.objgen
+                if og != (0, 0):
+                    if og in seen:
+                        continue
+                    seen.add(og)
+                collect_stream(obj)
+                collect_forms(obj.get("/Resources"), depth + 1)
+            except Exception:
+                continue
+
+    collect_stream(content_source)
+    collect_forms(resources, 0)
+    return used
+
+
+def _swept_shading_table(pdf, resources, sh_name: str, used: set):
+    """A FRESH /Shading subdict without `sh_name` when nothing still draws
+    it (the caller guarantees `resources` is page-local/copy-local — the
+    shared table is never mutated, the C2 sibling rule)."""
+    if sh_name in used:
+        return
+    try:
+        table = resources.get("/Shading")
+    except Exception:
+        return
+    if table is None or sh_name not in {str(k) for k in table.keys()}:
+        return
+    from pikepdf import Dictionary as _Dict, Name as _Name
+
+    fresh = _Dict()
+    for k in table.keys():
+        if str(k) != sh_name:
+            fresh[k] = table[k]
+    resources["/Shading"] = fresh
 
 
 def _fresh_vec_name(resources) -> str:
@@ -386,51 +533,120 @@ def _fresh_vec_name(resources) -> str:
     return f"/EditVec{n}"
 
 
-def _edit_nested_vector(pdf, p, obj, rewrite) -> None:
-    """9.D4: edit a vector object INSIDE a Form XObject on a COPY of that form
-    (fresh name, rewritten stream), swapping only THIS `Do` — a form stamped
-    elsewhere is untouched (the image copy-on-edit pattern). `rewrite` runs on
-    the FORM's instruction list and may raise (validation) before any mutation.
-    Only ONE level of nesting edits (v1); deeper is refused by the caller."""
+def _edit_nested_vector(pdf, p, obj, rewrite, sweep_shading=None) -> None:
+    """9.D4, generalized by P8 slice C to ANY depth ≤ MAX_FORM_DEPTH: edit a
+    vector object inside a CHAIN of Form XObjects on COPIES of every form
+    along the chain — the innermost form's stream takes `rewrite`, then each
+    ancestor is copied with its child's `Do` renamed to the child's copy,
+    and finally the page-level `Do` swaps. A form stamped elsewhere (at any
+    level) is untouched — each copy registers fresh-named on its PARENT's
+    copied resources (the C2 sibling rule at every level), and each
+    superseded original is dropped when nothing in the rewritten parent
+    still draws it (qpdf's GC leaves forms; round-39 HIGH at page level,
+    the P7 slice-F precedent on copies). `rewrite` runs on the INNERMOST
+    form's instruction list and may raise (validation) before any mutation.
+    A chain of length 1 is exactly the shipped depth-1 behavior."""
+    from engine.page_images import _drop_replaced_forms, _names_drawn
+
     resources = _copy_resources_for_write(pdf, _resolve_resources(p))
     p.obj["/Resources"] = resources
-    form = _lookup_xobject(obj["_form_name"], resources, None)
-    if form is None or str(form.get("/Subtype", "")) != "/Form":
-        raise ValueError("the form for this nested vector object was not found")
-    new_form_instrs = rewrite(list(pikepdf.parse_content_stream(form)))
-    new_form = pdf.make_stream(pikepdf.unparse_content_stream(new_form_instrs))
-    # Copy every key off the original EXCEPT the stream-encoding ones (a
-    # BLOCKLIST like redact.py/page_images — an allowlist silently dropped
-    # keys the edited form needs, e.g. /OC layer membership; round-39 HIGH).
-    for key in form.keys():
-        if str(key) in ("/Length", "/Filter", "/DecodeParms"):
-            continue
-        new_form[key] = form[key]
+    chain = obj["_do_chain"]
+    if not chain:
+        raise ValueError("nested vector object carries no form chain")
+    # Resolve the form objects along the chain, tracking each level's
+    # resource SCOPE exactly as the walk resolved names (own /Resources,
+    # else the enclosing scope as fallback).
+    forms: list = []
+    scopes: list = []
+    res_scope = resources
+    for name, _do_idx in chain:
+        scopes.append(res_scope)
+        form = _lookup_xobject(name, res_scope, res_scope)
+        if form is None or str(form.get("/Subtype", "")) != "/Form":
+            raise ValueError("the form chain for this nested vector object was not found")
+        forms.append(form)
+        fres = form.get("/Resources")
+        res_scope = fres if fres is not None else res_scope
+
+    # Innermost rewrite FIRST — a validation raise lands before any mutation.
+    new_inner_instrs = rewrite(list(pikepdf.parse_content_stream(forms[-1])))
+
+    def make_copy(orig, instrs):
+        # Copy every key off the original EXCEPT the stream-encoding ones (a
+        # BLOCKLIST like redact.py/page_images — an allowlist silently dropped
+        # keys the edited form needs, e.g. /OC layer membership; round-39 HIGH).
+        stream = pdf.make_stream(pikepdf.unparse_content_stream(instrs))
+        for key in orig.keys():
+            if str(key) in ("/Length", "/Filter", "/DecodeParms"):
+                continue
+            stream[key] = orig[key]
+        return stream
+
+    child_copy = make_copy(forms[-1], new_inner_instrs)
+    if sweep_shading:
+        # P8 slice D: a nested shading delete sweeps the entry off the INNER
+        # copy's own (COW'd) table — the original form's shared resources
+        # are never mutated (the C2 rule at this level too).
+        inner_own = forms[-1].get("/Resources")
+        inner_res = _copy_resources_for_write(
+            pdf, inner_own if inner_own is not None else scopes[-1]
+        )
+        _swept_shading_table(
+            pdf, inner_res, sweep_shading, _sh_names_used(child_copy, inner_res)
+        )
+        child_copy["/Resources"] = inner_res
+    # Outward: each parent copy renames the child's Do and adopts the copy.
+    for level in range(len(chain) - 1, 0, -1):
+        parent = forms[level - 1]
+        parent_own = parent.get("/Resources")
+        parent_res = _copy_resources_for_write(
+            pdf, parent_own if parent_own is not None else scopes[level - 1]
+        )
+        new_name = _fresh_vec_name(parent_res)
+        parent_instrs = list(pikepdf.parse_content_stream(parent))
+        parent_instrs[chain[level][1]] = _do_instruction(new_name)
+        parent_copy = make_copy(parent, parent_instrs)
+        _register_xobject(pdf, parent_res, new_name, child_copy)
+        # The copy's /XObject still references the superseded ORIGINAL child
+        # — drop it when the rewritten stream no longer draws it.
+        _drop_replaced_forms(
+            parent_res.get("/XObject"), _names_drawn(parent_instrs), {chain[level][0]}
+        )
+        parent_copy["/Resources"] = parent_res
+        child_copy = parent_copy
+
     new_name = _fresh_vec_name(resources)
-    _register_xobject(pdf, resources, new_name, new_form)
+    _register_xobject(pdf, resources, new_name, child_copy)
     page_instrs = list(pikepdf.parse_content_stream(p))
-    page_instrs[obj["_root_do_idx"]] = _do_instruction(new_name)
+    page_instrs[chain[0][1]] = _do_instruction(new_name)
     p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(page_instrs))
-    # Reclaim the form we just superseded — otherwise the OLD form (incl. a
-    # "deleted" path's geometry) stays embedded + reachable forever, and
-    # repeated edits grow the file unbounded (round-39 HIGH). Only drops it
+    # Reclaim the page-level form we just superseded — otherwise the OLD form
+    # (incl. a "deleted" path's geometry) stays embedded + reachable forever,
+    # and repeated edits grow the file unbounded (round-39 HIGH). Only drops
     # when nothing in the rewritten page still draws it (a form Do'd twice on
     # the page keeps its other occurrence — the reachability check handles it).
-    _finalize_page_rewrite(p, page_instrs, {obj["_form_name"]})
+    _finalize_page_rewrite(p, page_instrs, {chain[0][0]})
 
 
 def _resolve_target(pdf, p, index):
-    """The walked object at `index` (recursive listing) + a validated nested
-    edit-depth. Raises on out-of-range or a too-deeply-nested object."""
+    """The walked object at `index` (recursive listing). Raises on
+    out-of-range. An unclipped shading's rect falls back to the page box —
+    the SAME substitution the public lister makes, so the transform math
+    sees the rect the renderer targeted."""
     instructions = list(pikepdf.parse_content_stream(p))
     vectors = _walk_vectors(instructions, pdf=pdf, resources=_resolve_resources(p))
     if not (0 <= int(index) < len(vectors)):
         raise ValueError(f"vector index {index} is out of range (page has {len(vectors)})")
     obj = vectors[int(index)]
-    if obj["nested"] and obj["_edit_depth"] != 1:
-        raise ValueError(
-            "this vector object is nested more than one form deep and cannot be edited"
-        )
+    if obj.get("rect") is None:
+        try:
+            crop = p.obj.get("/CropBox", p.obj.get("/MediaBox"))
+            bx = [float(v) for v in crop]
+            obj["rect"] = [
+                min(bx[0], bx[2]), min(bx[1], bx[3]), max(bx[0], bx[2]), max(bx[1], bx[3])
+            ]
+        except (TypeError, ValueError):
+            obj["rect"] = [0.0, 0.0, 612.0, 792.0]
     return instructions, obj
 
 
@@ -485,17 +701,29 @@ def delete_page_vector(file: str, output: str, page: int, index: int) -> dict:
         # set). Every surrounding op stays — including a state op (q/Q/cm/colour)
         # a producer placed BETWEEN construction and paint: it flows to
         # following content EXACTLY as before, so removing it would change that
-        # content or unbalance q/Q (review round 36 HIGH). No resource sweep: a
-        # now-unreferenced /Pattern is harmless dead weight.
+        # content or unbalance q/Q (review round 36 HIGH). No resource sweep for
+        # a /Pattern (small dead weight); a deleted SHADING's entry IS swept
+        # (P8 slice D — its /Function can be a large sampled stream, and qpdf's
+        # GC leaves /Shading alone, probe-verified).
         drop = set(obj["drop_idxs"])
 
         def rewrite(instrs):
             return [ins for i, ins in enumerate(instrs) if i not in drop]
 
+        sweep_name = obj.get("_sh_name") if obj["kind"] == "shading" else None
         if obj["nested"]:
-            _edit_nested_vector(pdf, p, obj, rewrite)
+            _edit_nested_vector(pdf, p, obj, rewrite, sweep_shading=sweep_name)
         else:
-            p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(rewrite(instructions)))
+            kept = rewrite(instructions)
+            p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+            if sweep_name:
+                # COW the page resources before touching the table (the
+                # shared dict is every sibling's — the C2 rule).
+                resources = _copy_resources_for_write(pdf, _resolve_resources(p))
+                p.obj["/Resources"] = resources
+                _swept_shading_table(
+                    pdf, resources, sweep_name, _sh_names_used(p, resources)
+                )
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(index)}
     finally:
@@ -530,6 +758,13 @@ def transform_page_vector(file: str, output: str, page: int, index: int, matrix:
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
         instructions, obj = _resolve_target(pdf, p, index)
+        if obj["kind"] == "shading" and not obj.get("_sh_frame"):
+            # A bare `sh` outside the gradient-fill idiom: a cm on the sh
+            # alone would slide the gradient beneath its stationary clip
+            # window — refused by name; delete still works.
+            raise ValueError(
+                "this shading is not in a recognized gradient-fill frame and cannot be transformed"
+            )
         drop = obj["drop_idxs"]
         first, last = drop[0], drop[-1]
         bx0, by0, bx1, by1 = obj["rect"]
@@ -644,6 +879,8 @@ def restyle_page_vector(
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
         instructions, obj = _resolve_target(pdf, p, index)
+        if obj["kind"] == "shading":
+            raise ValueError("a shading has no stroke or fill to restyle")
         drop = obj["drop_idxs"]
         first, last = drop[0], drop[-1]
         contiguous = drop == list(range(first, last + 1))

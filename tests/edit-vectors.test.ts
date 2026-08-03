@@ -40,6 +40,17 @@ describe('fetchEditVectors (9.D1)', () => {
     );
     expect(out.map((v) => v.kind)).toEqual(['fill', 'stroke', 'fillstroke']);
     expect(out[0].fill).toEqual([1, 0, 0]);
+    // P8 slice D: 'shading' survives the mapping (it used to coerce to
+    // 'fill', which would have offered colour controls a shading refuses).
+    const shading = await fetchEditVectors(
+      mockCall([
+        { index: 0, rect: [0, 0, 100, 100], kind: 'shading', fill: null, stroke: null },
+      ]),
+      '/w.pdf',
+      1,
+      GEO,
+    );
+    expect(shading[0].kind).toBe('shading');
     expect(out[0].stroke).toBeNull();
     expect(out[1].stroke).toEqual([0, 0, 1]);
     // The rect is projected into display-normalized space (0..1).
