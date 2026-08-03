@@ -1,5 +1,69 @@
 # Changelog
 
+## 1.0.15 — Paragraphs take shape, styling comes along
+
+Paragraph editing grows real geometry — resize a paragraph's box by
+dragging, choose the gap when you split, merge in either direction without
+losing your edits — and pasted text now keeps its styling. Under it all,
+every screen of the app now holds an accessibility bar that is checked by
+machine on every test run, and the whole interface follows one accent
+colour.
+
+### Editing
+- **Paragraph boxes resize by dragging.** Grab either edge of the paragraph
+  editor and the text rewraps to the new width — first-line indents and
+  alignment behave, and a width no word can fit into is refused rather than
+  overflowed. Works on rotated pages and vertical text too.
+- **The split gap is yours.** Splitting a paragraph (Enter inside the text)
+  now takes an adjustable gap — drag or type it in the editor — instead of
+  a fixed distance. Every allowed gap still reads back as two paragraphs.
+- **Merging works in both directions, and keeps your edits.** Backspace at
+  the start joins with the paragraph above, Delete at the end pulls the next
+  one in — and if you had already edited the text, the edit rides along in
+  the same single undo step instead of being refused.
+- **Restyle while you merge.** Size, colour, and font choices made in the
+  editor apply to the merged result as part of the same operation.
+- **Paste keeps its styling.** Text copied from a web page or a word
+  processor pastes with its bold, italics, font class, size, and colour —
+  expressed in the document's own terms. What can't be represented
+  faithfully arrives as plain text rather than something almost right.
+
+### Accessibility & appearance
+- **Every surface is audited, on every test run.** An accessibility audit
+  (WCAG 2.1 AA) now sweeps every tool panel, dialog, menu, and preference
+  page in all three themes as part of the test battery, alongside a
+  keyboard-operability suite — Tab reaches every region, menus work from
+  the keyboard, and no dialog traps you.
+- **One accent colour, everywhere.** Your Windows accent now colours every
+  active control, focus ring, link, and slider in every theme — previously
+  some screens mixed the system accent with a second, built-in one. Text on
+  accent-coloured buttons picks black or white by measured contrast, so
+  every accent stays readable, hover included.
+- **Quieter status colours in the dark theme.** The greens and ambers used
+  for results and warnings are softened — they point at things now instead
+  of being the brightest thing on screen. Disabled buttons drop their
+  colour entirely.
+- **Light and high-contrast themes are complete.** The status bar,
+  operations strip, home cards, tool dock, and measurement controls no
+  longer keep dark styling in a light app; the high-contrast theme's badge
+  colours and title bars are corrected throughout. A theme-consistency
+  audit now runs with the test battery so this class of gap stays closed.
+
+### Scheduling, printing, and building
+- **Scheduled runs are proven on a fresh machine.** Creating a schedule's
+  task folder is now guaranteed rather than assumed, and every build runs a
+  live registration round-trip on a machine that has never held one.
+- **The stalled-printer fix has a live test.** A client that connects to
+  the virtual printer and goes silent is dropped on its own, without
+  blocking other jobs — now proven with real connections on every test run.
+- **Local builds work out of the box.** `npm run package:unsigned` produces
+  the full installer with no signing key; the README documents both build
+  paths. The plain-window fallback (remote desktop, transparency off) is
+  exercised live by the test battery as well.
+- **Documentation matches the product.** The settings screen, README,
+  contributor guide, and licence notes were corrected where they described
+  retired components or overstated what publishing runs.
+
 ## 1.0.14 — Every licence in the box, every print accounted for
 
 An outside review of the whole codebase, worked to zero. Two printing
