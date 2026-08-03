@@ -44,6 +44,7 @@ kept show renders at an identical matrix with identical state) is
 asserted directly by the test suite's dual-walk harness.
 """
 
+import math
 import os
 import re
 import statistics
@@ -1948,7 +1949,12 @@ def _position_lines(
     y0: float | None = None,
     base_ratio: float = 0.0,
     has_span_size: bool = False,
+    box_edges: tuple[float, float] | None = None,
 ) -> None:
+    # T18 resize: center/right/justify position against the paragraph's OWN
+    # edges — an explicit box passes its edges here or those alignments
+    # would ignore the resize entirely. None = the shipped para edges.
+    left_edge, right_edge = box_edges if box_edges else (para.left, para.right)
     # y0 overrides the anchor for a block that does NOT start at the
     # paragraph's own first baseline (A4 split: the second block starts
     # 2×leading below the first block's last line).
@@ -1991,9 +1997,9 @@ def _position_lines(
             line.y = lines[i - 1].y - max(effs[i - 1], effs[i]) * base_ratio
         if para.alignment == "center":
             # No clamp: an overflowing line centers symmetrically too.
-            line.x = para.left + ((para.right - para.left) - line.width) / 2
+            line.x = left_edge + ((right_edge - left_edge) - line.width) / 2
         elif para.alignment == "right":
-            line.x = para.right - line.width
+            line.x = right_edge - line.width
         else:
             line.x = first_left if i == 0 else body_left
         if (
@@ -2001,7 +2007,7 @@ def _position_lines(
             and i < len(lines) - 1
             and len(line.words) > 1
         ):
-            deficit = (para.right - line.x) - line.width
+            deficit = (right_edge - line.x) - line.width
             gaps = len(line.words) - 1
             if deficit > 0 and gaps > 0:
                 line.justify_extra = deficit / gaps
@@ -2078,7 +2084,7 @@ class _Emission:
     def __init__(
         self, para: _Paragraph, styled, fallbacks: dict, page_x0: float, page_x1: float,
         size_override=None, split_at=None, has_span_size=False, kerns=None,
-        base_level=None,
+        base_level=None, split_gap=None, box_width=None, box_left=None,
     ):
         self.para = para
         # 9.T3: the bidi base level when this paragraph reorders (0 or 1),
@@ -2120,6 +2126,15 @@ class _Emission:
         # grouping can never join across, so the output relists as TWO
         # paragraphs through the shipped heuristics).
         self.split_at = split_at
+        # T18: the split gap as a LEADING multiple (None = the shipped 2.0).
+        # The 2×eff relist floor below is never scaled by it — a tighter
+        # request stops at the tightest gap that still lists as two.
+        self.split_gap = split_gap
+        # T18 resize: an explicit box width (points, paragraph space) and,
+        # optionally, a new left edge. None = the shipped derived measures,
+        # byte-identical.
+        self.box_width = box_width
+        self.box_left = box_left
 
     def build(self, ctm) -> list[tuple]:
         """[(kind, instruction, raw_width|None)]; kind ∈ {'op','show'} —
@@ -2171,6 +2186,24 @@ class _Emission:
                 right_limit = max(self.page_x1 - margin, para.right)
         first_measure = right_limit - first_left
         body_measure = right_limit - body_left
+        # T18 resize: an explicit width replaces the derived measures. The
+        # first-line indent (its delta from the body edge) survives, so the
+        # opener keeps its shape at the new width. An explicit left edge
+        # moves the whole box — the renderer sends it when the LEFT handle
+        # dragged; width alone anchors the left edge and moves the right.
+        box_edges = None
+        if self.box_width is not None:
+            indent = first_left - body_left
+            if self.box_left is not None:
+                body_left = float(self.box_left)
+                first_left = body_left + indent
+            body_measure = float(self.box_width)
+            first_measure = body_measure - indent
+            if first_measure <= 0 or body_measure <= 0:
+                raise ValueError(
+                    "the requested box is narrower than the first-line indent"
+                )
+            box_edges = (body_left, body_left + body_measure)
         # A4 split: each block is its OWN paragraph (fresh first-line
         # indent, own justify-final-line), the second anchored below the
         # first by a gap the re-listing grouping can NEVER join across.
@@ -2194,7 +2227,12 @@ class _Emission:
         else:
             parts = [self.styled]
         dom_eff = _widest(para.lines[0].members).eff * size_scale
-        base_split_gap = max(2.0 * leading, 2.0 * dom_eff)
+        # T18: the user's gap factor scales the LEADING term only; the 2×eff
+        # relist floor is the guarantee the output still lists as two
+        # paragraphs (it defeats the 1.6-em join cap with margin) and never
+        # shrinks below it. Factor 2.0 (the default) is byte-identical.
+        gap_factor = 2.0 if self.split_gap is None else float(self.split_gap)
+        base_split_gap = max(gap_factor * leading, 2.0 * dom_eff)
         lines: list[_LayoutLine] = []
         prev_last: _LayoutLine | None = None
         for part in parts:
@@ -2202,6 +2240,18 @@ class _Emission:
             if not words:
                 continue
             block = _fill_lines(words, first_measure, body_measure)
+            if self.box_width is not None:
+                # An explicit resize REFUSES when a word cannot fit the box
+                # (the shipped no-resize path tolerates a natural overlong
+                # word — center even documents "no clamp" — but honoring an
+                # impossible request would silently overflow the very box
+                # the user just drew).
+                limit = max(first_measure, body_measure) + 0.5
+                for ln in block:
+                    if ln.width > limit:
+                        raise ValueError(
+                            "the paragraph cannot wrap to that width — a word is wider than the box"
+                        )
             if prev_last is not None and block:
                 # A4 split gap from the previous block's last line to this
                 # block's first line. 9.A5c (review round 35, finding 1): with
@@ -2223,6 +2273,7 @@ class _Emission:
             _position_lines(
                 block, para, first_left, body_left, leading, y0=y_next,
                 base_ratio=base_ratio, has_span_size=self.has_span_size,
+                box_edges=box_edges,
             )
             if block:
                 prev_last = block[-1]
@@ -2942,6 +2993,9 @@ def replace_paragraph_text(
     bold: bool | None = None,
     italic: bool | None = None,
     split_at: int | None = None,
+    split_gap: float | None = None,
+    box_width: float | None = None,
+    box_left: float | None = None,
     span_styles: list | None = None,
     features: list | None = None,
     alt_index: int = 0,
@@ -2977,6 +3031,19 @@ def replace_paragraph_text(
     2×leading below the first — a gap the re-listing grouping can never
     join across, so the result lists as two paragraphs. None = the
     shipped single-block layout (byte-identical).
+
+    T18 split gap: `split_gap` (leading multiples, [1.3, 10]) scales the
+    gap between the two blocks; the 2×eff relist floor never shrinks, so
+    every allowed factor still lists as two paragraphs. Requires
+    `split_at`; None = the shipped 2.0.
+
+    T18 resize: `box_width` (points, paragraph space) rewraps the
+    paragraph to an explicit measure — first-line indent preserved,
+    center/right/justify positioned against the new edges, and a width no
+    word can wrap into REFUSES rather than overflowing the box the user
+    drew. `box_left` (requires `box_width`) additionally moves the left
+    edge — the renderer sends it when the LEFT handle dragged. Both None
+    = the shipped derived measures, byte-identical.
 
     A5a/A5b/A5c per-span styling: `span_styles` is None or a list of
     `{start, end, color?: [r, g, b], family?, bold?, italic?, size?}` over
@@ -3146,6 +3213,42 @@ def replace_paragraph_text(
             if not (0 < sp < len(str(new_text))):
                 raise ValueError("split position must be inside the text")
             split_point = sp
+        # T18: the split gap in LEADING multiples. Bounded — below ~1.3 the
+        # grouping's ±25% drift window can re-join the halves (garbled
+        # output), above 10 the second block walks off the page for no
+        # articulable reason.
+        gap_value = None
+        if split_gap is not None:
+            try:
+                gv = float(split_gap)
+            except (TypeError, ValueError):
+                raise ValueError("split gap must be a number") from None
+            if split_point is None:
+                raise ValueError("split gap requires a split position")
+            if not (1.3 <= gv <= 10.0):
+                raise ValueError("split gap must be between 1.3 and 10 line heights")
+            gap_value = gv
+        # T18 resize: an explicit positive width; the emission refuses a
+        # width no word-wrap can honour.
+        width_value = None
+        left_value = None
+        if box_width is not None:
+            try:
+                wv = float(box_width)
+            except (TypeError, ValueError):
+                raise ValueError("box width must be a number") from None
+            if not (wv > 0 and math.isfinite(wv)):
+                raise ValueError("box width must be a positive number")
+            width_value = wv
+            if box_left is not None:
+                try:
+                    left_value = float(box_left)
+                except (TypeError, ValueError):
+                    raise ValueError("box left must be a number") from None
+                if not math.isfinite(left_value):
+                    raise ValueError("box left must be a finite number")
+        elif box_left is not None:
+            raise ValueError("box left requires a box width")
 
         # A5a/A5b/A5c per-span styling: fold the sparse span_styles ranges
         # into per-code-point lookups — `color_by_pos` (A5a colour),
@@ -3581,6 +3684,7 @@ def replace_paragraph_text(
             _Emission(
                 para, styled, fallbacks, page_x0, page_x1,
                 size_override=size_override, split_at=split_point,
+                split_gap=gap_value, box_width=width_value, box_left=left_value,
                 has_span_size=size_by_pos is not None,
                 # 9.K1b: kern from whatever face each slice renders in — the
                 # bundled subset when substituted, the document's own font
@@ -3645,6 +3749,16 @@ def merge_paragraph_with_previous(
     # does. Without it a non-embedded standard-14 font would kern on edit
     # (via its metric twin) but not on merge — "some documents, not others".
     font_path: str | None = None,
+    # T18: merge DIRECTION — with_next merges the NEXT paragraph into the
+    # selected one (the selected box anchors, exactly as the previous box
+    # anchors the shipped direction). expected_prev_* always fingerprints
+    # the ANCHOR paragraph, expected_* the one merging into it.
+    with_next: bool = False,
+    # T18: the selected paragraph's EDITED text (+ the renderer's span map
+    # for it) — an edited editor no longer refuses the merge; the page
+    # fingerprints still prove the on-disk state.
+    selected_text_override: str | None = None,
+    selected_spans_override: list | None = None,
 ) -> dict:
     """Merge a paragraph into the one above it in the listing (A4): the
     joined text (space-joined; no space across a CJK-CJK boundary — the
@@ -3681,9 +3795,14 @@ def merge_paragraph_with_previous(
         )
         paragraphs = _group(runs, detail)
         idx = int(paragraph_index)
-        if not (1 <= idx < len(paragraphs)):
-            raise ValueError("no previous paragraph to merge with")
-        prev, cur = paragraphs[idx - 1], paragraphs[idx]
+        if with_next:
+            if not (0 <= idx < len(paragraphs) - 1):
+                raise ValueError("no next paragraph to merge with")
+            prev, cur = paragraphs[idx], paragraphs[idx + 1]
+        else:
+            if not (1 <= idx < len(paragraphs)):
+                raise ValueError("no previous paragraph to merge with")
+            prev, cur = paragraphs[idx - 1], paragraphs[idx]
         for para_, label in ((prev, "previous"), (cur, "selected")):
             if not para_.editable:
                 raise ValueError(para_.reason or f"the {label} paragraph is not editable")
@@ -3701,17 +3820,36 @@ def merge_paragraph_with_previous(
         if [int(r) for r in expected_runs] != cur.run_indexes or str(expected_text) != cur.text:
             raise ValueError("the page's text changed underneath this edit — reopen the editor")
 
-        joiner = "" if (prev.text and cur.text and _cjk(prev.text[-1]) and _cjk(cur.text[0])) else " "
-        new_text = prev.text + joiner + cur.text
+        # T18: an edited editor rides its text into the merge as the
+        # SELECTED side (cur for the shipped previous-merge, prev/anchor
+        # for with_next), with the renderer's span map for that text. The
+        # fingerprints above already proved the PAGE state.
+        prev_text, cur_text = prev.text, cur.text
+        prev_spans_src, cur_spans_src = prev.spans, cur.spans
+        if selected_text_override is not None:
+            ov_text = str(selected_text_override)
+            if not ov_text.strip():
+                raise ValueError(
+                    "the edited text is empty — delete the paragraph instead of merging"
+                )
+            if not selected_spans_override:
+                raise ValueError("edited text needs its span map")
+            if with_next:
+                prev_text, prev_spans_src = ov_text, selected_spans_override
+            else:
+                cur_text, cur_spans_src = ov_text, selected_spans_override
+
+        joiner = "" if (prev_text and cur_text and _cjk(prev_text[-1]) and _cjk(cur_text[0])) else " "
+        new_text = prev_text + joiner + cur_text
         # Spans stay contiguous: the joiner rides the PREVIOUS paragraph's
         # last span (the line-join rule); cur's spans shift up.
-        shift = len(prev.text) + len(joiner)
-        spans = [dict(s) for s in prev.spans]
+        shift = len(prev_text) + len(joiner)
+        spans = [dict(s) for s in prev_spans_src]
         if joiner and spans:
             spans[-1]["end"] += len(joiner)
         spans += [
             {"start": s["start"] + shift, "end": s["end"] + shift, "run": s["run"]}
-            for s in cur.spans
+            for s in cur_spans_src
         ]
 
         members_by_index = {m.index: m for m in prev.members}
@@ -3765,7 +3903,14 @@ def merge_paragraph_with_previous(
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         _finalize_page_rewrite(p, kept, edit.superseded_forms)
         _save(pdf, input_path, output_path)
-        return {"output": str(output_path), "page": int(page), "index": idx - 1}
+        return {
+            "output": str(output_path),
+            "page": int(page),
+            # The merged paragraph lists at the ANCHOR's position: idx-1 for
+            # the shipped previous-merge, idx itself when the next paragraph
+            # merged INTO the selected one.
+            "index": idx if with_next else idx - 1,
+        }
     finally:
         try:
             pdf.close()
