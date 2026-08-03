@@ -1,12 +1,12 @@
 """Apply an INVISIBLE OCR text layer (the persistence half of Phase 2m).
 
-The renderer's tesseract.js worker recognizes scanned pages and converts the
-word boxes to PDF user-space rects (the same displayRectToPdf recipe as
-redaction/signature placement); this handler writes them into the file as an
-invisible-text overlay so the document becomes genuinely searchable ON DISK —
-pdfminer/pdf.js/Acrobat all extract it. Recognition itself is renderer-side
-by explicit roadmap assignment (§C); see
-docs/architecture/15-phase2m-ocr-find.md for the CLI scope boundary.
+Recognition happens in ``recognize.py`` — the bundled native Tesseract run as
+a subprocess (Phase 12 retired the renderer-side tesseract.js worker) — and
+the caller converts the word boxes to PDF user-space rects (the GUI via the
+same displayRectToPdf recipe as redaction/signature placement); this handler
+writes them into the file as an invisible-text overlay so the document
+becomes genuinely searchable ON DISK — pdfminer/pdf.js/Acrobat all extract
+it. The GUI, the CLI arms and scheduled runs all feed the same shape here.
 
 Construction — the standard "OCR under" text layer:
   - One Form XObject per page, tagged with a private resource name

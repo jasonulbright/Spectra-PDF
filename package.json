@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "prepackage": "powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 && powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1 && node scripts/sync-ocr-assets.mjs",
     "package": "npm run prepackage && cargo tauri build",
+    "package:unsigned": "npm run prepackage && cargo tauri build --config src-tauri/tauri.unsigned.conf.json",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

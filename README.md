@@ -20,7 +20,7 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - **Organize view** — every open file as a strip of live page thumbnails; drag pages within and across documents, multi-select, whole-document merge, drop files to import their pages at that spot. All of it staged in memory, committed atomically, undoable
 - **Navigation pane** (`F4`) — Pages (thumbnails with drag-reorder), Bookmarks (with editing), Search, Signatures
 - **Find & Search** — a universal search box in the toolbar that answers with both **tools and document text** in one list (type a tool's name to launch it, or a phrase to jump to the page), plus floating find (`Ctrl+F`, `F3`/`Ctrl+G` stepping) and a workspace-wide Search panel (`Ctrl+Shift+F`) with regex, case and whole-word modes and an on-disk scope. Scanned pages become searchable (and selectable) via OCR
-- **Batch OCR** (Tools ▸ Batch OCR Folder…) — point it at a folder and get a mirrored copy of the whole tree with every scanned PDF made searchable; already-searchable files copy through unchanged, problem files are reported, and the originals are never touched. Fully offline, like all OCR here
+- **Batch OCR** (Tools ▸ Batch OCR Folder…) — point it at a folder and get a mirrored copy of the whole tree with every scanned PDF made searchable; already-searchable files copy through unchanged and problem files are reported. Your originals stay untouched unless you pick the explicit replace-in-place mode, which stages each result beside the original, verifies it reads back, and only then swaps it over. Fully offline, like all OCR here
 
 ![Organize view](docs/images/screenshot_organize.png)
 
@@ -61,7 +61,7 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - Multi-level undo/redo across staged page edits and applied operations; one file is one document no matter how its path is spelled
 
 ### Desktop citizenship
-NSIS installer with silent modes and enterprise policy, file associations, Explorer context menu, system tray, start-with-Windows, update notifications (the app never downloads or installs updates itself), light/dark/system themes with Windows accent + Mica, WCAG 2.1 AA, full keyboard navigation (single-key tool accelerators available, off by default).
+NSIS installer with silent modes and enterprise policy, file associations, Explorer context menu, system tray, start-with-Windows, update notifications (the app never downloads or installs updates itself), light/dark/system themes with Windows accent + Mica, full keyboard navigation (single-key tool accelerators available, off by default).
 
 ## Command Line
 
@@ -227,11 +227,21 @@ language models. To run one on its own, see **Individual steps** below.
 ## Build
 
 ```bash
-# Full build — bundles Python, GS, builds Rust backend, produces NSIS installer
-npm run package
+# Local build — bundles every runtime, builds the Rust backend, produces the
+# NSIS installer. No signing key needed.
+npm run package:unsigned
 ```
 
-This runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it), `scripts/sync-edit-fonts.ps1` (the hash-pinned edit faces and their OFL licence texts — Liberation, Libertinus, Noto Sans CJK SC, IBM Plex Sans Arabic and Noto Sans Hebrew), `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it), `scripts/bundle-tesseract.ps1` (the pinned, SHA-256-verified native OCR engine, plus every redistribution notice for the ~50 libraries it links — the build REFUSES if any shipped binary lacks one), and `scripts/sync-ocr-assets.mjs` (the 47 pinned OCR language models) — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, produces the NSIS installer). Five of those produce a `tauri.conf.json` resource directory (`python`, `ghostscript`, `fonts`, `libreoffice`, `tesseract`), and **every one must exist before a build can succeed** — Tauri validates resource paths even with `--no-bundle`.
+`npm run package` (without `:unsigned`) builds the exact release shape, which
+additionally produces the **signed updater artifacts** (`latest.json` + `.sig`)
+— that step needs `TAURI_SIGNING_PRIVATE_KEY` in the environment, and the key
+lives only in the release workflow's repository secrets. Without it the build
+assembles the installer and then **fails at the updater-signing step**, so for
+a local installer use `package:unsigned`: the installer is identical, it just
+skips the updater artifacts, which only the publish workflow
+(`.github/workflows/release.yml`) has any use for.
+
+Either package script runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (downloads the official upstream Ghostscript release, verifies its checksum, and vendors it), `scripts/sync-edit-fonts.ps1` (the hash-pinned edit faces and their OFL licence texts — Liberation, Libertinus, Noto Sans CJK SC, IBM Plex Sans Arabic and Noto Sans Hebrew), `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it), `scripts/bundle-tesseract.ps1` (the pinned, SHA-256-verified native OCR engine, plus every redistribution notice for the ~50 libraries it links — the build REFUSES if any shipped binary lacks one), and `scripts/sync-ocr-assets.mjs` (the 47 pinned OCR language models) — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, produces the NSIS installer). Five of those produce a `tauri.conf.json` resource directory (`python`, `ghostscript`, `fonts`, `libreoffice`, `tesseract`), and **every one must exist before a build can succeed** — Tauri validates resource paths even with `--no-bundle`.
 
 Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 
@@ -242,7 +252,8 @@ Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 | `npm run prepackage` | Vendors every bundled runtime — embedded Python, Ghostscript, edit fonts, LibreOffice, native Tesseract + OCR models (no compile) |
 | `npm run build:renderer` | Vite production build of the React frontend |
 | `npm run build` | `cargo tauri build` — Rust compile + NSIS installer (assumes prepackage already ran) |
-| `npm run package` | All of the above in sequence |
+| `npm run package` | All of the above in sequence, release shape — needs `TAURI_SIGNING_PRIVATE_KEY` for the updater artifacts |
+| `npm run package:unsigned` | Same, minus the updater artifacts — the local-build path, no key needed |
 
 ## Architecture
 

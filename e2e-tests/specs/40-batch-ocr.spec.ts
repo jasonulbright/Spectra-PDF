@@ -35,8 +35,9 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 // (generated born-digital), broken.pdf (garbage bytes)} → run the dialog's
 // real flow with injected folders → assert the mirror: scanned output
 // extractable by an independent reader, born-digital byte-identical,
-// broken reported skipped, run completed. Recognition is the REAL
-// tesseract.js worker inside the webview (14-ocr-find precedent).
+// broken reported skipped, run completed. Recognition is the REAL bundled
+// native Tesseract via the engine (14-ocr-find precedent; tesseract.js is
+// retired — the GUI, CLI and scheduled runs share one recognizer).
 
 const SCANNED = resolve(__dirname, '..', 'fixtures', 'scanned.pdf');
 
