@@ -33,7 +33,7 @@ import {
   mergeSpanColors,
   mergeSpanFaces,
   mergeSpanSizes,
-  paragraphUnencodable,
+  relaxUnencodableSpans,
   remapRanges,
   sanitizeParagraphInput,
   seedSpanColors,
@@ -3607,7 +3607,7 @@ function ParagraphEditor({
     const onElement = range.startContainer.nodeType !== Node.TEXT_NODE;
     if (onElement && range.collapsed) setEditorSelection(el, s.start, s.end);
   });
-  const spans = computeEditSpans(para.text, value, para.spans, para.runs[0]);
+  const spans0 = computeEditSpans(para.text, value, para.spans, para.runs[0]);
   const familyChanged = family !== '';
   const styleChanged = bold !== para.bold || italic !== para.italic;
   // A substitution (family picked or a style toggle changed) re-renders
@@ -3626,10 +3626,16 @@ function ParagraphEditor({
   // the original subset lacked). The engine refuses a genuinely unencodable
   // char with a stated reason, the same honest boundary as convert.
   const featuresChanged = smallCaps || alternates;
-  const missing =
+  // T21 position-aware relaxation: a char stranded in a span whose font
+  // can't encode it reassigns to the nearest span whose run CAN — the
+  // commit route applies the identical relaxation (one implementation),
+  // so validation and commit can never disagree about the mapping.
+  const relaxed =
     substituting || featuresChanged
-      ? []
-      : paragraphUnencodable(value, spans, para.encodableByRun, para.sequencesByRun);
+      ? null
+      : relaxUnencodableSpans(value, spans0, para.encodableByRun, para.sequencesByRun);
+  const spans = relaxed?.spans ?? spans0;
+  const missing = relaxed?.missing ?? [];
   const valid = missing.length === 0;
   const sizeChanged = Math.abs(size - para.fontSize) > 0.01;
   const colorChanged = color.toLowerCase() !== para.color.toLowerCase();

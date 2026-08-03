@@ -410,7 +410,7 @@ export interface CanvasEditImagesHandlers {
     size?: number;
     color?: [number, number, number];
     family?: 'sans' | 'serif' | 'mono';
-    rotate?: 0 | 90 | 180 | 270;
+    rotate?: number;
     bold?: boolean;
     italic?: boolean;
     smallCaps?: boolean;
@@ -1050,7 +1050,7 @@ export interface TestHarness {
     size?: number;
     color?: [number, number, number];
     family?: 'sans' | 'serif' | 'mono';
-    rotate?: 0 | 90 | 180 | 270;
+    rotate?: number;
     bold?: boolean;
     italic?: boolean;
     smallCaps?: boolean;

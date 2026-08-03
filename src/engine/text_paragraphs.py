@@ -99,8 +99,23 @@ WRAP_TOL = 0.5  # user units of slack when refilling lines
 BULLET_CHARS = "•◦▪‣·∙–—*"
 _ENUM_RE = re.compile(r"^(\d{1,3}|[A-Za-z])[.)]([\s ]|$)")
 
-# Kinsoku-lite: closing punctuation that must not START a wrapped line.
-NO_LINE_START = set("。、」』）］｝！？，．・:;,.!?)]}»›'\"”’")
+# Kinsoku (JIS X 4051; T16 deepened the lite set): characters that must not
+# START a wrapped line — closing punctuation, plus small kana, the prolonged
+# sound mark and iteration marks (行頭禁則), and mid-leader continuation.
+NO_LINE_START = set(
+    "。、」』）］｝！？，．・:;,.!?)]}»›'\"”’"
+    # Small kana (hiragana + katakana) — they modify the PRECEDING syllable.
+    "ぁぃぅぇぉっゃゅょゎゕゖ"
+    "ァィゥェォッャュョヮヵヶ"
+    # Prolonged sound + iteration marks.
+    "ーゝゞヽヾ々〻"
+    # Leaders/ellipses never start a line mid-run.
+    "…‥"
+)
+
+# T16: characters that must not END a wrapped line (行末禁則) — opening
+# brackets and quotes glue FORWARD to the word they open.
+NO_LINE_END = set("（｛［「『【〈《〔〖〘〚(［{«‹“‘\"'")
 
 
 # ── members and lines ─────────────────────────────────────────────────────
@@ -1822,10 +1837,26 @@ def _tokenize(
             current.gap_styles.append((ch, st, w))
             continue
         if current.gap_styles:
-            close()  # a non-space after gap chars starts the next word
+            # T16 (行末禁則): a chunk ENDING with an opening bracket/quote
+            # must not end a line — the break opportunity after it is
+            # suppressed by FOLDING the gap into the word and continuing,
+            # so the opener travels with the word it opens. The spaces stay
+            # document text (chars + width), so the round-trip is untouched.
+            if current.chars and current.chars[-1][0][-1] in NO_LINE_END:
+                for gch, gst, gw in current.gap_styles:
+                    current.chars.append((gch, gst))
+                    current.char_widths.append(gw)
+                    current.width += gw
+                current.gap_after = 0.0
+                current.gap_styles = []
+            else:
+                close()  # a non-space after gap chars starts the next word
         elif (
             current.chars
             and ch not in NO_LINE_START
+            # T16: no break AFTER an opener either (the CJK-boundary break
+            # is the common Japanese case: 「日 must stay together).
+            and current.chars[-1][0][-1] not in NO_LINE_END
             # 9.B5: entries can be atomic multi-char ligatures — classify
             # the break by the boundary-adjacent code points.
             and (_cjk(current.chars[-1][0][-1]) or _cjk(ch[0]))
