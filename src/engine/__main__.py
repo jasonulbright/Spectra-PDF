@@ -79,6 +79,7 @@ from engine.guided_actions import run_action
 from engine.autotag import autotag
 from engine.page_images import (
     add_page_image,
+    add_page_vector_graphic,
     crop_page_image,
     delete_page_image,
     delete_page_images,
@@ -211,6 +212,7 @@ def main() -> None:
     server.register("transform_page_images", transform_page_images)
     server.register("delete_page_images", delete_page_images)
     server.register("add_page_image", add_page_image)
+    server.register("add_page_vector_graphic", add_page_vector_graphic)
     server.register("crop_page_image", crop_page_image)
     server.register("list_page_vectors", list_page_vectors)
     server.register("delete_page_vector", delete_page_vector)

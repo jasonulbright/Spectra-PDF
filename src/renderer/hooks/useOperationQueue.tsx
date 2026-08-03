@@ -41,6 +41,7 @@ const FRIENDLY_NAMES: Record<string, string> = {
   crop_page_image: 'Crop Image',
   set_image_opacity: 'Adjust Image',
   add_page_image: 'Add Image',
+  add_page_vector_graphic: 'Add Graphic',
   replace_text_run: 'Edit Text',
   convert_text_run: 'Edit Text',
   print: 'Print',

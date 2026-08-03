@@ -43,9 +43,10 @@ export interface EditImagePlacement {
     startAlpha: number;
     endAlpha: number;
   } | null;
-  /** C4: an inline (BI/ID/EI) draw vs a regular XObject placement —
-   * replace/extract are XObject-only (the toolbar disables them). */
-  kind: 'inline' | 'xobject';
+  /** C4: an inline (BI/ID/EI) draw vs a regular XObject placement.
+   * P7 slice F adds 'vector' — a placed SVG graphic; the whole transform
+   * family applies, replace/extract refuse (toolbar disables). */
+  kind: 'inline' | 'xobject' | 'vector';
   /** C3-tail: the tool-authored crop in the image's unit space, or null.
    * Only RECOGNIZED tool frames are reported (author clips stay null —
    * no handles, band-crop as before); the crop op replaces the whole
@@ -88,7 +89,7 @@ interface EngineListing {
       start_alpha: number;
       end_alpha: number;
     } | null;
-    kind: 'inline' | 'xobject';
+    kind: 'inline' | 'xobject' | 'vector';
     crop?: [number, number, number, number] | null;
     /** 9-§I.0-S8: the placement is wholly outside the active clip (invisible).
      * Filtered out below so clipped-away images are never offered as editable.
@@ -132,7 +133,7 @@ export async function fetchEditPlacements(
             endAlpha: image.mask.end_alpha,
           }
         : null,
-    kind: image.kind === 'inline' ? 'inline' : 'xobject',
+    kind: image.kind === 'inline' ? 'inline' : image.kind === 'vector' ? 'vector' : 'xobject',
     // Degenerate guard: a pre-tail file with DISJOINT stacked crops lists
     // an inverted intersection (x0>x1) — no sane handle seed exists, so
     // treat it as no tool crop (band-crop heals it; the band commit

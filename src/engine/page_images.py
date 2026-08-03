@@ -260,8 +260,25 @@ def _walk_placements(
             name = str(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback_resources)
             subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
-            if xobj is not None and subtype == "/Image":
+            vector_marker = (
+                xobj.get("/SpectraVector") if xobj is not None and subtype == "/Form" else None
+            )
+            if xobj is not None and (subtype == "/Image" or vector_marker is not None):
+                # P7 slice F convergence: a MARKED vector-graphic form is a
+                # LEAF placement in the same ordinal space as image draws —
+                # it draws the unit square under the live CTM (BBox [0,0,1,1]
+                # by construction), so every wrap-family edit applies to it
+                # verbatim and the walker never recurses into it.
                 x0, y0, x1, y1 = _bbox_of_rect_under_matrix(state.ctm, 1.0, 1.0)
+                if vector_marker is not None:
+                    try:
+                        vb = [float(v) for v in vector_marker.get("/ViewBox")]
+                        nw, nh = int(round(vb[2])), int(round(vb[3]))
+                    except (TypeError, ValueError, IndexError):
+                        nw = nh = 0
+                else:
+                    nw = int(xobj.get("/Width", 0))
+                    nh = int(xobj.get("/Height", 0))
                 out.append(
                     {
                         "index": len(out),
@@ -271,10 +288,10 @@ def _walk_placements(
                         # it to build the delta cm; `rect` is just its bbox.
                         "matrix": list(state.ctm),
                         "name": name,
-                        "kind": "xobject",
+                        "kind": "vector" if vector_marker is not None else "xobject",
                         "nested": nested,
-                        "native_width": int(xobj.get("/Width", 0)),
-                        "native_height": int(xobj.get("/Height", 0)),
+                        "native_width": nw,
+                        "native_height": nh,
                         # C3: effective fill alpha at this draw (the opacity
                         # slider's honest seed).
                         "opacity": round(alpha, 4),
@@ -860,7 +877,14 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
         name = str(operands[0]) if operands else None
         xobj = _lookup_xobject(name, resources, fallback_resources)
         subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
-        if xobj is not None and subtype == "/Image":
+        # P7 slice F: marked vector-graphic forms are LEAF placements — they
+        # occupy a counted ordinal slot exactly as the lister counts them
+        # (walker agreement), take every wrap-family edit, and are never
+        # recursed into. Replace refuses vectors at the op entry (kind check).
+        vector_leaf = (
+            subtype == "/Form" and xobj is not None and xobj.get("/SpectraVector") is not None
+        )
+        if xobj is not None and (subtype == "/Image" or vector_leaf):
             payload = state.take(state.seen)
             if payload is not None:
                 changed = True
@@ -881,6 +905,12 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     )
                 if state.action == "delete":
                     state.deleted_name = name
+                    if vector_leaf and name:
+                        # qpdf's GC drops orphaned IMAGES but leaves forms —
+                        # a deleted vector graphic's form must be dropped
+                        # explicitly (only when nothing still draws it; the
+                        # shared-draw check is _drop_replaced_forms' rule).
+                        state.superseded_forms.add(name)
                     # drop the instruction
                 elif _emit_wrap(kept, instruction, state, resources, fallback_resources, reserved):
                     # transform: q D cm — effective D·M_cur = M' at any depth.
@@ -944,6 +974,13 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     # Sweep superseded /EditGS entries off the COPY's fresh
                     # table (the collapse just dropped their frames).
                     _sweep_orphan_edit_gs(copy, copy_res)
+                # A vector-leaf DELETE inside this form: the copy's own
+                # /XObject still references the dead form — drop it here
+                # (page-level entries are finalize's job; qpdf GC only
+                # prunes images).
+                _drop_replaced_forms(
+                    copy_res.get("/XObject"), _names_drawn(inner_kept), state.superseded_forms
+                )
                 copy["/Resources"] = copy_res
                 new_name = _fresh_name(resources, name_counter, reserved)
                 new_forms[new_name] = copy
@@ -1688,6 +1725,11 @@ def replace_page_image(
         count = len(placements)
         if not (0 <= int(index) < count):
             raise ValueError(f"image index {index} is out of range (page has {count})")
+        if placements[int(index)].get("kind") == "vector":
+            raise ValueError(
+                "a vector graphic placement cannot be replaced with a raster image; "
+                "delete it and add a new graphic"
+            )
         name_counter = [0]
         reserved: set = set()
         replace_fit = (
@@ -1727,6 +1769,54 @@ def replace_page_image(
             pdf.close()
         except Exception:
             pass
+
+
+def _resolve_placement_box(p, left, bottom, w, h, at, fit, natural_w, natural_h):
+    """The final user-space box for an ADD placement — shared by raster and
+    vector adds so the two can never drift (P7 slice F). `rect` mode arrives
+    as (left,bottom,w,h); fit="contain" shrinks the box around its center to
+    the natural aspect. `at` mode is the natural-size click-place: natural
+    units as points (1px/1 viewBox unit = 1pt), centered on the click,
+    scaled DOWN (never up) to fit the page's visible box and shifted
+    inside it."""
+    if at is None:
+        if fit == "contain" and natural_w > 0 and natural_h > 0:
+            box_aspect = w / h
+            nat_aspect = natural_w / natural_h
+            if nat_aspect > box_aspect:
+                new_h = w / nat_aspect
+                bottom += (h - new_h) / 2.0
+                h = new_h
+            elif nat_aspect < box_aspect:
+                new_w = h * nat_aspect
+                left += (w - new_w) / 2.0
+                w = new_w
+        return left, bottom, w, h
+    try:
+        ax, ay = (float(v) for v in at)
+    except (TypeError, ValueError):
+        raise ValueError("at must be [x, y]") from None
+    if natural_w <= 0 or natural_h <= 0:
+        raise ValueError("image has no natural size")
+    # The page's visible box (CropBox falls back to MediaBox).
+    crop = p.obj.get("/CropBox", p.obj.get("/MediaBox"))
+    try:
+        pcx0, pcy0, pcx1, pcy1 = (float(v) for v in crop)
+    except (TypeError, ValueError):
+        pcx0, pcy0, pcx1, pcy1 = 0.0, 0.0, 612.0, 792.0
+    page_w = abs(pcx1 - pcx0)
+    page_h = abs(pcy1 - pcy0)
+    scale = min(1.0, page_w / natural_w, page_h / natural_h)
+    w = natural_w * scale
+    h = natural_h * scale
+    left = ax - w / 2.0
+    bottom = ay - h / 2.0
+    # Shift inside the visible box (the click may hug an edge).
+    lo_x, hi_x = min(pcx0, pcx1), max(pcx0, pcx1)
+    lo_y, hi_y = min(pcy0, pcy1), max(pcy0, pcy1)
+    left = min(max(left, lo_x), hi_x - w)
+    bottom = min(max(bottom, lo_y), hi_y - h)
+    return left, bottom, w, h
 
 
 def add_page_image(
@@ -1787,45 +1877,17 @@ def add_page_image(
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        img_w = int(image_obj["/Width"])
-        img_h = int(image_obj["/Height"])
-        if rect is not None and fit == "contain" and img_w > 0 and img_h > 0:
-            # Shrink the drawn box around its center to the source aspect.
-            box_aspect = w / h
-            img_aspect = img_w / img_h
-            if img_aspect > box_aspect:
-                new_h = w / img_aspect
-                bottom += (h - new_h) / 2.0
-                h = new_h
-            elif img_aspect < box_aspect:
-                new_w = h * img_aspect
-                left += (w - new_w) / 2.0
-                w = new_w
-        if at is not None:
-            try:
-                ax, ay = (float(v) for v in at)
-            except (TypeError, ValueError):
-                raise ValueError("at must be [x, y]") from None
-            if img_w <= 0 or img_h <= 0:
-                raise ValueError("image has no natural size")
-            # The page's visible box (CropBox falls back to MediaBox).
-            crop = p.obj.get("/CropBox", p.obj.get("/MediaBox"))
-            try:
-                pcx0, pcy0, pcx1, pcy1 = (float(v) for v in crop)
-            except (TypeError, ValueError):
-                pcx0, pcy0, pcx1, pcy1 = 0.0, 0.0, 612.0, 792.0
-            page_w = abs(pcx1 - pcx0)
-            page_h = abs(pcy1 - pcy0)
-            scale = min(1.0, page_w / img_w if img_w else 1.0, page_h / img_h if img_h else 1.0)
-            w = img_w * scale
-            h = img_h * scale
-            left = ax - w / 2.0
-            bottom = ay - h / 2.0
-            # Shift inside the visible box (the click may hug an edge).
-            lo_x, hi_x = min(pcx0, pcx1), max(pcx0, pcx1)
-            lo_y, hi_y = min(pcy0, pcy1), max(pcy0, pcy1)
-            left = min(max(left, lo_x), hi_x - w)
-            bottom = min(max(bottom, lo_y), hi_y - h)
+        left, bottom, w, h = _resolve_placement_box(
+            p,
+            left,
+            bottom,
+            w,
+            h,
+            at,
+            fit,
+            int(image_obj["/Width"]),
+            int(image_obj["/Height"]),
+        )
 
         # Register the XObject on a page-LOCAL /Resources so the draw lands on
         # THIS page only. QPDF flattens inherited /Resources onto every page's
@@ -1860,6 +1922,82 @@ def add_page_image(
             pass
 
 
+def add_page_vector_graphic(
+    file: str,
+    output: str,
+    page: int,
+    rect: list | None = None,
+    svg_path: str | None = None,
+    fit: str = "contain",
+    at: list | None = None,
+) -> dict:
+    """Place an SVG as REAL vector content (P7 slice F) — compiled by
+    `engine.svg_pdf` into a unit-square Form XObject and appended as
+    `q cm /Name Do Q`, so the placed graphic is an ordinary PLACEMENT
+    afterward: list/transform/skew/delete/opacity/blend/mask/crop all apply
+    verbatim (kind "vector"; replace/extract refuse by name). Placement
+    geometry is the raster add's exact arithmetic (`_resolve_placement_box`
+    — contain by default since a vector's aspect IS its meaning; `at` =
+    natural size, one viewBox unit per point). Refusals from the compiler
+    (`SvgUnsupported`) surface verbatim — they name what the file uses."""
+    from engine.svg_pdf import compile_svg
+
+    if fit not in ("stretch", "contain"):
+        raise ValueError('fit must be "stretch" or "contain"')
+    if (rect is None) == (at is None):
+        raise ValueError("exactly one of rect / at is required")
+    if not svg_path:
+        raise ValueError("svg_path is required")
+    svg_bytes = Path(svg_path).read_bytes()
+    left = bottom = w = h = 0.0
+    if rect is not None:
+        try:
+            x0, y0, x1, y1 = (float(v) for v in rect)
+        except (TypeError, ValueError):
+            raise ValueError("rect must be [x0, y0, x1, y1]") from None
+        left, right = min(x0, x1), max(x0, x1)
+        bottom, top = min(y0, y1), max(y0, y1)
+        w, h = right - left, top - bottom
+        if w < 1e-3 or h < 1e-3:
+            raise ValueError("placement box is too small")
+
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        form, view_w, view_h = compile_svg(pdf, svg_bytes)
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        left, bottom, w, h = _resolve_placement_box(
+            p, left, bottom, w, h, at, fit, view_w, view_h
+        )
+
+        # Page-local /Resources copy-on-write — the add_page_image rationale
+        # verbatim (the C2 sibling-leak rule).
+        res = _copy_resources_for_write(pdf, _resolve_resources(p))
+        p.obj["/Resources"] = res
+        name = _fresh_name(res, [0], set())
+        _register_xobject(pdf, res, name, form)
+
+        cm = [round(w, 4), 0, 0, round(h, 4), round(left, 4), round(bottom, 4)]
+        content = pikepdf.unparse_content_stream(
+            [_op([], "q"), _op(cm, "cm"), _do_instruction(name), _op([], "Q")]
+        )
+        # Shield the EXISTING content in its own q/Q (the A2 lesson).
+        p.contents_add(b"q\n", prepend=True)
+        p.contents_add(b"\nQ\n" + content, prepend=False)
+
+        _save(pdf, input_path, output_path)
+        return {"output": str(output_path), "page": int(page)}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
 def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> dict:
     """Save one placement's image bytes out (placement-independent — the
     XObject's own encoded data; pikepdf picks the natural format)."""
@@ -1876,12 +2014,19 @@ def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> 
         if not (0 <= int(index) < len(placements)):
             raise ValueError(f"image index {index} is out of range (page has {len(placements)})")
         target = placements[int(index)]
+        if target.get("kind") == "vector":
+            raise ValueError(
+                "a vector graphic placement has no image bytes to extract"
+            )
 
         # Re-walk to the owning object: the lister records the NAME and
         # nesting; resolve the actual object by replaying the same order.
         # Inline draws occupy listing slots (C4) and carry their own image
         # object (P6 — pikepdf's PdfInlineImage), so holder[index] stays
         # aligned with the listing on mixed pages AND inline targets extract.
+        # P7: marked vector forms occupy their counted slot too (never a
+        # valid extract target — refused above — but later indexes shift
+        # without the placeholder).
         holder: list = []
 
         def _collect(instructions, res, depth, fallback):
@@ -1896,14 +2041,17 @@ def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> 
                 st = str(xobj.get("/Subtype", "")) if xobj is not None else ""
                 if xobj is not None and st == "/Image":
                     holder.append(xobj)
-                elif xobj is not None and st == "/Form" and depth < MAX_FORM_DEPTH:
-                    fres = xobj.get("/Resources")
-                    _collect(
-                        pikepdf.parse_content_stream(xobj),
-                        fres if fres is not None else res,
-                        depth + 1,
-                        res,
-                    )
+                elif xobj is not None and st == "/Form":
+                    if xobj.get("/SpectraVector") is not None:
+                        holder.append(xobj)  # counted slot, not extractable
+                    elif depth < MAX_FORM_DEPTH:
+                        fres = xobj.get("/Resources")
+                        _collect(
+                            pikepdf.parse_content_stream(xobj),
+                            fres if fres is not None else res,
+                            depth + 1,
+                            res,
+                        )
 
         if target.get("kind") == "inline":
             # P6: qpdf's own inline→XObject externalization (min_size=0 —
