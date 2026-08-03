@@ -132,14 +132,49 @@ class TestListVectors:
         assert vs[0]["rect"] == [100.0, 100.0, 120.0, 120.0]
         assert vs[0]["matrix"] == [2.0, 0.0, 0.0, 2.0, 100.0, 100.0]
 
-    def test_curve_bbox_uses_control_points(self, tmp_dir):
-        # A Bézier's control points are a superset of the curve → a box never
-        # too small for hit-testing (the v1 approximation).
+    def test_curve_bbox_is_exact_not_control_points(self, tmp_dir):
+        # P8 slice A SUPERSEDED the v1 control-point approximation (this pin
+        # used to assert y max 400.5 — the CONTROL height): the box now hugs
+        # the true curve. Symmetric cubic, controls at y=400 → apex at
+        # t=0.5: y = (100 + 3·400 + 3·400 + 100)/8 = 325.
         src = _pdf(tmp_dir, b"100 100 m 120 400 300 400 320 100 c S\n")
         vs = _vecs(src)
-        # min x = 100 (start), max x = 320 (end); y spans 100..400 (controls);
-        # ±0.5 for the default line width (stroked).
-        assert vs[0]["rect"] == [99.5, 99.5, 320.5, 400.5]
+        x0, y0, x1, y1 = vs[0]["rect"]
+        assert (x0, y0, x1) == (99.5, 99.5, 320.5)
+        assert y1 == pytest.approx(325.5)  # true apex + half the line width
+
+    def test_v_and_y_curve_forms_box_exactly(self, tmp_dir):
+        # `v` reuses the current point as its first control; `y` duplicates
+        # its endpoint — both must flow through the same exact-extrema path.
+        src = _pdf(
+            tmp_dir,
+            b"100 100 m 300 400 320 100 v S\n"
+            b"400 100 m 420 400 620 100 y S\n",
+        )
+        vs = _vecs(src)
+        # v: cubic (100,100) c1=(100,100) c2=(300,400) end=(320,100) — the
+        # y-extremum sits at t=2/3: y = 233.33 (+0.5 stroke half-width).
+        assert vs[0]["rect"][3] == pytest.approx(233.8333, abs=1e-3)
+        # y: cubic (400,100) c1=(420,400) c2=(620,100) end=(620,100) — by
+        # symmetry of the coefficients the apex lands at t=1/3, same height.
+        assert vs[1]["rect"][3] == pytest.approx(233.8333, abs=1e-3)
+
+    def test_rotated_ctm_curve_bbox_stays_exact(self, tmp_dir):
+        # Extrema are computed on DEVICE-space control points — transforming
+        # a user-space bbox under this 90° rotation would swap/misplace the
+        # extents. Rotation maps (x,y) → (−y, x) then translates +400 in x.
+        src = _pdf(
+            tmp_dir,
+            b"q 0 1 -1 0 400 0 cm 100 100 m 120 400 300 400 320 100 c S Q\n",
+        )
+        vs = _vecs(src)
+        x0, y0, x1, y1 = vs[0]["rect"]
+        # Device x = 400 − y_user: y_user spans 100..325 → x spans 75..300.
+        assert x0 == pytest.approx(75 - 0.5)
+        assert x1 == pytest.approx(300.5)
+        # Device y = x_user: 100..320.
+        assert y0 == pytest.approx(99.5)
+        assert y1 == pytest.approx(320.5)
 
     def test_colours_captured(self, tmp_dir):
         src = _pdf(
@@ -537,12 +572,56 @@ class TestTransformVector:
         ops = _ops(out)
         assert ops.count("q") == ops.count("Q")  # the wrap is balanced
 
-    def test_transform_refuses_interleaved_state(self, tmp_dir):
-        # An object with a state op interleaved into its path can't be wrapped
-        # (the wrap's Q would scope it) — refused, never broken output.
-        src = _pdf(tmp_dir, b"10 10 m 1 0 0 rg 50 50 l 90 90 l f\n")
+    def test_transform_interleaved_state_wraps_and_replays(self, tmp_dir):
+        # P8 slice B LIFTED the round-36 refusal: the interleaved op stays
+        # inside the wrap AND replays after its Q, so the FOLLOWING object
+        # keeps the colour the producer's mid-path `rg` gave it. The old pin
+        # refused here; this pin proves the exactness argument instead.
+        src = _pdf(
+            tmp_dir,
+            b"10 10 m 1 0 0 rg 50 50 l 90 90 l 90 10 l f\n"
+            b"200 200 20 20 re f\n",  # inherits the red set mid-path above
+        )
+        assert _vecs(src)[1]["fill"] == [1.0, 0.0, 0.0]
         out = os.path.join(tmp_dir, "o.pdf")
-        with pytest.raises(ValueError, match="interleaved"):
+        transform_page_vector(src, out, 1, 0, [160.0, 0.0, 0.0, 160.0, 10.0, 10.0])
+        vs = _vecs(out)
+        # The target moved…
+        assert vs[0]["rect"] == pytest.approx([10, 10, 170, 170])
+        # …and the DOWNSTREAM object still sees the replayed red.
+        assert vs[1]["fill"] == [1.0, 0.0, 0.0]
+        assert vs[1]["rect"] == pytest.approx([200, 200, 220, 220])
+
+    def test_transform_replays_a_mid_path_cm_exactly(self, tmp_dir):
+        # The hardest replay case: a `cm` interleaved into construction. The
+        # replay applies it onto the state the wrap's Q RESTORED — i.e. the
+        # exact state the unwrapped `cm` composed from — so the next
+        # object's CTM (and thus its device rect) is byte-for-byte where it
+        # always was, even though our wrap's matrix acted inside.
+        src = _pdf(
+            tmp_dir,
+            b"10 10 m 2 0 0 2 0 0 cm 50 50 l 50 10 l f\n"
+            b"100 100 10 10 re f\n",  # drawn under the mid-path scale ×2
+        )
+        before = _vecs(src)
+        assert before[1]["rect"] == pytest.approx([200, 200, 220, 220])
+        out = os.path.join(tmp_dir, "o.pdf")
+        m0 = before[0]["rect"]
+        transform_page_vector(
+            src, out, 1, 0,
+            [m0[2] - m0[0], 0.0, 0.0, m0[3] - m0[1], m0[0] + 100, m0[1] + 100],
+        )
+        vs = _vecs(out)
+        assert vs[0]["rect"][0] == pytest.approx(m0[0] + 100)
+        # Downstream device geometry unmoved — the cm replay is exact.
+        assert vs[1]["rect"] == pytest.approx([200, 200, 220, 220])
+
+    def test_transform_refuses_unbalanced_qq_span(self, tmp_dir):
+        # The one still-refused interleave: an interior Q popping past the
+        # object's own span — the CTM varies mid-path, no single wrap exists.
+        src = _pdf(tmp_dir, b"q 10 10 m 50 50 l Q 90 90 l f\n")
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="unbalanced"):
             transform_page_vector(src, out, 1, 0, [10.0, 0.0, 0.0, 10.0, 0.0, 0.0])
 
     def test_transform_refuses_degenerate_bbox(self, tmp_dir):
@@ -619,11 +698,20 @@ class TestRestyleVector:
         ops = _ops(out)
         assert ops.count("q") == ops.count("Q")
 
-    def test_refuses_interleaved_state(self, tmp_dir):
-        src = _pdf(tmp_dir, b"10 10 m 1 0 0 rg 50 50 l 90 90 l f\n")
+    def test_interleaved_state_restyles_with_setters_at_paint_time(self, tmp_dir):
+        # P8 slice B: the new fill lands right BEFORE the paint op, where it
+        # beats the producer's mid-path `rg` (setters at the wrap head would
+        # silently lose to it) — and the replay keeps downstream red.
+        src = _pdf(
+            tmp_dir,
+            b"10 10 m 1 0 0 rg 50 50 l 90 90 l f\n"
+            b"200 200 20 20 re f\n",
+        )
         out = os.path.join(tmp_dir, "o.pdf")
-        with pytest.raises(ValueError, match="interleaved"):
-            restyle_page_vector(src, out, 1, 0, fill=[0, 1, 0])
+        restyle_page_vector(src, out, 1, 0, fill=[0, 1, 0])
+        vs = _vecs(out)
+        assert vs[0]["fill"] == [0.0, 1.0, 0.0]  # the restyle WON at paint
+        assert vs[1]["fill"] == [1.0, 0.0, 0.0]  # downstream keeps the replay
 
     def test_refuses_empty_request(self, tmp_dir):
         src = _pdf(tmp_dir, b"10 10 20 20 re f\n")
