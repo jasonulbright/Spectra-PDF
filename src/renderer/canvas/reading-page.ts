@@ -180,37 +180,64 @@ export const ZOOM_SETTLE_MS = 140;
  * WebView2 is Chromium).
  *
  * This is a REAL DOM height, not a raster: the reading view sizes its spacer
- * `pageCount * rowH`. Past the limit the element silently clamps, so the tail of
+ * off it. Past the limit the element silently clamps, so the tail of
  * the document becomes unreachable by scrolling AND `centerOn` can't land there
  * — while the page box keeps reporting the page it *meant*, so it reads e.g.
  * "800 / 1000" over page ~532, durably (review-caught: the widened MAX_ZOOM
  * made this reachable at ~533 pages, where the old ceiling needed ~5,683 and so
  * hid it).
  */
-const SAFE_ELEMENT_EXTENT = 30_000_000;
+export const SAFE_ELEMENT_EXTENT = 30_000_000;
+
+/**
+ * P12 — the scaled-spacer scroll map (brief 36). A document whose true
+ * extent exceeds the element cap renders a spacer of `spacerHeight =
+ * min(contentHeight, SAFE_ELEMENT_EXTENT)`; the scrollbar lives in REAL
+ * (spacer) space and every piece of document math lives in VIRTUAL space,
+ * linked by the linear map below. `k` is the ratio of the two SCROLLABLE
+ * ranges (both minus the same viewport), so the endpoints land exactly:
+ * scrollTop 0 ⇒ virtualTop 0, and the real bottom ⇒ the virtual bottom —
+ * the last row flush, never short, never past.
+ *
+ * `k === 1` is the identity (every document under the cap): virtualTop ==
+ * scrollTop bit-for-bit, and every consumer reduces to the shipped math.
+ */
+export interface ScrollMap {
+  /** The DOM spacer's height — min(contentHeight, SAFE_ELEMENT_EXTENT). */
+  spacerHeight: number;
+  /** Virtual px per real scroll px (≥ 1; 1 = identity). */
+  k: number;
+}
+
+export function scrollMapFor(contentHeight: number, viewportH: number): ScrollMap {
+  if (contentHeight <= SAFE_ELEMENT_EXTENT) return { spacerHeight: contentHeight, k: 1 };
+  const spacerHeight = SAFE_ELEMENT_EXTENT;
+  const realRange = spacerHeight - viewportH;
+  const virtualRange = contentHeight - viewportH;
+  // A viewport taller than the spacer cannot happen at the cap; guard the
+  // division anyway so a degenerate viewportH can never produce k ≤ 0.
+  const k = realRange > 0 && virtualRange > 0 ? virtualRange / realRange : 1;
+  return { spacerHeight, k: Math.max(1, k) };
+}
+
+/** Real scroll offset → virtual document offset. */
+export const virtualTopOf = (scrollTop: number, map: ScrollMap): number => scrollTop * map.k;
+
+/** Virtual document offset → the real scrollTop that shows it. */
+export const realTopFor = (virtualTop: number, map: ScrollMap): number => virtualTop / map.k;
 
 /**
  * The largest zoom this document can take without its spacer exceeding
- * `SAFE_ELEMENT_EXTENT` on EITHER axis — i.e. the point past which pages would stop being
- * reachable. Every page stays scrollable at any zoom the view allows.
- *
- * KNOWN BOUND, accepted: for a document of several thousand pages this ceiling
- * can fall BELOW a preset's honest target, so Actual Size / Fit Width then
- * render short of their label (e.g. Fit Width on a 5120px pane is honest to
- * ~4,400 pages; a 10,000-page doc gets ~44% of the pane). That is inherent to
- * laying the column out under ONE full-height DOM spacer — once row height must
- * be capped for reachability, no zoom-only fix exists. It fails SAFE (renders
- * smaller; never unreachable, never a wrong page number), and reachability beats
- * fidelity: a page you cannot scroll to is worse than one rendered small. The
- * escape, if it ever matters, is to drop the full-height spacer for a translated
- * window — a virtualization redesign, not a zoom change.
+ * `SAFE_ELEMENT_EXTENT` on the WIDTH axis. P12 (brief 36) REMOVED the height
+ * (pageCount) bound this function shipped with: the spacer's height is now
+ * capped by construction (`scrollMapFor`) and rows translate under it, so no
+ * page count can make the tail unreachable — and Actual Size / Fit Width are
+ * honest at ANY length (the old "KNOWN BOUND" paragraph, superseded). Width
+ * stays bounded: it never accumulates across pages, so it is a per-row truth
+ * a zoom cap is the right tool for.
  */
 export function maxZoomFor(pageCount: number, widestWidthAtZoom1 = 0): number {
   const bounds: number[] = [MAX_ZOOM];
-  if (pageCount > 0) {
-    // Height axis: the spacer is `pageCount` rows tall.
-    bounds.push(SAFE_ELEMENT_EXTENT / (pageCount * (READING_BASE_HEIGHT + READING_PAGE_GAP)));
-  }
   if (widestWidthAtZoom1 > 0) {
     // Width axis: M4.1f gave the spacer a REAL width (the widest page) so wide
     // pages are reachable — which means the width can blow the same element cap.

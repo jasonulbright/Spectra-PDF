@@ -32,6 +32,9 @@ import {
   clampZoom,
   currentPageFor,
   fitWidthZoom,
+  realTopFor,
+  scrollMapFor,
+  virtualTopOf,
   visibleRange,
   READING_BASE_HEIGHT,
   READING_PAGE_GAP as PAGE_GAP,
@@ -310,6 +313,12 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // aspect), so offsets are a simple arithmetic series — the virtualizer needs
   // only counts, and centerOn/current-page are O(1).
   const contentHeight = rowCount * rowH;
+  // P12 (brief 36): the scaled-spacer scroll map. The DOM spacer caps at
+  // SAFE_ELEMENT_EXTENT and rows translate under it; every document-space
+  // consumer below reads VIRTUAL offsets, and only the DOM write/read
+  // converts. k === 1 (any doc under the cap) is the bit-for-bit identity.
+  const smap = useMemo(() => scrollMapFor(contentHeight, viewportH), [contentHeight, viewportH]);
+  const virtualTop = virtualTopOf(scrollTop, smap);
 
   // The scrollable WIDTH (M4.1f). Without a real width the spacer is only as
   // wide as the pane, and a page wider than it — routine at Actual Size on
@@ -361,7 +370,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // metrics is the row count (single layout: rows == pages, so the shipped
   // inputs are bit-identical).
   const { first, last } = visibleRange(
-    { scrollTop, viewportH, rowH, pageHeight, pageCount: rowCount, contentHeight },
+    { scrollTop: virtualTop, viewportH, rowH, pageHeight, pageCount: rowCount, contentHeight },
     OVERSCAN,
   );
 
@@ -398,7 +407,16 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     // Row metrics for the geometric half; the anchor's bounds check needs the
     // REAL page count (anchor.page is a PAGE number, which in two-up exceeds
     // the row count for most of the document).
-    const mRows = { scrollTop, viewportH, rowH, pageHeight, pageCount: rowCount, contentHeight };
+    // P12: document math reads VIRTUAL offsets (identity for docs under the
+    // element cap). Anchors record virtual too, so the comparison is uniform.
+    const mRows = {
+      scrollTop: virtualTop,
+      viewportH,
+      rowH,
+      pageHeight,
+      pageCount: rowCount,
+      contentHeight,
+    };
     const mAnchor = { ...mRows, pageCount };
     // A jump wins until the user scrolls away from where it landed; then the
     // anchor is dropped and the view speaks for itself. Both halves are pure
@@ -423,6 +441,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     onCurrentPageChange(p);
   }, [
     scrollTop,
+    virtualTop,
     rowH,
     pageHeight,
     pageCount,
@@ -442,24 +461,32 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       const el = scrollRef.current;
       if (idx < 0 || !el) return;
       // Center the page's ROW in the viewport when it's shorter than the pane;
-      // otherwise align its top.
+      // otherwise align its top. The target is VIRTUAL; the DOM write converts
+      // (P12 — identity for docs under the element cap).
       const top = rowOfPage(idx, pageLayout, twoUpCover) * rowH;
       const offset = Math.max(0, (el.clientHeight - pageHeight) / 2);
-      el.scrollTo({ top: Math.max(0, top - offset), behavior: 'auto' });
+      el.scrollTo({ top: realTopFor(Math.max(0, top - offset), smap), behavior: 'auto' });
       // Record where it actually LANDED (behavior:'auto' settles scrollTop
       // synchronously, so this is the browser's own clamp applied) together with
       // what it meant, so the scroll event this fires can't "correct" a jump to
       // a boundary-adjacent page into the boundary page itself. `viewportH` is
       // the STATE the reporter compares against — not the live `el.clientHeight`
       // used for the offset above — so the two can never disagree and silently
-      // stop the anchor from ever holding.
-      jumpAnchorRef.current = { scrollTop: el.scrollTop, page: idx + 1, pageId, rowH, viewportH };
+      // stop the anchor from ever holding. Recorded VIRTUAL (P12), the space
+      // the reporter's metrics carry.
+      jumpAnchorRef.current = {
+        scrollTop: virtualTopOf(el.scrollTop, smap),
+        page: idx + 1,
+        pageId,
+        rowH,
+        viewportH,
+      };
       // Report immediately: a jump that doesn't move the view (already parked
       // there) fires no scroll event, so the effect above would never re-run.
       currentPageRef.current = idx + 1;
       onCurrentPageChangeRef.current?.(idx + 1);
     },
-    [doc.pages, rowH, pageHeight, viewportH, pageLayout, twoUpCover],
+    [doc.pages, rowH, pageHeight, viewportH, pageLayout, twoUpCover, smap],
   );
 
   // Both presets act on the CURRENT page — pages within one file can differ in
@@ -597,7 +624,14 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           const rowHz = pageH + PAGE_GAP * z;
           const row = rowOfPage(idx, pageLayout, twoUpCover);
           const rowTop = row * rowHz;
-          elc.scrollTop = Math.max(0, rowTop + cyNorm * pageH - elc.clientHeight / 2);
+          // P12: the target is VIRTUAL — convert through the map AT THE NEW
+          // ZOOM (this runs two frames later, but the map depends only on the
+          // new extent and the live viewport, both known here).
+          const mapZ = scrollMapFor(rowCountRef.current * rowHz, elc.clientHeight);
+          elc.scrollTop = realTopFor(
+            Math.max(0, rowTop + cyNorm * pageH - elc.clientHeight / 2),
+            mapZ,
+          );
           // Horizontal: rows centre in the spacer; walk the row for this
           // page's offset (two-up pairs included).
           const idxs = pagesInRow(row, pageLayout, twoUpCover, viewPages.length);
@@ -622,11 +656,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   useImperativeHandle(
     ref,
     (): CanvasHandle => ({
-      // Every zoom path goes through clampZoom, which bounds by the DOCUMENT's
-      // size as well as the view's range — past that the spacer would exceed the
-      // browser's element-height limit and the tail of the doc would stop being
-      // reachable (see maxZoomFor). That includes `reset`: a document long
-      // enough that even zoom 1 overflows must not be forced back to it.
+      // Every zoom path goes through clampZoom — the view's range plus the
+      // WIDTH-axis element bound (maxZoomFor). P12: the height axis no longer
+      // bounds zoom at all — the spacer caps and rows translate under it
+      // (scrollMapFor), so presets are honest at any page count.
       zoomIn: () => setZoom(clampZoom(zoomRef.current * ZOOM_STEP, rowCountRef.current, widestAtBaseRef.current)),
       zoomOut: () => setZoom(clampZoom(zoomRef.current / ZOOM_STEP, rowCountRef.current, widestAtBaseRef.current)),
       reset: () => setZoom(clampZoom(1, rowCountRef.current, widestAtBaseRef.current)),
@@ -794,7 +827,12 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
         className="docview-row"
         style={{
           position: 'absolute',
-          top: r * rowH,
+          // P12: rows sit at their virtual offset, corrected by the window's
+          // slide (scrollTop − virtualTop). Under the cap the correction is
+          // EXACTLY 0 (k = 1), so this is the shipped `r * rowH` bit-for-bit;
+          // past it, the rendered window rides with the real scroll position
+          // while the virtual offset slides the document under it.
+          top: r * rowH - (virtualTop - scrollTop),
           height: pageHeight,
           width,
           left: '50%',
@@ -824,7 +862,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     >
       <div
         className="docview-spacer"
-        style={{ height: contentHeight, width: contentWidth, position: 'relative' }}
+        style={{ height: smap.spacerHeight, width: contentWidth, position: 'relative' }}
       >
         {rows}
       </div>
