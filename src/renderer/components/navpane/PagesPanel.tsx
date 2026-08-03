@@ -392,6 +392,9 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       ref={scrollerRef}
       data-testid="pages-panel"
       className="navpanel-scroll pages-panel"
+      tabIndex={0}
+      role="region"
+      aria-label="Page thumbnails"
       onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
     >
       <div style={{ height: items.length * ROW_H, position: 'relative' }}>

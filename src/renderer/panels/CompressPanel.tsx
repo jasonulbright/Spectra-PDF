@@ -56,7 +56,7 @@ export function CompressPanel(): React.ReactElement {
       <div className="text-sm text-neutral-400">Working on: <span className="text-neutral-200">{activeFile.name}</span> ({activeFile.pageCount} pages)</div>
       <div>
         <label className="block text-sm text-neutral-400 mb-1">Quality</label>
-        <select value={quality} onChange={(e) => handlePresetChange(e.target.value)} className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm">
+        <select aria-label="Compression preset" value={quality} onChange={(e) => handlePresetChange(e.target.value)} className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm">
           <option value="screen">Screen (72 dpi, smallest)</option>
           <option value="ebook">Ebook (150 dpi)</option>
           <option value="printer">Printer (300 dpi)</option>
@@ -66,7 +66,7 @@ export function CompressPanel(): React.ReactElement {
       </div>
       <div>
         <label className="block text-sm text-neutral-400 mb-1">DPI: {dpi}</label>
-        <input type="range" min={72} max={600} step={1} value={dpi}
+        <input type="range" aria-label="Image resolution in DPI" min={72} max={600} step={1} value={dpi}
           onChange={(e) => handleDpiChange(Number(e.target.value))}
           className="w-64 accent-blue-600" />
         <div className="flex justify-between w-64 text-xs text-neutral-600">

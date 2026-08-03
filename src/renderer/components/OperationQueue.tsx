@@ -48,7 +48,14 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
         </button>
       </div>
       {!collapsed && (
-        <div ref={scrollRef} className="overflow-y-auto px-4 pb-2 flex flex-col gap-1" style={{ maxHeight: 88 }}>
+        <div
+          ref={scrollRef}
+          className="overflow-y-auto px-4 pb-2 flex flex-col gap-1"
+          style={{ maxHeight: 88 }}
+          tabIndex={0}
+          role="region"
+          aria-label="Recent operations"
+        >
           {items.map((item) => (
             <div key={item.id} className="flex items-center gap-3 text-xs">
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${

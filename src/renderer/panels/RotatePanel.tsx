@@ -39,13 +39,13 @@ export function RotatePanel(): React.ReactElement {
       <div className="flex gap-4">
         <div>
           <label className="block text-sm text-neutral-400 mb-1">Angle</label>
-          <select value={angle} onChange={(e) => setAngle(Number(e.target.value) as 90 | 180 | 270)} className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm">
+          <select aria-label="Rotation angle" value={angle} onChange={(e) => setAngle(Number(e.target.value) as 90 | 180 | 270)} className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm">
             <option value={90}>90 CW</option><option value={180}>180</option><option value={270}>90 CCW</option>
           </select>
         </div>
         <div>
           <label className="block text-sm text-neutral-400 mb-1">Pages (e.g. 1,3,5 or all)</label>
-          <input type="text" value={pageInput} onChange={(e) => setPageInput(e.target.value)} className="w-48 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500" />
+          <input type="text" aria-label="Pages to rotate" value={pageInput} onChange={(e) => setPageInput(e.target.value)} className="w-48 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500" />
         </div>
       </div>
       <button onClick={handleRotate} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">

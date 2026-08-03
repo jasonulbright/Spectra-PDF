@@ -167,7 +167,7 @@ export function ReadingOrderPanel(): React.ReactElement {
               No tagged content on this page.
             </p>
           ) : (
-            <ol className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1" data-testid="order-list">
+            <ol className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1" data-testid="order-list" tabIndex={0} aria-label="Reading order">
               {entries.map((entry, i) => {
                 const key = pathKey(entry.node.path);
                 const preview = nodePreview(entry.node, pageTexts);

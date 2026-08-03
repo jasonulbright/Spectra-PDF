@@ -110,7 +110,9 @@ describe('window effects + accent theming', () => {
     const fg = await browser.execute(() =>
       document.documentElement.style.getPropertyValue('--accent-fg').trim(),
     );
-    expect(['#ffffff', '#1a1a1a']).toContain(fg);
+    // P21: the dark side is PURE black — with a softened dark there is a
+    // luminance band where neither text color reaches 4.5:1 (accent.ts).
+    expect(['#ffffff', '#000000']).toContain(fg);
   });
 
   it('routes the accent into the canvas selection color', async () => {

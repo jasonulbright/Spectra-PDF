@@ -55,6 +55,49 @@
    Selector specificity ([data-theme] .class) beats a bare Tailwind class.
    ──────────────────────────────────────────────────────────────────────── */
 
+/* ── Shared dim-text token (P21 WCAG sweep) ──────────────────────────────
+   ONE variable, three theme values, each AA on the surfaces it appears on
+   (dark shell #171717/#191919, light #ffffff/#f9fafb, HC #000000). The
+   custom components converted onto it used six near-identical greys, four
+   of which measured 2.7:1–4.4:1 on the dark shell. */
+:root { --text-dim: #909098; --surface-2: #303034; --text: #e5e5e5; --border: #45454c; }
+[data-theme="light"] { --text-dim: #6b7280; --surface-2: #ffffff; --text: #111827; --border: #d1d5db; }
+[data-theme="high-contrast"] { --text-dim: #d0d0d0; --surface-2: #0d0d0d; --text: #ffffff; --border: #2e2e2e; }
+/* --surface-2/--text/--border were consumed with fallbacks but never
+   DEFINED — every consumer (the measure scale controls among them) was
+   theme-frozen at its dark fallback. Same disease as --text-dim above. */
+
+/* Tailwind's neutral-500 (#737373) is 3.8:1 on the dark shell and 2.7:1 on
+   bg-neutral-800 cards — sub-AA for exactly the hint text it is used on.
+   #a0a0a8 clears 4.5:1 on both. The :root prefix lifts specificity over the
+   bare utility (the same trick as the [data-theme] tables below) while still
+   losing to those tables, which come later at equal specificity. */
+:root .text-neutral-500 { color: #a0a0a8; }
+
+/* bg-neutral-850 is OUR shade, not Tailwind's — the light/HC tables below
+   remap it, but no base utility ever existed, so in dark the "surface" was
+   silently transparent (and axe, unable to composite through the shell's
+   oklch, judged its text against a white fallback). */
+:root .bg-neutral-850 { background-color: #1f1f1f; }
+
+/* ── Dark-theme status tints, muted (owner direction, 2026-08-02) ────────
+   Tailwind's green-400/amber-400 pastels are saturated enough to BE the
+   focus on a dark shell; the palette's job is to draw the eye to elements,
+   not to itself. Desaturated equivalents, all ≥7:1 on #171717 so the AA
+   gate keeps holding with margin. Light/HC keep their own tables (later at
+   equal specificity, so they still win). */
+:root .text-green-400 { color: #79c087; }
+:root .text-green-300 { color: #8fcf9c; }
+:root .text-green-300\/90 { color: #8fcf9ce6; }
+:root .text-green-300\/70 { color: #8fcf9cb3; }
+:root .text-green-200 { color: #a9dbb2; }
+:root .text-amber-500\/80 { color: #d0a85ccc; }
+:root .text-amber-400 { color: #d0a85c; }
+:root .text-amber-300 { color: #ddb970; }
+:root .text-amber-300\/90 { color: #ddb970e6; }
+:root .text-amber-200 { color: #e6c98f; }
+:root .text-amber-200\/90 { color: #e6c98fe6; }
+
 /* Backgrounds */
 [data-theme="light"] .bg-neutral-900  { background-color: #ffffff; }
 [data-theme="light"] .bg-neutral-850  { background-color: #f9fafb; }
@@ -67,9 +110,25 @@
 [data-theme="light"] .text-neutral-200 { color: #1f2937; }
 [data-theme="light"] .text-neutral-300 { color: #374151; }
 [data-theme="light"] .text-neutral-400 { color: #4b5563; }
-[data-theme="light"] .text-neutral-500 { color: #6b7280; }
-[data-theme="light"] .text-neutral-600 { color: #6b7280; }
+/* #6b7280 was AA on white but 4.39:1 on the #f3f4f6 card surfaces the
+   opacity-variant table maps to — one shade darker holds on both. */
+[data-theme="light"] .text-neutral-500 { color: #616a76; }
+[data-theme="light"] .text-neutral-600 { color: #616a76; }
 [data-theme="light"] .text-white       { color: #111827; }
+
+/* Opacity variants — these slipped past the solid table above: a 60% dark
+   wash composites to #7d7d7d over white, which put card text at 3.6:1 and
+   card hint text at 1.2:1 (P21 axe sweep, the checker/preflight rows). */
+[data-theme="light"] .bg-neutral-800\/60 { background-color: #f3f4f6; }
+[data-theme="light"] .bg-neutral-800\/50 { background-color: #f3f4f6; }
+[data-theme="light"] .bg-neutral-800\/40 { background-color: rgba(243, 244, 246, 0.7); }
+[data-theme="light"] .bg-neutral-800\/95 { background-color: #f3f4f6; }
+[data-theme="light"] .bg-neutral-900\/95 { background-color: #ffffff; }
+[data-theme="light"] .bg-neutral-900\/70 { background-color: rgba(249, 250, 251, 0.9); }
+[data-theme="light"] .bg-neutral-900\/60 { background-color: rgba(249, 250, 251, 0.9); }
+[data-theme="light"] .bg-neutral-900\/50 { background-color: rgba(249, 250, 251, 0.8); }
+[data-theme="light"] .bg-neutral-950\/40 { background-color: rgba(229, 231, 235, 0.6); }
+[data-theme="light"] .bg-neutral-700\/70 { background-color: rgba(229, 231, 235, 0.85); }
 
 /* Borders */
 [data-theme="light"] .border-neutral-800 { border-color: #e5e7eb; }
@@ -90,18 +149,18 @@
 [data-theme="light"] .bg-black\/60 { background-color: rgba(0, 0, 0, 0.3); }
 
 /* Accent buttons — seafoam/teal in light mode (WCAG AA 4.51:1 with white) */
-[data-theme="light"] .bg-blue-600 { background-color: #0c857a; }
-[data-theme="light"] .hover\:bg-blue-500:hover { background-color: #12a695; }
+[data-theme="light"] .bg-blue-600 { background-color: var(--accent, #0078d4); }
+[data-theme="light"] .hover\:bg-blue-500:hover { background-color: var(--accent-hover, #005ea6); }
 [data-theme="light"] .bg-blue-600 { color: #ffffff; }
-[data-theme="light"] .bg-blue-500 { background-color: #0c857a; }
+[data-theme="light"] .bg-blue-500 { background-color: var(--accent, #0078d4); }
 
 /* Accent selection/highlight tints */
 [data-theme="light"] .bg-blue-600\/30 { background-color: rgba(13, 148, 136, 0.3); }
 [data-theme="light"] .bg-blue-600\/20 { background-color: rgba(13, 148, 136, 0.2); }
-[data-theme="light"] .ring-blue-500 { --tw-ring-color: #0d9488; }
-[data-theme="light"] .border-blue-500 { border-color: #0d9488; }
-[data-theme="light"] .border-dashed.border-blue-500 { border-color: #0d9488; }
-[data-theme="light"] .text-blue-300 { color: #0d9488; }
+[data-theme="light"] .ring-blue-500 { --tw-ring-color: var(--accent, #0078d4); }
+[data-theme="light"] .border-blue-500 { border-color: var(--accent, #0078d4); }
+[data-theme="light"] .border-dashed.border-blue-500 { border-color: var(--accent, #0078d4); }
+[data-theme="light"] .text-blue-300 { color: #0067b8; }
 
 /* Danger elements — light mode red #D2424E with white text (WCAG AA 4.54:1) */
 [data-theme="light"] .bg-red-600 { background-color: #D2424E; color: #ffffff; }
@@ -127,8 +186,8 @@
 [data-theme="light"] .text-amber-300\/90 { color: #92400e; }
 [data-theme="light"] .text-amber-200 { color: #92400e; }
 [data-theme="light"] .text-amber-200\/90 { color: #92400e; }
-[data-theme="light"] .text-blue-400  { color: #0c857a; }
-[data-theme="light"] .text-blue-200  { color: #0c857a; }
+[data-theme="light"] .text-blue-400  { color: #0067b8; }
+[data-theme="light"] .text-blue-200  { color: #0067b8; }
 /* Hover states — red-100/amber-100 are used ONLY as hover: variants (dark
    theme brightens on hover; light darkens from the -300 base above), and a
    bare .text-red-100 rule would never match the hover\: token. blue-200 is
@@ -136,7 +195,7 @@
    the hover must land on a different value than the base or it's a no-op. */
 [data-theme="light"] .hover\:text-red-100:hover   { color: #7f1d1d; }
 [data-theme="light"] .hover\:text-amber-100:hover { color: #78350f; }
-[data-theme="light"] .hover\:text-blue-200:hover  { color: #115e59; }
+[data-theme="light"] .hover\:text-blue-200:hover  { color: #005ea6; }
 [data-theme="light"] .hover\:text-red-400:hover   { color: #b91c1c; }
 [data-theme="light"] .hover\:bg-red-900\/40:hover { background-color: rgba(210, 66, 78, 0.15); }
 /* Success buttons/badges: emerald-600 under white text is 3.06:1 on its own
@@ -149,7 +208,7 @@
 [data-theme="light"] .focus\:border-emerald-500:focus { border-color: #047857; }
 
 /* Focus ring */
-[data-theme="light"] .focus\:border-blue-500:focus { border-color: #0d9488; }
+[data-theme="light"] .focus\:border-blue-500:focus { border-color: var(--accent, #0078d4); }
 
 /* Thumbnail borders — shadow-sm is invisible on white backgrounds */
 [data-theme="light"] .bg-white.shadow-sm { border: 1px solid #d1d5db; }
@@ -157,6 +216,42 @@
 /* Scrollbar styling for light mode */
 [data-theme="light"] ::-webkit-scrollbar-thumb { background-color: #d1d5db; }
 [data-theme="light"] ::-webkit-scrollbar-track  { background-color: #f3f4f6; }
+
+/* Custom components the light tables never covered — measured 1.2:1–3.4:1
+   on white in the P21 sweep (the dock title was near-invisible). The dock
+   itself keeps its dark literal background otherwise, which is wrong in
+   BOTH light presentations (mica frosts it white, solid keeps it black
+   behind light-remapped text). */
+[data-theme="light"] .tool-dock { background: #f9fafb; border-left-color: #e5e7eb; }
+[data-theme="light"] .tool-dock-header { border-bottom-color: #e5e7eb; }
+[data-theme="light"] .tool-dock-title { color: #111827; }
+[data-theme="light"] .tool-dock-btn { color: #4b5563; }
+[data-theme="light"] .tool-dock-btn:hover { background: #e5e7eb; color: #111827; }
+[data-theme="light"] .home-recent-name { color: #111827; }
+[data-theme="light"] .home-action { color: #1f2937; background: #ffffff; border-color: #d1d5db; }
+[data-theme="light"] .home-action:hover { background: #f3f4f6; border-color: #9ca3af; }
+[data-theme="light"] .home-recent-icon { background: #f3f4f6; color: #4b5563; }
+[data-theme="light"] .home-recent:hover .home-recent-icon { color: #111827; }
+[data-theme="light"] .bookmark-add-btn { color: #4b5563; }
+[data-theme="light"] .bookmark-add-btn:hover { color: #111827; }
+[data-theme="light"] .signatures-nav-recheck-btn { color: #4b5563; }
+[data-theme="light"] .signatures-nav-recheck-btn:hover:not(:disabled) { color: #111827; }
+
+/* The docked status bar + properties bar — dark literals that had no theme
+   rows at all (owner screenshot, 2026-08-02: a black bar across a light
+   app). White-on-black PASSES the contrast gate, which is why the axe sweep
+   could not see this class of bug: it is a theme-consistency defect, not a
+   ratio one. */
+[data-theme="light"] .canvas-status-bar { background: #f3f4f6; border-top-color: #e5e7eb; }
+[data-theme="light"] .canvas-status-quiet { color: #374151; background: #ffffff; border-color: #d1d5db; }
+[data-theme="light"] .canvas-status-quiet:hover { background: #e5e7eb; color: #111827; }
+[data-theme="light"] .canvas-status-pages { color: #374151; }
+[data-theme="light"] .canvas-status-pageinput { background: #ffffff; border-color: #d1d5db; color: #111827; }
+[data-theme="light"] .properties-bar { background: #f9fafb; border-bottom-color: #e5e7eb; }
+[data-theme="light"] .properties-bar-note { color: #374151; }
+[data-theme="light"] .properties-bar-action { color: #374151; background: #ffffff; border-color: #d1d5db; }
+[data-theme="light"] .properties-bar-action:hover { background: #e5e7eb; color: #111827; }
+[data-theme="light"] .properties-bar-swatch { border-color: rgba(0, 0, 0, 0.25); }
 
 /* ── System accent color overrides ───────────────────────────────────────
    When --accent is set (System theme), replace hardcoded blue with the
@@ -172,7 +267,23 @@
 :root[style*="--accent"] .border-blue-500 { border-color: var(--accent); }
 :root[style*="--accent"] .border-dashed.border-blue-500 { border-color: var(--accent); }
 :root[style*="--accent"] .focus\:border-blue-500:focus { border-color: var(--accent); }
-:root[style*="--accent"] .text-blue-300 { color: var(--accent-hover); }
+/* Accent AS TEXT gets its own lifted variable: hover now shifts DARKER for
+   dark accents (away from white button text), so reusing it as link text on
+   the dark shell would sit under 3:1. --accent-text is the accent lifted to
+   AA on #171717 (accent.ts). */
+:root[style*="--accent"] .text-blue-300 { color: var(--accent-text, var(--accent-hover)); }
+/* The REST of the blue family (owner catch, 2026-08-02: tools still mixed
+   the system accent with default blues) — every blue-* utility in use
+   follows the accent, including the accent-color of range/checkbox inputs
+   and the info-banner wash. */
+:root[style*="--accent"] .text-blue-400 { color: var(--accent-text, var(--accent-hover)); }
+:root[style*="--accent"] .text-blue-200 { color: var(--accent-text, var(--accent-hover)); }
+:root[style*="--accent"] .text-blue-100 { color: var(--accent-text, var(--accent-hover)); }
+:root[style*="--accent"] .hover\:text-blue-200:hover { color: var(--accent-text, var(--accent-hover)); }
+:root[style*="--accent"] .accent-blue-600 { accent-color: var(--accent); }
+:root[style*="--accent"] .border-blue-800 { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+:root[style*="--accent"] .border-blue-500\/60 { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+:root[style*="--accent"] .bg-blue-900\/60 { background-color: color-mix(in srgb, var(--accent) 28%, transparent); }
 :root[style*="--accent"] .bg-blue-500 { background-color: var(--accent); }
 
 /* Text on solid accent surfaces: white fails contrast on light accents
@@ -186,6 +297,18 @@
 /* The canvas selection color is hardcoded per theme; under System theme it
    follows the accent like every other selection surface. */
 :root[style*="--accent"] .canvas-view { --select: var(--accent); }
+
+/* Disabled buttons drop their semantic/accent color entirely — a dimmed
+   green CTA still reads as a green CTA (owner, 2026-08-02). The tokens keep
+   this right in every theme; placed after the accent rules so it wins the
+   equal-specificity tie against them. */
+:root .bg-blue-600:disabled, :root .bg-blue-500:disabled,
+:root .bg-emerald-600:disabled, :root .bg-emerald-500:disabled,
+:root .bg-red-600:disabled, :root .bg-red-500:disabled {
+  background-color: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-dim);
+}
 
 /* ── Workbench chrome (Phase 4 M2) ────────────────────────────────────────
    The menu bar, main toolbar, and tab strip all carry `.app-shell-bar`, so
@@ -316,7 +439,7 @@
 .nav-resize-handle:hover { background: rgba(0, 120, 212, 0.35); }
 
 .navpanel-scroll { height: 100%; overflow-y: auto; overflow-x: hidden; }
-.navpanel-empty { padding: 16px; font-size: 13px; color: #737373; }
+.navpanel-empty { padding: 16px; font-size: 13px; color: var(--text-dim); }
 /* Nav-pane host for tool-dock panel components (left-dock candidates):
    the dock body's breathing room at nav width. */
 .navpanel-tool-host { padding: 12px; }
@@ -352,7 +475,7 @@
   left: 8px;
   right: 8px;
   height: 2px;
-  background: #0078d4;
+  background: var(--accent, #0078d4);
   border-radius: 1px;
   z-index: 6;
   pointer-events: none;
@@ -398,7 +521,8 @@
   color: #6b7280;
   padding: 0 2px;
 }
-.bookmark-jump:hover:not(:disabled) { color: #0078d4; text-decoration: underline; }
+.bookmark-jump:hover:not(:disabled) { color: var(--accent-text, #4cc2ff); text-decoration: underline; }
+[data-theme="light"] .bookmark-jump:hover:not(:disabled) { color: #0067b8; }
 .bookmark-page-input {
   width: 40px;
   padding: 2px 4px;
@@ -434,7 +558,7 @@
   border-radius: 4px;
 }
 .bookmark-add-btn:hover { color: #e5e5e5; background: #262626; }
-.bookmark-status { font-size: 11px; color: #6b7280; }
+.bookmark-status { font-size: 11px; color: var(--text-dim); }
 
 /* Search nav panel (M3.3) — query box + per-file hit list with snippets. */
 .search-panel-input-row {
@@ -452,12 +576,12 @@
   font-size: 13px;
   outline: none;
 }
-.search-panel-input:focus { border-color: #0078d4; }
+.search-panel-input:focus { border-color: var(--accent, #0078d4); }
 .search-results { padding: 4px 0; }
 .search-summary {
   padding: 4px 10px 6px;
   font-size: 11px;
-  color: #6b7280;
+  color: var(--text-dim);
 }
 .search-file-group { margin-bottom: 4px; }
 .search-file-name {
@@ -483,7 +607,7 @@
 .search-hit-page { font-size: 12px; color: #d4d4d4; }
 .search-hit-snippet {
   font-size: 11px;
-  color: #737373;
+  color: var(--text-dim);
   line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -493,7 +617,7 @@
 
 [data-theme="light"] .search-panel-input-row { border-bottom-color: #e5e7eb; }
 [data-theme="light"] .search-panel-input { background: #f3f4f6; border-color: #d1d5db; }
-[data-theme="light"] .search-panel-input:focus { border-color: #0078d4; }
+[data-theme="light"] .search-panel-input:focus { border-color: var(--accent, #0078d4); }
 [data-theme="light"] .search-file-name { color: #6b7280; }
 [data-theme="light"] .search-hit:hover { background: #f3f4f6; }
 [data-theme="light"] .search-hit-page { color: #1f2937; }
@@ -608,7 +732,7 @@
   --ink: #16161a;
   --ink-soft: #55555c;
   --ink-faint: #8e8e94;
-  --select: #0c857a;
+  --select: var(--accent, #0078d4);
   --hover: rgba(22, 22, 26, 0.06);
   --group-bg: rgba(20, 20, 24, 0.045);
   --page-shadow: 0 1px 2px rgba(20, 20, 24, 0.07), 0 6px 20px rgba(20, 20, 24, 0.06);
@@ -2117,7 +2241,7 @@
   padding: 2px 3px;
   background: rgba(255, 255, 250, 0.98);
   border: none;
-  outline: 2px solid #0078d4;
+  outline: 2px solid var(--accent, #0078d4);
   resize: none;
   line-height: 1.2;
   font-family: Helvetica, Arial, sans-serif;
@@ -2184,7 +2308,7 @@
   transition: background-color 90ms ease, border-color 90ms ease;
 }
 .tool-tile:hover { background: #262626; border-color: #3d3d3d; }
-.tool-tile:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+.tool-tile:focus-visible { outline: 2px solid var(--accent, #0078d4); outline-offset: 1px; }
 .tool-tile-icon {
   display: flex;
   align-items: center;
@@ -2227,7 +2351,7 @@
 }
 .omnisearch-input::placeholder { color: #6f6f76; }
 .omnisearch-input:focus {
-  border-color: #0078d4;
+  border-color: var(--accent, #0078d4);
   background: #1f1f1f;
 }
 /* The results hang BELOW the box and over the document — an overlay, so the
@@ -2251,12 +2375,12 @@
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #8a8a92;
+  color: var(--text-dim);
 }
 .omnisearch-empty {
   padding: 10px 8px;
   font-size: 12px;
-  color: #8a8a92;
+  color: var(--text-dim);
 }
 .omnisearch-row {
   display: flex;
@@ -2287,7 +2411,7 @@
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
   font-size: 11px;
-  color: #8a8a92;
+  color: var(--text-dim);
 }
 .omnisearch-snippet {
   overflow: hidden;
@@ -2328,8 +2452,8 @@
   cursor: default;
 }
 .tool-op:hover { background: #262626; color: #e5e5e5; }
-.tool-op.active { background: #0078d4; color: #ffffff; }
-.tool-op:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+.tool-op.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
+.tool-op:focus-visible { outline: 2px solid var(--accent, #0078d4); outline-offset: 1px; }
 
 [data-theme="light"] .tools-center-heading { color: #111827; }
 [data-theme="light"] .tools-center-sub { color: #6b7280; }
@@ -2343,7 +2467,7 @@
 [data-theme="light"] .tool-tile-title { color: #111827; }
 [data-theme="light"] .tool-op { color: #4b5563; }
 [data-theme="light"] .tool-op:hover { background: #f3f4f6; color: #111827; }
-[data-theme="light"] .tool-op.active { background: #0078d4; color: #ffffff; }
+[data-theme="light"] .tool-op.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 
 /* The task pane's document picker (M5.2) — replaces the retired rail's standing
    "Active File" column. The Tools tab isn't a doc tab, so a tool's panels need
@@ -2392,7 +2516,7 @@
 .home-sub {
   margin-top: 4px;
   font-size: 13px;
-  color: #8a8a92;
+  color: var(--text-dim);
 }
 .home-actions {
   display: flex;
@@ -2422,13 +2546,13 @@
   pointer-events: none;
 }
 .home-action-primary {
-  color: #fff;
-  background: #2563eb;
-  border-color: #2563eb;
+  color: var(--accent-fg, #ffffff);
+  background: var(--accent, #0078d4);
+  border-color: var(--accent, #0078d4);
 }
 .home-action-primary:hover {
-  background: #3b82f6;
-  border-color: #3b82f6;
+  background: var(--accent-hover, #005ea6);
+  border-color: var(--accent-hover, #005ea6);
 }
 .home-drop {
   display: flex;
@@ -2440,7 +2564,7 @@
   margin-bottom: 30px;
   border: 1px dashed #37373d;
   border-radius: 10px;
-  color: #6f6f78;
+  color: var(--text-dim);
   font-size: 13px;
   background: rgba(255, 255, 255, 0.012);
 }
@@ -2458,11 +2582,11 @@
   text-transform: uppercase;
   letter-spacing: 0.12em;
   font-weight: 650;
-  color: #77777f;
+  color: var(--text-dim);
 }
 .home-section-action {
   font-size: 12px;
-  color: #8a8a92;
+  color: var(--text-dim);
   cursor: pointer;
 }
 .home-section-action:hover {
@@ -2472,7 +2596,7 @@
   padding: 26px 0;
   text-align: center;
   font-size: 13px;
-  color: #5d5d66;
+  color: var(--text-dim);
 }
 .home-recents {
   display: flex;
@@ -2520,14 +2644,14 @@
 }
 .home-recent-folder {
   font-size: 12px;
-  color: #6f6f78;
+  color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .home-recent-when {
   font-size: 11.5px;
-  color: #6f6f78;
+  color: var(--text-dim);
   white-space: nowrap;
 }
 
@@ -2586,8 +2710,8 @@
   color: #fff;
 }
 .tool-dock-btn.active {
-  background: #2563eb;
-  color: #fff;
+  background: var(--accent, #0078d4);
+  color: var(--accent-fg, #ffffff);
 }
 /* The back-to-all-tools control inside a tool: a labelled control, not a bare
    glyph, so leaving a tool is as discoverable as entering one. Auto width
@@ -2666,9 +2790,9 @@
   color: #fff;
 }
 .canvas-status-quiet.active {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
+  background: var(--accent, #0078d4);
+  border-color: var(--accent, #0078d4);
+  color: var(--accent-fg, #ffffff);
 }
 .canvas-status-pages {
   display: flex;
@@ -2876,8 +3000,8 @@
   white-space: nowrap;
 }
 .secondary-tool:hover { background: #262626; color: #e5e5e5; }
-.secondary-tool.active { background: #0078d4; color: #ffffff; }
-.secondary-tool:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+.secondary-tool.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
+.secondary-tool:focus-visible { outline: 2px solid var(--accent, #0078d4); outline-offset: 1px; }
 .stamp-preset {
   padding: 1px 7px;
   font-size: 10px;
@@ -2901,7 +3025,7 @@
 [data-theme="light"] .secondary-toolbar-title { color: #6b7280; border-right-color: #e5e7eb; }
 [data-theme="light"] .secondary-tool { color: #4b5563; }
 [data-theme="light"] .secondary-tool:hover { background: #f3f4f6; color: #111827; }
-[data-theme="light"] .secondary-tool.active { background: #0078d4; color: #ffffff; }
+[data-theme="light"] .secondary-tool.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 
 /* An ops-less tool's Tools-tab pane: it has no form here, so it says so rather
    than borrowing another operation's (§ 3.3, the absence fence). */
@@ -2930,13 +3054,13 @@
   cursor: default;
 }
 .prefs-cat:hover { background: #262626; color: #e5e5e5; }
-.prefs-cat.active { background: #0078d4; color: #ffffff; }
-.prefs-cat:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+.prefs-cat.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
+.prefs-cat:focus-visible { outline: 2px solid var(--accent, #0078d4); outline-offset: 1px; }
 .prefs-body { min-width: 0; }
 
 [data-theme="light"] .prefs-cat { color: #4b5563; }
 [data-theme="light"] .prefs-cat:hover { background: #f3f4f6; color: #111827; }
-[data-theme="light"] .prefs-cat.active { background: #0078d4; color: #ffffff; }
+[data-theme="light"] .prefs-cat.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 
 /* Floating markup bar over a text selection (reading view, Select tool).
    Viewport-anchored (the coordinates come from the selection's client rects),
@@ -2965,7 +3089,7 @@
   cursor: default;
 }
 .text-selection-menu button:hover { background: #333333; }
-.text-selection-menu button:focus-visible { outline: 2px solid #0078d4; outline-offset: 1px; }
+.text-selection-menu button:focus-visible { outline: 2px solid var(--accent, #0078d4); outline-offset: 1px; }
 
 [data-theme="light"] .text-selection-menu { border-color: #d1d5db; background: #ffffff; }
 [data-theme="light"] .text-selection-menu button { color: #111827; }
@@ -3070,54 +3194,84 @@
 [data-theme="high-contrast"] .hover\:border-neutral-600:hover { border-color: #c0c0c0; }
 [data-theme="high-contrast"] .group:hover .group-hover\:text-white { color: #ffffff; }
 [data-theme="high-contrast"] .bg-black\/60 { background-color: rgba(0, 0, 0, 0.3); }
-[data-theme="high-contrast"] .bg-blue-600 { background-color: #0c857a; }
-[data-theme="high-contrast"] .hover\:bg-blue-500:hover { background-color: #12a695; }
-[data-theme="high-contrast"] .bg-blue-600 { color: #000000; }
-[data-theme="high-contrast"] .bg-blue-500 { background-color: #0c857a; }
+[data-theme="high-contrast"] .bg-blue-600 { background-color: var(--accent, #0078d4); }
+[data-theme="high-contrast"] .hover\:bg-blue-500:hover { background-color: var(--accent-hover, #005ea6); }
+[data-theme="high-contrast"] .bg-blue-600 { color: var(--accent-fg, #ffffff); }
+[data-theme="high-contrast"] .bg-blue-500 { background-color: var(--accent, #0078d4); }
 [data-theme="high-contrast"] .bg-blue-600\/30 { background-color: rgba(13, 148, 136, 0.3); }
 [data-theme="high-contrast"] .bg-blue-600\/20 { background-color: rgba(13, 148, 136, 0.2); }
-[data-theme="high-contrast"] .ring-blue-500 { --tw-ring-color: #0d9488; }
-[data-theme="high-contrast"] .border-blue-500 { border-color: #0d9488; }
-[data-theme="high-contrast"] .border-dashed.border-blue-500 { border-color: #0d9488; }
-[data-theme="high-contrast"] .text-blue-300 { color: #0d9488; }
+[data-theme="high-contrast"] .ring-blue-500 { --tw-ring-color: var(--accent, #0078d4); }
+[data-theme="high-contrast"] .border-blue-500 { border-color: var(--accent, #0078d4); }
+[data-theme="high-contrast"] .border-dashed.border-blue-500 { border-color: var(--accent, #0078d4); }
+[data-theme="high-contrast"] .text-blue-300 { color: #6cb8f6; }
 [data-theme="high-contrast"] .bg-red-600 { background-color: #D2424E; color: #000000; }
 [data-theme="high-contrast"] .hover\:bg-red-500:hover { background-color: #e85963; }
 [data-theme="high-contrast"] .bg-red-500 { background-color: #D2424E; color: #000000; }
 [data-theme="high-contrast"] .text-red-400 { color: #ff8080; }
 [data-theme="high-contrast"] .text-red-300 { color: #ff8080; }
-[data-theme="high-contrast"] .text-red-200 { color: #991b1b; }
-[data-theme="high-contrast"] .text-green-400 { color: #15803d; }
-[data-theme="high-contrast"] .text-green-300 { color: #15803d; }
-[data-theme="high-contrast"] .text-green-300\/90 { color: #15803d; }
-[data-theme="high-contrast"] .text-green-300\/70 { color: #15803db3; }
-[data-theme="high-contrast"] .text-green-200 { color: #166534; }
+/* P21: the greens, ambers and red-200 below previously carried the LIGHT
+   theme's dark-on-white values (#15803d, #92400e, #991b1b) — dark ink on a
+   black theme, 4.2:1 at best. High contrast brightens; it never darkens. */
+[data-theme="high-contrast"] .text-red-200 { color: #ffb3b3; }
+[data-theme="high-contrast"] .text-green-400 { color: #4ade80; }
+[data-theme="high-contrast"] .text-green-300 { color: #4ade80; }
+[data-theme="high-contrast"] .text-green-300\/90 { color: #4ade80e6; }
+[data-theme="high-contrast"] .text-green-300\/70 { color: #4ade80b3; }
+[data-theme="high-contrast"] .text-green-200 { color: #86efac; }
 [data-theme="high-contrast"] .text-amber-500\/80 { color: #ffe082; }
 [data-theme="high-contrast"] .text-amber-400 { color: #ffe082; }
-[data-theme="high-contrast"] .text-amber-300 { color: #92400e; }
-[data-theme="high-contrast"] .text-amber-300\/90 { color: #92400e; }
-[data-theme="high-contrast"] .text-amber-200 { color: #92400e; }
-[data-theme="high-contrast"] .text-amber-200\/90 { color: #92400e; }
-[data-theme="high-contrast"] .text-blue-400 { color: #0c857a; }
-[data-theme="high-contrast"] .text-blue-200 { color: #0c857a; }
-[data-theme="high-contrast"] .hover\:text-red-100:hover { color: #7f1d1d; }
-[data-theme="high-contrast"] .hover\:text-amber-100:hover { color: #78350f; }
-[data-theme="high-contrast"] .hover\:text-blue-200:hover { color: #115e59; }
+[data-theme="high-contrast"] .text-amber-300 { color: #ffe082; }
+[data-theme="high-contrast"] .text-amber-300\/90 { color: #ffe082e6; }
+[data-theme="high-contrast"] .text-amber-200 { color: #ffe082; }
+[data-theme="high-contrast"] .text-amber-200\/90 { color: #ffe082e6; }
+[data-theme="high-contrast"] .text-blue-400 { color: #6cb8f6; }
+[data-theme="high-contrast"] .text-blue-200 { color: #6cb8f6; }
+[data-theme="high-contrast"] .hover\:text-red-100:hover { color: #ffd6d6; }
+[data-theme="high-contrast"] .hover\:text-amber-100:hover { color: #fff3c4; }
+[data-theme="high-contrast"] .hover\:text-blue-200:hover { color: #9ccfff; }
 [data-theme="high-contrast"] .hover\:text-red-400:hover { color: #ff8080; }
 [data-theme="high-contrast"] .hover\:bg-red-900\/40:hover { background-color: rgba(210, 66, 78, 0.15); }
 [data-theme="high-contrast"] .bg-emerald-600 { background-color: #69f0ae; color: #000000; }
 [data-theme="high-contrast"] .bg-emerald-500 { background-color: #69f0ae; color: #000000; }
-[data-theme="high-contrast"] .hover\:bg-emerald-500:hover { background-color: #065f46; }
+/* Hover stays LIGHT: the base is a mint button with black text, and the old
+   #065f46 hover flipped it to dark green under that same black text (1.9:1). */
+[data-theme="high-contrast"] .hover\:bg-emerald-500:hover { background-color: #34d399; }
 [data-theme="high-contrast"] .focus\:border-emerald-500:focus { border-color: #69f0ae; }
-[data-theme="high-contrast"] .focus\:border-blue-500:focus { border-color: #0d9488; }
+[data-theme="high-contrast"] .focus\:border-blue-500:focus { border-color: var(--accent, #0078d4); }
 [data-theme="high-contrast"] .bg-white.shadow-sm { border: 1px solid #2e2e2e; }
 [data-theme="high-contrast"] ::-webkit-scrollbar-thumb { background-color: #2e2e2e; }
 [data-theme="high-contrast"] ::-webkit-scrollbar-track { background-color: #0d0d0d; }
-:root[data-backdrop="mica"][data-theme="high-contrast"] .app-shell-bar, :root[data-backdrop="mica"][data-theme="high-contrast"] .app-rail { background: rgba(255, 255, 255, 0.6); }
+/* Opacity variants (mirror of the light table's) and the dock's literals. */
+[data-theme="high-contrast"] .bg-neutral-800\/60 { background-color: #0d0d0d; }
+[data-theme="high-contrast"] .bg-neutral-800\/50 { background-color: #0d0d0d; }
+[data-theme="high-contrast"] .bg-neutral-800\/40 { background-color: rgba(13, 13, 13, 0.7); }
+[data-theme="high-contrast"] .bg-neutral-800\/95 { background-color: #0d0d0d; }
+[data-theme="high-contrast"] .bg-neutral-900\/95 { background-color: #000000; }
+[data-theme="high-contrast"] .bg-neutral-900\/70 { background-color: rgba(0, 0, 0, 0.9); }
+[data-theme="high-contrast"] .bg-neutral-900\/60 { background-color: rgba(0, 0, 0, 0.9); }
+[data-theme="high-contrast"] .bg-neutral-900\/50 { background-color: rgba(0, 0, 0, 0.8); }
+[data-theme="high-contrast"] .bg-neutral-950\/40 { background-color: rgba(26, 26, 26, 0.6); }
+[data-theme="high-contrast"] .bg-neutral-700\/70 { background-color: #1a1a1a; }
+[data-theme="high-contrast"] .tool-dock { background: #000000; border-left-color: #1a1a1a; }
+[data-theme="high-contrast"] .tool-dock-header { border-bottom-color: #1a1a1a; }
+[data-theme="high-contrast"] .canvas-status-bar { background: #000000; border-top-color: #1a1a1a; }
+[data-theme="high-contrast"] .canvas-status-quiet { color: #ffffff; background: #1a1a1a; border-color: #2e2e2e; }
+[data-theme="high-contrast"] .canvas-status-pages { color: #ffffff; }
+[data-theme="high-contrast"] .canvas-status-pageinput { background: #000000; border-color: #2e2e2e; color: #ffffff; }
+[data-theme="high-contrast"] .properties-bar { background: #000000; border-bottom-color: #1a1a1a; }
+[data-theme="high-contrast"] .properties-bar-note { color: #ffffff; }
+[data-theme="high-contrast"] .properties-bar-action { color: #ffffff; background: #1a1a1a; border-color: #2e2e2e; }
+/* P21: high contrast does NOT frost. The white wash here was the light
+   theme's mica treatment pasted onto a black theme — it put the shell's
+   light-on-dark text on a white bar (1.2:1 across the tab strip). The HC
+   contract is maximum contrast, and Windows' own HC mode disables
+   transparency entirely, so the bars stay solid even when Mica composes. */
+:root[data-backdrop="mica"][data-theme="high-contrast"] .app-shell-bar, :root[data-backdrop="mica"][data-theme="high-contrast"] .app-rail { background: #000000; }
 :root[data-backdrop="mica"][data-theme="high-contrast"] .app-content { background: #000000; }
 :root[data-backdrop="mica"][data-theme="high-contrast"] .app-banner.bg-blue-900\/60, :root[data-backdrop="mica"][data-theme="high-contrast"] .app-banner.bg-red-600\/20 { background-color: #000000; }
 [data-theme="high-contrast"] .search-panel-input-row { border-bottom-color: #1a1a1a; }
 [data-theme="high-contrast"] .search-panel-input { background: #0d0d0d; border-color: #2e2e2e; }
-[data-theme="high-contrast"] .search-panel-input:focus { border-color: #0078d4; }
+[data-theme="high-contrast"] .search-panel-input:focus { border-color: var(--accent, #0078d4); }
 [data-theme="high-contrast"] .search-file-name { color: #d0d0d0; }
 [data-theme="high-contrast"] .search-hit:hover { background: #0d0d0d; }
 [data-theme="high-contrast"] .search-hit-page { color: #ffffff; }
@@ -3127,7 +3281,7 @@
 [data-theme="high-contrast"] .signatures-nav-footer { border-top-color: #1a1a1a; }
 [data-theme="high-contrast"] .signatures-nav-recheck-btn { border-color: #2e2e2e; }
 [data-theme="high-contrast"] .signatures-nav-recheck-btn:hover:not(:disabled) { background: #1a1a1a; }
-[data-theme="high-contrast"] .signatures-nav-caveat { color: #92620e; }
+[data-theme="high-contrast"] .signatures-nav-caveat { color: #ffe082; }
 [data-theme="high-contrast"] .bookmark-title-input:hover, [data-theme="high-contrast"] .bookmark-title-input:focus { background: #0d0d0d; border-color: #2e2e2e; }
 [data-theme="high-contrast"] .bookmark-page-input { background: #0d0d0d; border-color: #2e2e2e; }
 [data-theme="high-contrast"] .bookmarks-footer { border-top-color: #1a1a1a; }
