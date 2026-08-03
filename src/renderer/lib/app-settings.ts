@@ -46,6 +46,10 @@ export interface Settings {
    * scheduling exists, setting one is REQUIRED for a non-interactive identity
    * rather than optional (owner requirement 2026-07-26). */
   batchLogDir: string;
+  /** N12: the UI language — 'system' resolves against the shipped locales
+   * (falling back to en), an explicit code pins one. Stored values are
+   * locale-independent keys, never display names. */
+  language: string;
 }
 
 export const DEFAULTS: Settings = {
@@ -62,6 +66,7 @@ export const DEFAULTS: Settings = {
   batchLogRetentionDays: 30,
   batchLogDir: '',
   identityName: '',
+  language: 'system',
 };
 
 export function loadSettings(): Settings {
