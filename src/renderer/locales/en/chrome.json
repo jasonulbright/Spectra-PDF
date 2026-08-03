@@ -12,6 +12,8 @@
   "chrome.home.title": "Home",
   "chrome.menu.noOpenDocuments": "No Open Documents",
   "chrome.menu.noRecentFiles": "No Recent Files",
+  "chrome.prefs.language": "Language",
+  "chrome.prefs.languageSystem": "System default",
   "chrome.recent.today": "Today {{time}}",
   "chrome.recent.yesterday": "Yesterday {{time}}",
   "chrome.status.applyChanges": "Apply changes",

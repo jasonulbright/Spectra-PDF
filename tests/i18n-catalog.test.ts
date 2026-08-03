@@ -18,7 +18,7 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
 // would drag i18next's init (and its DOM expectations) into this node
 // test, so the list is pinned here and a drift fails the parity loop.
-const SHIPPED_LOCALES = ['en'];
+const SHIPPED_LOCALES = ['en', 'es'];
 
 function expectedCatalog(): Record<string, string> {
   const out: Record<string, string> = { ...CHROME_STRINGS };
