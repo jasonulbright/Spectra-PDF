@@ -198,11 +198,18 @@ pub fn run() {
             // going to draw it. Checking only the first is what let a
             // transparency-effects-off machine get chrome styled for a
             // backdrop that was never composed.
+            // E2E-only lever: the battery's fallback spec launches with
+            // SPECTRAPDF_E2E_FORCE_OPAQUE=1 so the opaque presentation runs
+            // live on a machine where Mica would compose (spec 94; the RDP/
+            // transparency-off case is otherwise unreachable on a dev box).
+            // Gated on e2e mode so it is not a shipped configuration channel.
+            let force_opaque =
+                e2e && std::env::var("SPECTRAPDF_E2E_FORCE_OPAQUE").is_ok();
             let wants_backdrop = wants_backdrop(
                 windows_version::OsVersion::current().build,
                 is_remote_session(),
                 transparency_effects_enabled(),
-            );
+            ) && !force_opaque;
             let window =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                     .title("Spectra PDF")

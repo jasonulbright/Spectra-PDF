@@ -33,9 +33,14 @@ published without passing its tests.
 
 ### Building & releasing
 - **A release can't be published without passing its tests.** Publishing
-  now runs the full test suites first — the interface, the engine, and the
-  Windows layer — and refuses to continue if any of them fail, or if the
-  version being published disagrees with the version inside the app.
+  now runs the test suites first — the application's unit suite, the engine
+  suite, and the Windows-layer suite — and refuses to continue if any of
+  them fail, or if the version being published disagrees with the version
+  inside the app. (The full on-screen interface suite is run against the
+  built app on a real desktop before each release is tagged; hosted build
+  machines cannot drive the app's window, so that run is recorded per
+  release in the project tracker rather than performed by the publish
+  workflow.)
 - **Build instructions actually work.** The setup steps in the README were
   missing several of the components a build needs, so following them left
   the build failing on a missing folder. All of them are listed now.

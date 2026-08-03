@@ -191,8 +191,9 @@ describe('find + OCR (2m)', () => {
     );
     await setView('canvas');
 
-    // The real tesseract.js worker runs INSIDE the webview against the
-    // bundled offline assets — first run loads core+language, so be patient.
+    // Recognition runs in the ENGINE — the bundled native Tesseract as a
+    // subprocess, rasterizing through Ghostscript (Phase 12; tesseract.js is
+    // retired) — so the first run pays a real raster + recognize, be patient.
     // Wait on the real OCR signal (word boxes ready to persist), not the find
     // count (which the born-digital spec's leftover query could satisfy).
     await browser.waitUntil(async () => (await ocrReadyCount()) > 0, {

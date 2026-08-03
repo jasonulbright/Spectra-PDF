@@ -18,9 +18,15 @@
  *   cargo install tauri-driver --locked
  *   cargo install --git https://github.com/chippers/msedgedriver-tool
  *
- * Build the app harness with:
- *   cross-env VITE_E2E=1 npm run --prefix .. build:renderer
- *   cargo build --manifest-path ../src-tauri/Cargo.toml
+ * Build the app harness with (from the repo root):
+ *   VITE_E2E=1 npx tauri build --debug --no-bundle
+ *
+ * NOT with a bare `cargo build`: tauri-build re-runs whenever dist changes,
+ * and outside the tauri CLI it bakes a DEV context into the binary — the
+ * webview then points at http://localhost:5173 (no dev server = blank page)
+ * and every spec fails with "Test harness never appeared on window", which
+ * reads like a catastrophic regression. Proven live 2026-08-02 by CDP
+ * (/json listed the page URL as localhost:5173).
  *
  * Then: npm test
  */
@@ -88,7 +94,7 @@ export const config: WebdriverIO.Config = {
       );
     }
   },
-  beforeSession: () =>
+  beforeSession: (_config, _caps, specs: string[]) =>
     new Promise<void>((resolveSession, rejectSession) => {
       // Clear any orphaned driver/app/engine processes before the session starts.
       reapTestProcesses();
@@ -96,6 +102,12 @@ export const config: WebdriverIO.Config = {
       // Set SPECTRAPDF_E2E so the Tauri binary skips single-instance + tray —
       // each WDIO session needs a clean launch and a clean exit.
       const env = { ...process.env, SPECTRAPDF_E2E: '1' };
+      // The fallback spec's session launches the app with the backdrop forced
+      // OFF (an e2e-gated lever in lib.rs), so the opaque presentation —
+      // otherwise unreachable on a machine where Mica composes — runs live.
+      if (specs?.some((s) => s.includes('backdrop-fallback'))) {
+        env.SPECTRAPDF_E2E_FORCE_OPAQUE = '1';
+      }
       tauriDriver = spawn(
         'tauri-driver',
         ['--port', String(TAURI_DRIVER_PORT), '--native-driver', NATIVE_DRIVER],

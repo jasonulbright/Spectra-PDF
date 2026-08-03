@@ -515,8 +515,10 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             <span className="text-neutral-400">pyHanko</span> (MIT) among its packages;{' '}
             <span className="text-neutral-400">pdf.js</span> (Apache-2.0);{' '}
             <span className="text-neutral-400">pdf-lib</span> (MIT);{' '}
-            <span className="text-neutral-400">tesseract.js</span> and its OCR language models
-            (Apache-2.0); the <span className="text-neutral-400">Liberation</span> and{' '}
+            <span className="text-neutral-400">Tesseract</span> — the bundled OCR engine, also
+            run strictly as a separate program — and its language models (Apache-2.0), with the
+            redistribution notices for every library it links installed beside it;{' '}
+            the <span className="text-neutral-400">Liberation</span> and{' '}
             <span className="text-neutral-400">Libertinus</span> fonts (SIL OFL 1.1);{' '}
             <span className="text-neutral-400">Tauri</span> and the compiled Rust crates
             (MIT/Apache-2.0 and similar).

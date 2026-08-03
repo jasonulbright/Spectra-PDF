@@ -162,6 +162,16 @@ fn schtasks() -> Command {
 /// `logon_type` must agree with the `<LogonType>` in the XML's Principal;
 /// disagreeing registers a task that never runs.
 ///
+/// Creates the task path's FOLDER when it is missing, BEFORE registering.
+/// `RegisterTask` is not documented to create folders (folder-tree creation
+/// is `ITaskFolder::CreateFolder`'s job). A controlled mutation test on Win11
+/// 26200 showed it auto-creates anyway — observed, undocumented — but the
+/// first-ever schedule on a fresh install also runs on supported Server SKUs,
+/// and an explicit ensure makes folder creation contractual on every build
+/// instead of leaning on behavior no contract promises. The `#[ignore]`d COM
+/// tests below run in CI, where the runner genuinely has no `\Spectra PDF\`
+/// folder, so the fresh-install path stays exercised on Server as well.
+///
 /// Runs on its own thread so COM initialisation cannot collide with the async
 /// runtime's thread reuse, and the apartment is torn down deterministically.
 #[cfg(windows)]
@@ -201,6 +211,25 @@ fn register_task_com(
                 let root = service
                     .GetFolder(&BSTR::from("\\"))
                     .map_err(|e| format!("Could not open the task folder: {}", e.message()))?;
+
+                // Ensure the task's folder exists (see the function doc).
+                // ERROR_ALREADY_EXISTS is success: another registration can
+                // race this one between the Get and the Create.
+                if let Some((parent, _)) = task_path.rsplit_once('\\') {
+                    let parent = parent.trim_start_matches('\\');
+                    if !parent.is_empty() && root.GetFolder(&BSTR::from(parent)).is_err() {
+                        if let Err(e) = root.CreateFolder(&BSTR::from(parent), &VARIANT::default())
+                        {
+                            const ERROR_ALREADY_EXISTS: u32 = 0x800700B7;
+                            if e.code().0 as u32 != ERROR_ALREADY_EXISTS {
+                                return Err(format!(
+                                    "Could not create the task folder \\{parent}: {}",
+                                    e.message()
+                                ));
+                            }
+                        }
+                    }
+                }
 
                 let account = account.trim();
                 let (logon, user_v, pw_v) = if account.is_empty() {
@@ -897,11 +926,16 @@ mod tests {
     /// Exercises the COM registration end to end. `#[ignore]`d because it
     /// touches the machine's task store; run it deliberately with:
     ///
-    ///   cargo test scheduler::tests::com_registration_round_trip -- --ignored
+    ///   cargo test scheduler -- --ignored
     ///
     /// The other tests are compile-time or string-level, and a COM call that
     /// compiles can still fail at runtime on a CLSID, an apartment or a VARIANT
     /// type. Registers under the app's own folder, then deletes.
+    ///
+    /// CI runs this (and the fresh-folder test below) on every push: the
+    /// hosted runner has no `\Spectra PDF\` folder, so there this IS the
+    /// fresh-install acceptance — the case the dev machine can never
+    /// reproduce, because its folder already exists.
     ///
     /// Covers the InteractiveToken path. The Password path is the same call
     /// with a populated VARIANT and needs real domain credentials.
@@ -922,6 +956,80 @@ mod tests {
         let _ = run(schtasks().args(["/Delete", "/F", "/TN", &full]));
 
         assert!(found, "task registered via COM but schtasks could not see it");
+    }
+
+    /// The fresh-machine case, provable on ANY machine: registration into a
+    /// folder that does not exist yet must succeed and end with the task
+    /// queryable. An external review flagged this path as probably broken
+    /// (RegisterTask is not documented to create folders); the 2026-08-02
+    /// mutation check showed Win11 26200 auto-creates even WITHOUT our
+    /// ensure step — so on this build the test pins the whole path, and on
+    /// builds where the undocumented behavior is absent it pins the ensure
+    /// step itself. Uses its own probe folder so the app's real folder —
+    /// which may hold a user's schedules — is never touched or deleted.
+    #[test]
+    #[ignore]
+    fn com_registration_creates_the_missing_folder() {
+        // Pid + nanos: a pid alone is reusable across runs, and a stale
+        // probe folder would make this test pass without the feature.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let folder = format!("Spectra PDF Probe {}-{nanos}", std::process::id());
+        let mut p = action_profile();
+        p.name = "ZZ Fresh DELETE ME".into();
+        let xml = build_task_xml(r"C:\Windows\System32\cmd.exe", &p, None).unwrap();
+        let full = format!("\\{folder}\\{}", p.name);
+
+        let registered = register_task_com(full.clone(), xml, String::new(), None);
+
+        let found = registered.is_ok() && run(schtasks().args(["/Query", "/TN", &full])).is_ok();
+
+        // Cleanup before asserting: a failed assert must not strand the probe.
+        let _ = run(schtasks().args(["/Delete", "/F", "/TN", &full]));
+        delete_task_folder(&folder);
+
+        registered.expect("registration into a fresh folder failed");
+        assert!(
+            found,
+            "task registered into a fresh folder but schtasks could not see it"
+        );
+    }
+
+    /// Test-only cleanup: schtasks can delete tasks but not FOLDERS.
+    fn delete_task_folder(folder: &str) {
+        use windows::core::BSTR;
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+            COINIT_APARTMENTTHREADED,
+        };
+        use windows::Win32::System::TaskScheduler::{ITaskService, TaskScheduler};
+        use windows::Win32::System::Variant::VARIANT;
+        unsafe {
+            let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let owned = init.is_ok();
+            let service: Result<ITaskService, _> =
+                CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER);
+            if let Ok(service) = service {
+                if service
+                    .Connect(
+                        &VARIANT::default(),
+                        &VARIANT::default(),
+                        &VARIANT::default(),
+                        &VARIANT::default(),
+                    )
+                    .is_ok()
+                {
+                    if let Ok(root) = service.GetFolder(&BSTR::from("\\")) {
+                        let _ = root.DeleteFolder(&BSTR::from(folder), 0);
+                    }
+                }
+            }
+            if owned {
+                CoUninitialize();
+            }
+        }
     }
 
     #[test]

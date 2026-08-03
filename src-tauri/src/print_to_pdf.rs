@@ -255,45 +255,60 @@ pub fn start_listener(app: &AppHandle) {
         if let Some(state) = handle.try_state::<PrinterState>() {
             *state.listener_status.lock().unwrap() = "listening".to_string();
         }
-        for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
-            // The read happens on the job thread. On the accept loop, one
-            // client that connects and never closes blocks every later print
-            // until restart.
-            if IN_FLIGHT.load(Ordering::Relaxed) >= MAX_CONCURRENT_JOBS {
-                eprintln!("virtual printer: {MAX_CONCURRENT_JOBS} jobs already in flight, refused");
-                drop(stream);
-                continue;
-            }
-            IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
-            let job_app = handle.clone();
-            std::thread::spawn(move || {
-                let _slot = JobSlot;
-                let mut stream = stream;
-                // Per-read idle timeout: a half-open connection dies on its own
-                // thread instead of holding the listener.
-                let _ = stream.set_read_timeout(Some(READ_IDLE_TIMEOUT));
-                // RAW/JetDirect: the client streams the job and closes. Reads
-                // are capped so a runaway writer cannot exhaust disk staging.
-                let mut bytes = Vec::new();
-                let mut capped = std::io::Read::take(&mut stream, MAX_JOB_BYTES + 1);
-                if capped.read_to_end(&mut bytes).is_err() {
-                    // On timeout `read_to_end` leaves partial bytes in the
-                    // buffer. Distilling a truncated stream yields a
-                    // plausible-looking wrong document, so drop it.
-                    return;
-                }
-                if bytes.is_empty() {
-                    return; // port probes (and the spooler's SNMP pokes) are not jobs
-                }
-                if bytes.len() as u64 > MAX_JOB_BYTES {
-                    eprintln!("virtual printer: job over the {MAX_JOB_BYTES}-byte cap, refused");
-                    return;
-                }
-                handle_job(&job_app, bytes);
-            });
-        }
+        serve(listener, READ_IDLE_TIMEOUT, move |bytes| {
+            handle_job(&handle, bytes)
+        });
     });
+}
+
+/// The accept loop, separated from the app wiring so the stall behaviour is
+/// testable against real sockets: a test binds an ephemeral port and passes a
+/// plain sink, production passes `handle_job`. `idle_timeout` is a parameter
+/// for the same reason — the mid-job-stall test cannot wait out the
+/// production 60 seconds. Behaviour is identical to the pre-extraction loop.
+fn serve(
+    listener: TcpListener,
+    idle_timeout: Duration,
+    on_job: impl Fn(Vec<u8>) + Clone + Send + 'static,
+) {
+    for stream in listener.incoming() {
+        let Ok(stream) = stream else { continue };
+        // The read happens on the job thread. On the accept loop, one
+        // client that connects and never closes blocks every later print
+        // until restart.
+        if IN_FLIGHT.load(Ordering::Relaxed) >= MAX_CONCURRENT_JOBS {
+            eprintln!("virtual printer: {MAX_CONCURRENT_JOBS} jobs already in flight, refused");
+            drop(stream);
+            continue;
+        }
+        IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
+        let sink = on_job.clone();
+        std::thread::spawn(move || {
+            let _slot = JobSlot;
+            let mut stream = stream;
+            // Per-read idle timeout: a half-open connection dies on its own
+            // thread instead of holding the listener.
+            let _ = stream.set_read_timeout(Some(idle_timeout));
+            // RAW/JetDirect: the client streams the job and closes. Reads
+            // are capped so a runaway writer cannot exhaust disk staging.
+            let mut bytes = Vec::new();
+            let mut capped = std::io::Read::take(&mut stream, MAX_JOB_BYTES + 1);
+            if capped.read_to_end(&mut bytes).is_err() {
+                // On timeout `read_to_end` leaves partial bytes in the
+                // buffer. Distilling a truncated stream yields a
+                // plausible-looking wrong document, so drop it.
+                return;
+            }
+            if bytes.is_empty() {
+                return; // port probes (and the spooler's SNMP pokes) are not jobs
+            }
+            if bytes.len() as u64 > MAX_JOB_BYTES {
+                eprintln!("virtual printer: job over the {MAX_JOB_BYTES}-byte cap, refused");
+                return;
+            }
+            sink(bytes);
+        });
+    }
 }
 
 fn run_powershell(args: &[&str]) -> Result<String, String> {
@@ -453,5 +468,78 @@ mod tests {
         // read as ANSI by PS 5.1 and silently corrupts the parse.
         let install = format!("{PRINTER_NAME}{PORT_NAME}");
         assert!(install.is_ascii());
+    }
+
+    /// R2's acceptance, against real sockets: one client that connects and
+    /// never writes must not block later jobs. This is the exact wedge shape
+    /// the fix exists for — pre-R2, the accept loop read each connection to
+    /// EOF, so the silent client held every later print until app restart.
+    #[test]
+    fn a_stalled_client_does_not_block_other_jobs() {
+        use std::io::Write;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            serve(listener, Duration::from_secs(5), move |b| {
+                let _ = tx.send(b);
+            })
+        });
+
+        // The stalled client: connected, silent, held open across the test.
+        let stalled = std::net::TcpStream::connect(addr).unwrap();
+
+        let mut expected = Vec::new();
+        for i in 0..3u8 {
+            let payload = format!("%!PS job {i}").into_bytes();
+            expected.push(payload.clone());
+            let mut c = std::net::TcpStream::connect(addr).unwrap();
+            c.write_all(&payload).unwrap();
+            // Close = end of job (the RAW/JetDirect contract).
+            drop(c);
+        }
+
+        let mut got = Vec::new();
+        for _ in 0..3 {
+            got.push(rx.recv_timeout(Duration::from_secs(10)).expect(
+                "a completed job never arrived — blocked behind a stalled connection",
+            ));
+        }
+        got.sort();
+        expected.sort();
+        assert_eq!(got, expected);
+        drop(stalled);
+    }
+
+    /// The other half of R2: a client that stalls MID-JOB is dropped, never
+    /// delivered. `read_to_end` leaves the partial bytes in the buffer on
+    /// timeout, and distilling a truncated PostScript stream yields a
+    /// plausible-looking WRONG document — the silent-degradation class.
+    #[test]
+    fn a_mid_job_stall_is_dropped_not_delivered() {
+        use std::io::Write;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            serve(listener, Duration::from_millis(300), move |b| {
+                let _ = tx.send(b);
+            })
+        });
+
+        let mut c = std::net::TcpStream::connect(addr).unwrap();
+        c.write_all(b"%!PS half a job").unwrap();
+        // No close, no more bytes: the job thread's idle timeout must fire
+        // and the partial buffer must be dropped, not handed to the sink.
+        let delivered = rx.recv_timeout(Duration::from_secs(3));
+        assert!(
+            delivered.is_err(),
+            "a truncated job was delivered as if complete: {delivered:?}"
+        );
+        drop(c);
     }
 }
