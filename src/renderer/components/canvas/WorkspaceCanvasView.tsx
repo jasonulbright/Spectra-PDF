@@ -37,7 +37,7 @@ import { fetchEditVectors, type EditVectorObject } from '../../lib/edit-vectors'
 import type { EditImagePlacement } from '../../lib/edit-images';
 import { EDIT_DECLINED } from '../../lib/edit-text';
 import { pageIdAtSourceIndex } from '../../lib/durable-identity';
-import { computeEditSpans, fetchEditTextListing, hexToRgb } from '../../lib/edit-paragraphs';
+import { computeEditSpans, fetchEditTextListing, hexToRgb, relaxUnencodableSpans } from '../../lib/edit-paragraphs';
 import type { EditTextListing, ParagraphEditOpts , MergeRestyle } from '../../lib/edit-paragraphs';
 import { applyRotate, LOCAL_CORNERS, matMul, transformPoint } from '../../lib/image-transform';
 import type { Mat } from '../../lib/image-transform';
@@ -214,7 +214,7 @@ interface WorkspaceCanvasViewProps {
       size?: number;
       color?: [number, number, number];
       family?: 'serif' | 'sans' | 'mono';
-      rotate?: 0 | 90 | 180 | 270;
+      rotate?: number;
       bold?: boolean;
       italic?: boolean;
       kern?: boolean;
@@ -967,7 +967,9 @@ export function WorkspaceCanvasView({
   const [atSpanItalic, setAtSpanItalic] = useState(false);
   const atTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   // A2-tail: authoring-time rotation (90-deg steps; sticky like size/family).
-  const [atRotate, setAtRotate] = useState<0 | 90 | 180 | 270>(0);
+  // T19: any finite degree value — the step button cycles quarters, the
+  // number field takes free angles.
+  const [atRotate, setAtRotate] = useState<number>(0);
   // A2-tail-2: whole-box style toggles (sticky) + the live fit result
   // (null = unknown/measuring; the notice shows only on a definite no).
   const [atBold, setAtBold] = useState(false);
@@ -1097,7 +1099,7 @@ export function WorkspaceCanvasView({
       size?: number;
       color?: [number, number, number];
       family?: 'sans' | 'serif' | 'mono';
-      rotate?: 0 | 90 | 180 | 270;
+      rotate?: number;
       bold?: boolean;
       italic?: boolean;
       /** 9.K1: pair kerning — ON by default engine-side, so only `false`
@@ -2825,7 +2827,20 @@ export function WorkspaceCanvasView({
       setEditSel(null);
       setEditBusy(true);
       setEditNotice(null);
-      const spans = computeEditSpans(para.text, newText, para.spans);
+      // T21: the commit applies the SAME position-aware relaxation the
+      // editor validated with (one implementation — the mappings cannot
+      // disagree). Substitution/feature commits skip it, exactly as the
+      // editor's validation does (the member inventories no longer govern).
+      const spans0 = computeEditSpans(para.text, newText, para.spans);
+      const relaxing = !(
+        opts?.family !== undefined ||
+        opts?.bold !== undefined ||
+        opts?.italic !== undefined ||
+        (opts?.features?.length ?? 0) > 0
+      );
+      const spans = relaxing
+        ? relaxUnencodableSpans(newText, spans0, para.encodableByRun, para.sequencesByRun).spans
+        : spans0;
       const previousListing = editTextByPage.get(pageId);
       setEditTextByPage((prev) => {
         const next = new Map(prev);
@@ -5329,10 +5344,10 @@ export function WorkspaceCanvasView({
             <button
               type="button"
               data-testid="add-text-rotate"
-              title="Rotation — the text reads at this angle (90° steps)"
+              title="Rotation — cycle the quarter turns (the field beside takes any angle)"
               onClick={() =>
                 setAtRotate((r) => {
-                  const next = ((r + 90) % 360) as 0 | 90 | 180 | 270;
+                  const next = (Math.floor(r / 90) * 90 + 90) % 360;
                   // The box preview's direction arrow tracks the card live.
                   setAddTextPlacement((pl) => (pl ? { ...pl, rotate: next } : pl));
                   return next;
@@ -5347,8 +5362,25 @@ export function WorkspaceCanvasView({
               >
                 →
               </span>{' '}
-              {atRotate}°
+              {Math.round(atRotate * 10) / 10}°
             </button>
+            <input
+              type="number"
+              data-testid="add-text-rotate-deg"
+              title="Rotation in degrees — any angle (T19); quarter turns keep the reading-direction layout"
+              min={-360}
+              max={720}
+              step={1}
+              value={Number.isFinite(atRotate) ? Math.round(atRotate * 10) / 10 : ''}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                if (!Number.isFinite(v)) return;
+                const next = ((v % 360) + 360) % 360;
+                setAtRotate(next);
+                setAddTextPlacement((pl) => (pl ? { ...pl, rotate: next } : pl));
+              }}
+              className="w-20 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
+            />
             <button
               type="button"
               data-testid="add-text-bold"

@@ -1020,6 +1020,79 @@ export function computeEditSpans(
 /** Characters the mapped fonts cannot encode, deduplicated in order —
  * empty means the whole edit is expressible. Spaces always pass (the
  * engine emits synthetic gaps for space-less fonts). */
+/** T21 — position-aware relaxation. A character unencodable in the font of
+ * the span it was MAPPED to (by text position) but encodable in a NEARBY
+ * member's font stops refusing: it is REASSIGNED to the nearest span whose
+ * run carries it (distance in span steps; earlier span wins a tie), taking
+ * that span's style — visible in the editor's span mapping, deterministic,
+ * and applied identically at validation and commit (both routes call THIS
+ * function, the one-implementation rule). Characters no run can encode
+ * still refuse with the same message as before. Ligature sequences stay
+ * evaluated per original span (conservative: relaxation moves single
+ * characters only). */
+export function relaxUnencodableSpans(
+  newText: string,
+  spans: EditSpan[],
+  encodableByRun: Map<number, string>,
+  sequencesByRun?: Map<number, string[]>,
+): { spans: EditSpan[]; missing: string[] } {
+  const initial = paragraphUnencodable(newText, spans, encodableByRun, sequencesByRun);
+  if (initial.length === 0) return { spans, missing: [] };
+  const newA = Array.from(newText);
+  const invByRun = new Map<number, Set<string>>();
+  const runInv = (run: number): Set<string> => {
+    let inv = invByRun.get(run);
+    if (!inv) {
+      inv = new Set(encodableByRun.get(run) ?? '');
+      invByRun.set(run, inv);
+    }
+    return inv;
+  };
+  // Per-character owner assignment, then reassign the stranded ones.
+  const owner: number[] = new Array(newA.length).fill(-1);
+  spans.forEach((sp, si) => {
+    for (let i = sp.start; i < Math.min(sp.end, newA.length); i++) owner[i] = si;
+  });
+  const missing: string[] = [];
+  const reassigned: Map<number, number> = new Map(); // char index → span index
+  for (let i = 0; i < newA.length; i++) {
+    const si = owner[i];
+    if (si < 0) continue;
+    const ch = newA[i];
+    if (runInv(spans[si].run).has(ch)) continue;
+    // The char may still be covered by a ligature sequence in ITS span —
+    // paragraphUnencodable already accounted for that; only chars it named
+    // missing are candidates here.
+    if (!initial.includes(ch)) continue;
+    let best = -1;
+    let bestDist = Infinity;
+    for (let sj = 0; sj < spans.length; sj++) {
+      if (sj === si) continue;
+      if (!runInv(spans[sj].run).has(ch)) continue;
+      const dist = Math.abs(sj - si);
+      if (dist < bestDist || (dist === bestDist && sj < best)) {
+        best = sj;
+        bestDist = dist;
+      }
+    }
+    if (best >= 0) reassigned.set(i, best);
+    else if (!missing.includes(ch)) missing.push(ch);
+  }
+  if (reassigned.size === 0) return { spans, missing };
+  // Rebuild ordered spans from the per-char assignment (adjacent same-run
+  // stretches merge back into one span).
+  const rebuilt: EditSpan[] = [];
+  for (let i = 0; i < newA.length; i++) {
+    const si = reassigned.get(i) ?? owner[i];
+    if (si < 0) continue;
+    const run = spans[si].run;
+    const last = rebuilt[rebuilt.length - 1];
+    if (last && last.run === run && last.end === i) last.end = i + 1;
+    else rebuilt.push({ start: i, end: i + 1, run });
+  }
+  return { spans: rebuilt, missing };
+}
+
 export function paragraphUnencodable(
   newText: string,
   spans: EditSpan[],

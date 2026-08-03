@@ -320,15 +320,32 @@ class TestAddTextRotated:
             ops = {str(i.operator) for i in pikepdf.parse_content_stream(pdf.pages[0])}
         assert "cm" not in ops
 
-    def test_rotate_refuses_anything_but_the_four_steps(self, tmp_dir):
+    def test_rotate_refuses_non_numbers_and_takes_any_angle(self, tmp_dir):
+        # T19 LIFTED the four-step domain (this pin used to refuse 45/-90/
+        # 360): any finite number of degrees is a rotation now. The
+        # STRICTNESS stays — booleans, strings and non-finite values refuse.
         src = _blank(tmp_dir)
         out = os.path.join(tmp_dir, "o.pdf")
-        for bad in (45, -90, "90", 360, True):
+        for bad in ("90", True, float("nan"), float("inf")):
             with pytest.raises(ValueError, match="rotate"):
                 add_text_box(
                     src, out, 1, [72, 600, 300, 720], "x",
                     font_path=FONTS_DIR, rotate=bad,
                 )
+        # -90 normalizes to the 270 STEP path; 360 to the frameless 0 path.
+        add_text_box(src, out, 1, [72, 600, 300, 720], "x", font_path=FONTS_DIR, rotate=-90)
+        with pikepdf.open(out) as pdf:
+            cms = [
+                [float(v) for v in i.operands]
+                for i in pikepdf.parse_content_stream(pdf.pages[0])
+                if str(i.operator) == "cm"
+            ]
+        assert [0, -1, 1, 0] == cms[0][:4]  # the 270 step frame
+        out2 = os.path.join(tmp_dir, "o2.pdf")
+        add_text_box(src, out2, 1, [72, 600, 300, 720], "x", font_path=FONTS_DIR, rotate=360)
+        with pikepdf.open(out2) as pdf:
+            ops = {str(i.operator) for i in pikepdf.parse_content_stream(pdf.pages[0])}
+        assert "cm" not in ops  # 360 ≡ 0: the shipped frameless path
 
     def test_rotate_90_text_extracts(self, tmp_dir):
         # The ToUnicode surface is orientation-blind: every 90° authored
@@ -465,7 +482,7 @@ class TestAddTextStyleAndMeasure:
         with pytest.raises(ValueError, match="no text"):
             measure_text_box(src, 1, [72, 600, 300, 720], "   ", font_path=FONTS_DIR)
         with pytest.raises(ValueError, match="rotate"):
-            measure_text_box(src, 1, [72, 600, 300, 720], "x", font_path=FONTS_DIR, rotate=45)
+            measure_text_box(src, 1, [72, 600, 300, 720], "x", font_path=FONTS_DIR, rotate="45")
         with pytest.raises(ValueError, match="out of range"):
             measure_text_box(src, 9, [72, 600, 300, 720], "x", font_path=FONTS_DIR)
 
@@ -478,7 +495,7 @@ class TestAddTextStyleAndMeasure:
         with pytest.raises(ValueError, match="no text"):
             add_text_box(src, out, 9, [72, 600, 300, 720], "   ", font_path=FONTS_DIR)
         with pytest.raises(ValueError, match="rotate"):
-            add_text_box(src, out, 9, [72, 600, 300, 720], "x", font_path=FONTS_DIR, rotate=45)
+            add_text_box(src, out, 9, [72, 600, 300, 720], "x", font_path=FONTS_DIR, rotate="45")
         with pytest.raises(ValueError, match="no text"):
             measure_text_box(src, 9, [72, 600, 300, 720], "   ", font_path=FONTS_DIR)
 
@@ -995,3 +1012,64 @@ class TestRightToLeftAuthoring:
         )
         content = _page_content(out)
         assert b"Ts" not in content  # the rise op only the shaped path emits
+
+
+class TestFreeRotation:
+    """T19 — arbitrary-angle authoring: the layout stays local and
+    angle-blind; ONE free-rotation frame turns the drawn box about its own
+    center (the king's text-box rotation semantic). The four step angles
+    keep the shipped frames byte-for-byte (pinned above)."""
+
+    def test_37_degree_frame_is_exact(self, tmp_dir):
+        import math as _math
+
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        rect = [72, 600, 300, 720]
+        add_text_box(src, out, 1, rect, "angled", font_path=FONTS_DIR, rotate=37)
+        with pikepdf.open(out) as pdf:
+            cms = [
+                [float(v) for v in i.operands]
+                for i in pikepdf.parse_content_stream(pdf.pages[0])
+                if str(i.operator) == "cm"
+            ]
+        assert len(cms) == 1
+        a, b, c, d, e, f = cms[0]
+        th = _math.radians(37)
+        assert (a, b, c, d) == pytest.approx(
+            (_math.cos(th), _math.sin(th), -_math.sin(th), _math.cos(th)), abs=1e-5
+        )
+        # The frame maps the LOCAL box center onto the DRAWN box center —
+        # the rotate-in-place property.
+        l_w, l_h = 300 - 72, 720 - 600
+        cx = l_w / 2 * a + l_h / 2 * c + e
+        cy = l_w / 2 * b + l_h / 2 * d + f
+        assert (cx, cy) == pytest.approx(((72 + 300) / 2, (600 + 720) / 2), abs=1e-3)
+
+    def test_measure_is_angle_blind(self, tmp_dir):
+        src = _blank(tmp_dir)
+        rect = [72, 600, 300, 720]
+        flat = measure_text_box(src, 1, rect, "measure me", font_path=FONTS_DIR, rotate=0)
+        angled = measure_text_box(src, 1, rect, "measure me", font_path=FONTS_DIR, rotate=37)
+        assert flat["fits"] == angled["fits"]
+        assert flat["lines"] == angled["lines"]
+        assert flat["text_height"] == pytest.approx(angled["text_height"])
+
+    def test_free_angle_with_spans_carries_the_frame(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [72, 600, 300, 720], "styled angle",
+            font_path=FONTS_DIR, rotate=200,
+            spans=[{"start": 0, "end": 6, "color": [1, 0, 0]}],
+        )
+        with pikepdf.open(out) as pdf:
+            cms = [
+                [float(v) for v in i.operands]
+                for i in pikepdf.parse_content_stream(pdf.pages[0])
+                if str(i.operator) == "cm"
+            ]
+        assert len(cms) == 1
+        import math as _math
+
+        assert cms[0][0] == pytest.approx(_math.cos(_math.radians(200)), abs=1e-5)
