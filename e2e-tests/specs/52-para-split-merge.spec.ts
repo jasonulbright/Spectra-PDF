@@ -9,6 +9,7 @@ import {
   getState,
   invokeAppCommand,
   setParagraphSelection,
+  setReactInputValue,
 } from '../support/harness.js';
 
 // Phase 9.A4 — paragraph split (Enter mid-text) + merge (Backspace at the
@@ -151,6 +152,108 @@ describe('paragraph split + merge (Phase 9.A4)', () => {
       preUndoId,
       (paras) => paras.length === 1 && paras[0].text === joined,
       'undo did not restore the original paragraph',
+    );
+  });
+
+  // T18 — the geometry round: a user-chosen split gap, Delete-at-end
+  // merging the NEXT paragraph, an EDITED editor merging without dropping
+  // its edit, and a grip-drag resize that really rewraps. Same fixture;
+  // the previous test's undos leave it back at one paragraph.
+  it('T18: custom split gap, Delete-merge, edited-merge, grip resize', async function () {
+    this.timeout(240_000);
+    const joined = `${LINE1} ${LINE2}`;
+    let nowId = (await editTextPageIds())[0];
+    const para0 = (await editParagraphs(nowId))[0];
+    expect(para0.text).toBe(joined);
+
+    // SPLIT with a 3× gap set on the editor's control.
+    await editParagraphOpen(nowId, para0.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await setReactInputValue('[data-testid="edit-para-splitgap"]', '3');
+    await setEditorCaret(joined.indexOf('flowing'));
+    await browser.keys(['Enter']);
+    await waitForReindexedParas(
+      nowId,
+      (paras) =>
+        paras.length === 2 && paras[0].text === LINE1 && paras[1].text === LINE2,
+      'the gap split never produced two paragraphs',
+    );
+
+    // DELETE at the END of the FIRST paragraph folds the next back in.
+    nowId = (await editTextPageIds())[0];
+    const first = (await editParagraphs(nowId)).find((p) => p.text === LINE1)!;
+    await editParagraphOpen(nowId, first.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await setEditorCaret(Array.from(LINE1).length);
+    await browser.keys(['Delete']);
+    await waitForReindexedParas(
+      nowId,
+      (paras) => paras.length === 1 && paras[0].text === joined,
+      'Delete at the end never merged the next paragraph in',
+    );
+
+    // EDITED merge: split again (default gap), append to the SECOND's
+    // text, then Backspace at 0 — the edit must survive the merge.
+    nowId = (await editTextPageIds())[0];
+    const paraA = (await editParagraphs(nowId))[0];
+    await editParagraphOpen(nowId, paraA.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await setEditorCaret(joined.indexOf('flowing'));
+    await browser.keys(['Enter']);
+    await waitForReindexedParas(
+      nowId,
+      (paras) => paras.length === 2,
+      'the re-split never happened',
+    );
+    nowId = (await editTextPageIds())[0];
+    const second = (await editParagraphs(nowId)).find((p) => p.text === LINE2)!;
+    await editParagraphOpen(nowId, second.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await setEditorCaret(Array.from(LINE2).length);
+    await browser.keys([...' extra']);
+    await setEditorCaret(0);
+    await browser.keys(['Backspace']);
+    await waitForReindexedParas(
+      nowId,
+      (paras) => paras.length === 1 && paras[0].text === `${joined} extra`,
+      'the edited merge dropped the edit or never merged',
+    );
+
+    // RESIZE: drag the END grip inward ~40% of the card — the paragraph
+    // must rewrap to more lines.
+    nowId = (await editTextPageIds())[0];
+    const paraB = (await editParagraphs(nowId))[0];
+    const preLines = paraB.lineCount;
+    await editParagraphOpen(nowId, paraB.index);
+    const grip = $('[data-testid="edit-para-grip-end"]');
+    await grip.waitForDisplayed({ timeout: 10_000 });
+    // The canvas scrolls; W3C pointer coordinates are viewport-bound, so
+    // the grip must actually be on screen before the drag is composed.
+    await grip.scrollIntoView({ block: 'center', inline: 'center' });
+    const card = $('.page-editpara-editor');
+    const cardW = (await card.getSize()).width;
+    const loc = await grip.getLocation();
+    const gsz = await grip.getSize();
+    const cx = Math.round(loc.x + gsz.width / 2);
+    const cy = Math.round(loc.y + gsz.height / 2);
+    await browser.performActions([
+      {
+        type: 'pointer',
+        id: 'p1',
+        parameters: { pointerType: 'mouse' },
+        actions: [
+          { type: 'pointerMove', duration: 0, x: cx, y: cy },
+          { type: 'pointerDown', button: 0 },
+          { type: 'pointerMove', duration: 150, x: Math.max(10, cx - Math.round(cardW * 0.4)), y: cy },
+          { type: 'pointerUp', button: 0 },
+        ],
+      },
+    ]);
+    await browser.releaseActions();
+    await waitForReindexedParas(
+      nowId,
+      (paras) => paras.length >= 1 && paras[0].lineCount > preLines,
+      'the grip resize never rewrapped the paragraph',
     );
   });
 });
