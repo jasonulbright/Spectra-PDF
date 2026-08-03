@@ -41,6 +41,8 @@ import xml.etree.ElementTree as ET
 import pikepdf
 from pikepdf import Dictionary, Name
 
+from engine.bezier import cubic_bbox_points
+
 
 class SvgUnsupported(ValueError):
     """A stated refusal — the file uses SVG outside the supported subset."""
@@ -593,46 +595,22 @@ def _quad_to_cubic(x0, y0, qx, qy, x, y):
 def path_bbox(segs):
     """The TIGHT bbox of parsed segments — cubic extrema included (an
     objectBoundingBox gradient mapped to a control-point bbox would land the
-    fade visibly off)."""
-    xs: list[float] = []
-    ys: list[float] = []
+    fade visibly off). The extrema math is `engine.bezier` — the SAME
+    implementation `page_vectors` boxes with (P8 slice A dedupe)."""
+    pts: list[tuple[float, float]] = []
     cx = cy = 0.0
     for seg in segs:
         if seg[0] == "M" or seg[0] == "L":
-            xs.append(seg[1])
-            ys.append(seg[2])
+            pts.append((seg[1], seg[2]))
             cx, cy = seg[1], seg[2]
         elif seg[0] == "C":
             x1, y1, x2, y2, x3, y3 = seg[1:]
-            for p0, p1, p2, p3, acc in ((cx, x1, x2, x3, xs), (cy, y1, y2, y3, ys)):
-                acc.append(p3)
-                # dB/dt = 0: at² + bt + c with the standard cubic coefficients.
-                a = -p0 + 3 * p1 - 3 * p2 + p3
-                b = 2 * (p0 - 2 * p1 + p2)
-                cc = p1 - p0
-                roots = []
-                if abs(a) < 1e-12:
-                    if abs(b) > 1e-12:
-                        roots = [-cc / b]
-                else:
-                    disc = b * b - 4 * a * cc
-                    if disc >= 0:
-                        sq = math.sqrt(disc)
-                        roots = [(-b + sq) / (2 * a), (-b - sq) / (2 * a)]
-                for t in roots:
-                    if 0 < t < 1:
-                        mt = 1 - t
-                        acc.append(
-                            mt * mt * mt * p0
-                            + 3 * mt * mt * t * p1
-                            + 3 * mt * t * t * p2
-                            + t * t * t * p3
-                        )
-            xs.append(cx)
-            ys.append(cy)
+            pts.extend(cubic_bbox_points((cx, cy), (x1, y1), (x2, y2), (x3, y3)))
             cx, cy = x3, y3
-    if not xs:
+    if not pts:
         return None
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
     return (min(xs), min(ys), max(xs), max(ys))
 
 
