@@ -2728,6 +2728,57 @@
 .tool-dock-animated {
   transition: width 140ms ease;
 }
+
+/* T18 — paragraph-editor resize grips + split-gap scrub. Accent-tinted so
+   they theme with everything else; the grips sit ON the card edge along
+   the paragraph's inline axis (side classes cover every rotation/writing
+   mode combination the editor computes). */
+.page-editpara-grip {
+  position: absolute;
+  z-index: 3;
+  background: color-mix(in srgb, var(--accent, #0078d4) 55%, transparent);
+  border-radius: 2px;
+}
+.page-editpara-grip:hover {
+  background: var(--accent, #0078d4);
+}
+.page-editpara-grip.grip-left,
+.page-editpara-grip.grip-right {
+  top: 10%;
+  height: 80%;
+  width: 5px;
+  cursor: ew-resize;
+}
+.page-editpara-grip.grip-left { left: -3px; }
+.page-editpara-grip.grip-right { right: -3px; }
+.page-editpara-grip.grip-top,
+.page-editpara-grip.grip-bottom {
+  left: 10%;
+  width: 80%;
+  height: 5px;
+  cursor: ns-resize;
+}
+.page-editpara-grip.grip-top { top: -3px; }
+.page-editpara-grip.grip-bottom { bottom: -3px; }
+.page-editpara-resize-readout {
+  position: absolute;
+  top: -22px;
+  right: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  background: var(--accent, #0078d4);
+  color: var(--accent-fg, #ffffff);
+  pointer-events: none;
+}
+.page-editpara-gapgrip {
+  display: inline-block;
+  padding: 0 3px;
+  cursor: ew-resize;
+  color: var(--text-dim);
+  user-select: none;
+}
+.page-editpara-gapgrip:hover { color: var(--accent-text, #4cc2ff); }
 @media (prefers-reduced-motion: reduce) {
   .tool-dock-animated { transition: none; }
 }

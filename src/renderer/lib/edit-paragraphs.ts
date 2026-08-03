@@ -57,6 +57,10 @@ export interface EditParagraph {
   runs: number[];
   /** Display-normalized box. */
   rect: { x: number; y: number; w: number; h: number };
+  /** T18: the paragraph's box in PDF points [x0, y0, x1, y1] — the resize
+   * grips convert their pixel drag into `box_width`/`box_left` against
+   * THIS, never against the normalized rect (rotation bakes into that). */
+  boxPt: [number, number, number, number];
   /** Logical text — the other half of the fingerprint. */
   text: string;
   /** Style spans over `text` (code-point ranges → style-source run). */
@@ -112,6 +116,16 @@ export interface ParagraphEditOpts {
   /** A4: split the paragraph at this CODE-POINT offset (strictly inside
    * the text) — the engine lays the halves out as two paragraphs. */
   split_at?: number;
+  /** T18: the split gap in LEADING multiples ([1.3, 10]; requires
+   * split_at). Undefined = the engine's 2.0 default. The 2×eff relist
+   * floor never shrinks, so every allowed factor still lists as two. */
+  split_gap?: number;
+  /** T18 resize: rewrap to this box width (PDF points). The engine
+   * refuses a width no word can wrap into. */
+  box_width?: number;
+  /** T18 resize: move the box's left edge (PDF points; requires
+   * box_width) — sent when the LEFT grip dragged. */
+  box_left?: number;
   /** 9.K2: whole-paragraph OpenType features (the caret / whole-text case,
    * the sibling of the uniform A1 size/colour). `['small_caps']` and/or
    * `['salt']`; `alt_index` picks the salt alternate. The engine applies a
@@ -261,6 +275,7 @@ export async function fetchEditTextListing(
       alignment: p.alignment,
       lineCount: p.line_count,
       rect: pdfRectToDisplay(p.box, geometry.box, geometry.bakedRotate),
+      boxPt: [p.box[0], p.box[1], p.box[2], p.box[3]],
       encodableByRun: new Map(p.runs.map((r) => [r, rawRuns[r]?.encodable ?? ''])),
       sequencesByRun: new Map(
         p.runs.map((r) => [r, (rawRuns[r] as { sequences?: string[] })?.sequences ?? []]),

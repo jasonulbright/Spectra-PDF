@@ -551,7 +551,8 @@ interface PageCellProps {
   onCancelParagraphEdit?: () => void;
   /** A4: merge the paragraph being edited into the one above it (fires
    * only from an unchanged editor with the caret at position 0). */
-  onMergeParagraphPrev?: (pageId: string, index: number) => void;
+  onMergeParagraphPrev?: (pageId: string, index: number, editedText?: string) => void;
+  onMergeParagraphNext?: (pageId: string, index: number, editedText?: string) => void;
   // Pending visible-signature placement, when it sits on THIS page (transient
   // view state with mark lifecycle — see lib/signature-placement.ts).
   signaturePlacement?: SignaturePlacement | null;
@@ -824,6 +825,7 @@ function PageCellImpl({
   onCommitParagraphEdit,
   onCancelParagraphEdit,
   onMergeParagraphPrev,
+  onMergeParagraphNext,
   signaturePlacement,
   findMatch,
   findWords,
@@ -2666,9 +2668,18 @@ function PageCellImpl({
                 onCancel={() => onCancelParagraphEdit?.()}
                 onMergePrev={
                   para.index > 0 && onMergeParagraphPrev
-                    ? () => onMergeParagraphPrev(page.id, para.index)
+                    ? (editedText?: string) =>
+                        onMergeParagraphPrev(page.id, para.index, editedText)
                     : undefined
                 }
+                onMergeNext={
+                  onMergeParagraphNext &&
+                  (editParagraphs ?? []).some((p) => p.index === para.index + 1)
+                    ? (editedText?: string) =>
+                        onMergeParagraphNext(page.id, para.index, editedText)
+                    : undefined
+                }
+                rotation={page.rotation}
               />
             );
           }
@@ -3200,17 +3211,36 @@ function ParagraphEditor({
   onCommit,
   onCancel,
   onMergePrev,
+  onMergeNext,
+  rotation = 0,
 }: {
   para: EditParagraph;
   rect: { x: number; y: number; w: number; h: number };
   lineHeightPx: number;
   onCommit: (value: string, opts?: ParagraphEditOpts) => void;
   onCancel: () => void;
-  /** A4: merge into the previous paragraph — provided only when one
-   * exists; fires only from an unchanged editor at caret 0. */
-  onMergePrev?: () => void;
+  /** A4/T18: merge into the previous paragraph — provided only when one
+   * exists; fires from caret 0. An EDITED editor passes its text along
+   * (the merge carries it as the selected side's override). */
+  onMergePrev?: (editedText?: string) => void;
+  /** T18: merge the NEXT paragraph into this one — Delete at the end. */
+  onMergeNext?: (editedText?: string) => void;
+  /** T18: the page's view rotation — the resize grips map their screen
+   * drag back onto the paragraph's inline axis through it. */
+  rotation?: number;
 }): React.JSX.Element {
   const [value, setValue] = useState(para.text);
+  // T18: the split gap the NEXT Enter-inside split uses, in leading
+  // multiples. 2 = the engine default (not sent); adjustable by typing or
+  // by dragging the grip beside the field.
+  const [gapField, setGapField] = useState('2');
+  const gapVal = ((): number => {
+    const v = parseFloat(gapField);
+    return Number.isFinite(v) ? Math.max(1.3, Math.min(10, v)) : 2;
+  })();
+  // T18 resize: the live box width (points) while a grip drags, for the
+  // floating readout. null = no drag in flight.
+  const [gripPreview, setGripPreview] = useState<number | null>(null);
   // A1 restyle controls, seeded from the paragraph's own size/colour.
   const [size, setSize] = useState(para.fontSize);
   const [color, setColor] = useState(para.color);
@@ -3587,6 +3617,77 @@ function ParagraphEditor({
     if (valid && changed) settle(() => onCommit(value, restyleOpts()));
     else settle(onCancel);
   };
+  // T18 resize: the screen direction of the paragraph's +inline axis under
+  // the page's view rotation. Display space is top-left-origin and the card
+  // rect is already rotated through rotateNormalizedRect — this table
+  // mirrors that helper's clockwise quarter-turn exactly (horizontal
+  // paragraphs advance +x at 0°; vertical columns advance +y).
+  const inlineDir = ((): [number, number] => {
+    const d = ((rotation % 360) + 360) % 360;
+    if (!para.vertical) {
+      if (d === 90) return [0, 1];
+      if (d === 180) return [-1, 0];
+      if (d === 270) return [0, -1];
+      return [1, 0];
+    }
+    if (d === 90) return [-1, 0];
+    if (d === 180) return [0, -1];
+    if (d === 270) return [1, 0];
+    return [0, 1];
+  })();
+  const beginResize = (e: React.PointerEvent<HTMLDivElement>, side: 'start' | 'end'): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    const cell = wrapperRef.current?.parentElement;
+    if (!cell) return;
+    const ptInline = para.vertical
+      ? para.boxPt[3] - para.boxPt[1]
+      : para.boxPt[2] - para.boxPt[0];
+    const dispInlinePx =
+      inlineDir[0] !== 0 ? rect.w * cell.clientWidth : rect.h * cell.clientHeight;
+    if (!(ptInline > 0) || !(dispInlinePx > 0)) return;
+    const pxPerPt = dispInlinePx / ptInline;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    let deltaPt = 0;
+    // Native listeners, not React synthetic — the WebView drops synthetic
+    // pointermove under capture (the standing canvas-drag rule).
+    const onMove = (ev: PointerEvent): void => {
+      const along =
+        (ev.clientX - startX) * inlineDir[0] + (ev.clientY - startY) * inlineDir[1];
+      deltaPt = along / pxPerPt;
+      const w = side === 'end' ? ptInline + deltaPt : ptInline - deltaPt;
+      setGripPreview(w > 0 ? w : 0);
+    };
+    const detach = (): void => {
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onAbort);
+      setGripPreview(null);
+    };
+    const onUp = (): void => {
+      detach();
+      if (Math.abs(deltaPt) < 1) return; // a click is not a resize
+      const width = side === 'end' ? ptInline + deltaPt : ptInline - deltaPt;
+      if (!(width > 4) || !valid) return; // a sub-4pt box is a mis-drag
+      const opts: ParagraphEditOpts = { box_width: width };
+      if (side === 'start') {
+        // The START edge moved, so the engine must be told the new inline
+        // origin. Horizontal: the new x0. Vertical: the transposed left is
+        // −(top y) and the top chased the drag.
+        opts.box_left = para.vertical
+          ? -(para.boxPt[3] - deltaPt)
+          : para.boxPt[0] + deltaPt;
+      }
+      settle(() => onCommit(value, restyleOpts(opts)));
+    };
+    const onAbort = (): void => detach();
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onAbort);
+  };
   return (
     <div
       ref={wrapperRef}
@@ -3629,7 +3730,17 @@ function ParagraphEditor({
             caret.start < cpLen
           ) {
             if (valid) {
-              settle(() => onCommit(value, restyleOpts({ split_at: caret.start })));
+              settle(() =>
+                onCommit(
+                  value,
+                  restyleOpts({
+                    split_at: caret.start,
+                    // T18: only a non-default gap rides — 2.0 keeps the
+                    // engine's byte-identical default path.
+                    ...(gapVal !== 2 ? { split_gap: gapVal } : {}),
+                  }),
+                ),
+              );
             }
             return;
           }
@@ -3643,14 +3754,32 @@ function ParagraphEditor({
           (() => {
             const c = readEditorSelection(areaRef.current);
             return c !== null && c.start === 0 && c.end === 0;
-          })() &&
-          value === para.text
+          })()
         ) {
-          // A4 merge: backspace at the very start of an UNCHANGED editor
-          // joins into the previous paragraph (edits-then-merge would
-          // silently drop the edits, so a dirty editor just no-ops here).
+          // A4/T18 merge: backspace at the very start joins into the
+          // previous paragraph. An EDITED editor's text rides along as the
+          // merge's override (one op, one undo) — the old unchanged-only
+          // refusal is gone; only an INVALID edit still blocks (the engine
+          // would refuse the unencodable text anyway, with less context).
+          if (value !== para.text && !valid) return;
           e.preventDefault();
-          settle(onMergePrev);
+          settle(() => onMergePrev(value !== para.text ? value : undefined));
+        } else if (
+          e.key === 'Delete' &&
+          onMergeNext &&
+          areaRef.current &&
+          (e.target === areaRef.current || areaRef.current.contains(e.target as Node)) &&
+          (() => {
+            const c = readEditorSelection(areaRef.current);
+            const cpLen = Array.from(value).length;
+            return c !== null && c.start === cpLen && c.end === cpLen;
+          })()
+        ) {
+          // T18: Delete at the very end folds the NEXT paragraph into this
+          // one — the mirror of Backspace-at-0, edits riding the same way.
+          if (value !== para.text && !valid) return;
+          e.preventDefault();
+          settle(() => onMergeNext(value !== para.text ? value : undefined));
         } else if (e.key === 'Escape') {
           e.preventDefault();
           e.stopPropagation();
@@ -3665,6 +3794,31 @@ function ParagraphEditor({
         finish();
       }}
     >
+      {(['start', 'end'] as const).map((side) => {
+        const horizontalGrip = inlineDir[0] !== 0;
+        const positive = inlineDir[0] + inlineDir[1] > 0;
+        const cls = horizontalGrip
+          ? (side === 'end') === positive
+            ? 'grip-right'
+            : 'grip-left'
+          : (side === 'end') === positive
+            ? 'grip-bottom'
+            : 'grip-top';
+        return (
+          <div
+            key={side}
+            data-testid={`edit-para-grip-${side}`}
+            className={`page-editpara-grip ${cls}`}
+            title="Drag to resize the paragraph box"
+            onPointerDown={(e) => beginResize(e, side)}
+          />
+        );
+      })}
+      {gripPreview !== null && (
+        <div className="page-editpara-resize-readout" data-testid="edit-para-resize-readout">
+          {Math.round(gripPreview)} pt
+        </div>
+      )}
       <div className="page-editpara-toolbar" role="group" aria-label="Text style">
         <label className="page-editpara-ctl">
           Size
@@ -3691,6 +3845,47 @@ function ParagraphEditor({
                 setSize(clamped);
               }
             }}
+          />
+        </label>
+        <label
+          className="page-editpara-ctl"
+          title="Gap between the halves when Enter splits inside the text (× line height)"
+        >
+          Split gap
+          <span
+            className="page-editpara-gapgrip"
+            data-testid="edit-para-splitgap-grip"
+            title="Drag to adjust"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const startX = e.clientX;
+              const startV = gapVal;
+              const el = e.currentTarget;
+              el.setPointerCapture(e.pointerId);
+              // Native listeners under capture — the standing WebView rule.
+              const onMove = (ev: PointerEvent): void => {
+                const v = Math.max(1.3, Math.min(10, startV + (ev.clientX - startX) * 0.02));
+                setGapField(v.toFixed(1));
+              };
+              const onUp = (): void => {
+                el.removeEventListener('pointermove', onMove);
+                el.removeEventListener('pointerup', onUp);
+              };
+              el.addEventListener('pointermove', onMove);
+              el.addEventListener('pointerup', onUp);
+            }}
+          >
+            ⇔
+          </span>
+          <input
+            type="number"
+            data-testid="edit-para-splitgap"
+            min={1.3}
+            max={10}
+            step={0.1}
+            value={gapField}
+            onChange={(e) => setGapField(e.target.value)}
           />
         </label>
         <label className="page-editpara-ctl">
