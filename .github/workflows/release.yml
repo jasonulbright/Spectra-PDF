@@ -96,6 +96,13 @@ jobs:
       - name: Rust tests
         run: cd src-tauri && cargo test
 
+      # Fresh-install scheduling acceptance: the runner has no `\Spectra PDF\`
+      # task folder, so the #[ignore]d COM round-trips register into a genuinely
+      # fresh store here (registration ensures its folder rather than leaning
+      # on undocumented RegisterTask behavior; see ci.yml for the full note).
+      - name: Rust COM scheduler tests (fresh task store)
+        run: cd src-tauri && cargo test scheduler -- --ignored
+
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
