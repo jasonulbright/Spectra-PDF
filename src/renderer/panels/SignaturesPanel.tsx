@@ -342,7 +342,7 @@ export function SignaturesPanel(): React.ReactElement {
           >
             {result.signature_count} signature{result.signature_count === 1 ? '' : 's'} found.
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1">
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1" tabIndex={0} role="region" aria-label="Signatures">
             {result.signatures.map((sig, i) => (
               <SignatureCard
                 key={sig.field ?? i}

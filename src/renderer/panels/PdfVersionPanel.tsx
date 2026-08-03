@@ -52,7 +52,7 @@ export function PdfVersionPanel(): React.ReactElement {
       )}
       <div>
         <label className="block text-sm text-neutral-400 mb-1">Target Version</label>
-        <select value={version} onChange={(e) => setVersion(e.target.value)} className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm">
+        <select aria-label="PDF version" value={version} onChange={(e) => setVersion(e.target.value)} className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm">
           {VERSIONS.map((v) => <option key={v} value={v}>PDF {v}</option>)}
         </select>
       </div>

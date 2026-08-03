@@ -65,6 +65,7 @@ export function ExtractTextPanel({ initialPage, onConsumeInitialPage }: { initia
         <div>
           <label className="block text-sm text-neutral-400 mb-1">Pages (e.g. 1,3 or all)</label>
           <input type="text" value={pageInput} onChange={(e) => setPageInput(e.target.value)}
+            aria-label="Pages to extract"
             className="w-48 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500" />
         </div>
         <button onClick={handleExtract} disabled={busy} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">

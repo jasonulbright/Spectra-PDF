@@ -42,7 +42,7 @@ export function RecoverPanel(): React.ReactElement {
         {busy ? 'Recovering...' : 'Recover Pages'}
       </button>
       {report && report.lost_pages && report.lost_pages.length > 0 && (
-        <div className="bg-neutral-800 rounded p-3 text-xs max-h-48 overflow-y-auto">
+        <div className="bg-neutral-800 rounded p-3 text-xs max-h-48 overflow-y-auto" tabIndex={0} role="region" aria-label="Recovery report">
           <div className="text-neutral-300 mb-1 font-medium">Recovery Report</div>
           <div className="text-green-400 mb-1">Recovered: pages {report.recovered_pages.join(', ')}</div>
           <div className="text-red-400 mb-1">Lost pages:</div>
