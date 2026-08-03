@@ -1,4 +1,6 @@
 {
+  "chrome.empty.openPdf": "Abrir PDF",
+  "chrome.empty.openToStart": "Abra un PDF para empezar",
   "chrome.home.allTools": "Todas las herramientas",
   "chrome.home.batchOcr": "OCR por lotes",
   "chrome.home.clear": "Borrar",
@@ -16,6 +18,13 @@
   "chrome.prefs.languageSystem": "Predeterminado del sistema",
   "chrome.recent.today": "Hoy {{time}}",
   "chrome.recent.yesterday": "Ayer {{time}}",
+  "chrome.search.ariaLabel": "Buscar herramientas y texto del documento",
+  "chrome.search.inOpenDocuments": "En los documentos abiertos",
+  "chrome.search.inThisDocument": "En este documento",
+  "chrome.search.noMatch": "Ninguna herramienta ni texto coincide con «{{query}}».",
+  "chrome.search.openFirst": "Abra primero un PDF",
+  "chrome.search.placeholder": "Buscar herramientas y texto",
+  "chrome.search.tools": "Herramientas",
   "chrome.status.applyChanges": "Aplicar cambios",
   "chrome.status.barLabel": "Barra de estado del documento",
   "chrome.status.clear": "Borrar",
@@ -34,9 +43,9 @@
   "chrome.status.pageLabelHint": "Escriba una etiqueta de página (i, iv, A-1) o un número de hoja",
   "chrome.status.pageNumberHint": "Escriba un número de página",
   "chrome.status.read": "Leer",
-  "chrome.status.redacting": "Censurando…",
   "chrome.status.redactRegions_one": "Censurar {{count}} región",
   "chrome.status.redactRegions_other": "Censurar {{count}} regiones",
+  "chrome.status.redacting": "Censurando…",
   "chrome.status.saveMarks": "Guardar marcas",
   "chrome.status.saveMarksTitle": "Guardar las marcas pendientes en el documento para retomarlas más tarde (aún no se censura nada)",
   "chrome.status.savingMarks": "Guardando…",
@@ -215,9 +224,9 @@
   "menu.help": "Ayuda",
   "menu.tools": "Herramientas",
   "menu.view": "Ver",
-  "menu.window": "Ventana",
   "menu.view-nav-panels": "Paneles de navegación",
   "menu.view-page-display": "Presentación de página",
   "menu.view-rotate": "Girar vista",
-  "menu.view-zoom": "Zoom"
+  "menu.view-zoom": "Zoom",
+  "menu.window": "Ventana"
 }
