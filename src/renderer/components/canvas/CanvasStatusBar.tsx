@@ -1,5 +1,7 @@
 import React, { useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { DocViewMode } from '../../state/types';
+import { tChrome, tChromeCount } from '../../i18n';
 
 // The docked status bar (Phase 10 slice A — 25-workbench-relayout.md § 3.A).
 // Replaces the floating bottom-right cluster: view state (page box, zoom,
@@ -57,6 +59,8 @@ interface CanvasStatusBarProps {
 }
 
 export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element {
+  // N12: re-render on language change; strings resolve via tChrome below.
+  useTranslation();
   const barRef = useRef<HTMLDivElement | null>(null);
   // One tab stop for the BUTTONS (the MainToolbar roving pattern); the page
   // input stays its own stop — arrow keys inside a text input edit text, so
@@ -98,7 +102,7 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
       ref={applyRoving}
       data-testid="canvas-status-bar"
       role="toolbar"
-      aria-label="Document status bar"
+      aria-label={tChrome('chrome.status.barLabel')}
       onKeyDown={onKeyDown}
       className="canvas-status-bar"
     >
@@ -114,18 +118,18 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
                 className="canvas-status-action bg-emerald-600 hover:bg-emerald-500 text-white"
               >
                 {props.fillingForms
-                  ? 'Filling…'
-                  : `Fill ${props.pendingFormCount} field${props.pendingFormCount === 1 ? '' : 's'}`}
+                  ? tChrome('chrome.status.filling')
+                  : tChromeCount('chrome.status.fillFields', props.pendingFormCount)}
               </button>
               <button
                 type="button"
                 data-testid="forms-clear-btn"
                 disabled={props.fillingForms}
                 onClick={props.onClearForms}
-                title="Discard all pending form values"
+                title={tChrome('chrome.status.clearFormsTitle')}
                 className="canvas-status-action canvas-status-quiet"
               >
-                Clear
+                {tChrome('chrome.status.clear')}
               </button>
             </>
           )}
@@ -139,28 +143,30 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
                 className="canvas-status-action bg-red-600 hover:bg-red-500 text-white"
               >
                 {props.redacting
-                  ? 'Redacting…'
-                  : `Redact ${props.markCount} region${props.markCount === 1 ? '' : 's'}`}
+                  ? tChrome('chrome.status.redacting')
+                  : tChromeCount('chrome.status.redactRegions', props.markCount)}
               </button>
               <button
                 type="button"
                 data-testid="redact-save-btn"
                 disabled={props.redacting || props.savingMarks}
                 onClick={props.onSaveRedact}
-                title="Save the pending marks into the document to revisit later (nothing is redacted yet)"
+                title={tChrome('chrome.status.saveMarksTitle')}
                 className="canvas-status-action canvas-status-quiet"
               >
-                {props.savingMarks ? 'Saving…' : 'Save marks'}
+                {props.savingMarks
+                  ? tChrome('chrome.status.savingMarks')
+                  : tChrome('chrome.status.saveMarks')}
               </button>
               <button
                 type="button"
                 data-testid="redact-clear-btn"
                 disabled={props.redacting}
                 onClick={props.onClearRedact}
-                title="Clear all pending redaction marks"
+                title={tChrome('chrome.status.clearMarksTitle')}
                 className="canvas-status-action canvas-status-quiet"
               >
-                Clear
+                {tChrome('chrome.status.clear')}
               </button>
             </>
           )}
@@ -171,7 +177,7 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
               onClick={props.onApplyPageEdits}
               className="canvas-status-action bg-blue-600 hover:bg-blue-500 text-white"
             >
-              Apply changes
+              {tChrome('chrome.status.applyChanges')}
             </button>
           )}
         </div>
@@ -180,12 +186,12 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
       <button
         type="button"
         data-testid="toggle-comments"
-        title="Show annotation notes"
+        title={tChrome('chrome.status.commentsTitle')}
         aria-pressed={props.showComments}
         onClick={props.onToggleComments}
         className={'canvas-status-action canvas-status-quiet' + (props.showComments ? ' active' : '')}
       >
-        Comments
+        {tChrome('chrome.status.comments')}
       </button>
       {props.pageBox && (
         <div className="canvas-status-pages" data-testid="status-page-segment">
@@ -198,39 +204,48 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
             onBlur={props.pageBox.onBlur}
             onKeyDown={props.pageBox.onKeyDown}
             className="canvas-status-pageinput"
-            aria-label="Current page"
+            aria-label={tChrome('chrome.status.currentPage')}
             title={
               props.pageBox.labelled
-                ? 'Type a page label (i, iv, A-1) or a sheet number'
-                : 'Type a page number'
+                ? tChrome('chrome.status.pageLabelHint')
+                : tChrome('chrome.status.pageNumberHint')
             }
           />
           <span data-testid="page-nav-total">
             {props.pageBox.labelled
-              ? `(${props.pageBox.sheet ?? 1} of ${props.pageBox.total})`
-              : `/ ${props.pageBox.total}`}
+              ? tChrome('chrome.status.sheetOfTotal', {
+                  sheet: props.pageBox.sheet ?? 1,
+                  total: props.pageBox.total,
+                })
+              : tChrome('chrome.status.ofTotal', { total: props.pageBox.total })}
           </span>
         </div>
       )}
-      <div className="canvas-status-zoom" role="group" aria-label="Zoom">
-        <button type="button" title="Zoom out" onClick={props.onZoomOut} className="canvas-status-action canvas-status-quiet">
+      <div className="canvas-status-zoom" role="group" aria-label={tChrome('chrome.status.zoom')}>
+        <button type="button" title={tChrome('chrome.status.zoomOut')} onClick={props.onZoomOut} className="canvas-status-action canvas-status-quiet">
           −
         </button>
-        <button type="button" title="Fit to view" onClick={props.onFit} className="canvas-status-action canvas-status-quiet">
-          Fit
+        <button type="button" title={tChrome('chrome.status.fitTitle')} onClick={props.onFit} className="canvas-status-action canvas-status-quiet">
+          {tChrome('chrome.status.fit')}
         </button>
-        <button type="button" title="Zoom in" onClick={props.onZoomIn} className="canvas-status-action canvas-status-quiet">
+        <button type="button" title={tChrome('chrome.status.zoomIn')} onClick={props.onZoomIn} className="canvas-status-action canvas-status-quiet">
           +
         </button>
       </div>
       <button
         type="button"
         data-testid="toggle-doc-view"
-        title={props.docViewMode === 'document' ? 'Switch to the page organizer' : 'Switch to the reading view'}
+        title={
+          props.docViewMode === 'document'
+            ? tChrome('chrome.status.toOrganizer')
+            : tChrome('chrome.status.toReading')
+        }
         onClick={props.onToggleView}
         className="canvas-status-action canvas-status-quiet"
       >
-        {props.docViewMode === 'document' ? 'Organize' : 'Read'}
+        {props.docViewMode === 'document'
+          ? tChrome('chrome.status.organize')
+          : tChrome('chrome.status.read')}
       </button>
     </div>
   );
