@@ -9,6 +9,8 @@
 // bare-string entries migrate with `openedAt: null` — an honest "unknown",
 // displayed as an em dash, never a fabricated date.
 
+import i18next, { tChrome } from '../i18n';
+
 const KEY = 'spectra-recent';
 const MAX = 10;
 
@@ -76,15 +78,20 @@ export function formatOpenedAt(openedAt: number | null, now: number): string {
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
   const time = `${String(then.getHours()).padStart(2, '0')}:${String(then.getMinutes()).padStart(2, '0')}`;
-  if (sameDay(then, today)) return `Today ${time}`;
+  if (sameDay(then, today)) return tChrome('chrome.recent.today', { time });
   // A CALENDAR step, not now-24h: a real-time subtraction overshoots across
   // a 23-hour DST spring-forward day and mislabels yesterday for an hour
   // (review-caught).
   const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-  if (sameDay(then, yesterday)) return `Yesterday ${time}`;
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const datePart = `${months[then.getMonth()]} ${then.getDate()}`;
-  return then.getFullYear() === today.getFullYear()
-    ? datePart
-    : `${datePart}, ${then.getFullYear()}`;
+  if (sameDay(then, yesterday)) return tChrome('chrome.recent.yesterday', { time });
+  // N12: the date part follows the ACTIVE locale (Intl owns month names —
+  // never a hand-rolled table). en output is byte-identical to the old
+  // 'Mmm D' / 'Mmm D, YYYY' strings, which is what keeps the pure tests
+  // meaningful as en pins.
+  const sameYear = then.getFullYear() === today.getFullYear();
+  return new Intl.DateTimeFormat(i18next.language || 'en', {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  }).format(then);
 }

@@ -5,6 +5,8 @@ import { COMMANDS, type CommandId } from '../commands/registry';
 import { shortcutForCommand } from '../commands/keymap';
 import { invokeCommand, isCommandEnabled } from '../commands/context';
 import { ChromeIcon, type ChromeIconId } from './chrome-icons';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tCommandTitle } from '../i18n';
 import { ContextMenu } from './ContextMenu';
 import { OmniSearch } from './OmniSearch';
 
@@ -48,7 +50,10 @@ function ToolbarButton({
 }): React.ReactElement {
   const enabled = isCommandEnabled(command);
   const shortcut = shortcutForCommand(command);
-  const title = shortcut ? `${COMMANDS[command].title} (${shortcut})` : COMMANDS[command].title;
+  const cmdTitle = tCommandTitle(command, COMMANDS[command].title);
+  const title = shortcut
+    ? tChrome('chrome.toolbar.titleWithShortcut', { title: cmdTitle, shortcut })
+    : cmdTitle;
   return (
     <button
       type="button"
@@ -60,7 +65,7 @@ function ToolbarButton({
       onFocus={onFocus}
       onClick={() => invokeCommand(command)}
       title={title}
-      aria-label={COMMANDS[command].title}
+      aria-label={cmdTitle}
       className={
         'w-7 h-7 flex items-center justify-center rounded text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors' +
         (pressed ? ' bg-neutral-700 text-white' : '')
@@ -72,6 +77,8 @@ function ToolbarButton({
 }
 
 export function MainToolbar(): React.ReactElement {
+  // N12: re-render on language change; labels resolve via tChrome/tCommandTitle.
+  useTranslation();
   const state = useAppState(); // re-render on state change so enablement stays live
   // The Hand/Select pair are MODES (M6.2) — the armed one reads pressed, the
   // way Acrobat's own pair does. Select is "pressed" for any non-hand mode
@@ -135,7 +142,7 @@ export function MainToolbar(): React.ReactElement {
     <div
       data-testid="main-toolbar"
       role="toolbar"
-      aria-label="Main toolbar"
+      aria-label={tChrome('chrome.toolbar.mainLabel')}
       onKeyDown={onToolbarKeyDown}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -173,7 +180,7 @@ export function MainToolbar(): React.ReactElement {
           y={menuAt.y}
           items={[
             {
-              label: 'Customize Toolbar…',
+              label: tChrome('chrome.toolbar.customize'),
               onClick: () => invokeCommand('view.customizeToolbar'),
             },
           ]}
