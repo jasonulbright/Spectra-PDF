@@ -261,7 +261,15 @@ def _walk_vectors(
         if operator == "Do" and pdf is not None and operands and depth < MAX_FORM_DEPTH:
             fname = str(operands[0])
             xobj = _lookup_xobject(fname, resources, resources)
-            if xobj is not None and str(xobj.get("/Subtype", "")) == "/Form":
+            # P7 slice F: a MARKED vector-graphic form (a placed SVG) is one
+            # unit owned by the IMAGE-placement machinery — listing its
+            # interior paths here would offer per-path edits that fork a
+            # copy away from the marker and fight the placement selection.
+            if (
+                xobj is not None
+                and str(xobj.get("/Subtype", "")) == "/Form"
+                and xobj.get("/SpectraVector") is None
+            ):
                 fmatrix = _as_matrix(xobj.get("/Matrix")) or IDENTITY
                 fres = xobj.get("/Resources")
                 # A form inherits the caller's graphics state (§8.10.2): thread

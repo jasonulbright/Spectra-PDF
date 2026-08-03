@@ -352,7 +352,10 @@ export interface CanvasEditImagesHandlers {
   addImage: (
     page: number,
     rect: [number, number, number, number] | null,
-    source: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
+    source:
+      | { jpeg_path: string }
+      | { raw_path: string; width: number; height: number; channels: 3 | 4 }
+      | { svg_path: string },
     at?: [number, number],
   ) => Promise<void>;
   selection: () =>
@@ -1034,7 +1037,10 @@ export interface TestHarness {
   editImageAdd: (
     page: number,
     rect: [number, number, number, number] | null,
-    source: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
+    source:
+      | { jpeg_path: string }
+      | { raw_path: string; width: number; height: number; channels: 3 | 4 }
+      | { svg_path: string },
     at?: [number, number],
   ) => Promise<void>;
   /** Add Text (9.A2): place then author. */

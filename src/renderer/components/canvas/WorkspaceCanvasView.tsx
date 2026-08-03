@@ -232,7 +232,10 @@ interface WorkspaceCanvasViewProps {
     path: string,
     page: number,
     rect: [number, number, number, number] | null,
-    source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
+    source?:
+      | { jpeg_path: string }
+      | { raw_path: string; width: number; height: number; channels: 3 | 4 }
+      | { svg_path: string },
     at?: [number, number],
   ) => Promise<string | void>;
   // Add-page ghost (2n.3): pick file(s) and import their pages into a document
@@ -3327,6 +3330,15 @@ export function WorkspaceCanvasView({
     );
   }, [editSel, editImagesByPage]);
 
+  // P7 slice F: the single selected placement's KIND — the toolbar disables
+  // replace/extract for a placed vector graphic (engine refusal as belt).
+  const editImageSelKind = useMemo(() => {
+    if (!editSel || editSel.kind !== 'image' || editSel.indexes.length !== 1) return null;
+    return (
+      editImagesByPage.get(editSel.pageId)?.find((pl) => pl.index === editSel.index)?.kind ?? null
+    );
+  }, [editSel, editImagesByPage]);
+
   // P7 slice D: the selected placement's blend mode (seed) — single-only,
   // same divergence rule as opacity.
   const editImageBlend = useMemo(() => {
@@ -4418,6 +4430,7 @@ export function WorkspaceCanvasView({
         onSetImageBlend={commitImageBlend}
         editImageMask={editImageMask}
         onSetImageMask={commitImageMask}
+        editImagePlacementKind={editImageSelKind}
         editImageCount={editSel?.kind === 'image' ? editSel.indexes.length : 0}
         onAlignImages={alignImageGroup}
         onSetImageOpacity={commitImageOpacity}

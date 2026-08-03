@@ -17,7 +17,14 @@ export interface RawReplacementSource {
 
 export type ReplacementSource = { jpeg_path: string } | RawReplacementSource;
 
+/** ADD accepts everything replace does PLUS SVG (P7: placed as real vector
+ * content via the engine compiler — replace stays raster-only, since a
+ * vector placement refuses replace by design). */
+export type AddImageSource = ReplacementSource | { svg_path: string };
+
 export const isJpegPath = (path: string): boolean => /\.jpe?g$/i.test(path);
+
+export const isSvgPath = (path: string): boolean => /\.svg$/i.test(path);
 
 /**
  * The EXIF Orientation tag (1–8; 1 = upright) from a JPEG's APP1 segment, or
