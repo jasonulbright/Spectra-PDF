@@ -1742,6 +1742,29 @@
   stroke-dasharray: 5 4;
   pointer-events: none;
 }
+/* P7 slice E: gradient-mask direct manipulation — the from/to dots and the
+   axis line between them. */
+.page-imgtx-maskaxis {
+  stroke: var(--accent, #3b82f6);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  fill: none;
+}
+.page-imgtx-maskdot {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent, #3b82f6);
+  background: #fff;
+  pointer-events: auto;
+  cursor: grab;
+  box-sizing: border-box;
+}
+.page-imgtx-maskdot.to {
+  background: var(--accent, #3b82f6);
+}
 .page-imgtx-crophandle {
   position: absolute;
   width: 9px;
@@ -1767,6 +1790,14 @@
   min-width: 34px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+/* P7 slice D: the blend-mode select beside the opacity slider. */
+.secondary-toolbar-blend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: inherit;
 }
 
 /* A3b style toggles: B / I substitution buttons. */
