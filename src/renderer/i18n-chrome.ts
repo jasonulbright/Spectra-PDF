@@ -65,6 +65,15 @@ export const CHROME_STRINGS = {
   'chrome.recent.yesterday': 'Yesterday {{time}}',
   'chrome.prefs.language': 'Language',
   'chrome.prefs.languageSystem': 'System default',
+  'chrome.search.placeholder': 'Search tools and text',
+  'chrome.search.ariaLabel': 'Search tools and document text',
+  'chrome.search.noMatch': 'No tools or text match “{{query}}”.',
+  'chrome.search.tools': 'Tools',
+  'chrome.search.inThisDocument': 'In this document',
+  'chrome.search.inOpenDocuments': 'In open documents',
+  'chrome.search.openFirst': 'Open a PDF first',
+  'chrome.empty.openToStart': 'Open a PDF to get started',
+  'chrome.empty.openPdf': 'Open PDF',
 } as const;
 
 export type ChromeKey = keyof typeof CHROME_STRINGS;
