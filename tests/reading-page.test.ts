@@ -7,9 +7,13 @@ import {
   fitWidthZoom,
   maxZoomFor,
   naturalDisplayHeight,
+  realTopFor,
+  scrollMapFor,
+  virtualTopOf,
   visibleRange,
   MAX_ZOOM,
   MIN_ZOOM,
+  SAFE_ELEMENT_EXTENT,
   type JumpAnchor,
   type ReadingMetrics,
 } from '../src/renderer/canvas/reading-page';
@@ -497,86 +501,29 @@ describe('zoom presets — Actual Size / Fit Width', () => {
       expect(clampZoom(-3, 10)).toBe(MIN_ZOOM);
     });
   });
-
-  // The spacer is a REAL DOM height (pageCount * rowH), and Chromium caps a
-  // single element at ~33.55M px. Widening MAX_ZOOM to 64 made that reachable at
-  // ~533 pages (rowH ~63,000px) where the old ceiling of 6 needed ~5,683 — past
-  // it the document's tail silently stops being scrollable AND centerOn can't
-  // land there, while the page box still reports the page it meant.
-  describe('maxZoomFor — zoom can never make the document unreachable', () => {
-    const rowHAtZoom1 = 960 + 24;
+  // P12 (brief 36) SUPERSEDED the height-axis zoom bound these pins used to
+  // cover: the spacer now caps at SAFE_ELEMENT_EXTENT and rows translate under
+  // it (scrollMapFor), so NO page count may bound zoom — the presets must be
+  // honest at any length. The WIDTH bound stays (width never accumulates
+  // across pages, so a zoom cap is the right tool there), and its pins stay.
+  describe('maxZoomFor — width-only bound (P12: height never bounds zoom)', () => {
     const CHROMIUM_ELEMENT_CAP = 33_554_428;
-    const contentHeightAt = (pageCount: number, zoom: number): number =>
-      pageCount * rowHAtZoom1 * zoom;
 
-    it('keeps the spacer under the browser cap at every page count', () => {
-      for (const pageCount of [1, 10, 533, 600, 1000, 5000, 34_000, 200_000]) {
-        const z = maxZoomFor(pageCount);
-        expect(contentHeightAt(pageCount, z), `${pageCount} pages @ zoom ${z}`).toBeLessThan(
-          CHROMIUM_ELEMENT_CAP,
-        );
+    it('page count no longer bounds zoom at ANY length', () => {
+      for (const pageCount of [1, 533, 600, 5000, 34_101, 50_000_000]) {
+        expect(maxZoomFor(pageCount), `${pageCount} pages`).toBe(MAX_ZOOM);
+        expect(clampZoom(MAX_ZOOM, pageCount)).toBe(MAX_ZOOM);
       }
     });
 
-    it('a 600-page doc cannot be zoomed into unreachability (the regression)', () => {
-      // Unbounded, MAX_ZOOM=64 would give 600 * 984 * 64 = 37.7M px — over the cap.
-      expect(contentHeightAt(600, MAX_ZOOM)).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
-      expect(contentHeightAt(600, maxZoomFor(600))).toBeLessThan(CHROMIUM_ELEMENT_CAP);
-      expect(clampZoom(MAX_ZOOM, 600)).toBeLessThan(MAX_ZOOM); // the stepper is bounded too
-    });
-
-    it('leaves ordinary documents the full range (the cap must not tax normal use)', () => {
-      for (const pageCount of [1, 20, 100, 300]) {
-        expect(maxZoomFor(pageCount)).toBe(MAX_ZOOM);
-      }
-    });
-
-    it('never inverts the clamp for an absurdly long document', () => {
-      // A doc so long that even MIN_ZOOM overflows must pin at the floor, not
-      // produce max < min (which would make clampZoom return the max).
-      const z = maxZoomFor(50_000_000);
-      expect(z).toBe(MIN_ZOOM);
-      expect(clampZoom(1, 50_000_000)).toBe(MIN_ZOOM);
-    });
-
-    it('treats an empty doc as unconstrained', () => {
-      expect(maxZoomFor(0)).toBe(MAX_ZOOM);
-    });
-
-    // Round-3 regression. The count is half of what makes a zoom valid, and it
-    // changes UNDER a stable zoom (Undo/Import/merge grow the doc without
-    // remounting the view). Clamping only where zoom is WRITTEN left the existing
-    // zoom stale and the spacer over the cap with no zoom press at all — so
-    // DocumentView derives `zoom = clampZoom(zoomState, pageCount)` every render.
-    // These pin the derivation's contract.
-    it('re-clamps a previously-valid zoom when the document GROWS under it', () => {
-      // 476 pages @ 64x is legitimate — maxZoomFor doesn't reduce it...
-      expect(maxZoomFor(476)).toBe(MAX_ZOOM);
-      expect(clampZoom(MAX_ZOOM, 476)).toBe(MAX_ZOOM);
-      // ...then an Undo/Import brings it to 534 pages while zoom state stays 64.
-      expect(contentHeightAt(534, MAX_ZOOM)).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
-      const effective = clampZoom(MAX_ZOOM, 534); // what the render now derives
-      expect(effective).toBeLessThan(MAX_ZOOM);
-      expect(contentHeightAt(534, effective)).toBeLessThan(CHROMIUM_ELEMENT_CAP);
-    });
-
-    // M4.1f gave the spacer a REAL width so wide pages are reachable — which
-    // means WIDTH can blow the same element cap that height can. Bounding one
-    // axis and not the other makes the fix for one the bug in the other.
-    it('bounds zoom on the WIDTH axis too (a degenerate wide page)', () => {
+    it('bounds zoom on the WIDTH axis (a degenerate wide page)', () => {
       // A spec-legal MediaBox [0 0 14400 26] — 200in x 0.36in, aspect ~554:1.
       const degenerate = { id: 'w', width: 14400, height: 26, rotation: 0 as const };
       const widest = displayWidthAt(degenerate, READING_BASE_HEIGHT);
-      const widthAt = (zoom: number): number =>
-        widest * zoom;
-      // Unbounded on width, max zoom would overflow the element cap...
-      expect(widthAt(MAX_ZOOM)).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
-      // ...and the page COUNT bound alone never looks at aspect, so it allows it.
-      expect(maxZoomFor(1)).toBe(MAX_ZOOM);
-      // With the width bound, the spacer stays reachable.
+      expect(widest * MAX_ZOOM).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
       const z = maxZoomFor(1, widest);
       expect(z).toBeLessThan(MAX_ZOOM);
-      expect(widthAt(z)).toBeLessThan(CHROMIUM_ELEMENT_CAP);
+      expect(widest * z).toBeLessThan(CHROMIUM_ELEMENT_CAP);
       expect(clampZoom(MAX_ZOOM, 1, widest)).toBe(z);
     });
 
@@ -585,21 +532,74 @@ describe('zoom presets — Actual Size / Fit Width', () => {
         expect(maxZoomFor(10, displayWidthAt(p, READING_BASE_HEIGHT))).toBe(MAX_ZOOM);
       }
     });
+  });
 
-    it('takes the TIGHTER of the two axis bounds', () => {
-      const wide = displayWidthAt({ id: 'w', width: 14400, height: 26, rotation: 0 }, READING_BASE_HEIGHT);
-      // A long doc of degenerate pages: both axes bind; the result must satisfy both.
-      const z = maxZoomFor(600, wide);
-      expect(z).toBeLessThanOrEqual(maxZoomFor(600));
-      expect(z).toBeLessThanOrEqual(maxZoomFor(1, wide));
+  // P12 — the scaled-spacer scroll map itself.
+  describe('scrollMapFor / virtualTopOf / realTopFor', () => {
+    const rowH = READING_BASE_HEIGHT + PAGE_GAP;
+    const viewportH = 900;
+
+    it('is the IDENTITY for every document under the element cap', () => {
+      for (const pageCount of [1, 100, 5000, 30_000]) {
+        const content = pageCount * rowH;
+        if (content > SAFE_ELEMENT_EXTENT) continue;
+        const map = scrollMapFor(content, viewportH);
+        expect(map.spacerHeight).toBe(content);
+        expect(map.k).toBe(1);
+        for (const st of [0, 123.5, content - viewportH]) {
+          expect(virtualTopOf(st, map)).toBe(st);
+          expect(realTopFor(st, map)).toBe(st);
+        }
+      }
     });
 
-    it('clamps the INITIAL zoom of 1 for a document long enough to overflow at 1x', () => {
-      // No write site ever sees the initial state, so only the derivation covers it.
-      expect(contentHeightAt(34_101, 1)).toBeGreaterThan(CHROMIUM_ELEMENT_CAP);
-      const effective = clampZoom(1, 34_101);
-      expect(effective).toBeLessThan(1);
-      expect(contentHeightAt(34_101, effective)).toBeLessThan(CHROMIUM_ELEMENT_CAP);
+    it('caps the spacer and maps the endpoints EXACTLY past the cap', () => {
+      const pageCount = 100_000; // ~98.4M px of true extent at zoom 1
+      const content = pageCount * rowH;
+      expect(content).toBeGreaterThan(SAFE_ELEMENT_EXTENT);
+      const map = scrollMapFor(content, viewportH);
+      expect(map.spacerHeight).toBe(SAFE_ELEMENT_EXTENT);
+      expect(map.k).toBeGreaterThan(1);
+      // Top lands at the top...
+      expect(virtualTopOf(0, map)).toBe(0);
+      // ...and the REAL bottom lands the VIRTUAL bottom flush — the last row
+      // exactly reachable, never short of the end, never past it.
+      const realBottom = map.spacerHeight - viewportH;
+      expect(virtualTopOf(realBottom, map)).toBeCloseTo(content - viewportH, 6);
+    });
+
+    it('round-trips virtual -> real -> virtual exactly enough to land a jump', () => {
+      const content = 200_000 * rowH;
+      const map = scrollMapFor(content, viewportH);
+      for (const target of [0, rowH * 12_345, content / 2, content - viewportH]) {
+        expect(virtualTopOf(realTopFor(target, map), map)).toBeCloseTo(target, 6);
+      }
+    });
+
+    it('row placement is the shipped formula under the cap and continuous past it', () => {
+      // Under the cap: top(r) = r*rowH - (virtualTop - scrollTop) === r*rowH.
+      const small = scrollMapFor(500 * rowH, viewportH);
+      const st = 4321;
+      expect(st * small.k - st).toBe(0);
+      // Past the cap: the correction slides the document under the window —
+      // the row under the scroll position stays under it.
+      const content = 100_000 * rowH;
+      const map = scrollMapFor(content, viewportH);
+      const real = map.spacerHeight / 3;
+      const vTop = virtualTopOf(real, map);
+      const row = Math.floor(vTop / rowH);
+      const top = row * rowH - (vTop - real);
+      // The row's on-screen offset (top - real) sits within one row of the
+      // viewport origin.
+      expect(top - real).toBeGreaterThan(-rowH);
+      expect(top - real).toBeLessThanOrEqual(0 + rowH);
+    });
+
+    it('never produces k below 1, even for degenerate viewport heights', () => {
+      for (const vh of [0, -10, SAFE_ELEMENT_EXTENT + 5]) {
+        const map = scrollMapFor(SAFE_ELEMENT_EXTENT * 2, vh);
+        expect(map.k).toBeGreaterThanOrEqual(1);
+      }
     });
   });
 });
