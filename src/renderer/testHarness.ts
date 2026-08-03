@@ -421,7 +421,7 @@ export interface CanvasEditImagesHandlers {
   vectorPageIds: () => string[];
   vectors: (pageId: string) => {
     index: number;
-    kind: 'fill' | 'stroke' | 'fillstroke';
+    kind: 'fill' | 'stroke' | 'fillstroke' | 'shading';
     fill: [number, number, number] | null;
     stroke: [number, number, number] | null;
     lineWidth: number;
@@ -989,7 +989,7 @@ export interface TestHarness {
   editVectorPageIds: () => string[];
   editVectors: (pageId: string) => {
     index: number;
-    kind: 'fill' | 'stroke' | 'fillstroke';
+    kind: 'fill' | 'stroke' | 'fillstroke' | 'shading';
     fill: [number, number, number] | null;
     stroke: [number, number, number] | null;
     lineWidth: number;
