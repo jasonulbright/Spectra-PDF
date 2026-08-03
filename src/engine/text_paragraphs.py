@@ -2976,6 +2976,564 @@ def _augment_tounicode(pdf, font_dict, additions: dict[int, str]) -> None:
     font_dict["/ToUnicode"] = pdf.make_stream(body.encode("ascii"))
 
 
+class _PreparedStyle:
+    """Everything the styled-chars pipeline resolves for an edit: the styled
+    stream, the fallback subsets, and the whole-paragraph overrides. Built by
+    `_prepare_styled` — ONE implementation shared by replace (which adds
+    per-span styling, bidi machinery and the T26 in-place path) and merge
+    (whole-paragraph restyle only, shipped substitution behaviour kept)."""
+
+    __slots__ = (
+        "styled", "fallbacks", "size_override", "has_span_size",
+        "vertical_face", "inplace_face", "inplace_font_dict",
+        "inplace_tounicode", "inplace_widths",
+    )
+
+
+def _prepare_styled(
+    pdf,
+    para: _Paragraph,
+    resources,
+    new_text: str,
+    spans: list,
+    *,
+    convert: bool = False,
+    font_path: str | None = None,
+    size=None,
+    color=None,
+    family=None,
+    bold=None,
+    italic=None,
+    features=None,
+    alt_index: int = 0,
+    span_styles: list | None = None,
+    allow_inplace: bool = False,
+    bidi_aware: bool = False,
+    members_override: dict | None = None,
+) -> _PreparedStyle:
+    """The A1/A3/A5/9.K2/9.T26 styling pipeline, extracted verbatim from
+    `replace_paragraph_text` for T18 so a merge can restyle through the
+    SAME machinery instead of a drifting copy. `allow_inplace=False` and
+    `bidi_aware=False` keep a caller byte-identical to the pre-extraction
+    bare `_styled_chars` call when every restyle argument is None."""
+    inplace_face = None
+    inplace_font_dict = None
+    inplace_tounicode: dict[int, str] = {}
+    inplace_widths: dict[int, float] = {}
+    # A1 overrides: a size in points (clamped to a sane editing range —
+    # an unbounded value pushed most of the paragraph off the page on a
+    # typo, review-caught), an [r,g,b] fill colour.
+    size_override = None
+    if size is not None:
+        try:
+            sv = float(size)
+        except (TypeError, ValueError):
+            sv = 0.0
+        if sv > 0:
+            size_override = max(1.0, min(_MAX_EDIT_SIZE, sv))
+    color_override = None
+    if color is not None:
+        try:
+            rgb = [max(0.0, min(1.0, float(c))) for c in color]
+        except (TypeError, ValueError):
+            rgb = []
+        if len(rgb) == 3:
+            color_override = (None, ("rg", tuple(rgb)))
+    # A3a family swap: an explicit selector, so garbage REFUSES rather
+    # than silently keeping the original (a swap that did nothing would
+    # be a success that lied).
+    family_override = None
+    if family is not None:
+        family_override = _validated_family(family)
+    # A3b style axis: a PRESENT bold/italic is the substituted face's
+    # absolute weight/slant; both None = no style substitution.
+    style_override = None
+    if bold is not None or italic is not None:
+        style_override = (bool(bold), bool(italic))
+    # 9.K2 whole-paragraph OpenType features (small caps / alternates).
+    # `features` accepts the tokens "small_caps"/"smcp"/"c2sc"/"salt"; a
+    # feature forces the Libertinus-Serif switch (Liberation has none) and
+    # substitutes the whole paragraph. `((), 0)` when absent, so the
+    # no-feature path is byte-identical.
+    para_feats = _normalize_para_features(features)
+    try:
+        para_alt = int(alt_index or 0) if para_feats else 0
+    except (TypeError, ValueError):
+        para_alt = 0
+    substituting = (
+        family_override is not None or style_override is not None or bool(para_feats)
+    )
+    # 9.T4: a VERTICAL paragraph substitutes into a vertical-capable
+    # face. This used to refuse outright ("vertical text cannot
+    # substitute a horizontal face") because the bundled Liberation
+    # faces are horizontal and nothing else was vendored — a true
+    # statement that stopped being true when T5 bundled Noto Sans CJK
+    # (which carries `vert`/`vrt2` and `vmtx`) and T3 brought the shaper
+    # that can reach those features. Family serif/sans/mono has nothing
+    # honest to resolve to for a column, so it is IGNORED here rather
+    # than obeyed into a sideways result; the weight axis is real, and a
+    # user who wants a different vertical face picks an installed one
+    # (T6), which is checked for vertical machinery before it is used.
+    vertical_face = None
+    # `convert` counts as well as a style request. A column whose own
+    # font cannot express a typed character needs the vertical face for
+    # exactly the reason a restyle does, and without this it raised
+    # "vertical text cannot be converted to the fallback font" — the
+    # refusal T4 was supposed to have lifted. It survived because the
+    # shipped pin for the escape hatch passes `bold=True`, which sets
+    # `substituting` on its own and hid the plain-convert case.
+    if (substituting or convert) and para.vertical:
+        # `style_key` is imported again below, inside the fallback-build
+        # block — naming it there makes it a FUNCTION-LOCAL, so this
+        # earlier use must bring its own or it reads as unassigned.
+        from engine.font_fallback import (
+            face_shapes_vertically,
+            resolve_vertical_font,
+        )
+        from engine.font_fallback import style_key as _style_key
+
+        if not font_path:
+            raise ValueError("fallback font path is required to restyle")
+        if isinstance(family_override, str) and os.path.isabs(family_override):
+            if not face_shapes_vertically(family_override, para.text):
+                raise ValueError(
+                    "that font has no vertical forms — pick one that does"
+                )
+            vertical_face = family_override
+        else:
+            vertical_face = resolve_vertical_font(
+                str(font_path),
+                para.text,
+                style=_style_key(
+                    bool(style_override[0]) if style_override else False,
+                    bool(style_override[1]) if style_override else False,
+                ),
+            )
+
+    # A5a/A5b/A5c per-span styling: fold the sparse span_styles ranges
+    # into per-code-point lookups — `color_by_pos` (A5a colour),
+    # `face_by_pos` (A5b face key), and `size_by_pos` (A5c size, points)
+    # INDEPENDENTLY, so one entry may carry a colour, a face, a size, or
+    # any combination, on unaligned ranges. Last-writer-wins on overlap.
+    # All three stay None when unused → _styled_chars byte-identical.
+    color_by_pos = None
+    face_by_pos = None
+    size_by_pos = None
+    if span_styles:
+        n_cp = len(str(new_text))
+        for entry in span_styles:
+            try:
+                st = int(entry["start"])
+                en = int(entry["end"])
+            except (KeyError, TypeError, ValueError):
+                raise ValueError("span style needs integer start/end") from None
+            if not (0 <= st <= en <= n_cp):
+                raise ValueError("span style range out of bounds")
+            if st == en:
+                continue  # empty range: harmless no-op
+            has_face = any(
+                f in entry for f in ("family", "bold", "italic", "small_caps", "alternates")
+            )
+            has_color = entry.get("color") is not None
+            has_size = entry.get("size") is not None
+            if not has_face and not has_color and not has_size:
+                raise ValueError("span style must set a colour, a face, or a size")
+            if has_color:
+                try:
+                    rgb = [max(0.0, min(1.0, float(c))) for c in entry.get("color")]
+                except (TypeError, ValueError):
+                    rgb = []
+                if len(rgb) != 3:
+                    raise ValueError("span style colour must be [r, g, b]")
+                cs = (None, ("rg", tuple(rgb)))
+                if color_by_pos is None:
+                    color_by_pos = [None] * n_cp
+                for k in range(st, en):
+                    color_by_pos[k] = cs
+            if has_face:
+                # A5b face key (family_or_None, bold, italic): family in
+                # the trio or absent (None = keep the member family);
+                # bold/italic coerced bool (absent = False — the absolute
+                # A3b weight/slant semantics, now per span).
+                fam = entry.get("family")
+                if fam is not None:
+                    try:
+                        fam = _validated_family(fam)
+                    except ValueError as exc:
+                        raise ValueError(f"span style {exc}") from None
+                # 9.K2: a per-span OpenType feature request (small caps /
+                # alternates) rides the SAME face key. small_caps expands
+                # to smcp+c2sc; a feature forces a feature-bearing face
+                # (Libertinus Serif) in the build below, because Liberation
+                # has none. No feature => `((), 0)`, byte-identical to A5b.
+                feats, alt = _span_features(entry)
+                facekey = (fam, bool(entry.get("bold")), bool(entry.get("italic")), feats, alt)
+                if face_by_pos is None:
+                    face_by_pos = [None] * n_cp
+                for k in range(st, en):
+                    face_by_pos[k] = facekey
+            if has_size:
+                # A5c per-span size (points): coerce + clamp to the A1
+                # range [1.0, _MAX_EDIT_SIZE] (a fat-fingered 5000 lands
+                # at the viewer max, never off-page); a non-number refuses
+                # named, mirroring the colour shape check.
+                try:
+                    sv = float(entry.get("size"))
+                except (TypeError, ValueError):
+                    raise ValueError("span style size must be a number") from None
+                sv = max(1.0, min(_MAX_EDIT_SIZE, sv))
+                if size_by_pos is None:
+                    size_by_pos = [None] * n_cp
+                for k in range(st, en):
+                    size_by_pos[k] = sv
+
+    # A3a/A3b whole-paragraph substitution → ONE face key covering every
+    # char (family_override may be None = keep the member family). None
+    # when not substituting. Per-span faces (face_by_pos) override it per
+    # position; the single-key case stays byte-identical to shipped A3.
+    whole_para_face = None
+    if substituting:
+        wb = style_override[0] if style_override is not None else False
+        wi = style_override[1] if style_override is not None else False
+        whole_para_face = (family_override, wb, wi, para_feats, para_alt)
+
+    members_by_index = (
+        members_override
+        if members_override is not None
+        else {m.index: m for m in para.members}
+    )
+    # 9.A5b (round-33 HIGH): each member's OWN classified family, so a
+    # per-span face with no explicit family lands on that member's family
+    # (a bolded mono word in a serif paragraph → mono-bold). Only needed
+    # when per-span faces are present; the font is looked up in the
+    # member's own stream resources (form-scoped when nested), page
+    # resources as fallback.
+    member_family = None
+    if face_by_pos is not None:
+        from engine.font_fallback import classify_font_family
+        from engine.text_runs import _lookup_font
+
+        member_family = {}
+        for m in para.members:
+            fd = _lookup_font(m.style["font_name"], m.resources or resources, resources)
+            member_family[m.index] = classify_font_family(fd) if fd is not None else "sans"
+    # 9.T3: a paragraph that reorders may carry a cursively joining
+    # script, which has to be SHAPED into a face that still knows how.
+    # The per-member weight/slant comes along so a bold Arabic run lands
+    # on the bold face rather than flattening.
+    rtl_style = None
+    if bidi_aware and para.bidi and not para.vertical:
+        from engine.font_fallback import classify_font_style
+        from engine.text_runs import _lookup_font
+
+        rtl_style = {}
+        for m in para.members:
+            fd = _lookup_font(m.style["font_name"], m.resources or resources, resources)
+            try:
+                rtl_style[m.index] = classify_font_style(fd) if fd is not None else (False, False)
+            except Exception:
+                rtl_style[m.index] = (False, False)
+
+    # 9.T26: qualify the document's OWN font for in-place shaping, so an
+    # RTL edit keeps the document's typeface instead of substituting the
+    # bundled face. Every condition below is a correctness gate, not a
+    # preference:
+    #   - no substitution/feature request and no per-span face — asking
+    #     for bold IS asking to leave the document font;
+    #   - ONE font across the members — a per-member split would seam a
+    #     word at a member boundary;
+    #   - the PDF-side shape (Identity-H + Identity CIDToGIDMap: a glyph
+    #     id IS the code) and the program-side one (cmap + GSUB still
+    #     present) both hold — `in_place_face` checks them;
+    #   - every joining word of the NEW text shapes without `.notdef`
+    #     (a subset keeps only the glyphs it drew, and a form the new
+    #     text needs may be gone);
+    #   - no glyph SPELLING collision: code == gid here, so one glyph
+    #     gets exactly one ToUnicode entry — a shaped cluster that wants
+    #     gid G to spell Y when the document already has it spelling X
+    #     cannot be expressed, and the T25 fatha-as-sukun lesson says
+    #     never to try. Any failed condition falls back to the bundled
+    #     face, which is the shipped, correct behaviour.
+    if (
+        allow_inplace
+        and rtl_style is not None
+        and not substituting
+        and font_path
+        and len({m.style["font_name"] for m in para.members}) == 1
+    ):
+        from engine import shaping as _shaping
+        from engine.text_runs import _lookup_font as _lf
+
+        first_m = min(para.members, key=lambda m: m.index)
+        fd0 = _lf(first_m.style["font_name"], first_m.resources or resources, resources)
+        candidate = _shaping.in_place_face(fd0) if fd0 is not None else None
+        if candidate is not None:
+            cap0 = first_m.cap
+            ok = True
+            additions: dict[int, str] = {}
+            try:
+                from fontTools.ttLib import TTFont as _TT
+
+                _tt = _TT(candidate, fontNumber=0, lazy=True)
+                try:
+                    gid_of0 = {n: i for i, n in enumerate(_tt.getGlyphOrder())}
+                finally:
+                    _tt.close()
+                for token in str(new_text).split():
+                    if not _shaping.requires_shaping(token):
+                        continue
+                    run0 = _shaping.shape(candidate, token, rtl=True)
+                    for name, spells in run0.clusters:
+                        gid = gid_of0[name]
+                        existing = cap0._code2uni.get(gid)
+                        if existing is None:
+                            additions[gid] = spells
+                        elif spells and existing != spells:
+                            ok = False
+                            break
+                    if not ok:
+                        break
+            except Exception:
+                ok = False
+            if ok:
+                inplace_face = candidate
+                inplace_font_dict = fd0
+                inplace_tounicode = additions
+            else:
+                try:
+                    os.unlink(candidate)
+                except OSError:
+                    pass
+    styled, fb_by_face = _styled_chars(
+        str(new_text), list(spans), members_by_index, bool(convert),
+        size_override=size_override, color_override=color_override,
+        whole_para_face=whole_para_face, color_by_pos=color_by_pos,
+        face_by_pos=face_by_pos, size_by_pos=size_by_pos,
+        member_family=member_family, rtl_style=rtl_style,
+        vertical_ok=vertical_face is not None,
+        inplace_ok=inplace_face is not None,
+    )
+    # 9.A5b: build ONE _Fallback per face key, sorted-face order so the
+    # subset names + embedded bytes are deterministic. The whole-para A3
+    # path yields exactly one key here → one subset → byte-identical to
+    # the shipped single-_Fallback output.
+    fallbacks: dict[tuple, _Fallback] = {}
+    if fb_by_face:
+        from engine.font_fallback import (
+            build_fallback_font,
+            resolve_fallback_font,
+            style_key,
+            synthetic_family_font,
+        )
+        from engine.text_runs import _lookup_font
+
+        if not font_path:
+            raise ValueError("fallback font path is required to convert")
+        # family=None keys resolve their face from the FIRST member's own
+        # font (form-scoped when nested — a form's `F1` can differ from
+        # the page's, review-caught): this is the B1 dominant face and
+        # reproduces the shipped whole-para style-only / convert resolve
+        # exactly. family=serif|sans|mono keys bypass classification via
+        # a synthetic /Flags dict (the A2 trick).
+        first = min(para.members, key=lambda m: m.index)
+        for key in sorted(fb_by_face, key=_face_sort_key):
+            fam, kbold, kitalic, kfeats, kalt = key
+            chars = "".join(sorted(fb_by_face[key]))
+            if vertical_face is not None:
+                # 9.T4: ONE vertical face serves the whole paragraph —
+                # the weight was resolved with it, and a column cannot
+                # mix writing modes anyway (the writing mode rides in
+                # lkey, so a mixed-mode paragraph never groups).
+                from engine.font_fallback import build_vertical_font
+
+                font_dict, encode, width_1000 = build_vertical_font(
+                    pdf, vertical_face, chars
+                )
+                fallbacks[key] = _Fallback(
+                    None, font_dict, encode, width_1000, vertical_face
+                )
+                continue
+            if fam == INPLACE_FAMILY:
+                # 9.T26: shape with the DOCUMENT'S OWN program and emit
+                # its own glyph ids — Identity-H makes a gid the two-byte
+                # code, so nothing new embeds, no name allocates, and the
+                # Tf the emission writes is the font the paragraph
+                # already uses.
+                #
+                # Widths: /W is what the VIEWER advances by, so a gid /W
+                # already covers keeps that number. A gid the edit
+                # INTRODUCES (a joining form the subset never drew) is
+                # absent from /W and would fall to DW — and papering over
+                # that with TJ corrections put a forward jump between two
+                # real glyphs, which the word-gap heuristic then read as
+                # a SPACE INSIDE THE WORD (probe-caught: `ونص` came back
+                # `ون ص`). So the new gids take their PROGRAM advance
+                # here, and `/W` itself is AUGMENTED with the same
+                # numbers after the edit — measured, drawn, and re-read
+                # all become the one number.
+                from fontTools.ttLib import TTFont as _TT
+
+                styled, shaped_runs = _shape_styled_runs(styled, key, inplace_face)
+                _tt = _TT(inplace_face, fontNumber=0, lazy=True)
+                try:
+                    _order = _tt.getGlyphOrder()
+                    _gid_of = {n: i for i, n in enumerate(_order)}
+                    _hmtx = _tt["hmtx"]
+                    _upem = _tt["head"].unitsPerEm or 1000
+                    _prog_adv = {
+                        _gid_of[n]: round(_hmtx[n][0] * 1000.0 / _upem, 2)
+                        for run2 in shaped_runs
+                        for n in run2.glyph_names
+                    }
+                finally:
+                    _tt.close()
+                _cap = min(para.members, key=lambda m: m.index).cap
+                for _g, _adv in _prog_adv.items():
+                    if _g not in _cap._widths:
+                        inplace_widths[_g] = _adv
+
+                def _ip_encode(text, _c=_cap):
+                    return _c.encode(text)
+
+                def _ip_width(text, _c=_cap):
+                    return _c.text_width(text)
+
+                def _ip_genc(name, spells, _g=_gid_of):
+                    return _g[name].to_bytes(2, "big")
+
+                def _ip_gwidth(name, spells, _g=_gid_of, _c=_cap, _w=dict(inplace_widths)):
+                    gid = _g[name]
+                    if gid in _w:
+                        return _w[gid]
+                    return _c.decoded_width(gid.to_bytes(2, "big"))
+
+                # The ToUnicode additions the augmentation writes, taken
+                # from the ACTUAL emitted runs (word fragments can pick
+                # forms the prequalification's whole-word pass did not).
+                inplace_tounicode = {}
+                for run2 in shaped_runs:
+                    for name, spells in run2.clusters:
+                        gid = _gid_of[name]
+                        existing = _cap._code2uni.get(gid)
+                        if existing is None:
+                            inplace_tounicode[gid] = spells
+                        elif spells and existing != spells:
+                            # The T25 lesson, held as a refusal: one code
+                            # cannot spell two things, and here code==gid.
+                            raise ValueError(
+                                "this edit cannot keep the document font — "
+                                "retry, or restyle to another face"
+                            )
+                fallbacks[key] = _Fallback(
+                    min(para.members, key=lambda m: m.index).style["font_name"],
+                    None, _ip_encode, _ip_width, inplace_face,
+                    glyph_encode=_ip_genc, glyph_width=_ip_gwidth,
+                )
+                continue
+            if fam == RTL_FAMILY:
+                # 9.T3: resolve the bundled RTL face, SHAPE every word
+                # that routed here against it, then embed a subset that
+                # carries the resulting glyphs. The order is forced: the
+                # subset has to contain the shaper's output, and the
+                # shaper needs the face.
+                from engine.font_fallback import build_shaped_font, resolve_rtl_font
+
+                face = resolve_rtl_font(
+                    str(font_path), chars, style=style_key(kbold, kitalic)
+                )
+                styled, shaped_runs = _shape_styled_runs(styled, key, face)
+                fdict, fenc, fwidth, genc, gwidth = build_shaped_font(
+                    pdf, face, chars, shaped_runs
+                )
+                fallbacks[key] = _Fallback(
+                    None, fdict, fenc, fwidth, face,
+                    glyph_encode=genc, glyph_width=gwidth,
+                )
+                continue
+            if kfeats:
+                # 9.K2: apply the OpenType feature. IN PLACE using the
+                # OWNING member's font when it carries the feature AND the
+                # substituted glyphs; otherwise the explicit switch to
+                # bundled Libertinus Serif (Liberation has no features).
+                # ToUnicode keeps the plain letters (searchable) either way.
+                # The in-place source member (round-42 CRITICAL fix): a
+                # per-span key baked its own member index into `fam`; a
+                # whole-paragraph key (None) resolves from the dominant
+                # `first`; an explicit family + feature (str) can only get
+                # features from Libertinus, so it never applies in place.
+                if isinstance(fam, int):
+                    src_member = members_by_index.get(fam)
+                elif fam is None:
+                    src_member = first
+                else:
+                    src_member = None
+                face, glyph_for, tmp = _feature_source(
+                    font_path, src_member, resources, chars, kfeats, kalt,
+                    style_key(kbold, kitalic),
+                )
+                feat_kern = None
+                try:
+                    font_dict, encode, width_1000 = build_fallback_font(
+                        pdf, face, chars, glyph_for=glyph_for
+                    )
+                    # Capture the IN-PLACE face's kerning while its temp
+                    # program still exists — the emission pass reads it
+                    # later (by which point `tmp` is unlinked), so reading
+                    # the path then would silently un-kern the run (K1b).
+                    if tmp:
+                        from engine.font_kerning import kern_pairs as _kp
+
+                        feat_kern = _kp(str(face))
+                finally:
+                    if tmp:
+                        try:
+                            os.unlink(tmp)
+                        except OSError:
+                            pass
+                fallbacks[key] = _Fallback(
+                    None, font_dict, encode, width_1000, face, kern_pairs=feat_kern
+                )
+                continue
+            if isinstance(fam, str) and os.path.isabs(fam):
+                # 9.T6: an INSTALLED font, chosen by the user. It bypasses
+                # the family ladder entirely — the ladder exists to pick a
+                # bundled stand-in, and there is nothing to stand in for
+                # when the face itself was named. Coverage still decides
+                # the outcome: `build_fallback_font` refuses by character
+                # if the chosen face cannot express the text.
+                from engine.system_fonts import resolve_face
+
+                face = resolve_face(fam)
+                styled, fallbacks[key] = _embed_shaping_aware(
+                    pdf, face, chars, styled, key
+                )
+                continue
+            if fam is not None:
+                original = synthetic_family_font(fam)
+            else:
+                original = _lookup_font(
+                    first.style["font_name"], first.resources or resources, resources
+                )
+            face = resolve_fallback_font(
+                str(font_path), original, style=style_key(kbold, kitalic), text=chars
+            )
+            styled, fallbacks[key] = _embed_shaping_aware(
+                pdf, face, chars, styled, key
+            )
+
+    out = _PreparedStyle()
+    out.styled = styled
+    out.fallbacks = fallbacks
+    out.size_override = size_override
+    out.has_span_size = size_by_pos is not None
+    out.vertical_face = vertical_face
+    out.inplace_face = inplace_face
+    out.inplace_font_dict = inplace_font_dict
+    out.inplace_tounicode = inplace_tounicode
+    out.inplace_widths = inplace_widths
+    return out
+
+
 def replace_paragraph_text(
     file: str,
     output: str,
@@ -3111,95 +3669,6 @@ def replace_paragraph_text(
         if [int(r) for r in expected_runs] != para.run_indexes or str(expected_text) != para.text:
             raise ValueError("the page's text changed underneath this edit — reopen the editor")
 
-        # A1 overrides: a size in points (clamped to a sane editing range —
-        # an unbounded value pushed most of the paragraph off the page on a
-        # typo, review-caught), an [r,g,b] fill colour.
-        size_override = None
-        if size is not None:
-            try:
-                sv = float(size)
-            except (TypeError, ValueError):
-                sv = 0.0
-            if sv > 0:
-                size_override = max(1.0, min(_MAX_EDIT_SIZE, sv))
-        color_override = None
-        if color is not None:
-            try:
-                rgb = [max(0.0, min(1.0, float(c))) for c in color]
-            except (TypeError, ValueError):
-                rgb = []
-            if len(rgb) == 3:
-                color_override = (None, ("rg", tuple(rgb)))
-        # A3a family swap: an explicit selector, so garbage REFUSES rather
-        # than silently keeping the original (a swap that did nothing would
-        # be a success that lied).
-        family_override = None
-        if family is not None:
-            family_override = _validated_family(family)
-        # A3b style axis: a PRESENT bold/italic is the substituted face's
-        # absolute weight/slant; both None = no style substitution.
-        style_override = None
-        if bold is not None or italic is not None:
-            style_override = (bool(bold), bool(italic))
-        # 9.K2 whole-paragraph OpenType features (small caps / alternates).
-        # `features` accepts the tokens "small_caps"/"smcp"/"c2sc"/"salt"; a
-        # feature forces the Libertinus-Serif switch (Liberation has none) and
-        # substitutes the whole paragraph. `((), 0)` when absent, so the
-        # no-feature path is byte-identical.
-        para_feats = _normalize_para_features(features)
-        try:
-            para_alt = int(alt_index or 0) if para_feats else 0
-        except (TypeError, ValueError):
-            para_alt = 0
-        substituting = (
-            family_override is not None or style_override is not None or bool(para_feats)
-        )
-        # 9.T4: a VERTICAL paragraph substitutes into a vertical-capable
-        # face. This used to refuse outright ("vertical text cannot
-        # substitute a horizontal face") because the bundled Liberation
-        # faces are horizontal and nothing else was vendored — a true
-        # statement that stopped being true when T5 bundled Noto Sans CJK
-        # (which carries `vert`/`vrt2` and `vmtx`) and T3 brought the shaper
-        # that can reach those features. Family serif/sans/mono has nothing
-        # honest to resolve to for a column, so it is IGNORED here rather
-        # than obeyed into a sideways result; the weight axis is real, and a
-        # user who wants a different vertical face picks an installed one
-        # (T6), which is checked for vertical machinery before it is used.
-        vertical_face = None
-        # `convert` counts as well as a style request. A column whose own
-        # font cannot express a typed character needs the vertical face for
-        # exactly the reason a restyle does, and without this it raised
-        # "vertical text cannot be converted to the fallback font" — the
-        # refusal T4 was supposed to have lifted. It survived because the
-        # shipped pin for the escape hatch passes `bold=True`, which sets
-        # `substituting` on its own and hid the plain-convert case.
-        if (substituting or convert) and para.vertical:
-            # `style_key` is imported again below, inside the fallback-build
-            # block — naming it there makes it a FUNCTION-LOCAL, so this
-            # earlier use must bring its own or it reads as unassigned.
-            from engine.font_fallback import (
-                face_shapes_vertically,
-                resolve_vertical_font,
-            )
-            from engine.font_fallback import style_key as _style_key
-
-            if not font_path:
-                raise ValueError("fallback font path is required to restyle")
-            if isinstance(family_override, str) and os.path.isabs(family_override):
-                if not face_shapes_vertically(family_override, para.text):
-                    raise ValueError(
-                        "that font has no vertical forms — pick one that does"
-                    )
-                vertical_face = family_override
-            else:
-                vertical_face = resolve_vertical_font(
-                    str(font_path),
-                    para.text,
-                    style=_style_key(
-                        bool(style_override[0]) if style_override else False,
-                        bool(style_override[1]) if style_override else False,
-                    ),
-                )
         # A4 split: an explicit selector — a caret offset outside the open
         # interval refuses (a "split" that splits nothing would be a
         # success that lied). Code points: Python strings index them
@@ -3250,411 +3719,23 @@ def replace_paragraph_text(
         elif box_left is not None:
             raise ValueError("box left requires a box width")
 
-        # A5a/A5b/A5c per-span styling: fold the sparse span_styles ranges
-        # into per-code-point lookups — `color_by_pos` (A5a colour),
-        # `face_by_pos` (A5b face key), and `size_by_pos` (A5c size, points)
-        # INDEPENDENTLY, so one entry may carry a colour, a face, a size, or
-        # any combination, on unaligned ranges. Last-writer-wins on overlap.
-        # All three stay None when unused → _styled_chars byte-identical.
-        color_by_pos = None
-        face_by_pos = None
-        size_by_pos = None
-        if span_styles:
-            n_cp = len(str(new_text))
-            for entry in span_styles:
-                try:
-                    st = int(entry["start"])
-                    en = int(entry["end"])
-                except (KeyError, TypeError, ValueError):
-                    raise ValueError("span style needs integer start/end") from None
-                if not (0 <= st <= en <= n_cp):
-                    raise ValueError("span style range out of bounds")
-                if st == en:
-                    continue  # empty range: harmless no-op
-                has_face = any(
-                    f in entry for f in ("family", "bold", "italic", "small_caps", "alternates")
-                )
-                has_color = entry.get("color") is not None
-                has_size = entry.get("size") is not None
-                if not has_face and not has_color and not has_size:
-                    raise ValueError("span style must set a colour, a face, or a size")
-                if has_color:
-                    try:
-                        rgb = [max(0.0, min(1.0, float(c))) for c in entry.get("color")]
-                    except (TypeError, ValueError):
-                        rgb = []
-                    if len(rgb) != 3:
-                        raise ValueError("span style colour must be [r, g, b]")
-                    cs = (None, ("rg", tuple(rgb)))
-                    if color_by_pos is None:
-                        color_by_pos = [None] * n_cp
-                    for k in range(st, en):
-                        color_by_pos[k] = cs
-                if has_face:
-                    # A5b face key (family_or_None, bold, italic): family in
-                    # the trio or absent (None = keep the member family);
-                    # bold/italic coerced bool (absent = False — the absolute
-                    # A3b weight/slant semantics, now per span).
-                    fam = entry.get("family")
-                    if fam is not None:
-                        try:
-                            fam = _validated_family(fam)
-                        except ValueError as exc:
-                            raise ValueError(f"span style {exc}") from None
-                    # 9.K2: a per-span OpenType feature request (small caps /
-                    # alternates) rides the SAME face key. small_caps expands
-                    # to smcp+c2sc; a feature forces a feature-bearing face
-                    # (Libertinus Serif) in the build below, because Liberation
-                    # has none. No feature => `((), 0)`, byte-identical to A5b.
-                    feats, alt = _span_features(entry)
-                    facekey = (fam, bool(entry.get("bold")), bool(entry.get("italic")), feats, alt)
-                    if face_by_pos is None:
-                        face_by_pos = [None] * n_cp
-                    for k in range(st, en):
-                        face_by_pos[k] = facekey
-                if has_size:
-                    # A5c per-span size (points): coerce + clamp to the A1
-                    # range [1.0, _MAX_EDIT_SIZE] (a fat-fingered 5000 lands
-                    # at the viewer max, never off-page); a non-number refuses
-                    # named, mirroring the colour shape check.
-                    try:
-                        sv = float(entry.get("size"))
-                    except (TypeError, ValueError):
-                        raise ValueError("span style size must be a number") from None
-                    sv = max(1.0, min(_MAX_EDIT_SIZE, sv))
-                    if size_by_pos is None:
-                        size_by_pos = [None] * n_cp
-                    for k in range(st, en):
-                        size_by_pos[k] = sv
-
-        # A3a/A3b whole-paragraph substitution → ONE face key covering every
-        # char (family_override may be None = keep the member family). None
-        # when not substituting. Per-span faces (face_by_pos) override it per
-        # position; the single-key case stays byte-identical to shipped A3.
-        whole_para_face = None
-        if substituting:
-            wb = style_override[0] if style_override is not None else False
-            wi = style_override[1] if style_override is not None else False
-            whole_para_face = (family_override, wb, wi, para_feats, para_alt)
-
-        members_by_index = {m.index: m for m in para.members}
-        # 9.A5b (round-33 HIGH): each member's OWN classified family, so a
-        # per-span face with no explicit family lands on that member's family
-        # (a bolded mono word in a serif paragraph → mono-bold). Only needed
-        # when per-span faces are present; the font is looked up in the
-        # member's own stream resources (form-scoped when nested), page
-        # resources as fallback.
-        member_family = None
-        if face_by_pos is not None:
-            from engine.font_fallback import classify_font_family
-            from engine.text_runs import _lookup_font
-
-            member_family = {}
-            for m in para.members:
-                fd = _lookup_font(m.style["font_name"], m.resources or resources, resources)
-                member_family[m.index] = classify_font_family(fd) if fd is not None else "sans"
-        # 9.T3: a paragraph that reorders may carry a cursively joining
-        # script, which has to be SHAPED into a face that still knows how.
-        # The per-member weight/slant comes along so a bold Arabic run lands
-        # on the bold face rather than flattening.
-        rtl_style = None
-        if para.bidi and not para.vertical:
-            from engine.font_fallback import classify_font_style
-            from engine.text_runs import _lookup_font
-
-            rtl_style = {}
-            for m in para.members:
-                fd = _lookup_font(m.style["font_name"], m.resources or resources, resources)
-                try:
-                    rtl_style[m.index] = classify_font_style(fd) if fd is not None else (False, False)
-                except Exception:
-                    rtl_style[m.index] = (False, False)
-
-        # 9.T26: qualify the document's OWN font for in-place shaping, so an
-        # RTL edit keeps the document's typeface instead of substituting the
-        # bundled face. Every condition below is a correctness gate, not a
-        # preference:
-        #   - no substitution/feature request and no per-span face — asking
-        #     for bold IS asking to leave the document font;
-        #   - ONE font across the members — a per-member split would seam a
-        #     word at a member boundary;
-        #   - the PDF-side shape (Identity-H + Identity CIDToGIDMap: a glyph
-        #     id IS the code) and the program-side one (cmap + GSUB still
-        #     present) both hold — `in_place_face` checks them;
-        #   - every joining word of the NEW text shapes without `.notdef`
-        #     (a subset keeps only the glyphs it drew, and a form the new
-        #     text needs may be gone);
-        #   - no glyph SPELLING collision: code == gid here, so one glyph
-        #     gets exactly one ToUnicode entry — a shaped cluster that wants
-        #     gid G to spell Y when the document already has it spelling X
-        #     cannot be expressed, and the T25 fatha-as-sukun lesson says
-        #     never to try. Any failed condition falls back to the bundled
-        #     face, which is the shipped, correct behaviour.
-        if (
-            rtl_style is not None
-            and not substituting
-            and font_path
-            and len({m.style["font_name"] for m in para.members}) == 1
-        ):
-            from engine import shaping as _shaping
-            from engine.text_runs import _lookup_font as _lf
-
-            first_m = min(para.members, key=lambda m: m.index)
-            fd0 = _lf(first_m.style["font_name"], first_m.resources or resources, resources)
-            candidate = _shaping.in_place_face(fd0) if fd0 is not None else None
-            if candidate is not None:
-                cap0 = first_m.cap
-                ok = True
-                additions: dict[int, str] = {}
-                try:
-                    from fontTools.ttLib import TTFont as _TT
-
-                    _tt = _TT(candidate, fontNumber=0, lazy=True)
-                    try:
-                        gid_of0 = {n: i for i, n in enumerate(_tt.getGlyphOrder())}
-                    finally:
-                        _tt.close()
-                    for token in str(new_text).split():
-                        if not _shaping.requires_shaping(token):
-                            continue
-                        run0 = _shaping.shape(candidate, token, rtl=True)
-                        for name, spells in run0.clusters:
-                            gid = gid_of0[name]
-                            existing = cap0._code2uni.get(gid)
-                            if existing is None:
-                                additions[gid] = spells
-                            elif spells and existing != spells:
-                                ok = False
-                                break
-                        if not ok:
-                            break
-                except Exception:
-                    ok = False
-                if ok:
-                    inplace_face = candidate
-                    inplace_font_dict = fd0
-                    inplace_tounicode = additions
-                else:
-                    try:
-                        os.unlink(candidate)
-                    except OSError:
-                        pass
-        styled, fb_by_face = _styled_chars(
-            str(new_text), list(spans), members_by_index, bool(convert),
-            size_override=size_override, color_override=color_override,
-            whole_para_face=whole_para_face, color_by_pos=color_by_pos,
-            face_by_pos=face_by_pos, size_by_pos=size_by_pos,
-            member_family=member_family, rtl_style=rtl_style,
-            vertical_ok=vertical_face is not None,
-            inplace_ok=inplace_face is not None,
+        # T18: the styling pipeline lives in _prepare_styled now — replace
+        # passes everything through (per-span styling, bidi machinery, the
+        # T26 in-place path included).
+        prep = _prepare_styled(
+            pdf, para, resources, str(new_text), list(spans),
+            convert=bool(convert), font_path=font_path,
+            size=size, color=color, family=family, bold=bold, italic=italic,
+            features=features, alt_index=alt_index, span_styles=span_styles,
+            allow_inplace=True, bidi_aware=True,
         )
-        # 9.A5b: build ONE _Fallback per face key, sorted-face order so the
-        # subset names + embedded bytes are deterministic. The whole-para A3
-        # path yields exactly one key here → one subset → byte-identical to
-        # the shipped single-_Fallback output.
-        fallbacks: dict[tuple, _Fallback] = {}
-        if fb_by_face:
-            from engine.font_fallback import (
-                build_fallback_font,
-                resolve_fallback_font,
-                style_key,
-                synthetic_family_font,
-            )
-            from engine.text_runs import _lookup_font
-
-            if not font_path:
-                raise ValueError("fallback font path is required to convert")
-            # family=None keys resolve their face from the FIRST member's own
-            # font (form-scoped when nested — a form's `F1` can differ from
-            # the page's, review-caught): this is the B1 dominant face and
-            # reproduces the shipped whole-para style-only / convert resolve
-            # exactly. family=serif|sans|mono keys bypass classification via
-            # a synthetic /Flags dict (the A2 trick).
-            first = min(para.members, key=lambda m: m.index)
-            for key in sorted(fb_by_face, key=_face_sort_key):
-                fam, kbold, kitalic, kfeats, kalt = key
-                chars = "".join(sorted(fb_by_face[key]))
-                if vertical_face is not None:
-                    # 9.T4: ONE vertical face serves the whole paragraph —
-                    # the weight was resolved with it, and a column cannot
-                    # mix writing modes anyway (the writing mode rides in
-                    # lkey, so a mixed-mode paragraph never groups).
-                    from engine.font_fallback import build_vertical_font
-
-                    font_dict, encode, width_1000 = build_vertical_font(
-                        pdf, vertical_face, chars
-                    )
-                    fallbacks[key] = _Fallback(
-                        None, font_dict, encode, width_1000, vertical_face
-                    )
-                    continue
-                if fam == INPLACE_FAMILY:
-                    # 9.T26: shape with the DOCUMENT'S OWN program and emit
-                    # its own glyph ids — Identity-H makes a gid the two-byte
-                    # code, so nothing new embeds, no name allocates, and the
-                    # Tf the emission writes is the font the paragraph
-                    # already uses.
-                    #
-                    # Widths: /W is what the VIEWER advances by, so a gid /W
-                    # already covers keeps that number. A gid the edit
-                    # INTRODUCES (a joining form the subset never drew) is
-                    # absent from /W and would fall to DW — and papering over
-                    # that with TJ corrections put a forward jump between two
-                    # real glyphs, which the word-gap heuristic then read as
-                    # a SPACE INSIDE THE WORD (probe-caught: `ونص` came back
-                    # `ون ص`). So the new gids take their PROGRAM advance
-                    # here, and `/W` itself is AUGMENTED with the same
-                    # numbers after the edit — measured, drawn, and re-read
-                    # all become the one number.
-                    from fontTools.ttLib import TTFont as _TT
-
-                    styled, shaped_runs = _shape_styled_runs(styled, key, inplace_face)
-                    _tt = _TT(inplace_face, fontNumber=0, lazy=True)
-                    try:
-                        _order = _tt.getGlyphOrder()
-                        _gid_of = {n: i for i, n in enumerate(_order)}
-                        _hmtx = _tt["hmtx"]
-                        _upem = _tt["head"].unitsPerEm or 1000
-                        _prog_adv = {
-                            _gid_of[n]: round(_hmtx[n][0] * 1000.0 / _upem, 2)
-                            for run2 in shaped_runs
-                            for n in run2.glyph_names
-                        }
-                    finally:
-                        _tt.close()
-                    _cap = min(para.members, key=lambda m: m.index).cap
-                    for _g, _adv in _prog_adv.items():
-                        if _g not in _cap._widths:
-                            inplace_widths[_g] = _adv
-
-                    def _ip_encode(text, _c=_cap):
-                        return _c.encode(text)
-
-                    def _ip_width(text, _c=_cap):
-                        return _c.text_width(text)
-
-                    def _ip_genc(name, spells, _g=_gid_of):
-                        return _g[name].to_bytes(2, "big")
-
-                    def _ip_gwidth(name, spells, _g=_gid_of, _c=_cap, _w=dict(inplace_widths)):
-                        gid = _g[name]
-                        if gid in _w:
-                            return _w[gid]
-                        return _c.decoded_width(gid.to_bytes(2, "big"))
-
-                    # The ToUnicode additions the augmentation writes, taken
-                    # from the ACTUAL emitted runs (word fragments can pick
-                    # forms the prequalification's whole-word pass did not).
-                    inplace_tounicode = {}
-                    for run2 in shaped_runs:
-                        for name, spells in run2.clusters:
-                            gid = _gid_of[name]
-                            existing = _cap._code2uni.get(gid)
-                            if existing is None:
-                                inplace_tounicode[gid] = spells
-                            elif spells and existing != spells:
-                                # The T25 lesson, held as a refusal: one code
-                                # cannot spell two things, and here code==gid.
-                                raise ValueError(
-                                    "this edit cannot keep the document font — "
-                                    "retry, or restyle to another face"
-                                )
-                    fallbacks[key] = _Fallback(
-                        min(para.members, key=lambda m: m.index).style["font_name"],
-                        None, _ip_encode, _ip_width, inplace_face,
-                        glyph_encode=_ip_genc, glyph_width=_ip_gwidth,
-                    )
-                    continue
-                if fam == RTL_FAMILY:
-                    # 9.T3: resolve the bundled RTL face, SHAPE every word
-                    # that routed here against it, then embed a subset that
-                    # carries the resulting glyphs. The order is forced: the
-                    # subset has to contain the shaper's output, and the
-                    # shaper needs the face.
-                    from engine.font_fallback import build_shaped_font, resolve_rtl_font
-
-                    face = resolve_rtl_font(
-                        str(font_path), chars, style=style_key(kbold, kitalic)
-                    )
-                    styled, shaped_runs = _shape_styled_runs(styled, key, face)
-                    fdict, fenc, fwidth, genc, gwidth = build_shaped_font(
-                        pdf, face, chars, shaped_runs
-                    )
-                    fallbacks[key] = _Fallback(
-                        None, fdict, fenc, fwidth, face,
-                        glyph_encode=genc, glyph_width=gwidth,
-                    )
-                    continue
-                if kfeats:
-                    # 9.K2: apply the OpenType feature. IN PLACE using the
-                    # OWNING member's font when it carries the feature AND the
-                    # substituted glyphs; otherwise the explicit switch to
-                    # bundled Libertinus Serif (Liberation has no features).
-                    # ToUnicode keeps the plain letters (searchable) either way.
-                    # The in-place source member (round-42 CRITICAL fix): a
-                    # per-span key baked its own member index into `fam`; a
-                    # whole-paragraph key (None) resolves from the dominant
-                    # `first`; an explicit family + feature (str) can only get
-                    # features from Libertinus, so it never applies in place.
-                    if isinstance(fam, int):
-                        src_member = members_by_index.get(fam)
-                    elif fam is None:
-                        src_member = first
-                    else:
-                        src_member = None
-                    face, glyph_for, tmp = _feature_source(
-                        font_path, src_member, resources, chars, kfeats, kalt,
-                        style_key(kbold, kitalic),
-                    )
-                    feat_kern = None
-                    try:
-                        font_dict, encode, width_1000 = build_fallback_font(
-                            pdf, face, chars, glyph_for=glyph_for
-                        )
-                        # Capture the IN-PLACE face's kerning while its temp
-                        # program still exists — the emission pass reads it
-                        # later (by which point `tmp` is unlinked), so reading
-                        # the path then would silently un-kern the run (K1b).
-                        if tmp:
-                            from engine.font_kerning import kern_pairs as _kp
-
-                            feat_kern = _kp(str(face))
-                    finally:
-                        if tmp:
-                            try:
-                                os.unlink(tmp)
-                            except OSError:
-                                pass
-                    fallbacks[key] = _Fallback(
-                        None, font_dict, encode, width_1000, face, kern_pairs=feat_kern
-                    )
-                    continue
-                if isinstance(fam, str) and os.path.isabs(fam):
-                    # 9.T6: an INSTALLED font, chosen by the user. It bypasses
-                    # the family ladder entirely — the ladder exists to pick a
-                    # bundled stand-in, and there is nothing to stand in for
-                    # when the face itself was named. Coverage still decides
-                    # the outcome: `build_fallback_font` refuses by character
-                    # if the chosen face cannot express the text.
-                    from engine.system_fonts import resolve_face
-
-                    face = resolve_face(fam)
-                    styled, fallbacks[key] = _embed_shaping_aware(
-                        pdf, face, chars, styled, key
-                    )
-                    continue
-                if fam is not None:
-                    original = synthetic_family_font(fam)
-                else:
-                    original = _lookup_font(
-                        first.style["font_name"], first.resources or resources, resources
-                    )
-                face = resolve_fallback_font(
-                    str(font_path), original, style=style_key(kbold, kitalic), text=chars
-                )
-                styled, fallbacks[key] = _embed_shaping_aware(
-                    pdf, face, chars, styled, key
-                )
+        styled = prep.styled
+        fallbacks = prep.fallbacks
+        size_override = prep.size_override
+        inplace_face = prep.inplace_face
+        inplace_font_dict = prep.inplace_font_dict
+        inplace_tounicode = prep.inplace_tounicode
+        inplace_widths = prep.inplace_widths
 
         member_set = set(para.run_indexes)
         per_stream_counts: dict[tuple, int] = defaultdict(int)
@@ -3685,7 +3766,7 @@ def replace_paragraph_text(
                 para, styled, fallbacks, page_x0, page_x1,
                 size_override=size_override, split_at=split_point,
                 split_gap=gap_value, box_width=width_value, box_left=left_value,
-                has_span_size=size_by_pos is not None,
+                has_span_size=prep.has_span_size,
                 # 9.K1b: kern from whatever face each slice renders in — the
                 # bundled subset when substituted, the document's own font
                 # (embedded program, else its metric twin) otherwise.
@@ -3759,6 +3840,13 @@ def merge_paragraph_with_previous(
     # fingerprints still prove the on-disk state.
     selected_text_override: str | None = None,
     selected_spans_override: list | None = None,
+    # T18: whole-paragraph restyle riding the merge — the same A1/A3
+    # semantics replace has, through the same pipeline (_prepare_styled).
+    size=None,
+    color=None,
+    family=None,
+    bold=None,
+    italic=None,
 ) -> dict:
     """Merge a paragraph into the one above it in the listing (A4): the
     joined text (space-joined; no space across a CJK-CJK boundary — the
@@ -3852,11 +3940,32 @@ def merge_paragraph_with_previous(
             for s in cur_spans_src
         ]
 
+        # T18 restyle-on-merge refusal: a face substitution on right-to-left
+        # text cannot ride a merge — this emission has no shaping pass, so a
+        # substituted joining script would come out in unshaped forms.
+        # Restyling the merged paragraph afterwards goes through replace,
+        # which has the full machinery.
+        if (family is not None or bold is not None or italic is not None) and (
+            prev.bidi or cur.bidi
+        ):
+            raise ValueError(
+                "restyle the merged paragraph after merging — a face change "
+                "cannot ride a merge of right-to-left text"
+            )
         members_by_index = {m.index: m for m in prev.members}
         members_by_index.update({m.index: m for m in cur.members})
-        # convert=False: a merge re-encodes existing characters in their own
-        # fonts; the belt refusal names any that cannot round-trip.
-        styled, _fb = _styled_chars(new_text, spans, members_by_index, False)
+        # T18: the same styling pipeline replace uses. With every restyle
+        # argument None this is byte-identical to the old bare
+        # `_styled_chars(new_text, spans, members_by_index, False)` call
+        # (allow_inplace/bidi_aware off = the shipped merge behaviour).
+        prep = _prepare_styled(
+            pdf, prev, resources, new_text, spans,
+            convert=False, font_path=font_path,
+            size=size, color=color, family=family, bold=bold, italic=italic,
+            allow_inplace=False, bidi_aware=False,
+            members_override=members_by_index,
+        )
+        styled = prep.styled
 
         member_set = set(prev.run_indexes) | set(cur.run_indexes)
         per_stream_counts: dict[tuple, int] = defaultdict(int)
@@ -3880,9 +3989,10 @@ def merge_paragraph_with_previous(
             prev.stream,
             set(ordinal_of.values()),
             ordinal_of[min(member_set)],
-            _Emission(prev, styled, {}, page_x0, page_x1,
-                      kerns=_KernSource(resources, font_path, {})),
-            {},
+            _Emission(prev, styled, prep.fallbacks, page_x0, page_x1,
+                      size_override=prep.size_override,
+                      kerns=_KernSource(resources, font_path, prep.fallbacks)),
+            prep.fallbacks,
         )
         kept, changed, new_forms = _rewrite_paragraph_stream(
             pdf,
@@ -3902,6 +4012,12 @@ def merge_paragraph_with_previous(
             _register_xobject(pdf, resources, nm, st)
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         _finalize_page_rewrite(p, kept, edit.superseded_forms)
+        # T18: a restyled merge can embed a substitute face — register it,
+        # exactly as replace does (a Tf naming an unregistered font renders
+        # nothing).
+        if edit.pending_fonts and edit.target_stream == ():
+            for fname, fdict in edit.pending_fonts:
+                _register_font(pdf, resources, fname, fdict)
         _save(pdf, input_path, output_path)
         return {
             "output": str(output_path),

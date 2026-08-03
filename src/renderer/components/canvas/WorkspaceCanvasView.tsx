@@ -38,7 +38,7 @@ import type { EditImagePlacement } from '../../lib/edit-images';
 import { EDIT_DECLINED } from '../../lib/edit-text';
 import { pageIdAtSourceIndex } from '../../lib/durable-identity';
 import { computeEditSpans, fetchEditTextListing, hexToRgb } from '../../lib/edit-paragraphs';
-import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
+import type { EditTextListing, ParagraphEditOpts , MergeRestyle } from '../../lib/edit-paragraphs';
 import { applyRotate } from '../../lib/image-transform';
 import { workspacePageNumber } from '../../lib/workspace-commit';
 import { runCommitGate } from '../../lib/commit-gate';
@@ -187,6 +187,7 @@ interface WorkspaceCanvasViewProps {
       withNext?: boolean;
       overrideText?: string;
       overrideSpans?: { start: number; end: number; run: number }[];
+      restyle?: MergeRestyle;
     },
   ) => Promise<string | void>;
   // Author a NEW text object (9.A2): a rubber-band box + entered text become a
@@ -2833,6 +2834,7 @@ export function WorkspaceCanvasView({
       mergingIdx: number,
       withNext: boolean,
       editedText?: string,
+      restyle?: MergeRestyle,
     ): Promise<void> => {
       if (!focusedDoc || committingTextRef.current) return;
       const listing = editTextByPage.get(pageId);
@@ -2860,6 +2862,7 @@ export function WorkspaceCanvasView({
           { index: anchor.index, runs: anchor.runs, text: anchor.text },
           { index: merging.index, runs: merging.runs, text: merging.text },
           {
+            ...(restyle ? { restyle } : {}),
             ...(withNext ? { withNext: true } : {}),
             ...(editedText !== undefined && editedText !== selectedPara.text
               ? {
@@ -2902,13 +2905,13 @@ export function WorkspaceCanvasView({
     [focusedDoc, docs, editTextByPage, onMergeParagraph],
   );
   const handleMergeParagraphPrev = useCallback(
-    (pageId: string, index: number, editedText?: string) =>
-      mergeParagraphs(pageId, index - 1, index, false, editedText),
+    (pageId: string, index: number, editedText?: string, restyle?: MergeRestyle) =>
+      mergeParagraphs(pageId, index - 1, index, false, editedText, restyle),
     [mergeParagraphs],
   );
   const handleMergeParagraphNext = useCallback(
-    (pageId: string, index: number, editedText?: string) =>
-      mergeParagraphs(pageId, index, index + 1, true, editedText),
+    (pageId: string, index: number, editedText?: string, restyle?: MergeRestyle) =>
+      mergeParagraphs(pageId, index, index + 1, true, editedText, restyle),
     [mergeParagraphs],
   );
 
@@ -4234,10 +4237,18 @@ export function WorkspaceCanvasView({
               opts?: ParagraphEditOpts,
             ) => void handleCommitParagraphEdit(pageId, index, text, opts),
             onCancelParagraphEdit: handleCancelTextEdit,
-            onMergeParagraphPrev: (pageId: string, index: number, editedText?: string) =>
-              void handleMergeParagraphPrev(pageId, index, editedText),
-            onMergeParagraphNext: (pageId: string, index: number, editedText?: string) =>
-              void handleMergeParagraphNext(pageId, index, editedText),
+            onMergeParagraphPrev: (
+              pageId: string,
+              index: number,
+              editedText?: string,
+              restyle?: MergeRestyle,
+            ) => void handleMergeParagraphPrev(pageId, index, editedText, restyle),
+            onMergeParagraphNext: (
+              pageId: string,
+              index: number,
+              editedText?: string,
+              restyle?: MergeRestyle,
+            ) => void handleMergeParagraphNext(pageId, index, editedText, restyle),
             signaturePlacement: liveSigPlacement,
             findMatchPageIds,
             findWordsByPage,
@@ -4469,11 +4480,11 @@ export function WorkspaceCanvasView({
             void handleCommitParagraphEdit(pageId, index, text, opts)
           }
           onCancelParagraphEdit={handleCancelTextEdit}
-          onMergeParagraphPrev={(pageId, index, editedText) =>
-            void handleMergeParagraphPrev(pageId, index, editedText)
+          onMergeParagraphPrev={(pageId, index, editedText, restyle) =>
+            void handleMergeParagraphPrev(pageId, index, editedText, restyle)
           }
-          onMergeParagraphNext={(pageId, index, editedText) =>
-            void handleMergeParagraphNext(pageId, index, editedText)
+          onMergeParagraphNext={(pageId, index, editedText, restyle) =>
+            void handleMergeParagraphNext(pageId, index, editedText, restyle)
           }
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}

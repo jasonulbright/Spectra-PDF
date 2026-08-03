@@ -219,6 +219,42 @@ describe('paragraph split + merge (Phase 9.A4)', () => {
       'the edited merge dropped the edit or never merged',
     );
 
+    // RESTYLE-ON-MERGE: split once more, set the editor's Size to 20, then
+    // Backspace-merge — one op must both join AND resize (slice 4).
+    nowId = (await editTextPageIds())[0];
+    const paraR = (await editParagraphs(nowId))[0];
+    await editParagraphOpen(nowId, paraR.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await setEditorCaret(joined.indexOf('flowing'));
+    await browser.keys(['Enter']);
+    await waitForReindexedParas(nowId, (paras) => paras.length === 2, 'restyle re-split failed');
+    nowId = (await editTextPageIds())[0];
+    const secondR = (await editParagraphs(nowId)).find((p) => p.text !== LINE1)!;
+    await editParagraphOpen(nowId, secondR.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await setReactInputValue('[data-testid="edit-para-size"]', '20');
+    await setEditorCaret(0);
+    await browser.keys(['Backspace']);
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0 || ids[0] === nowId) return false;
+        const paras = (await browser.execute<
+          { index: number; text: string; sizes: number[] }[],
+          [string]
+        >(function (pid) {
+          return (window as any).__SPECTRA_TEST__.editParagraphs(pid);
+        }, ids[0]));
+        return (
+          paras.length === 1 &&
+          paras[0].text === `${joined} extra` &&
+          paras[0].sizes.length === 1 &&
+          Math.round(paras[0].sizes[0]) === 20
+        );
+      },
+      { timeout: 30_000, timeoutMsg: 'the merge did not carry the size restyle' },
+    );
+
     // RESIZE: drag the END grip inward ~40% of the card — the paragraph
     // must rewrap to more lines.
     nowId = (await editTextPageIds())[0];

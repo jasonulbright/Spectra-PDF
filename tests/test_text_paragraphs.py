@@ -2085,6 +2085,64 @@ class TestT18Geometry:
         assert len(merged) == 1
         assert merged[0]["text"] == "First paragraph words Rewritten second half"
 
+    TWO_PARAS = (
+        b"BT /F1 12 Tf 72 700 Td (First paragraph words) Tj ET "
+        b"BT /F1 12 Tf 72 600 Td (Second paragraph words) Tj ET"
+    )
+
+    def test_merge_with_size_restyle(self, tmp_dir):
+        src = _build(tmp_dir, self.TWO_PARAS)
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        _merge(src, out, paras, 1, size=20.0)
+        merged = _paras(out)
+        assert len(merged) == 1
+        assert merged[0]["text"] == "First paragraph words Second paragraph words"
+        runs_out = list_text_paragraphs(out, 1)["runs"]
+        assert all(r["font_size"] == pytest.approx(20.0, abs=0.1) for r in runs_out)
+
+    def test_merge_with_color_restyle(self, tmp_dir):
+        src = _build(tmp_dir, self.TWO_PARAS)
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        _merge(src, out, paras, 1, color=[1.0, 0.0, 0.0])
+        merged = _paras(out)
+        assert len(merged) == 1
+        assert merged[0]["color"] == "#ff0000"
+
+    @_needs_faces
+    def test_merge_with_family_restyle(self, tmp_dir):
+        src = _build(tmp_dir, self.TWO_PARAS)
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        _merge(src, out, paras, 1, family="sans", font_path=FONTS_DIR)
+        merged = _paras(out)
+        assert len(merged) == 1
+        assert merged[0]["text"] == "First paragraph words Second paragraph words"
+        assert any("LiberationSans" in n for n in _page_base_fonts(out))
+
+    def test_merge_bidi_substitution_refuses(self, tmp_dir):
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(400, 300))
+        page = pdf.pages[0]
+        page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=_hebrew(pdf)))
+        # 'A' decodes to א through the fixture font's ToUnicode — the
+        # minimal strong-RTL producer the other bidi tests use.
+        page.Contents = pdf.make_stream(
+            b"BT /F1 12 Tf 72 200 Td (AAA) Tj ET "
+            b"BT /F1 12 Tf 72 100 Td (AAA) Tj ET"
+        )
+        src = os.path.join(tmp_dir, "heb.pdf")
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        if len(paras) < 2:
+            pytest.skip("hebrew fixture grouped unexpectedly")
+        with pytest.raises(ValueError, match="cannot ride a merge"):
+            _merge(src, out, paras, 1, family="sans", font_path=FONTS_DIR)
+        assert not os.path.exists(out)
+
     def test_merge_override_refusals(self, tmp_dir):
         src = _build(
             tmp_dir,
