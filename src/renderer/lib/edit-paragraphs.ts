@@ -96,6 +96,13 @@ export interface EditParagraph {
   runSizes: number[];
 }
 
+/** T18: the whole-paragraph restyle subset a MERGE can carry (the same
+ * A1/A3 semantics, through the same engine pipeline). */
+export type MergeRestyle = Pick<
+  ParagraphEditOpts,
+  'size' | 'color' | 'family' | 'bold' | 'italic'
+>;
+
 /** A1/A3 restyle overrides carried on a paragraph commit. */
 export interface ParagraphEditOpts {
   convert?: boolean;
