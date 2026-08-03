@@ -475,19 +475,26 @@ fn walk_pdfs(
     }
 }
 
-/// Pick a replacement image (Edit ▸ Replace Image). Not canonicalized into
-/// an identity — it's a media source, read once.
+/// Pick an image (Edit ▸ Replace Image / Add Image). Not canonicalized into
+/// an identity — it's a media source, read once. P7: `include_svg` widens
+/// the filter for ADD (SVG places as real vector content); Replace stays
+/// raster-only (a vector placement refuses replace by design).
 #[tauri::command]
 pub async fn pick_image_file(
     app: AppHandle,
     window: tauri::WebviewWindow,
+    include_svg: Option<bool>,
 ) -> Result<Option<String>, String> {
-    let result = app
-        .dialog()
-        .file()
-        .set_parent(&window)
-        .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "gif", "webp"])
-        .blocking_pick_file();
+    let mut dialog = app.dialog().file().set_parent(&window);
+    dialog = if include_svg.unwrap_or(false) {
+        dialog.add_filter(
+            "Images and vector graphics",
+            &["png", "jpg", "jpeg", "bmp", "gif", "webp", "svg"],
+        )
+    } else {
+        dialog.add_filter("Images", &["png", "jpg", "jpeg", "bmp", "gif", "webp"])
+    };
+    let result = dialog.blocking_pick_file();
     match result {
         Some(p) => match p.into_path() {
             Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
