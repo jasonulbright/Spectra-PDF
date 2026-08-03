@@ -3634,7 +3634,6 @@ function ParagraphEditor({
     substituting || featuresChanged
       ? null
       : relaxUnencodableSpans(value, spans0, para.encodableByRun, para.sequencesByRun);
-  const spans = relaxed?.spans ?? spans0;
   const missing = relaxed?.missing ?? [];
   const valid = missing.length === 0;
   const sizeChanged = Math.abs(size - para.fontSize) > 0.01;

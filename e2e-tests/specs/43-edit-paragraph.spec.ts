@@ -238,4 +238,94 @@ describe('edit paragraph (Phase 7.5)', () => {
       { timeout: 30_000, timeoutMsg: 'undo did not restore the original size/wrap' },
     );
   });
+
+  it('T17: a paragraph continuing into a form XObject edits across streams', async function () {
+    this.timeout(120_000);
+    // Fixture: the page draws line 1, a form XObject (Do'd right after)
+    // draws line 2 one leading below — the T17 grouping evidence. The edit
+    // is width-preserving (wordz for words) so each half lands back in its
+    // own stream and the output relists as ONE paragraph.
+    const { PDFName } = await import('pdf-lib');
+    const xsPath = resolve(tmp, 'cross-stream.pdf');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([400, 300]);
+    const ctx = doc.context;
+    const fontRef = (font as any).ref;
+    const form = ctx.stream(
+      'BT /F1 12 Tf 0 0 Td (Second line of the paragraph words) Tj ET',
+      {
+        Type: 'XObject',
+        Subtype: 'Form',
+        BBox: [0, 0, 300, 20],
+        Matrix: [1, 0, 0, 1, 60, 198],
+        Resources: { Font: { F1: fontRef } },
+      },
+    );
+    const formRef = ctx.register(form);
+    page.node.set(
+      PDFName.of('Resources'),
+      ctx.obj({ Font: ctx.obj({ F1: fontRef }), XObject: ctx.obj({ Fm1: formRef }) }),
+    );
+    const content = ctx.stream(
+      'BT /F1 12 Tf 60 212 Td (First line of the paragraph words) Tj ET /Fm1 Do',
+    );
+    page.node.set(PDFName.of('Contents'), ctx.register(content));
+    writeFileSync(xsPath, await doc.save());
+
+    await waitForHarness();
+    await openByPaths([xsPath]);
+    await browser.waitUntil(
+      async () => ((await getState()).activeFile?.path ?? '').includes('cross-stream.pdf'),
+      { timeout: 15_000, timeoutMsg: 'cross-stream fixture never became active' },
+    );
+    await invokeAppCommand('tools.open.edit');
+
+    const joined =
+      'First line of the paragraph words Second line of the paragraph words';
+    let pageId = '';
+    let para!: { index: number; text: string; lineCount: number; alignment: string };
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        const paras = await editParagraphs(ids[0]);
+        const hit = paras.find((p) => p.text === joined);
+        if (!hit) return false;
+        pageId = ids[0];
+        para = hit;
+        return true;
+      },
+      { timeout: 30_000, timeoutMsg: 'the page+form halves never grouped into one paragraph' },
+    );
+    expect(para.lineCount).toBe(2);
+
+    const edited =
+      'First line of the paragraph wordz Second line of the paragraph wordz';
+    await editParagraphOpen(pageId, para.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await setContentEditableValue('[data-testid="edit-para-input"]', edited);
+    await browser.keys(['Enter']);
+
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        const paras = await editParagraphs(ids[0]);
+        return paras.some((p) => p.text === edited && p.lineCount === 2);
+      },
+      { timeout: 30_000, timeoutMsg: 'the cross-stream edit never appeared in the listings' },
+    );
+
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const ids = await editTextPageIds();
+        if (ids.length === 0) return false;
+        const paras = await editParagraphs(ids[0]);
+        return paras.some((p) => p.text === joined && p.lineCount === 2);
+      },
+      { timeout: 30_000, timeoutMsg: 'undo did not restore the cross-stream paragraph' },
+    );
+  });
 });
