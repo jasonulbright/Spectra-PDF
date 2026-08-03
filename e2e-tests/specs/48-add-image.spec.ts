@@ -74,7 +74,10 @@ describe('add image (Phase 9.C2)', () => {
     });
     expect((await currentPlacements()).length).toBe(1); // the existing image
 
-    // Embed a new image at user rect [200,150,320,240] → cm [120,0,0,90,200,150].
+    // Embed a new image at user band [200,150,320,240]. P7 (slice C): the
+    // add is ASPECT-HONEST — the SQUARE 2x2 source lands contained in the
+    // 120x90 band as a 90x90 box centered → cm [90,0,0,90,215,150]
+    // (pre-P7 this stretched to [120,0,0,90,200,150] and distorted).
     await editImageAdd(1, [200, 150, 320, 240], {
       raw_path: rawPath,
       width: 2,
@@ -87,11 +90,11 @@ describe('add image (Phase 9.C2)', () => {
         const p = await currentPlacements();
         return (
           p.length === 2 &&
-          p.some((pl) => matrixClose(pl.matrix, [120, 0, 0, 90, 200, 150])) &&
+          p.some((pl) => matrixClose(pl.matrix, [90, 0, 0, 90, 215, 150])) &&
           p.some((pl) => matrixClose(pl.matrix, [100, 0, 0, 80, 50, 50])) // original survives
         );
       },
-      { timeout: 30_000, timeoutMsg: 'the added image never appeared at the box' },
+      { timeout: 30_000, timeoutMsg: 'the added image never appeared contained in the box' },
     );
 
     // Undo drops the added image, leaving the original.
@@ -102,6 +105,33 @@ describe('add image (Phase 9.C2)', () => {
         return p.length === 1 && matrixClose(p[0]?.matrix, [100, 0, 0, 80, 50, 50]);
       },
       { timeout: 30_000, timeoutMsg: 'undo did not remove the added image' },
+    );
+  });
+
+  it('click-places at natural size (P7): rect=null + at → 1px=1pt centered on the click', async function () {
+    this.timeout(120_000);
+    await waitForHarness();
+    await invokeAppCommand('tools.open.edit');
+    await browser.waitUntil(async () => (await editImagePageIds()).length > 0, {
+      timeout: 30_000,
+      timeoutMsg: 'edit placements never loaded',
+    });
+
+    // 2x2 px at (200,150) → a 2x2 pt box centered there: cm [2,0,0,2,199,149].
+    await editImageAdd(1, null, { raw_path: rawPath, width: 2, height: 2, channels: 3 }, [
+      200, 150,
+    ]);
+    await browser.waitUntil(
+      async () => {
+        const p = await currentPlacements();
+        return p.length === 2 && p.some((pl) => matrixClose(pl.matrix, [2, 0, 0, 2, 199, 149]));
+      },
+      { timeout: 30_000, timeoutMsg: 'the click-place never landed at natural size' },
+    );
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(
+      async () => (await currentPlacements()).length === 1,
+      { timeout: 30_000, timeoutMsg: 'undo did not remove the click-placed image' },
     );
   });
 });

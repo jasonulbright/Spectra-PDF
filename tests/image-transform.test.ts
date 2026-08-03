@@ -4,6 +4,7 @@ import {
   applyMove,
   applyResizeCorner,
   applyRotate,
+  applySkewEdge,
   cropRectFromLocalPoints,
   displayQuad,
   displayToUser,
@@ -58,6 +59,50 @@ describe('gesture builders (user space)', () => {
     const m2 = applyResizeCorner(M, 2, 250, 760)!;
     approx(transformPoint(m2, 0, 0), [50, 600]); // opposite corner pinned
     approx(transformPoint(m2, 1, 1), [250, 760]); // dragged corner at P
+  });
+
+  it('skew shears the dragged edge along itself and pins the opposite edge (P7)', () => {
+    // Top edge (3) of M dragged +30 user-x: bottom corners stay, top corners
+    // shift by exactly the drag (k measured at the dragged edge).
+    const s = applySkewEdge(M, 3, 100, 680, 130, 680)!;
+    approx(transformPoint(s, 0, 0), [50, 600]); // BL pinned
+    approx(transformPoint(s, 1, 0), [150, 600]); // BR pinned
+    approx(transformPoint(s, 0, 1), [80, 680]); // TL +30
+    approx(transformPoint(s, 1, 1), [180, 680]); // TR +30
+    // Right edge (2) dragged +40 user-y: left edge pinned, right shifts.
+    const r = applySkewEdge(M, 2, 150, 620, 150, 660)!;
+    approx(transformPoint(r, 0, 0), [50, 600]);
+    approx(transformPoint(r, 0, 1), [50, 680]);
+    approx(transformPoint(r, 1, 0), [150, 640]); // BR +40
+    approx(transformPoint(r, 1, 1), [150, 720]); // TR +40
+  });
+
+  it('skew of the bottom/left edges pins top/right instead', () => {
+    const b = applySkewEdge(M, 1, 100, 600, 120, 600)!;
+    approx(transformPoint(b, 0, 1), [50, 680]); // TL pinned
+    approx(transformPoint(b, 0, 0), [70, 600]); // BL +20
+    const l = applySkewEdge(M, 0, 50, 640, 50, 615)!;
+    approx(transformPoint(l, 1, 0), [150, 600]); // BR pinned
+    approx(transformPoint(l, 0, 0), [50, 575]); // BL −25
+  });
+
+  it('skew stays correct on a rotated placement and preserves the determinant', () => {
+    const rot = applyRotate(M, Math.PI / 3); // arbitrary rotation
+    // Drag the top edge along its own (rotated) direction: express the drag
+    // in user space as local Δx=0.3 mapped through the rotated matrix.
+    const [sx, sy] = transformPoint(rot, 0.5, 1);
+    const [cx2, cy2] = transformPoint(rot, 0.8, 1);
+    const s = applySkewEdge(rot, 3, sx, sy, cx2, cy2)!;
+    // The bottom edge is exactly where it was.
+    approx(transformPoint(s, 0, 0), transformPoint(rot, 0, 0));
+    approx(transformPoint(s, 1, 0), transformPoint(rot, 1, 0));
+    // Shear preserves area: det unchanged.
+    const det = (m: Mat): number => m[0] * m[3] - m[1] * m[2];
+    expect(det(s)).toBeCloseTo(det(rot), 6);
+  });
+
+  it('skew refuses a degenerate base matrix', () => {
+    expect(applySkewEdge([0, 0, 0, 0, 5, 6], 3, 0, 0, 1, 1)).toBeNull();
   });
 
   it('rotate keeps the center fixed', () => {

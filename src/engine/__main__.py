@@ -81,11 +81,13 @@ from engine.page_images import (
     add_page_image,
     crop_page_image,
     delete_page_image,
+    delete_page_images,
     extract_page_image,
     list_page_images,
     replace_page_image,
     set_image_opacity,
     transform_page_image,
+    transform_page_images,
 )
 from engine.page_vectors import (
     delete_page_vector,
@@ -206,6 +208,8 @@ def main() -> None:
     server.register("replace_page_image", replace_page_image)
     server.register("extract_page_image", extract_page_image)
     server.register("transform_page_image", transform_page_image)
+    server.register("transform_page_images", transform_page_images)
+    server.register("delete_page_images", delete_page_images)
     server.register("add_page_image", add_page_image)
     server.register("crop_page_image", crop_page_image)
     server.register("list_page_vectors", list_page_vectors)
