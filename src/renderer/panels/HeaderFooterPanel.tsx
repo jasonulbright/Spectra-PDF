@@ -123,6 +123,7 @@ export function HeaderFooterPanel(): React.ReactElement {
           <label className="block text-sm text-neutral-400 mb-1">Font size</label>
           <input
             data-testid="hf-font-size"
+            aria-label="Font size"
             type="number"
             min={4}
             max={72}
@@ -135,6 +136,7 @@ export function HeaderFooterPanel(): React.ReactElement {
           <label className="block text-sm text-neutral-400 mb-1">Margin</label>
           <input
             data-testid="hf-margin"
+            aria-label="Margin"
             type="number"
             min={0}
             max={144}
@@ -165,6 +167,7 @@ export function HeaderFooterPanel(): React.ReactElement {
           <label className="block text-sm text-neutral-400 mb-1">Pages (e.g. 1-5 or all)</label>
           <input
             data-testid="hf-pages"
+            aria-label="Pages"
             type="text"
             value={pageInput}
             onChange={(e) => setPageInput(e.target.value)}
@@ -177,6 +180,7 @@ export function HeaderFooterPanel(): React.ReactElement {
           <label className="block text-sm text-neutral-400 mb-1">Bates start</label>
           <input
             data-testid="hf-bates-start"
+            aria-label="Bates starting number"
             type="number"
             min={0}
             value={batesStart}
@@ -188,6 +192,7 @@ export function HeaderFooterPanel(): React.ReactElement {
           <label className="block text-sm text-neutral-400 mb-1">Bates digits</label>
           <input
             data-testid="hf-bates-digits"
+            aria-label="Bates digit count"
             type="number"
             min={1}
             max={12}

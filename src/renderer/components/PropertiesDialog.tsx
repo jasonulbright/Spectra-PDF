@@ -183,6 +183,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
                 <label className="block text-sm text-neutral-400 mb-1">{f.label}</label>
                 <input
                   data-testid={`props-${f.label.toLowerCase()}`}
+                  aria-label={f.label}
                   className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
                   value={f.value}
                   onChange={(e) => f.set(e.target.value)}

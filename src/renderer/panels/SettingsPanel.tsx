@@ -88,7 +88,12 @@ export function applyTheme(theme?: string): void {
   } else {
     document.documentElement.setAttribute('data-theme', resolved);
     getCurrentWindow().setTheme(resolved === 'light' ? 'light' : 'dark').catch(() => {});
-    clearAccentColor();
+    // The accent is the product's ONE accent in every theme (owner direction
+    // 2026-08-02, after explicit themes fell back to a second, teal accent
+    // while active-state chips stayed system-blue — two accents on one
+    // screen). The CSS tables carry the Windows-default blue when the read
+    // fails, so nothing ever needs clearing.
+    applyAccentColor();
   }
 }
 
@@ -104,16 +109,8 @@ function applyAccentColor(): void {
     root.style.setProperty('--accent-muted', vars.muted);
     root.style.setProperty('--accent-subtle', vars.subtle);
     root.style.setProperty('--accent-fg', vars.fg);
+    root.style.setProperty('--accent-text', vars.text);
   }).catch(() => {});
-}
-
-function clearAccentColor(): void {
-  const root = document.documentElement;
-  root.style.removeProperty('--accent');
-  root.style.removeProperty('--accent-hover');
-  root.style.removeProperty('--accent-muted');
-  root.style.removeProperty('--accent-subtle');
-  root.style.removeProperty('--accent-fg');
 }
 
 // Apply theme immediately on module load
@@ -124,9 +121,10 @@ window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', ()
   if (loadSettings().theme === 'system') applyTheme('system');
 });
 
-// Re-read accent color when app regains focus (user may have changed it in Windows Settings)
+// Re-read accent color when app regains focus (user may have changed it in
+// Windows Settings). Every theme consumes it — the one-accent rule.
 getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-  if (focused && loadSettings().theme === 'system') applyAccentColor();
+  if (focused) applyAccentColor();
 });
 
 function GsInfoDisplay({ info, label }: { info: GsInfo | null; label: string }): React.ReactElement | null {
@@ -289,6 +287,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       <div>
         <label className="block text-sm text-neutral-400 mb-1">Default Compression Quality</label>
         <select
+          aria-label="Default compression quality"
           value={settings.compressionQuality}
           onChange={(e) => update('compressionQuality', e.target.value)}
           className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
@@ -329,6 +328,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         <div className="flex items-center gap-2 mt-2">
           <span className="text-sm text-neutral-400">Keep logs for</span>
           <select
+            aria-label="Keep batch OCR logs for"
             data-testid="pref-batch-log-retention"
             value={String(settings.batchLogRetentionDays)}
             disabled={!settings.batchLogEnabled}
@@ -405,6 +405,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       <div>
         <label className="block text-sm text-neutral-400 mb-1">Theme</label>
         <select
+          aria-label="Theme"
           value={settings.theme}
           onChange={(e) => update('theme', e.target.value)}
           className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"

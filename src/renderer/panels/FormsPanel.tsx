@@ -182,7 +182,7 @@ export function FormsPanel(): React.ReactElement {
         <div className="text-sm text-neutral-500">This PDF has no form fields.</div>
       ) : (
         <>
-          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1">
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1" tabIndex={0} role="region" aria-label="Form fields">
             {fields.map((f) => (
               <FieldRow
                 key={f.name}

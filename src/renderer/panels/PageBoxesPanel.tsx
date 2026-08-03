@@ -104,8 +104,11 @@ export function PageBoxesPanel(): React.ReactElement {
   const edge = (label: string, value: number, set: (n: number) => void, testId: string) => (
     <div>
       <label className="block text-sm text-neutral-400 mb-1">{label}</label>
+      {/* aria-label carries the same text: the visual label above is not
+          programmatically associated (no id/htmlFor in this factory). */}
       <input
         data-testid={testId}
+        aria-label={`${label} inset`}
         type="number"
         value={value}
         onChange={(e) => set(Number(e.target.value))}
@@ -128,6 +131,7 @@ export function PageBoxesPanel(): React.ReactElement {
         <label className="block text-sm text-neutral-400 mb-1">Box</label>
         <select
           data-testid="pagebox-box"
+          aria-label="Box to edit"
           value={box}
           onChange={(e) => setBox(e.target.value)}
           className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
@@ -148,6 +152,7 @@ export function PageBoxesPanel(): React.ReactElement {
           <label className="block text-sm text-neutral-400 mb-1">Pages (e.g. 1,3,5 or all)</label>
           <input
             data-testid="pagebox-pages"
+            aria-label="Pages to crop"
             type="text"
             value={pageInput}
             onChange={(e) => setPageInput(e.target.value)}

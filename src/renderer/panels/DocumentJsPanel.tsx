@@ -203,6 +203,9 @@ export function DocumentJsPanel(): React.ReactElement {
           <ul
             data-testid="docjs-list"
             className="w-44 shrink-0 overflow-y-auto rounded border border-neutral-800 bg-neutral-900/50 p-1 flex flex-col gap-0.5"
+            tabIndex={0}
+            role="region"
+            aria-label="Document scripts"
           >
             {scripts.map((s, i) => (
               <li key={i}>

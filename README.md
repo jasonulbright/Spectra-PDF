@@ -61,7 +61,7 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - Multi-level undo/redo across staged page edits and applied operations; one file is one document no matter how its path is spelled
 
 ### Desktop citizenship
-NSIS installer with silent modes and enterprise policy, file associations, Explorer context menu, system tray, start-with-Windows, update notifications (the app never downloads or installs updates itself), light/dark/system themes with Windows accent + Mica, full keyboard navigation (single-key tool accelerators available, off by default).
+NSIS installer with silent modes and enterprise policy, file associations, Explorer context menu, system tray, start-with-Windows, update notifications (the app never downloads or installs updates itself), light/dark/high-contrast/system themes carrying the Windows accent + Mica, WCAG 2.1 AA (an axe-core audit of every surface in all three themes runs in the test battery, alongside a keyboard-operability suite and a theme-consistency audit), full keyboard navigation (single-key tool accelerators available, off by default).
 
 ## Command Line
 

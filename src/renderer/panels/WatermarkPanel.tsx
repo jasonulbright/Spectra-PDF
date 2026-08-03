@@ -83,6 +83,7 @@ export function WatermarkPanel(): React.ReactElement {
         <label className="block text-sm text-neutral-400 mb-1">Text</label>
         <input
           data-testid="watermark-text"
+          aria-label="Watermark text"
           type="text"
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -97,6 +98,7 @@ export function WatermarkPanel(): React.ReactElement {
           <label className="block text-sm text-neutral-400 mb-1">Opacity ({Math.round(opacity * 100)}%)</label>
           <input
             data-testid="watermark-opacity"
+            aria-label="Opacity"
             type="range"
             min={0.05}
             max={1}
@@ -110,6 +112,7 @@ export function WatermarkPanel(): React.ReactElement {
           <label className="block text-sm text-neutral-400 mb-1">Angle (°)</label>
           <input
             data-testid="watermark-angle"
+            aria-label="Angle in degrees"
             type="number"
             min={-180}
             max={180}
@@ -139,6 +142,7 @@ export function WatermarkPanel(): React.ReactElement {
         <div>
           <label className="block text-sm text-neutral-400 mb-1">Placement</label>
           <select
+            aria-label="Placement"
             data-testid="watermark-layer"
             value={layer}
             onChange={(e) => setLayer(e.target.value as 'over' | 'under')}
@@ -152,6 +156,7 @@ export function WatermarkPanel(): React.ReactElement {
           <label className="block text-sm text-neutral-400 mb-1">Pages (e.g. 1,3,5 or all)</label>
           <input
             data-testid="watermark-pages"
+            aria-label="Pages to watermark"
             type="text"
             value={pageInput}
             onChange={(e) => setPageInput(e.target.value)}

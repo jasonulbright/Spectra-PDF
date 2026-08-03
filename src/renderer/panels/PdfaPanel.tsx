@@ -31,7 +31,7 @@ export function PdfaPanel(): React.ReactElement {
       <div className="text-sm text-neutral-400">Working on: <span className="text-neutral-200">{activeFile.name}</span></div>
       <div>
         <label className="block text-sm text-neutral-400 mb-1">Conformance Level</label>
-        <select value={level} onChange={(e) => setLevel(e.target.value)} className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm">
+        <select aria-label="PDF/A conformance level" value={level} onChange={(e) => setLevel(e.target.value)} className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm">
           <option value="1b">PDF/A-1b</option><option value="2b">PDF/A-2b</option><option value="3b">PDF/A-3b</option>
         </select>
       </div>
