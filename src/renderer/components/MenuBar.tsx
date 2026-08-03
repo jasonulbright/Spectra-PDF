@@ -5,6 +5,8 @@ import { MENUS, type MenuNode } from '../commands/menus';
 import { COMMANDS, type CommandId } from '../commands/registry';
 import { shortcutForCommand } from '../commands/keymap';
 import { getCommandContext, invokeCommand, isCommandEnabled } from '../commands/context';
+import { useTranslation } from 'react-i18next';
+import { tCommandTitle, tMenuLabel } from '../i18n';
 
 // The workbench menu bar (Phase 4 M2) — rendered entirely from commands/menus
 // data over the command registry (§ 4.1). No handlers live here: a `command`
@@ -47,7 +49,7 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
           onSelect={() => invokeCommand(node.command)}
           className={itemCls}
         >
-          <span>{cmd.title}</span>
+          <span>{tCommandTitle(node.command, cmd.title)}</span>
           <Shortcut command={node.command} />
         </Menubar.Item>
       );
@@ -56,7 +58,7 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
       return (
         <Menubar.Sub key={i}>
           <Menubar.SubTrigger className={itemCls} data-testid={`submenu-${node.id}`}>
-            <span>{node.label}</span>
+            <span>{tMenuLabel(node.id, node.label)}</span>
             <span className="text-[11px] text-neutral-500">▸</span>
           </Menubar.SubTrigger>
           <Menubar.Portal>
@@ -95,6 +97,9 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
 export function MenuBar(): React.ReactElement {
   // Subscribe to state so enablement predicates + dynamic sections re-resolve.
   useAppState();
+  // N12: re-render on language change (the hook's only job here — labels
+  // resolve through tCommandTitle/tMenuLabel at render).
+  useTranslation();
   // Menus also re-resolve on OPEN (native-menu semantics): an enablement
   // input that isn't app state — edit.copy reads the live DOM selection —
   // otherwise stays stale from the last app dispatch (review-caught, M6.3).
@@ -111,7 +116,7 @@ export function MenuBar(): React.ReactElement {
             data-testid={`menu-${menu.id}`}
             className="px-2.5 py-1 rounded-sm text-neutral-300 outline-none cursor-default select-none data-[state=open]:bg-neutral-700 data-[state=open]:text-white hover:bg-neutral-700"
           >
-            {menu.label}
+            {tMenuLabel(menu.id, menu.label)}
           </Menubar.Trigger>
           <Menubar.Portal>
             <Menubar.Content className={contentCls} align="start" sideOffset={2}>
