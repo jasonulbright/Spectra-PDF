@@ -7,6 +7,8 @@ import { invokeCommand, isCommandEnabled, getCanvasServices } from '../commands/
 import { showableDoc } from '../state/selectors';
 import { ToolIcon } from './tool-icons';
 import { TILE_GLYPH } from './ToolsCenter';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../i18n';
 
 // U2 — the universal search box in the toolbar row (Phase 11, § U2).
 //
@@ -43,6 +45,8 @@ const MAX_TOOL_HITS = 5;
 const MAX_TEXT_HITS = 8;
 
 export function OmniSearch(): React.JSX.Element {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const state = useAppState();
   const { search, snippetsFor, version } = useSearchContext();
   const [query, setQuery] = useState('');
@@ -187,8 +191,8 @@ export function OmniSearch(): React.JSX.Element {
         className="omnisearch-input"
         type="text"
         value={query}
-        placeholder="Search tools and text"
-        aria-label="Search tools and document text"
+        placeholder={tChrome('chrome.search.placeholder')}
+        aria-label={tChrome('chrome.search.ariaLabel')}
         aria-expanded={showPanel}
         role="combobox"
         aria-controls="omnisearch-results"
@@ -203,10 +207,12 @@ export function OmniSearch(): React.JSX.Element {
         <div className="omnisearch-panel" id="omnisearch-results" role="listbox" data-testid="omnisearch-results">
           {hits.length === 0 && (
             <div className="omnisearch-empty" data-testid="omnisearch-empty">
-              No tools or text match “{debounced.trim()}”.
+              {tChrome('chrome.search.noMatch', { query: debounced.trim() })}
             </div>
           )}
-          {toolHits.length > 0 && <div className="omnisearch-head">Tools</div>}
+          {toolHits.length > 0 && (
+            <div className="omnisearch-head">{tChrome('chrome.search.tools')}</div>
+          )}
           {toolHits.map((hit, i) => (
             <button
               key={`tool-${hit.id}`}
@@ -215,7 +221,7 @@ export function OmniSearch(): React.JSX.Element {
               aria-selected={active === i}
               data-testid={`omnisearch-tool-${hit.id}`}
               disabled={!hit.enabled}
-              title={hit.enabled ? hit.description : 'Open a PDF first'}
+              title={hit.enabled ? hit.description : tChrome('chrome.search.openFirst')}
               className={'omnisearch-row' + (active === i ? ' active' : '')}
               onPointerDown={(e) => e.preventDefault()}
               onClick={() => run(hit)}
@@ -227,7 +233,11 @@ export function OmniSearch(): React.JSX.Element {
             </button>
           ))}
           {textHits.length > 0 && (
-            <div className="omnisearch-head">{hasDoc ? 'In this document' : 'In open documents'}</div>
+            <div className="omnisearch-head">
+              {hasDoc
+                ? tChrome('chrome.search.inThisDocument')
+                : tChrome('chrome.search.inOpenDocuments')}
+            </div>
           )}
           {textHits.map((hit, i) => {
             const idx = toolHits.length + i;
