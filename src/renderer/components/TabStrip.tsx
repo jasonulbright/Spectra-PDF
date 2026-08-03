@@ -6,6 +6,8 @@ import type { FocusedTab } from '../state/types';
 import { invokeCommand } from '../commands/context';
 import { tabFilePaths } from '../commands/registry';
 import { ChromeIcon } from './chrome-icons';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../i18n';
 
 // The tab strip (Phase 4 M2, § 3.1): Home | Tools | one tab per open
 // document. A 1:1 evolution of the old Home/Tools/Canvas switcher + the
@@ -23,6 +25,8 @@ const activeCls = 'bg-neutral-900 text-white';
 const idleCls = 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800';
 
 export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
+  // N12: re-render on language change; labels resolve via tChrome.
+  useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
   const focused = state.ui.focusedTab;
@@ -70,7 +74,7 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
         className={`${tabBase} ${focused === 'home' ? activeCls : idleCls}`}
       >
         <ChromeIcon icon="home" size={14} className="opacity-80" />
-        Home
+        {tChrome('chrome.tabs.home')}
       </button>
       {/* The Tools pseudo-tab retired in Phase 10 slice C: ops panels live in
           the right dock (Shift+F4), the tile grid lives on Home. */}
@@ -107,7 +111,7 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
                   e.stopPropagation();
                   onCloseFile(path);
                 }}
-                title={`Close ${f.name}`}
+                title={tChrome('chrome.tabs.closeFile', { name: f.name })}
                 className="ml-1 w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-red-400 hover:bg-neutral-700 opacity-0 group-hover:opacity-100 shrink-0"
               >
                 <ChromeIcon icon="close" size={11} />
@@ -123,7 +127,7 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
             <button
               type="button"
               data-testid="tab-overflow"
-              title="All open documents"
+              title={tChrome('chrome.tabs.allOpenDocuments')}
               className="flex items-center justify-center w-8 border-l border-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-800 shrink-0 outline-none"
             >
               <ChromeIcon icon="overflow" size={16} />

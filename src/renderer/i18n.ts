@@ -13,11 +13,15 @@
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import enChrome from './locales/en/chrome.json';
+import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chrome';
 
 export const SHIPPED_LOCALES: readonly string[] = ['en'];
 
 function detectLanguage(): string {
   if (import.meta.env.VITE_E2E) return 'en';
+  // Node test env (vitest imports data modules that reach this file) has no
+  // navigator; the guard keeps this module importable anywhere.
+  if (typeof navigator === 'undefined') return 'en';
   const nav = (navigator.language || 'en').toLowerCase();
   const exact = SHIPPED_LOCALES.find((l) => l.toLowerCase() === nav);
   if (exact) return exact;
@@ -52,4 +56,25 @@ export function tCommandTitle(commandId: string, englishTitle: string): string {
 /** Translate a top-level menu or submenu label by its stable id. */
 export function tMenuLabel(menuId: string, englishLabel: string): string {
   return i18next.t(`menu.${menuId}`, { defaultValue: englishLabel });
+}
+
+/**
+ * Translate a JSX/dynamic chrome string by its typed key (the
+ * CHROME_STRINGS record carries the English — see i18n-chrome.ts).
+ * `vars` interpolates `{{name}}` placeholders.
+ */
+export function tChrome(key: ChromeKey, vars?: Record<string, string | number>): string {
+  return i18next.t(key, { defaultValue: CHROME_STRINGS[key], ...vars });
+}
+
+/**
+ * Translate a PLURAL chrome message by its base id — i18next resolves the
+ * `_one`/`_other` catalog pair from `count` per the locale's plural rules.
+ */
+export function tChromeCount(key: ChromePluralKey, count: number): string {
+  const suffix = count === 1 ? '_one' : '_other';
+  return i18next.t(key, {
+    count,
+    defaultValue: CHROME_STRINGS[`${key}${suffix}` as ChromeKey],
+  });
 }
