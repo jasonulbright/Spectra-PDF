@@ -2804,7 +2804,13 @@ function PageCellImpl({
               type="button"
               data-testid={`edit-image-${img.index}`}
               className={'page-editimg' + (selected ? ' selected' : '')}
-              title={img.nested ? 'Image (inside a form)' : 'Image'}
+              title={
+                img.kind === 'vector'
+                  ? 'Vector graphic'
+                  : img.nested
+                    ? 'Image (inside a form)'
+                    : 'Image'
+              }
               aria-pressed={selected}
               style={{
                 left: `${r.x * 100}%`,

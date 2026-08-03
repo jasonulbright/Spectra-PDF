@@ -5,7 +5,9 @@ import {
   decodeToRawSource,
   engineWantsRawFallback,
   isJpegPath,
+  isSvgPath,
   jpegExifOrientation,
+  type AddImageSource,
   type ReplacementSource,
 } from './lib/image-replace';
 import { EDIT_DECLINED } from './lib/edit-text';
@@ -1366,22 +1368,51 @@ function AppContent(): React.ReactElement {
       path: string,
       page: number,
       rect: [number, number, number, number] | null,
-      injected?: ReplacementSource,
+      injected?: AddImageSource,
       at?: [number, number],
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
 
-      let source: ReplacementSource | null = injected ?? null;
+      // P7 slice F: an SVG (picked or injected) places as REAL vector
+      // content — the engine compiles it into a unit-square form and the
+      // result is an ordinary placement (movable, styleable, deletable).
+      let svgPath: string | null =
+        injected && 'svg_path' in injected ? injected.svg_path : null;
+      let source: ReplacementSource | null =
+        injected && !('svg_path' in injected) ? injected : null;
       let pickedPath: string | null = null;
-      if (!source) {
-        pickedPath = await dialog.pickImageFile();
+      if (!injected) {
+        pickedPath = await dialog.pickImageFile(true);
         if (!pickedPath) return; // cancelled — no-op
-        if (isJpegPath(pickedPath)) {
+        if (isSvgPath(pickedPath)) {
+          svgPath = pickedPath;
+        } else if (isJpegPath(pickedPath)) {
           const head = await batch.readFileBuffer(pickedPath);
           if (jpegExifOrientation(head) === 1) source = { jpeg_path: pickedPath };
         }
+      }
+      if (svgPath) {
+        const snapshotPath = await file.snapshot(f.workingPath);
+        await call('add_page_vector_graphic', {
+          file: f.workingPath,
+          output: f.workingPath,
+          page,
+          ...(rect ? { rect } : { at }),
+          svg_path: svgPath,
+        });
+        const result = await reloadFile(path);
+        if (result) {
+          dispatch({
+            type: 'UPDATE_FILE',
+            path,
+            pageCount: result.pageCount,
+            buffer: result.buffer,
+            snapshotPath,
+          });
+        }
+        return;
       }
       const tempFiles: string[] = [];
       const writeTemp = async (data: Uint8Array): Promise<string> => {

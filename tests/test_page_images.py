@@ -2127,3 +2127,160 @@ class TestGradientMask:
                 mask={"kind": "linear", "from": [0, 0], "to": [1, 1], "start_alpha": 2, "end_alpha": 0},
             )
         assert not os.path.exists(out)
+
+
+SIMPLE_SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">'
+    b'<rect width="100" height="50" fill="#3366cc"/>'
+    b'<circle cx="25" cy="25" r="15" fill="gold"/></svg>'
+)
+
+
+def _write_svg(tmp_dir, name="logo.svg", data=SIMPLE_SVG):
+    path = os.path.join(tmp_dir, name)
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
+class TestVectorPlacement:
+    """P7 slice F: a placed SVG is a first-class placement (kind "vector") —
+    the whole wrap family applies verbatim; replace/extract refuse by name;
+    the vector lister leaves it alone; delete drops the form's bytes."""
+
+    def test_place_contain_and_natural_size(self, tmp_dir):
+        from engine.page_images import add_page_vector_graphic
+
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        svg = _write_svg(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # contain (default): a 2:1 graphic in a 200x200 box → 200x100 centered.
+        add_page_vector_graphic(src, out, 1, rect=[100, 100, 300, 300], svg_path=svg)
+        img = list_page_images(out, 1)["images"][0]
+        assert img["kind"] == "vector"
+        assert img["matrix"] == pytest.approx([200, 0, 0, 100, 100, 150])
+        assert (img["native_width"], img["native_height"]) == (100, 50)
+        # at: natural size (viewBox units as points), centered on the click.
+        out2 = os.path.join(tmp_dir, "o2.pdf")
+        add_page_vector_graphic(src, out2, 1, at=[200, 300], svg_path=svg)
+        assert list_page_images(out2, 1)["images"][0]["matrix"] == pytest.approx(
+            [100, 0, 0, 50, 150, 275]
+        )
+
+    def test_transform_and_style_apply_verbatim(self, tmp_dir):
+        from engine.page_images import add_page_vector_graphic, set_image_opacity
+
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        svg = _write_svg(tmp_dir)
+        p1 = os.path.join(tmp_dir, "p1.pdf")
+        add_page_vector_graphic(src, p1, 1, rect=[100, 100, 300, 200], svg_path=svg)
+        p2 = os.path.join(tmp_dir, "p2.pdf")
+        transform_page_image(p1, p2, 1, 0, [100, 0, 0, 50, 300, 500])
+        m = list_page_images(p2, 1)["images"][0]
+        assert m["kind"] == "vector"
+        assert m["matrix"] == pytest.approx([100, 0, 0, 50, 300, 500])
+        p3 = os.path.join(tmp_dir, "p3.pdf")
+        set_image_opacity(p2, p3, 1, 0, 0.5, blend="Multiply")
+        m3 = list_page_images(p3, 1)["images"][0]
+        assert m3["opacity"] == pytest.approx(0.5)
+        assert m3["blend"] == "Multiply"
+
+    def test_mixed_page_ordinals_agree(self, tmp_dir):
+        from engine.page_images import add_page_vector_graphic
+
+        # Image at slot 0, vector at slot 1 — the mutators must hit the slot
+        # the lister names (walker agreement across KINDS).
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)  # three raster placements
+        svg = _write_svg(tmp_dir)
+        p1 = os.path.join(tmp_dir, "p1.pdf")
+        add_page_vector_graphic(src, p1, 1, rect=[400, 400, 500, 450], svg_path=svg)
+        imgs = list_page_images(p1, 1)["images"]
+        assert [i["kind"] for i in imgs] == ["xobject", "xobject", "xobject", "vector"]
+        # Transform the VECTOR (index 3): rasters untouched.
+        p2 = os.path.join(tmp_dir, "p2.pdf")
+        transform_page_image(p1, p2, 1, 3, [100, 0, 0, 50, 50, 50])
+        after = list_page_images(p2, 1)["images"]
+        assert after[3]["matrix"] == pytest.approx([100, 0, 0, 50, 50, 50])
+        assert after[0]["matrix"] == pytest.approx([100, 0, 0, 80, 50, 600])
+        # Delete the FIRST raster: the vector survives at index 2.
+        p3 = os.path.join(tmp_dir, "p3.pdf")
+        delete_page_image(p2, p3, 1, 0)
+        assert [i["kind"] for i in list_page_images(p3, 1)["images"]] == [
+            "xobject",
+            "xobject",
+            "vector",
+        ]
+
+    def test_replace_and_extract_refuse_by_name(self, tmp_dir):
+        from engine.page_images import add_page_vector_graphic
+
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        svg = _write_svg(tmp_dir)
+        p1 = os.path.join(tmp_dir, "p1.pdf")
+        add_page_vector_graphic(src, p1, 1, rect=[100, 100, 200, 150], svg_path=svg)
+        with pytest.raises(ValueError, match="vector graphic"):
+            replace_page_image(p1, os.path.join(tmp_dir, "r.pdf"), 1, 0, _raw_source(tmp_dir))
+        with pytest.raises(ValueError, match="no image bytes"):
+            extract_page_image(p1, 1, 0, os.path.join(tmp_dir, "x"))
+
+    def test_delete_drops_the_form_bytes(self, tmp_dir):
+        from engine.page_images import add_page_vector_graphic
+
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        svg = _write_svg(tmp_dir)
+        p1 = os.path.join(tmp_dir, "p1.pdf")
+        add_page_vector_graphic(src, p1, 1, rect=[100, 100, 200, 150], svg_path=svg)
+        out = os.path.join(tmp_dir, "o.pdf")
+        delete_page_image(p1, out, 1, 0)
+        assert list_page_images(out, 1)["images"] == []
+        with pikepdf.open(out) as pdf:
+            xo = pdf.pages[0].obj["/Resources"].get("/XObject")
+            names = {str(k) for k in xo.keys()} if xo is not None else set()
+            assert not any(n.startswith("/EditIm") for n in names)
+
+    def test_vector_lister_skips_the_placed_graphic(self, tmp_dir):
+        from engine.page_images import add_page_vector_graphic
+        from engine.page_vectors import list_page_vectors
+
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        svg = _write_svg(tmp_dir)
+        p1 = os.path.join(tmp_dir, "p1.pdf")
+        add_page_vector_graphic(src, p1, 1, rect=[100, 100, 200, 150], svg_path=svg)
+        # One unit owned by the placement machinery — not N stray paths.
+        assert list_page_vectors(p1, 1)["vectors"] == []
+
+    def test_compiler_refusal_surfaces_verbatim(self, tmp_dir):
+        from engine.page_images import add_page_vector_graphic
+
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        svg = _write_svg(
+            tmp_dir,
+            "text.svg",
+            b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+            b"<text x='1' y='5'>hi</text></svg>",
+        )
+        with pytest.raises(ValueError, match="text.*not supported"):
+            add_page_vector_graphic(
+                src, os.path.join(tmp_dir, "o.pdf"), 1, rect=[0, 0, 100, 100], svg_path=svg
+            )
+
+    def test_group_delete_mixes_kinds(self, tmp_dir):
+        from engine.page_images import add_page_vector_graphic, delete_page_images
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        svg = _write_svg(tmp_dir)
+        p1 = os.path.join(tmp_dir, "p1.pdf")
+        add_page_vector_graphic(src, p1, 1, rect=[400, 400, 500, 450], svg_path=svg)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # One multi op removes a raster AND the vector.
+        delete_page_images(p1, out, 1, [0, 3])
+        after = list_page_images(out, 1)["images"]
+        assert [i["kind"] for i in after] == ["xobject", "xobject"]

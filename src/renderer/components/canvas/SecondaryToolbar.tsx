@@ -141,6 +141,9 @@ export interface SecondaryToolbarProps {
   imageCropArmed: boolean;
   onToggleImageCrop: () => void;
   onRotateImage: (dir: 1 | -1) => void;
+  /** P7 slice F: the single selected placement's kind — replace/extract
+   * disable for a placed vector graphic (null = no single selection). */
+  editImagePlacementKind: 'inline' | 'xobject' | 'vector' | null;
   /** P7 multi-select: how many images are selected (0 when the selection is
    * not images). Single-target actions disable above 1; the align/distribute
    * row appears at 2+ (distribute needs 3+). */
@@ -231,6 +234,7 @@ export function SecondaryToolbar({
   onSetImageBlend,
   editImageMask,
   onSetImageMask,
+  editImagePlacementKind,
   editImageCount,
   onAlignImages,
   onSetImageOpacity,
@@ -491,7 +495,17 @@ export function SecondaryToolbar({
             type="button"
             data-testid="edit-action-replace"
             className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editImageCount > 1 || editBusy}
+            disabled={
+              editSelectionKind !== 'image' ||
+              editImageCount > 1 ||
+              editImagePlacementKind === 'vector' ||
+              editBusy
+            }
+            title={
+              editImagePlacementKind === 'vector'
+                ? 'A vector graphic cannot be replaced with a raster image — delete it and add a new graphic'
+                : undefined
+            }
             onClick={() => onEditAction('replace')}
           >
             Replace…
@@ -500,7 +514,17 @@ export function SecondaryToolbar({
             type="button"
             data-testid="edit-action-extract"
             className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editImageCount > 1 || editBusy}
+            disabled={
+              editSelectionKind !== 'image' ||
+              editImageCount > 1 ||
+              editImagePlacementKind === 'vector' ||
+              editBusy
+            }
+            title={
+              editImagePlacementKind === 'vector'
+                ? 'A vector graphic has no image bytes to extract'
+                : undefined
+            }
             onClick={() => onEditAction('extract')}
           >
             Extract…
