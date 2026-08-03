@@ -21,6 +21,7 @@ walker-agreement discipline), so the card's fit indicator can never
 disagree with the commit.
 """
 
+import math
 import os
 from pathlib import Path
 from typing import NamedTuple
@@ -466,12 +467,16 @@ class _BoxLayout(NamedTuple):
     # T25: the right-to-left half. None for every left-to-right box, which is
     # what keeps the shipped emission byte-identical.
     bidi: object | None = None
+    # T19: a FREE rotation angle in degrees (None on the shipped step path).
+    # The frame already encodes it; `angle` exists so the shift-up band can
+    # compute the page box's preimage under the free rotation.
+    angle: float | None = None
 
 
 def _layout_box_spans(
     pdf, body, spans, sz, font_path, family, bold, italic, kern, features,
     alt_index, rot, l_left, l_right, l_top, l_w, l_h, frame,
-    left, right, top, bottom,
+    left, right, top, bottom, angle=None,
 ) -> "_BoxLayout":
     """T15: the per-span layout — one resolved style per distinct combo,
     per-char widths, greedy wrap over mixed-width words, per-line leading
@@ -729,7 +734,7 @@ def _layout_box_spans(
         raise ValueError("no text to add")
 
     return _BoxLayout(
-        lines=plain_lines, body=body, leading=sz * _LEADING_EM, sz=sz, rot=rot,
+        lines=plain_lines, body=body, leading=sz * _LEADING_EM, sz=sz, rot=rot, angle=angle,
         l_left=l_left, l_right=l_right, l_top=l_top, l_w=l_w, l_h=l_h,
         frame=frame, left=left, right=right, top=top, bottom=bottom,
         font_dict=None, encode=None, width_1000=None, kern_pairs={},
@@ -799,11 +804,18 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         x0, y0, x1, y1 = (float(v) for v in rect)
     except (TypeError, ValueError):
         raise ValueError("rect must be [x0, y0, x1, y1]") from None
-    # Strict on purpose (size/rect coerce; this refuses "90"/True): 90°
-    # steps only is the A2-tail contract, and rotate is the one parameter
-    # where a silently-coerced wrong value flips the whole geometry.
-    if isinstance(rotate, bool) or not isinstance(rotate, (int, float)) or rotate not in (0, 90, 180, 270):
-        raise ValueError(f"rotate must be 0, 90, 180, or 270 (got {rotate!r})")
+    # Strict on purpose (size/rect coerce; this refuses "90"/True): rotate
+    # is the one parameter where a silently-coerced wrong value flips the
+    # whole geometry. T19 widened the DOMAIN (any finite degree value), not
+    # the strictness: booleans and strings still refuse. The four step
+    # angles keep the A2-tail contract byte-for-byte; anything else takes
+    # the free-rotation frame below.
+    if (
+        isinstance(rotate, bool)
+        or not isinstance(rotate, (int, float))
+        or not math.isfinite(float(rotate))
+    ):
+        raise ValueError(f"rotate must be a number of degrees (got {rotate!r})")
     # Strict booleans (A2-tail-2): checked as bool, NOT truthiness — bool is
     # an int subclass, so a real True/False passes while bold=1 / italic="y"
     # refuse (a coerced style would silently pick the wrong face).
@@ -816,7 +828,11 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # itself rather than surfacing whatever the font machinery hits on the way.
     if not isinstance(kern, bool):
         raise ValueError(f"kern must be true or false (got {kern!r})")
-    rot = int(rotate)
+    _ang = float(rotate) % 360.0
+    if _ang in (0.0, 90.0, 180.0, 270.0):
+        rot, angle = int(_ang), None  # the shipped step path, byte-identical
+    else:
+        rot, angle = None, _ang
     left, right = min(x0, x1), max(x0, x1)
     top, bottom = max(y0, y1), min(y0, y1)
     box_w = max(right - left, 1.0)
@@ -837,13 +853,30 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     if rot == 0:
         l_left, l_right, l_top = left, right, top
         frame = None
-    else:
+    elif rot is not None:
         l_left, l_right, l_top = 0.0, l_w, l_h
         frame = {
             90: [0, 1, -1, 0, round(right, 4), round(bottom, 4)],
             180: [-1, 0, 0, -1, round(right, 4), round(top, 4)],
             270: [0, -1, 1, 0, round(left, 4), round(top, 4)],
         }[rot]
+    else:
+        # T19 free rotation: the layout fills the DRAWN box's own
+        # dimensions and the frame turns that box about its own CENTER —
+        # the king's text-box rotation semantic. Layout, wrap, and measure
+        # stay local and angle-blind; only this frame differs.
+        l_left, l_right, l_top = 0.0, l_w, l_h
+        theta = math.radians(angle)
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+        cx, cy = (left + right) / 2.0, (bottom + top) / 2.0
+        frame = [
+            round(cos_t, 6),
+            round(sin_t, 6),
+            round(-sin_t, 6),
+            round(cos_t, 6),
+            round(cx - (l_w / 2.0 * cos_t - l_h / 2.0 * sin_t), 4),
+            round(cy - (l_w / 2.0 * sin_t + l_h / 2.0 * cos_t), 4),
+        ]
 
     sz = max(1.0, min(_MAX_SIZE, float(size) if size else 12.0))
     leading = sz * _LEADING_EM
@@ -855,7 +888,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
             pdf, body, _validated_spans(spans, len(body)), sz, font_path, family,
             bold, italic, kern, features, alt_index,
             rot, l_left, l_right, l_top, l_w, l_h, frame,
-            left, right, top, bottom,
+            left, right, top, bottom, angle,
         )
 
     # A2-tail-2: compose the A3b style into the SAME resolve ladder (both
@@ -943,7 +976,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         lines.pop()
 
     return _BoxLayout(
-        lines=lines, body=body, leading=leading, sz=sz, rot=rot,
+        lines=lines, body=body, leading=leading, sz=sz, rot=rot, angle=angle,
         l_left=l_left, l_right=l_right, l_top=l_top, l_w=l_w, l_h=l_h,
         frame=frame, left=left, right=right, top=top, bottom=bottom,
         font_dict=font_dict, encode=encode, width_1000=width_1000,
@@ -1014,6 +1047,22 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
         page_lly, page_ury = top - vbox[3], top - vbox[1]
     elif rot == 270:
         page_lly, page_ury = vbox[0] - left, vbox[2] - left
+    elif rot is None:
+        # T19 free rotation: the band is the page box's PREIMAGE under the
+        # frame — invert the (pure rotation + translate) affine, map the
+        # four device corners, take the local y-extent.
+        a_f, b_f, c_f, d_f, e_f, f_f = (float(v) for v in frame)
+        det = a_f * d_f - b_f * c_f
+        inv_b, inv_d = -b_f / det, a_f / det
+        inv_f = (b_f * e_f - a_f * f_f) / det
+        ys = [
+            x_ * inv_b + y_ * inv_d + inv_f
+            for x_, y_ in (
+                (vbox[0], vbox[1]), (vbox[2], vbox[1]),
+                (vbox[0], vbox[3]), (vbox[2], vbox[3]),
+            )
+        ]
+        page_lly, page_ury = min(ys), max(ys)
     else:
         page_lly, page_ury = vbox[1], vbox[3]
     if baselines and baselines[-1] < page_lly:
@@ -1193,6 +1242,22 @@ def add_text_box(
             page_lly, page_ury = top - vbox[3], top - vbox[1]
         elif rot == 270:
             page_lly, page_ury = vbox[0] - left, vbox[2] - left
+        elif rot is None:
+            # T19 free rotation: the band is the page box's PREIMAGE under the
+            # frame — invert the (pure rotation + translate) affine, map the
+            # four device corners, take the local y-extent.
+            a_f, b_f, c_f, d_f, e_f, f_f = (float(v) for v in frame)
+            det = a_f * d_f - b_f * c_f
+            inv_b, inv_d = -b_f / det, a_f / det
+            inv_f = (b_f * e_f - a_f * f_f) / det
+            ys = [
+                x_ * inv_b + y_ * inv_d + inv_f
+                for x_, y_ in (
+                    (vbox[0], vbox[1]), (vbox[2], vbox[1]),
+                    (vbox[0], vbox[3]), (vbox[2], vbox[3]),
+                )
+            ]
+            page_lly, page_ury = min(ys), max(ys)
         else:
             page_lly, page_ury = vbox[1], vbox[3]
         last_baseline = y_top - (len(lines) - 1) * leading

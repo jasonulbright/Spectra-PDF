@@ -13,6 +13,7 @@ import {
   mergeSpanColors,
   mergeSpanFaces,
   paragraphUnencodable,
+  relaxUnencodableSpans,
   remapRanges,
   sanitizeParagraphInput,
   seedSpanColors,
@@ -123,6 +124,81 @@ describe('paragraphUnencodable (per-span validation)', () => {
   it('dedups in order', () => {
     const spans = [{ start: 0, end: 4, run: 0 }];
     expect(paragraphUnencodable('→→é→', spans, new Map([[0, 'x']]))).toEqual(['→', 'é']);
+  });
+});
+
+describe('relaxUnencodableSpans (T21 position-aware relaxation)', () => {
+  const inv = new Map([
+    [0, 'ab'],
+    [1, 'cdé'],
+  ]);
+
+  it('reassigns a stranded char to the nearest span whose run encodes it', () => {
+    const spans = [
+      { start: 0, end: 3, run: 0 },
+      { start: 3, end: 5, run: 1 },
+    ];
+    // 'é' at position 2 sits in run 0 (ab only) — run 1 carries it: the
+    // char moves to run 1's style instead of refusing (the exact case the
+    // per-member check refused spuriously).
+    const out = relaxUnencodableSpans('abécd', spans, inv);
+    expect(out.missing).toEqual([]);
+    // The reassigned char merges with the adjacent same-run span — fewer
+    // spans, identical mapping.
+    expect(out.spans).toEqual([
+      { start: 0, end: 2, run: 0 },
+      { start: 2, end: 5, run: 1 },
+    ]);
+  });
+
+  it('a char no run encodes still refuses with the same shape', () => {
+    const spans = [
+      { start: 0, end: 2, run: 0 },
+      { start: 2, end: 4, run: 1 },
+    ];
+    const out = relaxUnencodableSpans('ab→d', spans, inv);
+    expect(out.missing).toEqual(['→']);
+    // The mapping is untouched when nothing could relax.
+    expect(out.spans).toEqual(spans);
+  });
+
+  it('fully-encodable input is a pass-through (identity spans)', () => {
+    const spans = [
+      { start: 0, end: 2, run: 0 },
+      { start: 2, end: 4, run: 1 },
+    ];
+    const out = relaxUnencodableSpans('abcd', spans, inv);
+    expect(out.missing).toEqual([]);
+    expect(out.spans).toBe(spans); // the exact same array — zero churn
+  });
+
+  it('nearest span wins; earlier breaks ties', () => {
+    const spans = [
+      { start: 0, end: 2, run: 0 },
+      { start: 2, end: 4, run: 1 },
+      { start: 4, end: 6, run: 2 },
+    ];
+    const inv3 = new Map([
+      [0, 'zé'],
+      [1, 'ab'],
+      [2, 'cdé'],
+    ]);
+    // 'é' stranded in the MIDDLE span: runs 0 and 2 both encode it, equal
+    // distance — the earlier span (run 0) takes it deterministically.
+    const out = relaxUnencodableSpans('abéacd', spans, inv3);
+    expect(out.missing).toEqual([]);
+    expect(out.spans[1]).toEqual({ start: 2, end: 3, run: 0 });
+  });
+
+  it('mixed: relaxes what it can, refuses the rest', () => {
+    const spans = [
+      { start: 0, end: 3, run: 0 },
+      { start: 3, end: 6, run: 1 },
+    ];
+    const out = relaxUnencodableSpans('abé→cd', spans, inv);
+    expect(out.missing).toEqual(['→']);
+    // The é still moved: SOME run-1 span covers position 2 now.
+    expect(out.spans.some((sp) => sp.run === 1 && sp.start <= 2 && sp.end > 2)).toBe(true);
   });
 });
 
