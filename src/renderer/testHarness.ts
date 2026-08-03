@@ -325,6 +325,14 @@ export interface CanvasEditImagesHandlers {
     nested: boolean;
     matrix: number[];
     opacity: number;
+    blend: string;
+    mask: {
+      kind: string;
+      from: [number, number];
+      to: [number, number];
+      startAlpha: number;
+      endAlpha: number;
+    } | null;
     kind: string;
     crop: number[] | null;
   }[];
@@ -378,6 +386,16 @@ export interface CanvasEditImagesHandlers {
       outputPrefix?: string;
       rect?: [number, number, number, number];
       opacity?: number;
+      blend?: string;
+      mask?:
+        | { kind: 'none' }
+        | {
+            kind: 'linear' | 'radial';
+            from: [number, number];
+            to: [number, number];
+            start_alpha: number;
+            end_alpha: number;
+          };
     },
   ) => Promise<void>;
   /** Add Text (9.A2): place a box on the active file's first page (the band
@@ -938,6 +956,14 @@ export interface TestHarness {
     nested: boolean;
     matrix: number[];
     opacity: number;
+    blend: string;
+    mask: {
+      kind: string;
+      from: [number, number];
+      to: [number, number];
+      startAlpha: number;
+      endAlpha: number;
+    } | null;
     kind: string;
     crop: number[] | null;
   }[];
@@ -991,6 +1017,16 @@ export interface TestHarness {
       outputPrefix?: string;
       rect?: [number, number, number, number];
       opacity?: number;
+      blend?: string;
+      mask?:
+        | { kind: 'none' }
+        | {
+            kind: 'linear' | 'radial';
+            from: [number, number];
+            to: [number, number];
+            start_alpha: number;
+            end_alpha: number;
+          };
     },
   ) => Promise<void>;
   /** Add Image (9.C2): embed a source at a user-space rect; P7: rect=null

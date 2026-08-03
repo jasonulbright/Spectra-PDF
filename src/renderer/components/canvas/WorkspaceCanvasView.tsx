@@ -128,6 +128,8 @@ interface WorkspaceCanvasViewProps {
       matrix?: number[];
       rect?: [number, number, number, number];
       opacity?: number;
+      blend?: string;
+      mask?: import('../../lib/edit-images').EditImageMaskParam;
     },
   ) => Promise<string | void>;
   // P7 multi-select: group transform/delete — ONE engine call for N
@@ -3050,6 +3052,7 @@ export function WorkspaceCanvasView({
       index: editSel.index,
       matrix: placement.matrix,
       crop: placement.crop,
+      mask: placement.mask,
       box: geom.box,
       bakedRotate: geom.bakedRotate,
       busy: editBusy,
@@ -3095,6 +3098,7 @@ export function WorkspaceCanvasView({
       index: selectedVector.index,
       matrix: [x1 - x0, 0, 0, y1 - y0, x0, y0] as [number, number, number, number, number, number],
       crop: null,
+      mask: null,
       box: geom.box,
       bakedRotate: geom.bakedRotate,
       busy: editBusy,
@@ -3323,6 +3327,57 @@ export function WorkspaceCanvasView({
     );
   }, [editSel, editImagesByPage]);
 
+  // P7 slice D: the selected placement's blend mode (seed) — single-only,
+  // same divergence rule as opacity.
+  const editImageBlend = useMemo(() => {
+    if (!editSel || editSel.kind !== 'image' || editSel.indexes.length !== 1) return null;
+    return (
+      editImagesByPage.get(editSel.pageId)?.find((pl) => pl.index === editSel.index)?.blend ??
+      'Normal'
+    );
+  }, [editSel, editImagesByPage]);
+
+  const commitImageBlend = useCallback(
+    (blend: string): void => {
+      void runEditAction('opacity', { blend });
+    },
+    [runEditAction],
+  );
+
+  // P7 slice E: the selected placement's tool gradient mask (seed) —
+  // 'none' when a single image is selected without one, null when the
+  // control has no target at all.
+  const editImageMask = useMemo(() => {
+    if (!editSel || editSel.kind !== 'image' || editSel.indexes.length !== 1) return null;
+    const placement = editImagesByPage
+      .get(editSel.pageId)
+      ?.find((pl) => pl.index === editSel.index);
+    if (!placement) return null;
+    return placement.mask ?? ({ kind: 'none' } as const);
+  }, [editSel, editImagesByPage]);
+
+  const commitImageMask = useCallback(
+    (mask: import('../../lib/edit-images').EditImageMaskParam): void => {
+      void runEditAction('opacity', { mask });
+    },
+    [runEditAction],
+  );
+
+  // The overlay's mask-dot commit — pageId/index verified against the
+  // selection like commitImageCrop, then routed through the shared action.
+  const commitImageMaskFromOverlay = useCallback(
+    (
+      pageId: string,
+      index: number,
+      mask: import('../../lib/edit-images').EditImageMaskParam,
+    ): void => {
+      if (!editSel || editSel.kind !== 'image') return;
+      if (editSel.pageId !== pageId || editSel.index !== index) return;
+      commitImageMask(mask);
+    },
+    [editSel, commitImageMask],
+  );
+
   // 9.C2 Add Image: the band draws the box; convert display→user space
   // (buildSignatureAppearance, verbatim from A2) and hand it to App's
   // onAddImage, which picks the file and embeds. No card — the native picker
@@ -3454,6 +3509,8 @@ export function WorkspaceCanvasView({
           nested: p.nested,
           matrix: [...p.matrix],
           opacity: p.opacity,
+          blend: p.blend,
+          mask: p.mask ? { ...p.mask, from: [...p.mask.from] as [number, number], to: [...p.mask.to] as [number, number] } : null,
           kind: p.kind,
           crop: p.crop ? [...p.crop] : null,
         })),
@@ -4357,6 +4414,10 @@ export function WorkspaceCanvasView({
         editNotice={editNotice}
         onEditAction={(kind) => void runEditAction(kind)}
         editImageOpacity={editImageOpacity}
+        editImageBlend={editImageBlend}
+        onSetImageBlend={commitImageBlend}
+        editImageMask={editImageMask}
+        onSetImageMask={commitImageMask}
         editImageCount={editSel?.kind === 'image' ? editSel.indexes.length : 0}
         onAlignImages={alignImageGroup}
         onSetImageOpacity={commitImageOpacity}
@@ -4445,6 +4506,7 @@ export function WorkspaceCanvasView({
               void commitVectorTransform(pageId, index, matrix),
             imageCropArmed,
             onCommitImageCrop: commitImageCrop,
+            onCommitImageMask: commitImageMaskFromOverlay,
             editTextByPage,
             editSelection: editSel,
             editingText,
@@ -4709,6 +4771,7 @@ export function WorkspaceCanvasView({
           }
           imageCropArmed={imageCropArmed}
           onCommitImageCrop={commitImageCrop}
+          onCommitImageMask={commitImageMaskFromOverlay}
           editTextByPage={editTextByPage}
           editSelection={editSel}
           editingText={editingText}

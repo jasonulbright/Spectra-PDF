@@ -524,6 +524,12 @@ interface PageCellProps {
    * the crop band instead of moving. */
   imageCropArmed?: boolean;
   onCommitImageCrop?: (pageId: string, index: number, rect: [number, number, number, number]) => void;
+  /** P7 slice E: the overlay's gradient-mask dot commit. */
+  onCommitImageMask?: (
+    pageId: string,
+    index: number,
+    mask: import('../../lib/edit-images').EditImageMaskParam,
+  ) => void;
   /** Edit-mode text runs (7.2+7.3), same projection rules as images.
    * Since 7.5 these are only the runs NOT covered by an editable
    * paragraph (refused paragraphs decompose back to run boxes). */
@@ -821,6 +827,7 @@ function PageCellImpl({
   onCommitImageTransform,
   imageCropArmed,
   onCommitImageCrop,
+  onCommitImageMask,
   onSelectEditImage,
   editTextRuns,
   editTextSelectedIndex,
@@ -2825,6 +2832,7 @@ function PageCellImpl({
           onCommit={(matrix) => onCommitImageTransform(page.id, editImageTransform.index, matrix)}
           cropArmed={Boolean(imageCropArmed)}
           onCommitCrop={(rect) => onCommitImageCrop?.(page.id, editImageTransform.index, rect)}
+          onCommitMask={(mask) => onCommitImageMask?.(page.id, editImageTransform.index, mask)}
         />
       )}
       {tool === 'edit' && editImageGroup && onCommitImageGroupTransform && (

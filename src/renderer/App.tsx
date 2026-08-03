@@ -9,6 +9,7 @@ import {
   type ReplacementSource,
 } from './lib/image-replace';
 import { EDIT_DECLINED } from './lib/edit-text';
+import type { EditImageMaskParam } from './lib/edit-images';
 import type { ParagraphEditOpts } from './lib/edit-paragraphs';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
 import { PasswordDialog, PasswordResult } from './components/PasswordDialog';
@@ -1177,6 +1178,8 @@ function AppContent(): React.ReactElement {
         matrix?: number[];
         rect?: [number, number, number, number];
         opacity?: number;
+        blend?: string;
+        mask?: EditImageMaskParam;
       },
     ) => {
       const f = state.files.get(path);
@@ -1211,11 +1214,21 @@ function AppContent(): React.ReactElement {
 
       if (kind === 'opacity') {
         // 9.C3: uniform placement opacity via a page-local ExtGState.
-        if (opts?.opacity === undefined) throw new Error('opacity requires a value');
+        // P7: the same frame carries the blend mode and/or a gradient soft
+        // mask — any combination; the engine merges into ONE frame.
+        if (
+          opts?.opacity === undefined &&
+          opts?.blend === undefined &&
+          opts?.mask === undefined
+        ) {
+          throw new Error('opacity requires a value, a blend mode, or a mask');
+        }
         await performOperation(path, 'set_image_opacity', {
           page,
           index,
-          opacity: opts.opacity,
+          ...(opts.opacity !== undefined ? { opacity: opts.opacity } : {}),
+          ...(opts.blend !== undefined ? { blend: opts.blend } : {}),
+          ...(opts.mask !== undefined ? { mask: opts.mask } : {}),
         });
         return;
       }

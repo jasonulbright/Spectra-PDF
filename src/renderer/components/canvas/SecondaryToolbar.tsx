@@ -110,6 +110,34 @@ export interface SecondaryToolbarProps {
    * and the rotate-90 steps (routed through the C1 transform). */
   editImageOpacity: number | null;
   onSetImageOpacity: (value: number) => void;
+  /** P7 slice D: the selected placement's blend mode seed (null = no single
+   * image selected) + commit. */
+  editImageBlend: string | null;
+  onSetImageBlend: (blend: string) => void;
+  /** P7 slice E: the selected placement's gradient-mask seed ({kind:'none'}
+   * when a single image has no tool mask; null = no single selection) +
+   * commit (the wire shape — full params or {kind:'none'} to clear). */
+  editImageMask:
+    | {
+        kind: 'linear' | 'radial';
+        from: [number, number];
+        to: [number, number];
+        startAlpha: number;
+        endAlpha: number;
+      }
+    | { kind: 'none' }
+    | null;
+  onSetImageMask: (
+    mask:
+      | { kind: 'none' }
+      | {
+          kind: 'linear' | 'radial';
+          from: [number, number];
+          to: [number, number];
+          start_alpha: number;
+          end_alpha: number;
+        },
+  ) => void;
   imageCropArmed: boolean;
   onToggleImageCrop: () => void;
   onRotateImage: (dir: 1 | -1) => void;
@@ -199,6 +227,10 @@ export function SecondaryToolbar({
   onEditAction,
   onEditTextOpen,
   editImageOpacity,
+  editImageBlend,
+  onSetImageBlend,
+  editImageMask,
+  onSetImageMask,
   editImageCount,
   onAlignImages,
   onSetImageOpacity,
@@ -522,6 +554,124 @@ export function SecondaryToolbar({
               onCommit={onSetImageOpacity}
             />
           )}
+          {/* P7 slice D: blend mode — seeded from the listing, committed
+              through the same gs frame as opacity (one merged frame). */}
+          {editSelectionKind === 'image' && editImageBlend !== null && (
+            <label className="secondary-toolbar-blend" title="Blend mode">
+              <span>Blend</span>
+              <select
+                data-testid="edit-image-blend"
+                value={editImageBlend}
+                disabled={editBusy}
+                onChange={(e) => onSetImageBlend(e.target.value)}
+              >
+                {[
+                  'Normal',
+                  'Multiply',
+                  'Screen',
+                  'Overlay',
+                  'Darken',
+                  'Lighten',
+                  'ColorDodge',
+                  'ColorBurn',
+                  'HardLight',
+                  'SoftLight',
+                  'Difference',
+                  'Exclusion',
+                  'Hue',
+                  'Saturation',
+                  'Color',
+                  'Luminosity',
+                ].map((m) => (
+                  <option key={m} value={m}>
+                    {m.replace(/([a-z])([A-Z])/g, '$1 $2')}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {/* P7 slice E: gradient mask — kind select seeds/starts the fade;
+              the on-canvas dots then steer its direction; alphas here. */}
+          {editSelectionKind === 'image' && editImageMask !== null && (
+            <label className="secondary-toolbar-blend" title="Gradient fade mask">
+              <span>Fade</span>
+              <select
+                data-testid="edit-image-mask-kind"
+                value={editImageMask.kind}
+                disabled={editBusy}
+                onChange={(e) => {
+                  const kind = e.target.value;
+                  if (kind === 'none') {
+                    onSetImageMask({ kind: 'none' });
+                  } else if (kind === 'linear' || kind === 'radial') {
+                    // Keep the current geometry when switching kind; seed a
+                    // fresh default axis otherwise.
+                    const cur = editImageMask.kind !== 'none' ? editImageMask : null;
+                    onSetImageMask({
+                      kind,
+                      from: cur?.from ?? (kind === 'linear' ? [0, 0.5] : [0.5, 0.5]),
+                      to: cur?.to ?? [1, 0.5],
+                      start_alpha: cur?.startAlpha ?? 1,
+                      end_alpha: cur?.endAlpha ?? 0,
+                    });
+                  }
+                }}
+              >
+                <option value="none">None</option>
+                <option value="linear">Linear</option>
+                <option value="radial">Radial</option>
+              </select>
+            </label>
+          )}
+          {editSelectionKind === 'image' &&
+            editImageMask !== null &&
+            editImageMask.kind !== 'none' && (
+              <label className="secondary-toolbar-blend" title="Fade start and end opacity (%)">
+                <input
+                  type="number"
+                  data-testid="edit-image-mask-a0"
+                  min={0}
+                  max={100}
+                  step={5}
+                  defaultValue={Math.round(editImageMask.startAlpha * 100)}
+                  disabled={editBusy}
+                  onBlur={(e) => {
+                    const v = Math.max(0, Math.min(100, Number(e.target.value))) / 100;
+                    if (Math.abs(v - editImageMask.startAlpha) < 0.005) return;
+                    onSetImageMask({
+                      kind: editImageMask.kind,
+                      from: editImageMask.from,
+                      to: editImageMask.to,
+                      start_alpha: v,
+                      end_alpha: editImageMask.endAlpha,
+                    });
+                  }}
+                  style={{ width: 46 }}
+                />
+                <span>→</span>
+                <input
+                  type="number"
+                  data-testid="edit-image-mask-a1"
+                  min={0}
+                  max={100}
+                  step={5}
+                  defaultValue={Math.round(editImageMask.endAlpha * 100)}
+                  disabled={editBusy}
+                  onBlur={(e) => {
+                    const v = Math.max(0, Math.min(100, Number(e.target.value))) / 100;
+                    if (Math.abs(v - editImageMask.endAlpha) < 0.005) return;
+                    onSetImageMask({
+                      kind: editImageMask.kind,
+                      from: editImageMask.from,
+                      to: editImageMask.to,
+                      start_alpha: editImageMask.startAlpha,
+                      end_alpha: v,
+                    });
+                  }}
+                  style={{ width: 46 }}
+                />
+              </label>
+            )}
           {/* P7 multi-select: align/distribute the group — per-member
               translates through the ONE multi commit (one undo entry). */}
           {editImageCount > 1 && (
