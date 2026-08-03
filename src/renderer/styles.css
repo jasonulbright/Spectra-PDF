@@ -1442,12 +1442,53 @@
   border-radius: 50%;
   cursor: grab;
 }
+/* P7 multi-select: the group frame (dashed box over the union bounds) and
+   the per-member outlines inside it. Members take the pointer for drags,
+   modifier toggles, and collapse clicks. */
+.page-imgtx-groupframe {
+  fill: rgba(59, 130, 246, 0.06);
+  stroke: var(--accent, #3b82f6);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+  pointer-events: fill;
+  cursor: move;
+}
+.page-imgtx-member {
+  fill: rgba(59, 130, 246, 0.08);
+  stroke: var(--accent, #3b82f6);
+  stroke-width: 1;
+  pointer-events: fill;
+  cursor: move;
+}
+/* P7 slice A: skew handles — diamonds at the edge midpoints, visually
+   distinct from the square resize corners and the round rotate knob. */
+.page-imgtx-skew {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  background: #fff;
+  border: 1.5px solid var(--accent, #3b82f6);
+  transform: rotate(45deg);
+  pointer-events: auto;
+  cursor: pointer;
+  box-sizing: border-box;
+}
 
 .secondary-toolbar-hint {
   font-size: 11px;
   color: var(--text-dim, #8a8a92);
   align-self: center;
   padding: 0 4px;
+}
+/* P7 multi-select: the align/distribute cluster in the Edit strip. */
+.secondary-toolbar-align {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border, #3a3a40);
 }
 .secondary-toolbar-hint.error {
   color: #f87171;

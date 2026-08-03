@@ -39,7 +39,8 @@ import { EDIT_DECLINED } from '../../lib/edit-text';
 import { pageIdAtSourceIndex } from '../../lib/durable-identity';
 import { computeEditSpans, fetchEditTextListing, hexToRgb } from '../../lib/edit-paragraphs';
 import type { EditTextListing, ParagraphEditOpts , MergeRestyle } from '../../lib/edit-paragraphs';
-import { applyRotate } from '../../lib/image-transform';
+import { applyRotate, LOCAL_CORNERS, matMul, transformPoint } from '../../lib/image-transform';
+import type { Mat } from '../../lib/image-transform';
 import { workspacePageNumber } from '../../lib/workspace-commit';
 import { runCommitGate } from '../../lib/commit-gate';
 
@@ -128,6 +129,14 @@ interface WorkspaceCanvasViewProps {
       rect?: [number, number, number, number];
       opacity?: number;
     },
+  ) => Promise<string | void>;
+  // P7 multi-select: group transform/delete — ONE engine call for N
+  // placements (one snapshot, one undo entry). Same EDIT_DECLINED contract.
+  onEditImagesGroup: (
+    kind: 'transform' | 'delete',
+    path: string,
+    page: number,
+    opts: { targets?: { index: number; matrix: number[] }[]; indexes?: number[] },
   ) => Promise<string | void>;
   // Edit ▸ Vectors (9.D1/D2/D3): delete, transform, or restyle one vector path
   // object — same undoable App routing. EDIT_DECLINED on a refused signed-doc
@@ -220,8 +229,9 @@ interface WorkspaceCanvasViewProps {
   onAddImage: (
     path: string,
     page: number,
-    rect: [number, number, number, number],
+    rect: [number, number, number, number] | null,
     source?: { jpeg_path: string } | { raw_path: string; width: number; height: number; channels: 3 | 4 },
+    at?: [number, number],
   ) => Promise<string | void>;
   // Add-page ghost (2n.3): pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
@@ -369,6 +379,7 @@ export function WorkspaceCanvasView({
   onAddLinks,
   onApplyOcrLayer,
   onEditImage,
+  onEditImagesGroup,
   onEditVector,
   onEditText,
   onRestyleText,
@@ -2126,12 +2137,15 @@ export function WorkspaceCanvasView({
     useState<ReadonlyMap<string, EditTextListing>>(NO_EDIT_TEXT);
   // ONE selection across all edit-object kinds — the secondary toolbar's
   // actions key off the kind. 'para' (7.5) is the primary text surface;
-  // 'text' survives for runs outside any editable paragraph.
-  const [editSel, setEditSel] = useState<{
-    kind: 'image' | 'text' | 'para';
-    pageId: string;
-    index: number;
-  } | null>(null);
+  // 'text' survives for runs outside any editable paragraph. The image arm
+  // carries `indexes` (P7 multi-select): `index` stays the anchor (last
+  // clicked) so single-selection consumers read it unchanged; a group is
+  // simply indexes.length > 1, same page by construction.
+  const [editSel, setEditSel] = useState<
+    | { kind: 'image'; pageId: string; index: number; indexes: number[] }
+    | { kind: 'text' | 'para'; pageId: string; index: number }
+    | null
+  >(null);
   // The ONE open inline editor — a run's or a paragraph's; the input
   // itself lives in PageCell (local value state, validated live).
   const [editingText, setEditingText] = useState<{
@@ -2153,13 +2167,14 @@ export function WorkspaceCanvasView({
     { tool: null, docId: null, buffer: null, path: null },
   );
   // C1-tail (keep selection across a transform): count-PRESERVING image
-  // ops (transform/rotate/crop/opacity/replace) stash {pageNumber, index}
+  // ops (transform/rotate/crop/opacity/replace) stash {pageNumber, indexes}
   // at commit; when the post-op refetch lands (page ids regenerated —
   // the non-authored-rebuild rule), the effect below re-selects the same
-  // placement so chained nudges need no re-click. Delete/extract never
+  // placement(s) so chained nudges need no re-click. Delete/extract never
   // stash (the index dies / nothing changes); declines and failures
-  // clear it.
-  const imageReselectRef = useRef<{ pageNumber: number; index: number } | null>(null);
+  // clear it. P7: the stash carries the whole group; restore is
+  // all-or-nothing (count-preserving ops keep every member alive).
+  const imageReselectRef = useRef<{ pageNumber: number; indexes: number[] } | null>(null);
   // 9.D2 (round-37 MED): the same reselect stash for a vector transform — a
   // whole-file op regenerates every page id, so the pre-op selectedVector id
   // is dead; this re-selects the object on its page once the fresh listing
@@ -2295,10 +2310,16 @@ export function WorkspaceCanvasView({
           // vanishing from its page.
           const stash = imageReselectRef.current;
           if (stash && page.sourcePageIndex === stash.pageNumber - 1) {
-            if (placements.some((pl) => pl.index === stash.index)) {
+            const present = new Set(placements.map((pl) => pl.index));
+            if (stash.indexes.every((i) => present.has(i))) {
               setEditSel(
                 (prevSel) =>
-                  prevSel ?? { kind: 'image' as const, pageId: page.id, index: stash.index },
+                  prevSel ?? {
+                    kind: 'image' as const,
+                    pageId: page.id,
+                    index: stash.indexes[stash.indexes.length - 1],
+                    indexes: [...stash.indexes],
+                  },
               );
             } else {
               imageReselectRef.current = null;
@@ -2347,16 +2368,43 @@ export function WorkspaceCanvasView({
   // it too (no new editor while a commit is in flight).
   const committingTextRef = useRef(false);
 
-  const handleSelectEditImage = useCallback((pageId: string, index: number) => {
-    imageReselectRef.current = null; // a user pick owns selection now
-    setEditNotice(null);
-    setEditingText(null);
-    setEditSel((prev) =>
-      prev?.kind === 'image' && prev.pageId === pageId && prev.index === index
-        ? null
-        : { kind: 'image', pageId, index },
-    );
-  }, []);
+  const handleSelectEditImage = useCallback(
+    (pageId: string, index: number, additive?: boolean) => {
+      imageReselectRef.current = null; // a user pick owns selection now
+      setEditNotice(null);
+      setEditingText(null);
+      setEditSel((prev) => {
+        // P7: Shift/Ctrl-click grows/shrinks a same-page group. A different
+        // page (or no image selection) starts fresh — cross-page groups have
+        // no king precedent and no honest group frame.
+        if (additive && prev?.kind === 'image' && prev.pageId === pageId) {
+          const has = prev.indexes.includes(index);
+          const indexes = has
+            ? prev.indexes.filter((i) => i !== index)
+            : [...prev.indexes, index];
+          if (indexes.length === 0) return null;
+          return {
+            kind: 'image',
+            pageId,
+            index: has ? indexes[indexes.length - 1] : index,
+            indexes,
+          };
+        }
+        // Plain click: toggle a lone selection off; collapse a group to the
+        // clicked member (the king's behavior — click focuses one).
+        if (
+          prev?.kind === 'image' &&
+          prev.pageId === pageId &&
+          prev.index === index &&
+          prev.indexes.length === 1
+        ) {
+          return null;
+        }
+        return { kind: 'image', pageId, index, indexes: [index] };
+      });
+    },
+    [],
+  );
 
   const handleSelectEditText = useCallback((pageId: string, index: number) => {
     imageReselectRef.current = null; // a user pick owns selection now
@@ -2930,7 +2978,7 @@ export function WorkspaceCanvasView({
       // index dies with the placement and extract changes nothing.
       imageReselectRef.current =
         kind === 'replace' || kind === 'crop' || kind === 'opacity'
-          ? { pageNumber, index: target.index }
+          ? { pageNumber, indexes: [...target.indexes] }
           : null;
       const previousPlacements = editImagesByPage.get(target.pageId);
       if (kind !== 'extract') {
@@ -2947,7 +2995,15 @@ export function WorkspaceCanvasView({
         });
       }
       try {
-        const notice = await onEditImage(kind, focusedDoc.path, pageNumber, target.index, opts);
+        // P7: a group delete is ONE engine call (one undo entry) — every
+        // other action stays single-target (the toolbar restricts them to
+        // N=1; the anchor is the honest target if one slips through).
+        const notice =
+          kind === 'delete' && target.indexes.length > 1
+            ? await onEditImagesGroup('delete', focusedDoc.path, pageNumber, {
+                indexes: [...target.indexes],
+              })
+            : await onEditImage(kind, focusedDoc.path, pageNumber, target.index, opts);
         if (notice === EDIT_DECLINED) {
           imageReselectRef.current = null;
           // Declined signed-doc warning: no buffer change, no refetch —
@@ -2974,14 +3030,16 @@ export function WorkspaceCanvasView({
         setEditBusy(false);
       }
     },
-    [editSel, focusedDoc, docs, onEditImage, editBusy, editImagesByPage],
+    [editSel, focusedDoc, docs, onEditImage, onEditImagesGroup, editBusy, editImagesByPage],
   );
 
   // The selected image's transform context (9.C1): its user-space matrix + the
   // page geometry the gesture needs to convert pointer↔user space. Null unless
-  // an image is selected AND its page geometry is loaded.
+  // EXACTLY ONE image is selected AND its page geometry is loaded — a group
+  // renders the group frame instead (no skew/crop on a group; stated P7
+  // boundary, matching the king).
   const editImageTransform = useMemo(() => {
-    if (!editSel || editSel.kind !== 'image') return null;
+    if (!editSel || editSel.kind !== 'image' || editSel.indexes.length !== 1) return null;
     const placement = editImagesByPage
       .get(editSel.pageId)
       ?.find((pl) => pl.index === editSel.index);
@@ -2992,6 +3050,28 @@ export function WorkspaceCanvasView({
       index: editSel.index,
       matrix: placement.matrix,
       crop: placement.crop,
+      box: geom.box,
+      bakedRotate: geom.bakedRotate,
+      busy: editBusy,
+    };
+  }, [editSel, editImagesByPage, editGeomByPage, editBusy]);
+
+  // P7: the group transform context (N>1) — every member's committed matrix +
+  // the shared page geometry. Members missing from the listing (mid-refetch)
+  // drop out; below 2 the group frame stands down.
+  const editImageGroup = useMemo(() => {
+    if (!editSel || editSel.kind !== 'image' || editSel.indexes.length < 2) return null;
+    const placements = editImagesByPage.get(editSel.pageId);
+    const geom = editGeomByPage.get(editSel.pageId);
+    if (!placements || !geom) return null;
+    const members = editSel.indexes
+      .map((i) => placements.find((pl) => pl.index === i))
+      .filter((pl): pl is NonNullable<typeof pl> => !!pl)
+      .map((pl) => ({ index: pl.index, matrix: pl.matrix }));
+    if (members.length < 2) return null;
+    return {
+      pageId: editSel.pageId,
+      members,
       box: geom.box,
       bakedRotate: geom.bakedRotate,
       busy: editBusy,
@@ -3034,7 +3114,7 @@ export function WorkspaceCanvasView({
       if (pageNumber == null) return;
       setEditBusy(true);
       setEditNotice(null);
-      imageReselectRef.current = { pageNumber, index };
+      imageReselectRef.current = { pageNumber, indexes: [index] };
       try {
         const notice = await onEditImage('transform', focusedDoc.path, pageNumber, index, {
           matrix,
@@ -3053,6 +3133,117 @@ export function WorkspaceCanvasView({
       }
     },
     [focusedDoc, docs, onEditImage, editBusy],
+  );
+
+  // P7: commit a GROUP gesture — per-member absolute targets through the ONE
+  // multi op (one undo entry). The stash re-selects the whole group when the
+  // fresh listing lands (count-preserving, so all members survive).
+  const commitImageGroupTransform = useCallback(
+    async (
+      pageId: string,
+      targets: { index: number; matrix: number[] }[],
+      reselectIndexes?: number[],
+    ): Promise<void> => {
+      if (!focusedDoc || editBusy || targets.length === 0) return;
+      const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
+      if (pageNumber == null) return;
+      setEditBusy(true);
+      setEditNotice(null);
+      // An align can move a SUBSET while the whole group must re-select.
+      imageReselectRef.current = {
+        pageNumber,
+        indexes: reselectIndexes ?? targets.map((t) => t.index),
+      };
+      try {
+        const notice = await onEditImagesGroup('transform', focusedDoc.path, pageNumber, {
+          targets,
+        });
+        if (notice === EDIT_DECLINED) {
+          imageReselectRef.current = null;
+          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+        } else if (typeof notice === 'string') {
+          setEditNotice({ text: notice, error: false });
+        }
+      } catch (err) {
+        imageReselectRef.current = null;
+        setEditNotice({ text: err instanceof Error ? err.message : String(err), error: true });
+      } finally {
+        setEditBusy(false);
+      }
+    },
+    [focusedDoc, docs, onEditImagesGroup, editBusy],
+  );
+
+  // P7: align/distribute the group — pure per-member translates committed
+  // through the same multi op. Boxes are user-space AABBs of each member's
+  // quad (rotation-honest); alignment references the group's own extents,
+  // the king's semantic.
+  const alignImageGroup = useCallback(
+    (
+      mode: 'left' | 'centerh' | 'right' | 'top' | 'centerv' | 'bottom' | 'disth' | 'distv',
+    ): void => {
+      if (!editImageGroup || editImageGroup.busy) return;
+      const boxes = editImageGroup.members.map((m) => {
+        const corners = LOCAL_CORNERS.map(([lx, ly]) =>
+          transformPoint(m.matrix as Mat, lx, ly),
+        );
+        const xs = corners.map((c) => c[0]);
+        const ys = corners.map((c) => c[1]);
+        return {
+          index: m.index,
+          matrix: m.matrix,
+          x0: Math.min(...xs),
+          x1: Math.max(...xs),
+          y0: Math.min(...ys),
+          y1: Math.max(...ys),
+        };
+      });
+      const minX = Math.min(...boxes.map((b) => b.x0));
+      const maxX = Math.max(...boxes.map((b) => b.x1));
+      const minY = Math.min(...boxes.map((b) => b.y0));
+      const maxY = Math.max(...boxes.map((b) => b.y1));
+      let moves: { index: number; dx: number; dy: number }[];
+      if (mode === 'disth' || mode === 'distv') {
+        // Even gaps between sorted neighbours, first and last pinned.
+        const horizontal = mode === 'disth';
+        const sorted = [...boxes].sort((a, b) => (horizontal ? a.x0 - b.x0 : a.y0 - b.y0));
+        const span = horizontal ? maxX - minX : maxY - minY;
+        const total = sorted.reduce(
+          (s, b) => s + (horizontal ? b.x1 - b.x0 : b.y1 - b.y0),
+          0,
+        );
+        const gap = (span - total) / (sorted.length - 1);
+        let cursor = horizontal ? minX : minY;
+        moves = sorted.map((b) => {
+          const size = horizontal ? b.x1 - b.x0 : b.y1 - b.y0;
+          const delta = cursor - (horizontal ? b.x0 : b.y0);
+          cursor += size + gap;
+          return { index: b.index, dx: horizontal ? delta : 0, dy: horizontal ? 0 : delta };
+        });
+      } else {
+        moves = boxes.map((b) => {
+          if (mode === 'left') return { index: b.index, dx: minX - b.x0, dy: 0 };
+          if (mode === 'right') return { index: b.index, dx: maxX - b.x1, dy: 0 };
+          if (mode === 'centerh')
+            return { index: b.index, dx: (minX + maxX) / 2 - (b.x0 + b.x1) / 2, dy: 0 };
+          if (mode === 'top') return { index: b.index, dx: 0, dy: maxY - b.y1 };
+          if (mode === 'bottom') return { index: b.index, dx: 0, dy: minY - b.y0 };
+          return { index: b.index, dx: 0, dy: (minY + maxY) / 2 - (b.y0 + b.y1) / 2 };
+        });
+      }
+      const byIndex = new Map(boxes.map((b) => [b.index, b.matrix]));
+      const targets = moves
+        .filter((mv) => Math.abs(mv.dx) > 1e-6 || Math.abs(mv.dy) > 1e-6)
+        .map((mv) => {
+          const m = byIndex.get(mv.index)!;
+          return { index: mv.index, matrix: [m[0], m[1], m[2], m[3], m[4] + mv.dx, m[5] + mv.dy] };
+        });
+      if (targets.length === 0) return; // already aligned — no undo churn
+      // Untouched members still re-select: stash the full group.
+      const all = editImageGroup.members.map((m) => m.index);
+      void commitImageGroupTransform(editImageGroup.pageId, targets, all);
+    },
+    [editImageGroup, commitImageGroupTransform],
   );
 
   // 9.C3: crop mode (toolbar toggle) — armed, the overlay's body drag draws
@@ -3086,23 +3277,47 @@ export function WorkspaceCanvasView({
 
   // 9.C3: rotate-90 buttons — pure composition onto the committed matrix,
   // committed through the SHIPPED transform op (zero new engine surface).
+  // P7: with a group selected, every member turns about the GROUP center
+  // (one user-space rotation D post-composed onto each matrix, one multi
+  // commit) — the arrangement turns as a unit, the king's semantic.
   const rotateImage90 = useCallback(
     (dir: 1 | -1): void => {
+      if (editImageGroup && !editImageGroup.busy) {
+        const pts = editImageGroup.members.flatMap((m) =>
+          LOCAL_CORNERS.map(([lx, ly]) => transformPoint(m.matrix as Mat, lx, ly)),
+        );
+        const cx = (Math.min(...pts.map((p) => p[0])) + Math.max(...pts.map((p) => p[0]))) / 2;
+        const cy = (Math.min(...pts.map((p) => p[1])) + Math.max(...pts.map((p) => p[1]))) / 2;
+        const a = (dir * Math.PI) / 2;
+        const cos = Math.cos(a);
+        const sin = Math.sin(a);
+        const d: Mat = [cos, sin, -sin, cos, cx - cx * cos + cy * sin, cy - cx * sin - cy * cos];
+        void commitImageGroupTransform(
+          editImageGroup.pageId,
+          editImageGroup.members.map((m) => ({
+            index: m.index,
+            matrix: [...matMul(m.matrix as Mat, d)],
+          })),
+        );
+        return;
+      }
       if (!editImageTransform || editImageTransform.busy) return;
       const m = applyRotate(
-        editImageTransform.matrix as [number, number, number, number, number, number],
+        editImageTransform.matrix as Mat,
         (dir * Math.PI) / 2,
       );
       void commitImageTransform(editImageTransform.pageId, editImageTransform.index, [...m]);
     },
-    [editImageTransform, commitImageTransform],
+    [editImageTransform, editImageGroup, commitImageTransform, commitImageGroupTransform],
   );
 
   // C4: the selected placement's kind — replace/extract disable for an
   // inline draw (honest disable at the control, engine refusal as belt).
   // The selected placement's current opacity — the slider's honest seed.
   const editImageOpacity = useMemo(() => {
-    if (!editSel || editSel.kind !== 'image') return null;
+    // Single selection only (P7): per-member opacities diverge in a group,
+    // so a shared slider would lie about N−1 of them.
+    if (!editSel || editSel.kind !== 'image' || editSel.indexes.length !== 1) return null;
     return (
       editImagesByPage.get(editSel.pageId)?.find((pl) => pl.index === editSel.index)?.opacity ?? 1
     );
@@ -3146,7 +3361,17 @@ export function WorkspaceCanvasView({
           };
         });
         if (!built) throw new Error('The page this image was placed on no longer exists.');
-        const notice = await onAddImage(built.path, built.appearance.page, built.appearance.rect);
+        // P7 (slice C): the PageCell click sentinel (w=h=0) degenerates the
+        // appearance rect to the click point — route it as a natural-size
+        // `at` placement instead of a drawn box.
+        const isClick = rect.w === 0 && rect.h === 0;
+        const [rx0, ry0, rx1, ry1] = built.appearance.rect;
+        const notice = isClick
+          ? await onAddImage(built.path, built.appearance.page, null, undefined, [
+              (rx0 + rx1) / 2,
+              (ry0 + ry1) / 2,
+            ])
+          : await onAddImage(built.path, built.appearance.page, built.appearance.rect);
         if (notice === EDIT_DECLINED) {
           setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
         } else if (typeof notice === 'string') {
@@ -3189,6 +3414,8 @@ export function WorkspaceCanvasView({
   commitAddTextRef.current = commitAddText;
   const commitImageTransformRef = useRef(commitImageTransform);
   commitImageTransformRef.current = commitImageTransform;
+  const commitImageGroupTransformRef = useRef(commitImageGroupTransform);
+  commitImageGroupTransformRef.current = commitImageGroupTransform;
   const onAddImageRef = useRef(onAddImage);
   onAddImageRef.current = onAddImage;
   const focusedDocPathRef = useRef<string | null>(focusedDoc?.path ?? null);
@@ -3232,16 +3459,29 @@ export function WorkspaceCanvasView({
         })),
       transformImage: (pageId, index, matrix) =>
         commitImageTransformRef.current(pageId, index, matrix),
-      addImage: async (page, rect, source) => {
+      transformImages: (pageId, targets) =>
+        commitImageGroupTransformRef.current(pageId, targets),
+      addImage: async (page, rect, source, at) => {
         const path = focusedDocPathRef.current;
         if (!path) throw new Error('addImage: no active document');
-        await onAddImageRef.current(path, page, rect, source);
+        await onAddImageRef.current(path, page, rect, source, at);
       },
-      select: (pageId, index) => {
+      select: (pageId, index, additive) => {
         imageReselectRef.current = null; // harness picks are user picks
-        setEditSel({ kind: 'image', pageId, index });
+        // Deliberately NON-toggling (unlike the click handler): harness
+        // re-selects must be idempotent — specs select the same placement
+        // repeatedly across commits. `additive` grows the group (P7).
+        setEditSel((prev) => {
+          if (additive && prev?.kind === 'image' && prev.pageId === pageId) {
+            return prev.indexes.includes(index)
+              ? prev
+              : { kind: 'image', pageId, index, indexes: [...prev.indexes, index] };
+          }
+          return { kind: 'image', pageId, index, indexes: [index] };
+        });
       },
       selection: () => editSelRef.current,
+      deleteSelected: () => runEditActionRef.current('delete'),
       textPageIds: () => [...editTextRef.current.keys()],
       textRuns: (pageId) =>
         (editTextRef.current.get(pageId)?.runBoxes ?? []).map((r) => ({
@@ -4117,7 +4357,8 @@ export function WorkspaceCanvasView({
         editNotice={editNotice}
         onEditAction={(kind) => void runEditAction(kind)}
         editImageOpacity={editImageOpacity}
-
+        editImageCount={editSel?.kind === 'image' ? editSel.indexes.length : 0}
+        onAlignImages={alignImageGroup}
         onSetImageOpacity={commitImageOpacity}
         imageCropArmed={imageCropArmed}
         onToggleImageCrop={() => setImageCropArmed((a) => !a)}
@@ -4194,6 +4435,11 @@ export function WorkspaceCanvasView({
             selectedVector,
             editImageTransform,
             onCommitImageTransform: commitImageTransform,
+            editImageGroup,
+            onCommitImageGroupTransform: (
+              pageId: string,
+              targets: { index: number; matrix: number[] }[],
+            ) => void commitImageGroupTransform(pageId, targets),
             vectorTransform,
             onCommitVectorTransform: (pageId: string, index: number, matrix: number[]) =>
               void commitVectorTransform(pageId, index, matrix),
@@ -4284,6 +4530,7 @@ export function WorkspaceCanvasView({
           const inactiveOverrides = {
             editingText: null,
             editImageTransform: null,
+            editImageGroup: null,
             vectorTransform: null,
             imageCropArmed: false,
             signaturePlacement: null,
@@ -4452,6 +4699,10 @@ export function WorkspaceCanvasView({
           selectedVector={selectedVector}
           editImageTransform={editImageTransform}
           onCommitImageTransform={commitImageTransform}
+          editImageGroup={editImageGroup}
+          onCommitImageGroupTransform={(pageId, targets) =>
+            void commitImageGroupTransform(pageId, targets)
+          }
           vectorTransform={vectorTransform}
           onCommitVectorTransform={(pageId, index, matrix) =>
             void commitVectorTransform(pageId, index, matrix)

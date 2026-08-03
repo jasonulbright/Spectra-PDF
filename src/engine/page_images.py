@@ -311,33 +311,50 @@ def _invert_matrix(m):
 
 class _EditState:
     """Mutable cursor shared across the recursive rewrite: counts image
-    draws in the SAME order as the lister; applies the action at `target`."""
+    draws in the SAME order as the lister; applies the action at every
+    ordinal in `targets` (P7: a dict — multi-select group ops run as ONE
+    rewrite pass; the single-placement ops pass a one-entry dict).
+
+    Per-target payloads carry what differs between targets (today: the
+    transform delta). Safe by `_recognized_frames`' exactness: a recognized
+    frame's body is exactly [prefix, inner unit, Q], so a recognized frame
+    encloses exactly ONE draw — a per-target collapse/fold can never touch
+    a frame that also encloses another target, and surviving open_q kept
+    indices stay valid across a collapse (dropped frames are the innermost
+    run, so every surviving open frame's kept position precedes them)."""
 
     def __init__(
         self,
-        target: int,
+        targets: dict[int, dict],
         action: str,
         replacement_name: str | None,
         pending_image=None,
-        delta=None,
         crop_rect=None,
         pending_gs=None,
+        replace_fit=None,
     ):
-        self.target = target
+        self.targets = dict(targets)
         self.action = action  # 'delete' | 'replace' | 'transform' | 'crop' | 'opacity'
         self.replacement_name = replacement_name
         self.pending_image = pending_image
-        # 'transform' only: the delta matrix D injected as `q D cm Do Q` at the
-        # target draw so the placement's effective CTM becomes the caller's M'.
-        self.delta = delta
+        # 'replace' with fit="contain" (P7): a LOCAL aspect-correction matrix
+        # [sx,0,0,sy,tx,ty] wrapped around the renamed draw as the RECOGNIZED
+        # transform shape `q cm Do Q` — so the letterbox folds under a later
+        # transform exactly like any tool frame. None = stretch (7.1 shipped
+        # behavior, byte-stable).
+        self.replace_fit = replace_fit
+        # 'transform' only: the CURRENT target's delta matrix D, injected as
+        # `q D cm Do Q` at its draw so the placement's effective CTM becomes
+        # the caller's M'. Assigned per hit from the target's payload.
+        self.delta = None
         # 'crop' only (C3): [cx0, cy0, cx1, cy1] in the image's UNIT space —
         # emitted as a clip path AT the draw, so it rides the same CTM as the
         # unit square at any nesting depth (no matrix math needed).
         self.crop_rect = crop_rect
         # 'transform' only (C3-tail): the intersection of the recognized crop
-        # frames the collapse just dropped at the target — re-emitted as the
-        # innermost frame INSIDE the new cm, so the clip travels with the
-        # move instead of staying in pre-transform space.
+        # frames the collapse just dropped at the CURRENT target — re-emitted
+        # as the innermost frame INSIDE the new cm, so the clip travels with
+        # the move instead of staying in pre-transform space.
         self.carried_crop = None
         # 'opacity' only (C3): the ExtGState dict to register. The NAME is
         # allocated AT the target draw against the resources actually in
@@ -356,6 +373,26 @@ class _EditState:
         # the superseded form keeps the "deleted" image bytes reachable —
         # review-caught, and redact.py's exact precedent).
         self.superseded_forms: set = set()
+
+    def take(self, ordinal: int) -> dict | None:
+        """Consume and return the payload when `ordinal` is a target."""
+        payload = self.targets.pop(ordinal, None)
+        if payload is not None and not self.targets:
+            self.done = True
+        return payload
+
+    def emit_replacement(self, kept) -> None:
+        """The renamed draw, wrapped in the aspect-correction frame when
+        fit="contain" asked for one (the frame is `_WRAP_SHAPES`' transform
+        shape, so listings and later folds treat it as an ordinary tool
+        frame)."""
+        if self.replace_fit is not None:
+            kept.append(_op([], "q"))
+            kept.append(_op([round(float(v), 6) for v in self.replace_fit], "cm"))
+            kept.append(_do_instruction(self.replacement_name))
+            kept.append(_op([], "Q"))
+        else:
+            kept.append(_do_instruction(self.replacement_name))
 
 
 def _emit_wrap(kept, instruction, state, resources, fallback_resources, reserved) -> bool:
@@ -614,8 +651,8 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
             # the lister counts both, so the rewriter must too (a later
             # inline draw still occupies its counted slot after the edit
             # is done).
-            if not state.done and state.seen == state.target:
-                state.done = True
+            payload = state.take(state.seen)
+            if payload is not None:
                 changed = True
                 if state.action == "crop":
                     _collapse_crop_frames(kept, instructions, i, open_q, skip_q)
@@ -626,7 +663,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     # written — folding first would leave a dropped crop's
                     # rect measured against a space that no longer exists.
                     state.carried_crop, state.delta = _collapse_for_transform(
-                        kept, instructions, i, open_q, skip_q, state.delta
+                        kept, instructions, i, open_q, skip_q, payload["delta"]
                     )
                 elif state.action == "opacity":
                     _collapse_opacity_frames(
@@ -643,7 +680,9 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     # an ordinary placement afterward (list/delete/replace/
                     # transform all see it with no special case). The old
                     # inline bytes vanish with the dropped instruction.
-                    kept.append(_do_instruction(state.replacement_name))
+                    # (P7: fit="contain" wraps the promoted draw too — the
+                    # frame is balanced, so the slot arithmetic is unmoved.)
+                    state.emit_replacement(kept)
             else:
                 kept.append(instruction)
             state.seen += 1
@@ -656,8 +695,8 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
         xobj = _lookup_xobject(name, resources, fallback_resources)
         subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
         if xobj is not None and subtype == "/Image":
-            if state.seen == state.target:
-                state.done = True
+            payload = state.take(state.seen)
+            if payload is not None:
                 changed = True
                 if state.action == "crop":
                     _collapse_crop_frames(kept, instructions, i, open_q, skip_q)
@@ -665,7 +704,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     # P9: see the inline-image branch — crops out first, then
                     # the transform frames fold into the one fresh matrix.
                     state.carried_crop, state.delta = _collapse_for_transform(
-                        kept, instructions, i, open_q, skip_q, state.delta
+                        kept, instructions, i, open_q, skip_q, payload["delta"]
                     )
                 elif state.action == "opacity":
                     _collapse_opacity_frames(
@@ -683,7 +722,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     # resources in scope (never shadows a form's own names).
                     pass
                 else:
-                    kept.append(_do_instruction(state.replacement_name))
+                    state.emit_replacement(kept)
             else:
                 kept.append(instruction)
             state.seen += 1
@@ -840,8 +879,18 @@ def _save(pdf, input_path: Path, output_path: Path) -> None:
         pdf.save(output_path)
 
 
-def delete_page_image(file: str, output: str, page: int, index: int) -> dict:
-    """Remove one image placement (per-placement — see module docstring)."""
+def delete_page_images(file: str, output: str, page: int, indexes: list) -> dict:
+    """Remove SEVERAL image placements in ONE atomic rewrite (P7 multi-select
+    group delete): one pass, one save, one undoable operation. `indexes` are
+    distinct lister ordinals; per-placement semantics are identical to the
+    single delete (a shared XObject drawn elsewhere is untouched, nested
+    targets edit form copies, reachability GC runs once at the end)."""
+    try:
+        idxs = sorted({int(i) for i in (indexes or [])})
+    except (TypeError, ValueError):
+        raise ValueError("indexes must be a list of integers") from None
+    if not idxs:
+        raise ValueError("indexes must name at least one placement")
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -864,21 +913,100 @@ def delete_page_image(file: str, output: str, page: int, index: int) -> dict:
                 pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
             )
         )
-        if not (0 <= int(index) < count):
-            raise ValueError(f"image index {index} is out of range (page has {count})")
+        for idx in idxs:
+            if not (0 <= idx < count):
+                raise ValueError(f"image index {idx} is out of range (page has {count})")
 
-        state = _EditState(int(index), "delete", None)
+        state = _EditState({idx: {} for idx in idxs}, "delete", None)
         kept, changed, new_forms = _rewrite(
             pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
         )
-        if not changed:
+        if not changed or state.targets:
             raise ValueError("edit did not apply (placement not found)")
         for nm, st in new_forms.items():
             _register_xobject(pdf, resources, nm, st)
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         _finalize_page_rewrite(p, kept, state.superseded_forms)
         _save(pdf, input_path, output_path)
-        return {"output": str(output_path), "page": int(page), "index": int(index)}
+        return {"output": str(output_path), "page": int(page), "indexes": idxs}
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+
+
+def delete_page_image(file: str, output: str, page: int, index: int) -> dict:
+    """Remove one image placement (per-placement — see module docstring).
+    Thin wrapper over the multi op: ONE implementation, no behavior drift."""
+    delete_page_images(file, output, page, [int(index)])
+    return {"output": str(Path(output)), "page": int(page), "index": int(index)}
+
+
+def transform_page_images(file: str, output: str, page: int, targets: list) -> dict:
+    """Move/resize/rotate/skew SEVERAL image placements in ONE atomic rewrite
+    (P7 multi-select group transform). `targets` is [{"index": i, "matrix":
+    [a,b,c,d,e,f]}, ...] — each placement's CTM is rewritten to its own
+    ABSOLUTE M' exactly as the single transform does, in one pass with one
+    save, so a group gesture is one undoable operation. Deltas are computed
+    per target from ONE pre-rewrite walk; that stays sound because each
+    wrap touches only its own draw (and `_recognized_frames`' exactness
+    means no foldable frame can enclose two targets)."""
+    parsed: dict[int, tuple] = {}
+    for t in list(targets or []):
+        if not isinstance(t, dict):
+            raise ValueError("each target must be {index, matrix}")
+        try:
+            idx = int(t.get("index"))
+        except (TypeError, ValueError):
+            raise ValueError("each target needs an integer index") from None
+        m = _as_matrix(t.get("matrix"))
+        if m is None:
+            raise ValueError("each target matrix must be [a, b, c, d, e, f]")
+        if idx in parsed:
+            raise ValueError(f"duplicate target index {idx}")
+        parsed[idx] = m
+    if not parsed:
+        raise ValueError("targets must name at least one placement")
+    input_path = Path(file)
+    output_path = Path(output)
+    pdf = pikepdf.open(file)
+    try:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        # Copy-on-write a page-LOCAL /Resources — nested-placement transforms
+        # register a form COPY, which on a shared (qpdf-flattened) /Resources
+        # would leak into sibling pages (the C2 review fix, uniform across the
+        # page-level image ops).
+        resources = _copy_resources_for_write(pdf, _resolve_resources(p))
+        p.obj["/Resources"] = resources
+        placements = _walk_placements(
+            pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
+        )
+        for idx in parsed:
+            if not (0 <= idx < len(placements)):
+                raise ValueError(
+                    f"image index {idx} is out of range (page has {len(placements)})"
+                )
+        edit_targets = {
+            idx: {"delta": _mat_mult(m_target, _invert_matrix(tuple(placements[idx]["matrix"])))}
+            for idx, m_target in parsed.items()
+        }
+
+        state = _EditState(edit_targets, "transform", None)
+        kept, changed, new_forms = _rewrite(
+            pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
+        )
+        if not changed or state.targets:
+            raise ValueError("edit did not apply (placement not found)")
+        for nm, st in new_forms.items():
+            _register_xobject(pdf, resources, nm, st)
+        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        _finalize_page_rewrite(p, kept, state.superseded_forms)
+        _save(pdf, input_path, output_path)
+        return {"output": str(output_path), "page": int(page), "indexes": sorted(parsed)}
     finally:
         try:
             pdf.close()
@@ -897,51 +1025,12 @@ def transform_page_image(file: str, output: str, page: int, index: int, matrix: 
     D = M'·M_cur⁻¹, and wraps the draw as `q D cm Do Q`, so the effective
     transform D·M_cur becomes M'. Per-placement like delete/replace: a shared
     XObject drawn elsewhere is untouched; a placement inside a form is
-    transformed on a COPY of that form."""
-    m_target = _as_matrix(matrix)
-    if m_target is None:
+    transformed on a COPY of that form. Thin wrapper over the multi op —
+    ONE implementation, no behavior drift."""
+    if _as_matrix(matrix) is None:
         raise ValueError("matrix must be [a, b, c, d, e, f]")
-    input_path = Path(file)
-    output_path = Path(output)
-    pdf = pikepdf.open(file)
-    try:
-        total = len(pdf.pages)
-        if not (1 <= int(page) <= total):
-            raise ValueError(f"page {page} is out of range (1-{total})")
-        p = pdf.pages[int(page) - 1]
-        # Copy-on-write a page-LOCAL /Resources — nested-placement transforms
-        # register a form COPY, which on a shared (qpdf-flattened) /Resources
-        # would leak into sibling pages (the C2 review fix, uniform across the
-        # page-level image ops).
-        resources = _copy_resources_for_write(pdf, _resolve_resources(p))
-        p.obj["/Resources"] = resources
-        placements = _walk_placements(
-            pdf, pikepdf.parse_content_stream(p), resources, IDENTITY, 0, None, [], False
-        )
-        if not (0 <= int(index) < len(placements)):
-            raise ValueError(
-                f"image index {index} is out of range (page has {len(placements)})"
-            )
-        m_cur = tuple(placements[int(index)]["matrix"])
-        delta = _mat_mult(m_target, _invert_matrix(m_cur))
-
-        state = _EditState(int(index), "transform", None, delta=delta)
-        kept, changed, new_forms = _rewrite(
-            pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
-        )
-        if not changed:
-            raise ValueError("edit did not apply (placement not found)")
-        for nm, st in new_forms.items():
-            _register_xobject(pdf, resources, nm, st)
-        p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
-        _finalize_page_rewrite(p, kept, state.superseded_forms)
-        _save(pdf, input_path, output_path)
-        return {"output": str(output_path), "page": int(page), "index": int(index)}
-    finally:
-        try:
-            pdf.close()
-        except Exception:
-            pass
+    transform_page_images(file, output, page, [{"index": int(index), "matrix": matrix}])
+    return {"output": str(Path(output)), "page": int(page), "index": int(index)}
 
 
 def crop_page_image(file: str, output: str, page: int, index: int, rect: list) -> dict:
@@ -991,7 +1080,7 @@ def crop_page_image(file: str, output: str, page: int, index: int, rect: list) -
             raise ValueError(
                 f"image index {index} is out of range (page has {len(placements)})"
             )
-        state = _EditState(int(index), "crop", None, crop_rect=(lo_x, lo_y, hi_x, hi_y))
+        state = _EditState({int(index): {}}, "crop", None, crop_rect=(lo_x, lo_y, hi_x, hi_y))
         kept, changed, new_forms = _rewrite(
             pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
         )
@@ -1043,7 +1132,7 @@ def set_image_opacity(file: str, output: str, page: int, index: int, opacity: fl
         gs_dict = Dictionary(
             Type=Name("/ExtGState"), ca=round(alpha, 4), CA=round(alpha, 4)
         )
-        state = _EditState(int(index), "opacity", None, pending_gs=gs_dict)
+        state = _EditState({int(index): {}}, "opacity", None, pending_gs=gs_dict)
         kept, changed, new_forms = _rewrite(
             pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, [1], set()
         )
@@ -1179,8 +1268,43 @@ def _image_from_source(pdf, source: dict):
     return stream
 
 
-def replace_page_image(file: str, output: str, page: int, index: int, source: dict) -> dict:
-    """Swap one placement's image for a new one (per-placement; CTM kept)."""
+def _contain_fit_matrix(matrix, img_w: int, img_h: int):
+    """The LOCAL letterbox matrix [sx,0,0,sy,tx,ty] that fits an img_w×img_h
+    image inside the placement box drawn by `matrix`, aspect preserved and
+    centered (P7 fit="contain"). The drawn box's proportions are the CTM's
+    column lengths |(a,b)| × |(c,d)| — rotation/skew-honest, since a local
+    scale composes inside whatever orientation the CTM applies. Returns None
+    (= keep stretch) when nothing sane exists: a degenerate box or image, or
+    an aspect already matching."""
+    try:
+        a, b, c, d, _e, _f = (float(v) for v in matrix)
+    except (TypeError, ValueError):
+        return None
+    box_w = (a * a + b * b) ** 0.5
+    box_h = (c * c + d * d) ** 0.5
+    if box_w < 1e-9 or box_h < 1e-9 or img_w <= 0 or img_h <= 0:
+        return None
+    img_aspect = img_w / img_h
+    sx, sy = 1.0, 1.0
+    sy_for_full_width = box_w / (box_h * img_aspect)
+    if sy_for_full_width <= 1.0:
+        sy = sy_for_full_width  # image proportionally wider: pillar the height
+    else:
+        sx = (box_h * img_aspect) / box_w  # proportionally taller: box the width
+    if abs(sx - 1.0) < 1e-6 and abs(sy - 1.0) < 1e-6:
+        return None  # aspects already agree — no frame needed
+    return (sx, 0.0, 0.0, sy, (1.0 - sx) / 2.0, (1.0 - sy) / 2.0)
+
+
+def replace_page_image(
+    file: str, output: str, page: int, index: int, source: dict, fit: str = "stretch"
+) -> dict:
+    """Swap one placement's image for a new one (per-placement; CTM kept).
+    P7: fit="contain" letterboxes the new image inside the old box (aspect
+    preserved, centered) via a recognized transform frame; the default
+    "stretch" is the 7.1 shipped behavior, byte-stable."""
+    if fit not in ("stretch", "contain"):
+        raise ValueError('fit must be "stretch" or "contain"')
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -1211,8 +1335,21 @@ def replace_page_image(file: str, output: str, page: int, index: int, source: di
             raise ValueError(f"image index {index} is out of range (page has {count})")
         name_counter = [0]
         reserved: set = set()
+        replace_fit = (
+            _contain_fit_matrix(
+                placements[int(index)]["matrix"],
+                int(image_obj["/Width"]),
+                int(image_obj["/Height"]),
+            )
+            if fit == "contain"
+            else None
+        )
         state = _EditState(
-            int(index), "replace", _fresh_name(resources, name_counter, reserved), image_obj
+            {int(index): {}},
+            "replace",
+            _fresh_name(resources, name_counter, reserved),
+            image_obj,
+            replace_fit=replace_fit,
         )
         kept, changed, new_forms = _rewrite(
             pdf, pikepdf.parse_content_stream(p), resources, 0, None, state, name_counter, reserved
@@ -1237,26 +1374,50 @@ def replace_page_image(file: str, output: str, page: int, index: int, source: di
             pass
 
 
-def add_page_image(file: str, output: str, page: int, rect: list, source: dict) -> dict:
-    """Embed a NEW image at `rect` (Phase 9.C2) — pure authoring, no rewrite of
-    existing content.
+def add_page_image(
+    file: str,
+    output: str,
+    page: int,
+    rect: list | None = None,
+    source: dict | None = None,
+    fit: str = "stretch",
+    at: list | None = None,
+) -> dict:
+    """Embed a NEW image (Phase 9.C2; P7 widened) — pure authoring, no rewrite
+    of existing content.
 
-    `rect` is [x0, y0, x1, y1] in USER-space points (the drawn box). `source`
-    is the SAME shape 7.1 replace takes ({jpeg_path} passthrough |
+    Placement is ONE of:
+      - `rect` = [x0, y0, x1, y1] USER-space points (the drawn box). With the
+        default fit="stretch" the unit image square maps onto the box exactly
+        (the 7.1 rule, byte-stable); fit="contain" first shrinks the box
+        around its center to the source's aspect, so nothing distorts.
+      - `at` = [x, y]: natural-size click-place — the image lands at its own
+        pixel dimensions in points (1px = 1pt, the 72-dpi identity), centered
+        on the click, scaled DOWN (never up) to fit the page's visible box
+        and shifted inside it.
+
+    `source` is the SAME shape 7.1 replace takes ({jpeg_path} passthrough |
     {raw_path,width,height,channels} decoded), embedded by the SAME
-    `_image_from_source`. The image is appended as `q <cm> /Name Do Q` with
-    `cm` mapping the unit image square onto the box (stretch-to-box, replace's
-    v1 rule), so the added image is an ORDINARY placement afterward —
-    list/delete/replace/transform (C1) all see it with no special case."""
-    try:
-        x0, y0, x1, y1 = (float(v) for v in rect)
-    except (TypeError, ValueError):
-        raise ValueError("rect must be [x0, y0, x1, y1]") from None
-    left, right = min(x0, x1), max(x0, x1)
-    bottom, top = min(y0, y1), max(y0, y1)
-    w, h = right - left, top - bottom
-    if w < 1e-3 or h < 1e-3:
-        raise ValueError("image box is too small")
+    `_image_from_source`. The image is appended as `q <cm> /Name Do Q`, so
+    the added image is an ORDINARY placement afterward —
+    list/delete/replace/transform all see it with no special case."""
+    if fit not in ("stretch", "contain"):
+        raise ValueError('fit must be "stretch" or "contain"')
+    if (rect is None) == (at is None):
+        raise ValueError("exactly one of rect / at is required")
+    if source is None:
+        raise ValueError("source is required")
+    left = bottom = w = h = 0.0
+    if rect is not None:
+        try:
+            x0, y0, x1, y1 = (float(v) for v in rect)
+        except (TypeError, ValueError):
+            raise ValueError("rect must be [x0, y0, x1, y1]") from None
+        left, right = min(x0, x1), max(x0, x1)
+        bottom, top = min(y0, y1), max(y0, y1)
+        w, h = right - left, top - bottom
+        if w < 1e-3 or h < 1e-3:
+            raise ValueError("image box is too small")
 
     input_path = Path(file)
     output_path = Path(output)
@@ -1271,6 +1432,45 @@ def add_page_image(file: str, output: str, page: int, rect: list, source: dict) 
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
+        img_w = int(image_obj["/Width"])
+        img_h = int(image_obj["/Height"])
+        if rect is not None and fit == "contain" and img_w > 0 and img_h > 0:
+            # Shrink the drawn box around its center to the source aspect.
+            box_aspect = w / h
+            img_aspect = img_w / img_h
+            if img_aspect > box_aspect:
+                new_h = w / img_aspect
+                bottom += (h - new_h) / 2.0
+                h = new_h
+            elif img_aspect < box_aspect:
+                new_w = h * img_aspect
+                left += (w - new_w) / 2.0
+                w = new_w
+        if at is not None:
+            try:
+                ax, ay = (float(v) for v in at)
+            except (TypeError, ValueError):
+                raise ValueError("at must be [x, y]") from None
+            if img_w <= 0 or img_h <= 0:
+                raise ValueError("image has no natural size")
+            # The page's visible box (CropBox falls back to MediaBox).
+            crop = p.obj.get("/CropBox", p.obj.get("/MediaBox"))
+            try:
+                pcx0, pcy0, pcx1, pcy1 = (float(v) for v in crop)
+            except (TypeError, ValueError):
+                pcx0, pcy0, pcx1, pcy1 = 0.0, 0.0, 612.0, 792.0
+            page_w = abs(pcx1 - pcx0)
+            page_h = abs(pcy1 - pcy0)
+            scale = min(1.0, page_w / img_w if img_w else 1.0, page_h / img_h if img_h else 1.0)
+            w = img_w * scale
+            h = img_h * scale
+            left = ax - w / 2.0
+            bottom = ay - h / 2.0
+            # Shift inside the visible box (the click may hug an edge).
+            lo_x, hi_x = min(pcx0, pcx1), max(pcx0, pcx1)
+            lo_y, hi_y = min(pcy0, pcy1), max(pcy0, pcy1)
+            left = min(max(left, lo_x), hi_x - w)
+            bottom = min(max(bottom, lo_y), hi_y - h)
 
         # Register the XObject on a page-LOCAL /Resources so the draw lands on
         # THIS page only. QPDF flattens inherited /Resources onto every page's

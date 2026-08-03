@@ -49,16 +49,25 @@ interface DocumentRowProps {
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
+  /** P7 multi-select: the group frame context (N>1) + its one-op commit. */
+  editImageGroup: import('./ImageGroupOverlay').ImageGroupCtx | null;
+  onCommitImageGroupTransform: (
+    pageId: string,
+    targets: { index: number; matrix: number[] }[],
+  ) => void;
   vectorTransform: EditImageTransformCtx | null;
   onCommitVectorTransform: (pageId: string, index: number, matrix: number[]) => void;
   /** 9.C3 crop mode: armed flag + unit-space rect commit. */
   imageCropArmed: boolean;
   onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
   editTextByPage: ReadonlyMap<string, EditTextListing>;
-  editSelection: { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
+  editSelection:
+    | { kind: 'image'; pageId: string; index: number; indexes: number[] }
+    | { kind: 'text' | 'para'; pageId: string; index: number }
+    | null;
   /** The ONE open inline editor — a run's (kind 'text') or a paragraph's. */
   editingText: { kind: 'text' | 'para'; pageId: string; index: number } | null;
-  onSelectEditImage: (pageId: string, index: number) => void;
+  onSelectEditImage: (pageId: string, index: number, additive?: boolean) => void;
   onSelectEditVector: (pageId: string, index: number) => void;
   onDeleteVector: () => void;
   onRestyleVector: (
@@ -180,6 +189,8 @@ function DocumentRowImpl({
   selectedVector,
   editImageTransform,
   onCommitImageTransform,
+  editImageGroup,
+  onCommitImageGroupTransform,
   vectorTransform,
   onCommitVectorTransform,
   imageCropArmed,
@@ -276,15 +287,17 @@ function DocumentRowImpl({
         selectedVectorIndex={selectedVector?.pageId === page.id ? selectedVector.index : null}
         editImageTransform={editImageTransform?.pageId === page.id ? editImageTransform : null}
         onCommitImageTransform={onCommitImageTransform}
+        editImageGroup={editImageGroup?.pageId === page.id ? editImageGroup : null}
+        onCommitImageGroupTransform={onCommitImageGroupTransform}
         vectorTransform={vectorTransform?.pageId === page.id ? vectorTransform : null}
         onCommitVectorTransform={onCommitVectorTransform}
         imageCropArmed={imageCropArmed}
         onCommitImageCrop={onCommitImageCrop}
         editTextRuns={editTextByPage.get(page.id)?.runBoxes}
         editParagraphs={editTextByPage.get(page.id)?.paragraphs}
-        editSelectedIndex={
+        editSelectedIndexes={
           editSelection?.kind === 'image' && editSelection.pageId === page.id
-            ? editSelection.index
+            ? editSelection.indexes
             : null
         }
         editTextSelectedIndex={
