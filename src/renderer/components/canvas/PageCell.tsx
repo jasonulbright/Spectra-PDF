@@ -11,7 +11,7 @@ import { rgb01ToHex, hex01ToRgb, type EditVectorObject } from '../../lib/edit-ve
 import ImageTransformOverlay from './ImageTransformOverlay';
 import type { EditTextRun } from '../../lib/edit-text';
 import { unencodableChars } from '../../lib/edit-text';
-import type { EditParagraph, ParagraphEditOpts } from '../../lib/edit-paragraphs';
+import type { EditParagraph, ParagraphEditOpts , MergeRestyle } from '../../lib/edit-paragraphs';
 import {
   getSystemFonts,
   pickFace,
@@ -551,8 +551,8 @@ interface PageCellProps {
   onCancelParagraphEdit?: () => void;
   /** A4: merge the paragraph being edited into the one above it (fires
    * only from an unchanged editor with the caret at position 0). */
-  onMergeParagraphPrev?: (pageId: string, index: number, editedText?: string) => void;
-  onMergeParagraphNext?: (pageId: string, index: number, editedText?: string) => void;
+  onMergeParagraphPrev?: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
+  onMergeParagraphNext?: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
   // Pending visible-signature placement, when it sits on THIS page (transient
   // view state with mark lifecycle — see lib/signature-placement.ts).
   signaturePlacement?: SignaturePlacement | null;
@@ -2668,15 +2668,15 @@ function PageCellImpl({
                 onCancel={() => onCancelParagraphEdit?.()}
                 onMergePrev={
                   para.index > 0 && onMergeParagraphPrev
-                    ? (editedText?: string) =>
-                        onMergeParagraphPrev(page.id, para.index, editedText)
+                    ? (editedText?: string, restyle?: MergeRestyle) =>
+                        onMergeParagraphPrev(page.id, para.index, editedText, restyle)
                     : undefined
                 }
                 onMergeNext={
                   onMergeParagraphNext &&
                   (editParagraphs ?? []).some((p) => p.index === para.index + 1)
-                    ? (editedText?: string) =>
-                        onMergeParagraphNext(page.id, para.index, editedText)
+                    ? (editedText?: string, restyle?: MergeRestyle) =>
+                        onMergeParagraphNext(page.id, para.index, editedText, restyle)
                     : undefined
                 }
                 rotation={page.rotation}
@@ -3222,9 +3222,9 @@ function ParagraphEditor({
   /** A4/T18: merge into the previous paragraph — provided only when one
    * exists; fires from caret 0. An EDITED editor passes its text along
    * (the merge carries it as the selected side's override). */
-  onMergePrev?: (editedText?: string) => void;
+  onMergePrev?: (editedText?: string, restyle?: MergeRestyle) => void;
   /** T18: merge the NEXT paragraph into this one — Delete at the end. */
-  onMergeNext?: (editedText?: string) => void;
+  onMergeNext?: (editedText?: string, restyle?: MergeRestyle) => void;
   /** T18: the page's view rotation — the resize grips map their screen
    * drag back onto the paragraph's inline axis through it. */
   rotation?: number;
@@ -3617,6 +3617,19 @@ function ParagraphEditor({
     if (valid && changed) settle(() => onCommit(value, restyleOpts()));
     else settle(onCancel);
   };
+  // T18: the whole-paragraph restyle deltas a MERGE carries along — the
+  // same values a commit would send, minus everything a merge cannot
+  // express (per-span ranges, split, features).
+  const mergeRestyle = (): MergeRestyle | undefined => {
+    const o = restyleOpts();
+    const r: MergeRestyle = {};
+    if (o.size !== undefined) r.size = o.size;
+    if (o.color !== undefined) r.color = o.color;
+    if (o.family !== undefined) r.family = o.family;
+    if (o.bold !== undefined) r.bold = o.bold;
+    if (o.italic !== undefined) r.italic = o.italic;
+    return Object.keys(r).length > 0 ? r : undefined;
+  };
   // T18 resize: the screen direction of the paragraph's +inline axis under
   // the page's view rotation. Display space is top-left-origin and the card
   // rect is already rotated through rotateNormalizedRect — this table
@@ -3763,7 +3776,7 @@ function ParagraphEditor({
           // would refuse the unencodable text anyway, with less context).
           if (value !== para.text && !valid) return;
           e.preventDefault();
-          settle(() => onMergePrev(value !== para.text ? value : undefined));
+          settle(() => onMergePrev(value !== para.text ? value : undefined, mergeRestyle()));
         } else if (
           e.key === 'Delete' &&
           onMergeNext &&
@@ -3779,7 +3792,7 @@ function ParagraphEditor({
           // one — the mirror of Backspace-at-0, edits riding the same way.
           if (value !== para.text && !valid) return;
           e.preventDefault();
-          settle(() => onMergeNext(value !== para.text ? value : undefined));
+          settle(() => onMergeNext(value !== para.text ? value : undefined, mergeRestyle()));
         } else if (e.key === 'Escape') {
           e.preventDefault();
           e.stopPropagation();

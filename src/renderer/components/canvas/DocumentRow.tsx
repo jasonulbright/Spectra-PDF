@@ -79,8 +79,8 @@ interface DocumentRowProps {
   onOpenParagraphEditor: (pageId: string, index: number) => void;
   onCommitParagraphEdit: (pageId: string, index: number, newText: string, opts?: ParagraphEditOpts) => void;
   onCancelParagraphEdit: () => void;
-  onMergeParagraphPrev: (pageId: string, index: number, editedText?: string) => void;
-  onMergeParagraphNext: (pageId: string, index: number, editedText?: string) => void;
+  onMergeParagraphPrev: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
+  onMergeParagraphNext: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
