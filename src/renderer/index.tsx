@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { initBackdrop } from './lib/backdrop';
 import { stampInitialTheme } from './lib/theme-boot';
+import './i18n'; // N12: initializes i18next before anything renders a string
 import './styles.css';
 
 // The shell CSS keys on BOTH [data-theme] and [data-backdrop], so both are

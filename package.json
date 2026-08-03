@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "cargo tauri dev",
     "dev:renderer": "vite --config vite.config.ts",
+    "i18n:en": "powershell -Command \"$env:I18N_WRITE='1'; vitest run tests/i18n-catalog.test.ts\"",
     "build:renderer": "node scripts/sync-ocr-assets.mjs && vite build --config vite.config.ts",
     "build": "cargo tauri build",
     "tauri": "tauri",
