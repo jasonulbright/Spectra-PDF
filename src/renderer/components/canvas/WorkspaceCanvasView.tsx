@@ -183,6 +183,11 @@ interface WorkspaceCanvasViewProps {
     page: number,
     prev: { index: number; runs: number[]; text: string },
     cur: { index: number; runs: number[]; text: string },
+    opts?: {
+      withNext?: boolean;
+      overrideText?: string;
+      overrideSpans?: { start: number; end: number; run: number }[];
+    },
   ) => Promise<string | void>;
   // Author a NEW text object (9.A2): a rubber-band box + entered text become a
   // fresh Type0 run via the engine's add_text_box. `rect` is PDF user-space
@@ -2816,13 +2821,25 @@ export function WorkspaceCanvasView({
   // unchanged editor at caret 0 — the editor enforces that). Same commit
   // shape as handleCommitParagraphEdit: close editor, drop the page's stale
   // listing synchronously, restore on decline/error.
-  const handleMergeParagraphPrev = useCallback(
-    async (pageId: string, index: number): Promise<void> => {
+  // T18 generalized core: `anchor` keeps its box, `merging` folds into it.
+  // The shipped Backspace path is anchor=index−1/merging=index (upward);
+  // the Delete path is anchor=index (the selected)/merging=index+1. An
+  // edited editor's text rides as the SELECTED side's override (the
+  // selected paragraph is `merging` upward, `anchor` on the next path).
+  const mergeParagraphs = useCallback(
+    async (
+      pageId: string,
+      anchorIdx: number,
+      mergingIdx: number,
+      withNext: boolean,
+      editedText?: string,
+    ): Promise<void> => {
       if (!focusedDoc || committingTextRef.current) return;
       const listing = editTextByPage.get(pageId);
-      const cur = listing?.paragraphs.find((p) => p.index === index);
-      const prevPara = listing?.paragraphs.find((p) => p.index === index - 1);
-      if (!cur || !prevPara) return;
+      const anchor = listing?.paragraphs.find((p) => p.index === anchorIdx);
+      const merging = listing?.paragraphs.find((p) => p.index === mergingIdx);
+      if (!anchor || !merging) return;
+      const selectedPara = withNext ? anchor : merging;
       const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
       if (pageNumber == null) return;
       committingTextRef.current = true;
@@ -2840,8 +2857,21 @@ export function WorkspaceCanvasView({
         const result = await onMergeParagraph(
           focusedDoc.path,
           pageNumber,
-          { index: prevPara.index, runs: prevPara.runs, text: prevPara.text },
-          { index: cur.index, runs: cur.runs, text: cur.text },
+          { index: anchor.index, runs: anchor.runs, text: anchor.text },
+          { index: merging.index, runs: merging.runs, text: merging.text },
+          {
+            ...(withNext ? { withNext: true } : {}),
+            ...(editedText !== undefined && editedText !== selectedPara.text
+              ? {
+                  overrideText: editedText,
+                  overrideSpans: computeEditSpans(
+                    selectedPara.text,
+                    editedText,
+                    selectedPara.spans,
+                  ),
+                }
+              : {}),
+          },
         );
         if (result === EDIT_DECLINED) {
           if (previousListing) {
@@ -2870,6 +2900,16 @@ export function WorkspaceCanvasView({
       }
     },
     [focusedDoc, docs, editTextByPage, onMergeParagraph],
+  );
+  const handleMergeParagraphPrev = useCallback(
+    (pageId: string, index: number, editedText?: string) =>
+      mergeParagraphs(pageId, index - 1, index, false, editedText),
+    [mergeParagraphs],
+  );
+  const handleMergeParagraphNext = useCallback(
+    (pageId: string, index: number, editedText?: string) =>
+      mergeParagraphs(pageId, index, index + 1, true, editedText),
+    [mergeParagraphs],
   );
 
   const runEditAction = useCallback(
@@ -4194,8 +4234,10 @@ export function WorkspaceCanvasView({
               opts?: ParagraphEditOpts,
             ) => void handleCommitParagraphEdit(pageId, index, text, opts),
             onCancelParagraphEdit: handleCancelTextEdit,
-            onMergeParagraphPrev: (pageId: string, index: number) =>
-              void handleMergeParagraphPrev(pageId, index),
+            onMergeParagraphPrev: (pageId: string, index: number, editedText?: string) =>
+              void handleMergeParagraphPrev(pageId, index, editedText),
+            onMergeParagraphNext: (pageId: string, index: number, editedText?: string) =>
+              void handleMergeParagraphNext(pageId, index, editedText),
             signaturePlacement: liveSigPlacement,
             findMatchPageIds,
             findWordsByPage,
@@ -4427,7 +4469,12 @@ export function WorkspaceCanvasView({
             void handleCommitParagraphEdit(pageId, index, text, opts)
           }
           onCancelParagraphEdit={handleCancelTextEdit}
-          onMergeParagraphPrev={(pageId, index) => void handleMergeParagraphPrev(pageId, index)}
+          onMergeParagraphPrev={(pageId, index, editedText) =>
+            void handleMergeParagraphPrev(pageId, index, editedText)
+          }
+          onMergeParagraphNext={(pageId, index, editedText) =>
+            void handleMergeParagraphNext(pageId, index, editedText)
+          }
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}
