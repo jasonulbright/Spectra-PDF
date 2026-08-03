@@ -1029,6 +1029,7 @@ function AppContent(): React.ReactElement {
         withNext?: boolean;
         overrideText?: string;
         overrideSpans?: { start: number; end: number; run: number }[];
+        restyle?: import('./lib/edit-paragraphs').MergeRestyle;
       },
     ): Promise<string | void> => {
       const f = state.files.get(path);
@@ -1045,6 +1046,13 @@ function AppContent(): React.ReactElement {
         expected_runs: cur.runs,
         expected_text: cur.text,
         ...(opts?.withNext ? { with_next: true } : {}),
+        // T18: whole-paragraph restyle riding the merge (same A1/A3
+        // semantics as replace, same engine pipeline).
+        ...(opts?.restyle?.size !== undefined ? { size: opts.restyle.size } : {}),
+        ...(opts?.restyle?.color !== undefined ? { color: opts.restyle.color } : {}),
+        ...(opts?.restyle?.family !== undefined ? { family: opts.restyle.family } : {}),
+        ...(opts?.restyle?.bold !== undefined ? { bold: opts.restyle.bold } : {}),
+        ...(opts?.restyle?.italic !== undefined ? { italic: opts.restyle.italic } : {}),
         ...(opts?.overrideText !== undefined
           ? {
               selected_text_override: opts.overrideText,
