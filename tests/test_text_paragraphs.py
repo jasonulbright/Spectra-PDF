@@ -1909,6 +1909,201 @@ class TestSplitMerge:
         assert not os.path.exists(out)
 
 
+class TestT18Geometry:
+    """T18 — box resize, draggable split gap, widened merge."""
+
+    TWO_LINES = (
+        b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj "
+        b"0 -14 Td (epsilon zeta eta theta) Tj ET"
+    )
+
+    def test_split_gap_scales_the_gap(self, tmp_dir):
+        src = _build(tmp_dir, self.TWO_LINES)
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        cut = para["text"].index("epsilon")
+        _apply(src, out, para, para["text"], split_at=cut, split_gap=3.0)
+        relisted = _paras(out)
+        assert len(relisted) == 2
+        runs_out = list_text_paragraphs(out, 1)["runs"]
+        tops = sorted({round(r["rect"][3], 1) for r in runs_out}, reverse=True)
+        assert (tops[0] - tops[1]) == pytest.approx(42.0, abs=1.5)
+
+    def test_split_gap_floor_still_relists_as_two(self, tmp_dir):
+        # 1.3×leading (18.2) sits UNDER the 2×eff relist floor (24) — the
+        # floor wins, and the output still lists as two paragraphs.
+        src = _build(tmp_dir, self.TWO_LINES)
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        cut = para["text"].index("epsilon")
+        _apply(src, out, para, para["text"], split_at=cut, split_gap=1.3)
+        relisted = _paras(out)
+        assert len(relisted) == 2
+        runs_out = list_text_paragraphs(out, 1)["runs"]
+        tops = sorted({round(r["rect"][3], 1) for r in runs_out}, reverse=True)
+        assert (tops[0] - tops[1]) == pytest.approx(24.0, abs=1.5)
+
+    def test_split_gap_default_matches_none_byte_for_byte(self, tmp_dir):
+        src = _build(tmp_dir, self.TWO_LINES)
+        para = _paras(src)[0]
+        cut = para["text"].index("epsilon")
+        out_none = os.path.join(tmp_dir, "a.pdf")
+        out_two = os.path.join(tmp_dir, "b.pdf")
+        _apply(src, out_none, para, para["text"], split_at=cut)
+        _apply(src, out_two, para, para["text"], split_at=cut, split_gap=2.0)
+        with open(out_none, "rb") as fa, open(out_two, "rb") as fb:
+            assert fa.read() == fb.read()
+
+    def test_split_gap_refusals(self, tmp_dir):
+        src = _build(tmp_dir, self.TWO_LINES)
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        cut = para["text"].index("epsilon")
+        with pytest.raises(ValueError, match="requires a split position"):
+            _apply(src, out, para, para["text"], split_gap=3.0)
+        with pytest.raises(ValueError, match="between 1.3 and 10"):
+            _apply(src, out, para, para["text"], split_at=cut, split_gap=1.0)
+        with pytest.raises(ValueError, match="between 1.3 and 10"):
+            _apply(src, out, para, para["text"], split_at=cut, split_gap=11.0)
+        with pytest.raises(ValueError, match="must be a number"):
+            _apply(src, out, para, para["text"], split_at=cut, split_gap="wide")
+        assert not os.path.exists(out)
+
+    def test_box_width_rewraps_narrower(self, tmp_dir):
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], box_width=80.0)
+        relisted = _paras(out)
+        assert len(relisted) == 1
+        assert relisted[0]["text"] == "Alpha beta gamma delta"
+        runs_out = list_text_paragraphs(out, 1)["runs"]
+        # More than one line now, every line inside the 80pt box, left
+        # edge anchored where the paragraph always was.
+        tops = {round(r["rect"][3], 1) for r in runs_out}
+        assert len(tops) > 1
+        assert min(r["rect"][0] for r in runs_out) == pytest.approx(72.0, abs=0.1)
+        assert all((r["rect"][2] - 72.0) <= 80.5 for r in runs_out)
+
+    def test_box_width_wider_joins_lines(self, tmp_dir):
+        src = _build(tmp_dir, self.TWO_LINES)
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], box_width=400.0)
+        runs_out = list_text_paragraphs(out, 1)["runs"]
+        tops = {round(r["rect"][3], 1) for r in runs_out}
+        assert len(tops) == 1
+        assert _paras(out)[0]["text"] == para["text"]
+
+    def test_box_left_moves_the_box(self, tmp_dir):
+        src = _build(tmp_dir, self.TWO_LINES)
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], box_width=200.0, box_left=150.0)
+        runs_out = list_text_paragraphs(out, 1)["runs"]
+        assert min(r["rect"][0] for r in runs_out) == pytest.approx(150.0, abs=0.1)
+        assert _paras(out)[0]["text"] == para["text"]
+
+    def test_box_width_refusals(self, tmp_dir):
+        src = _build(tmp_dir, self.TWO_LINES)
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        with pytest.raises(ValueError, match="wider than the box"):
+            _apply(src, out, para, para["text"], box_width=10.0)
+        with pytest.raises(ValueError, match="positive"):
+            _apply(src, out, para, para["text"], box_width=-5.0)
+        with pytest.raises(ValueError, match="requires a box width"):
+            _apply(src, out, para, para["text"], box_left=100.0)
+        assert not os.path.exists(out)
+
+    def test_box_width_none_is_byte_identical(self, tmp_dir):
+        src = _build(tmp_dir, self.TWO_LINES)
+        para = _paras(src)[0]
+        out_a = os.path.join(tmp_dir, "a.pdf")
+        out_b = os.path.join(tmp_dir, "b.pdf")
+        _apply(src, out_a, para, para["text"])
+        _apply(src, out_b, para, para["text"], box_width=None)
+        with open(out_a, "rb") as fa, open(out_b, "rb") as fb:
+            assert fa.read() == fb.read()
+
+    def test_merge_with_next_anchors_on_selected(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (First paragraph words) Tj ET "
+            b"BT /F1 12 Tf 72 600 Td (Second paragraph words) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        assert len(paras) == 2
+        from engine.text_paragraphs import merge_paragraph_with_previous
+
+        res = merge_paragraph_with_previous(
+            src, out, 1, 0,
+            paras[0]["runs"], paras[0]["text"], paras[1]["runs"], paras[1]["text"],
+            with_next=True,
+        )
+        assert res["index"] == 0
+        merged = _paras(out)
+        assert len(merged) == 1
+        assert merged[0]["text"] == "First paragraph words Second paragraph words"
+        # Anchored in the SELECTED (first) paragraph's box.
+        runs_out = list_text_paragraphs(out, 1)["runs"]
+        assert max(r["rect"][3] for r in runs_out) == pytest.approx(712.0, abs=2.0)
+
+    def test_merge_with_next_at_last_refuses(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (First paragraph words) Tj ET "
+            b"BT /F1 12 Tf 72 600 Td (Second paragraph words) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        from engine.text_paragraphs import merge_paragraph_with_previous
+
+        with pytest.raises(ValueError, match="no next paragraph"):
+            merge_paragraph_with_previous(
+                src, out, 1, 1,
+                paras[1]["runs"], paras[1]["text"], paras[1]["runs"], paras[1]["text"],
+                with_next=True,
+            )
+
+    def test_merge_carries_the_edited_text(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (First paragraph words) Tj ET "
+            b"BT /F1 12 Tf 72 600 Td (Second paragraph words) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        edited = "Rewritten second half"
+        spans = [{"start": 0, "end": len(edited), "run": paras[1]["runs"][0]}]
+        _merge(
+            src, out, paras, 1,
+            selected_text_override=edited, selected_spans_override=spans,
+        )
+        merged = _paras(out)
+        assert len(merged) == 1
+        assert merged[0]["text"] == "First paragraph words Rewritten second half"
+
+    def test_merge_override_refusals(self, tmp_dir):
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 700 Td (First paragraph words) Tj ET "
+            b"BT /F1 12 Tf 72 600 Td (Second paragraph words) Tj ET",
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        paras = _paras(src)
+        with pytest.raises(ValueError, match="empty"):
+            _merge(
+                src, out, paras, 1,
+                selected_text_override="   ",
+                selected_spans_override=[{"start": 0, "end": 3, "run": paras[1]["runs"][0]}],
+            )
+        with pytest.raises(ValueError, match="span map"):
+            _merge(src, out, paras, 1, selected_text_override="Edited")
+        assert not os.path.exists(out)
+
+
 def _vpage(tmp_dir, content: bytes, name="v.pdf", with_helv=False) -> str:
     """A page with /FV = Identity-V あいう at uniform /W2 advance 1000
     (10pt per char at size 10 — the hand-math base), plus /F1 Helvetica
