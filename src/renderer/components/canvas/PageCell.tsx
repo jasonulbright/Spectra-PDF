@@ -737,6 +737,25 @@ function VectorRestyleToolbar({
     },
     [],
   );
+  if (obj.kind === 'shading') {
+    // P8 slice D: a gradient fill has no flat colour or width to restyle —
+    // move/delete apply; the engine names the same refusal as belt.
+    return (
+      <div
+        className={className}
+        data-testid={testid}
+        style={style}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <span
+          className="page-editvec-ctl"
+          title="A gradient fill has no flat colour to change — move or delete it"
+        >
+          Gradient fill
+        </span>
+      </div>
+    );
+  }
   return (
     <div className={className} data-testid={testid} style={style} onPointerDown={(e) => e.stopPropagation()}>
       {obj.kind !== 'stroke' && (
