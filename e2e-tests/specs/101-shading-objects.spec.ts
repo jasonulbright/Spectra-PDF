@@ -3,17 +3,64 @@ import { writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
 import { PDFDocument, PDFName } from 'pdf-lib';
-import {
-  waitForHarness,
-  openByPaths,
-  getState,
-  invokeAppCommand,
-  editVectorPageIds,
-  editVectors,
-  editVectorSelect,
-  editVectorTransform,
-  editVectorDelete,
-} from '../support/harness.js';
+import { waitForHarness, openByPaths, getState, invokeAppCommand } from '../support/harness.js';
+
+// The vector bridge is driven directly off the window harness (the 58–61
+// idiom — there are no named exports for this family).
+async function editVectorPageIds(): Promise<string[]> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.editVectorPageIds();
+  });
+}
+
+async function editVectors(
+  pageId: string,
+): Promise<{ index: number; kind: string; userRect: [number, number, number, number] }[]> {
+  return await browser.execute(function (p) {
+    return (window as any).__SPECTRA_TEST__.editVectors(p);
+  }, pageId);
+}
+
+async function editVectorSelect(pageId: string, index: number): Promise<void> {
+  await browser.execute(
+    function (p, i) {
+      (window as any).__SPECTRA_TEST__.editVectorSelect(p, i);
+    },
+    pageId,
+    index,
+  );
+}
+
+async function editVectorTransform(
+  pageId: string,
+  index: number,
+  matrix: number[],
+): Promise<void> {
+  const result = await browser.executeAsync<string | null, [string, number, number[]]>(
+    function (p, i, m, done) {
+      (window as any).__SPECTRA_TEST__.editVectorTransform(p, i, m)
+        .then(() => done(null))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    pageId,
+    index,
+    matrix,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`editVectorTransform failed: ${result.replace('__SPECTRA_E2E_ERROR__:', '')}`);
+  }
+}
+
+async function editVectorDelete(): Promise<void> {
+  const result = await browser.executeAsync<string | null, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.editVectorDelete()
+      .then(() => done(null))
+      .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+  });
+  if (typeof result === 'string') {
+    throw new Error(`editVectorDelete failed: ${result.replace('__SPECTRA_E2E_ERROR__:', '')}`);
+  }
+}
 
 // P8 slice D — `sh` shadings are OBJECTS against the built binary. The
 // gradient-fill idiom (`q <clip> W n /Sh0 sh Q`) lists as kind "shading"
