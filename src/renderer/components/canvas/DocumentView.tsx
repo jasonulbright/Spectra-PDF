@@ -98,15 +98,24 @@ export interface DocumentViewProps {
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
+  /** P7 multi-select: the group frame context (N>1) + its one-op commit. */
+  editImageGroup: import('./ImageGroupOverlay').ImageGroupCtx | null;
+  onCommitImageGroupTransform: (
+    pageId: string,
+    targets: { index: number; matrix: number[] }[],
+  ) => void;
   vectorTransform: EditImageTransformCtx | null;
   onCommitVectorTransform: (pageId: string, index: number, matrix: number[]) => void;
   /** 9.C3 crop mode: armed flag + unit-space rect commit. */
   imageCropArmed: boolean;
   onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
   editTextByPage: ReadonlyMap<string, EditTextListing>;
-  editSelection: { kind: 'image' | 'text' | 'para'; pageId: string; index: number } | null;
+  editSelection:
+    | { kind: 'image'; pageId: string; index: number; indexes: number[] }
+    | { kind: 'text' | 'para'; pageId: string; index: number }
+    | null;
   editingText: { kind: 'text' | 'para'; pageId: string; index: number } | null;
-  onSelectEditImage: (pageId: string, index: number) => void;
+  onSelectEditImage: (pageId: string, index: number, additive?: boolean) => void;
   onSelectEditVector: (pageId: string, index: number) => void;
   onDeleteVector: () => void;
   onRestyleVector: (
@@ -678,6 +687,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
             props.editImageTransform?.pageId === page.id ? props.editImageTransform : null
           }
           onCommitImageTransform={props.onCommitImageTransform}
+          editImageGroup={
+            props.editImageGroup?.pageId === page.id ? props.editImageGroup : null
+          }
+          onCommitImageGroupTransform={props.onCommitImageGroupTransform}
           vectorTransform={
             props.vectorTransform?.pageId === page.id ? props.vectorTransform : null
           }
@@ -686,9 +699,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onCommitImageCrop={props.onCommitImageCrop}
           editTextRuns={props.editTextByPage.get(page.id)?.runBoxes}
           editParagraphs={props.editTextByPage.get(page.id)?.paragraphs}
-          editSelectedIndex={
+          editSelectedIndexes={
             props.editSelection?.kind === 'image' && props.editSelection.pageId === page.id
-              ? props.editSelection.index
+              ? props.editSelection.indexes
               : null
           }
           editTextSelectedIndex={

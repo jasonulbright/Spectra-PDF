@@ -1251,7 +1251,16 @@ function AppContent(): React.ReactElement {
         };
         try {
           const snapshotPath = await file.snapshot(f.workingPath);
-          const params = { file: f.workingPath, output: f.workingPath, page, index };
+          // P7 (slice C): the replacement letterboxes into the old frame
+          // (aspect preserved, centered) instead of stretching — the engine
+          // emits a recognized transform frame, so later moves fold it.
+          const params = {
+            file: f.workingPath,
+            output: f.workingPath,
+            page,
+            index,
+            fit: 'contain',
+          };
           if (source) {
             try {
               await call('replace_page_image', { ...params, source });
@@ -1308,6 +1317,31 @@ function AppContent(): React.ReactElement {
     [state.files, call, performOperation, reloadFile, dispatch, confirmEditOfSignedDoc],
   );
 
+  // P7 multi-select: group transform/delete over N placements on one page —
+  // ONE engine call, one snapshot, one undo entry (the whole point of the
+  // engine's multi ops; N single calls would churn N undo entries and N page
+  // rebuilds for one gesture).
+  const handleEditImagesGroup = useCallback(
+    async (
+      kind: 'transform' | 'delete',
+      path: string,
+      page: number,
+      opts: { targets?: { index: number; matrix: number[] }[]; indexes?: number[] },
+    ): Promise<string | void> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error('The file is no longer open.');
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (kind === 'transform') {
+        if (!opts.targets?.length) throw new Error('group transform requires targets');
+        await performOperation(path, 'transform_page_images', { page, targets: opts.targets });
+        return;
+      }
+      if (!opts.indexes?.length) throw new Error('group delete requires indexes');
+      await performOperation(path, 'delete_page_images', { page, indexes: opts.indexes });
+    },
+    [state.files, performOperation, confirmEditOfSignedDoc],
+  );
+
   // 9.C2 Add Image: embed a NEW raster at `rect` (PDF user-space points). Picks
   // the file with the SAME EXIF-aware JPEG-passthrough / raw-decode routing as
   // 7.1 replace (one snapshot for the whole attempt, incl. the CMYK raw
@@ -1318,8 +1352,9 @@ function AppContent(): React.ReactElement {
     async (
       path: string,
       page: number,
-      rect: [number, number, number, number],
+      rect: [number, number, number, number] | null,
       injected?: ReplacementSource,
+      at?: [number, number],
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error('The file is no longer open.');
@@ -1346,7 +1381,15 @@ function AppContent(): React.ReactElement {
       };
       try {
         const snapshotPath = await file.snapshot(f.workingPath);
-        const params = { file: f.workingPath, output: f.workingPath, page, rect };
+        // P7 (slice C): a drawn box embeds aspect-honest (fit contain — the
+        // engine shrinks the box around its center to the source's aspect);
+        // a click (`at`) places at natural size, page-clamped engine-side.
+        const params = {
+          file: f.workingPath,
+          output: f.workingPath,
+          page,
+          ...(rect ? { rect, fit: 'contain' } : { at }),
+        };
         if (source) {
           try {
             await call('add_page_image', { ...params, source });
@@ -1982,6 +2025,7 @@ function AppContent(): React.ReactElement {
                   onAddLinks={handleAddLinks}
                   onApplyOcrLayer={handleApplyOcrLayer}
                   onEditImage={handleEditImage}
+                  onEditImagesGroup={handleEditImagesGroup}
                   onEditVector={handleEditVector}
                   onEditText={handleEditText}
                   onRestyleText={handleRestyleText}

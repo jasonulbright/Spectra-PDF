@@ -5,6 +5,7 @@ import {
   applyMove,
   applyResizeCorner,
   applyRotate,
+  applySkewEdge,
   cropRectFromLocalPoints,
   displayQuad,
   displayToUser,
@@ -211,6 +212,10 @@ export default function ImageTransformOverlay({
     const [cx, cy] = userCenter(b);
     return applyRotate(b, Math.atan2(c[1] - cy, c[0] - cx) - Math.atan2(s[1] - cy, s[0] - cx));
   };
+  // P7 slice A: edge-mid handles shear parallel to their edge (opposite edge
+  // pinned) — the same start/preview/commit path as every other gesture.
+  const skewGesture = (edge: 0 | 1 | 2 | 3): Compute => (s, c, b) =>
+    applySkewEdge(b, edge, s[0], s[1], c[0], c[1]) ?? b;
 
   const pts = quad.map((p) => `${p[0] * 100},${p[1] * 100}`).join(' ');
   const dot = (p: [number, number]): React.CSSProperties => ({
@@ -310,6 +315,27 @@ export default function ImageTransformOverlay({
           onPointerDown={(e) => start(e, rotateGesture)}
         />
       )}
+      {/* P7 slice A: skew handles at the quad edge midpoints (0=left 1=bottom
+          2=right 3=top — the applyCropEdge edge order). The top handle shares
+          the rotate arm's anchor point but not its offset knob. */}
+      {!cropArmed &&
+        (
+          [
+            [(quad[0][0] + quad[3][0]) / 2, (quad[0][1] + quad[3][1]) / 2],
+            [(quad[0][0] + quad[1][0]) / 2, (quad[0][1] + quad[1][1]) / 2],
+            [(quad[1][0] + quad[2][0]) / 2, (quad[1][1] + quad[2][1]) / 2],
+            [(quad[2][0] + quad[3][0]) / 2, (quad[2][1] + quad[3][1]) / 2],
+          ] as Array<[number, number]>
+        ).map((p, i) => (
+          <div
+            key={`s${i}`}
+            className="page-imgtx-skew"
+            data-testid={`img-skew-edge-${i}`}
+            title="Skew — drag along the edge"
+            style={dot(p)}
+            onPointerDown={(e) => start(e, skewGesture(i as 0 | 1 | 2 | 3))}
+          />
+        ))}
       {cropEdgeMids &&
         cropEdgeMids.map((p, i) => (
           <div

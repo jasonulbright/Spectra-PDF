@@ -1579,3 +1579,292 @@ class TestWrapperCollapse:
         names = [a[0] for op, a in ops if op == "gs"]
         assert "/GS1" in names  # the author's state survived
         assert len(names) == 2  # ours went inside it
+
+
+def _page_with_two_in_one_form(path):
+    """TWO images drawn inside ONE Form XObject, form drawn once — the P7
+    multi-op fixture: both nested targets must land in ONE form copy."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    im_f = _rgb_image(pdf, 0, 255, 0)
+    im_g = _rgb_image(pdf, 255, 255, 0)
+    form = pdf.make_stream(
+        b"q 100 0 0 100 0 0 cm /ImF Do Q q 100 0 0 100 150 0 cm /ImG Do Q"
+    )
+    form["/Type"] = Name("/XObject")
+    form["/Subtype"] = Name("/Form")
+    form["/BBox"] = pikepdf.Array([0, 0, 300, 100])
+    form["/Resources"] = Dictionary(XObject=Dictionary(ImF=im_f, ImG=im_g))
+    page.obj["/Resources"] = Dictionary(XObject=Dictionary(Fm1=pdf.make_indirect(form)))
+    page.Contents = pdf.make_stream(b"q 1 0 0 1 50 400 cm /Fm1 Do Q")
+    pdf.save(path)
+    pdf.close()
+
+
+def _page_with_direct_and_form(path):
+    """One page-level draw + one form-nested draw — the mixed multi-target
+    fixture (state must survive the recursion unwind and keep applying)."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    im_a = _rgb_image(pdf, 255, 0, 0)
+    im_f = _rgb_image(pdf, 0, 255, 0)
+    form = pdf.make_stream(b"q 100 0 0 100 0 0 cm /ImF Do Q")
+    form["/Type"] = Name("/XObject")
+    form["/Subtype"] = Name("/Form")
+    form["/BBox"] = pikepdf.Array([0, 0, 100, 100])
+    form["/Resources"] = Dictionary(XObject=Dictionary(ImF=im_f))
+    page.obj["/Resources"] = Dictionary(
+        XObject=Dictionary(ImA=im_a, Fm1=pdf.make_indirect(form))
+    )
+    page.Contents = pdf.make_stream(
+        b"q 100 0 0 80 50 600 cm /ImA Do Q q 1 0 0 1 300 200 cm /Fm1 Do Q"
+    )
+    pdf.save(path)
+    pdf.close()
+
+
+class TestMultiImageOps:
+    """P7 multi-select: transform_page_images / delete_page_images — ONE
+    atomic rewrite for N placements (one save, one undo entry)."""
+
+    def test_group_transform_moves_both_page_level_targets(self, tmp_dir):
+        from engine.page_images import transform_page_images
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        r = transform_page_images(
+            src,
+            out,
+            1,
+            [
+                {"index": 0, "matrix": [100, 0, 0, 80, 150, 650]},
+                {"index": 2, "matrix": [200, 0, 0, 150, 90, 340]},
+            ],
+        )
+        assert r["indexes"] == [0, 2]
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["matrix"] == pytest.approx([100, 0, 0, 80, 150, 650])
+        assert imgs[2]["matrix"] == pytest.approx([200, 0, 0, 150, 90, 340])
+        # The untargeted middle placement is untouched.
+        assert imgs[1]["matrix"] == pytest.approx([100, 0, 0, 80, 300, 600])
+
+    def test_group_transform_two_targets_in_one_form_copy(self, tmp_dir):
+        from engine.page_images import transform_page_images
+
+        src = os.path.join(tmp_dir, "twoform.pdf")
+        _page_with_two_in_one_form(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # Both placements live inside the ONE form draw: the rewrite must
+        # produce ONE copy carrying BOTH new matrices.
+        transform_page_images(
+            src,
+            out,
+            1,
+            [
+                {"index": 0, "matrix": [100, 0, 0, 100, 60, 420]},
+                {"index": 1, "matrix": [100, 0, 0, 100, 260, 420]},
+            ],
+        )
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["matrix"] == pytest.approx([100, 0, 0, 100, 60, 420])
+        assert imgs[1]["matrix"] == pytest.approx([100, 0, 0, 100, 260, 420])
+        # Exactly ONE form Do on the page (the copy superseded the original).
+        assert len(_names_in_page_stream(out)) == 1
+
+    def test_group_transform_mixed_page_and_nested(self, tmp_dir):
+        from engine.page_images import transform_page_images
+
+        src = os.path.join(tmp_dir, "mixed.pdf")
+        _page_with_direct_and_form(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        transform_page_images(
+            src,
+            out,
+            1,
+            [
+                {"index": 0, "matrix": [100, 0, 0, 80, 70, 620]},
+                {"index": 1, "matrix": [100, 0, 0, 100, 320, 220]},
+            ],
+        )
+        imgs = list_page_images(out, 1)["images"]
+        assert imgs[0]["matrix"] == pytest.approx([100, 0, 0, 80, 70, 620])
+        assert imgs[1]["matrix"] == pytest.approx([100, 0, 0, 100, 320, 220])
+
+    def test_group_transform_with_inline_target(self, tmp_dir):
+        from engine.page_images import transform_page_images
+
+        src = os.path.join(tmp_dir, "inline.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        im = _rgb_image(pdf, 200, 0, 0)
+        page.obj["/Resources"] = Dictionary(XObject=Dictionary(ImA=im))
+        page.Contents = pdf.make_stream(
+            b"q 20 0 0 20 30 700 cm BI /W 1 /H 1 /CS /G /BPC 8 ID \x7f EI Q "
+            b"q 100 0 0 80 50 600 cm /ImA Do Q"
+        )
+        pdf.save(src)
+        pdf.close()
+        out = os.path.join(tmp_dir, "o.pdf")
+        transform_page_images(
+            src,
+            out,
+            1,
+            [
+                {"index": 0, "matrix": [20, 0, 0, 20, 60, 720]},
+                {"index": 1, "matrix": [100, 0, 0, 80, 90, 630]},
+            ],
+        )
+        imgs = list_page_images(out, 1)["images"]
+        assert [i["kind"] for i in imgs] == ["inline", "xobject"]
+        assert imgs[0]["matrix"] == pytest.approx([20, 0, 0, 20, 60, 720])
+        assert imgs[1]["matrix"] == pytest.approx([100, 0, 0, 80, 90, 630])
+
+    def test_group_delete_removes_both_and_gcs_the_orphan(self, tmp_dir):
+        from engine.page_images import delete_page_images
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        r = delete_page_images(src, out, 1, [0, 2])
+        assert r["indexes"] == [0, 2]
+        imgs = list_page_images(out, 1)["images"]
+        # Only the second ImA placement survives (as index 0 now).
+        assert len(imgs) == 1
+        assert imgs[0]["matrix"] == pytest.approx([100, 0, 0, 80, 300, 600])
+        # ImB lost its last draw: dropped from the output entirely.
+        with pikepdf.open(out) as pdf2:
+            xo = pdf2.pages[0].obj["/Resources"].get("/XObject")
+            assert "/ImB" not in {str(k) for k in xo.keys()}
+
+    def test_group_delete_both_nested_placements(self, tmp_dir):
+        from engine.page_images import delete_page_images
+
+        src = os.path.join(tmp_dir, "twoform.pdf")
+        _page_with_two_in_one_form(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        delete_page_images(src, out, 1, [0, 1])
+        assert list_page_images(out, 1)["images"] == []
+
+    def test_multi_validation_refuses(self, tmp_dir):
+        from engine.page_images import delete_page_images, transform_page_images
+
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="at least one"):
+            transform_page_images(src, out, 1, [])
+        with pytest.raises(ValueError, match="duplicate"):
+            transform_page_images(
+                src,
+                out,
+                1,
+                [
+                    {"index": 0, "matrix": [1, 0, 0, 1, 0, 0]},
+                    {"index": 0, "matrix": [2, 0, 0, 2, 0, 0]},
+                ],
+            )
+        with pytest.raises(ValueError, match="out of range"):
+            transform_page_images(src, out, 1, [{"index": 9, "matrix": [1, 0, 0, 1, 0, 0]}])
+        with pytest.raises(ValueError, match="matrix"):
+            transform_page_images(src, out, 1, [{"index": 0, "matrix": [1, 0]}])
+        with pytest.raises(ValueError, match="at least one"):
+            delete_page_images(src, out, 1, [])
+        with pytest.raises(ValueError, match="out of range"):
+            delete_page_images(src, out, 1, [0, 7])
+        assert not os.path.exists(out)  # every refusal fired before a save
+
+
+def _wide_raw_source(tmp_dir, w, h):
+    path = os.path.join(tmp_dir, f"wide-{w}x{h}.raw")
+    with open(path, "wb") as f:
+        f.write(bytes([10, 20, 30]) * (w * h))
+    return {"raw_path": path, "width": w, "height": h, "channels": 3}
+
+
+class TestAspectHonestPlacement:
+    """P7 slice C: fit="contain" on replace/add + natural-size click-place.
+    The default "stretch" paths stay byte-stable (the existing suite runs
+    them unchanged)."""
+
+    def test_replace_contain_letterboxes_and_keeps_the_center(self, tmp_dir):
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)  # placement 0 draws a 100x80 box at (50,600)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # A SQUARE 2x2 image into the 1.25-aspect box: width shrinks to 80,
+        # centered — nothing distorts.
+        replace_page_image(src, out, 1, 0, _raw_source(tmp_dir), fit="contain")
+        m = list_page_images(out, 1)["images"][0]["matrix"]
+        box_w = (m[0] ** 2 + m[1] ** 2) ** 0.5
+        box_h = (m[2] ** 2 + m[3] ** 2) ** 0.5
+        assert box_w == pytest.approx(80, abs=1e-3)
+        assert box_h == pytest.approx(80, abs=1e-3)
+        # Center preserved: M'(0.5,0.5) == old center (100, 640).
+        cx = m[0] * 0.5 + m[2] * 0.5 + m[4]
+        cy = m[1] * 0.5 + m[3] * 0.5 + m[5]
+        assert (cx, cy) == (pytest.approx(100, abs=1e-3), pytest.approx(640, abs=1e-3))
+
+    def test_replace_contain_frame_folds_under_a_later_transform(self, tmp_dir):
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        mid = os.path.join(tmp_dir, "mid.pdf")
+        replace_page_image(src, mid, 1, 0, _raw_source(tmp_dir), fit="contain")
+        out = os.path.join(tmp_dir, "o.pdf")
+        target = [60, 0, 0, 60, 200, 500]
+        transform_page_image(mid, out, 1, 0, target)
+        # The letterbox frame is the recognized transform shape, so the P9
+        # fold absorbs it — the listing lands EXACTLY on the target.
+        assert list_page_images(out, 1)["images"][0]["matrix"] == pytest.approx(target)
+
+    def test_replace_contain_matching_aspect_stays_bare(self, tmp_dir):
+        src = os.path.join(tmp_dir, "imgs.pdf")
+        _page_with_images(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # A 2x2 image into ImB's 200x150 box mismatches; use placement 0 with
+        # a 5x4 image (aspect 1.25 == 100/80): no frame is emitted at all.
+        replace_page_image(src, out, 1, 0, _wide_raw_source(tmp_dir, 5, 4), fit="contain")
+        m = list_page_images(out, 1)["images"][0]["matrix"]
+        assert m == pytest.approx([100, 0, 0, 80, 50, 600])
+
+    def test_add_contain_shrinks_the_band_around_its_center(self, tmp_dir):
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # A square image into a 200x100 band: a 100x100 box, centered.
+        add_page_image(src, out, 1, [100, 100, 300, 200], _raw_source(tmp_dir), fit="contain")
+        m = list_page_images(out, 1)["images"][0]["matrix"]
+        assert m == pytest.approx([100, 0, 0, 100, 150, 100])
+
+    def test_add_at_places_natural_size_centered_on_the_click(self, tmp_dir):
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_page_image(src, out, 1, source=_raw_source(tmp_dir), at=[200, 300])
+        m = list_page_images(out, 1)["images"][0]["matrix"]
+        # 2x2 px = 2x2 pt (the 72-dpi identity), centered on (200,300).
+        assert m == pytest.approx([2, 0, 0, 2, 199, 299])
+
+    def test_add_at_scales_down_and_clamps_inside_the_page(self, tmp_dir):
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)  # 612x792
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_page_image(src, out, 1, source=_wide_raw_source(tmp_dir, 1000, 200), at=[600, 50])
+        m = list_page_images(out, 1)["images"][0]["matrix"]
+        # scale = 612/1000; the box shifts fully inside the page.
+        assert m[0] == pytest.approx(612, abs=1e-3)
+        assert m[3] == pytest.approx(122.4, abs=1e-3)
+        assert m[4] == pytest.approx(0, abs=1e-3)
+        assert m[5] == pytest.approx(0, abs=1e-3)
+
+    def test_add_placement_validation(self, tmp_dir):
+        src = os.path.join(tmp_dir, "blank.pdf")
+        _blank_page_pdf(src)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="exactly one"):
+            add_page_image(src, out, 1, [0, 0, 10, 10], _raw_source(tmp_dir), at=[5, 5])
+        with pytest.raises(ValueError, match="exactly one"):
+            add_page_image(src, out, 1, source=_raw_source(tmp_dir))
+        with pytest.raises(ValueError, match="fit"):
+            add_page_image(src, out, 1, [0, 0, 10, 10], _raw_source(tmp_dir), fit="cover")
+        with pytest.raises(ValueError, match="fit"):
+            replace_page_image(src, out, 1, 0, _raw_source(tmp_dir), fit="cover")
