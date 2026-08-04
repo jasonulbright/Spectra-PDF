@@ -287,6 +287,126 @@ export const CANVAS_STRINGS = {
   'canvas.imgtx.skew': 'Skew — drag along the edge',
   'canvas.imgtx.gradientStart': 'Gradient start',
   'canvas.imgtx.gradientEnd': 'Gradient end',
+
+  // ── Form-widget overlays (on-canvas fill / sign) ─────────────────────
+  // Every one of these was `${widget.fieldName} — <state>` in code. The FIELD
+  // NAME is the document's own (never translated); the sentence around it is
+  // ours, and it is one key so the name can move within it.
+  'canvas.widget.pending': '{{field}} — filled, not yet applied',
+  'canvas.widget.signHere': '{{field}} — click to sign this field',
+  'canvas.widget.signed': '{{field}} — already signed',
+  'canvas.widget.readonlySig': '{{field}} — read-only signature field',
+  'canvas.widget.readonly': '{{field}} — read-only',
+  'canvas.widget.radio': '{{field}}: {{option}}',
+  'canvas.widget.radioUnmapped': '(unmapped option)',
+  'canvas.widget.button': '{{field}} — {{action}}',
+  'canvas.widget.action.reset': 'resets form fields',
+  'canvas.widget.action.uri': 'links to {{uri}}',
+  // The action KIND is the PDF's own /A classification, verbatim inside the
+  // localized frame (the slice-D boundary).
+  'canvas.widget.action.other': '{{kind}} action',
+  'canvas.widget.action.none': 'no action',
+  'canvas.widget.badge.signHere': 'SIGN HERE',
+  'canvas.widget.badge.signed': 'SIGNED',
+  'canvas.widget.badge.signature': 'SIGNATURE',
+
+  // ── Vector-object chrome (P8) ────────────────────────────────────────
+  'canvas.editvec.shadingTitle':
+    'A gradient fill has no flat colour to change — move or delete it',
+  'canvas.editvec.shading': 'Gradient fill',
+  'canvas.editvec.fillTitle': 'Fill colour',
+  'canvas.editvec.fill': 'Fill',
+  'canvas.editvec.strokeTitle': 'Stroke colour',
+  'canvas.editvec.stroke': 'Line',
+  'canvas.editvec.widthTitle': 'Line width',
+  'canvas.editvec.width': 'W',
+  // The object KIND (fill/stroke/shading/text) is the engine's own listing
+  // vocabulary; the sentence and the nested clause are ours.
+  'canvas.editvec.hit': 'Vector object ({{kind}})',
+  'canvas.editvec.hitNested': 'Vector object ({{kind}}) — inside a group',
+  'canvas.editvec.delete': 'Delete this vector object',
+
+  // ── Annotation hover chrome ──────────────────────────────────────────
+  'canvas.annot.recolorTo': 'Recolor to {{color}}',
+  'canvas.annot.removeText': 'Remove text',
+  'canvas.annot.removeDrawing': 'Remove drawing',
+  'canvas.annot.removeStamp': 'Remove stamp',
+  'canvas.annot.removeNote': 'Remove note',
+  'canvas.annot.removeHighlight': 'Remove highlight',
+  // One key per markup type: "Remove " + type is the banned concatenation,
+  // and several languages inflect the verb with the object.
+  'canvas.annot.removeMarkup.highlight': 'Remove highlight',
+  'canvas.annot.removeMarkup.underline': 'Remove underline',
+  'canvas.annot.removeMarkup.strikeout': 'Remove strikeout',
+  'canvas.annot.removeMarkup.squiggly': 'Remove squiggly',
+
+  // ── On-page placements and marks ─────────────────────────────────────
+  'canvas.mark.redact': 'REDACT',
+  'canvas.mark.redactRemove': 'Remove redaction mark',
+  'canvas.mark.signature': 'SIGNATURE',
+  'canvas.mark.signatureRemove': 'Remove signature placement',
+  'canvas.mark.newField': 'NEW FIELD',
+  'canvas.mark.newFieldRemove': 'Remove field placement',
+  'canvas.mark.newText': 'NEW TEXT',
+  'canvas.mark.newTextRemove': 'Remove text placement',
+  'canvas.mark.keep': 'KEEP',
+  'canvas.mark.cropRemove': 'Remove crop rectangle',
+
+  // ── Edit-tool object hit targets ─────────────────────────────────────
+  'canvas.editimg.vector': 'Vector graphic',
+  'canvas.editimg.nested': 'Image (inside a form)',
+  'canvas.editimg.image': 'Image',
+  'canvas.editpara.hit': 'Paragraph — double-click to edit',
+
+  // ── The paragraph editor (9.A/9.K) ───────────────────────────────────
+  'canvas.editpara.resizeGrip': 'Drag to resize the paragraph box',
+  'canvas.editpara.resizeReadout': '{{width}} pt',
+  'canvas.editpara.styleGroup': 'Text style',
+  'canvas.editpara.size': 'Size',
+  'canvas.editpara.sizeTitle':
+    'With text selected, sizes the selection; otherwise the whole paragraph',
+  'canvas.editpara.splitGap': 'Split gap',
+  'canvas.editpara.splitGapTitle':
+    'Gap between the halves when Enter splits inside the text (× line height)',
+  'canvas.editpara.dragToAdjust': 'Drag to adjust',
+  'canvas.editpara.colour': 'Colour',
+  'canvas.editpara.colourTitle':
+    'With text selected, recolours the selection; otherwise the whole paragraph',
+  'canvas.editpara.font': 'Font',
+  'canvas.editpara.keepFont': 'Keep original font',
+  // FACE NAMES (Liberation Sans, an installed family) are proper nouns and
+  // stay verbatim; the GROUP headings are ours.
+  'canvas.editpara.bundled': 'Bundled',
+  'canvas.editpara.installed': 'Installed',
+  'canvas.editpara.installedRestricted': 'Installed ({{count}} not shown — licence)',
+  'canvas.editpara.verticalKeepsFont':
+    'Vertical text keeps its font — the bundled faces are horizontal',
+  'canvas.editpara.familyTitle': "Replaces the paragraph's font with the chosen bundled face",
+  // Single-letter style buttons: they are ABBREVIATED WORDS (bold, italic,
+  // small caps, alternates), not symbols — Spanish writes N and K — so they
+  // localize while their stable test ids do not.
+  'canvas.editpara.bold': 'B',
+  'canvas.editpara.boldTitle': 'Bold — substitutes the bundled bold face',
+  'canvas.editpara.italic': 'I',
+  'canvas.editpara.italicTitle': 'Italic — substitutes the bundled italic face',
+  'canvas.editpara.smallCaps': 'SC',
+  'canvas.editpara.smallCapsTitle':
+    'Small caps — uses the font’s own if it has them, else Libertinus Serif',
+  'canvas.editpara.alternates': 'Alt',
+  'canvas.editpara.alternatesTitle':
+    'Stylistic alternates (salt) — uses the font’s own if it has them, else Libertinus Serif',
+  'canvas.editpara.altIndexTitle': 'Which stylistic alternate to use, when the font offers several',
+  'canvas.editpara.textAria': 'Paragraph text',
+  // The missing characters arrive already quoted and joined — one finished
+  // unit, so the sentence around them is a single key.
+  'canvas.editpara.missingGlyphs': "This document's font does not contain {{chars}}",
+  'canvas.editpara.useCompatibleFont': 'Use a compatible font',
+
+  // ── The inline text-run editor (7.2/T14) ─────────────────────────────
+  'canvas.edittext.sizePlaceholder': '{{size}}pt',
+  'canvas.edittext.keepColour': 'Keep current colour',
+  'canvas.edittext.colour': 'Colour {{color}}',
+  'canvas.edittext.applyStyle': 'Apply style',
 } as const;
 
 export type CanvasKey = keyof typeof CANVAS_STRINGS;
