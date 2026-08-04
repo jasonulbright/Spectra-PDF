@@ -93,4 +93,66 @@ describe('deriveAccentVars', () => {
   it('returns null on malformed input instead of emitting broken CSS', () => {
     expect(deriveAccentVars('not-a-color')).toBeNull();
   });
+
+  it('emits the accent as #RRGGBB — spec 21 pins the shape', () => {
+    expect(deriveAccentVars('#00b7c3', 'dark')!.accent).toMatch(/^#[0-9A-F]{6}$/);
+  });
+});
+
+// The derivation is a function of (accent, THEME): one accent still serves
+// every theme, but the shell it is drawn against differs, and a value lifted
+// for one shell is wrong on another. Every case below was live before the
+// theme argument existed — the light column shipped the DARK lift.
+describe('deriveAccentVars per theme', () => {
+  const WHITE: [number, number, number] = [0xff, 0xff, 0xff];
+  const DARK_SHELL: [number, number, number] = [0x17, 0x17, 0x17];
+  const BLACK: [number, number, number] = [0, 0, 0];
+
+  it('DARKENS accent-as-text for the light shell instead of lifting it', () => {
+    // The bug this pins: cyan lifted for #171717 was then drawn on white at
+    // 2.47:1 — every .text-blue-* consumer in the light theme.
+    const dark = deriveAccentVars('#00B7C3', 'dark')!;
+    const light = deriveAccentVars('#00B7C3', 'light')!;
+    expect(ratio(parseRgb(dark.text), DARK_SHELL)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(parseRgb(light.text), WHITE)).toBeGreaterThanOrEqual(4.5);
+    // Same accent, opposite directions.
+    expect(relativeLuminance(parseRgb(light.text))).toBeLessThan(
+      relativeLuminance(parseRgb(dark.text)),
+    );
+  });
+
+  it('holds AAA for accent-as-text under high contrast', () => {
+    for (const hex of ['#00B7C3', '#0078D4', '#001F3F', '#FFB900']) {
+      const hc = deriveAccentVars(hex, 'high-contrast')!;
+      expect(ratio(parseRgb(hc.text), BLACK)).toBeGreaterThanOrEqual(7);
+    }
+  });
+
+  it('floors the ACCENT itself against the contrast theme, and leaves it alone elsewhere', () => {
+    // A user's system accent is arbitrary: navy on black is 1.6:1 and simply
+    // is not there. Under high contrast the theme's requirement wins.
+    const navy = parseHex('#001F3F')!;
+    expect(ratio(navy, BLACK)).toBeLessThan(3);
+    const hc = deriveAccentVars('#001F3F', 'high-contrast')!;
+    expect(ratio(parseHex(hc.accent)!, BLACK)).toBeGreaterThanOrEqual(3);
+    // The washes and the foreground describe the accent actually shown.
+    expect(hc.muted).toBe(
+      `rgba(${parseHex(hc.accent)![0]}, ${parseHex(hc.accent)![1]}, ${parseHex(hc.accent)![2]}, 0.3)`,
+    );
+    // The ordinary themes take the system value verbatim — one accent.
+    expect(deriveAccentVars('#001F3F', 'dark')!.accent).toBe('#001F3F');
+    expect(deriveAccentVars('#001F3F', 'light')!.accent).toBe('#001F3F');
+    // An accent that already clears the floor is untouched under HC too.
+    expect(deriveAccentVars('#00B7C3', 'high-contrast')!.accent).toBe('#00B7C3');
+  });
+
+  it('keeps text-on-accent legible in every theme', () => {
+    for (const theme of ['light', 'dark', 'high-contrast'] as const) {
+      for (const hex of ['#00B7C3', '#0078D4', '#001F3F', '#FFB900', '#000000', '#FFFFFF']) {
+        const vars = deriveAccentVars(hex, theme)!;
+        const fg = vars.fg === '#ffffff' ? WHITE : BLACK;
+        expect(ratio(fg, parseHex(vars.accent)!)).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
 });
