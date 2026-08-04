@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { showsFormWidgets } from '../../commands/tools';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
@@ -87,6 +87,16 @@ import {
   type SnapType,
 } from '../../lib/snap';
 import { gridForPage, gridLines } from '../../lib/rulers';
+import {
+  countMarksOf,
+  derivedGroups,
+  symbolById,
+  type CountGroup,
+} from '../../lib/count-marks';
+import {
+  getTakeoffSettings,
+  subscribeTakeoffSettings,
+} from '../../lib/takeoff-settings';
 import { guidesOnPage, isOffPage, toSnapGuides, type GuideAxis, type PageGuide } from '../../lib/guides';
 import type { SnapSettings } from '../../lib/snap-settings';
 import type { PageSnapGeometry } from '../../lib/snap-geometry';
@@ -199,6 +209,21 @@ export const STAMP_PRESETS: StampPreset[] = [
 // single click-to-place, not a drag-sized box.
 const STAMP_W = 0.32;
 const STAMP_H = 0.09;
+
+// N11 slice C: a count marker's on-PAPER size, in PDF points. A count mark is
+// a marker, not a region — it is the same size on every page of a set,
+// whatever those pages measure, which is why this is a paper length converted
+// per page rather than a fraction of one.
+const COUNT_MARK_PT = 14;
+
+/** A symbol part's unit-square points as an SVG `points` list (closing the
+ * ring for a closed part, which `polyline` does not do by itself). */
+function countSymbolPoints(points: readonly number[], closed: boolean): string {
+  const out: string[] = [];
+  for (let i = 0; i + 1 < points.length; i += 2) out.push(`${points[i]},${points[i + 1]}`);
+  if (closed && out.length > 0) out.push(out[0]);
+  return out.join(' ');
+}
 
 // Shared by the floating toolbar's "color for new annotations" picker and
 // each annotation's own hover recolor row.
@@ -767,6 +792,16 @@ interface PageCellProps {
   onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   // Ctrl-marquee result — the view decides how it merges into the selection.
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
+  // N11 slice C: the count mode's Ctrl-marquee re-files the marks it covered
+  // into the armed group. A separate callback from `onMarqueeSelect` because
+  // it is a different payload with a different meaning, not a mode flag on
+  // the same one.
+  onRegroupCountMarks: (
+    docId: string,
+    pageId: string,
+    annotationIds: string[],
+    group: CountGroup,
+  ) => void;
   // N3 marquee zoom: band in DISPLAY page-normalized coords; the reading
   // view zooms until it fills the pane. Optional — the board has no zoom.
   onZoomToRect?: (pageId: string, rect: { x: number; y: number; w: number; h: number }) => void;
@@ -1009,6 +1044,7 @@ function PageCellImpl({
   onCalibrate,
   onMeasureContextMenu,
   onMarqueeSelect,
+  onRegroupCountMarks,
   onZoomToRect,
   onAddRedactionMark,
   onRemoveRedactionMark,
@@ -1095,6 +1131,26 @@ function PageCellImpl({
   const measDispW = page.rotation === 90 || page.rotation === 270 ? page.height : page.width;
   const measDispH = page.rotation === 90 || page.rotation === 270 ? page.width : page.height;
   const measScale = measureScale ?? DEFAULT_MEASURE_SCALE;
+
+  // N11 slice C — which group the next count click files under. Read straight
+  // off the module store rather than threaded down as a prop: the store is the
+  // one owner (the Takeoff panel and the secondary toolbar's picker read the
+  // same value), and nothing between here and the canvas view derives anything
+  // from it, so a prop would be four files of pass-through for no gain.
+  const takeoffSettings = useSyncExternalStore(
+    subscribeTakeoffSettings,
+    getTakeoffSettings,
+    getTakeoffSettings,
+  );
+  // The armed group's DEFINITION comes from the document when the document
+  // has one of that name — the file is the authority on how its own group
+  // looks, so a new mark matches the ones already on the sheet.
+  const armedCountGroup = useMemo<CountGroup | null>(() => {
+    const name = takeoffSettings.armed;
+    if (!name) return null;
+    const fromFile = derivedGroups(countMarksOf(page.annotations)).find((g) => g.name === name);
+    return fromFile ?? takeoffSettings.groups.find((g) => g.name === name) ?? null;
+  }, [takeoffSettings, page.annotations]);
 
   const snapArmed = snapSettings?.enabled === true;
   // The grid exists independently of whether it is DRAWN: "snap to a grid you
@@ -1737,6 +1793,78 @@ function PageCellImpl({
     window.addEventListener('keydown', onKey, true);
   };
 
+  /**
+   * N11 slice C — the Ctrl-marquee that RE-FILES count marks.
+   *
+   * The same band mechanics as the selection marquee (and the same reason not
+   * to snap it: a band that jumped to a vector endpoint would cover a
+   * different set than the one drawn), with a different payload — the marks it
+   * covers move into the armed group, taking its colour, symbol and fresh
+   * sequence numbers. One drag, one undo step.
+   */
+  const handleCountMarqueeDown = (e: React.PointerEvent<HTMLElement>): void => {
+    if (e.button !== 0 || manipActive.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    manipActive.current = true;
+    const el = e.currentTarget;
+    const norm = (cx: number, cy: number): { x: number; y: number } => {
+      const p = pagePoint(el, cx, cy, { snap: false });
+      return { x: p.x, y: p.y };
+    };
+    const start = norm(e.clientX, e.clientY);
+    let latest: AnnotationRect = { ...start, w: 0, h: 0 };
+    setMarquee(latest);
+    const onMove = (ev: PointerEvent): void => {
+      const p = norm(ev.clientX, ev.clientY);
+      latest = {
+        x: Math.min(start.x, p.x),
+        y: Math.min(start.y, p.y),
+        w: Math.abs(p.x - start.x),
+        h: Math.abs(p.y - start.y),
+      };
+      setMarquee(latest);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKey, true);
+      manipActive.current = false;
+      cancelManip.current = null;
+      setMarquee(null);
+      swallowNextClick();
+      const group = armedCountGroup;
+      if (!commit || !group || (latest.w < 0.005 && latest.h < 0.005)) return;
+      const hits = (page.annotations ?? [])
+        .filter((x) => {
+          if (x.kind !== 'count') return false;
+          const b = viewRotation === 0 ? x : rotateNormalizedRect(x, viewRotation);
+          return (
+            b.x < latest.x + latest.w &&
+            b.x + b.w > latest.x &&
+            b.y < latest.y + latest.h &&
+            b.y + b.h > latest.y
+          );
+        })
+        .map((x) => x.id);
+      if (hits.length > 0) onRegroupCountMarks(docId, page.id, hits, group);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        finish(false);
+      }
+    };
+    cancelManip.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onKey, true);
+  };
+
   /** Drag one vertex of a points shape (or the callout leader) — single
    * selection only, same preview/dispatch discipline as move/resize. */
   const handleVertexDown = (
@@ -2326,6 +2454,61 @@ function PageCellImpl({
       setEditing(annotation.id);
       return;
     }
+    if (tool === 'count') {
+      // N11 slice C — the count gesture.
+      //
+      //   click on empty page   → place a mark of the armed group
+      //   click ON a mark of that group → remove it ("click again to
+      //                           un-count"), one undo step either way
+      //   Ctrl-drag             → marquee, re-filing the marks it covers
+      //
+      // Nothing armed places nothing: the panel says which group is armed, and
+      // inventing one behind the user's back is how a takeoff ends up with a
+      // group called "Group 1" nobody asked for.
+      if (!armedCountGroup) return;
+      if (e.ctrlKey || e.metaKey) {
+        handleCountMarqueeDown(e);
+        return;
+      }
+      const { x: cx, y: cy } = pagePoint(e.currentTarget, e.clientX, e.clientY, {
+        suspend: e.altKey,
+      });
+      // Un-count: the topmost mark of the ARMED group whose displayed box
+      // contains the click. Marks of other groups are not the armed group's
+      // business — clicking one places a mark on top of it, which is what
+      // counting two overlapping trades looks like.
+      const hit = [...(page.annotations ?? [])]
+        .reverse()
+        .find((a) => {
+          if (a.kind !== 'count' || (a.countGroup ?? '') !== armedCountGroup.name) return false;
+          const d = viewRotation === 0 ? a : rotateNormalizedRect(a, viewRotation);
+          return cx >= d.x && cx <= d.x + d.w && cy >= d.y && cy <= d.y + d.h;
+        });
+      if (hit) {
+        onRemoveAnnotation(docId, page.id, hit.id);
+        return;
+      }
+      const w = Math.min(0.2, COUNT_MARK_PT / measDispW);
+      const h = Math.min(0.2, COUNT_MARK_PT / measDispH);
+      const placed = toStoredRect({
+        x: Math.max(0, Math.min(1 - w, cx - w / 2)),
+        y: Math.max(0, Math.min(1 - h, cy - h / 2)),
+        w,
+        h,
+      });
+      // `countSeq` and the "<group> <seq>" note are allocated by the REDUCER,
+      // which is the only place that holds every page of the document — a
+      // sequence number is unique per group across the whole file.
+      onAddAnnotation(docId, page.id, {
+        id: crypto.randomUUID(),
+        kind: 'count',
+        ...placed,
+        color: armedCountGroup.color,
+        countGroup: armedCountGroup.name,
+        countSymbol: armedCountGroup.symbol,
+      });
+      return;
+    }
     if (tool === 'stamp') {
       if (!stampPreset) return; // no preset picked yet — clicks are a no-op
       const { x: cx, y: cy } = pagePoint(e.currentTarget, e.clientX, e.clientY, {
@@ -2712,10 +2895,13 @@ function PageCellImpl({
             (a.kind === 'ink' || a.kind === 'measure' ? ' page-annot-ink' : '') +
             (a.kind === 'textmarkup' ? ' page-annot-ink' : '') + // SVG body, no default border
             (a.kind === 'shape' || a.kind === 'callout' ? ' page-annot-ink' : '') + // SVG bodies too
+            // N11 slice C: the count symbol and the legend table are their own
+            // bodies — no default box chrome around either.
+            (a.kind === 'count' || a.kind === 'countlegend' ? ' page-annot-ink' : '') +
             (a.kind === 'stamp' ? ' page-annot-stamp' : '') +
             (selectedAnnotationIds.includes(a.id) ? ' page-annot-selected' : '')
           }
-          title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'note' || a.kind === 'shape' ? a.note : undefined}
+          title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'note' || a.kind === 'shape' || a.kind === 'count' ? a.note : undefined}
           style={{
             left: `${da.x * 100}%`,
             top: `${da.y * 100}%`,
@@ -2725,9 +2911,22 @@ function PageCellImpl({
               ? {}
               : a.kind === 'highlight'
                 ? { backgroundColor: `${a.color}66`, borderColor: a.color }
-                : a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'shape' || a.kind === 'callout'
+                : a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'shape' || a.kind === 'callout' || a.kind === 'count'
                   ? {}
-                  : a.kind === 'note'
+                  : a.kind === 'countlegend'
+                    ? {
+                        backgroundColor: 'rgba(255,255,255,0.95)',
+                        borderColor: a.color,
+                        color: '#16161a',
+                        // Sized from the BOX, like the freetext body: the
+                        // legend prints at a fixed point size, so on screen it
+                        // has to track the zoom the same way.
+                        fontSize: Math.max(
+                          5,
+                          (da.h * pageHeight) / (((a.legendRows?.length ?? 0) + 2) * 1.6),
+                        ),
+                      }
+                    : a.kind === 'note'
                     ? { backgroundColor: `${a.color}dd`, borderColor: a.color, borderRadius: 2 }
                     : a.kind === 'stamp'
                       ? a.imageData
@@ -2778,6 +2977,84 @@ function PageCellImpl({
               : undefined
           }
         >
+          {a.kind === 'count' && !pristineImport && (
+            // The same unit-square parts the appearance stream draws, so what
+            // is on screen and what prints are one geometry, not two.
+            <svg
+              className="page-annot-ink-svg"
+              viewBox="0 0 1 1"
+              preserveAspectRatio="none"
+              data-count-group={a.countGroup ?? ''}
+            >
+              {symbolById(a.countSymbol).parts.map((part, pi) =>
+                part.kind === 'circle' ? (
+                  <circle
+                    key={pi}
+                    cx={part.cx}
+                    cy={part.cy}
+                    r={part.r}
+                    fill={`${a.color}2e`}
+                    stroke={a.color}
+                    strokeWidth={1.5}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ) : (
+                  <polyline
+                    key={pi}
+                    points={countSymbolPoints(part.points, part.closed)}
+                    fill={part.closed ? `${a.color}2e` : 'none'}
+                    stroke={a.color}
+                    strokeWidth={1.5}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ),
+              )}
+            </svg>
+          )}
+          {a.kind === 'countlegend' && !pristineImport && (
+            // The legend's on-canvas body mirrors what the appearance draws:
+            // a symbol swatch, the group, the tally, and the total.
+            <div className="page-annot-legend" data-testid="count-legend">
+              <div className="page-annot-legend-title">{a.legendTitle}</div>
+              {(a.legendRows ?? []).map((row) => (
+                <div key={row.group} className="page-annot-legend-row">
+                  <svg viewBox="0 0 1 1" width="1em" height="1em" aria-hidden="true">
+                    {symbolById(row.symbol).parts.map((part, pi) =>
+                      part.kind === 'circle' ? (
+                        <circle
+                          key={pi}
+                          cx={part.cx}
+                          cy={part.cy}
+                          r={part.r}
+                          fill="none"
+                          stroke={row.color}
+                          strokeWidth={0.08}
+                        />
+                      ) : (
+                        <polyline
+                          key={pi}
+                          points={countSymbolPoints(part.points, part.closed)}
+                          fill="none"
+                          stroke={row.color}
+                          strokeWidth={0.08}
+                        />
+                      ),
+                    )}
+                  </svg>
+                  <span className="page-annot-legend-name">{row.group}</span>
+                  <span className="page-annot-legend-count">{row.count}</span>
+                </div>
+              ))}
+              <div className="page-annot-legend-row page-annot-legend-total">
+                <span className="page-annot-legend-name">{a.legendTotalWord}</span>
+                <span className="page-annot-legend-count">
+                  {(a.legendRows ?? []).reduce((n, r) => n + r.count, 0)}
+                </span>
+              </div>
+            </div>
+          )}
           {(a.kind === 'ink' || a.kind === 'measure') && !pristineImport && (
             <svg
               className="page-annot-ink-svg"

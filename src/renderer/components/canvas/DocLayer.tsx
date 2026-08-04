@@ -151,6 +151,7 @@ interface DocLayerProps {
   onCalibrate: (lengthPts: number) => void;
   onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
+  onRegroupCountMarks: (docId: string, pageId: string, annotationIds: string[], group: import('../../lib/count-marks').CountGroup) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -270,6 +271,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onCalibrate={props.onCalibrate}
               onMeasureContextMenu={props.onMeasureContextMenu}
               onMarqueeSelect={props.onMarqueeSelect}
+              onRegroupCountMarks={props.onRegroupCountMarks}
               onAddRedactionMark={props.onAddRedactionMark}
               onRemoveRedactionMark={props.onRemoveRedactionMark}
               onSetSignaturePlacement={props.onSetSignaturePlacement}

@@ -24,6 +24,7 @@ export type ToolId =
   | 'prepareform'
   | 'redact'
   | 'measure'
+  | 'takeoff'
   | 'actions'
   | 'ocr'
   | 'compare'
@@ -142,6 +143,19 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     description: 'Measure distances, perimeters, and areas on the page.',
     ops: [],
     canvasTools: ['measuredist', 'measureperim', 'measurearea', 'measurecal'],
+  },
+  {
+    id: 'takeoff',
+    title: 'Count & Takeoff',
+    description: 'Count items on a drawing by group, then export the takeoff or place a legend.',
+    // It HAS an op, so by the registry's own rule its home is the tool dock:
+    // the panel is where groups are managed, tallies are read, the legend is
+    // placed and the CSV is written. The `count` mode is what puts you on the
+    // page, and `openTool` arms a tool's canvas mode BEFORE it considers ops
+    // (the Comment precedent), so opening Takeoff lands you counting with the
+    // panel one dock-click away.
+    ops: ['takeoff'],
+    canvasTools: ['count'],
   },
   {
     id: 'actions',

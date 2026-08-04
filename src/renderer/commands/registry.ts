@@ -104,7 +104,7 @@ export function cycledTab(state: AppState, delta: 1 | -1): FocusedTab {
 const CANVAS_TOOLS = [
   'select', 'hand', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
   'formfields', 'edit', 'addtext', 'addimage', 'measuredist', 'measureperim', 'measurearea',
-  'measurecal', 'shape', 'callout', 'note', 'inkerase', 'zoommarquee', 'cropdraw',
+  'measurecal', 'shape', 'callout', 'note', 'inkerase', 'zoommarquee', 'cropdraw', 'count',
 ] as const;
 
 export const TOOL_TITLES: Record<CanvasTool, string> = {
@@ -114,7 +114,7 @@ export const TOOL_TITLES: Record<CanvasTool, string> = {
   addimage: 'Add Image',
   measuredist: 'Distance', measureperim: 'Perimeter', measurearea: 'Area', measurecal: 'Calibrate',
   shape: 'Shape', callout: 'Callout', note: 'Sticky Note', inkerase: 'Eraser',
-  zoommarquee: 'Marquee Zoom', cropdraw: 'Draw Crop',
+  zoommarquee: 'Marquee Zoom', cropdraw: 'Draw Crop', count: 'Count',
 };
 
 // CANVAS_TOOLS must be a literal tuple (COMMAND_IDS builds `tools.${t}` from
@@ -306,6 +306,7 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   prepareform: ['tools.close'],
   redact: ['tools.close'],
   measure: ['tools.close'],
+  takeoff: ['tools.close'],
   actions: [],
   ocr: [],
   compare: [],

@@ -145,6 +145,7 @@ spectrapdf page-labels input.pdf -o labeled.pdf --range "1:r" --range "5:D"
 # Attachments, layers, links
 spectrapdf xfdf-export input.pdf -o comments.xfdf   # annotations to XFDF
 spectrapdf xfdf-import input.pdf --xfdf comments.xfdf -o annotated.pdf
+spectrapdf count-summary plans.pdf -o takeoff.csv                # count marks → CSV takeoff
 spectrapdf attach-list input.pdf
 spectrapdf attach-add input.pdf -o out.pdf --source data.xlsx
 spectrapdf layer-list plans.pdf
