@@ -158,6 +158,16 @@ export const WORKBENCH_STRINGS = {
   'app.closeAll.unsaved': 'Unsaved changes in: {{names}}. Save before closing all?',
   'app.exit.unsaved': 'Unsaved changes in: {{names}}. Save before exiting?',
   'app.window.unsaved': 'Unsaved changes in: {{names}}. Save before closing?',
+
+  // The commit-failure banner. Both messages were built by `+`-concatenating
+  // two English halves around the engine's own text — one interpolated key
+  // each now, so a translator controls where the cause lands in the sentence.
+  'app.commit.failedRetry':
+    'Applying page changes failed: {{message}}. Your edits are still pending — fix the cause (disk space, file locks) and retry.',
+  'app.commit.failedAbort':
+    'Applying page changes failed: {{message}}. Nothing was saved — your edits are still pending.',
+  'app.commit.retry': 'Retry',
+  'app.commit.dismiss': 'Dismiss',
 } as const;
 
 export type WorkbenchKey = keyof typeof WORKBENCH_STRINGS;
