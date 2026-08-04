@@ -164,6 +164,9 @@ const panels: Record<Operation, React.ComponentType> = {
 };
 
 function AppContent(): React.ReactElement {
+  // N12: re-render on language change; the banner's buttons and every
+  // confirm/notice message below resolve via tChrome.
+  useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
   // The tab model lives in the ui slice (Phase 4 M2) so the command registry,
@@ -380,8 +383,9 @@ function AppContent(): React.ReactElement {
       await commitRef.current();
     } catch (err) {
       setCommitError(
-        `Applying page changes failed: ${err instanceof Error ? err.message : String(err)}. ` +
-          'Your edits are still pending — fix the cause (disk space, file locks) and retry.',
+        tChrome('app.commit.failedRetry', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
       );
     }
   }, []);
@@ -1531,8 +1535,9 @@ function AppContent(): React.ReactElement {
       return true;
     } catch (err) {
       setCommitError(
-        `Applying page changes failed: ${err instanceof Error ? err.message : String(err)}. ` +
-          'Nothing was saved — your edits are still pending.',
+        tChrome('app.commit.failedAbort', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
       );
       return false;
     }
@@ -2030,13 +2035,13 @@ function AppContent(): React.ReactElement {
             onClick={() => void commitAndReport()}
             className="px-2 py-0.5 text-xs bg-red-600 hover:bg-red-500 text-white rounded font-medium"
           >
-            Retry
+            {tChrome('app.commit.retry')}
           </button>
           <button
             onClick={() => setCommitError(null)}
             className="text-red-300 hover:text-red-100 text-xs"
           >
-            Dismiss
+            {tChrome('app.commit.dismiss')}
           </button>
         </div>
       )}
