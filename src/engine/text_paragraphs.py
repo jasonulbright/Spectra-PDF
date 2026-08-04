@@ -150,6 +150,20 @@ class _Member:
         "adv",
         "perp",
         "rise_scale",
+        # 9.T12D — tate-chu-yoko: an UPRIGHT horizontal block absorbed into a
+        # column as ONE unit. `atomic` makes it indivisible to the styling,
+        # the width model and the line breaker alike; `tcy_em` is the inline
+        # extent it consumes of the column (one em — the typographic
+        # definition of the construct, and what keeps the column's pitch
+        # right); `tcy_cross` is the one em it may occupy ACROSS the column,
+        # which is what its `Tz` is recomputed against; `tcy_perp` is its own
+        # offset from the column's baseline on the perpendicular axis, kept
+        # so an untouched block re-emits exactly where it was drawn.
+        "atomic",
+        "tcy_em",
+        "tcy_cross",
+        "tcy_perp",
+        "tcy_width0",
         "x0",
         "x1",
         "y",
@@ -622,6 +636,13 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         # positive Ts really does move the glyph toward −y′.
         mem.rise_scale = _rise_scale(m, vertical, frame, adv, perp)
         mem.rise_user = style["rise"] * mem.rise_scale
+        # 9.T12D: ordinary members are never atomic. A tate-chu-yoko block is
+        # re-framed into its column AFTER grouping, where the evidence lives.
+        mem.atomic = False
+        mem.tcy_em = 0.0
+        mem.tcy_cross = 0.0
+        mem.tcy_perp = 0.0
+        mem.tcy_width0 = 0.0
         mem.tm = det["tm"]
         mem.ctm = det["ctm"]
         # 9.B4b/T13: the FRAME rides INSIDE lkey, over the TRANSPOSED linear
@@ -1228,9 +1249,124 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
 # inline extent.
 TCY_EXTENT_EM = 1.5
 
+# Where the block's own baseline sits inside the em it occupies. A latin
+# baseline sits about four fifths of the way down its em box, and the number
+# is only ever used as a PAIR: admission subtracts it to find the block's
+# start, emission adds it back to find the baseline, so an untouched block
+# re-emits at exactly the pen it was drawn at whatever value this takes.
+TCY_BASELINE_EM = 0.8
+
+
+def _tcy_candidates(p: _Paragraph, members: list[_Member]) -> list[_Member]:
+    """The members that LOOK like a tate-chu-yoko block of column `p`.
+
+    Deliberately conservative, because the false-positive direction refuses
+    (or now re-frames) an edit that works today: the block must sit INSIDE
+    the column's own box, its advance must run along the column's block
+    axis, and its inline extent must be within about one em of the column's
+    line size."""
+    owned = {m.index for m in p.members}
+    bx0, by0, bx1, by1 = p.box
+    eff = max(line.eff for line in p.lines)
+    out: list[_Member] = []
+    for m in members:
+        if m.index in owned or m.vertical or not m.ptext.strip():
+            continue
+        # Its advance, in the COLUMN's frame: along ±y′ is the block axis (a
+        # member advancing along +x′ would simply have joined the column,
+        # which is T13's whole point).
+        ax, ay = _t(p.frame, m.a, m.b)
+        if abs(ax) > MATRIX_TOL * max(abs(ay), 1e-9):
+            continue
+        r = m.rect
+        if not (
+            r[0] >= bx0 - 0.5 and r[2] <= bx1 + 0.5
+            and r[1] >= by0 - 0.5 and r[3] <= by1 + 0.5
+        ):
+            continue
+        if max(r[2] - r[0], r[3] - r[1]) > TCY_EXTENT_EM * eff:
+            continue
+        out.append(m)
+    return out
+
+
+def _absorb_tate_chu_yoko(
+    paragraphs: list[_Paragraph], members: list[_Member]
+) -> bool:
+    """9.T12D — re-frame every ADMISSIBLE tate-chu-yoko block into its
+    column, as ONE atomic member. Returns whether anything moved.
+
+    Slice B made the silent case loud: before it, the block's linear key
+    differed from the column's, so the column grouped WITHOUT it and a
+    reflow moved the CJK text over or past a date that never moved. This is
+    the step that makes it WORK — the block groups with its column, the
+    paragraph's text carries the year where the year is, and the block moves
+    as a unit.
+
+    Admission needs more evidence than detection does, and what it cannot
+    prove it leaves to `_mark_tate_chu_yoko`'s named refusal:
+
+      * the block draws UPRIGHT (an ordinary horizontal member — a turned
+        one would have joined the column on its own);
+      * its characters do not JOIN, so re-emitting them per code is correct
+        (a cursive block would need the shaping ladder, and a shaped run
+        inside an atomic unit inside a column is not a thing this design
+        expresses);
+      * it carries no rise — Ts on a block whose glyph-up runs along the
+        column's INLINE axis is the same inexpressible shift an upright
+        vertical member's rise is;
+      * it is editable at all, since an absorbed block must be re-emitted.
+    """
+    from engine.shaping import requires_shaping
+
+    moved = False
+    for p in list(paragraphs):
+        if not (p.editable and p.vertical and p.frame != _ORIENTATIONS[HORIZONTAL]):
+            continue
+        frame = p.frame
+        base = _widest(p.lines[0].members)
+        column_em = max(line.eff for line in p.lines)
+        for m in _tcy_candidates(p, members):
+            if (
+                m.orientation != HORIZONTAL
+                or not m.editable
+                or m.blocking_reason is not None
+                or m.rise_user != 0.0
+                or requires_shaping(m.ptext)
+            ):
+                continue  # the named refusal still owns this one
+            # A horizontal member's frame is the IDENTITY, so its `x0`/`y`
+            # are its page pen (e, f) verbatim — no extra state to carry.
+            anchor_x, anchor_y = _t(frame, m.x0, m.y)
+            # Its own line in the column: whichever line's baseline it sits
+            # nearest on the perpendicular axis.
+            line = min(p.lines, key=lambda l: abs(l.y - anchor_y))
+            m.frame = frame
+            m.orientation = _FRAME_NAME[frame]
+            m.lkey = base.lkey
+            m.atomic = True
+            m.tcy_em = column_em
+            m.tcy_cross = column_em
+            m.tcy_perp = anchor_y - line.y
+            # Its DRAWN width across the column (a horizontal member's
+            # `x1 - x0` is exactly that), captured before the two are
+            # overwritten with the column-frame extent. The emission
+            # re-centres on it, so a block that gains characters grows
+            # symmetrically instead of walking out of the column on one side
+            # — and a block whose text did not change shifts by zero, which
+            # is what keeps an untouched column byte-identical.
+            m.tcy_width0 = abs(m.x1 - m.x0)
+            m.x0 = anchor_x - TCY_BASELINE_EM * column_em
+            m.x1 = m.x0 + column_em
+            m.y = line.y
+            m.eff = column_em
+            moved = True
+    return moved
+
 
 def _mark_tate_chu_yoko(paragraphs: list[_Paragraph], members: list[_Member]) -> None:
-    """Refuse — BY NAME — a column that contains a tate-chu-yoko block.
+    """Refuse — BY NAME — a column that still contains a tate-chu-yoko block
+    the absorption could not admit.
 
     What happened before this existed was worse than a refusal and entirely
     silent: the block's linear key differs from the column's, so the column
@@ -1238,44 +1374,23 @@ def _mark_tate_chu_yoko(paragraphs: list[_Paragraph], members: list[_Member]) ->
     that never moved. Text on text, no error, in a document class (vertical
     Japanese with numbers in it) that is not rare.
 
-    Detection is deliberately conservative, because the false-positive
-    direction refuses an edit that works today: the block must sit INSIDE
-    the column's own box, its advance must run along the column's block
-    axis, and its inline extent must be within about one em of the column's
-    line size."""
+    9.T12D turned the ordinary case into SUPPORT — `_absorb_tate_chu_yoko`
+    re-frames the block into the column as one atomic unit. What is left
+    here is the residue: a block that is turned rather than upright, one
+    whose characters JOIN, one carrying a rise, one that is not editable at
+    all. Those keep the loud refusal, which is still strictly better than
+    reflowing over them."""
     columns = [
         p for p in paragraphs
         if p.editable and p.vertical and p.frame != _ORIENTATIONS[HORIZONTAL]
     ]
-    if not columns:
-        return
     for p in columns:
-        owned = {m.index for m in p.members}
-        bx0, by0, bx1, by1 = p.box
-        eff = max(line.eff for line in p.lines)
-        for m in members:
-            if m.index in owned or m.vertical or not m.ptext.strip():
-                continue
-            # Its advance, in the COLUMN's frame: along ±y′ is the block
-            # axis (a member advancing along +x′ would simply have joined
-            # the column, which is T13's whole point).
-            ax, ay = _t(p.frame, m.a, m.b)
-            if abs(ax) > MATRIX_TOL * max(abs(ay), 1e-9):
-                continue
-            r = m.rect
-            if not (
-                r[0] >= bx0 - 0.5 and r[2] <= bx1 + 0.5
-                and r[1] >= by0 - 0.5 and r[3] <= by1 + 0.5
-            ):
-                continue
-            if max(r[2] - r[0], r[3] - r[1]) > TCY_EXTENT_EM * eff:
-                continue
+        if _tcy_candidates(p, members):
             p.editable = False
             p.reason = (
                 "a horizontal block inside this column (tate-chu-yoko) "
                 "does not reflow"
             )
-            break
 
 
 def _reading_tiebreak(p: _Paragraph) -> float:
@@ -1297,6 +1412,33 @@ def _reading_tiebreak(p: _Paragraph) -> float:
 
 def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
     members = _members_from(runs, detail)
+    paragraphs = _assemble(members, runs)
+    # 9.T12D: a tate-chu-yoko block is re-framed into its column and the
+    # grouping RE-RUN, because the evidence that identifies one is exactly
+    # the paragraphs the first pass produced (a column's box, its line size,
+    # and which members did NOT join it). Nothing is re-walked: the members
+    # are the same objects, with the absorbed ones now carrying the column's
+    # frame and key.
+    if _absorb_tate_chu_yoko(paragraphs, members):
+        paragraphs = _assemble(members, runs)
+    # What the absorption could not admit keeps slice B's named refusal —
+    # loud, where it used to be silent.
+    _mark_tate_chu_yoko(paragraphs, members)
+    # Reading order on a MIXED page needs a frame-agnostic PRIMARY key:
+    # lines[0].y is real Y for horizontal but real X for a column (round
+    # 28 MEDIUM — a mid-page vertical column outsorted the page-top
+    # header). The box is real-page space in every frame, so top-edge
+    # first; the TIEBREAK is per-FRAME (side-by-side blocks share a top):
+    # horizontal reads leftmost-first, vertical columns read
+    # rightmost-first (the RTL column convention) — `_reading_tiebreak`
+    # derives that from the frame's own line-stacking direction rather
+    # than from a writing-mode boolean, which after T13 no longer answers
+    # the geometric question.
+    paragraphs.sort(key=lambda p: (p.stream, -p.box[3], _reading_tiebreak(p)))
+    return paragraphs
+
+
+def _assemble(members: list[_Member], runs: list[dict]) -> list[_Paragraph]:
     groups: dict[tuple, list[_Member]] = defaultdict(list)
     for mem in members:
         groups[(mem.stream, mem.lkey)].append(mem)
@@ -1326,23 +1468,7 @@ def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
         for para_lines in _join_paragraphs(lines, cross_ok=cross_ok):
             paragraphs.extend(_analyze([para_lines], lkey))
     # Whitespace-only clusters offer nothing to edit — no box at all.
-    paragraphs = [p for p in paragraphs if p.text.strip()]
-    # 9.T13 § 4.4: a column holding a tate-chu-yoko block refuses BY NAME
-    # rather than reflowing over it. Runs after grouping because the
-    # evidence is exactly the members that did NOT join the column.
-    _mark_tate_chu_yoko(paragraphs, members)
-    # Reading order on a MIXED page needs a frame-agnostic PRIMARY key:
-    # lines[0].y is real Y for horizontal but real X for a column (round
-    # 28 MEDIUM — a mid-page vertical column outsorted the page-top
-    # header). The box is real-page space in every frame, so top-edge
-    # first; the TIEBREAK is per-FRAME (side-by-side blocks share a top):
-    # horizontal reads leftmost-first, vertical columns read
-    # rightmost-first (the RTL column convention) — `_reading_tiebreak`
-    # derives that from the frame's own line-stacking direction rather
-    # than from a writing-mode boolean, which after T13 no longer answers
-    # the geometric question.
-    paragraphs.sort(key=lambda p: (p.stream, -p.box[3], _reading_tiebreak(p)))
-    return paragraphs
+    return [p for p in paragraphs if p.text.strip()]
 
 
 def _validated_family(family) -> str:
@@ -1979,6 +2105,33 @@ def _styled_chars(
     for span in spans:
         member = members_by_index[int(span["run"])]
         seg_text = new_text[span["start"] : span["end"]]
+        if member.atomic and seg_text:
+            # 9.T12D: a tate-chu-yoko block is ONE entry — indivisible to
+            # the width model, to the line breaker (it can never straddle a
+            # column break, the same way a shaped word cannot) and to the
+            # emission, which writes it as a single positioned show with its
+            # own Tz. Its characters were proven non-joining at admission,
+            # so a per-code re-emission is correct here in a way it never is
+            # for a cursive run.
+            fk = face_at(span["start"], member)
+            if fk is None and not all(
+                c == " " or member.cap.can_encode(c) for c in seg_text
+            ):
+                if not convert:
+                    ch = next(
+                        c for c in seg_text
+                        if c != " " and not member.cap.can_encode(c)
+                    )
+                    raise ValueError(f"font cannot encode {ch!r}")
+                fk = (None, False, False, (), 0)
+                fb_by_face.setdefault(fk, set()).update(seg_text)
+            elif fk is not None:
+                fb_by_face.setdefault(fk, set()).update(seg_text)
+            styled.append((
+                seg_text,
+                ref(member, fk, color_at(span["start"], member), size_at(span["start"])),
+            ))
+            continue
         i = 0
         while i < len(seg_text):
             ch = seg_text[i]
@@ -2167,6 +2320,14 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
                      kerns=None, prev_ch=None, prev_st=None) -> float:
     m = st.member
     s = st.style()
+    if m.atomic:
+        # 9.T12D: a tate-chu-yoko block consumes exactly ONE EM of the
+        # column, whatever it says and however many characters it says it
+        # in. That is the typographic definition of the construct, and it
+        # is what keeps the surrounding column's pitch right — the block's
+        # own width is fitted ACROSS the column by a recomputed Tz instead
+        # (`_Emission._emit`).
+        return m.tcy_em
     if st.shaped is not None:
         # 9.T3: a shaped word measures as the GLYPHS the shaper chose, and
         # the number to sum is the shaper's POSITIONED advance — because that
@@ -3033,6 +3194,33 @@ class _Emission:
                 mem = st.member
                 lin_a, lin_b, lin_c, lin_d = linear_of(mem)
                 for dx, dy, encoded_items, raw in self._pieces(seg, mem.perp):
+                    h_scale = st.style()["h_scale"]
+                    if mem.atomic:
+                        # 9.T12D: a tate-chu-yoko block anchors at the
+                        # BASELINE inside the em the layout gave it, and
+                        # keeps its own offset across the column so an
+                        # untouched block re-emits at the pen it was drawn
+                        # at. Its Tz is recomputed from the text it now
+                        # holds, so a two-digit year that becomes a
+                        # four-digit one still occupies one em across the
+                        # column — the convention the construct exists to
+                        # satisfy — and a block that already fits keeps its
+                        # own h_scale untouched.
+                        dx += TCY_BASELINE_EM * mem.tcy_em
+                        dy += mem.tcy_perp
+                        natural = abs(raw * mem.adv) * h_scale
+                        if natural > mem.tcy_cross > 0.0:
+                            h_scale = h_scale * mem.tcy_cross / natural
+                            natural = mem.tcy_cross
+                        # Re-centre on the width it was DRAWN at: the block
+                        # grows along its own advance, which the frame sends
+                        # to ±y′, so half the width change comes off that
+                        # axis. Zero when the text is unchanged.
+                        _gx, gy = _t(self.frame, mem.a, mem.b)
+                        if gy and mem.tcy_width0:
+                            dy -= 0.5 * (natural - mem.tcy_width0) * (
+                                1.0 if gy > 0 else -1.0
+                            )
                     # Rise renders via Ts (a state op), never the matrix —
                     # the line target is the BASELINE.
                     #
@@ -3063,7 +3251,7 @@ class _Emission:
                         # there and map its corners back, which reduces to
                         # the shipped rectangle when the frame is identity.
                         eff = size * abs(mem.perp)
-                        adv = raw * st.style()["h_scale"] * abs(mem.adv)
+                        adv = raw * h_scale * abs(mem.adv)
                         ax, ay = line.x + dx, line.y + dy
                         for cx, cy in (
                             (ax, ay - 0.35 * eff),
@@ -3075,7 +3263,7 @@ class _Emission:
                             grow(px, py, px, py)
                     tm_op = mat_mult(target, ctm_inv)
                     out.append(("op", _instruction([_f(v) for v in tm_op], "Tm"), None))
-                    out.extend(self._state_ops(st, used))
+                    out.extend(self._state_ops(st, used, h_scale=h_scale))
                     # 9.T13: a SHOW tuple carries the piece's ADVANCE AXIS as
                     # a fourth element — a rotated member's advance is
                     # horizontal in the font's own terms (its downward travel
@@ -3233,9 +3421,15 @@ class _Emission:
             dx += w
         return segments
 
-    def _state_ops(self, st: _StyleRef, used=None) -> list[tuple]:
+    def _state_ops(self, st: _StyleRef, used=None, h_scale=None) -> list[tuple]:
         m = st.member
         s = st.style()  # A1: effective (possibly size/color-overridden)
+        # 9.T12D: `h_scale` is the emission's recomputed Tz for a
+        # tate-chu-yoko block, whose horizontal condensation is a function
+        # of the text it now holds. None everywhere else, which is every
+        # show ever emitted before it.
+        if h_scale is None:
+            h_scale = s["h_scale"]
         ops: list[tuple] = []
         if st.fallback is not None:
             fb = self.fallbacks[st.fallback]
@@ -3247,7 +3441,7 @@ class _Emission:
             font = s["font_name"]
         if font:
             ops.append(("op", _instruction([Name(font), _f(s["size"])], "Tf"), None))
-        ops.append(("op", _instruction([_f(s["h_scale"] * 100.0)], "Tz"), None))
+        ops.append(("op", _instruction([_f(h_scale * 100.0)], "Tz"), None))
         ops.append(("op", _instruction([_f(s["char_spacing"])], "Tc"), None))
         ops.append(("op", _instruction([_f(s["word_spacing"])], "Tw"), None))
         ops.append(("op", _instruction([int(s["render_mode"])], "Tr"), None))
@@ -3328,6 +3522,21 @@ class _Emission:
                 items.append(-kern_1000)
         flush()
         raw = seg["width"] / axis if axis else 0.0
+        if m.atomic:
+            # 9.T12D: the width model reports what a tate-chu-yoko block
+            # COSTS THE COLUMN — one em along the reading axis — which is
+            # deliberately not what its own pen does. The pen moves the
+            # block's natural horizontal advance, and that is the number the
+            # emitted-state machine, the /BBox envelope and the Tz
+            # recomputation all need. Taking `seg["width"]` here would have
+            # told all three that a four-digit year is exactly as wide as a
+            # two-digit one.
+            text = "".join(it[1] for it in seg["items"] if it[0] == "ch")
+            if st.fallback is not None:
+                w1000 = self.fallbacks[st.fallback].width_1000(text)
+            else:
+                w1000 = m.cap.text_width(text)
+            raw = w1000 / 1000.0 * s["size"] + s["char_spacing"] * len(text)
         return items, raw
 
 

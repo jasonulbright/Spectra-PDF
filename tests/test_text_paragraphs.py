@@ -3177,15 +3177,20 @@ class TestOrientations:
         assert b"-4 Ts" in raw
         assert _paras(out)[0]["text"] == "Base2"
 
-    def test_tate_chu_yoko_refuses_the_column_by_name(self, tmp_dir):
-        # What happened before this refusal was worse than a refusal and
-        # silent: the upright block's key differs from the column's, so the
-        # column grouped WITHOUT it and a reflow moved the CJK text over a
-        # date that never moved.
+    def test_tate_chu_yoko_that_cannot_be_admitted_still_refuses_by_name(
+        self, tmp_dir
+    ):
+        # 9.T12D INVERTED the ordinary case (see `TestTateChuYoko`); what is
+        # left here is the residue the absorption cannot admit — this block
+        # carries a RISE, whose Ts displaces along the column's INLINE axis
+        # and is the same inexpressible shift an upright vertical member's
+        # rise is. Loud, where before slice B it was silent: the block's key
+        # differed from the column's, so the column grouped WITHOUT it and a
+        # reflow moved the CJK text over a date that never moved.
         src = _vpage(
             tmp_dir,
             b"BT /FV 10 Tf 300 700 Td <000300040005> Tj ET"
-            b" BT /F1 5 Tf 296 676 Td (26) Tj ET",
+            b" BT /F1 5 Tf 2 Ts 296 676 Td (26) Tj ET",
             with_helv=True,
         )
         column = next(p for p in _paras(src) if p["text"] == "あいう")
@@ -4689,3 +4694,178 @@ class TestMongolianColumns:
         # A Mongolian-block code point with no glyph anywhere.
         with pytest.raises(ValueError, match="no bundled Mongolian font"):
             resolve_mongolian_font(MONG_FONTS, "᢮᢯᢭")
+
+
+class TestTateChuYoko:
+    """9.T12D (brief 39 § 6) — tate-chu-yoko becomes an atomic editable unit.
+
+    Slice B made the silent case LOUD (the column grouped without the block,
+    so a reflow moved the CJK text over a date that never moved). This is
+    the step that makes it work: the block joins its column as ONE member,
+    the paragraph's text carries the year where the year is, and the block
+    moves as a unit. Positions are HAND-COMPUTED, the round-27 discipline.
+
+    The fixture's column advances 10pt per glyph from y=700 — あ at 700, い
+    at 690, the block occupying 680→670 (baseline 0.8 em down, i.e. 672),
+    and う resuming at 670. The block is centred on the column: "26" at 5pt
+    Helvetica is 5.56pt wide, so its left edge is 300 − 5.56/2 = 297.22.
+    """
+
+    COLUMN = (
+        b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET"
+        b" BT /F1 5 Tf 297.22 672 Td (26) Tj ET"
+        b" BT /FV 10 Tf 300 670 Td <0005> Tj ET"
+    )
+
+    def _src(self, tmp_dir, content=None, name="tcy.pdf"):
+        return _vpage(tmp_dir, content or self.COLUMN, name=name, with_helv=True)
+
+    def test_the_block_joins_the_column_in_reading_position(self, tmp_dir):
+        src = self._src(tmp_dir)
+        paras = _paras(src)
+        assert len(paras) == 1
+        p = paras[0]
+        # The year is where the year is — between the second and third kana.
+        assert p["text"] == "あい26う"
+        assert p["orientation"] == "vertical-rl"
+        assert p["editable"] is True
+        assert p["reason"] is None
+        assert p["runs"] == [0, 1, 2]
+        # ONE line: the block costs the column one em, not a line break.
+        assert p["line_count"] == 1
+
+    def test_an_untouched_column_re_emits_the_block_where_it_was_drawn(
+        self, tmp_dir
+    ):
+        # The strongest property available: the block's own anchor comes
+        # back exactly. Admission subtracts the baseline fraction to find
+        # the block's start and the emission adds it back, so the pair
+        # cancels whatever the fraction is.
+        src = self._src(tmp_dir)
+        out = os.path.join(tmp_dir, "same.pdf")
+        p = _paras(src)[0]
+        spans = [
+            {"start": sp["start"], "end": sp["end"], "run": sp["run"]}
+            for sp in p["spans"]
+        ]
+        _apply(src, out, p, p["text"], spans=spans)
+        raw = _content_bytes(out)
+        assert b"1 0 0 1 297.22 672 Tm" in raw
+        assert b"(26) Tj" in raw
+        assert b"1 0 0 1 300 700 Tm" in raw  # …and the column above it
+        assert b"1 0 0 1 300 670 Tm" in raw  # …and the column below
+        assert _paras(out)[0]["text"] == p["text"]
+
+    def test_a_longer_block_condenses_to_one_em_and_stays_centred(self, tmp_dir):
+        # Two digits become four. The block still occupies ONE EM across the
+        # column — the convention the construct exists to satisfy — which
+        # takes a recomputed Tz, and it re-centres on the width it was drawn
+        # at so it grows symmetrically instead of walking out of the column.
+        src = self._src(tmp_dir)
+        out = os.path.join(tmp_dir, "longer.pdf")
+        p = _paras(src)[0]
+        new_text = p["text"].replace("26", "2026")
+        spans = []
+        idx = p["text"].index("26")
+        for sp in p["spans"]:
+            st, en = sp["start"], sp["end"]
+            if st <= idx < en:
+                spans.append({"start": st, "end": en + 2, "run": sp["run"]})
+            else:
+                shift = 2 if st > idx else 0
+                spans.append({"start": st + shift, "end": en + shift, "run": sp["run"]})
+        _apply(src, out, p, new_text, spans=spans)
+        raw = _content_bytes(out)
+        # 4 digits x 556/1000 x 5pt = 11.12pt natural; one em is 10.
+        assert b"89.928058 Tz" in raw
+        # Centred: 300 - 10/2.
+        assert b"1 0 0 1 295 672 Tm" in raw
+        assert b"(2026) Tj" in raw
+        # …and it is STILL one paragraph, still inside the column's box.
+        after = _paras(out)
+        assert len(after) == 1
+        assert after[0]["text"] == new_text
+        assert after[0]["box"] == pytest.approx(p["box"], abs=0.05)
+
+    def test_the_block_never_splits_across_a_column_break(self, tmp_dir):
+        # It is one unit to the line breaker, the same way a shaped word is:
+        # a wrap may put it at the head of the next column, never half of it
+        # there. The edit lengthens the column past its measure so the wrap
+        # has to act.
+        src = self._src(tmp_dir)
+        out = os.path.join(tmp_dir, "wrapped.pdf")
+        p = _paras(src)[0]
+        new_text = "あ" * 60 + "26" + "う"
+        spans = [
+            {"start": 0, "end": 60, "run": 0},
+            {"start": 60, "end": 62, "run": 1},
+            {"start": 62, "end": 63, "run": 2},
+        ]
+        _apply(src, out, p, new_text, spans=spans)
+        after = _paras(out)[0]
+        assert after["line_count"] > 1  # it really did wrap
+        assert "26" in after["text"]
+        raw = _content_bytes(out)
+        # ONE show carries the whole block — never `(2` here and `6)` there.
+        assert raw.count(b"(26) Tj") == 1
+
+    def test_a_block_with_a_rise_keeps_the_named_refusal(self, tmp_dir):
+        # Ts on a block whose glyph-up runs along the column's INLINE axis
+        # is the same inexpressible shift an upright vertical member's rise
+        # is, so admission refuses it — loudly, and by name.
+        # `Ts` is text state and survives ET, so it is reset explicitly —
+        # otherwise the column run below inherits it and refuses for the
+        # UPRIGHT-vertical-rise reason instead, which is a different pin.
+        src = self._src(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET"
+            b" BT /F1 5 Tf 2 Ts 297.22 672 Td (26) Tj 0 Ts ET"
+            b" BT /FV 10 Tf 300 670 Td <0005> Tj ET",
+            name="rise.pdf",
+        )
+        column = next(p for p in _paras(src) if p["text"] == "あい う")
+        assert column["editable"] is False
+        assert "tate-chu-yoko" in column["reason"]
+
+    def test_a_joining_block_keeps_the_named_refusal(self, tmp_dir):
+        # A cursive block would need the shaping ladder, and a shaped run
+        # inside an atomic unit inside a column is not a thing this design
+        # expresses. Named refusal rather than a guess.
+        src = os.path.join(tmp_dir, "joining.pdf")
+        pdf = pikepdf.new()
+        vfont = _identity_v(
+            pdf,
+            {3: "あ", 4: "い", 5: "う"},
+            [3, [-1000, 500, 880, -1000, 500, 880, -1000, 500, 880]],
+        )
+        arab = _mong_font(pdf, {1: "ب", 2: "ا"}, base="/AAAAAA+Ar")
+        _page(
+            pdf,
+            b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET"
+            b" BT /F2 5 Tf 297.5 672 Td <0001> Tj ET"
+            b" BT /FV 10 Tf 300 670 Td <0005> Tj ET",
+            {"/FV": vfont, "/F2": arab},
+        )
+        pdf.save(src)
+        pdf.close()
+        column = next(p for p in _paras(src) if p["text"] == "あい う")
+        assert column["editable"] is False
+        assert "tate-chu-yoko" in column["reason"]
+
+    def test_a_horizontal_paragraph_beside_a_column_is_still_not_a_block(
+        self, tmp_dir
+    ):
+        # The false-positive direction stays the dangerous one, and the
+        # absorption inherits the same conservative evidence the refusal
+        # used: containment in the column's own box AND about one em of
+        # extent. Ordinary prose near a column joins nothing.
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj ET"
+            b" BT /F1 12 Tf 72 690 Td (A whole line of prose) Tj ET",
+            with_helv=True,
+        )
+        column = next(p for p in _paras(src) if p["text"] == "あいう")
+        assert column["editable"] is True
+        assert column["reason"] is None
+        assert column["runs"] == [0]
