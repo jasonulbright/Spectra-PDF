@@ -15,6 +15,8 @@ import { MENUS, type MenuNode } from '../src/renderer/commands/menus';
 import { CHROME_STRINGS } from '../src/renderer/i18n-chrome';
 import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
 import { DIALOG_STRINGS } from '../src/renderer/i18n-dialogs';
+import { WORKBENCH_STRINGS } from '../src/renderer/i18n-workbench';
+import { TOOL_DEFS } from '../src/renderer/commands/tools';
 import { TOOLBAR_CATALOG } from '../src/renderer/commands/toolbars';
 import { FRIENDLY_NAMES } from '../src/renderer/hooks/useOperationQueue';
 import { STEP_CATALOG } from '../src/renderer/lib/guided-actions';
@@ -30,9 +32,16 @@ function expectedCatalog(): Record<string, string> {
     ...CHROME_STRINGS,
     ...PANEL_STRINGS,
     ...DIALOG_STRINGS,
+    ...WORKBENCH_STRINGS,
   };
   for (const [id, cmd] of Object.entries(COMMANDS)) {
     out[`cmd.${id}`] = cmd.title;
+  }
+  // Tool blurbs (the tile tooltip). The tool's NAME is not derived here: it is
+  // already `cmd.tools.open.<id>`, and tToolTitle reads that one key so the
+  // menu and the dock cannot name a tool differently in one language.
+  for (const tool of TOOL_DEFS) {
+    out[`tool.desc.${tool.id}`] = tool.description;
   }
   // Toolbar catalog group labels (the Customize Toolbar dialog's section
   // heads) — a data table, so its display strings derive keys here.

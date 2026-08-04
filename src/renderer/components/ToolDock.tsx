@@ -7,6 +7,8 @@ import { invokeCommand } from '../commands/context';
 import { ToolsCenter } from './ToolsCenter';
 import { ExtractTextPanel } from '../panels/ExtractTextPanel';
 import { ToolIcon } from './tool-icons';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tOperationTitle, tToolTitle } from '../i18n';
 
 // The right tool dock (Phase 10 slice B1 — 25-workbench-relayout.md § 3.B1).
 // Ops-tool panels render HERE, beside an always-visible document, instead of
@@ -24,6 +26,8 @@ interface ToolDockProps {
 }
 
 export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDockProps): React.JSX.Element {
+  // N12: re-render on language change; strings resolve via tChrome/tTool*.
+  useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
   const width = state.ui.toolDock.width;
@@ -77,13 +81,13 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
       data-testid="tool-dock"
       data-dock-view={listView ? "list" : "tool"}
       role="complementary"
-      aria-label="Tool pane"
+      aria-label={tChrome('dock.paneLabel')}
     >
       {/* No resize grip on the list: its width is a constant, and a drag would
           otherwise write a clamped (>= 300px) value into the width the TOOL
           panels remember. */}
       {!listView && (
-        <div className="tool-dock-resize" data-testid="tool-dock-resize" onPointerDown={onResizeDown} title="Drag to resize" />
+        <div className="tool-dock-resize" data-testid="tool-dock-resize" onPointerDown={onResizeDown} title={tChrome('dock.resize')} />
       )}
       <div className="tool-dock-header">
         {/* Inside a tool this is a BACK control, and says so: a bare grid glyph
@@ -93,22 +97,26 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
         <button
           type="button"
           data-testid="tool-dock-grid"
-          title={listView ? 'Back to the open tool' : 'All tools'}
-          aria-label={listView ? 'Back to the open tool' : 'Back to all tools'}
+          title={listView ? tChrome('dock.backTitle') : tChrome('dock.allTools')}
+          aria-label={listView ? tChrome('dock.backTitle') : tChrome('dock.backAria')}
           aria-pressed={listView}
           onClick={() => setShowGrid((v) => !v)}
           className={listView ? 'tool-dock-btn active' : 'tool-dock-btn tool-dock-back'}
         >
-          {listView ? '⊞' : '‹ All tools'}
+          {listView ? '⊞' : tChrome('dock.backLabel')}
         </button>
         <span className="tool-dock-title" data-testid="tool-dock-title">
-          {showGrid ? 'All tools' : (owner?.title ?? OPERATION_TITLES[activeOp])}
+          {showGrid
+            ? tChrome('dock.allTools')
+            : owner
+              ? tToolTitle(owner.id, owner.title)
+              : tOperationTitle(activeOp, OPERATION_TITLES[activeOp])}
         </span>
         <button
           type="button"
           data-testid="tool-dock-close"
-          title="Close the tool pane"
-          aria-label="Close the tool pane"
+          title={tChrome('dock.close')}
+          aria-label={tChrome('dock.close')}
           onClick={() => dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: false })}
           className="tool-dock-btn"
         >
@@ -127,7 +135,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
               onClick={() => invokeCommand(`tools.panel.${op}`)}
             >
               <ToolIcon op={op} />
-              {OPERATION_TITLES[op]}
+              {tOperationTitle(op, OPERATION_TITLES[op])}
             </button>
           ))}
         </div>
