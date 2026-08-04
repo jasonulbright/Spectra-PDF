@@ -452,3 +452,64 @@ class TestConvertTextRun:
             convert_text_run(
                 src, os.path.join(tmp_dir, "o.pdf"), 1, 0, "x", os.path.join(tmp_dir, "no.ttf")
             )
+
+
+class TestVerticalFaceGate:
+    """Brief 39 slice A — `face_shapes_vertically` reads METRICS.
+
+    Its docstring always said "a font with no vertical machinery answers
+    False rather than drawing sideways"; the implementation asked the
+    SHAPER, which answers with a synthesized advance whenever `vmtx` is
+    absent — so the gate reduced to a cmap-coverage test and Liberation
+    Sans passed it. These are the inversions: the faces that used to
+    qualify no longer do.
+    """
+
+    CJK = os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")
+    MONBAITI = r"C:\Windows\Fonts\monbaiti.ttf"
+    MONGOLIAN = "\u182e\u1823\u1829\u182d\u1823\u182f"
+
+    def test_latin_face_is_not_vertical(self):
+        from engine.font_fallback import face_has_vertical_metrics, face_shapes_vertically
+
+        assert face_has_vertical_metrics(FONT) is False
+        assert face_shapes_vertically(FONT, "Abc") is False
+
+    @pytest.mark.skipif(
+        not os.path.isfile(MONBAITI), reason="Mongolian Baiti not installed"
+    )
+    def test_mongolian_face_is_not_vertical_either(self):
+        # The reference implementation of a vertical SCRIPT, and it still
+        # answers False: Mongolian Baiti stores horizontal glyphs and its
+        # columns come from ROTATING the run (recon § 1.3), so there is no
+        # honest /W2 to embed. Refusing it here is what sends a Mongolian
+        # column down the rotated-run path instead of an /Identity-V embed.
+        from engine.font_fallback import face_has_vertical_metrics, face_shapes_vertically
+
+        assert face_has_vertical_metrics(self.MONBAITI) is False
+        assert face_shapes_vertically(self.MONBAITI, self.MONGOLIAN) is False
+
+    @pytest.mark.skipif(
+        not os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")),
+        reason="CJK faces not provisioned",
+    )
+    def test_cjk_face_still_qualifies(self):
+        from engine.font_fallback import face_has_vertical_metrics, face_shapes_vertically
+
+        assert face_has_vertical_metrics(self.CJK) is True
+        assert face_shapes_vertically(self.CJK, "\u65e5\u672c\u8a9e\u3001") is True
+        # ...and the SECOND absence stays distinguishable: metrics present,
+        # no form for this character (EGYPTIAN HIEROGLYPH A001).
+        assert face_shapes_vertically(self.CJK, "\U00013000") is False
+
+    def test_build_vertical_font_refuses_a_face_with_no_vmtx(self):
+        # Defence in depth at the EMBED: even called directly, nothing
+        # writes /Identity-V + /W2 from a face that states no advances.
+        from engine.font_fallback import build_vertical_font
+
+        pdf = pikepdf.new()
+        try:
+            with pytest.raises(ValueError, match="no vertical metrics"):
+                build_vertical_font(pdf, FONT, "Abc")
+        finally:
+            pdf.close()

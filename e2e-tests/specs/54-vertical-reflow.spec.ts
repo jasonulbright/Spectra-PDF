@@ -113,13 +113,25 @@ describe('vertical paragraph reflow (Phase 9.B4b)', () => {
     expect(paras[0].lineCount).toBe(2);
     expect(paras[0].vertical).toBe(true);
 
-    // Editor: substitution restyles are gated off for vertical (the
-    // engine refuses — the bundled Liberation faces are horizontal).
+    // Editor: substitution restyles are LIVE for vertical text (9.T4 —
+    // Noto Sans CJK carries `vert`/`vrt2` and `vmtx`, and the shaper can
+    // reach them). This assertion is the INVERSION of the shipped one:
+    // through 2026-08-04 the three controls were disabled with a reason
+    // ("the bundled faces are horizontal") that T4 had already made false,
+    // and this spec pinned that stale gate green. What stays unavailable
+    // is stated as the absence it is — the three BUNDLED families (all
+    // horizontal; a column resolves the CJK face whichever is picked) and
+    // the OpenType feature toggles (a vertical embed carries no feature
+    // request at all).
     await editParagraphOpen(pageId, paras[0].index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
-    expect(await $('[data-testid="edit-para-family"]').isEnabled()).toBe(false);
-    expect(await $('[data-testid="edit-para-bold"]').isEnabled()).toBe(false);
-    expect(await $('[data-testid="edit-para-italic"]').isEnabled()).toBe(false);
+    expect(await $('[data-testid="edit-para-family"]').isEnabled()).toBe(true);
+    expect(await $('[data-testid="edit-para-bold"]').isEnabled()).toBe(true);
+    expect(await $('[data-testid="edit-para-italic"]').isEnabled()).toBe(true);
+    expect(
+      await $('[data-testid="edit-para-family"] option[value="sans"]').isEnabled(),
+    ).toBe(false);
+    expect(await $('[data-testid="edit-para-smallcaps"]').isEnabled()).toBe(false);
 
     // Retype: 5 chars refill the columns top-down at the measured pitch
     // (3 + 2 — the pytest hand-math case). Enter commits.
@@ -139,5 +151,40 @@ describe('vertical paragraph reflow (Phase 9.B4b)', () => {
       (now) => now.length === 1 && now[0].text === ORIGINAL,
       'undo did not restore the original vertical text',
     );
+  });
+
+  it('commits a bold restyle on the column and re-lists it vertical', async function () {
+    this.timeout(180_000);
+    // T4's headline — "the weight axis is real, Bold asked for is Bold
+    // embedded" — reaching a USER for the first time: the control that
+    // sends it was disabled until brief 39 slice A.
+    const ids = await editTextPageIds();
+    const pageId = ids[0];
+    const before = await editParagraphs(pageId);
+    expect(before).toHaveLength(1);
+    expect(before[0].vertical).toBe(true);
+    await editParagraphOpen(pageId, before[0].index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    const boldBtn = await $('[data-testid="edit-para-bold"]');
+    expect(await boldBtn.isEnabled()).toBe(true);
+    await boldBtn.click();
+    await browser.waitUntil(
+      async () => (await boldBtn.getAttribute('aria-pressed')) === 'true',
+      { timeout: 10_000, timeoutMsg: 'the bold toggle never engaged' },
+    );
+    // Re-set the SAME text through the harness helper rather than clicking
+    // into the editor: it leaves the caret at the END, so Enter commits
+    // instead of splitting the paragraph (the A4 mid-text branch).
+    await setEditorValue(ORIGINAL);
+    await browser.keys(['Enter']);
+    await waitForReindexedParas(
+      pageId,
+      (now) => now.length === 1 && now[0].text === before[0].text,
+      'the vertical bold restyle never committed',
+    );
+    const after = await editParagraphs((await editTextPageIds())[0]);
+    // Still a column, still the same text — a restyle, not a rewrite.
+    expect(after[0].vertical).toBe(true);
+    expect(after[0].text).toBe(before[0].text);
   });
 });
