@@ -128,6 +128,36 @@ export const WORKBENCH_STRINGS = {
   'pagemenu.deletePage': 'Delete page',
   'pagemenu.deleteN_one': 'Delete {{count}} page',
   'pagemenu.deleteN_other': 'Delete {{count}} pages',
+
+  // ── App-level confirms and notices ────────────────────────────────────
+  // The DIALOGS that render these were threaded in the dialogs batch; the
+  // MESSAGES App hands them were not, so a Spanish user got a localized
+  // frame around an English sentence. Titles ride the same records as the
+  // bodies — a notice's title is part of its message, not chrome.
+  'app.prefs.aria': 'Preferences',
+  'app.prefs.title': 'Preferences',
+  'app.prefs.close': 'Close',
+
+  'app.formButton.title': 'Form button',
+  'app.formButton.externalTitle': 'Form button — external link',
+  'app.formButton.noAction': '"{{field}}" has no action attached.',
+  'app.formButton.uri':
+    '"{{field}}" links to:\n\n{{uri}}\n\nThis app never opens external sites itself. Copy the address to the clipboard?',
+  'app.formButton.clipboardFailed': 'Could not access the clipboard.',
+  'app.formButton.javascript':
+    '"{{field}}" runs document JavaScript, which this app does not execute.',
+  'app.formButton.submit':
+    '"{{field}}" submits the form to a server, which this app does not do. Fill the form and save or export it instead.',
+  'app.formButton.named':
+    '"{{field}}" triggers the viewer action "{{action}}", which this app does not map.',
+  'app.formButton.unsupported': '"{{field}}" carries an action this app does not support.',
+
+  'app.sendEmail.title': 'Send by Email',
+
+  'app.close.unsaved': '"{{name}}" has unsaved changes. Save before closing?',
+  'app.closeAll.unsaved': 'Unsaved changes in: {{names}}. Save before closing all?',
+  'app.exit.unsaved': 'Unsaved changes in: {{names}}. Save before exiting?',
+  'app.window.unsaved': 'Unsaved changes in: {{names}}. Save before closing?',
 } as const;
 
 export type WorkbenchKey = keyof typeof WORKBENCH_STRINGS;
