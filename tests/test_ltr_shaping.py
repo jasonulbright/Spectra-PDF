@@ -196,6 +196,9 @@ class TestShapedMeasureMatchesTheDraw:
             # for a horizontal member they ARE a and d.
             adv = 1.0
             perp = 1.0
+            # 9.T12D: only a tate-chu-yoko block is atomic; an ordinary
+            # member measures its characters.
+            atomic = False
             style = {
                 "size": 10.0, "char_spacing": 0.0, "word_spacing": 0.0,
                 "h_scale": 1.0, "font_name": "F1", "fill_color": None,

@@ -33,6 +33,14 @@ const COLUMN = 'あいうPDF';
 const COLUMN_RETYPED = 'あいういPDF';
 const BLOCK = 'Rotated block';
 const BLOCK_RETYPED = 'Turned';
+// 9.T12D — a second column carrying a TATE-CHU-YOKO block: the upright
+// two-digit year set inside vertical text. Before slice B the column
+// grouped WITHOUT it and a reflow moved the CJK over a date that never
+// moved; slice B made that loud; slice D makes it work. The retype turns
+// two digits into four, which is the case that proves the block is ATOMIC:
+// it re-condenses to one em of the column rather than pushing the kana.
+const TCY = 'あい26う';
+const TCY_RETYPED = 'あい2026う';
 
 async function editTextPageIds(): Promise<string[]> {
   return await browser.execute<string[], []>(function () {
@@ -122,8 +130,14 @@ describe('rotated-glyph vertical forms (Phase 9.T13)', () => {
     const paras = await editParagraphs((await editTextPageIds())[0]);
     const column = paras.find((p) => p.text === COLUMN);
     const block = paras.find((p) => p.text === BLOCK);
+    const tcy = paras.find((p) => p.text === TCY);
     expect(column).toBeDefined();
     expect(block).toBeDefined();
+    // 9.T12D: the year is IN the column's text, and the column is editable
+    // rather than refusing by name.
+    expect(tcy).toBeDefined();
+    expect(tcy!.orientation).toBe('vertical-rl');
+    expect(tcy!.lineCount).toBe(1);
     // The column HOLDS a vertical-writing member, so it is a column…
     expect(column!.orientation).toBe('vertical-rl');
     expect(column!.vertical).toBe(true);
@@ -179,6 +193,38 @@ describe('rotated-glyph vertical forms (Phase 9.T13)', () => {
       preUndoId,
       (now) => now.some((p) => p.text === COLUMN),
       'undo did not restore the column',
+    );
+  });
+
+  it('edits a tate-chu-yoko block as part of its column (Phase 9.T12D)', async function () {
+    this.timeout(180_000);
+    const pageId = (await editTextPageIds())[0];
+    const paras = await editParagraphs(pageId);
+    const tcy = paras.find((p) => p.text === TCY)!;
+    await editParagraphOpen(pageId, tcy.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await setEditorValue(TCY_RETYPED);
+    await browser.keys(['Enter']);
+    await waitForReindexedParas(
+      pageId,
+      (now) =>
+        // Still ONE paragraph carrying the longer year, still one line: the
+        // block re-condensed to one em instead of pushing the column apart.
+        now.some(
+          (p) =>
+            p.text === TCY_RETYPED &&
+            p.orientation === 'vertical-rl' &&
+            p.lineCount === 1,
+        ),
+      'the tate-chu-yoko block never reflowed with its column',
+    );
+
+    const preUndoId = (await editTextPageIds())[0];
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await waitForReindexedParas(
+      preUndoId,
+      (now) => now.some((p) => p.text === TCY),
+      'undo did not restore the tate-chu-yoko column',
     );
   });
 });
