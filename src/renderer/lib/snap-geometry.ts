@@ -3,12 +3,21 @@
 // gestures work in. The impure half of snapping; all the math is in the pure
 // `lib/snap.ts` beside it (the `edit-vectors.ts` / `measure.ts` split).
 //
-// The call goes through the GATED `useEngine.call`, never `callRaw`. It reads
-// the WORKING copy, and a pending page rotation or reorder changes the very
-// geometry the user is snapping to — the gate is what makes the answer match
-// the view. That is the same commit side effect the Edit tool's listing pass
-// already has (`WorkspaceCanvasView`'s `runCommitGate()` before its listings);
-// it is stated here so nobody "optimizes" it into a raw call later.
+// The call goes through `useEngine.call` (a workspace file — `callRaw` is for
+// non-workspace targets only, and that rule is not negotiable). It does NOT
+// commit, because `list_page_geometry` is an INTERNAL_METHOD: it is a pure
+// read that refetches on every workspace change, and an ANNOTATION is a
+// pending page edit, so gating it would flush the user's markup to disk the
+// instant they drew it (the documented `get_pdf_version`/`measure_text_box`
+// hazard — e2e-caught in specs 87 and 88, which lost their page-tier
+// annotations mid-suite).
+//
+// What makes that SAFE rather than a stale read: the caller addresses the
+// SOURCE file at `sourcePageIndex` — exactly the page pdf.js rasterizes — so
+// a pending reorder cannot mis-address it (a physical page never moves) and a
+// pending rotation is applied by the same projection the raster already gets.
+// The answer matches the view by CONSTRUCTION rather than by forcing a write.
+// Do not "fix" this by adding the gate back.
 import { pdfPointToDisplay } from './pdfx-build';
 import type { PageGeometry } from './redaction';
 import type { SnapPath } from './snap';

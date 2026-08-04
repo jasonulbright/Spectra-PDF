@@ -257,6 +257,8 @@ export interface PageAnnotationSnapshot {
   strokeWidth?: number;
   fillColor?: string;
   opacity?: number;
+  /** N11: the vertex list, for the geometry assertions a snap needs. */
+  points?: number[];
 }
 
 /** Every pending annotation on one page, workspace order (= z-order). */
