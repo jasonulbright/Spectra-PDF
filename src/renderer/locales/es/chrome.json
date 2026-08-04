@@ -1,6 +1,10 @@
 {
   "app.close.unsaved": "«{{name}}» tiene cambios sin guardar. ¿Guardar antes de cerrar?",
   "app.closeAll.unsaved": "Hay cambios sin guardar en: {{names}}. ¿Guardar antes de cerrarlo todo?",
+  "app.commit.dismiss": "Descartar",
+  "app.commit.failedAbort": "No se pudieron aplicar los cambios de página: {{message}}. No se guardó nada: los cambios siguen pendientes.",
+  "app.commit.failedRetry": "No se pudieron aplicar los cambios de página: {{message}}. Los cambios siguen pendientes: corrija la causa (espacio en disco, archivos bloqueados) y vuelva a intentarlo.",
+  "app.commit.retry": "Reintentar",
   "app.exit.unsaved": "Hay cambios sin guardar en: {{names}}. ¿Guardar antes de salir?",
   "app.formButton.clipboardFailed": "No se pudo acceder al portapapeles.",
   "app.formButton.externalTitle": "Botón de formulario: enlace externo",

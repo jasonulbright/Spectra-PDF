@@ -1,6 +1,10 @@
 {
   "app.close.unsaved": "\"{{name}}\" has unsaved changes. Save before closing?",
   "app.closeAll.unsaved": "Unsaved changes in: {{names}}. Save before closing all?",
+  "app.commit.dismiss": "Dismiss",
+  "app.commit.failedAbort": "Applying page changes failed: {{message}}. Nothing was saved — your edits are still pending.",
+  "app.commit.failedRetry": "Applying page changes failed: {{message}}. Your edits are still pending — fix the cause (disk space, file locks) and retry.",
+  "app.commit.retry": "Retry",
   "app.exit.unsaved": "Unsaved changes in: {{names}}. Save before exiting?",
   "app.formButton.clipboardFailed": "Could not access the clipboard.",
   "app.formButton.externalTitle": "Form button — external link",
