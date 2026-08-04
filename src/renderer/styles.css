@@ -1525,6 +1525,131 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* N11 slice D — the symbol palette (the stamp picker's third species and the
+   Takeoff panel's marker picker: ONE component, so one block of style). */
+.symbol-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+/* The stamp picker's palette hangs BELOW the strip as a popover (the
+   snap-popover precedent). It must not be a wrapped row of the strip: that
+   overflowed the toolbar's box and was painted under the document view — a
+   palette you could see and could not press. */
+.symbol-palette-popover {
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 10px;
+  z-index: 40;
+  width: 320px;
+  max-width: calc(100% - 20px);
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--panel-bg, rgba(23, 23, 23, 0.98));
+  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.16));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.symbol-palette-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.symbol-palette-search {
+  flex: 1 1 auto;
+  min-width: 80px;
+  padding: 3px 6px;
+  font-size: 12px;
+  color: var(--text, #e6e6ea);
+  background: var(--surface-1, #232327);
+  border: 1px solid var(--border, #45454c);
+  border-radius: 4px;
+}
+.symbol-palette-action {
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-dim, #8a8a92);
+  background: var(--surface-2, #303034);
+  border: 1px solid var(--border, #45454c);
+  border-radius: 4px;
+}
+.symbol-palette-action:hover {
+  color: var(--text, #e6e6ea);
+}
+.symbol-palette-sets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  max-height: 320px;
+}
+.symbol-palette-sets.compact {
+  max-height: 168px;
+}
+.symbol-palette-set-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim, #8a8a92);
+}
+.symbol-palette-set-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.symbol-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 2px;
+}
+.symbol-palette-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  /* The press starts a DRAG (window-level pointer listeners), so the browser's
+     own text/image drag must not compete for it. */
+  touch-action: none;
+  user-select: none;
+}
+.symbol-palette-item:hover {
+  background: var(--surface-2, #303034);
+}
+.symbol-palette-item.active {
+  border-color: var(--accent, #2f6fed);
+  background: var(--surface-2, #303034);
+}
+.symbol-palette-item-name {
+  font-size: 9px;
+  line-height: 1.1;
+  color: var(--text-dim, #8a8a92);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.symbol-palette-empty,
+.symbol-palette-status {
+  font-size: 11px;
+  color: var(--text-dim, #8a8a92);
+  margin: 0;
+}
+.symbol-palette-status.error {
+  color: #f87171;
+}
+/* The drag ghost follows the pointer at the window level and is never a hit
+   target — the drop hit-tests what is UNDER it. */
+.symbol-drag-ghost {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
 /* Custom stamp library (parity map § 2). */
 .stamp-custom-wrap {
   position: relative;
@@ -2336,6 +2461,18 @@
   user-select: none;
 }
 
+/* N11 slice D — a placed vector SYMBOL: the line art alone, like an image
+   stamp, and the same unit-square geometry the appearance stream draws. */
+.page-annot-stamp:has(.page-annot-symbol-svg) {
+  border-width: 0;
+}
+.page-annot-symbol-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
 
 .outline-drop-indicator {
   height: 2px;
@@ -2607,6 +2744,8 @@
   border-bottom: 1px solid #2e2e2e;
   background: #1f1f1f;
   flex-shrink: 0;
+  /* The symbol palette (N11 slice D) hangs off this strip. */
+  position: relative;
 }
 
 /* Home (Phase 10 slice E) — the king's-bar redesign: quick actions, a quiet

@@ -1,28 +1,42 @@
-import React from 'react';
-import { symbolById } from '../lib/count-marks';
+import React, { useSyncExternalStore } from 'react';
+import { symbolById, type SymbolPart } from '../lib/count-marks';
+import { getSymbolSets, subscribeSymbolSets, symbolParts } from '../lib/symbol-library';
 
-// N11 slice C — a count symbol as an inline SVG.
+// N11 slice C/D — a vector symbol as an inline SVG.
 //
 // It draws the SAME unit-square parts `pdfx-build` turns into path operators
 // for the annotation's appearance, so the picker, the page and the printed
-// sheet cannot show three different markers. Its own module because three
+// sheet cannot show three different markers. Its own module because four
 // surfaces need it (the Takeoff panel, the secondary toolbar's group picker,
-// and slice D's symbol palette) and none of them should have to import
-// another surface to get it.
+// the symbol palette, and the comment list) and none of them should have to
+// import another surface to get it.
+//
+// Slice D widened the resolution rather than the API: an id is looked up in
+// the whole symbol REGISTRY (built-in markers, the built-in AEC set, and every
+// imported set), and an explicit `parts` wins over any lookup — that is how an
+// annotation carrying its own geometry draws correctly on a machine that never
+// imported the set it came from.
 
 export function CountSymbolGlyph({
   symbol,
+  parts,
   color,
   size = 16,
 }: {
-  symbol: string;
+  symbol?: string;
+  /** The geometry, when the caller already holds it (an annotation's carried
+   * snapshot). Beats the registry lookup. */
+  parts?: readonly SymbolPart[];
   color: string;
   size?: number;
 }): React.JSX.Element {
-  const s = symbolById(symbol);
+  // Re-render when a set is imported or removed: a group's marker can be a
+  // symbol that only exists after an import.
+  useSyncExternalStore(subscribeSymbolSets, getSymbolSets, getSymbolSets);
+  const resolved = parts ?? symbolParts(symbol) ?? symbolById(symbol).parts;
   return (
     <svg width={size} height={size} viewBox="0 0 1 1" aria-hidden="true">
-      {s.parts.map((part, i) =>
+      {resolved.map((part, i) =>
         part.kind === 'circle' ? (
           <circle
             key={i}

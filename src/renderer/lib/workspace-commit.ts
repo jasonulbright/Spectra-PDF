@@ -105,7 +105,7 @@ export function planCommit(
           ...(p.annotations?.length
             ? {
                 annotations: p.annotations.map(
-                  ({ kind, x, y, w, h, color, note, points, strokes, imageData, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, importedOriginal }) => ({
+                  ({ kind, x, y, w, h, color, note, points, strokes, imageData, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, symbolId, symbolParts, importedOriginal }) => ({
                     kind,
                     x,
                     y,
@@ -140,6 +140,10 @@ export function planCommit(
                     legendRows,
                     legendTitle,
                     legendTotalWord,
+                    // N11 slice D — a placed symbol's registry id and its own
+                    // carried geometry (the same allowlist trap).
+                    symbolId,
+                    symbolParts,
                     importedOriginal,
                   }),
                 ),

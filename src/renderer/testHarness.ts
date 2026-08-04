@@ -15,6 +15,13 @@ import { invokeCommand as invokeRegisteredCommand } from './commands/context';
 import { COMMANDS, type CommandId } from './commands/registry';
 import { setAppLanguage } from './i18n';
 import { getTakeoffSettings, setTakeoffSettings } from './lib/takeoff-settings';
+import {
+  getSymbolSets,
+  getUserSymbolSets,
+  reloadSymbolSets,
+  removeSymbolSet,
+} from './lib/symbol-library';
+import { importSymbolSetFromPath } from './lib/symbol-set-io';
 import type { FocusedTab } from './state/types';
 
 export interface TestStateSnapshot {
@@ -719,7 +726,7 @@ export interface TestHarness {
   getPageAnnotations: (
     docId: string,
     pageId: string,
-  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[]; countGroup?: string; countSymbol?: string; countSeq?: number }[];
+  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[]; countGroup?: string; countSymbol?: string; countSeq?: number; symbolId?: string; symbolParts?: number }[];
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
   commitPendingEdits: () => Promise<void>;
@@ -1042,6 +1049,16 @@ export interface TestHarness {
     armed: string | null,
   ) => void;
   takeoffArmed: () => string | null;
+  /** N11 slice D: import a symbol SET from a path — the native file picker is
+   * the only step skipped, so a spec drives the real parse, the real
+   * sanitizer and the real store. Rejects with the refusal message a
+   * malformed file earns (the guided-actions import precedent). */
+  symbolImportFromPath: (path: string) => Promise<{ id: string; outcome: string }>;
+  /** Every set in the registry, built-ins included, with its symbol ids. */
+  symbolSets: () => { id: string; name: string; builtin: boolean; symbols: string[] }[];
+  /** Drop the imported sets and re-read the store — the cross-spec-leak rule
+   * (a set left behind would change the next run's palette). */
+  symbolResetSets: () => void;
   /** 9.D1 vector objects: list, select, delete. */
   editVectorPageIds: () => string[];
   editVectors: (pageId: string) => {
@@ -1150,7 +1167,7 @@ export interface TestHarnessDeps {
   getPageAnnotations: (
     docId: string,
     pageId: string,
-  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[]; countGroup?: string; countSymbol?: string; countSeq?: number }[];
+  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[]; countGroup?: string; countSymbol?: string; countSeq?: number; symbolId?: string; symbolParts?: number }[];
   dispatchAddAnnotation: (docId: string, pageId: string, annotation: TestAnnotationInput & { id: string }) => void;
   dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   dispatchRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
@@ -1825,6 +1842,21 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         armed: armed && groups.some((g) => g.name === armed) ? armed : null,
       }),
     takeoffArmed: () => getTakeoffSettings().armed,
+    symbolImportFromPath: async (path) => {
+      const res = await importSymbolSetFromPath(path);
+      return { id: res.set.id, outcome: res.outcome };
+    },
+    symbolSets: () =>
+      getSymbolSets().map((s) => ({
+        id: s.id,
+        name: s.name,
+        builtin: s.builtin === true,
+        symbols: s.symbols.map((x) => x.id),
+      })),
+    symbolResetSets: () => {
+      for (const set of [...getUserSymbolSets()]) removeSymbolSet(set.id);
+      reloadSymbolSets();
+    },
     editVectorPageIds: () => canvasEditImages?.vectorPageIds() ?? [],
     editVectors: (pageId) => canvasEditImages?.vectors(pageId) ?? [],
     editVectorSelect: (pageId, index) => canvasEditImages?.selectVector(pageId, index),
