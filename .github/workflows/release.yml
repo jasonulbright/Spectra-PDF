@@ -88,6 +88,7 @@ jobs:
           mkdir -p resources/fonts
           mkdir -p resources/libreoffice
           mkdir -p resources/tesseract
+          mkdir -p resources/jbig2enc
         shell: bash
 
       # `cargo check` never RUNS anything. The Rust tests cover the virtual
@@ -175,6 +176,14 @@ jobs:
         # CLI and every scheduled run share it). Pinned + SHA-256 verified in the
         # script; extracted from the NSIS installer with 7-Zip, never run.
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
+
+      - name: Vendor jbig2enc (MRC mask codec, Apache-2.0)
+        # O8: the JBIG2 encoder for MRC's 1-bit text stencil. Official prebuilt
+        # Windows x64 MSVC release asset, SHA-256 pinned in the script, driven
+        # as a subprocess (the Ghostscript pattern). The script REFUSES to ship
+        # if any statically-linked component named in upstream's depmf.json
+        # lacks a row in scripts/jbig2enc-licenses.tsv.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
 
       - name: Stage OCR language models
         # Decompresses the 47 pinned Apache-2.0 models into
