@@ -824,3 +824,142 @@ describe('count marks + takeoff legend round-trip', () => {
     await pdf.loadingTask.destroy();
   });
 });
+
+// N11 slice D — a placed vector SYMBOL. The decision under test is that the
+// GEOMETRY travels with the annotation: a symbol from an imported set has to
+// draw on a machine that never imported that set, and re-importing it as a
+// plain text stamp would turn the drawing into its own label.
+describe('symbol stamp round-trip', () => {
+  const parts = [
+    { kind: 'poly' as const, points: [0.1, 0.1, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9], closed: true },
+    { kind: 'circle' as const, cx: 0.5, cy: 0.5, r: 0.2 },
+  ];
+
+  it('bakes a /Stamp carrying /SpectraSymbol + /SpectraSymbolParts, and re-imports the artwork', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', a, 'a', [
+          {
+            ...pageRef('a.pdf', 0),
+            annotations: [
+              {
+                id: 'y1',
+                kind: 'stamp',
+                x: 0.2,
+                y: 0.2,
+                w: 0.06,
+                h: 0.06,
+                color: '#2f6fed',
+                note: 'Receptacle',
+                symbolId: 'fs-outlet',
+                symbolParts: parts,
+              },
+            ],
+          },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const bytes = await buildCommitBytes(plan);
+    const styles = await readRawAnnotationStyles(bytes);
+    expect(styles).not.toBeNull();
+    const raw = styles![0][0];
+    expect(raw.subtype).toBe('Stamp');
+    // No /IT: a symbol is not a count mark, and the count importer must not
+    // claim it.
+    expect(raw.it).toBeUndefined();
+    expect(raw.spectraSymbol).toBe('fs-outlet');
+    expect(raw.spectraSymbolParts).toBe(JSON.stringify(parts));
+
+    const pdf = await loadPdf(bytes);
+    const page = await pdf.getPage(1);
+    const imported = await importPageAnnotations(page, styles![0]);
+    expect(imported).toHaveLength(1);
+    expect(imported[0].kind).toBe('stamp');
+    expect(imported[0].symbolId).toBe('fs-outlet');
+    expect(imported[0].symbolParts).toEqual(parts);
+    expect(imported[0].note).toBe('Receptacle');
+    await pdf.loadingTask.destroy();
+  });
+
+  it('a count mark whose marker came from an IMPORTED set carries its geometry too', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', a, 'a', [
+          {
+            ...pageRef('a.pdf', 0),
+            annotations: [
+              {
+                id: 'c9',
+                kind: 'count',
+                x: 0.4,
+                y: 0.3,
+                w: 0.04,
+                h: 0.04,
+                color: '#e0393e',
+                countGroup: 'Outlets',
+                countSymbol: 'fs-outlet',
+                countSeq: 2,
+                note: 'Outlets 2',
+                symbolParts: parts,
+              },
+            ],
+          },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const bytes = await buildCommitBytes(plan);
+    const styles = await readRawAnnotationStyles(bytes);
+    const raw = styles![0][0];
+    expect(raw.it).toBe('Count');
+    // The id is written as the FILE spells it, unknown to this build or not.
+    expect(raw.spectraSymbol).toBe('fs-outlet');
+    expect(raw.spectraSymbolParts).toBe(JSON.stringify(parts));
+
+    const pdf = await loadPdf(bytes);
+    const page = await pdf.getPage(1);
+    const imported = await importPageAnnotations(page, styles![0]);
+    expect(imported[0].kind).toBe('count');
+    expect(imported[0].countSymbol).toBe('fs-outlet');
+    expect(imported[0].symbolParts).toEqual(parts);
+    await pdf.loadingTask.destroy();
+  });
+
+  it('a BUILT-IN marker writes no geometry — the id already names it', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', a, 'a', [
+          {
+            ...pageRef('a.pdf', 0),
+            annotations: [
+              {
+                id: 'c8',
+                kind: 'count',
+                x: 0.4,
+                y: 0.3,
+                w: 0.04,
+                h: 0.04,
+                color: '#e0393e',
+                countGroup: 'Doors',
+                countSymbol: 'square',
+                countSeq: 1,
+                note: 'Doors 1',
+              },
+            ],
+          },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const bytes = await buildCommitBytes(plan);
+    const styles = await readRawAnnotationStyles(bytes);
+    expect(styles![0][0].spectraSymbolParts).toBeUndefined();
+  });
+});

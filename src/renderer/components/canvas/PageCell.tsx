@@ -92,7 +92,10 @@ import {
   derivedGroups,
   symbolById,
   type CountGroup,
+  type SymbolPart,
 } from '../../lib/count-marks';
+import { symbolParts as registrySymbolParts } from '../../lib/symbol-library';
+import { registerSymbolDrop, type SymbolDragPayload } from '../../lib/symbol-drag';
 import {
   getTakeoffSettings,
   subscribeTakeoffSettings,
@@ -195,6 +198,12 @@ export interface StampPreset {
    * undistorted, and the commit embeds it as the /Stamp appearance. */
   imageData?: string;
   aspect?: number;
+  /** VECTOR SYMBOL stamps (N11 slice D): the registry id plus the geometry
+   * itself. The parts travel with the placement so a symbol from an imported
+   * set draws wherever the file goes; `label` is the display name and lands in
+   * /Contents like any other stamp's. */
+  symbolId?: string;
+  symbolParts?: readonly SymbolPart[];
 }
 
 export const STAMP_PRESETS: StampPreset[] = [
@@ -215,6 +224,26 @@ const STAMP_H = 0.09;
 // whatever those pages measure, which is why this is a paper length converted
 // per page rather than a fraction of one.
 const COUNT_MARK_PT = 14;
+
+// N11 slice D: a placed SYMBOL's on-paper size, in PDF points. Bigger than a
+// count marker because it is the drawing, not a tally dot — and, unlike a
+// count mark, a symbol stamp RESIZES (a receptacle and a north arrow are not
+// the same size on a sheet).
+const SYMBOL_STAMP_PT = 24;
+
+/**
+ * The geometry a count mark must CARRY, or nothing.
+ *
+ * A built-in marker needs no snapshot — every build has it, and 400 copies of
+ * a shape the id already names is 400 copies too many. A marker from an
+ * IMPORTED set does: without it the mark would resolve to the default marker
+ * on a machine that never imported the set, silently redrawing the sheet.
+ */
+function importedMarkerParts(symbolId: string): { symbolParts?: readonly SymbolPart[] } {
+  if (symbolById(symbolId).id === symbolId) return {};
+  const parts = registrySymbolParts(symbolId);
+  return parts ? { symbolParts: parts } : {};
+}
 
 /** A symbol part's unit-square points as an SVG `points` list (closing the
  * ring for a closed part, which `polyline` does not do by itself). */
@@ -1461,6 +1490,54 @@ function PageCellImpl({
     return out;
   };
 
+  // ── N11 slice D: a symbol DROPPED out of the palette ──────────────────
+  //
+  // The drag runs on window-level listeners in `symbol-drag.ts` (the canvas
+  // invariant — HTML5 DnD cannot complete in this webview); this is only where
+  // it lands. The placement goes through the same `pagePoint` choke point a
+  // click does, so a dropped symbol snaps to the geometry under it exactly
+  // like a clicked one, and it is ONE annotation dispatch — one undo step.
+  const dropSymbol = (
+    el: HTMLElement,
+    cx: number,
+    cy: number,
+    payload: SymbolDragPayload,
+  ): void => {
+    const p = pagePoint(el, cx, cy);
+    endSnapGesture();
+    const w = Math.min(0.4, SYMBOL_STAMP_PT / measDispW);
+    const h = Math.min(0.4, SYMBOL_STAMP_PT / measDispH);
+    const placed = toStoredRect({
+      x: Math.max(0, Math.min(1 - w, p.x - w / 2)),
+      y: Math.max(0, Math.min(1 - h, p.y - h / 2)),
+      w,
+      h,
+    });
+    onAddAnnotation(docId, page.id, {
+      id: crypto.randomUUID(),
+      kind: 'stamp',
+      ...placed,
+      color: payload.color,
+      // The display NAME lands in /Contents, the same rule a stamp preset's
+      // word follows (it is the stamp's text, not chrome).
+      note: payload.name,
+      symbolId: payload.symbolId,
+      symbolParts: payload.parts,
+    });
+  };
+  // The registry is keyed by page id and the handler closes over live props,
+  // so it goes through a ref: re-registering on every render would churn the
+  // map mid-gesture.
+  const dropSymbolRef = useRef(dropSymbol);
+  dropSymbolRef.current = dropSymbol;
+  useEffect(
+    () =>
+      registerSymbolDrop(page.id, (el, cx, cy, payload) =>
+        dropSymbolRef.current(el, cx, cy, payload),
+      ),
+    [page.id],
+  );
+
   // ── Annotation manipulation (rung 1): move / resize / marquee ─────────
   // Gestures run with window-level listeners (the canvas invariant), preview
   // through local state in the STORED frame (so the render-side projection is
@@ -1640,7 +1717,10 @@ function PageCellImpl({
     };
     // Image stamps default to their own aspect (they are pictures); Shift
     // locks the rest on demand.
-    const aspectByDefault = a.kind === 'stamp' && !!a.imageData;
+    // A raster and a UNIT-SQUARE symbol both have a shape of their own, so
+    // resizing keeps their aspect unless Shift says otherwise; a text stamp's
+    // box does not.
+    const aspectByDefault = a.kind === 'stamp' && (!!a.imageData || !!a.symbolParts);
     let activated = false;
     let lastStored: { x: number; y: number; w: number; h: number; points?: number[] } | null = null;
     // A resize DRAGS one handle, so the pointer IS the moving geometry —
@@ -2506,6 +2586,7 @@ function PageCellImpl({
         color: armedCountGroup.color,
         countGroup: armedCountGroup.name,
         countSymbol: armedCountGroup.symbol,
+        ...importedMarkerParts(armedCountGroup.symbol),
       });
       return;
     }
@@ -2516,10 +2597,14 @@ function PageCellImpl({
       });
       // Image stamps size from their own aspect (normalized height = width ×
       // aspect × the displayed page's width/height ratio, so the image is
-      // undistorted on paper); text stamps keep the fixed footprint.
-      const w = STAMP_W;
-      const h =
-        stampPreset.imageData && stampPreset.aspect
+      // undistorted on paper); text stamps keep the fixed footprint; a SYMBOL
+      // is a square PAPER length (N11 slice D), so it is the same size on
+      // every sheet of a set exactly like a count marker.
+      const symbol = stampPreset.symbolParts ?? registrySymbolParts(stampPreset.symbolId);
+      const w = symbol ? Math.min(0.4, SYMBOL_STAMP_PT / measDispW) : STAMP_W;
+      const h = symbol
+        ? Math.min(0.4, SYMBOL_STAMP_PT / measDispH)
+        : stampPreset.imageData && stampPreset.aspect
           ? Math.min(0.6, STAMP_W * stampPreset.aspect * (measDispW / measDispH))
           : STAMP_H;
       // Built in the DISPLAY frame (the stamp reads upright on the view you
@@ -2532,14 +2617,15 @@ function PageCellImpl({
       });
       // Dynamic tokens ({date}/{time}/{name}) resolve AT PLACEMENT — a stamp
       // records when it was placed; committing later must not re-date it.
-      const label = stampPreset.imageData
-        ? stampPreset.label
-        : resolveStampTokens(
-            stampPreset.label,
-            new Date(),
-            getSettings().identityName,
-            i18next.language,
-          );
+      const label =
+        stampPreset.imageData || symbol
+          ? stampPreset.label
+          : resolveStampTokens(
+              stampPreset.label,
+              new Date(),
+              getSettings().identityName,
+              i18next.language,
+            );
       onAddAnnotation(docId, page.id, {
         id: crypto.randomUUID(),
         kind: 'stamp',
@@ -2547,6 +2633,12 @@ function PageCellImpl({
         color: annotationColor ?? stampPreset.color,
         note: label,
         ...(stampPreset.imageData ? { imageData: stampPreset.imageData } : {}),
+        ...(symbol
+          ? {
+              ...(stampPreset.symbolId ? { symbolId: stampPreset.symbolId } : {}),
+              symbolParts: symbol,
+            }
+          : {}),
       });
       return;
     }
@@ -2929,8 +3021,8 @@ function PageCellImpl({
                     : a.kind === 'note'
                     ? { backgroundColor: `${a.color}dd`, borderColor: a.color, borderRadius: 2 }
                     : a.kind === 'stamp'
-                      ? a.imageData
-                        ? {} // image stamps are the raster alone — no box chrome
+                      ? a.imageData || a.symbolParts
+                        ? {} // the raster / the symbol alone — no box chrome
                         : { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
                       : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
             // Select tool: every annotation body is clickable (the properties
@@ -3247,7 +3339,45 @@ function PageCellImpl({
               <span className="page-annot-text-body">{a.note}</span>
             )}
             {a.kind === 'stamp' && !pristineImport && (
-              a.imageData ? (
+              a.symbolParts ? (
+                // N11 slice D — a placed VECTOR SYMBOL, drawn from the same
+                // unit-square parts the appearance stream emits as path
+                // operators. The annotation's own carried geometry is what is
+                // drawn (never a registry lookup), so a symbol from a set this
+                // machine never imported still reads correctly.
+                <svg
+                  className="page-annot-symbol-svg"
+                  viewBox="0 0 1 1"
+                  preserveAspectRatio="none"
+                  data-symbol-id={a.symbolId ?? ''}
+                >
+                  {a.symbolParts.map((part, pi) =>
+                    part.kind === 'circle' ? (
+                      <circle
+                        key={pi}
+                        cx={part.cx}
+                        cy={part.cy}
+                        r={part.r}
+                        fill="none"
+                        stroke={a.color}
+                        strokeWidth={1.5}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    ) : (
+                      <polyline
+                        key={pi}
+                        points={countSymbolPoints(part.points, part.closed)}
+                        fill="none"
+                        stroke={a.color}
+                        strokeWidth={1.5}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    ),
+                  )}
+                </svg>
+              ) : a.imageData ? (
                 <img
                   src={a.imageData}
                   alt={a.note ?? 'Stamp'}

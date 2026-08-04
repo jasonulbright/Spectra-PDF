@@ -123,6 +123,86 @@ function round4(v: number): number {
 
 export const DEFAULT_COUNT_SYMBOL = COUNT_SYMBOLS[0].id;
 
+// ── The part-list schema (N11 slice D) ───────────────────────────────────
+//
+// A part list becomes PDF PATH OPERATORS (`pdfx-build`'s `symbolOps`) and SVG
+// geometry, so every number that reaches either renderer must be proven a
+// finite number in range FIRST. That is why the sanitizer lives here, in the
+// pure module, rather than beside the importer that happens to call it: the
+// artwork can arrive from an imported set file OR from a private key inside a
+// PDF, and both roads must be gated by the same check. A string that slipped
+// through would be concatenated straight into a content stream.
+//
+// The unit square is the whole coordinate space; a part outside it is refused
+// rather than clamped, because clamping silently redraws someone's artwork.
+
+/** Ceilings — a symbol is a marker, not a drawing. They bound what one
+ * imported file can push into a content stream. */
+export const SYMBOL_MAX_PARTS = 64;
+export const SYMBOL_MAX_POINTS = 512;
+
+function inUnit(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
+}
+
+/** Round to the authoring grid (1e-4) so a sanitized part list is byte-stable
+ * through a JSON round trip. */
+function q(v: number): number {
+  return Math.round(v * 10_000) / 10_000;
+}
+
+/**
+ * Validate + normalize an untrusted part list. Returns null when ANY part is
+ * malformed — a partially-drawn symbol is a lie about what the file said, so
+ * the caller falls back to a known symbol instead.
+ */
+export function sanitizeParts(raw: unknown): SymbolPart[] | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > SYMBOL_MAX_PARTS) return null;
+  const out: SymbolPart[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) return null;
+    const p = entry as Record<string, unknown>;
+    if (p.kind === 'circle') {
+      if (!inUnit(p.cx) || !inUnit(p.cy)) return null;
+      if (typeof p.r !== 'number' || !Number.isFinite(p.r) || p.r <= 0 || p.r > 0.5) return null;
+      // A circle that leaves the unit square would be clipped by the
+      // appearance BBox — refuse rather than draw a cropped ring.
+      if (p.cx - p.r < 0 || p.cx + p.r > 1 || p.cy - p.r < 0 || p.cy + p.r > 1) return null;
+      out.push({ kind: 'circle', cx: q(p.cx), cy: q(p.cy), r: q(p.r) });
+      continue;
+    }
+    if (p.kind !== 'poly') return null;
+    const pts = p.points;
+    if (!Array.isArray(pts) || pts.length < 4 || pts.length % 2 !== 0) return null;
+    if (pts.length > SYMBOL_MAX_POINTS) return null;
+    const clean: number[] = [];
+    for (const n of pts) {
+      if (!inUnit(n)) return null;
+      clean.push(q(n));
+    }
+    out.push({ kind: 'poly', points: clean, closed: p.closed === true });
+  }
+  return out;
+}
+
+/** A part list as compact JSON — what rides in the private
+ * `/SpectraSymbolParts` so a symbol travels WITH the annotation and draws on a
+ * machine that never imported the set it came from. */
+export function partsToJson(parts: readonly SymbolPart[]): string {
+  return JSON.stringify(parts);
+}
+
+/** The inverse, sanitized: bytes out of a file are untrusted exactly like
+ * bytes out of an imported set file. */
+export function partsFromJson(text: string | undefined): SymbolPart[] | null {
+  if (!text) return null;
+  try {
+    return sanitizeParts(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
 /** The symbol with this id, or the default. Never throws: a file counted by a
  * later version can name a symbol this build has never heard of, and the
  * honest answer there is the default marker, not a dropped mark. */

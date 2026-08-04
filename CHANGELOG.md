@@ -1,6 +1,76 @@
 # Changelog
 
-## 1.0.17 — The interface speaks Spanish
+## 1.0.17 — Drafting tools, and an interface that speaks Spanish
+
+Markup lands where you aim it: snapping to the drawing's own geometry,
+rulers, a grid in real-world units, and guides you drag off the rulers.
+Quantities get a proper home — count items into named groups, watch the
+tallies add up, stamp a legend onto the sheet, and export the takeoff as a
+spreadsheet. Symbols arrive as a searchable palette you drag from, with
+your own sets loadable from a file. And the whole interface now speaks
+Spanish.
+
+### Drafting aids
+- **Snapping.** While you measure, draw, place or move, the pointer
+  snaps to the drawing's own geometry — endpoints, midpoints, centres,
+  intersections and edges, plus the markup you have already placed.
+  Each kind can be switched off on its own, and holding Alt suspends
+  snapping for the rest of a gesture. Tab steps through the candidates
+  under the cursor when several are in reach.
+- **Straight lines on demand.** Holding Shift holds a segment to the
+  nearest angle increment — 15° by default, and configurable — measured
+  from where the segment started, so a run of vertices stays regular.
+- **Rulers and guides.** Rulers along the top and left edges read in the
+  drawing's own units and track the pointer. Drag a guide off a ruler
+  onto the page, move it, or drag it off the page to remove it. Guides
+  are a drafting aid: they are never written into the document.
+- **A grid in real-world units.** Show a grid spaced in paper units or —
+  the useful one — in real-world units through the drawing scale, so a
+  1 ft grid on a scaled sheet lands where a drafter expects. Showing the
+  grid and snapping to it are separate switches, and the grid stops being
+  drawn when it would be too fine to read while snapping keeps working.
+- **Everything snaps to it.** Snapping applies wherever you place
+  something, not only while measuring.
+
+### Count and takeoff
+- **Count items into named groups.** Pick a group, click each item on the
+  sheet, and a numbered marker lands there. Clicking a marker again
+  un-counts it. Each group has its own colour and symbol.
+- **Recount a whole area at once.** Ctrl-drag a box over markers to move
+  them into the armed group; they take that group's colour and symbol and
+  are renumbered at its end.
+- **Tallies that cannot go stale.** Counts are read from the marks
+  themselves, per group and per page, so what the panel shows is always
+  what is on the drawing.
+- **Legends on the sheet.** Stamp a legend table onto the page — symbol,
+  group and count per row, with a total.
+- **Export the takeoff.** Write a CSV with one row per group per page and
+  a totals row, from the app or from the command line.
+- **The counts live in the file.** Markers are saved as ordinary
+  annotations, so a drawing counted on one machine opens with its groups,
+  colours, symbols and numbering intact anywhere else — and shows as a
+  printable symbol in other viewers.
+
+### Symbols
+- **A symbol palette.** A searchable library of vector symbols, available
+  both in the stamp picker and beside the count groups. Drag a symbol onto
+  the page to place it, or click it to place with your next click.
+- **General AEC symbols included.** Twenty everyday symbols ship with the
+  app — door swing, window, receptacle, switch, lights, smoke detector,
+  thermostat, exit sign, data outlet, junction box, floor drain, supply
+  diffuser, return grille, sprinkler, valve, north arrow, detail bubble,
+  elevation marker and fire extinguisher — alongside the counting markers.
+- **Bring your own set.** Load a firm's standard symbols from a JSON file
+  and export any set back out to share it. A file that is not a valid set
+  is refused with the reason and the symbol at fault named, and nothing is
+  half-imported.
+- **Symbols are vectors, and they travel.** A placed symbol prints crisply
+  at any size, and it carries its own artwork inside the document — so a
+  drawing marked up with your firm's set opens correctly on a machine that
+  has never seen it.
+- **Placed symbols behave like markup.** They snap where you drop them,
+  take the colour you are working in, resize keeping their shape, and
+  move, group and delete like any other annotation.
 
 ### Language
 - **Spanish.** The whole interface is translated — menus, toolbars, the

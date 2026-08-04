@@ -45,6 +45,10 @@ export interface RawAnnotStyle {
   /** The private /SpectraLegend JSON — a placed takeoff legend's snapshot
    * rows. Text, so it survives any producer that rewrites the dictionary. */
   spectraLegend?: string;
+  /** The private /SpectraSymbolParts JSON — a placed symbol's own geometry
+   * (N11 slice D), carried so the drawing redraws where the SET it came from
+   * was never imported. Sanitized at the importer, never trusted here. */
+  spectraSymbolParts?: string;
 }
 
 function num(v: unknown): number | undefined {
@@ -167,6 +171,7 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
             subj: textOf(dict.lookup(PDFName.of('Subj'))),
             spectraSymbol: textOf(dict.lookup(PDFName.of('SpectraSymbol'))),
             spectraLegend: textOf(dict.lookup(PDFName.of('SpectraLegend'))),
+            spectraSymbolParts: textOf(dict.lookup(PDFName.of('SpectraSymbolParts'))),
             ...(rd && rd.length === 4 ? { rd: rd as [number, number, number, number] } : {}),
           });
           } catch {

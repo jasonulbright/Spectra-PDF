@@ -175,6 +175,19 @@ export interface PageAnnotation {
   countGroup?: string;
   countSymbol?: string;
   countSeq?: number;
+  // N11 slice D — a VECTOR SYMBOL placed as a stamp: which registry symbol it
+  // is (→ the private /SpectraSymbol), and its own geometry (→ the private
+  // /SpectraSymbolParts).
+  //
+  // The parts travel WITH the annotation deliberately. A symbol from an
+  // imported set is unknown to a machine that never imported that set, and
+  // resolving an unknown id to the default marker would silently redraw
+  // someone's drawing — so the geometry is carried, and the id is what
+  // re-identifies it where the set IS present. A count mark carries parts too
+  // when its group's marker came from an imported set (a built-in marker
+  // needs no snapshot: every build has it).
+  symbolId?: string;
+  symbolParts?: readonly import('../lib/count-marks').SymbolPart[];
   // countlegend only: the rows the legend was placed with — a snapshot, so a
   // commit reproduces what the user saw rather than re-deriving numbers that
   // have moved since. Mirrored into /SpectraLegend and read back on import.
