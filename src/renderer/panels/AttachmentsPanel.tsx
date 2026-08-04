@@ -4,6 +4,8 @@ import { useEngine } from '../hooks/useEngine';
 import { file, dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 interface Attachment {
   name: string;
@@ -19,6 +21,8 @@ function human(size: number): string {
 }
 
 export function AttachmentsPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call, saveFile } = useEngine();
   const [items, setItems] = useState<Attachment[]>([]);
@@ -61,7 +65,7 @@ export function AttachmentsPanel(): React.ReactElement {
     const source = await dialog.pickAnyFile();
     if (!source) return;
     setBusy(true);
-    setStatus('Attaching…');
+    setStatus(tChrome('panel.attach.attaching'));
     try {
       const snapshotPath = await file.snapshot(activeFile.workingPath);
       const r = await call('add_attachment', {
@@ -71,9 +75,9 @@ export function AttachmentsPanel(): React.ReactElement {
       });
       await reloadFile(snapshotPath);
       await refresh();
-      setStatus(`Attached ${(r as unknown as { name: string }).name}`);
+      setStatus(tChrome('panel.attach.attached', { name: (r as unknown as { name: string }).name }));
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
@@ -85,12 +89,12 @@ export function AttachmentsPanel(): React.ReactElement {
       const output = await saveFile(name);
       if (!output) return;
       setBusy(true);
-      setStatus('Extracting…');
+      setStatus(tChrome('panel.attach.extracting'));
       try {
         await call('extract_attachment', { file: activeFile.workingPath, name, output });
-        setStatus(`Saved ${name}`);
+        setStatus(tChrome('panel.attach.saved', { name }));
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
         setBusy(false);
       }
@@ -102,15 +106,15 @@ export function AttachmentsPanel(): React.ReactElement {
     async (name: string) => {
       if (!activeFile) return;
       setBusy(true);
-      setStatus('Removing…');
+      setStatus(tChrome('panel.attach.removing'));
       try {
         const snapshotPath = await file.snapshot(activeFile.workingPath);
         await call('remove_attachment', { file: activeFile.workingPath, output: activeFile.workingPath, name });
         await reloadFile(snapshotPath);
         await refresh();
-        setStatus(`Removed ${name}`);
+        setStatus(tChrome('panel.attach.removed', { name }));
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
         setBusy(false);
       }
@@ -118,12 +122,12 @@ export function AttachmentsPanel(): React.ReactElement {
     [activeFile, call, reloadFile, refresh],
   );
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to manage its attachments" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.attach.open')} />;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">
-        Working on: <span className="text-neutral-200">{activeFile.name}</span>
+        {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span>
       </div>
       <div>
         <button
@@ -132,11 +136,11 @@ export function AttachmentsPanel(): React.ReactElement {
           disabled={busy}
           className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
         >
-          Attach a file…
+          {tChrome('panel.attach.attachFile')}
         </button>
       </div>
       {items.length === 0 ? (
-        <p className="text-sm text-neutral-500" data-testid="attach-empty">This document has no attachments.</p>
+        <p className="text-sm text-neutral-500" data-testid="attach-empty">{tChrome('panel.attach.empty')}</p>
       ) : (
         <div className="flex flex-col gap-1" data-testid="attach-list">
           {items.map((a) => (
@@ -153,7 +157,7 @@ export function AttachmentsPanel(): React.ReactElement {
                 disabled={busy}
                 className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
               >
-                Save…
+                {tChrome('panel.attach.save')}
               </button>
               <button
                 data-testid={`attach-remove-${a.name}`}
@@ -161,7 +165,7 @@ export function AttachmentsPanel(): React.ReactElement {
                 disabled={busy}
                 className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-50"
               >
-                Remove
+                {tChrome('panel.attach.remove')}
               </button>
             </div>
           ))}
