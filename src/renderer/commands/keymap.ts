@@ -15,6 +15,7 @@ import {
 import { isDocTab, type CanvasTool } from '../state/types';
 import { getSettings } from '../lib/app-settings';
 import type { CommandContext } from './types';
+import { tChrome, type UiKey } from '../i18n';
 
 /** The single inline-edit guard (formerly duplicated in App.tsx and
  * WorkspaceCanvasView.tsx): keystrokes belong to a focused field. */
@@ -46,16 +47,21 @@ function matches(b: KeyBinding, e: KeyLike): boolean {
   return true;
 }
 
-const KEY_LABELS: Record<string, string> = {
-  delete: 'Del',
-  backspace: 'Backspace',
-  tab: 'Tab',
-  escape: 'Esc',
-  ' ': 'Space',
+// N12 slice C — the keyboard-shortcut HELP surface. A NAMED key has a word
+// for a name and localizes ("Del" is "Supr" in Spanish); a single character
+// is the letter engraved on the reader's own keyboard and never does. The
+// function-key names (F3, F10) are their own international notation.
+const KEY_LABEL_KEYS: Record<string, UiKey> = {
+  delete: 'shortcut.key.delete',
+  backspace: 'shortcut.key.backspace',
+  tab: 'shortcut.key.tab',
+  escape: 'shortcut.key.escape',
+  ' ': 'shortcut.key.space',
 };
 
-function formatKey(key: string): string {
-  return KEY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key);
+export function formatKey(key: string): string {
+  const k = KEY_LABEL_KEYS[key];
+  return k ? tChrome(k) : key.length === 1 ? key.toUpperCase() : key;
 }
 
 /**
@@ -71,8 +77,8 @@ export function shortcutForCommand(command: CommandId): string | null {
   const b = KEY_BINDINGS.find((x) => x.command === command && !x.requiresPref);
   if (!b) return null;
   const parts: string[] = [];
-  if (b.ctrl) parts.push('Ctrl');
-  if (b.shift) parts.push('Shift');
+  if (b.ctrl) parts.push(tChrome('shortcut.ctrl'));
+  if (b.shift) parts.push(tChrome('shortcut.shift'));
   parts.push(formatKey(b.key));
   return parts.join('+');
 }
