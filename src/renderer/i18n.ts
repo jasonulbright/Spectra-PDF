@@ -18,6 +18,7 @@ import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chr
 import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
 import { WORKBENCH_STRINGS, type WorkbenchKey } from './i18n-workbench';
+import { CANVAS_STRINGS, type CanvasKey } from './i18n-canvas';
 import { loadSettings } from './lib/app-settings';
 import { OCR_LANGUAGES } from './ocr/languages';
 
@@ -217,20 +218,22 @@ export function tToolbarGroup(groupId: string, englishLabel: string): string {
 }
 
 // The typed UI records, merged: chrome (slice A) + panels, dialogs and the
-// workbench chrome (slice B). One helper set serves all four — a key is
-// compile-time-checked against the union.
+// workbench chrome (slice B) + the canvas and its overlays (slice C). One
+// helper set serves all five — a key is compile-time-checked against the union.
 const UI_STRINGS: Record<string, string> = {
   ...CHROME_STRINGS,
   ...PANEL_STRINGS,
   ...DIALOG_STRINGS,
   ...WORKBENCH_STRINGS,
+  ...CANVAS_STRINGS,
 };
-export type UiKey = ChromeKey | PanelKey | DialogKey | WorkbenchKey;
+export type UiKey = ChromeKey | PanelKey | DialogKey | WorkbenchKey | CanvasKey;
 type UiPluralKey =
   | ChromePluralKey
   | { [K in PanelKey]: K extends `${infer B}_one` ? B : never }[PanelKey]
   | { [K in DialogKey]: K extends `${infer B}_one` ? B : never }[DialogKey]
-  | { [K in WorkbenchKey]: K extends `${infer B}_one` ? B : never }[WorkbenchKey];
+  | { [K in WorkbenchKey]: K extends `${infer B}_one` ? B : never }[WorkbenchKey]
+  | { [K in CanvasKey]: K extends `${infer B}_one` ? B : never }[CanvasKey];
 
 /**
  * Translate a JSX/dynamic UI string by its typed key (the CHROME_STRINGS /

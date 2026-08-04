@@ -16,6 +16,7 @@ import { CHROME_STRINGS } from '../src/renderer/i18n-chrome';
 import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
 import { DIALOG_STRINGS } from '../src/renderer/i18n-dialogs';
 import { WORKBENCH_STRINGS } from '../src/renderer/i18n-workbench';
+import { CANVAS_STRINGS } from '../src/renderer/i18n-canvas';
 import { TOOL_DEFS } from '../src/renderer/commands/tools';
 import { NAV_PANEL_TITLES } from '../src/renderer/commands/navpanels';
 import { TOOLBAR_CATALOG } from '../src/renderer/commands/toolbars';
@@ -34,6 +35,7 @@ function expectedCatalog(): Record<string, string> {
     ...PANEL_STRINGS,
     ...DIALOG_STRINGS,
     ...WORKBENCH_STRINGS,
+    ...CANVAS_STRINGS,
   };
   for (const [id, cmd] of Object.entries(COMMANDS)) {
     out[`cmd.${id}`] = cmd.title;
