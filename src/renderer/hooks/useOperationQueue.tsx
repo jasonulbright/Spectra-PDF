@@ -137,6 +137,16 @@ const INTERNAL_METHODS = new Set([
   // Reading the structure tree to seed the Tags + Reading Order panels — a
   // read; the set/move/delete/add tag mutations stay gated.
   'get_struct_tree',
+  // N11 slice A — the snap-geometry probe. A pure read, and the
+  // get_pdf_version/measure_text_box hazard in its sharpest form: it refetches
+  // whenever the workspace changes, and an ANNOTATION is a pending page edit,
+  // so gating it would flush the user's just-drawn markup to disk the instant
+  // they drew it (e2e-caught: specs 87 and 88 lost their page-tier
+  // annotations mid-suite). Correctness does NOT rest on the gate here — the
+  // probe addresses the SOURCE file at `sourcePageIndex`, exactly the page
+  // pdf.js rasterizes, so a pending reorder cannot mis-address it and a
+  // pending rotation is applied by the same projection the raster gets.
+  'list_page_geometry',
 ]);
 
 export function isTrackableMethod(method: string): boolean {

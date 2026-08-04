@@ -3609,17 +3609,9 @@ export function WorkspaceCanvasView({
   snapGeomRef.current = snapGeomByPage;
   const snapFetchTokenRef = useRef(0);
   // Which canvas modes get PAGE geometry fetched. Freehand (ink/eraser) is
-  // excluded because it passes `snap:false` at the choke point anyway.
-  //
-  // `select` is excluded for a sharper reason: the fetch runs the COMMIT GATE
-  // (below), and the gate flushes pending page edits. Select is the default
-  // tool, so including it would silently commit a user's pending page moves
-  // and rotations the moment they opened a document — the "Apply changes"
-  // button would vanish with no action of theirs. Snapping still WORKS while
-  // moving an annotation in Select: markup candidates are derived in PageCell
-  // from state already in hand, with no engine call and no gate. Page-content
-  // snapping is armed by arming a mode that PLACES something, which is
-  // exactly where both references have it.
+  // excluded because it passes `snap:false` at the choke point anyway, and
+  // the modes with no page gesture at all (hand, forms, edit, the panels'
+  // own modes) have nothing to snap.
   const snapConsumingTool =
     tool === 'measuredist' ||
     tool === 'measureperim' ||
@@ -3636,7 +3628,8 @@ export function WorkspaceCanvasView({
     tool === 'formfields' ||
     tool === 'cropdraw' ||
     tool === 'addtext' ||
-    tool === 'addimage';
+    tool === 'addimage' ||
+    tool === 'select';
   const snapBuffer = focusedDoc ? state.files.get(focusedDoc.path)?.buffer : undefined;
   useEffect(() => {
     const token = ++snapFetchTokenRef.current;
@@ -3682,18 +3675,6 @@ export function WorkspaceCanvasView({
     const from = Math.max(0, centre - SNAP_PAGE_WINDOW);
     const to = Math.min(doc.pages.length - 1, centre + SNAP_PAGE_WINDOW);
     const run = async (): Promise<void> => {
-      try {
-        // GATED, never callRaw: this reads the WORKING copy, and a pending
-        // page rotation or reorder changes the geometry being snapped to.
-        // The gate is what makes the answer match the view.
-        await runCommitGate();
-      } catch {
-        return;
-      }
-      if (snapFetchTokenRef.current !== token) return;
-      const f = state.files.get(doc.path);
-      if (!f?.buffer) return;
-      const proxy = await getDocumentProxy(doc.path, f.buffer);
       const validIds = new Set(doc.pages.map((p) => p.id));
       const next = new Map<string, PageSnapGeometry>();
       for (const [k, v] of snapGeomRef.current) if (validIds.has(k)) next.set(k, v);
@@ -3702,9 +3683,20 @@ export function WorkspaceCanvasView({
         if (!page) continue;
         if (snapFetchTokenRef.current !== token) return;
         if (next.has(page.id)) continue; // cached by page id (buffer identity is a dep)
-        const pageNumber = workspacePageNumber(docs, doc, page.id);
-        if (pageNumber == null) continue;
+        // Addressed like the RASTER, not like a whole-file op: the SOURCE
+        // file at `sourcePageIndex`, which is exactly the page pdf.js draws.
+        // That is what makes this read correct with NO commit gate — a
+        // pending reorder cannot mis-address it (the physical page never
+        // moves) and a pending rotation is applied by the same projection the
+        // raster gets. Gating instead would flush the user's pending
+        // ANNOTATIONS to disk on every workspace change, which is what the
+        // first cut did (e2e-caught in specs 87/88); `list_page_geometry` is
+        // an INTERNAL_METHOD for that reason.
+        const srcFile = state.files.get(page.sourceDocId);
+        if (!srcFile?.buffer) continue;
         try {
+          const proxy = await getDocumentProxy(page.sourceDocId, srcFile.buffer);
+          if (snapFetchTokenRef.current !== token) return;
           const p = await proxy.getPage(page.sourcePageIndex + 1);
           const [vx0, vy0, vx1, vy1] = p.view;
           const geometry = {
@@ -3713,8 +3705,8 @@ export function WorkspaceCanvasView({
           };
           const listing = await fetchSnapGeometry(
             (m, params) => engineCall(m, params),
-            f.workingPath,
-            pageNumber,
+            srcFile.workingPath,
+            page.sourcePageIndex + 1,
             geometry,
           );
           if (snapFetchTokenRef.current !== token) return;
@@ -3800,6 +3792,12 @@ export function WorkspaceCanvasView({
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasEditImages({
       pageIds: () => [...editImagesRef.current.keys()],
+      snapGeometryPageIds: () => [...snapGeomRef.current.keys()],
+      snapGeometry: (pageId) =>
+        (snapGeomRef.current.get(pageId)?.paths ?? []).map((p) => ({
+          subpaths: p.subpaths.map((sp) => [...sp]),
+          closed: [...p.closed],
+        })),
       // False while a listing pass is in flight. An empty listing is BOTH
       // "no images here" and "the fresh listing hasn't landed yet", so a
       // spec asserting on emptiness alone can pass over a no-op.
