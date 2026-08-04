@@ -103,6 +103,11 @@ export interface AnnotationRect {
 }
 
 export interface StampPreset {
+  /** Stable id for the BUILT-IN presets (absent on user-made stamps, which
+   * are identified by their own `id` in the library). N12 slice C: the label
+   * localizes — it is the text stamped INTO the document — so nothing may
+   * derive identity, a test id, or a comparison from it. */
+  id?: string;
   label: string;
   color: string;
   /** Custom IMAGE stamps (parity map § 2): the raster as a data URL plus its
@@ -113,11 +118,11 @@ export interface StampPreset {
 }
 
 export const STAMP_PRESETS: StampPreset[] = [
-  { label: 'APPROVED', color: '#2fbf71' },
-  { label: 'REJECTED', color: '#e0393e' },
-  { label: 'DRAFT', color: '#8a8a93' },
-  { label: 'CONFIDENTIAL', color: '#e0393e' },
-  { label: 'REVIEWED', color: '#2f6fed' },
+  { id: 'approved', label: 'APPROVED', color: '#2fbf71' },
+  { id: 'rejected', label: 'REJECTED', color: '#e0393e' },
+  { id: 'draft', label: 'DRAFT', color: '#8a8a93' },
+  { id: 'confidential', label: 'CONFIDENTIAL', color: '#e0393e' },
+  { id: 'reviewed', label: 'REVIEWED', color: '#2f6fed' },
 ];
 
 // Fixed footprint, display-normalized (0..1 of the page cell) — stamps are a
