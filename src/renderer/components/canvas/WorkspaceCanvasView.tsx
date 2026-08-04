@@ -4006,6 +4006,10 @@ export function WorkspaceCanvasView({
           lineCount: p.lineCount,
           alignment: p.alignment,
           vertical: p.vertical,
+          // 9.T13: the frame the paragraph's layout ran in, so a spec can
+          // assert a rotated block LISTS as one rather than inferring it
+          // from geometry.
+          orientation: p.orientation,
           // 9.A5a: the distinct per-span colours (seed hexes) — an e2e can
           // assert a recoloured range survives the round-trip.
           colors: Array.from(

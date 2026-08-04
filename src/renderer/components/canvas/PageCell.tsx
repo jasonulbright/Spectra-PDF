@@ -4725,28 +4725,58 @@ function ParagraphEditor({
   };
   // T18 resize: the screen direction of the paragraph's +inline axis under
   // the page's view rotation. Display space is top-left-origin and the card
-  // rect is already rotated through rotateNormalizedRect — this table
-  // mirrors that helper's clockwise quarter-turn exactly (horizontal
-  // paragraphs advance +x at 0°; vertical columns advance +y).
+  // rect is already rotated through rotateNormalizedRect — the quarter-turn
+  // loop below mirrors that helper's clockwise turn exactly.
+  //
+  // 9.T13: the base direction comes from the paragraph's ORIENTATION, not
+  // from its writing mode — a rotated block reads down or up the page with
+  // no vertical writing mode in it, and `vertical-rl`/`rotated-cw` share
+  // one map. At 0° a horizontal paragraph advances screen +x, a column
+  // (and a CW-turned block) screen +y, a CCW-turned block screen −y, and a
+  // 180° block screen −x. Screen y runs DOWN, which is why page −y is [0, 1].
   const inlineDir = ((): [number, number] => {
-    const d = ((rotation % 360) + 360) % 360;
-    if (!para.vertical) {
-      if (d === 90) return [0, 1];
-      if (d === 180) return [-1, 0];
-      if (d === 270) return [0, -1];
-      return [1, 0];
-    }
-    if (d === 90) return [-1, 0];
-    if (d === 180) return [0, -1];
-    if (d === 270) return [1, 0];
-    return [0, 1];
+    const base: [number, number] =
+      para.orientation === 'vertical-rl' || para.orientation === 'rotated-cw'
+        ? [0, 1]
+        : para.orientation === 'rotated-ccw'
+          ? [0, -1]
+          : para.orientation === 'rotated-180'
+            ? [-1, 0]
+            : [1, 0];
+    let [x, y] = base;
+    const turns = (Math.round((((rotation % 360) + 360) % 360) / 90) % 4 + 4) % 4;
+    for (let i = 0; i < turns; i += 1) [x, y] = [-y, x]; // one clockwise turn
+    return [x, y];
   })();
+  // 9.T13: the paragraph's inline extent and the page-space origin of its
+  // START edge both live on the frame's inline axis. `vertical-rl` and
+  // `rotated-cw` measure the box HEIGHT and take a negated top edge (the
+  // transposed left is −y); `rotated-ccw` measures the height too but its
+  // transposed left is +y; `rotated-180` measures the width against a
+  // negated right edge. Horizontal is the shipped arithmetic, untouched.
+  const inlineIsVerticalOnPage =
+    para.orientation === 'vertical-rl' ||
+    para.orientation === 'rotated-cw' ||
+    para.orientation === 'rotated-ccw';
+  const boxLeftPt = (deltaPt: number): number => {
+    switch (para.orientation) {
+      case 'vertical-rl':
+      case 'rotated-cw':
+        return -(para.boxPt[3] - deltaPt);
+      case 'rotated-ccw':
+        return para.boxPt[1] + deltaPt;
+      case 'rotated-180':
+        return -(para.boxPt[2] - deltaPt);
+      default:
+        return para.boxPt[0] + deltaPt;
+    }
+  };
   const beginResize = (e: React.PointerEvent<HTMLDivElement>, side: 'start' | 'end'): void => {
     e.preventDefault();
     e.stopPropagation();
     const cell = wrapperRef.current?.parentElement;
     if (!cell) return;
-    const ptInline = para.vertical
+    const ptInline = inlineIsVerticalOnPage
       ? para.boxPt[3] - para.boxPt[1]
       : para.boxPt[2] - para.boxPt[0];
     const dispInlinePx =
@@ -4781,11 +4811,9 @@ function ParagraphEditor({
       const opts: ParagraphEditOpts = { box_width: width };
       if (side === 'start') {
         // The START edge moved, so the engine must be told the new inline
-        // origin. Horizontal: the new x0. Vertical: the transposed left is
-        // −(top y) and the top chased the drag.
-        opts.box_left = para.vertical
-          ? -(para.boxPt[3] - deltaPt)
-          : para.boxPt[0] + deltaPt;
+        // origin — in the paragraph's OWN frame, which is what `box_left`
+        // has always meant (the transposed left edge).
+        opts.box_left = boxLeftPt(deltaPt);
       }
       settle(() => onCommit(value, restyleOpts(opts)));
     };
@@ -5411,19 +5439,21 @@ function ParagraphEditor({
           {tChrome('canvas.editpara.missingGlyphs', {
             chars: missing.map((c) => `'${c}'`).join(' '),
           })}
-          {/* 9.B4b: no fallback for vertical — the engine refuses convert
-              (the bundled fallback face is horizontal), so the offer would
-              only ever produce an error notice. */}
-          {!para.vertical && (
-            <button
-              type="button"
-              data-testid="edit-para-convert"
-              className="page-edittext-convert"
-              onClick={() => settle(() => onCommit(value, restyleOpts({ convert: true })))}
-            >
-              {tChrome('canvas.editpara.useCompatibleFont')}
-            </button>
-          )}
+          {/* 9.T4 lifted the vertical convert refusal (a column converts
+              into the bundled CJK face, which carries `vert`/`vrt2` and
+              `vmtx`), so the offer is live in every writing mode. It was
+              still hidden for columns until brief 39 — the same stale
+              pre-T4 reason the restyle controls carried. A character even
+              the vertical face cannot draw refuses BY NAME, which is an
+              honest notice rather than a hidden control. */}
+          <button
+            type="button"
+            data-testid="edit-para-convert"
+            className="page-edittext-convert"
+            onClick={() => settle(() => onCommit(value, restyleOpts({ convert: true })))}
+          >
+            {tChrome('canvas.editpara.useCompatibleFont')}
+          </button>
         </div>
       )}
     </div>

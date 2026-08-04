@@ -218,9 +218,14 @@ class TestAddTextRotated:
         assert (y1 - y0) > (x1 - x0)  # rotated: tall, not wide
         assert y1 <= 700 + 1.0  # inside the drawn box
         assert run["editable"] is True  # the run surface still edits it
-        # Rotated text never groups — the shipped paragraph boundary.
+        # 9.T13 INVERSION: an authored rotated label now GROUPS as a
+        # paragraph (admission runs in the member's own transposed frame),
+        # so the label is editable as text rather than only as a run box.
+        # A 90° CCW quarter turn reads UP the page.
         paras = list_text_paragraphs(out, 1)["paragraphs"]
-        assert not any("Vertical label" in p["text"] for p in paras)
+        rotated = next(p for p in paras if "Vertical label" in p["text"])
+        assert rotated["orientation"] == "rotated-ccw"
+        assert rotated["editable"] is True
 
     def test_rotate_180_first_line_hugs_the_bottom_edge(self, tmp_dir):
         # Box [72, 500, 372, 540] (W=300, H=40). 180°: frame

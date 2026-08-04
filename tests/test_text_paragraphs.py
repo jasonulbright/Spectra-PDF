@@ -406,14 +406,39 @@ class TestGrouping:
         # Not wholly clipped (has visible members) → the whole-para flag is False.
         assert p["clipped"] is False
 
-    def test_rotated_text_never_groups(self, tmp_dir):
+    def test_rotated_text_groups_in_its_own_frame(self, tmp_dir):
+        # 9.T13 INVERSION. This pinned "rotated text never groups" — which
+        # was never a capability claim, only the consequence of one
+        # page-space axis-alignment test. Admission now runs in the
+        # member's OWN transposed frame, so a quarter-turned run is an
+        # ordinary axis-aligned member there and reflows like any other.
         src = _build(
             tmp_dir,
             b"BT /F1 12 Tf 0 1 -1 0 100 100 Tm (Rotated) Tj ET",
         )
         listing = list_text_paragraphs(src, 1)
-        assert listing["paragraphs"] == []
+        assert len(listing["paragraphs"]) == 1
+        p = listing["paragraphs"][0]
+        assert p["text"] == "Rotated"
+        assert p["editable"] is True
+        # 90° CCW: reading runs UP the page (+y), lines stack +x.
+        assert p["orientation"] == "rotated-ccw"
+        assert p["vertical"] is False  # a HORIZONTAL font, merely turned
         assert len(listing["runs"]) == 1
+
+    def test_skewed_text_still_never_groups(self, tmp_dir):
+        # The boundary T13 KEPT, and deliberately: `a′ > 0 ∧ d′ > 0` is
+        # retained in the transposed frame, so skew and mirroring stay on
+        # the 7.2 run-box surface. (Second run: a mirrored matrix, negative
+        # determinant.)
+        src = _build(
+            tmp_dir,
+            b"BT /F1 12 Tf 1 0.5 -0.2 1 100 100 Tm (Skewed) Tj ET"
+            b" BT /F1 12 Tf -1 0 0 1 300 300 Tm (Mirror) Tj ET",
+        )
+        listing = list_text_paragraphs(src, 1)
+        assert listing["paragraphs"] == []
+        assert len(listing["runs"]) == 2
 
     def test_vertical_runs_group_with_column_gap_paragraph_break(self, tmp_dir):
         # 9.B4b lifted the B4a never-groups boundary: vertical runs now
@@ -2674,7 +2699,10 @@ class TestVerticalParagraphs:
             for m, d in zip(members, det):
                 a, _b, _c, dd, e, f = d["combined"]
                 assert m.vertical is True
-                assert m.lkey[-1] is True  # the mode rides IN lkey
+                # 9.T13: the FRAME rides in lkey (it was the mode boolean
+                # through B4b) — a column's map is T(x, y) = (-y, x).
+                assert m.lkey[-1] == (0.0, -1.0, 1.0, 0.0)
+                assert m.orientation == "vertical-rl"
                 # T maps the real pen (e, f) to the transposed anchor…
                 assert (m.x0, m.y) == pytest.approx(t(e, f))
                 # …and T⁻¹ recovers it exactly.
@@ -2737,7 +2765,8 @@ class TestVerticalParagraphs:
             )
             members = _members_from(runs, det)
             assert members[0].vertical is False
-            assert members[0].lkey[-1] is False
+            assert members[0].lkey[-1] == (1.0, 0.0, 0.0, 1.0)  # the identity frame
+            assert members[0].orientation == "horizontal"
             assert (members[0].x0, members[0].y) == pytest.approx((72, 700))
 
     def test_vertical_rise_attach_refuses_to_edit(self, tmp_dir):
@@ -2939,6 +2968,266 @@ class TestLigatureParagraphs:
         out = os.path.join(tmp_dir, "o.pdf")
         _apply(src, out, para, para["text"], family="sans", font_path=FONTS_DIR)
         assert _paras(out)[0]["text"] == "afib"
+
+
+class TestOrientations:
+    """9.T13 (brief 39 § 4) — rotated-glyph vertical forms join the column.
+
+    The writing mode became an ORIENTATION whose whole content is a signed
+    axis permutation, so admission is the shipped axis-alignment test asked
+    one frame later. Positions here are HAND-COMPUTED, the round-27
+    discipline: a self-consistent wrong-axis model agrees with any
+    walker-vs-walker comparison, so the dual-walk harness alone cannot pin
+    an axis.
+    """
+
+    def test_every_orientation_round_trips_through_its_inverse(self):
+        # T-1 . T = id for every frame, on points chosen to catch a
+        # transposed-vs-inverted mixup (asymmetric, signed, non-integer).
+        from engine.text_paragraphs import _ORIENTATIONS, _t, _t_inv
+
+        pts = [(0.0, 0.0), (300.0, 700.0), (-14.0, 40.0), (612.5, -792.25)]
+        for name, frame in _ORIENTATIONS.items():
+            for x, y in pts:
+                assert _t_inv(*(frame,) + _t(frame, x, y)) == pytest.approx((x, y)), name
+                assert _t(*(frame,) + _t_inv(frame, x, y)) == pytest.approx((x, y)), name
+
+    def test_each_orientation_sends_its_reading_axis_to_plus_x(self):
+        # The DEFINITION of the map, asserted rather than assumed: a
+        # member's advance lands on +x' and its perpendicular on +y', which
+        # is exactly what makes the horizontal model apply unchanged.
+        from engine.text_paragraphs import (
+            _ORIENTATIONS,
+            HORIZONTAL,
+            ROTATED_180,
+            ROTATED_CCW,
+            ROTATED_CW,
+            VERTICAL_RL,
+            _transposed_linear,
+        )
+
+        S = 10.0
+        cases = [
+            (HORIZONTAL, (S, 0.0, 0.0, S, 0.0, 0.0), False),
+            (VERTICAL_RL, (S, 0.0, 0.0, S, 0.0, 0.0), True),
+            (ROTATED_CW, (0.0, -S, S, 0.0, 0.0, 0.0), False),
+            (ROTATED_CCW, (0.0, S, -S, 0.0, 0.0, 0.0), False),
+            (ROTATED_180, (-S, 0.0, 0.0, -S, 0.0, 0.0), False),
+        ]
+        for name, m, vertical in cases:
+            got = _transposed_linear(m, vertical, _ORIENTATIONS[name])
+            assert got is not None, name
+            a2, b2, c2, d2 = got
+            assert (a2, d2) == pytest.approx((S, S)), name
+            assert (b2, c2) == pytest.approx((0.0, 0.0)), name
+
+    def test_skew_mirror_and_off_quarter_refuse(self):
+        from engine.text_paragraphs import _ORIENTATIONS, _orientation_of, _transposed_linear
+
+        # Off-quarter (45 degrees): no orientation candidate at all.
+        assert _orientation_of((7.07, -7.07, 7.07, 7.07, 0, 0), False) is None
+        # Skewed and mirrored DO classify (their advance is on an axis) and
+        # are refused one step later, by the a' > 0 and d' > 0 test.
+        for m in (
+            (10.0, 0.0, 3.0, 10.0, 0.0, 0.0),  # skewed
+            (10.0, 0.0, 0.0, -10.0, 0.0, 0.0),  # mirrored: negative determinant
+        ):
+            name = _orientation_of(m, False)
+            assert name is not None
+            assert _transposed_linear(m, False, _ORIENTATIONS[name]) is None
+
+    def test_sideways_latin_joins_the_column_as_one_paragraph(self, tmp_dir):
+        # THE T13 case. The Latin run is a 90-degree-CW-rotated run of a
+        # HORIZONTAL font drawn inside a CJK column; both transpose to the
+        # same frame at the same scale, so they group as the one paragraph
+        # they visually are. Before T13 the column grouped WITHOUT it.
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj ET"
+            b" BT /F1 10 Tf 0 -1 1 0 300 670 Tm (PDF) Tj ET",
+            with_helv=True,
+        )
+        paras = _paras(src)
+        assert len(paras) == 1
+        p = paras[0]
+        # Reading position: the column reads top-down, so the Latin follows.
+        assert p["text"] == "あいうPDF"
+        assert p["orientation"] == "vertical-rl"
+        assert p["vertical"] is True  # it HOLDS a vertical-writing member
+        assert p["runs"] == [0, 1]
+        assert p["editable"] is True
+
+    def test_the_mixed_column_emits_each_members_own_matrix(self, tmp_dir):
+        # The emission takes its linear part PER SEGMENT: the upright
+        # member keeps (1 0 0 1) and the rotated one writes its own
+        # rotation. One paragraph, two matrices — which is precisely what
+        # the shipped single-linear-part emission could not express.
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj ET"
+            b" BT /F1 10 Tf 0 -1 1 0 300 670 Tm (PDF) Tj ET",
+            with_helv=True,
+        )
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        spans = [
+            {"start": sp["start"], "end": sp["end"], "run": sp["run"]}
+            for sp in para["spans"]
+        ]
+        _apply(src, out, para, para["text"], spans=spans)
+        raw = _content_bytes(out)
+        assert b"1 0 0 1 300 700 Tm" in raw  # the upright column glyphs
+        assert b"0 -1 1 0 300 670 Tm" in raw  # the sideways Latin
+        after = list_text_runs(out, 1)["runs"]
+        assert [r["vertical"] for r in after] == [True, False]
+        # Hand-computed: nothing moved — the column runs 300..670 down from
+        # y=700 and the Latin sits at the pen it always did.
+        assert after[0]["rect"] == pytest.approx([295, 670, 305, 700], abs=0.05)
+        assert after[1]["rect"] == pytest.approx([300, 650, 310, 670], abs=0.05)
+        assert _paras(out)[0]["text"] == "あいうPDF"
+
+    def test_mixed_orientation_edit_leaves_kept_runs_unmoved(self, tmp_dir):
+        # The dual-walk property with members of two orientations in one
+        # paragraph: the emitted-state machine advances on each PIECE's own
+        # axis, so a kept show after the divergence renders identically.
+        # (Feed the wrong axis here and every following run shifts.)
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj ET"
+            b" BT /F1 10 Tf 0 -1 1 0 300 670 Tm (PDF) Tj ET"
+            b" BT /F1 12 Tf 72 300 Td (Kept elsewhere) Tj ET",
+            with_helv=True,
+        )
+        paras = _paras(src)
+        target = next(p for p in paras if "PDF" in p["text"])
+        out = os.path.join(tmp_dir, "o.pdf")
+        spans = [
+            {"start": sp["start"], "end": sp["end"], "run": sp["run"]}
+            for sp in target["spans"]
+        ]
+        _apply(src, out, target, target["text"], spans=spans)
+        _assert_non_members_unmoved(src, out, target["runs"])
+
+    def test_standalone_rotated_block_reflows(self, tmp_dir):
+        # No CJK anywhere near it: a 90-degree-CW block groups and reflows
+        # through the same pipeline, because admission is now a
+        # transposed-frame test rather than a page-space one.
+        src = _vpage(
+            tmp_dir,
+            b"BT /F1 12 Tf 0 -1 1 0 300 700 Tm (Sideways text here) Tj ET",
+            with_helv=True,
+        )
+        para = _paras(src)[0]
+        assert para["orientation"] == "rotated-cw"
+        assert para["vertical"] is False
+        assert para["box"] == pytest.approx([300, 598.624, 312, 700], abs=0.05)
+        out = os.path.join(tmp_dir, "o.pdf")
+        _apply(src, out, para, "Short")
+        after = list_text_runs(out, 1)["runs"]
+        # Hand-computed: Helvetica "Short" at 12 is 28.68 wide, drawn DOWN
+        # the page from y=700 at the same anchor, one em (12) across.
+        assert after[0]["rect"] == pytest.approx([300, 671.32, 312, 700], abs=0.05)
+        assert _paras(out)[0]["text"] == "Short"
+
+    def test_counter_clockwise_and_upside_down_blocks_reflow(self, tmp_dir):
+        # Refusing three of the four quarter turns while accepting one
+        # would be inventing a boundary: the map costs nothing extra.
+        src = _vpage(
+            tmp_dir,
+            b"BT /F1 12 Tf 0 1 -1 0 300 300 Tm (Upward) Tj ET"
+            b" BT /F1 12 Tf -1 0 0 -1 500 500 Tm (Inverted) Tj ET",
+            with_helv=True,
+        )
+        paras = {p["text"]: p for p in _paras(src)}
+        assert paras["Upward"]["orientation"] == "rotated-ccw"
+        assert paras["Inverted"]["orientation"] == "rotated-180"
+        for text in ("Upward", "Inverted"):
+            out = os.path.join(tmp_dir, f"o-{text}.pdf")
+            _apply(src, out, paras[text], text)
+            relisted = {p["text"]: p for p in _paras(out)}
+            assert text in relisted
+            assert relisted[text]["orientation"] == paras[text]["orientation"]
+            assert relisted[text]["box"] == pytest.approx(paras[text]["box"], abs=0.05)
+
+    def test_a_rise_on_a_rotated_member_is_an_ordinary_superscript(self, tmp_dir):
+        # The refusal NARROWED from per-paragraph to per-member: a rotated
+        # member's Ts displaces along its glyph's own up vector, which the
+        # frame sends to +y' — the perpendicular, exactly where the
+        # horizontal model puts a rise. So this reflows, and the emission
+        # writes the Ts. (Dividing the rise by the member's page `d`, which
+        # is ZERO at a quarter turn, silently flattened it — probe-caught.)
+        src = _vpage(
+            tmp_dir,
+            b"BT /F1 12 Tf 0 -1 1 0 300 700 Tm (Base) Tj"
+            b" /F1 8 Tf 0 -1 1 0 296 672 Tm (2) Tj ET",
+            with_helv=True,
+        )
+        para = _paras(src)[0]
+        assert para["text"] == "Base2"
+        assert para["editable"] is True
+        assert para["reason"] is None
+        out = os.path.join(tmp_dir, "o.pdf")
+        spans = [
+            {"start": sp["start"], "end": sp["end"], "run": sp["run"]}
+            for sp in para["spans"]
+        ]
+        _apply(src, out, para, para["text"], spans=spans)
+        raw = _content_bytes(out)
+        # 4pt of real-x displacement at matrix scale 1 → a −4 Ts.
+        assert b"-4 Ts" in raw
+        assert _paras(out)[0]["text"] == "Base2"
+
+    def test_tate_chu_yoko_refuses_the_column_by_name(self, tmp_dir):
+        # What happened before this refusal was worse than a refusal and
+        # silent: the upright block's key differs from the column's, so the
+        # column grouped WITHOUT it and a reflow moved the CJK text over a
+        # date that never moved.
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj ET"
+            b" BT /F1 5 Tf 296 676 Td (26) Tj ET",
+            with_helv=True,
+        )
+        column = next(p for p in _paras(src) if p["text"] == "あいう")
+        assert column["editable"] is False
+        assert "tate-chu-yoko" in column["reason"]
+        # The block itself stays individually editable on the run surface.
+        block = next(p for p in _paras(src) if p["text"] == "26")
+        assert block["editable"] is True
+
+    def test_a_horizontal_paragraph_beside_a_column_is_not_mistaken_for_tcy(self, tmp_dir):
+        # The false-positive direction is the dangerous one: ordinary
+        # horizontal text NEAR a column must not refuse it. Detection wants
+        # containment in the column's own box AND about one em of extent.
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj ET"
+            b" BT /F1 12 Tf 72 690 Td (A whole line of prose) Tj ET",
+            with_helv=True,
+        )
+        column = next(p for p in _paras(src) if p["text"] == "あいう")
+        assert column["editable"] is True
+        assert column["reason"] is None
+
+    def test_mixed_page_reading_order_is_frame_derived(self, tmp_dir):
+        # The tiebreak comes from the FRAME's own line-stacking direction,
+        # not from a writing-mode boolean (which after T13 no longer answers
+        # the geometric question). Top edge first; columns sharing a top
+        # read rightmost-first.
+        src = _vpage(
+            tmp_dir,
+            b"BT /F1 12 Tf 72 740 Td (Header) Tj ET"
+            b" BT /FV 10 Tf 300 700 Td <000300040005> Tj ET"
+            b" BT /FV 10 Tf 340 700 Td <00030004> Tj ET"
+            b" BT /F1 12 Tf 0 -1 1 0 120 400 Tm (Turned) Tj ET",
+            with_helv=True,
+        )
+        got = [p["text"] for p in _paras(src)]
+        assert got[0] == "Header"
+        # Both columns top at y=700: the RIGHT one (x=340) reads first.
+        assert got[1] == "あい"
+        assert got[2] == "あいう"
+        assert got[3] == "Turned"
 
 
 class TestAlignmentDetection:
