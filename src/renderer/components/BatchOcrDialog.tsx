@@ -17,6 +17,8 @@ import { createBatchIo } from '../lib/batch-ocr-io';
 import { formatBatchLog, batchLogFileName } from '../lib/batch-log';
 import { getSettings } from '../lib/app-settings';
 import { TEST_HARNESS_ENABLED, registerBatchOcr } from '../testHarness';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount, tNumber, tOcrLanguage } from '../i18n';
 
 // Tools ▸ Batch OCR Folder… (Phase 6, docs/architecture/20-phase6-batch-ocr.md):
 // mirror a folder tree into searchable PDFs. Needs NO open document — the
@@ -37,6 +39,8 @@ export interface BatchOcrDialogProps {
 type Phase = 'setup' | 'running' | 'done';
 
 export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Element {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { callRaw } = useEngine();
 
   const [phase, setPhase] = useState<Phase>('setup');
@@ -124,12 +128,12 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   };
 
   const pickSource = async (): Promise<void> => {
-    const path = await dialog.pickFolder('Choose the folder to make searchable');
+    const path = await dialog.pickFolder(tChrome('dialog.batch.pickSource'));
     if (path) await selectSource(path);
   };
 
   const pickDest = async (): Promise<void> => {
-    const path = await dialog.pickFolder('Choose the destination folder');
+    const path = await dialog.pickFolder(tChrome('dialog.common.pickDest'));
     if (path) setDest(path);
   };
 
@@ -176,10 +180,10 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const rootConflict = (root: string | null): string | null => {
     if (root === null) return null;
     if (source !== null && destConflictsWithSource(source, root)) {
-      return 'inside the source folder — the next run would process these files again';
+      return tChrome('dialog.batch.conflictInSource');
     }
     if (dest !== null && destConflictsWithSource(dest, root)) {
-      return 'inside the destination folder — originals would be mixed in with the searchable copies';
+      return tChrome('dialog.batch.conflictInDest');
     }
     return null;
   };
@@ -430,16 +434,16 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
       {phase === 'setup' && (
         <div className="flex flex-col gap-4">
           <FolderRow
-            label="Source folder"
+            label={tChrome('dialog.batch.sourceLabel')}
             testid="batch-ocr-source"
             value={source}
             onPick={() => void pickSource()}
             buttonRef={sourceBtnRef}
             note={
               scanning
-                ? 'Scanning folder…'
+                ? tChrome('dialog.batch.scanning')
                 : entries !== null
-                  ? `${entries.length} PDF${entries.length === 1 ? '' : 's'} found`
+                  ? tChromeCount('dialog.batch.found', entries.length)
                   : null
             }
           />
@@ -460,18 +464,16 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               className="rounded bg-neutral-900 border-neutral-600"
             />
             <span className="text-sm text-neutral-300">
-              Replace the originals in place (no destination folder)
+              {tChrome('dialog.batch.inPlace')}
             </span>
           </label>
           {inPlace ? (
             <p className="text-xs text-amber-400" data-testid="batch-inplace-note">
-              Each file is processed to a staged copy beside it, read back and verified,
-              then swapped over the original. Already-searchable files are left untouched.
-              Runs as one operation — there is no per-file stop.
+              {tChrome('dialog.batch.inPlaceNote')}
             </p>
           ) : (
             <FolderRow
-              label="Destination folder"
+              label={tChrome('dialog.batch.destLabel')}
               testid="batch-ocr-dest"
               value={dest}
               onPick={() => void pickDest()}
@@ -480,22 +482,25 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           )}
           {conflict && (
             <p className="text-sm text-red-400" data-testid="batch-ocr-conflict">
-              {identityConflict
-                ? 'These are the same folder (reached by two different paths) — choose a separate destination for the searchable copies.'
-                : 'The destination must be outside the source folder — choose a separate folder for the searchable copies.'}
+              {tChrome(
+                identityConflict
+                  ? 'dialog.batch.conflictIdentity'
+                  : 'dialog.batch.conflictInside',
+              )}
             </p>
           )}
           <div>
             <label className="block text-sm text-neutral-400 mb-1">
-              Recognition languages
-              <span className="text-neutral-500"> — {describeLanguages(langs)}</span>
+              {/* One whole label: where the summary sits in the phrase is
+                  a property of the language, not of the styling. */}
+              {tChrome('dialog.batch.languages', { summary: describeLanguages(langs) })}
             </label>
             {/* A checkbox list, not a 47-entry <select multiple>: ctrl-clicking
                 to build a set is a UI most people lose a selection to. */}
             <div
               data-testid="batch-ocr-lang"
               role="group"
-              aria-label="Recognition languages"
+              aria-label={tChrome('dialog.batch.languagesAria')}
               className="max-h-44 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-2 gap-x-3 gap-y-1"
             >
               {OCR_LANGUAGES.map((l) => (
@@ -513,23 +518,18 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                     }
                     className="rounded bg-neutral-900 border-neutral-600"
                   />
-                  <span className="text-neutral-300">{l.label}</span>
+                  <span className="text-neutral-300">{tOcrLanguage(l.code)}</span>
                 </label>
               ))}
             </div>
             {langs.length > 1 && (
               <p className="text-xs text-neutral-500 mt-1" data-testid="batch-ocr-lang-note">
-                Several languages are recognized together, which is slower — and on a page
-                that is only one of them, the single right language is usually more accurate.
-                This is not automatic detection.
+                {tChrome('dialog.batch.multiLangNote')}
               </p>
             )}
           </div>
           <p className="text-xs text-neutral-500">
-            Every PDF in the source folder is mirrored into the destination:
-            scanned pages gain an invisible searchable text layer; already-searchable
-            files are copied unchanged. Existing destination files with the same
-            names are overwritten.
+            {tChrome('dialog.batch.blurb')}
           </p>
 
           {/* Requests 2 and 3. Presented as one clearly-fenced section because
@@ -538,39 +538,37 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               until a folder is chosen or a box is ticked. */}
           <details className="rounded border border-neutral-800 bg-neutral-950/40" data-testid="batch-ocr-filing">
             <summary className="px-3 py-2 text-sm text-neutral-300 cursor-pointer select-none">
-              File the originals after processing
-              <span className="text-neutral-500"> — optional; moves your own files</span>
+              {tChrome('dialog.batch.filingSection')}
             </summary>
             <div className="px-3 pb-3 pt-1 flex flex-col gap-3">
               <p className="text-xs text-amber-400/90">
-                Everything below MOVES files out of your source folder. Left alone, the
-                source folder is never modified — that is the default.
+                {tChrome('dialog.batch.filingWarning')}
               </p>
               {!inPlace && (
                 <OptionalFolderRow
-                  label="Move processed originals to"
+                  label={tChrome('dialog.batch.movedLabel')}
                   testid="batch-ocr-moved"
                   value={movedRoot}
                   conflict={movedConflict}
                   onPick={async () => {
-                    const path = await dialog.pickFolder('Choose where processed originals go');
+                    const path = await dialog.pickFolder(tChrome('dialog.common.pickProcessed'));
                     if (path) setMovedRoot(path);
                   }}
                   onClear={() => setMovedRoot(null)}
-                  note="Only after the searchable copy has been read back and verified. The folder structure is preserved, and a name that already exists is never overwritten."
+                  note={tChrome('dialog.batch.movedNote')}
                 />
               )}
               <OptionalFolderRow
-                label="Move failed originals to"
+                label={tChrome('dialog.batch.errorsLabel')}
                 testid="batch-ocr-errors"
                 value={errorRoot}
                 conflict={errorConflict}
                 onPick={async () => {
-                  const path = await dialog.pickFolder('Choose where files that could not be processed go');
+                  const path = await dialog.pickFolder(tChrome('dialog.batch.pickErrors'));
                   if (path) setErrorRoot(path);
                 }}
                 onClear={() => setErrorRoot(null)}
-                note="Password-protected and damaged files, so what is left behind in the source folder is what succeeded."
+                note={tChrome('dialog.batch.errorsNote')}
               />
               <label className="flex items-start gap-2 cursor-pointer">
                 <input
@@ -581,11 +579,9 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                   className="mt-0.5 rounded bg-neutral-900 border-neutral-600"
                 />
                 <span className="text-sm text-neutral-300">
-                  Try to repair damaged files
+                  {tChrome('dialog.batch.repair')}
                   <span className="block text-xs text-neutral-500">
-                    A file that will not open is rewritten (annotations, bookmarks and
-                    metadata are kept) and processed if that works. Password-protected
-                    files are not repairable and are left alone.
+                    {tChrome('dialog.batch.repairNote')}
                   </span>
                 </span>
               </label>
@@ -601,10 +597,9 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                   className="mt-0.5 rounded bg-neutral-900 border-neutral-600"
                 />
                 <span className="text-sm text-neutral-300">
-                  Replace the damaged original with the repaired file
+                  {tChrome('dialog.batch.replaceRepaired')}
                   <span className="block text-xs text-neutral-500">
-                    Writes the repaired file back over the original — the repaired
-                    document, not the searchable copy.
+                    {tChrome('dialog.batch.replaceRepairedNote')}
                   </span>
                 </span>
               </label>
@@ -612,13 +607,14 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           </details>
           {skippedDirs.length > 0 && (
             <p className="text-xs text-amber-400" data-testid="batch-ocr-skipped-dirs">
-              Could not read {skippedDirs.length} subfolder{skippedDirs.length === 1 ? '' : 's'} (it
-              will be missing from the mirror): {skippedDirs.join('; ')}
+              {tChromeCount('dialog.batch.skippedDirs', skippedDirs.length, {
+                dirs: skippedDirs.join('; '),
+              })}
             </p>
           )}
           {entries !== null && entries.length === 0 && (
             <p className="text-sm text-neutral-400" data-testid="batch-ocr-empty">
-              No PDF files found in this folder.
+              {tChrome('dialog.batch.empty')}
             </p>
           )}
           {error && (
@@ -630,26 +626,26 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               onClick={onClose}
               className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
             >
-              Cancel
+              {tChrome('dialog.common.cancel')}
             </button>
             {inPlace && confirmInPlace ? (
               <>
                 <span className="text-xs text-amber-400 self-center" data-testid="batch-inplace-warning">
-                  Replace the originals in the source folder? There is no undo.
+                  {tChrome('dialog.batch.inPlaceConfirm')}
                 </span>
                 <button
                   data-testid="batch-inplace-keep"
                   onClick={() => setConfirmInPlace(false)}
                   className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
                 >
-                  Keep
+                  {tChrome('dialog.common.keep')}
                 </button>
                 <button
                   data-testid="batch-inplace-replace"
                   onClick={() => void startInPlace()}
                   className="px-3 py-1.5 text-xs text-white bg-red-700/90 hover:bg-red-600 rounded font-medium"
                 >
-                  Replace originals
+                  {tChrome('dialog.batch.replaceOriginals')}
                 </button>
               </>
             ) : (
@@ -659,7 +655,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 onClick={() => (inPlace ? setConfirmInPlace(true) : void start())}
                 className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
               >
-                Start
+                {tChrome('dialog.batch.start')}
               </button>
             )}
           </div>
@@ -676,10 +672,10 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               data-testid="batch-ocr-stop"
               onClick={cancel}
               disabled={stopping || inPlace}
-              title={inPlace ? 'An in-place run is one operation — it cannot stop per file' : undefined}
+              title={inPlace ? tChrome('dialog.batch.noStopInPlace') : undefined}
               className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium disabled:opacity-50"
             >
-              {stopping ? 'Stopping…' : 'Stop'}
+              {tChrome(stopping ? 'dialog.batch.stopping' : 'dialog.batch.stop')}
             </button>
           </div>
         </div>
@@ -688,29 +684,40 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
       {phase === 'done' && report && summary && (
         <div className="flex flex-col gap-3" data-testid="batch-ocr-done">
           <p className="text-sm" data-testid="batch-ocr-summary">
-            {report.cancelled ? 'Stopped. ' : ''}
-            {/* "already searchable" must not absorb the OCR-ran-but-found-
-                nothing copies (review-caught mislabel) — those carry a
-                reason and get their own segment. */}
-            {[
-              `${summary.ocrd} made searchable`,
-              `${summary.copied - notedCopies.length} copied (already searchable)`,
-              ...(notedCopies.length > 0
-                ? [`${notedCopies.length} copied (no text recognized)`]
-                : []),
-              `${summary.skipped} skipped`,
-            ].join(' · ')}
+            {/* Each segment is a WHOLE message; only the ' · ' separator is
+                assembled. "already searchable" must not absorb the
+                OCR-ran-but-found-nothing copies (review-caught mislabel) —
+                those carry a reason and get their own segment. */}
+            {(() => {
+              const parts = [
+                tChrome('dialog.batch.sumOcrd', { count: tNumber(summary.ocrd) }),
+                tChrome('dialog.batch.sumCopied', {
+                  count: tNumber(summary.copied - notedCopies.length),
+                }),
+                ...(notedCopies.length > 0
+                  ? [tChrome('dialog.batch.sumNoText', { count: tNumber(notedCopies.length) })]
+                  : []),
+                tChrome('dialog.batch.sumSkipped', { count: tNumber(summary.skipped) }),
+              ].join(' · ');
+              return report.cancelled
+                ? tChrome('dialog.batch.stoppedPrefix', { summary: parts })
+                : parts;
+            })()}
           </p>
           {report.cancelled && (
             <p className="text-xs text-neutral-500">
-              Files finished before the stop remain in the destination.
+              {tChrome('dialog.batch.cancelledNote')}
             </p>
           )}
           {(movedCount > 0 || repairedCount > 0) && (
             <p className="text-xs text-neutral-400" data-testid="batch-ocr-moved-summary">
               {[
-                ...(movedCount > 0 ? [`${movedCount} original${movedCount === 1 ? '' : 's'} moved`] : []),
-                ...(repairedCount > 0 ? [`${repairedCount} repaired`] : []),
+                ...(movedCount > 0
+                  ? [tChromeCount('dialog.batch.movedCount', movedCount)]
+                  : []),
+                ...(repairedCount > 0
+                  ? [tChrome('dialog.batch.repairedCount', { count: tNumber(repairedCount) })]
+                  : []),
               ].join(' · ')}
             </p>
           )}
@@ -720,12 +727,11 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               data-testid="batch-ocr-move-failures"
             >
               <p className="text-xs text-amber-400 mb-1">
-                {moveFailures.length} original{moveFailures.length === 1 ? ' is' : 's are'} still in
-                the source folder:
+                {tChromeCount('dialog.batch.moveFailures', moveFailures.length)}
               </p>
               {moveFailures.map((r) => (
                 <p key={r.rel} className="text-xs text-amber-400/90">
-                  {r.rel} — {r.moveError}
+                  {tChrome('dialog.batch.rowReason', { rel: r.rel, reason: r.moveError ?? '' })}
                 </p>
               ))}
             </div>
@@ -734,7 +740,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             <div className="max-h-40 overflow-y-auto border border-neutral-800 rounded p-2">
               {skippedResults.map((r) => (
                 <p key={r.rel} className="text-xs text-amber-400">
-                  {r.rel} — {r.reason}
+                  {tChrome('dialog.batch.rowReason', { rel: r.rel, reason: r.reason ?? '' })}
                 </p>
               ))}
             </div>
@@ -743,7 +749,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             <div className="max-h-24 overflow-y-auto border border-neutral-800 rounded p-2">
               {notedCopies.map((r) => (
                 <p key={r.rel} className="text-xs text-neutral-400">
-                  {r.rel} — copied ({r.reason})
+                  {tChrome('dialog.batch.rowCopied', { rel: r.rel, reason: r.reason ?? '' })}
                 </p>
               ))}
             </div>
@@ -755,34 +761,31 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             >
               {notedOcr.map((r) => (
                 <p key={r.rel} className="text-xs text-neutral-400">
-                  {r.rel} — made searchable, but {r.reason}
+                  {tChrome('dialog.batch.rowPartial', { rel: r.rel, reason: r.reason ?? '' })}
                 </p>
               ))}
             </div>
           )}
           {report.skippedDirs.length > 0 && (
             <p className="text-xs text-amber-400">
-              Unreadable subfolders (missing from the mirror): {report.skippedDirs.join('; ')}
+              {tChrome('dialog.batch.unreadableDirs', { dirs: report.skippedDirs.join('; ') })}
             </p>
           )}
           {logPath && (
             <p className="text-xs text-neutral-500" data-testid="batch-ocr-log-path">
-              Log written:{' '}
-              <span className="text-neutral-400" title={logPath}>
-                {logPath}
-              </span>{' '}
+              {tChrome('dialog.batch.logWritten', { path: logPath })}{' '}
               <button
                 data-testid="batch-ocr-log-open"
                 onClick={() => void batch.openLogFolder(getSettings().batchLogDir).catch(() => {})}
                 className="underline hover:text-neutral-300"
               >
-                Open folder
+                {tChrome('dialog.batch.openFolder')}
               </button>
             </p>
           )}
           {logError && (
             <p className="text-xs text-amber-400" data-testid="batch-ocr-log-error">
-              The run finished, but its log could not be written: {logError}
+              {tChrome('dialog.batch.logError', { message: logError })}
             </p>
           )}
           <div className="flex justify-end gap-2 pt-1">
@@ -791,7 +794,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               onClick={runAnother}
               className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
             >
-              Run another
+              {tChrome('dialog.batch.again')}
             </button>
             <button
               ref={doneCloseBtnRef}
@@ -799,7 +802,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               onClick={onClose}
               className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium"
             >
-              Close
+              {tChrome('dialog.common.close')}
             </button>
           </div>
         </div>
@@ -821,32 +824,41 @@ function ProgressLine({
   if (stopping) {
     return (
       <p className="text-sm text-neutral-300" data-testid="batch-ocr-progress" aria-live="polite">
-        Stopping — finishing the current file… (Close again to abandon the run.)
+        {tChrome('dialog.batch.progressStopping')}
       </p>
     );
   }
   if (!progress) {
     return (
       <p className="text-sm text-neutral-400" data-testid="batch-ocr-progress" aria-live="polite">
-        Starting…
+        {tChrome('dialog.batch.progressStarting')}
       </p>
     );
   }
   const { fileIndex, fileCount, rel, phase, page, pageCount } = progress;
   const verb =
     phase === 'recognizing'
-      ? `recognizing page ${page ?? 0} of ${pageCount ?? 0}`
+      ? tChrome('dialog.batch.verbRecognizing', {
+          page: tNumber(page ?? 0),
+          pageCount: tNumber(pageCount ?? 0),
+        })
       : phase === 'copying'
-        ? 'copying'
+        ? tChrome('dialog.batch.verbCopying')
         : phase === 'writing'
-          ? 'writing searchable copy'
+          ? tChrome('dialog.batch.verbWriting')
           : phase === 'scanning'
-            ? 'checking pages'
-            : 'loading';
+            ? tChrome('dialog.batch.verbScanning')
+            : tChrome('dialog.batch.verbLoading');
   return (
     <p className="text-sm text-neutral-300" data-testid="batch-ocr-progress" aria-live="polite">
-      File {fileIndex + 1} of {fileCount}: <span className="text-neutral-100">{rel}</span>
-      <span className="text-neutral-400"> — {verb}</span>
+      {/* One whole narration — the file name and the verb used to sit in
+          their own coloured spans, which fixed the clause order. */}
+      {tChrome('dialog.batch.progress', {
+        index: tNumber(fileIndex + 1),
+        count: tNumber(fileCount),
+        rel,
+        verb,
+      })}
     </p>
   );
 }
@@ -900,14 +912,14 @@ function FolderRow({
           onClick={onPick}
           className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium shrink-0"
         >
-          Choose…
+          {tChrome('dialog.common.choose')}
         </button>
         <span
           data-testid={testid}
           className="text-sm text-neutral-300 truncate"
           title={value ?? undefined}
         >
-          {value ?? 'No folder chosen'}
+          {value ?? tChrome('dialog.batch.noFolder')}
         </span>
       </div>
       {note && <p className="text-xs text-neutral-500 mt-1">{note}</p>}
@@ -943,10 +955,10 @@ function OptionalFolderRow({
           onClick={onPick}
           className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium shrink-0"
         >
-          Choose…
+          {tChrome('dialog.common.choose')}
         </button>
         <span data-testid={testid} className="text-sm text-neutral-300 truncate" title={value ?? undefined}>
-          {value ?? 'Not moving them (default)'}
+          {value ?? tChrome('dialog.batch.notMoving')}
         </span>
         {value !== null && (
           <button
@@ -954,13 +966,13 @@ function OptionalFolderRow({
             onClick={onClear}
             className="px-2 py-1 text-xs text-neutral-500 hover:text-neutral-300 shrink-0"
           >
-            Clear
+            {tChrome('dialog.common.clear')}
           </button>
         )}
       </div>
       {conflict !== null ? (
         <p className="text-xs text-red-400 mt-1" data-testid={`${testid}-conflict`}>
-          That folder is {conflict}.
+          {conflict}
         </p>
       ) : (
         <p className="text-xs text-neutral-500 mt-1">{note}</p>
@@ -982,19 +994,19 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Batch OCR Folder"
+        aria-label={tChrome('dialog.batch.title')}
         data-testid="batch-ocr-dialog"
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[560px] max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
-          <h3 className="text-sm font-semibold">Batch OCR Folder</h3>
+          <h3 className="text-sm font-semibold">{tChrome('dialog.batch.title')}</h3>
           <button
             data-testid="batch-ocr-x"
             onClick={onClose}
             className="text-neutral-500 hover:text-neutral-300 text-sm"
           >
-            Close
+            {tChrome('dialog.common.close')}
           </button>
         </div>
         <div className="p-5">{children}</div>
