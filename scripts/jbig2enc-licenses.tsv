@@ -1,0 +1,50 @@
+# Redistribution-notice manifest for the bundled JBIG2 encoder (O8 slice B).
+#
+# bundle-jbig2enc.ps1 ships ONE binary — jbig2.exe from the official
+# jbig2enc 0.32 Windows x64 MSVC release asset. It is a STATIC build: leptonica,
+# libtiff, libjpeg-turbo, libpng, zlib-ng, openjpeg, libwebp and giflib are
+# linked inside that single executable rather than sitting beside it as DLLs.
+# A per-FILE manifest (the tesseract-licenses.tsv shape) would therefore
+# account for one row and silently drop eight components, so this manifest is
+# per COMPONENT and the `file` column names the binary each is linked into.
+#
+# The component list is not hand-written. Upstream ships `depmf.json` in the
+# same zip — a dependency manifest with exact versions and SPDX ids — and
+# bundle-jbig2enc.ps1 REFUSES to ship when a project named there has no row
+# here, or when a row's version disagrees with it. `jbig2.exe --version`
+# prints the same set at run time and is the cross-check.
+#
+# COLUMNS: file <TAB> component <TAB> version <TAB> spdx <TAB> notice <TAB> source
+#   file      exact filename as shipped in resources/jbig2enc/
+#   component upstream project, spelled as `depmf.json` spells it
+#   version   the version frozen inside the pinned binary
+#   spdx      SPDX expression. "AND" = every listed licence's terms apply.
+#   notice    filename under resources/jbig2enc/licenses/, except jbig2enc's
+#             own, which the zip supplies and which ships at the top level
+#   source    upstream the notice text came from
+#
+# RULES:
+#  - A dependency is never removed to simplify this file. Every component gets
+#    a row, whatever its licence. (Nothing here is copyleft, but that is a fact
+#    about this artifact, not a criterion — this project is MIT open source
+#    with a public repository, so the source column answers "where is the
+#    source" for any licence.)
+#  - Notices are FETCHED ONCE, from a URL pinned to the component version
+#    above, by fetch-jbig2enc-licenses.ps1, reviewed as a git diff, and
+#    committed. The build copies them offline. There is no ongoing obligation
+#    to track upstream relicensing for a binary that is frozen.
+#  - JBIG2 is a patented process. Upstream's own PATENTS note ships beside the
+#    binary as PATENTS-jbig2enc.txt; it is not a licence and gets no row.
+#  - Keep sorted by component so a diff against a fresh depmf.json reads
+#    cleanly.
+#
+file	component	version	spdx	notice	source
+jbig2.exe	giflib	5.2.2	MIT	LICENSE-giflib.txt	https://raw.githubusercontent.com/mirrorer/giflib/master/COPYING
+jbig2.exe	jbig2enc	0.32	Apache-2.0	LICENSE-jbig2enc.txt	shipped in the release zip as COPYING
+jbig2.exe	leptonica	1.87.0	BSD-2-Clause	LICENSE-leptonica.txt	https://raw.githubusercontent.com/DanBloomberg/leptonica/1.87.0/leptonica-license.txt
+jbig2.exe	libjpeg-turbo	3.1.4.1	BSD-3-Clause AND IJG	LICENSE-libjpeg-turbo.txt	https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.4/LICENSE.md
+jbig2.exe	libpng	1.6.58	libpng-2.0	LICENSE-libpng.txt	https://raw.githubusercontent.com/pnggroup/libpng/v1.6.58/LICENSE
+jbig2.exe	libwebp	1.6.0	BSD-3-Clause	LICENSE-libwebp.txt	https://raw.githubusercontent.com/webmproject/libwebp/v1.6.0/COPYING
+jbig2.exe	openjp2	2.5.4	BSD-2-Clause	LICENSE-openjpeg.txt	https://raw.githubusercontent.com/uclouvain/openjpeg/v2.5.4/LICENSE
+jbig2.exe	tiff	4.7.1	libtiff AND BSD-4.3TAHOE	LICENSE-libtiff.txt	https://gitlab.com/libtiff/libtiff/-/raw/v4.7.1/LICENSE.md
+jbig2.exe	zlib-ng	2.3.3	Zlib	LICENSE-zlib-ng.txt	https://raw.githubusercontent.com/zlib-ng/zlib-ng/2.3.3/LICENSE.md
