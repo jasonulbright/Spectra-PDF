@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.0.18 — Vertical writing, all the way
+
+Text set in columns finishes the job it started. Mongolian — and the Todo,
+Sibe and Manchu that share its alphabet — reads and edits the way it is
+written: down the page, with the columns running left to right. And the
+small horizontal blocks that live inside vertical text, the years and page
+numbers and two-digit figures, are now part of the column they sit in
+rather than something the column has to work around.
+
+### Vertical text
+- **Left-to-right columns.** Mongolian text sets in vertical columns that
+  advance from left to right, the opposite of the East Asian convention.
+  Those columns now list, read and reflow in the right order: the leftmost
+  column is the start of the paragraph, and text that grows adds a new
+  column to the right. The direction is read from the text itself, so
+  documents in every other vertical script are untouched.
+- **Editing Mongolian keeps it joined.** Mongolian letters change shape
+  according to their neighbours, and a PDF stores the final shapes rather
+  than the rules that produced them. An edited column is re-formed properly
+  — using the document's own typeface wherever that typeface still carries
+  what is needed, and a bundled Mongolian face otherwise — so edited text
+  reads as words instead of a row of disconnected letters. Edited text also
+  still extracts, searches and copies as the characters that were typed.
+- **Numbers inside a column are editable in place.** A year or a page
+  number set upright inside vertical text is part of that column's text
+  now: it appears in the editor where it appears on the page, it moves with
+  the text around it, and it stays exactly one column wide even when it
+  gains digits. Previously the column reflowed around such a block without
+  accounting for it, which could leave text overlapping it.
+- **Upright punctuation.** Commas, brackets and quotation marks in a
+  column take the upright forms the typeface provides for vertical
+  setting, rather than the sideways ones.
+
 ## 1.0.17 — Drafting tools, long documents, and an interface that speaks Spanish
 
 Markup lands where you aim it: snapping to the drawing's own geometry,
