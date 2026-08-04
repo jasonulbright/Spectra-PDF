@@ -1,9 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../i18n';
+import { formatQueueLabel, type QueueLabel } from '../hooks/useOperationQueue';
 
 export interface QueueItem {
   id: string;
-  label: string;
+  /** What the line SAYS, as data — rendered at the current language on every
+   * paint (N12). The operation log renders the same descriptor in English. */
+  label: QueueLabel;
   status: 'running' | 'done' | 'error';
+  /** Failure text from the engine (slice-D boundary — passed through as the
+   * engine wrote it). Empty for running and completed operations, whose
+   * wording is the queue's own. */
   message: string;
   startTime: number;
 }
@@ -19,6 +27,8 @@ function formatTime(ts: number): string {
 }
 
 export function OperationQueue({ items, onClear }: OperationQueueProps): React.ReactElement | null {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -38,13 +48,16 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
         onClick={() => setCollapsed((prev) => !prev)}
       >
         <span className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold">
-          Operations ({items.length}){collapsed ? ' ...' : ''}
+          {tChrome(
+            collapsed ? 'dialog.opqueue.headingCollapsed' : 'dialog.opqueue.heading',
+            { count: items.length },
+          )}
         </span>
         <button
           onClick={(e) => { e.stopPropagation(); onClear(); }}
           className="text-[10px] text-neutral-500 hover:text-neutral-400"
         >
-          Clear
+          {tChrome('dialog.opqueue.clear')}
         </button>
       </div>
       {!collapsed && (
@@ -54,7 +67,7 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
           style={{ maxHeight: 88 }}
           tabIndex={0}
           role="region"
-          aria-label="Recent operations"
+          aria-label={tChrome('dialog.opqueue.aria')}
         >
           {items.map((item) => (
             <div key={item.id} className="flex items-center gap-3 text-xs">
@@ -62,10 +75,21 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
                 item.status === 'running' ? 'bg-blue-500 animate-pulse' :
                 item.status === 'done' ? 'bg-emerald-500' : 'bg-red-500'
               }`} />
-              <span className="text-neutral-300">{formatTime(item.startTime)} {item.label}</span>
-              <span className="text-neutral-500 truncate flex-1">{item.message}</span>
+              <span className="text-neutral-300">
+                {formatTime(item.startTime)} {formatQueueLabel(item.label)}
+              </span>
+              <span className="text-neutral-500 truncate flex-1">
+                {/* Completion is the queue's OWN wording, keyed off the state
+                    discriminant rather than off any text the hook wrote —
+                    a failure's text belongs to the engine and passes through. */}
+                {item.status === 'done' ? tChrome('dialog.opqueue.complete') : item.message}
+              </span>
               <span className="text-neutral-500 shrink-0">
-                {item.status === 'done' ? `${((Date.now() - item.startTime) / 1000).toFixed(1)}s` : ''}
+                {item.status === 'done'
+                  ? tChrome('dialog.opqueue.elapsed', {
+                      seconds: ((Date.now() - item.startTime) / 1000).toFixed(1),
+                    })
+                  : ''}
               </span>
             </div>
           ))}

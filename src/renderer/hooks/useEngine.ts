@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { engine, dialog } from '../lib/tauri-bridge';
 import { runCommitGate } from '../lib/commit-gate';
 import { lockKeysFor, withFileLock } from '../lib/engine-lock';
-import { useOperationQueue, isTrackableMethod, getFriendlyName } from './useOperationQueue';
+import { useOperationQueue, isTrackableMethod } from './useOperationQueue';
 
 interface PendingRequest {
   resolve: (value: EngineResult) => void;
@@ -127,7 +127,7 @@ export function useEngine() {
       // rename, so without this the later rename silently wins and the
       // earlier operation's work is gone with no error anywhere.
       return withFileLock(lockKeysFor(params), () =>
-        track(getFriendlyName(method, params), () => rawCall(method, params)),
+        track(method, params, () => rawCall(method, params)),
       ) as Promise<EngineResult>;
     }
     return rawCall(method, params);

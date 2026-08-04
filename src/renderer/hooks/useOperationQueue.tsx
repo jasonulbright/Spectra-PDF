@@ -1,17 +1,24 @@
 import React, { createContext, useContext, useCallback, useState, useRef } from 'react';
 import type { QueueItem } from '../components/OperationQueue';
 import { app } from '../lib/tauri-bridge';
+import { tChrome, tChromeCount, tQueueOp } from '../i18n';
 
 interface QueueContextValue {
   items: QueueItem[];
   /** Track an async operation in the queue. Returns a promise that resolves when the operation completes. */
-  track: (label: string, operation: () => Promise<unknown>) => Promise<unknown>;
+  track: (
+    method: string,
+    params: Record<string, unknown>,
+    operation: () => Promise<unknown>,
+  ) => Promise<unknown>;
   clear: () => void;
 }
 
 const QueueContext = createContext<QueueContextValue | null>(null);
 
-const FRIENDLY_NAMES: Record<string, string> = {
+/** The op NAME per engine method — a data table, so the i18n catalog gate
+ * generates an `opqueue.op.<method>` key from every row (exported for it). */
+export const FRIENDLY_NAMES: Record<string, string> = {
   merge: 'Merge',
   split: 'Split',
   add_attachment: 'Attach File',
@@ -48,11 +55,11 @@ const FRIENDLY_NAMES: Record<string, string> = {
   export_document: 'Export',
   export_images: 'Export Images',
   verify_signatures: 'Verify Signatures',
-  // NB: the default getFriendlyName path uses only params.file — the signing
-  // password is never referenced, so it can't reach the operation log.
+  // NB: the descriptor below is a WHITELIST — the signing password is not
+  // among the fields it copies, so it can't reach the queue or the log.
   sign_pdf: 'Sign',
-  // Same property: no param besides the (non-secret) name ever reaches the
-  // queue label; the .pfx password stays out of every sink.
+  // Same property: only whitelisted (non-secret) fields reach the queue
+  // label; the .pfx password stays out of every sink.
   generate_signer: 'Create Signer',
   set_document_js: 'Edit Document JavaScript',
   set_struct_props: 'Edit Tag',
@@ -135,61 +142,161 @@ export function isTrackableMethod(method: string): boolean {
   return !INTERNAL_METHODS.has(method);
 }
 
-function formatPages(pages: unknown): string {
-  if (Array.isArray(pages)) return pages.length === 1 ? `p${pages[0]}` : `p${pages.join(',')}`;
-  if (typeof pages === 'string' && pages) return `p${pages}`;
-  return 'all';
-}
-
 function fileName(path: unknown): string {
   if (typeof path !== 'string') return '';
   return path.split(/[\\/]/).pop() || '';
 }
 
-export function getFriendlyName(method: string, params: Record<string, unknown> = {}): string {
-  const base = FRIENDLY_NAMES[method] || method;
-  const file = fileName(params.file);
+/**
+ * N12 slice B — what a queue line SAYS, as data rather than as a finished
+ * English sentence. The queue stores this descriptor and renders it at the
+ * current language on every paint, while the operation LOG renders the same
+ * descriptor pinned to English (a diagnostic sink — the slice-D boundary).
+ *
+ * SECURITY, strengthened here: the descriptor is a WHITELIST of the few
+ * values a label needs (a base file name, a page list, a count, a format).
+ * The engine params — which for `sign_pdf` include the signing password and
+ * for a token flow the PIN — are read once, synchronously, and never stored.
+ * Previously the safety rested on the formatter's default branch happening
+ * not to touch anything but `params.file`; now no param can reach the queue
+ * unless it is named below.
+ */
+export interface QueueLabel {
+  method: string;
+  /** Base name of the operated file, if the label names one. */
+  file?: string;
+  fileA?: string;
+  fileB?: string;
+  /** Joined page list, or null for "every page". */
+  pages?: string | null;
+  ranges?: string | null;
+  copies?: number;
+  detail?: string;
+  level?: string;
+  fileCount?: number;
+  regionCount?: number;
+  fmt?: string;
+  dpi?: string;
+  angle?: number;
+}
 
+function pageList(pages: unknown): string | null {
+  if (Array.isArray(pages)) return pages.join(',');
+  if (typeof pages === 'string' && pages) return pages;
+  return null;
+}
+
+/** Build the descriptor for an engine call. Pure, and the only place that
+ * ever reads `params` on the queue's behalf. */
+export function describeOperation(
+  method: string,
+  params: Record<string, unknown> = {},
+): QueueLabel {
+  const l: QueueLabel = { method, file: fileName(params.file) };
   switch (method) {
+    case 'rotate':
+      l.angle = Number(params.angle);
+      l.pages = pageList(params.pages);
+      break;
+    case 'delete':
+    case 'extract_text':
+      l.pages = pageList(params.pages);
+      break;
+    case 'print':
+      l.pages = pageList(params.pages);
+      l.copies = Number(params.copies);
+      break;
+    case 'split':
+      l.ranges = typeof params.ranges === 'string' && params.ranges ? params.ranges : null;
+      break;
+    case 'compress':
+      l.detail = typeof params.quality === 'string' && params.quality ? params.quality : 'ebook';
+      break;
+    case 'convert_pdfa':
+      l.level = typeof params.level === 'string' && params.level ? params.level : '2b';
+      break;
+    case 'merge':
+      l.fileCount = Array.isArray(params.files) ? params.files.length : 0;
+      break;
+    case 'redact':
+      l.regionCount = Array.isArray(params.regions) ? params.regions.length : 0;
+      break;
+    case 'compare_text':
+      l.fileA = fileName(params.file_a);
+      l.fileB = fileName(params.file_b);
+      break;
+    case 'export_document':
+      l.fmt = String(params.fmt ?? '').toUpperCase();
+      break;
+    case 'export_images':
+      l.fmt = String(params.fmt ?? '').toUpperCase();
+      l.dpi = String(params.dpi ?? '');
+      break;
+    default:
+      break;
+  }
+  return l;
+}
+
+/** Render a descriptor. `lng` pins the language — the log passes 'en'. */
+export function formatQueueLabel(l: QueueLabel, lng?: string): string {
+  const op = tQueueOp(l.method, FRIENDLY_NAMES[l.method] || l.method, lng);
+  const file = l.file ?? '';
+  const pages =
+    l.pages === null || l.pages === undefined
+      ? tChrome('dialog.opqueue.allPages', undefined, lng)
+      : tChrome('dialog.opqueue.pageList', { pages: l.pages }, lng);
+
+  switch (l.method) {
     case 'rotate': {
-      const angle = Number(params.angle);
-      const dir = angle === 90 ? 'CW' : angle === 270 ? 'CCW' : `${angle}°`;
-      return `${base} ${dir} ${formatPages(params.pages)} — ${file}`;
+      const dir =
+        l.angle === 90
+          ? tChrome('dialog.opqueue.cw', undefined, lng)
+          : l.angle === 270
+            ? tChrome('dialog.opqueue.ccw', undefined, lng)
+            : tChrome('dialog.opqueue.degrees', { angle: Number(l.angle) }, lng);
+      return tChrome('dialog.opqueue.rotate', { op, dir, pages, file }, lng);
     }
     case 'delete':
-      return `${base} ${formatPages(params.pages)} — ${file}`;
-    case 'split':
-      return `${base} ${params.ranges || 'all'} — ${file}`;
     case 'extract_text':
-      return `${base} ${formatPages(params.pages)} — ${file}`;
-    case 'print': {
-      const copies = Number(params.copies);
-      const times = copies > 1 ? ` ×${copies}` : '';
-      return `${base} ${formatPages(params.pages)}${times} — ${file}`;
-    }
+      return tChrome('dialog.opqueue.pages', { op, pages, file }, lng);
+    case 'print':
+      return Number(l.copies) > 1
+        ? tChrome('dialog.opqueue.printCopies', {
+            op, pages, copies: Number(l.copies), file,
+          }, lng)
+        : tChrome('dialog.opqueue.pages', { op, pages, file }, lng);
+    case 'split':
+      return tChrome('dialog.opqueue.ranges', {
+        op,
+        ranges: l.ranges ?? tChrome('dialog.opqueue.allPages', undefined, lng),
+        file,
+      }, lng);
     case 'compress':
-      return `${base} (${params.quality || 'ebook'}) — ${file}`;
+      return tChrome('dialog.opqueue.detail', { op, detail: l.detail ?? '', file }, lng);
     case 'convert_pdfa':
-      return `${base} ${params.level || '2b'} — ${file}`;
+      return tChrome('dialog.opqueue.level', { op, level: l.level ?? '', file }, lng);
     case 'encrypt':
     case 'decrypt':
     case 'set_metadata':
     case 'unlock':
-      return `${base} — ${file}`;
+      return tChrome('dialog.opqueue.file', { op, file }, lng);
     case 'merge':
-      return `${base} (${Array.isArray(params.files) ? params.files.length : '?'} files)`;
-    case 'redact': {
-      const n = Array.isArray(params.regions) ? params.regions.length : 0;
-      return `${base} ${n} region${n === 1 ? '' : 's'} — ${file}`;
-    }
+      return tChromeCount('dialog.opqueue.mergeFiles', l.fileCount ?? 0, { op }, lng);
+    case 'redact':
+      return tChromeCount('dialog.opqueue.redactRegions', l.regionCount ?? 0, { op, file }, lng);
     case 'compare_text':
-      return `${base}: ${fileName(params.file_a)} ↔ ${fileName(params.file_b)}`;
+      return tChrome('dialog.opqueue.compare', { op, a: l.fileA ?? '', b: l.fileB ?? '' }, lng);
     case 'export_document':
-      return `${base} ${String(params.fmt ?? '').toUpperCase()} — ${file}`;
+      return tChrome('dialog.opqueue.format', { op, fmt: l.fmt ?? '', file }, lng);
     case 'export_images':
-      return `${base} ${String(params.fmt ?? '').toUpperCase()} ${params.dpi ?? ''}dpi — ${file}`;
+      return tChrome('dialog.opqueue.formatDpi', {
+        op, fmt: l.fmt ?? '', dpi: l.dpi ?? '', file,
+      }, lng);
     default:
-      return file ? `${base} — ${file}` : base;
+      return file
+        ? tChrome('dialog.opqueue.file', { op, file }, lng)
+        : tChrome('dialog.opqueue.plain', { op }, lng);
   }
 }
 
@@ -197,21 +304,31 @@ export function QueueProvider({ children }: { children: React.ReactNode }): Reac
   const [items, setItems] = useState<QueueItem[]>([]);
   const idCounter = useRef(0);
 
-  const track = useCallback((label: string, operation: () => Promise<unknown>) => {
+  const track = useCallback((
+    method: string,
+    params: Record<string, unknown>,
+    operation: () => Promise<unknown>,
+  ) => {
     const id = String(++idCounter.current);
     const startTime = Date.now();
+    // Read `params` ONCE, here, into the whitelisted descriptor — nothing
+    // else about the call is retained (see describeOperation's note).
+    const label = describeOperation(method, params);
     setItems((prev) => [...prev, { id, label, status: 'running', message: '', startTime }]);
 
+    // The log is a DIAGNOSTIC sink and stays English regardless of the UI
+    // language (the same boundary the engine's own messages sit on).
     const logLine = (status: string, detail: string) => {
       const ts = new Date(startTime).toISOString();
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      app.appendOperationLog(`${ts} [${status}] ${label} — ${detail} (${elapsed}s)`).catch(() => {});
+      const english = formatQueueLabel(label, 'en');
+      app.appendOperationLog(`${ts} [${status}] ${english} — ${detail} (${elapsed}s)`).catch(() => {});
     };
 
     return operation().then(
       (result) => {
         setItems((prev) => prev.map((item) =>
-          item.id === id ? { ...item, status: 'done' as const, message: 'Complete' } : item
+          item.id === id ? { ...item, status: 'done' as const, message: '' } : item
         ));
         logLine('OK', 'Complete');
         return result;
