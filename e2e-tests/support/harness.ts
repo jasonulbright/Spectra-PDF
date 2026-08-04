@@ -81,6 +81,43 @@ export async function setView(view: TestStateSnapshot['view']): Promise<void> {
   );
 }
 
+/**
+ * Open a menubar menu and wait for one of its items — RETRYING the trigger.
+ *
+ * Hardening for the recorded `menuitem-tool-* still not displayed after
+ * 10000ms` class (dev-notes flake ledger, first seen 2026-08-02 on
+ * `91-ink-strokes`). A single `.click()` on the trigger is not a reliable
+ * open: the specs that flake click the menubar immediately after
+ * `openByPaths` + `setView('canvas')`, so the click can land while the
+ * canvas is still mounting and the menu either never opens or is dismissed
+ * by the focus change that follows. Waiting longer cannot fix that — the
+ * menu is CLOSED, not slow — which is why this re-issues the trigger
+ * instead of extending a timeout.
+ *
+ * The trigger TOGGLES, so it is only re-clicked when the menu is actually
+ * shut (Radix reflects that in `aria-expanded`); re-clicking an open menu
+ * would close the very thing we are waiting for.
+ */
+export async function openMenuItem(menuTestId: string, itemTestId: string): Promise<void> {
+  const trigger = $(`[data-testid="${menuTestId}"]`);
+  await trigger.waitForDisplayed({ timeout: 15_000 });
+
+  await browser.waitUntil(
+    async () => {
+      if (await $(`[data-testid="${itemTestId}"]`).isDisplayed()) return true;
+      if ((await trigger.getAttribute('aria-expanded')) !== 'true') {
+        await trigger.click();
+      }
+      return await $(`[data-testid="${itemTestId}"]`).isDisplayed();
+    },
+    {
+      timeout: 20_000,
+      interval: 250,
+      timeoutMsg: `${itemTestId} never appeared after opening ${menuTestId}`,
+    },
+  );
+}
+
 /** Focus a tab directly (Phase 4 M2): 'home' | 'tools' | { doc: path }. */
 export async function focusTab(tab: FocusedTab): Promise<void> {
   await browser.execute<void, [FocusedTab]>(
