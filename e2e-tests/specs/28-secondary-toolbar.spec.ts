@@ -7,6 +7,7 @@ import {
   closeAllFiles,
   focusTab,
   invokeAppCommand,
+  openMenuItem,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -33,8 +34,7 @@ describe('secondary toolbar', () => {
   });
 
   it('Tools ▸ Comment arms the tool from the document, and the strip shows ITS modes', async () => {
-    await $('[data-testid="menu-tools"]').click();
-    await $('[data-testid="menuitem-tool-comment"]').waitForDisplayed();
+    await openMenuItem('menu-tools', 'menuitem-tool-comment');
     await $('[data-testid="menuitem-tool-comment"]').click();
 
     // Still on the document — a canvas tool must not yank you to the Tools tab.
@@ -95,7 +95,7 @@ describe('secondary toolbar', () => {
     // Escape means "stop drawing", not "close Comment". With the pill gone, a
     // strip that vanished on Escape would leave no way to re-arm short of the
     // Tools menu — so the strip belongs to the open TOOL, not the armed mode.
-    await $('[data-testid="menu-tools"]').click();
+    await openMenuItem('menu-tools', 'menuitem-tool-comment');
     await $('[data-testid="menuitem-tool-comment"]').click();
     await $('[data-testid="secondary-toolbar"]').waitForDisplayed();
     await browser.keys(['Escape']);
@@ -118,7 +118,7 @@ describe('secondary toolbar', () => {
     // It owns exactly one mode, and § 3.2 names its "+ Add Field" control. It
     // also has ops — which used to send it to the Tools tab, i.e. away from the
     // page it had just armed a mode on.
-    await $('[data-testid="menu-tools"]').click();
+    await openMenuItem('menu-tools', 'menuitem-tool-prepareform');
     await $('[data-testid="menuitem-tool-prepareform"]').click();
     await browser.waitUntil(
       async () => {
@@ -137,8 +137,7 @@ describe('secondary toolbar', () => {
   });
 
   it('Tools ▸ Redact arms a DIFFERENT tool, and the strip follows', async () => {
-    await $('[data-testid="menu-tools"]').click();
-    await $('[data-testid="menuitem-tool-redact"]').waitForDisplayed();
+    await openMenuItem('menu-tools', 'menuitem-tool-redact');
     await $('[data-testid="menuitem-tool-redact"]').click();
     const bar = $('[data-testid="secondary-toolbar"]');
     await bar.waitForDisplayed({ timeoutMsg: 'no secondary toolbar after arming Redact' });
