@@ -88,6 +88,8 @@ import {
   type ResizeHandle,
 } from '../../lib/annotation-manipulation';
 import type { ShapeType } from '../../state/types';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tNumber, type UiKey } from '../../i18n';
 
 // Measure overlays draw in amber — legible over both white paper and the
 // annotation palette's blues/yellows, and distinct from ink's default.
@@ -249,6 +251,7 @@ function FormWidgetView({
   onSignFieldRequest: (path: string, fieldName: string) => void;
   onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => void;
 }): React.JSX.Element | null {
+  useTranslation();
   const hasPending = pending !== undefined;
   if (!formsMode && !hasPending) return null;
   // Widget rects are display-normalized at the BAKED orientation; an
@@ -266,7 +269,7 @@ function FormWidgetView({
       <div
         className="page-form-widget page-form-pending"
         style={style}
-        title={`${widget.fieldName} — filled, not yet applied`}
+        title={tChrome('canvas.widget.pending', { field: widget.fieldName })}
       />
     );
   }
@@ -291,13 +294,13 @@ function FormWidgetView({
           type="button"
           className="page-form-widget page-form-sig signable"
           style={style}
-          title={`${widget.fieldName} — click to sign this field`}
+          title={tChrome('canvas.widget.signHere', { field: widget.fieldName })}
           onClick={(e) => {
             stop(e);
             onSignFieldRequest(widget.path, widget.fieldName);
           }}
         >
-          <span>SIGN HERE</span>
+          <span>{tChrome('canvas.widget.badge.signHere')}</span>
         </button>
       );
     }
@@ -306,13 +309,16 @@ function FormWidgetView({
         {...common}
         className={'page-form-widget page-form-sig' + (widget.sigFilled ? ' signed' : '')}
         style={style}
-        title={
-          widget.sigFilled
-            ? `${widget.fieldName} — already signed`
-            : `${widget.fieldName} — read-only signature field`
-        }
+        title={tChrome(
+          widget.sigFilled ? 'canvas.widget.signed' : 'canvas.widget.readonlySig',
+          { field: widget.fieldName },
+        )}
       >
-        <span>{widget.sigFilled ? 'SIGNED' : 'SIGNATURE'}</span>
+        <span>
+          {tChrome(
+            widget.sigFilled ? 'canvas.widget.badge.signed' : 'canvas.widget.badge.signature',
+          )}
+        </span>
       </div>
     );
   }
@@ -323,19 +329,19 @@ function FormWidgetView({
     // honest about the rest (no shell-open, no JS engine).
     const label =
       widget.action?.kind === 'reset'
-        ? 'resets form fields'
+        ? tChrome('canvas.widget.action.reset')
         : widget.action?.kind === 'uri'
-          ? `links to ${widget.action.uri}`
+          ? tChrome('canvas.widget.action.uri', { uri: widget.action.uri })
           : widget.action
-            ? `${widget.action.kind} action`
-            : 'no action';
+            ? tChrome('canvas.widget.action.other', { kind: widget.action.kind })
+            : tChrome('canvas.widget.action.none');
     return (
       <button
         {...common}
         type="button"
         className="page-form-widget page-form-button"
         style={style}
-        title={`${widget.fieldName} — ${label}`}
+        title={tChrome('canvas.widget.button', { field: widget.fieldName, action: label })}
         onClick={(e) => {
           stop(e);
           onFormButton(widget.path, widget.fieldName, widget.action ?? null);
@@ -349,7 +355,7 @@ function FormWidgetView({
         {...common}
         className="page-form-widget page-form-locked"
         style={style}
-        title={`${widget.fieldName} — read-only`}
+        title={tChrome('canvas.widget.readonly', { field: widget.fieldName })}
       />
     );
   }
@@ -399,7 +405,10 @@ function FormWidgetView({
           'page-form-widget page-form-radio' + (on ? ' on' : '') + (hasPending ? ' pending' : '')
         }
         style={style}
-        title={`${widget.fieldName}: ${widget.radioOption ?? '(unmapped option)'}`}
+        title={tChrome('canvas.widget.radio', {
+          field: widget.fieldName,
+          option: widget.radioOption ?? tChrome('canvas.widget.radioUnmapped'),
+        })}
         disabled={widget.radioOption === undefined}
         onClick={(e) => {
           stop(e);
@@ -714,6 +723,7 @@ function VectorRestyleToolbar({
   testid: string;
   onCommit: (opts: VectorRestyleOpts) => void;
 }): React.ReactElement {
+  useTranslation();
   const [fill, setFill] = useState(() => rgb01ToHex(obj.fill));
   const [stroke, setStroke] = useState(() => rgb01ToHex(obj.stroke));
   const [width, setWidth] = useState(() => String(obj.lineWidth));
@@ -754,9 +764,9 @@ function VectorRestyleToolbar({
       >
         <span
           className="page-editvec-ctl"
-          title="A gradient fill has no flat colour to change — move or delete it"
+          title={tChrome('canvas.editvec.shadingTitle')}
         >
-          Gradient fill
+          {tChrome('canvas.editvec.shading')}
         </span>
       </div>
     );
@@ -764,8 +774,8 @@ function VectorRestyleToolbar({
   return (
     <div className={className} data-testid={testid} style={style} onPointerDown={(e) => e.stopPropagation()}>
       {obj.kind !== 'stroke' && (
-        <label className="page-editvec-ctl" title="Fill colour">
-          Fill
+        <label className="page-editvec-ctl" title={tChrome('canvas.editvec.fillTitle')}>
+          {tChrome('canvas.editvec.fill')}
           <input
             type="color"
             data-testid={`edit-vector-fill-${obj.index}`}
@@ -780,8 +790,8 @@ function VectorRestyleToolbar({
       )}
       {obj.kind !== 'fill' && (
         <>
-          <label className="page-editvec-ctl" title="Stroke colour">
-            Line
+          <label className="page-editvec-ctl" title={tChrome('canvas.editvec.strokeTitle')}>
+            {tChrome('canvas.editvec.stroke')}
             <input
               type="color"
               data-testid={`edit-vector-stroke-${obj.index}`}
@@ -793,8 +803,8 @@ function VectorRestyleToolbar({
               }}
             />
           </label>
-          <label className="page-editvec-ctl" title="Line width">
-            W
+          <label className="page-editvec-ctl" title={tChrome('canvas.editvec.widthTitle')}>
+            {tChrome('canvas.editvec.width')}
             <input
               type="number"
               min={0}
@@ -909,6 +919,7 @@ function PageCellImpl({
   onSetSignaturePlacement,
   onClearSignaturePlacement,
 }: PageCellProps): React.JSX.Element {
+  useTranslation();
   // The cell's width. Two formulas, deliberately:
   //  - The BOARD keeps `displayWidthOf`'s width-at-BASE_PAGE_HEIGHT, scaled by
   //    pageHeight (a factor of 1 there). Its integer-at-280 rounding is what the
@@ -2477,7 +2488,7 @@ function PageCellImpl({
                     <button
                       key={c}
                       className="page-annot-recolor-dot"
-                      title={`Recolor to ${c}`}
+                      title={tChrome('canvas.annot.recolorTo', { color: c })}
                       style={{ backgroundColor: c }}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2490,16 +2501,18 @@ function PageCellImpl({
                   className="page-annot-x"
                   title={
                     a.kind === 'freetext'
-                      ? 'Remove text'
+                      ? tChrome('canvas.annot.removeText')
                       : a.kind === 'ink'
-                        ? 'Remove drawing'
+                        ? tChrome('canvas.annot.removeDrawing')
                         : a.kind === 'stamp'
-                          ? 'Remove stamp'
+                          ? tChrome('canvas.annot.removeStamp')
                           : a.kind === 'textmarkup'
-                            ? `Remove ${a.markupType ?? 'highlight'}`
+                            ? tChrome(
+                                `canvas.annot.removeMarkup.${a.markupType ?? 'highlight'}` as UiKey,
+                              )
                             : a.kind === 'note'
-                              ? 'Remove note'
-                              : 'Remove highlight'
+                              ? tChrome('canvas.annot.removeNote')
+                              : tChrome('canvas.annot.removeHighlight')
                   }
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2578,11 +2591,11 @@ function PageCellImpl({
               height: `${r.h * 100}%`,
             }}
           >
-            <span className="page-redact-label">REDACT</span>
+            <span className="page-redact-label">{tChrome('canvas.mark.redact')}</span>
             {(tool === 'select' || tool === 'redact') && (
               <button
                 className="page-annot-x"
-                title="Remove redaction mark"
+                title={tChrome('canvas.mark.redactRemove')}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -2631,7 +2644,10 @@ function PageCellImpl({
                 type="button"
                 data-testid={`edit-vector-${vec.index}`}
                 className="page-editvec-hit"
-                title={`Vector object (${vec.kind})${vec.nested ? ' — inside a group' : ''}`}
+                title={tChrome(
+                  vec.nested ? 'canvas.editvec.hitNested' : 'canvas.editvec.hit',
+                  { kind: vec.kind },
+                )}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -2666,7 +2682,7 @@ function PageCellImpl({
                   type="button"
                   data-testid={`edit-vector-delete-${vectorTransform.index}`}
                   className="page-editvec-del"
-                  title="Delete this vector object"
+                  title={tChrome('canvas.editvec.delete')}
                   style={{ left: `${(dr.x + dr.w) * 100}%`, top: `${dr.y * 100}%` }}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
@@ -2743,7 +2759,7 @@ function PageCellImpl({
               type="button"
               data-testid={`edit-para-${para.index}`}
               className={'page-editpara' + (selected ? ' selected' : '')}
-              title="Paragraph — double-click to edit"
+              title={tChrome('canvas.editpara.hit')}
               aria-pressed={selected}
               style={{
                 left: `${r.x * 100}%`,
@@ -2828,13 +2844,13 @@ function PageCellImpl({
               type="button"
               data-testid={`edit-image-${img.index}`}
               className={'page-editimg' + (selected ? ' selected' : '')}
-              title={
+              title={tChrome(
                 img.kind === 'vector'
-                  ? 'Vector graphic'
+                  ? 'canvas.editimg.vector'
                   : img.nested
-                    ? 'Image (inside a form)'
-                    : 'Image'
-              }
+                    ? 'canvas.editimg.nested'
+                    : 'canvas.editimg.image',
+              )}
               aria-pressed={selected}
               style={{
                 left: `${r.x * 100}%`,
@@ -2918,11 +2934,11 @@ function PageCellImpl({
                 height: `${r.h * 100}%`,
               }}
             >
-              <span className="page-signature-label">SIGNATURE</span>
+              <span className="page-signature-label">{tChrome('canvas.mark.signature')}</span>
               {(tool === 'select' || tool === 'signature') && (
                 <button
                   className="page-annot-x"
-                  title="Remove signature placement"
+                  title={tChrome('canvas.mark.signatureRemove')}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2950,11 +2966,11 @@ function PageCellImpl({
                 height: `${r.h * 100}%`,
               }}
             >
-              <span className="page-form-new-label">NEW FIELD</span>
+              <span className="page-form-new-label">{tChrome('canvas.mark.newField')}</span>
               {(tool === 'select' || tool === 'forms' || tool === 'formfields') && (
                 <button
                   className="page-annot-x"
-                  title="Remove field placement"
+                  title={tChrome('canvas.mark.newFieldRemove')}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2983,7 +2999,7 @@ function PageCellImpl({
               }}
             >
               <span className="page-form-new-label">
-                NEW TEXT{' '}
+                {tChrome('canvas.mark.newText')}{' '}
                 <span
                   className="inline-block"
                   data-testid="add-text-direction"
@@ -3001,7 +3017,7 @@ function PageCellImpl({
               {(tool === 'select' || tool === 'edit' || tool === 'addtext') && (
                 <button
                   className="page-annot-x"
-                  title="Remove text placement"
+                  title={tChrome('canvas.mark.newTextRemove')}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -3032,10 +3048,10 @@ function PageCellImpl({
                 height: `${r.h * 100}%`,
               }}
             >
-              <span className="page-crop-label">KEEP</span>
+              <span className="page-crop-label">{tChrome('canvas.mark.keep')}</span>
               <button
                 className="page-annot-x"
-                title="Remove crop rectangle"
+                title={tChrome('canvas.mark.cropRemove')}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -3304,6 +3320,7 @@ function ParagraphEditor({
    * drag back onto the paragraph's inline axis through it. */
   rotation?: number;
 }): React.JSX.Element {
+  useTranslation();
   const [value, setValue] = useState(para.text);
   // T18: the split gap the NEXT Enter-inside split uses, in leading
   // multiples. 2 = the engine default (not sent); adjustable by typing or
@@ -3902,26 +3919,32 @@ function ParagraphEditor({
             key={side}
             data-testid={`edit-para-grip-${side}`}
             className={`page-editpara-grip ${cls}`}
-            title="Drag to resize the paragraph box"
+            title={tChrome('canvas.editpara.resizeGrip')}
             onPointerDown={(e) => beginResize(e, side)}
           />
         );
       })}
       {gripPreview !== null && (
         <div className="page-editpara-resize-readout" data-testid="edit-para-resize-readout">
-          {Math.round(gripPreview)} pt
+          {tChrome('canvas.editpara.resizeReadout', {
+            width: tNumber(Math.round(gripPreview)),
+          })}
         </div>
       )}
-      <div className="page-editpara-toolbar" role="group" aria-label="Text style">
+      <div
+        className="page-editpara-toolbar"
+        role="group"
+        aria-label={tChrome('canvas.editpara.styleGroup')}
+      >
         <label className="page-editpara-ctl">
-          Size
+          {tChrome('canvas.editpara.size')}
           <input
             type="number"
             data-testid="edit-para-size"
             min={1}
             max={1638}
             step={1}
-            title="With text selected, sizes the selection; otherwise the whole paragraph"
+            title={tChrome('canvas.editpara.sizeTitle')}
             value={sizeField}
             onChange={(e) => {
               setSizeField(e.target.value);
@@ -3942,13 +3965,13 @@ function ParagraphEditor({
         </label>
         <label
           className="page-editpara-ctl"
-          title="Gap between the halves when Enter splits inside the text (× line height)"
+          title={tChrome('canvas.editpara.splitGapTitle')}
         >
-          Split gap
+          {tChrome('canvas.editpara.splitGap')}
           <span
             className="page-editpara-gapgrip"
             data-testid="edit-para-splitgap-grip"
-            title="Drag to adjust"
+            title={tChrome('canvas.editpara.dragToAdjust')}
             onPointerDown={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -3982,12 +4005,12 @@ function ParagraphEditor({
           />
         </label>
         <label className="page-editpara-ctl">
-          Colour
+          {tChrome('canvas.editpara.colour')}
           <input
             type="color"
             data-testid="edit-para-color"
             value={/^#[0-9a-f]{6}$/i.test(colorField) ? colorField : '#000000'}
-            title="With text selected, recolours the selection; otherwise the whole paragraph"
+            title={tChrome('canvas.editpara.colourTitle')}
             onChange={(e) => {
               // A5a dual role: a PARTIAL selection recolours just that range
               // (per-span); a caret or whole-text selection recolours the
@@ -4005,16 +4028,16 @@ function ParagraphEditor({
           />
         </label>
         <label className="page-editpara-ctl">
-          Font
+          {tChrome('canvas.editpara.font')}
           <select
             data-testid="edit-para-family"
             value={family}
             disabled={para.vertical}
-            title={
+            title={tChrome(
               para.vertical
-                ? 'Vertical text keeps its font — the bundled faces are horizontal'
-                : "Replaces the paragraph's font with the chosen bundled face"
-            }
+                ? 'canvas.editpara.verticalKeepsFont'
+                : 'canvas.editpara.familyTitle',
+            )}
             onChange={(e) => {
               // A5b dual role: a real family + a PARTIAL selection → per-span
               // face on that range; otherwise the shipped whole-paragraph
@@ -4032,8 +4055,8 @@ function ParagraphEditor({
               }
             }}
           >
-            <option value="">Keep original font</option>
-            <optgroup label="Bundled">
+            <option value="">{tChrome('canvas.editpara.keepFont')}</option>
+            <optgroup label={tChrome('canvas.editpara.bundled')}>
               <option value="sans">Liberation Sans</option>
               <option value="serif">Liberation Serif</option>
               <option value="mono">Liberation Mono</option>
@@ -4042,8 +4065,10 @@ function ParagraphEditor({
               <optgroup
                 label={
                   installed.restricted > 0
-                    ? `Installed (${installed.restricted} not shown — licence)`
-                    : 'Installed'
+                    ? tChrome('canvas.editpara.installedRestricted', {
+                        count: tNumber(installed.restricted),
+                      })
+                    : tChrome('canvas.editpara.installed')
                 }
               >
                 {installed.families.map((fam) => {
@@ -4068,11 +4093,9 @@ function ParagraphEditor({
           className={`page-editpara-style${(faceField ? faceField.bold : bold) ? ' pressed' : ''}`}
           aria-pressed={faceField ? faceField.bold : bold}
           disabled={para.vertical}
-          title={
-            para.vertical
-              ? 'Vertical text keeps its font — the bundled faces are horizontal'
-              : 'Bold — substitutes the bundled bold face'
-          }
+          title={tChrome(
+            para.vertical ? 'canvas.editpara.verticalKeepsFont' : 'canvas.editpara.boldTitle',
+          )}
           onClick={() => {
             // A5b dual role: a PARTIAL selection toggles bold on that range
             // (keeping its other axes); a caret or whole-text selection
@@ -4104,7 +4127,7 @@ function ParagraphEditor({
             }
           }}
         >
-          B
+          {tChrome('canvas.editpara.bold')}
         </button>
         <button
           type="button"
@@ -4112,11 +4135,9 @@ function ParagraphEditor({
           className={`page-editpara-style page-editpara-style-i${(faceField ? faceField.italic : italic) ? ' pressed' : ''}`}
           aria-pressed={faceField ? faceField.italic : italic}
           disabled={para.vertical}
-          title={
-            para.vertical
-              ? 'Vertical text keeps its font — the bundled faces are horizontal'
-              : 'Italic — substitutes the bundled italic face'
-          }
+          title={tChrome(
+            para.vertical ? 'canvas.editpara.verticalKeepsFont' : 'canvas.editpara.italicTitle',
+          )}
           onClick={() => {
             // A5b dual role: PARTIAL → per-span italic on that range; caret
             // or whole-text → the shipped whole-paragraph toggle. Per SEGMENT
@@ -4138,7 +4159,7 @@ function ParagraphEditor({
             }
           }}
         >
-          I
+          {tChrome('canvas.editpara.italic')}
         </button>
         {/* 9.K2 OpenType features — dual role like B/I. A partial selection
             applies the feature to that range (per span, riding the face
@@ -4153,11 +4174,9 @@ function ParagraphEditor({
           }`}
           aria-pressed={faceField ? faceField.smallCaps : smallCaps}
           disabled={para.vertical}
-          title={
-            para.vertical
-              ? 'Vertical text keeps its font — the bundled faces are horizontal'
-              : 'Small caps — uses the font’s own if it has them, else Libertinus Serif'
-          }
+          title={tChrome(
+            para.vertical ? 'canvas.editpara.verticalKeepsFont' : 'canvas.editpara.smallCapsTitle',
+          )}
           onClick={() => {
             const sel = spanTarget();
             if (sel) {
@@ -4176,7 +4195,7 @@ function ParagraphEditor({
             }
           }}
         >
-          SC
+          {tChrome('canvas.editpara.smallCaps')}
         </button>
         <button
           type="button"
@@ -4186,11 +4205,11 @@ function ParagraphEditor({
           }`}
           aria-pressed={faceField ? faceField.alternates : alternates}
           disabled={para.vertical}
-          title={
+          title={tChrome(
             para.vertical
-              ? 'Vertical text keeps its font — the bundled faces are horizontal'
-              : 'Stylistic alternates (salt) — uses the font’s own if it has them, else Libertinus Serif'
-          }
+              ? 'canvas.editpara.verticalKeepsFont'
+              : 'canvas.editpara.alternatesTitle',
+          )}
           onClick={() => {
             const sel = spanTarget();
             if (sel) {
@@ -4217,7 +4236,7 @@ function ParagraphEditor({
             }
           }}
         >
-          Alt
+          {tChrome('canvas.editpara.alternates')}
         </button>
         {(faceField ? faceField.alternates : alternates) && (
           <label className="page-editpara-ctl">
@@ -4229,7 +4248,7 @@ function ParagraphEditor({
               max={99}
               step={1}
               value={altIndex}
-              title="Which stylistic alternate to use, when the font offers several"
+              title={tChrome('canvas.editpara.altIndexTitle')}
               onChange={(e) => {
                 const v = Math.max(0, Math.min(99, Math.trunc(parseFloat(e.target.value) || 0)));
                 setAltIndex(v);
@@ -4271,7 +4290,7 @@ function ParagraphEditor({
           suppressContentEditableWarning
           role="textbox"
           aria-multiline="true"
-          aria-label="Paragraph text"
+          aria-label={tChrome('canvas.editpara.textAria')}
           spellCheck={false}
           /* 9.T3: the engine hands back LOGICAL (reading) order for a
              right-to-left paragraph, so the box has to read that way too —
@@ -4386,7 +4405,9 @@ function ParagraphEditor({
       </div>
       {!valid && (
         <div className="page-edittext-error" data-testid="edit-para-error" aria-live="polite">
-          This document's font does not contain {missing.map((c) => `'${c}'`).join(' ')}
+          {tChrome('canvas.editpara.missingGlyphs', {
+            chars: missing.map((c) => `'${c}'`).join(' '),
+          })}
           {/* 9.B4b: no fallback for vertical — the engine refuses convert
               (the bundled fallback face is horizontal), so the offer would
               only ever produce an error notice. */}
@@ -4397,7 +4418,7 @@ function ParagraphEditor({
               className="page-edittext-convert"
               onClick={() => settle(() => onCommit(value, restyleOpts({ convert: true })))}
             >
-              Use a compatible font
+              {tChrome('canvas.editpara.useCompatibleFont')}
             </button>
           )}
         </div>
@@ -4428,6 +4449,7 @@ function TextRunEditor({
   onRestyle?: (style: { size?: number; color?: [number, number, number] }) => void;
   onCancel: () => void;
 }): React.JSX.Element {
+  useTranslation();
   const [value, setValue] = useState(run.text);
   // T14 style row state: blank size = keep; null color = keep.
   const [styleSize, setStyleSize] = useState('');
@@ -4508,7 +4530,9 @@ function TextRunEditor({
       />
       {!valid && (
         <div className="page-edittext-error" data-testid="edit-text-error" aria-live="polite">
-          This document's font does not contain {missing.map((c) => `'${c}'`).join(' ')}
+          {tChrome('canvas.editpara.missingGlyphs', {
+            chars: missing.map((c) => `'${c}'`).join(' '),
+          })}
           {/* 7.4: the coverage-refusal escape hatch — re-render the run in
               the bundled fallback font. The wrapper's pointerdown
               preventDefault keeps the input focused; click still fires. */}
@@ -4518,7 +4542,7 @@ function TextRunEditor({
             className="page-edittext-convert"
             onClick={() => settle(() => onCommit(value, { convert: true }))}
           >
-            Use a compatible font
+            {tChrome('canvas.editpara.useCompatibleFont')}
           </button>
         </div>
       )}
@@ -4535,7 +4559,9 @@ function TextRunEditor({
             min={1}
             max={999}
             step="0.5"
-            placeholder={`${Math.round(run.fontSize ?? 12)}pt`}
+            placeholder={tChrome('canvas.edittext.sizePlaceholder', {
+              size: tNumber(Math.round(run.fontSize ?? 12)),
+            })}
             value={styleSize}
             className={sizeValid ? '' : 'invalid'}
             onChange={(e) => setStyleSize(e.target.value)}
@@ -4548,7 +4574,11 @@ function TextRunEditor({
                 'page-edittext-colorchip' + (styleColor === hex ? ' selected' : '')
               }
               style={{ background: hex }}
-              title={styleColor === hex ? 'Keep current colour' : `Colour ${hex}`}
+              title={
+                styleColor === hex
+                  ? tChrome('canvas.edittext.keepColour')
+                  : tChrome('canvas.edittext.colour', { color: hex })
+              }
               onClick={() => setStyleColor((cur) => (cur === hex ? null : hex))}
             />
           ))}
@@ -4566,7 +4596,7 @@ function TextRunEditor({
               )
             }
           >
-            Apply style
+            {tChrome('canvas.edittext.applyStyle')}
           </button>
         </div>
       )}
