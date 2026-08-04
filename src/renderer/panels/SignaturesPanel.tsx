@@ -130,7 +130,7 @@ export function SignaturesPanel(): React.ReactElement {
       appearance?: { page: number; rect: [number, number, number, number] },
       profile?: { pades?: boolean; tsaUrl?: string; ltv?: boolean },
     ): Promise<SignResult> => {
-      if (!activeFile) throw new Error('No active file to sign.');
+      if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
       return (await call('sign_pdf', {
         file: activeFile.workingPath,
         output,
@@ -204,7 +204,7 @@ export function SignaturesPanel(): React.ReactElement {
       rsn?: string,
       loc?: string,
     ): Promise<VerifyResult> => {
-      if (!activeFile) throw new Error('No active file to sign.');
+      if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
       await performOperation(activeFile.path, 'sign_pdf', {
         ...sourceParams,
         // A token source takes the password field as its PIN (F3).

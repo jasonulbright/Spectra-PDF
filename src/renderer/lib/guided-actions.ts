@@ -14,7 +14,7 @@ import { OCR_LANGUAGES } from '../ocr/languages';
 // through the catalog. That is the one non-pure import here — i18n is
 // itself a data module (catalogs + i18next), so the helpers below stay
 // unit-testable with no DOM.
-import { tChrome, tStepTitle } from '../i18n';
+import { tChrome, tStepParam, tStepTitle } from '../i18n';
 
 // Slice 2 grew the catalog: OCR (the batch pipeline's single-file arm),
 // header/footer (one positioned text per step — several positions compose as
@@ -251,24 +251,35 @@ export function buildStepParams(
   return def.mapParams ? def.mapParams(out) : out;
 }
 
-/** null when valid; else the first human-readable problem. */
+/** null when valid; else the first human-readable problem.
+ *
+ * N12 slice E: every refusal is ONE interpolated catalog key, and the STEP
+ * and PARAM names inside it resolve through the same `gaction.*` keys the
+ * editor renders — a message naming "Watermark" in a Spanish UI while the
+ * step list above it says "Marca de agua" would be worse than English. */
 export function validateAction(action: GuidedAction): string | null {
-  if (!action.name.trim()) return 'The action needs a name.';
-  if (action.steps.length === 0) return 'Add at least one step.';
+  if (!action.name.trim()) return tChrome('refusal.action.needsName');
+  if (action.steps.length === 0) return tChrome('refusal.action.needsStep');
   for (let i = 0; i < action.steps.length; i++) {
     const step = action.steps[i];
     const def = STEP_CATALOG.find((d) => d.op === step.op);
-    if (!def) return `Step ${i + 1} names an unknown operation.`;
+    if (!def) return tChrome('refusal.action.unknownOp', { index: i + 1 });
     const asked = new Set(askedParamKeys(step));
     for (const p of def.params) {
       // An asked/secret param's emptiness is the PRE-RUN form's problem.
       if (p.required && !asked.has(p.key) && !String(step.params[p.key] ?? '').trim()) {
-        return `Step ${i + 1} (${def.title}): ${p.label} is required.`;
+        return tChrome('refusal.action.paramRequired', {
+          index: i + 1,
+          step: tStepTitle(def.op, def.title),
+          param: tStepParam(def.op, p.key, p.label),
+        });
       }
     }
     // A terminal step never mutates the open doc, so nothing may follow it.
     if (def.terminalOutput && i < action.steps.length - 1) {
-      return `${def.title} writes a new file and must be the last step.`;
+      return tChrome('refusal.action.terminalNotLast', {
+        step: tStepTitle(def.op, def.title),
+      });
     }
   }
   return null;
@@ -283,13 +294,16 @@ export function validateRunValues(
   for (const key of askedParamKeys(step)) {
     const p = def.params.find((x) => x.key === key)!;
     if (p.required && !String(values[key] ?? '').trim()) {
-      return `${def.title}: ${p.label} is required.`;
+      return tChrome('refusal.action.runParamRequired', {
+        step: tStepTitle(def.op, def.title),
+        param: tStepParam(def.op, p.key, p.label),
+      });
     }
   }
   if (step.op === 'encrypt') {
     const u = String(values.user_password ?? '').trim();
     const o = String(values.owner_password ?? '').trim();
-    if (!u && !o) return 'Encrypt: set an open or an owner password.';
+    if (!u && !o) return tChrome('refusal.action.encryptNeedsPassword');
   }
   return null;
 }
@@ -397,14 +411,14 @@ export function parseActionFile(text: string): GuidedAction {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error('Not a valid JSON file.');
+    throw new Error(tChrome('refusal.actionFile.notJson'));
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error('Not an action file — expected an object with "name" and "steps".');
+    throw new Error(tChrome('refusal.actionFile.notAnActionFile'));
   }
   const a = parsed as Record<string, unknown>;
   if (typeof a.name !== 'string' || !Array.isArray(a.steps)) {
-    throw new Error('Not an action file — expected an object with "name" and "steps".');
+    throw new Error(tChrome('refusal.actionFile.notAnActionFile'));
   }
   const steps = a.steps.map((s, i) => parseImportedStep(s, i));
   const action: GuidedAction = { id: crypto.randomUUID(), name: a.name.trim(), steps };
@@ -413,19 +427,25 @@ export function parseActionFile(text: string): GuidedAction {
   return action;
 }
 
+// N12 slice E: every refusal below is one interpolated catalog key. The `op`
+// id and the parameter NAMES stay verbatim inside them — they are the action
+// FILE's own vocabulary, and a translated key would name something the file
+// being fixed does not contain.
 function parseImportedStep(s: unknown, i: number): GuidedStep {
   const n = i + 1;
   if (typeof s !== 'object' || s === null || Array.isArray(s)) {
-    throw new Error(`Step ${n} is not a step object.`);
+    throw new Error(tChrome('refusal.actionFile.stepNotObject', { index: n }));
   }
   const raw = s as Record<string, unknown>;
   const op = raw.op;
-  if (typeof op !== 'string') throw new Error(`Step ${n} is not a step object.`);
+  if (typeof op !== 'string') {
+    throw new Error(tChrome('refusal.actionFile.stepNotObject', { index: n }));
+  }
   const def = STEP_CATALOG.find((d) => d.op === op);
-  if (!def) throw new Error(`Step ${n}: unknown operation '${op}'.`);
+  if (!def) throw new Error(tChrome('refusal.actionFile.unknownOp', { index: n, op }));
   const rawParams = raw.params ?? {};
   if (typeof rawParams !== 'object' || rawParams === null || Array.isArray(rawParams)) {
-    throw new Error(`Step ${n} (${op}): params must be an object.`);
+    throw new Error(tChrome('refusal.actionFile.paramsNotObject', { index: n, op }));
   }
   const params: Record<string, unknown> = { ...(rawParams as Record<string, unknown>) };
   // The engine's placements list is this editor's position+text pair: fold a
@@ -433,21 +453,19 @@ function parseImportedStep(s: unknown, i: number): GuidedStep {
   // placements than one per step is not representable in the editor.
   if (op === 'add_header_footer' && 'placements' in params) {
     if ('position' in params || 'text' in params) {
-      throw new Error(`Step ${n} (${op}): use placements or position/text, not both.`);
+      throw new Error(tChrome('refusal.actionFile.placementsConflict', { index: n, op }));
     }
     const pl = params.placements;
     delete params.placements;
     if (!Array.isArray(pl) || pl.length === 0) {
-      throw new Error(`Step ${n} (${op}): placements must be a non-empty list.`);
+      throw new Error(tChrome('refusal.actionFile.placementsEmpty', { index: n, op }));
     }
     if (pl.length > 1) {
-      throw new Error(
-        `Step ${n} (${op}): only one placement per step is editable here — split into one step per position.`,
-      );
+      throw new Error(tChrome('refusal.actionFile.placementsMulti', { index: n, op }));
     }
     const first = pl[0] as Record<string, unknown> | null;
     if (typeof first !== 'object' || first === null) {
-      throw new Error(`Step ${n} (${op}): placements must be a list of {position, text}.`);
+      throw new Error(tChrome('refusal.actionFile.placementsShape', { index: n, op }));
     }
     params.position = first.position;
     params.text = first.text;
@@ -457,16 +475,31 @@ function parseImportedStep(s: unknown, i: number): GuidedStep {
     .filter((k) => !allowed.has(k))
     .sort();
   if (unknown.length > 0) {
-    throw new Error(`Step ${n} (${op}): unknown parameter(s) [${unknown.join(', ')}].`);
+    throw new Error(
+      tChrome('refusal.actionFile.unknownParams', {
+        index: n,
+        op,
+        params: unknown.join(', '),
+      }),
+    );
   }
   const clean: Record<string, string | number> = {};
   for (const [key, v] of Object.entries(params)) {
     const p = allowed.get(key)!;
     if (typeof v !== 'string' && typeof v !== 'number') {
-      throw new Error(`Step ${n} (${op}): parameter '${key}' must be text or a number.`);
+      throw new Error(
+        tChrome('refusal.actionFile.paramType', { index: n, op, param: key }),
+      );
     }
     if (p.kind === 'select' && !p.options!.some((o) => o.value === String(v))) {
-      throw new Error(`Step ${n} (${op}): invalid value '${String(v)}' for '${key}'.`);
+      throw new Error(
+        tChrome('refusal.actionFile.invalidValue', {
+          index: n,
+          op,
+          value: String(v),
+          param: key,
+        }),
+      );
     }
     clean[key] = v;
   }
@@ -474,7 +507,7 @@ function parseImportedStep(s: unknown, i: number): GuidedStep {
   // meaningless here (askedParamKeys intersects anyway) — keep the known.
   if (raw.ask === undefined) return { op: def.op, params: clean };
   if (!Array.isArray(raw.ask) || raw.ask.some((k) => typeof k !== 'string')) {
-    throw new Error(`Step ${n} (${op}): "ask" must be a list of parameter names.`);
+    throw new Error(tChrome('refusal.actionFile.askNotList', { index: n, op }));
   }
   return { op: def.op, params: clean, ask: (raw.ask as string[]).filter((k) => allowed.has(k)) };
 }
