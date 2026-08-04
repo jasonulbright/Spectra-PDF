@@ -101,6 +101,8 @@ $RtlWanted = @(
     @{ Name = 'NotoSansHebrew-Regular.ttf';    Sha256 = '04272f5600d0ec816d31d0df73b23aa8d3501ea359ebe820da31c11ffcf00853' }
     @{ Name = 'NotoSansHebrew-Bold.ttf';       Sha256 = 'dfdb3056de1f4542b888c77a1a8a750548a802e271479f56e52152423b64dde8' }
     @{ Name = 'LICENSE-NotoHebrew-OFL.txt';    Sha256 = '9b9fe028b5ba74d231659a1bbaf0ed09b11e759d1ca6a070999e16d151616b47' }
+    @{ Name = 'NotoSansMongolian-Regular.ttf'; Sha256 = 'e458bbdef2ac9579315293070b8f72abc290a42a0279a99b50a9829a7ccd8245' }
+    @{ Name = 'LICENSE-NotoMongolian-OFL.txt'; Sha256 = 'b0158b3c0b16c20e22ea662850503a7980111c5c704501e942cc1a7ed12dc011' }
 )
 $allPresent = $true
 $Wanted = @($Faces + $LibFaces + $CjkFaces + $RtlWanted + @(
@@ -258,6 +260,35 @@ $RtlSources = @(
             @{ In = 'NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Bold.ttf';    Out = 'NotoSansHebrew-Bold.ttf';    Sha256 = 'dfdb3056de1f4542b888c77a1a8a750548a802e271479f56e52152423b64dde8' }
         )
         License = @{ In = 'OFL.txt'; Out = 'LICENSE-NotoHebrew-OFL.txt'; Sha256 = '9b9fe028b5ba74d231659a1bbaf0ed09b11e759d1ca6a070999e16d151616b47' }
+    }
+    @{
+        # 9.T12 — the Mongolian shaping face. Mongolian joins cursively, and a
+        # PDF viewer never shapes, so a re-emitted Mongolian column MUST come
+        # from a face that still carries the joining rules; the document's own
+        # program is preferred (T26 in-place) and this is what substitutes when
+        # it cannot.
+        #
+        # Chosen on the same MEASUREMENT that chose IBM Plex over Noto Sans
+        # Arabic (`mongolian-measure.local.py`, run against this face and
+        # against Mongolian Baiti as the script's reference implementation):
+        # every cluster has exactly ONE advancing glyph (ligating clusters
+        # included), no `.notdef` across the corpus, and real per-glyph
+        # horizontal advances of 284–1065 per 1000/em. It is embedded
+        # HORIZONTALLY under a rotated Tm — a Mongolian face states no
+        # vertical advance worth putting in /W2 (Mongolian Baiti carries no
+        # `vmtx` at all).
+        #
+        # The `full` build, deliberately: the `unhinted` one this repo's
+        # Hebrew entry uses has NO Latin or digit coverage, and a Mongolian
+        # column with a year in it would have refused. Regular only — the
+        # style map degrades exactly as the CJK map does for italic.
+        Label   = 'Noto Sans Mongolian'
+        Url     = 'https://github.com/notofonts/mongolian/releases/download/NotoSansMongolian-v3.002/NotoSansMongolian-v3.002.zip'
+        Sha256  = 'a5d3085d4040ecd92d44bf5c4f8faaeae7ba3147cf82e09aa2ef5ad46475de6c'
+        Faces   = @(
+            @{ In = 'NotoSansMongolian/full/ttf/NotoSansMongolian-Regular.ttf'; Out = 'NotoSansMongolian-Regular.ttf'; Sha256 = 'e458bbdef2ac9579315293070b8f72abc290a42a0279a99b50a9829a7ccd8245' }
+        )
+        License = @{ In = 'OFL.txt'; Out = 'LICENSE-NotoMongolian-OFL.txt'; Sha256 = 'b0158b3c0b16c20e22ea662850503a7980111c5c704501e942cc1a7ed12dc011' }
     }
 )
 Add-Type -AssemblyName System.IO.Compression.FileSystem

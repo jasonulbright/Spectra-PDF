@@ -60,6 +60,41 @@ _JOINING_SCRIPTS = frozenset((
     "Thaa",  # Thaana (joining-transparent marks, but shaped as a unit)
 ))
 
+# 9.T12: the joining scripts that run LEFT to right. Every other entry above
+# is a right-to-left script, and the shaping direction used to be derived as
+# "it joins, therefore rtl" — which shaped Mongolian backwards, because
+# Mongolian is the one cursive script in the set whose logical order runs the
+# other way (HarfBuzz guesses `ltr` for script `Mong`, and its advances are
+# real per-letter numbers in that direction). Direction is a property of the
+# TEXT, never of whether it joins.
+_LTR_JOINING_SCRIPTS = frozenset((
+    "Mong",  # Mongolian, and with it Todo, Sibe and Manchu (one block)
+))
+
+# 9.T12: the scripts whose text sets in vertical COLUMNS by convention, with
+# the columns advancing LEFT to right — the T12 direction evidence. Mongolian
+# and its relatives are the living case; Phags-pa and the Zanabazar/Soyombo
+# pair set the same way. Ranges rather than fontTools script names because a
+# reader needs to see exactly what is claimed.
+_LTR_COLUMN_RANGES = (
+    (0x1800, 0x18AF),  # Mongolian (Todo, Sibe, Manchu included)
+    (0x11660, 0x1167F),  # Mongolian Supplement
+    (0xA840, 0xA877),  # Phags-pa
+    (0x11A00, 0x11A4F),  # Zanabazar Square
+    (0x11A50, 0x11AAF),  # Soyombo
+)
+
+
+def sets_columns_left_to_right(text: str) -> bool:
+    """True when `text` carries a character of a script whose vertical
+    columns advance LEFT to right (9.T12 § 5.1 script evidence).
+
+    A TEXT test, like `requires_shaping`, and for the same reason: the
+    column direction has to be decidable before any font is resolved."""
+    return any(
+        any(lo <= ord(ch) <= hi for lo, hi in _LTR_COLUMN_RANGES) for ch in text
+    )
+
 
 @lru_cache(maxsize=4096)
 def _script_of(ch: str) -> str:
@@ -76,6 +111,27 @@ def requires_shaping(text: str) -> bool:
     nobody needs here, and a font may lack it while the text still needs
     joining (which is exactly the case that must substitute, not proceed)."""
     return any(_script_of(ch) in _JOINING_SCRIPTS for ch in text)
+
+
+def shapes_right_to_left(text: str) -> bool:
+    """The direction to hand HarfBuzz for `text` — 9.T12.
+
+    Strong bidi evidence decides first (Hebrew joins nothing and is still
+    right-to-left). Failing that, a joining script's own direction decides,
+    which is right-to-left for every entry in `_JOINING_SCRIPTS` except
+    Mongolian. Text with neither shapes left to right, the shipped default.
+
+    Before this the callers passed `rtl=joins or has_strong_rtl(text)`, which
+    is exactly right for thirteen of the fourteen joining scripts and hands
+    back a REVERSED glyph stream for the fourteenth."""
+    from engine import bidi
+
+    if bidi.has_strong_rtl(text):
+        return True
+    tag = script_tag(text)
+    if tag is None:
+        return False
+    return tag not in _LTR_JOINING_SCRIPTS
 
 
 def script_tag(text: str) -> str | None:
@@ -256,14 +312,13 @@ def shape_if_it_changes(face_path: str, word: str) -> "ShapedRun | None":
     not this function's call to make."""
     if not word:
         return None
-    from engine import bidi
-
     joins = requires_shaping(word)
     # Direction comes from the TEXT, never from "does it join". Hebrew joins
     # nothing but is still right-to-left, and shaping it left-to-right hands
-    # back a reversed glyph stream.
+    # back a reversed glyph stream; Mongolian joins and is left-to-right, and
+    # shaping it right-to-left hands back the same reversal (9.T12).
     try:
-        run = shape(face_path, word, rtl=joins or bidi.has_strong_rtl(word))
+        run = shape(face_path, word, rtl=shapes_right_to_left(word))
     except ValueError:
         return None
     if joins:
@@ -395,12 +450,121 @@ def shape_vertical(face_path: str, ch: str):
     return order[infos[0].codepoint], advance
 
 
+@lru_cache(maxsize=32)
+def vertical_forms(face_path: str) -> dict:
+    """The face's `vert`/`vrt2` glyph→glyph map, read straight out of GSUB —
+    9.T12 § 5.4.
+
+    `vert` is by OpenType definition a SINGLE substitution: one glyph in, one
+    glyph out, the upright variant of a mark that would otherwise lie on its
+    side in a column (a 、, a 「, a bracket). Reading the lookup itself is
+    therefore exact and positional by construction.
+
+    Brief 39 § 5.4 proposed harvesting the map from a second, top-to-bottom
+    SHAPING pass instead, on a recon observation that a Mongolian letter
+    changed glyph under `ttb`. Measured against both real faces
+    (`vert-harvest.local.py`), that observation was misattributed: neither
+    face's `vert` covers a single Mongolian LETTER — both cover only
+    punctuation and brackets — and the letter differences under `ttb` are the
+    cursive shaper picking DIFFERENT positional forms (and, in Noto Sans
+    Mongolian, dropping a ligature: 5 glyphs under `ltr` against 6 under
+    `ttb`, so the two passes are not even positionally comparable). A `ttb`
+    pass therefore changes far more than `vert` and would silently rewrite
+    letters. The feature is what we want; the feature is what we read."""
+    from fontTools.ttLib import TTFont
+
+    out: dict[str, str] = {}
+    try:
+        tt = TTFont(face_path, fontNumber=0, lazy=True)
+    except Exception:
+        return out
+    try:
+        gsub = tt.get("GSUB")
+        if gsub is None or gsub.table is None:
+            return out
+        table = gsub.table
+        wanted: set[int] = set()
+        for rec in table.FeatureList.FeatureRecord:
+            if rec.FeatureTag in ("vert", "vrt2"):
+                wanted.update(rec.Feature.LookupListIndex)
+        for index in sorted(wanted):
+            lookup = table.LookupList.Lookup[index]
+            for sub in lookup.SubTable:
+                mapping = getattr(sub, "mapping", None)
+                if mapping:
+                    out.update(mapping)
+    except Exception:
+        return {}
+    finally:
+        tt.close()
+    return out
+
+
+@lru_cache(maxsize=32)
+def _hmtx_1000(face_path: str) -> dict:
+    """glyph name → horizontal advance per 1000/em."""
+    from fontTools.ttLib import TTFont
+
+    tt = TTFont(face_path, fontNumber=0, lazy=True)
+    try:
+        upem = tt["head"].unitsPerEm or 1000
+        return {
+            name: adv * 1000.0 / upem for name, (adv, _lsb) in tt["hmtx"].metrics.items()
+        }
+    finally:
+        tt.close()
+
+
+def shape_sideways(face_path: str, text: str) -> ShapedRun:
+    """Shape ONE word for a COLUMN of a script whose font stores horizontal
+    glyphs — 9.T12.
+
+    A Mongolian (or Phags-pa, or Soyombo) column is not `-V`-CMap vertical
+    text: the face has no honest vertical metric to embed, the glyphs are the
+    horizontal ones, and the column is produced by ROTATING the run. So the
+    glyphs, the clusters and the advances all come from an ordinary
+    directional shape — and the ONE thing a column still owes the reader is
+    the face's own upright punctuation, which is `vert`.
+
+    Raises ValueError when a substituted glyph has no `hmtx` entry: the
+    advance is what the column's length is measured from, and inventing one
+    is the § 1.5b defect wearing a different hat."""
+    run = shape(face_path, text, rtl=shapes_right_to_left(text))
+    vmap = vertical_forms(face_path)
+    if not vmap or not any(name in vmap for name, _a, _x, _y in run.glyphs):
+        return run
+    widths = _hmtx_1000(face_path)
+    glyphs = []
+    total = 0.0
+    for name, adv, x_off, y_off in run.glyphs:
+        sub = vmap.get(name)
+        if sub is None:
+            glyphs.append((name, adv, x_off, y_off))
+            total += adv
+            continue
+        if sub not in widths:
+            raise ValueError(
+                f"this font's vertical form of {name!r} has no advance"
+            )
+        glyphs.append((sub, widths[sub], x_off, y_off))
+        total += widths[sub]
+    clusters = [
+        (vmap.get(name, name), spells) for name, spells in run.clusters
+    ]
+    return ShapedRun(run.text, glyphs, total, clusters)
+
+
 def face_can_shape(face_path: str, text: str) -> bool:
     """Whether `face_path` shapes `text` without hitting `.notdef` — the
     ladder's probe, so a face that merely CONTAINS the letters but not their
-    joining forms is not mistaken for a working one."""
+    joining forms is not mistaken for a working one.
+
+    9.T12: the probe runs in the TEXT's own direction. It used to take
+    `shape`'s right-to-left default, which is correct for every joining
+    script but Mongolian — and a probe that shapes backwards answers about a
+    run nobody will draw."""
     try:
-        shape(face_path, text)
+        shape(face_path, text, rtl=shapes_right_to_left(text))
         return True
     except Exception:
         return False

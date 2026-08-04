@@ -51,6 +51,7 @@ document_js.duplicateDocumentScriptName	pattern	document_js	Duplicate document-s
 document_js.eachDocumentScriptMust	exact	document_js	Each document script must be an object with name and js.
 document_js.eachDocumentScriptNeeds	exact	document_js	Each document script needs a non-empty name.
 font_fallback.bundledFallbackFontFound	pattern	font_fallback	bundled fallback font not found: {{font_path}}
+font_fallback.bundledMongolianFontExpress	pattern	font_fallback	no bundled Mongolian font can express {{text}}
 font_fallback.bundledRightLeftFont	pattern	font_fallback	no bundled right-to-left font can express {{text}}
 font_fallback.bundledVerticalFontExpress	pattern	font_fallback	no bundled vertical font can express {{text}}
 font_fallback.fallbackFontCannotExpress	pattern	font_fallback	the fallback font cannot express {{ch}}
@@ -231,6 +232,7 @@ recover.pdfEncryptedDecryptBefore	exact	recover	PDF is encrypted -- decrypt befo
 repair.pdfEncryptedDecryptBefore	exact	repair	PDF is encrypted -- decrypt before repairing
 repair.pdfTooDamagedTier	pattern	repair	PDF is too damaged for Tier 1 repair: {{e2}}. Try 'rebuild' (Tier 2) or 'recover' (Tier 3).
 rtl_text.textContainsDirectionalFormatting	exact	rtl_text	text contains directional formatting characters that cannot be laid out
+shaping.fontSVerticalForm	pattern	shaping	this font's vertical form of {{name}} has no advance
 shaping.shapingFontCannotExpress	pattern	shaping	the shaping font cannot express {{text}}
 signatures.certificatesFoundTrustRoot	pattern	signatures	no certificates found in trust root: {{p}}
 signatures.chooseOnePlacementFill	exact	signatures	Choose ONE placement: fill an existing signature field, or place a new visible stamp.

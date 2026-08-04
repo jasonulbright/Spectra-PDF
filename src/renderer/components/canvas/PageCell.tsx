@@ -4736,7 +4736,9 @@ function ParagraphEditor({
   // 180° block screen −x. Screen y runs DOWN, which is why page −y is [0, 1].
   const inlineDir = ((): [number, number] => {
     const base: [number, number] =
-      para.orientation === 'vertical-rl' || para.orientation === 'rotated-cw'
+      para.orientation === 'vertical-rl' ||
+      para.orientation === 'vertical-lr' ||
+      para.orientation === 'rotated-cw'
         ? [0, 1]
         : para.orientation === 'rotated-ccw'
           ? [0, -1]
@@ -4749,18 +4751,22 @@ function ParagraphEditor({
     return [x, y];
   })();
   // 9.T13: the paragraph's inline extent and the page-space origin of its
-  // START edge both live on the frame's inline axis. `vertical-rl` and
-  // `rotated-cw` measure the box HEIGHT and take a negated top edge (the
-  // transposed left is −y); `rotated-ccw` measures the height too but its
-  // transposed left is +y; `rotated-180` measures the width against a
-  // negated right edge. Horizontal is the shipped arithmetic, untouched.
+  // START edge both live on the frame's inline axis. `vertical-rl`,
+  // `vertical-lr` (9.T12) and `rotated-cw` measure the box HEIGHT and take a
+  // negated top edge (the transposed left is −y in all three — the column
+  // DIRECTION changes where the next column goes, never where this one
+  // starts); `rotated-ccw` measures the height too but its transposed left
+  // is +y; `rotated-180` measures the width against a negated right edge.
+  // Horizontal is the shipped arithmetic, untouched.
   const inlineIsVerticalOnPage =
     para.orientation === 'vertical-rl' ||
+    para.orientation === 'vertical-lr' ||
     para.orientation === 'rotated-cw' ||
     para.orientation === 'rotated-ccw';
   const boxLeftPt = (deltaPt: number): number => {
     switch (para.orientation) {
       case 'vertical-rl':
+      case 'vertical-lr':
       case 'rotated-cw':
         return -(para.boxPt[3] - deltaPt);
       case 'rotated-ccw':
