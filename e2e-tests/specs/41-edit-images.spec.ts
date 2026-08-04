@@ -12,6 +12,7 @@ import {
   editImagePlacements,
   editImageSelect,
   editImageAct,
+  settledEditImagePageIds,
 } from '../support/harness.js';
 
 // Phase 7.1 — Edit ▸ Images round-trip against the built binary: arm the Edit
@@ -92,12 +93,19 @@ describe('edit images (Phase 7.1)', () => {
 
     // DELETE it — the page's placements drop to zero (page disappears from
     // the ids list, since only non-empty pages are listed).
+    // Asserted against a SETTLED listing: the canvas drops the page's boxes
+    // the moment the delete starts and the ids rotate under the rebuild, so
+    // an empty reading on its own is also the mid-op state — it would be
+    // satisfied by a delete that never applied (the spec-99 lesson).
     await editImageSelect(pageIdAfter, 0);
     await editImageAct('delete');
-    await browser.waitUntil(async () => (await editImagePageIds()).length === 0, {
-      timeout: 30_000,
-      timeoutMsg: 'placements did not empty after delete',
-    });
+    await browser.waitUntil(
+      async () => {
+        const ids = await settledEditImagePageIds();
+        return ids !== null && ids.length === 0;
+      },
+      { timeout: 30_000, timeoutMsg: 'placements did not empty after delete' },
+    );
 
     // UNDO — the snapshot restores, the buffer refreshes, the listings
     // refetch: the image is back.

@@ -1033,6 +1033,27 @@ export async function editImagePageIds(): Promise<string[]> {
   });
 }
 
+/**
+ * The listing maps are keyed by generation-tagged page ids; a whole-file op
+ * rebuilds the file, the ids rotate, and the canvas prunes the dead keys
+ * immediately — so the maps are EMPTY for the whole per-page engine refetch.
+ * An assertion on emptiness alone therefore also passes when the op did
+ * nothing at all. Always pair it with this.
+ */
+export async function editImageListingSettled(): Promise<boolean> {
+  return await browser.execute<boolean, []>(function () {
+    return (window as any).__SPECTRA_TEST__.editImageListingSettled();
+  });
+}
+
+/** Page ids from a SETTLED listing — the only honest reading. */
+export async function settledEditImagePageIds(): Promise<string[] | null> {
+  return await browser.execute<string[] | null, []>(function () {
+    const h = (window as any).__SPECTRA_TEST__;
+    return h.editImageListingSettled() ? h.editImagePageIds() : null;
+  });
+}
+
 export async function editImagePlacements(
   pageId: string,
 ): Promise<
