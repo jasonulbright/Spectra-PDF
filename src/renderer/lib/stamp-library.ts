@@ -56,11 +56,22 @@ export function isCustomStamp(v: unknown): v is CustomStamp {
  * {name} — against the placement moment and the user's identity preference.
  * An empty name collapses cleanly ("SIGNED {name} {date}" without a name
  * must read "SIGNED 7/30/2026", not "SIGNED  7/30/2026").
+ *
+ * N12 slice C: `locale` is the APP's language, not the machine's. A stamp is
+ * authored in the language the user is working in, and the placement writes
+ * the resolved text into the document — so a Spanish UI on an English
+ * Windows must stamp a Spanish date. Omitting it keeps the platform default
+ * (the pure tests call it that way).
  */
-export function resolveStampTokens(label: string, now: Date, identityName: string): string {
+export function resolveStampTokens(
+  label: string,
+  now: Date,
+  identityName: string,
+  locale?: string,
+): string {
   return label
-    .replace(/\{date\}/gi, now.toLocaleDateString())
-    .replace(/\{time\}/gi, now.toLocaleTimeString())
+    .replace(/\{date\}/gi, now.toLocaleDateString(locale))
+    .replace(/\{time\}/gi, now.toLocaleTimeString(locale))
     .replace(/\{name\}/gi, identityName.trim())
     .replace(/ {2,}/g, ' ')
     .trim();

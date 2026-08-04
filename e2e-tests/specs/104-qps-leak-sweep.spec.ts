@@ -22,6 +22,10 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 //     construction under qps. A bare language name is CORRECT here.
 //   • Document CONTENT — file names, page labels, signer names, the engine's
 //     own refusal text (the slice-D boundary). None of it is ours to bracket.
+//   • NOTATION on the canvas: the align/z-order GLYPHS, the find-mode toggle
+//     labels (Aa, \b, .*), measure UNIT symbols, PDF blend-mode VALUES and
+//     bundled FACE NAMES (Liberation Sans). Symbols and proper nouns are the
+//     same in every locale, so they are bare under qps by construction.
 
 const qps = async (lang: string): Promise<void> => {
   await browser.execute((l) => {
@@ -155,6 +159,95 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       expect(leaks).toEqual([]);
     } finally {
       await qps('en');
+      await closeAllFiles();
+    }
+    await browser.waitUntil(
+      async () => (await $('[data-testid="menu-file"]').getText()) === 'File',
+      { timeout: 10_000, timeoutMsg: 'the chrome never returned to English' },
+    );
+  });
+
+  // Slice C widened it again: the CANVAS and its overlays — the contextual
+  // secondary toolbar (its title, its modes, a mode's options), the properties
+  // bar, and the find bar. All of it lives OVER the page, so it needs a
+  // document open and a tool armed.
+  it('the canvas overlays render no bare English under qps', async () => {
+    await waitForHarness();
+    await openByPaths([SAMPLE_PDF]);
+    await browser.waitUntil(async () => (await getState()).view === 'canvas', {
+      timeout: 15_000,
+      timeoutMsg: 'opening did not focus the doc tab',
+    });
+
+    const leaks: string[] = [];
+    const check = (label: string, text: string | null): void => {
+      if (!text || !text.startsWith('[')) leaks.push(`${label}: "${text ?? '(null)'}"`);
+    };
+
+    // Arm Comment BEFORE switching locale: the Tools menu item is matched by
+    // its stable test id, but reading the menu in qps buys nothing here.
+    expect(await invokeAppCommand('tools.open.comment')).toBe(true);
+    await $('[data-testid="secondary-toolbar"]').waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: 'arming Comment did not raise the secondary toolbar',
+    });
+
+    await qps('qps');
+    try {
+      // ── SECONDARY TOOLBAR: the owning tool's name (read through the COMMAND
+      // key, not a second copy) and each mode button (likewise).
+      check(
+        'secondary toolbar title',
+        await $('[data-testid="secondary-toolbar"] .secondary-toolbar-title').getText(),
+      );
+      for (const m of ['highlight', 'freetext', 'ink', 'stamp']) {
+        check(`secondary mode ${m}`, await $(`[data-testid="tool-${m}"]`).getText());
+      }
+      check(
+        'secondary modes group aria',
+        await $('[data-testid="secondary-toolbar"] .secondary-toolbar-modes')
+          .getAttribute('aria-label'),
+      );
+
+      // ── A MODE OPTION: the stamp presets. Their WORDS localize (a stamp's
+      // label is written into the document) while their test ids do not — the
+      // whole point of giving STAMP_PRESETS a stable id in slice C.
+      await $('[data-testid="tool-stamp"]').click();
+      await $('[data-testid="stamp-preset-approved"]').waitForDisplayed({
+        timeout: 10_000,
+        timeoutMsg: 'the stamp presets never appeared',
+      });
+      check('stamp preset approved', await $('[data-testid="stamp-preset-approved"]').getText());
+      check('stamp new', await $('[data-testid="stamp-new-text"]').getText());
+
+      // ── PROPERTIES BAR (Ctrl+E): nothing is selected, so it shows its
+      // how-to-get-a-selection line plus the close affordance's title.
+      expect(await invokeAppCommand('view.propertiesBar')).toBe(true);
+      await $('[data-testid="properties-bar"]').waitForDisplayed({
+        timeout: 10_000,
+        timeoutMsg: 'the properties bar never opened',
+      });
+      check('pbar empty', await $('[data-testid="pbar-empty"]').getText());
+      check('pbar close title', await $('[data-testid="pbar-close"]').getAttribute('title'));
+      check(
+        'pbar toolbar aria',
+        await $('[data-testid="properties-bar"]').getAttribute('aria-label'),
+      );
+      expect(await invokeAppCommand('view.propertiesBar')).toBe(true);
+
+      // ── FIND BAR: its placeholder is a catalog string; the OCR language
+      // names inside it are not (see the header) and are not read here.
+      expect(await invokeAppCommand('edit.find')).toBe(true);
+      await $('[data-testid="find-bar"]').waitForDisplayed({
+        timeout: 10_000,
+        timeoutMsg: 'the find bar never opened',
+      });
+      check('find placeholder', await $('[data-testid="find-input"]').getAttribute('placeholder'));
+
+      expect(leaks).toEqual([]);
+    } finally {
+      await qps('en');
+      await browser.keys(['Escape']);
       await closeAllFiles();
     }
     await browser.waitUntil(
