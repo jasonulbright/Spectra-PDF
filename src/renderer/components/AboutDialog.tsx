@@ -1,5 +1,7 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppModal } from '../hooks/useAppModal';
+import { tChrome } from '../i18n';
 
 // About dialog (Phase 4 M2) — the app name/version/repo, moved out of the
 // old header chrome (the native title bar carries the name now). Version is
@@ -13,6 +15,8 @@ interface AboutDialogProps {
 const REPO_URL = 'https://github.com/jasonulbright/Spectra-PDF';
 
 export function AboutDialog({ version, onClose }: AboutDialogProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const shellRef = useAppModal(onClose);
   return (
     <div
@@ -26,17 +30,17 @@ export function AboutDialog({ version, onClose }: AboutDialogProps): React.React
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="About Spectra PDF"
+        aria-label={tChrome('dialog.about.aria')}
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[380px]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6 text-center">
           <h2 className="text-lg font-semibold">Spectra PDF</h2>
           <p data-testid="about-version" className="text-sm text-neutral-400 mt-1">
-            Version {version}
+            {tChrome('dialog.about.version', { version })}
           </p>
           <p className="text-xs text-neutral-500 mt-4">
-            A modern, offline-first PDF workbench.
+            {tChrome('dialog.about.tagline')}
           </p>
           <p className="text-xs text-neutral-500 mt-1 break-all">{REPO_URL}</p>
         </div>
@@ -45,7 +49,7 @@ export function AboutDialog({ version, onClose }: AboutDialogProps): React.React
             onClick={onClose}
             className="px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
           >
-            Close
+            {tChrome('dialog.common.close')}
           </button>
         </div>
       </div>

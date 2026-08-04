@@ -5,7 +5,7 @@ import { deriveAccentVars } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
+import { tChrome, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
 // Re-exported for the ~6 existing panel consumers; the implementation is the
 // leaf module (the keymap reads it too — see lib/app-settings.ts).
