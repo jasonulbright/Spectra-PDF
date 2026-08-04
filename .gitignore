@@ -42,6 +42,11 @@ resources/fonts/
 # Native Tesseract (vendored by scripts/bundle-tesseract.ps1; large binaries +
 # 47 language models, same repo-hygiene class as resources/ghostscript).
 resources/tesseract/
+# JBIG2 encoder (vendored by scripts/bundle-jbig2enc.ps1; a ~4.8MB static
+# binary plus its notice tree — same repo-hygiene class as the above. The
+# provision script, the SHA-256 pin and the checked-in notice texts are what
+# lives in git; the binary does not).
+resources/jbig2enc/
 
 # Test
 coverage/
