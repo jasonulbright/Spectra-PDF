@@ -6,6 +6,9 @@ import { dialog, file } from '../lib/tauri-bridge';
 import { getCanvasServices } from '../commands/context';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { ANNOTATION_PALETTE } from '../components/canvas/PageCell';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
+import type { PanelKey } from '../i18n-panels';
 
 // U3 (Phase 11) — THE comments surface. One.
 //
@@ -30,24 +33,25 @@ import { ANNOTATION_PALETTE } from '../components/canvas/PageCell';
 // The PDF's own vocabulary, not the app's internal kind. A row that says
 // "textmarkup" tells the user nothing — "Highlight" is the word the format,
 // the engine's by-type summary, and every other PDF tool use.
-const KIND_LABEL: Record<string, string> = {
-  highlight: 'Highlight',
-  underline: 'Underline',
-  strikeout: 'StrikeOut',
-  squiggly: 'Squiggly',
-  freetext: 'FreeText',
-  ink: 'Ink',
-  stamp: 'Stamp',
-  note: 'Text',
-  link: 'Link',
-  measure: 'Measurement',
-  shape: 'Shape',
-  callout: 'Callout',
+const KIND_KEY: Record<string, PanelKey> = {
+  highlight: 'panel.comments.kind.highlight',
+  underline: 'panel.comments.kind.underline',
+  strikeout: 'panel.comments.kind.strikeout',
+  squiggly: 'panel.comments.kind.squiggly',
+  freetext: 'panel.comments.kind.freetext',
+  ink: 'panel.comments.kind.ink',
+  stamp: 'panel.comments.kind.stamp',
+  note: 'panel.comments.kind.note',
+  link: 'panel.comments.kind.link',
+  measure: 'panel.comments.kind.measure',
+  shape: 'panel.comments.kind.shape',
+  callout: 'panel.comments.kind.callout',
 };
 
 function labelFor(kind: string, markupType?: string): string {
-  if (kind === 'textmarkup') return KIND_LABEL[markupType ?? 'highlight'] ?? 'Highlight';
-  return KIND_LABEL[kind] ?? kind;
+  const k = kind === 'textmarkup' ? (markupType ?? 'highlight') : kind;
+  const key = KIND_KEY[k];
+  return key ? tChrome(key) : k;
 }
 
 interface EngineAnnot {
@@ -66,6 +70,8 @@ interface Overview {
 export function CommentsPanel(): React.ReactElement {
   const state = useAppState();
   const dispatch = useAppDispatch();
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -138,13 +144,13 @@ export function CommentsPanel(): React.ReactElement {
     });
     if (!output) return;
     setBusy(true);
-    setStatus('Exporting XFDF…');
+    setStatus(tChrome('panel.comments.exporting'));
     try {
       const r = await call('export_xfdf', { file: activeFile.workingPath, output });
       const n = (r as unknown as { count: number }).count;
-      setStatus(`Exported ${n} comment${n === 1 ? '' : 's'} to XFDF`);
+      setStatus(tChromeCount('panel.comments.exported', n));
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
@@ -155,7 +161,7 @@ export function CommentsPanel(): React.ReactElement {
     const xfdf = await dialog.pickAnyFile();
     if (!xfdf) return;
     setBusy(true);
-    setStatus('Importing XFDF…');
+    setStatus(tChrome('panel.comments.importing'));
     try {
       const snapshotPath = await file.snapshot(activeFile.workingPath);
       const r = await call('import_xfdf', {
@@ -168,10 +174,17 @@ export function CommentsPanel(): React.ReactElement {
       dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
       await refresh();
       const rr = r as unknown as { added: number; skipped: { reason: string }[] };
-      const skipped = rr.skipped.length ? ` (${rr.skipped.length} skipped)` : '';
-      setStatus(`Imported ${rr.added} comment${rr.added === 1 ? '' : 's'}${skipped} — undo with Ctrl+Z`);
+      const skipped = rr.skipped.length
+        ? tChrome('panel.comments.importedSkipped', { count: rr.skipped.length })
+        : '';
+      setStatus(
+        tChrome(rr.added === 1 ? 'panel.comments.imported_one' : 'panel.comments.imported_other', {
+          count: rr.added,
+          skipped,
+        }),
+      );
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
@@ -181,7 +194,7 @@ export function CommentsPanel(): React.ReactElement {
     if (!activeFile) return;
     setConfirming(false);
     setBusy(true);
-    setStatus('Deleting comments…');
+    setStatus(tChrome('panel.comments.deleting'));
     try {
       const snapshotPath = await file.snapshot(activeFile.workingPath);
       const r = await call('delete_all_annotations', {
@@ -193,15 +206,15 @@ export function CommentsPanel(): React.ReactElement {
       dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
       await refresh();
       const n = (r as unknown as { removed: number }).removed;
-      setStatus(`Removed ${n} comment${n === 1 ? '' : 's'} (undo with Ctrl+Z)`);
+      setStatus(tChromeCount('panel.comments.removed', n));
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
   }, [activeFile, call, dispatch, refresh]);
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to review its comments" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.comments.open')} />;
 
   const fileCount = overview?.count ?? 0;
   const types = Object.entries(overview?.by_type ?? {});
@@ -214,23 +227,23 @@ export function CommentsPanel(): React.ReactElement {
   return (
     <div className="flex flex-col gap-3">
       <div className="text-sm text-neutral-400">
-        Working on: <span className="text-neutral-200">{activeFile.name}</span>
+        {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span>
       </div>
 
       {total === 0 ? (
         <p className="text-sm text-neutral-500" data-testid="comments-empty">
-          This document has no comments.
+          {tChrome('panel.comments.empty')}
         </p>
       ) : (
         <>
           <div className="text-sm text-neutral-300" data-testid="comments-summary">
-            {total} comment{total === 1 ? '' : 's'}
+            {tChromeCount('panel.comments.summary', total)}
             {types.length > 0 && (
               <span className="text-neutral-500"> — {types.map(([t, n]) => `${n} ${t}`).join(', ')}</span>
             )}
           </div>
 
-          <div className="flex flex-col gap-1 max-h-[26rem] overflow-y-auto" data-testid="comments-list" tabIndex={0} role="region" aria-label="Comments">
+          <div className="flex flex-col gap-1 max-h-[26rem] overflow-y-auto" data-testid="comments-list" tabIndex={0} role="region" aria-label={tChrome('panel.comments.listAria')}>
             {rows.map((e) => (
               <div
                 key={e.annotationId}
@@ -242,11 +255,11 @@ export function CommentsPanel(): React.ReactElement {
                   type="button"
                   data-testid={`comment-jump-${e.annotationId}`}
                   className="w-full text-left"
-                  title="Go to this comment"
+                  title={tChrome('panel.comments.jumpTitle')}
                   onClick={() => getCanvasServices()?.openPageForReading(e.pageId)}
                 >
                   <div className="text-xs text-neutral-400">
-                    {e.label} · Page {e.pageNumber}
+                    {tChrome('panel.comments.pageLine', { label: e.label, page: e.pageNumber })}
                   </div>
                   {e.note && !(editing === e.annotationId) && (
                     <div className="text-sm text-neutral-200 truncate" title={e.note}>
@@ -281,14 +294,14 @@ export function CommentsPanel(): React.ReactElement {
                     className="text-xs px-1.5 py-0.5 rounded text-neutral-400 hover:bg-neutral-700 hover:text-neutral-100"
                     onClick={() => setEditing(editing === e.annotationId ? null : e.annotationId)}
                   >
-                    {e.note ? 'Edit note' : 'Add note'}
+                    {e.note ? tChrome('panel.comments.editNote') : tChrome('panel.comments.addNote')}
                   </button>
                   {ANNOTATION_PALETTE.map((c) => (
                     <button
                       key={c}
                       type="button"
-                      aria-label={`Recolour to ${c}`}
-                      title="Recolour"
+                      aria-label={tChrome('panel.comments.recolourTo', { color: c })}
+                      title={tChrome('panel.comments.recolour')}
                       className="w-3.5 h-3.5 rounded-sm border border-black/30"
                       style={{ background: c }}
                       onClick={() =>
@@ -315,7 +328,7 @@ export function CommentsPanel(): React.ReactElement {
                       })
                     }
                   >
-                    Delete
+                    {tChrome('panel.comments.delete')}
                   </button>
                 </div>
               </div>
@@ -323,28 +336,27 @@ export function CommentsPanel(): React.ReactElement {
 
             {notShown > 0 && (
               <p className="text-xs text-neutral-500 px-1 py-2" data-testid="comments-not-editable">
-                {notShown} more comment{notShown === 1 ? '' : 's'} in the file that this list can’t
-                edit — Delete All still removes {notShown === 1 ? 'it' : 'them'}.
+                {tChromeCount('panel.comments.notShown', notShown)}
               </p>
             )}
           </div>
 
           {confirming ? (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-amber-300">Delete all {total} comments?</span>
+              <span className="text-sm text-amber-300">{tChrome('panel.comments.confirm', { count: total })}</span>
               <button
                 data-testid="comments-delete-confirm"
                 onClick={() => void deleteAll()}
                 disabled={busy}
                 className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded text-sm font-medium"
               >
-                Delete all
+                {tChrome('panel.comments.deleteAllBtn')}
               </button>
               <button
                 onClick={() => setConfirming(false)}
                 className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm"
               >
-                Cancel
+                {tChrome('panel.comments.cancel')}
               </button>
             </div>
           ) : (
@@ -355,25 +367,25 @@ export function CommentsPanel(): React.ReactElement {
                 disabled={busy}
                 className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
               >
-                Delete all comments
+                {tChrome('panel.comments.deleteAll')}
               </button>
               <button
                 data-testid="comments-export-xfdf"
                 onClick={() => void exportXfdf()}
                 disabled={busy}
-                title="Export every comment to an XFDF interchange file"
+                title={tChrome('panel.comments.exportTitle')}
                 className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
               >
-                Export XFDF…
+                {tChrome('panel.comments.exportBtn')}
               </button>
               <button
                 data-testid="comments-import-xfdf"
                 onClick={() => void importXfdf()}
                 disabled={busy}
-                title="Add comments from an XFDF interchange file (undoable)"
+                title={tChrome('panel.comments.importTitle')}
                 className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
               >
-                Import XFDF…
+                {tChrome('panel.comments.importBtn')}
               </button>
             </div>
           )}
