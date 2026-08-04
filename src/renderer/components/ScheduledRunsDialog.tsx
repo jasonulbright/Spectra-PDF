@@ -12,6 +12,8 @@ import {
   unattendedBlocker,
 } from '../lib/guided-actions';
 import { TEST_HARNESS_ENABLED, registerScheduledRuns } from '../testHarness';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tOcrLanguage, tStepTitle } from '../i18n';
 
 // Tools ▸ Scheduled Batch Runs (Phase 12, issue #1 request 5).
 //
@@ -55,6 +57,8 @@ const EMPTY: ScheduleProfile = {
 };
 
 export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): React.JSX.Element {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const [runs, setRuns] = useState<ScheduledRun[] | null>(null);
   const [editing, setEditing] = useState<ScheduleProfile | null>(null);
   const [password, setPassword] = useState('');
@@ -90,7 +94,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
     if (editing.runType === 'action') {
       const chosen = libraryActions.find((a) => a.id === actionId);
       if (!chosen && !editing.actionFile) {
-        setError('Choose which guided action to run.');
+        setError(tChrome('dialog.schedule.needAction'));
         return;
       }
       if (chosen) {
@@ -108,14 +112,14 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
     }
     setBusy(true);
     setError(null);
-    setStatus('Creating the schedule…');
+    setStatus(tChrome('dialog.schedule.creating'));
     try {
       await schedule.create(editing, password || undefined, actionJson);
       // The password only ever existed for this call — Windows stores it, we
       // do not (the .pfx signing-password posture).
       setPassword('');
       setEditing(null);
-      setStatus('Schedule saved');
+      setStatus(tChrome('dialog.schedule.saved'));
       await refresh();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -168,16 +172,14 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
       {editing === null ? (
         <div className="flex flex-col gap-3" data-testid="schedule-list-view">
           <p className="text-xs text-neutral-500">
-            Scheduled runs happen through Windows Task Scheduler, so they run even when Open
-            PDF Studio is closed. Everything here is managed from this window — you never need
-            to open Task Scheduler.
+            {tChrome('dialog.schedule.blurb')}
           </p>
 
           {runs === null ? (
-            <p className="text-sm text-neutral-400">Loading…</p>
+            <p className="text-sm text-neutral-400">{tChrome('dialog.common.loading')}</p>
           ) : runs.length === 0 ? (
             <p className="text-sm text-neutral-400" data-testid="schedule-empty">
-              No scheduled runs yet.
+              {tChrome('dialog.schedule.empty')}
             </p>
           ) : (
             <div className="flex flex-col gap-2 max-h-72 overflow-y-auto" data-testid="schedule-list">
@@ -192,13 +194,24 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                     <span className="text-xs text-neutral-500">{r.status}</span>
                   </div>
                   <div className="text-xs text-neutral-500 mt-0.5">
-                    Next: {r.nextRun || '—'} · Last: {r.lastRun || 'never'}
-                    {r.lastResult ? ` (${r.lastResult})` : ''}
+                    {tChrome(
+                      r.lastResult
+                        ? 'dialog.schedule.timingResult'
+                        : 'dialog.schedule.timing',
+                      {
+                        next: r.nextRun || tChrome('dialog.schedule.none'),
+                        last: r.lastRun || tChrome('dialog.schedule.never'),
+                        result: r.lastResult,
+                      },
+                    )}
                   </div>
                   {r.profile ? (
                     <>
                       <div className="text-xs text-neutral-400 mt-0.5 truncate" title={r.profile.source}>
-                        {r.profile.source} → {r.profile.dest}
+                        {tChrome('dialog.common.route', {
+                          source: r.profile.source,
+                          dest: r.profile.dest,
+                        })}
                       </div>
                       {r.profile.runType === 'action' && (
                         <div
@@ -206,49 +219,53 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                           data-testid={`schedule-action-info-${r.name}`}
                           title={r.actionSteps.join(' → ')}
                         >
-                          Guided action: {r.actionName || '(unnamed)'}
-                          {r.actionSteps.length > 0 && ` — ${r.actionSteps.join(' → ')}`}
+                          {tChrome(
+                            r.actionSteps.length > 0
+                              ? 'dialog.schedule.guidedActionSteps'
+                              : 'dialog.schedule.guidedAction',
+                            {
+                              name: r.actionName || tChrome('dialog.schedule.unnamedAction'),
+                              steps: r.actionSteps.join(' → '),
+                            },
+                          )}
                         </div>
                       )}
                       {r.actionMissing && (
                         // It will still FIRE and fail — shown, never hidden.
                         <div className="text-xs text-amber-400 mt-0.5" data-testid={`schedule-action-missing-${r.name}`}>
-                          Its action file is missing — the run will fail until the schedule is
-                          recreated.
+                          {tChrome('dialog.schedule.actionMissing')}
                         </div>
                       )}
                     </>
                   ) : (
                     // It will still FIRE, so it is shown rather than hidden.
                     <div className="text-xs text-amber-400 mt-0.5">
-                      Edited outside this app — its settings cannot be shown here, but it will
-                      still run.
+                      {tChrome('dialog.schedule.foreign')}
                     </div>
                   )}
                   <div className="flex gap-2 mt-1.5">
                     <button
                       data-testid={`schedule-run-${r.name}`}
                       disabled={busy}
-                      onClick={() => void act('Starting…', () => schedule.runNow(r.name))}
+                      onClick={() => void act(tChrome('dialog.schedule.starting'), () => schedule.runNow(r.name))}
                       className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                     >
-                      Run now
+                      {tChrome('dialog.schedule.runNow')}
                     </button>
                     <button
                       disabled={busy}
                       onClick={() =>
-                        void act(
-                          'Updating…',
-                          () =>
-                            schedule.setEnabled(
-                              r.name,
-                              r.status.toLowerCase().includes('disabled'),
-                            ),
+                        // The toggle reads the BOOLEAN, never the status
+                        // TEXT: Windows localizes that string, so the old
+                        // `status.includes('disabled')` test inverted the
+                        // button on any non-English machine.
+                        void act(tChrome('dialog.schedule.updating'), () =>
+                          schedule.setEnabled(r.name, !r.enabled),
                         )
                       }
                       className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                     >
-                      {r.status.toLowerCase().includes('disabled') ? 'Enable' : 'Disable'}
+                      {tChrome(r.enabled ? 'dialog.schedule.disable' : 'dialog.schedule.enable')}
                     </button>
                     {r.profile && (
                       <button
@@ -259,29 +276,29 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                         }}
                         className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                       >
-                        Edit
+                        {tChrome('dialog.schedule.edit')}
                       </button>
                     )}
                     <div className="flex-1" />
                     {confirmDelete === r.name ? (
                       <>
-                        <span className="text-xs text-amber-400 self-center">Delete it?</span>
+                        <span className="text-xs text-amber-400 self-center">{tChrome('dialog.common.deleteIt')}</span>
                         <button
                           data-testid={`schedule-delete-confirm-${r.name}`}
                           disabled={busy}
                           onClick={() => {
                             setConfirmDelete(null);
-                            void act('Deleting…', () => schedule.remove(r.name));
+                            void act(tChrome('dialog.schedule.deleting'), () => schedule.remove(r.name));
                           }}
                           className="px-2 py-0.5 text-xs bg-red-700/80 hover:bg-red-600 disabled:opacity-50 rounded"
                         >
-                          Delete
+                          {tChrome('dialog.common.delete')}
                         </button>
                         <button
                           onClick={() => setConfirmDelete(null)}
                           className="px-2 py-0.5 text-xs text-neutral-400 hover:text-neutral-200"
                         >
-                          Keep
+                          {tChrome('dialog.common.keep')}
                         </button>
                       </>
                     ) : (
@@ -291,7 +308,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                         onClick={() => setConfirmDelete(r.name)}
                         className="px-2 py-0.5 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-50"
                       >
-                        Delete
+                        {tChrome('dialog.common.delete')}
                       </button>
                     )}
                   </div>
@@ -311,7 +328,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               onClick={onClose}
               className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
             >
-              Close
+              {tChrome('dialog.common.close')}
             </button>
             <button
               data-testid="schedule-new"
@@ -322,13 +339,13 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               }}
               className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium"
             >
-              New scheduled run
+              {tChrome('dialog.schedule.new')}
             </button>
           </div>
         </div>
       ) : (
         <div className="flex flex-col gap-3" data-testid="schedule-form">
-          <Field label="Name">
+          <Field label={tChrome('dialog.schedule.name')}>
             <input
               data-testid="schedule-name"
               value={editing.name}
@@ -337,20 +354,20 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
             />
           </Field>
 
-          <Field label="What runs">
+          <Field label={tChrome('dialog.schedule.whatRuns')}>
             <select
               data-testid="schedule-runtype"
               value={editing.runType === 'action' ? 'action' : 'batch-ocr'}
               onChange={(e) => setEditing({ ...editing, runType: e.target.value })}
               className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
             >
-              <option value="batch-ocr">Batch OCR (make searchable)</option>
-              <option value="action">Guided action</option>
+              <option value="batch-ocr">{tChrome('dialog.schedule.runTypeOcr')}</option>
+              <option value="action">{tChrome('dialog.schedule.runTypeAction')}</option>
             </select>
           </Field>
 
           {editing.runType === 'action' && (
-            <Field label="Guided action">
+            <Field label={tChrome('dialog.schedule.actionLabel')}>
               <select
                 data-testid="schedule-action"
                 value={actionId}
@@ -358,36 +375,44 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                 className="w-full px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
               >
                 <option value="">
-                  {editing.actionFile ? '(keep the current action)' : 'Choose an action…'}
+                  {tChrome(
+                    editing.actionFile
+                      ? 'dialog.schedule.keepAction'
+                      : 'dialog.common.chooseAction',
+                  )}
                 </option>
                 {libraryActions.map((a) => (
                   <option key={a.id} value={a.id}>
-                    {a.name} — {a.steps.map((s) => stepDefFor(s.op).title).join(' → ')}
+                    {tChrome('dialog.common.actionOption', {
+                      name: a.name,
+                      steps: a.steps
+                        .map((s) => tStepTitle(s.op, stepDefFor(s.op).title))
+                        .join(' → '),
+                    })}
                   </option>
                 ))}
               </select>
               <p className="text-xs text-neutral-500 mt-1">
-                The schedule keeps its own copy of the action; edit the schedule to pick up
-                later changes. Actions that ask for values when they run can’t be scheduled.
+                {tChrome('dialog.schedule.actionNote')}
               </p>
             </Field>
           )}
 
           <FolderField
-            label="Source folder"
+            label={tChrome('dialog.schedule.sourceLabel')}
             testid="schedule-source"
             value={editing.source}
-            onPick={() => void pick('Choose the folder to process', (p) => setEditing({ ...editing, source: p }))}
+            onPick={() => void pick(tChrome('dialog.schedule.pickSource'), (p) => setEditing({ ...editing, source: p }))}
           />
           <FolderField
-            label="Destination folder"
+            label={tChrome('dialog.schedule.destLabel')}
             testid="schedule-dest"
             value={editing.dest}
-            onPick={() => void pick('Choose the destination folder', (p) => setEditing({ ...editing, dest: p }))}
+            onPick={() => void pick(tChrome('dialog.common.pickDest'), (p) => setEditing({ ...editing, dest: p }))}
           />
 
           {editing.runType !== 'action' && (
-            <Field label={`Recognition languages — ${describeLanguages(langs)}`}>
+            <Field label={tChrome('dialog.schedule.languages', { summary: describeLanguages(langs) })}>
               <div className="max-h-28 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-3 gap-x-3 gap-y-1">
                 {OCR_LANGUAGES.map((l) => (
                   <label key={l.code} className="flex items-center gap-1.5 text-xs cursor-pointer">
@@ -402,7 +427,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                       }}
                       className="rounded bg-neutral-900 border-neutral-600"
                     />
-                    <span className="text-neutral-300">{l.label}</span>
+                    <span className="text-neutral-300">{tOcrLanguage(l.code)}</span>
                   </label>
                 ))}
               </div>
@@ -410,7 +435,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
           )}
 
           <div className="flex gap-3">
-            <Field label="Runs">
+            <Field label={tChrome('dialog.schedule.runs')}>
               <select
                 data-testid="schedule-frequency"
                 value={editing.frequency}
@@ -419,11 +444,11 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                 }
                 className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
               >
-                <option value="daily">Every day</option>
-                <option value="weekly">Weekly</option>
+                <option value="daily">{tChrome('dialog.schedule.daily')}</option>
+                <option value="weekly">{tChrome('dialog.schedule.weekly')}</option>
               </select>
             </Field>
-            <Field label="At">
+            <Field label={tChrome('dialog.schedule.at')}>
               <input
                 data-testid="schedule-time"
                 value={editing.time}
@@ -433,7 +458,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               />
             </Field>
             {editing.frequency === 'weekly' && (
-              <Field label="Days">
+              <Field label={tChrome('dialog.schedule.days')}>
                 <input
                   value={editing.days}
                   onChange={(e) => setEditing({ ...editing, days: e.target.value })}
@@ -446,24 +471,27 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
 
           <details className="rounded border border-neutral-800 bg-neutral-950/40">
             <summary className="px-3 py-2 text-sm text-neutral-300 cursor-pointer select-none">
-              {editing.runType === 'action' ? 'Account' : 'Filing and account'}
-              <span className="text-neutral-500"> — optional</span>
+              {tChrome(
+                editing.runType === 'action'
+                  ? 'dialog.schedule.accountSection'
+                  : 'dialog.schedule.filingSection',
+              )}
             </summary>
             <div className="px-3 pb-3 pt-1 flex flex-col gap-3">
               {editing.runType !== 'action' && (
                 <>
                   <FolderField
-                    label="Move processed originals to"
+                    label={tChrome('dialog.schedule.movedLabel')}
                     testid="schedule-moved"
                     value={editing.movedRoot}
-                    onPick={() => void pick('Choose where processed originals go', (p) => setEditing({ ...editing, movedRoot: p }))}
+                    onPick={() => void pick(tChrome('dialog.common.pickProcessed'), (p) => setEditing({ ...editing, movedRoot: p }))}
                     onClear={() => setEditing({ ...editing, movedRoot: '' })}
                   />
                   <FolderField
-                    label="Move failed originals to"
+                    label={tChrome('dialog.schedule.errorsLabel')}
                     testid="schedule-errors"
                     value={editing.errorRoot}
-                    onPick={() => void pick('Choose where failed originals go', (p) => setEditing({ ...editing, errorRoot: p }))}
+                    onPick={() => void pick(tChrome('dialog.schedule.pickErrors'), (p) => setEditing({ ...editing, errorRoot: p }))}
                     onClear={() => setEditing({ ...editing, errorRoot: '' })}
                   />
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -474,12 +502,12 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                       onChange={() => setEditing({ ...editing, repairDamaged: !editing.repairDamaged })}
                       className="rounded bg-neutral-900 border-neutral-600"
                     />
-                    <span className="text-sm text-neutral-300">Try to repair damaged files</span>
+                    <span className="text-sm text-neutral-300">{tChrome('dialog.schedule.repair')}</span>
                   </label>
                 </>
               )}
 
-              <Field label="Run as (blank = you)">
+              <Field label={tChrome('dialog.schedule.accountLabel')}>
                 <input
                   data-testid="schedule-account"
                   value={editing.account}
@@ -490,7 +518,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               </Field>
               {editing.account.trim() !== '' && (
                 <>
-                  <Field label="Password (leave blank for a managed service account)">
+                  <Field label={tChrome('dialog.schedule.passwordLabel')}>
                     <input
                       data-testid="schedule-password"
                       type="password"
@@ -500,19 +528,16 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                     />
                   </Field>
                   <p className="text-xs text-neutral-500 -mt-1">
-                    Windows stores this, not Spectra PDF. The account also needs the “Log on
-                    as a batch job” right on this machine, or the schedule is created but never
-                    runs.
+                    {tChrome('dialog.schedule.passwordNote')}
                   </p>
                   <FolderField
-                    label="Log folder (required when running as another account)"
+                    label={tChrome('dialog.schedule.logDirLabel')}
                     testid="schedule-logdir"
                     value={editing.logDir}
-                    onPick={() => void pick('Choose where run logs are written', (p) => setEditing({ ...editing, logDir: p }))}
+                    onPick={() => void pick(tChrome('dialog.schedule.pickLogDir'), (p) => setEditing({ ...editing, logDir: p }))}
                   />
                   <p className="text-xs text-neutral-500 -mt-1">
-                    The default log location belongs to whichever account runs the batch, so a
-                    run under another account would write its log where you cannot see it.
+                    {tChrome('dialog.schedule.logDirNote')}
                   </p>
                 </>
               )}
@@ -533,7 +558,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               }}
               className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
             >
-              Cancel
+              {tChrome('dialog.common.cancel')}
             </button>
             <button
               data-testid="schedule-save"
@@ -541,7 +566,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               onClick={() => void save()}
               className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
             >
-              {busy ? 'Saving…' : 'Save schedule'}
+              {tChrome(busy ? 'dialog.common.saving' : 'dialog.schedule.save')}
             </button>
           </div>
         </div>
@@ -552,7 +577,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
         onClick={() => void batch.openLogFolder(getSettings().batchLogDir).catch(() => {})}
         className="mt-2 text-xs text-neutral-500 underline hover:text-neutral-300"
       >
-        Open log folder
+        {tChrome('dialog.schedule.openLogs')}
       </button>
     </Shell>
   );
@@ -589,17 +614,17 @@ function FolderField({
           onClick={onPick}
           className="px-2.5 py-1 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium shrink-0"
         >
-          Choose…
+          {tChrome('dialog.common.choose')}
         </button>
         <span data-testid={testid} className="text-sm text-neutral-300 truncate" title={value}>
-          {value || 'Not set'}
+          {value || tChrome('dialog.common.notSet')}
         </span>
         {onClear && value !== '' && (
           <button
             onClick={onClear}
             className="px-2 py-0.5 text-xs text-neutral-500 hover:text-neutral-300 shrink-0"
           >
-            Clear
+            {tChrome('dialog.common.clear')}
           </button>
         )}
       </div>
@@ -620,19 +645,19 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Scheduled Batch Runs"
+        aria-label={tChrome('dialog.schedule.title')}
         data-testid="schedule-dialog"
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[620px] max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
-          <h3 className="text-sm font-semibold">Scheduled Batch Runs</h3>
+          <h3 className="text-sm font-semibold">{tChrome('dialog.schedule.title')}</h3>
           <button
             data-testid="schedule-x"
             onClick={onClose}
             className="text-neutral-500 hover:text-neutral-300 text-sm"
           >
-            Close
+            {tChrome('dialog.common.close')}
           </button>
         </div>
         <div className="p-5">{children}</div>

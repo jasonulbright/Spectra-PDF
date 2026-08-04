@@ -1,4 +1,8 @@
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from './languages';
+// N12: the SUMMARY is user-facing copy and the language names come from
+// Intl.DisplayNames — the only non-pure import here (i18n is itself a data
+// module, so the orderings and refusals below stay unit-testable).
+import { tChrome, tChromeCount, tOcrLanguage } from '../i18n';
 
 // Multi-language recognition (Phase 12, issue #1 request 1).
 //
@@ -46,7 +50,12 @@ export function parseTesseractLang(value: string): string[] {
 /** Human summary for the picker ("English", "English + French", "3 languages"). */
 export function describeLanguages(codes: readonly string[]): string {
   const norm = normalizeLanguages(codes);
-  if (norm.length > 2) return `${norm.length} languages`;
-  const label = (c: string): string => OCR_LANGUAGES.find((l) => l.code === c)?.label ?? c;
-  return norm.map(label).join(' + ');
+  if (norm.length > 2) return tChromeCount('dialog.ocr.langCount', norm.length);
+  if (norm.length === 2) {
+    return tChrome('dialog.ocr.langPair', {
+      a: tOcrLanguage(norm[0]),
+      b: tOcrLanguage(norm[1]),
+    });
+  }
+  return tOcrLanguage(norm[0]);
 }

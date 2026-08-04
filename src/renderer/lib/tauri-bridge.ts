@@ -192,7 +192,11 @@ export interface ScheduledRun {
   /** Read back from the command line the task will actually run — there is no
    * second store to disagree with it. Null if it was edited outside the app. */
   profile: ScheduleProfile | null;
+  /** Task Scheduler's own status text. DISPLAY ONLY — Windows localizes it,
+   * so nothing branches on its wording; `enabled` is the discriminant. */
   status: string;
+  /** Read from the task XML's `<Settings><Enabled>` — locale-independent. */
+  enabled: boolean;
   nextRun: string;
   lastRun: string;
   lastResult: string;
