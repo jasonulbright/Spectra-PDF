@@ -14,6 +14,10 @@
 // `forms` subcommand), which is unchanged by this.
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFString } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
+// N12 slice E: the spec problems are USER-FACING copy, so they resolve
+// through the catalog. i18n is itself a data module (catalogs + i18next), so
+// this file stays pure over bytes and unit-testable with no DOM.
+import { tChrome, type UiKey } from '../i18n';
 
 export type NewFieldType =
   | 'text'
@@ -33,6 +37,47 @@ export interface NewFieldSpec {
 }
 
 const CHOICE_TYPES: ReadonlySet<NewFieldType> = new Set(['radio', 'dropdown', 'optionlist']);
+
+/** One validation problem, held as its KEY plus its values rather than as a
+ * rendered sentence — see FieldSpecError. */
+interface FieldProblem {
+  key: UiKey;
+  vars?: Record<string, string | number>;
+}
+
+/**
+ * The refusal `addFormField` throws when a spec is invalid.
+ *
+ * Two properties earned in N12 slice E:
+ *   • the problems are reported ALL AT ONCE (the engine ops' fail-closed
+ *     posture), and each is its OWN catalog key. Nothing glues several
+ *     sentences into one key — a joined message would carry several
+ *     unrelated grammars and be untranslatable as a unit.
+ *   • `message` is an ACCESSOR (the EngineError precedent), so a refusal
+ *     already sitting in a component's state follows a LIVE language switch.
+ *     The join is a NEWLINE — a separator with no language of its own; the
+ *     display sinks collapse it to a space exactly as the old ' '.join did.
+ */
+export class FieldSpecError extends Error {
+  readonly problems: readonly FieldProblem[];
+
+  constructor(problems: readonly FieldProblem[]) {
+    // No argument: `Error(undefined)` defines no own `message`, leaving the
+    // accessor below as the only one.
+    super();
+    this.problems = problems;
+    this.name = 'FieldSpecError';
+    Object.defineProperty(this, 'message', {
+      get: () => problems.map((p) => tChrome(p.key, p.vars)).join('\n'),
+      configurable: true,
+      enumerable: false,
+    });
+    if (typeof this.stack === 'string') {
+      const [, ...rest] = this.stack.split('\n');
+      this.stack = [`FieldSpecError: ${this.message}`, ...rest].join('\n');
+    }
+  }
+}
 
 // The /T of every TOP-LEVEL /AcroForm /Fields entry — including non-terminal
 // hierarchy parents, which pdf-lib's getFields() (terminal-only) cannot see.
@@ -62,23 +107,26 @@ function topLevelFieldNames(doc: PDFDocument): Set<string> {
 // Validate a spec against the document BEFORE any mutation (fail-closed,
 // everything reported at once — the engine ops' posture).
 function validateSpec(doc: PDFDocument, spec: NewFieldSpec): void {
-  const problems: string[] = [];
+  const problems: FieldProblem[] = [];
   const name = spec.name.trim();
-  if (!name) problems.push('A field name is required.');
+  if (!name) problems.push({ key: 'refusal.field.nameRequired' });
   // pdf-lib rejects dots itself (hierarchy separator), but with an internal
   // message — say it plainly here.
-  if (name.includes('.')) problems.push('Field names cannot contain "." (it separates parent and child names).');
+  if (name.includes('.')) problems.push({ key: 'refusal.field.nameDot' });
   if (spec.pageIndex < 0 || spec.pageIndex >= doc.getPageCount()) {
-    problems.push(`Page ${spec.pageIndex + 1} is out of range (1-${doc.getPageCount()}).`);
+    problems.push({
+      key: 'refusal.field.pageOutOfRange',
+      vars: { page: spec.pageIndex + 1, count: doc.getPageCount() },
+    });
   }
   const [x0, y0, x1, y1] = spec.rect;
-  if (!(x1 > x0) || !(y1 > y0)) problems.push('The field rectangle is empty.');
+  if (!(x1 > x0) || !(y1 > y0)) problems.push({ key: 'refusal.field.rectEmpty' });
   if (CHOICE_TYPES.has(spec.type)) {
     const options = (spec.options ?? []).map((o) => o.trim()).filter(Boolean);
     if (options.length === 0) {
-      problems.push('This field type needs at least one option.');
+      problems.push({ key: 'refusal.field.needsOption' });
     } else if (new Set(options).size !== options.length) {
-      problems.push('Options must be unique.');
+      problems.push({ key: 'refusal.field.optionsUnique' });
     }
   }
   if (name) {
@@ -89,13 +137,13 @@ function validateSpec(doc: PDFDocument, spec: NewFieldSpec): void {
     // signature path has no pdf-lib backstop and would have created a
     // same-/T sibling next to such a parent).
     if (topLevelFieldNames(doc).has(name)) {
-      problems.push(`A field named "${name}" already exists.`);
+      problems.push({ key: 'refusal.field.nameExists', vars: { name } });
     }
   }
   // Ensure /AcroForm exists (getForm() lazily creates it, and strips /XFA —
   // the standing pure-AcroForm posture); addSignatureField relies on it.
   doc.getForm();
-  if (problems.length > 0) throw new Error(problems.join(' '));
+  if (problems.length > 0) throw new FieldSpecError(problems);
 }
 
 function addSignatureField(doc: PDFDocument, spec: NewFieldSpec): void {

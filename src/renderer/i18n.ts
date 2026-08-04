@@ -19,6 +19,7 @@ import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
 import { WORKBENCH_STRINGS, type WorkbenchKey } from './i18n-workbench';
 import { CANVAS_STRINGS, type CanvasKey } from './i18n-canvas';
+import { REFUSAL_STRINGS, type RefusalKey } from './i18n-refusals';
 import { loadSettings } from './lib/app-settings';
 import { OCR_LANGUAGES } from './ocr/languages';
 
@@ -88,6 +89,28 @@ void i18next.use(initReactI18next).init({
   interpolation: { escapeValue: false }, // React escapes; double-escaping corrupts
   returnEmptyString: false,
 });
+
+/**
+ * Keep `<html lang>` in step with the UI language.
+ *
+ * `index.html` ships `lang="en"` and nothing updated it, so a Spanish UI
+ * still announced itself as English: a screen reader picked English
+ * pronunciation rules for Spanish text, and the platform's own hyphenation
+ * and spell-check heuristics keyed off the wrong language. Found by the
+ * slice-E RTL spot-check — the attribute is also where a future RTL locale
+ * would carry `dir`, but nothing sets `dir` today and nothing should until a
+ * mirrored layout exists (see the punchlist's RTL row: half-mirroring is
+ * worse than not mirroring).
+ */
+function syncDocumentLanguage(lng: string): void {
+  if (typeof document === 'undefined') return;
+  // qps is a DEV pseudo-locale with no BCP-47 identity; leave the document
+  // marked as its English source rather than claiming a language that is not
+  // one.
+  document.documentElement.lang = lng === 'qps' ? 'en' : lng;
+}
+syncDocumentLanguage(i18next.language ?? 'en');
+i18next.on('languageChanged', syncDocumentLanguage);
 
 /** Switch the live UI language (the Settings panel persists the pref and
  * calls this; react-i18next re-renders every hooked component). */
@@ -218,16 +241,24 @@ export function tToolbarGroup(groupId: string, englishLabel: string): string {
 }
 
 // The typed UI records, merged: chrome (slice A) + panels, dialogs and the
-// workbench chrome (slice B) + the canvas and its overlays (slice C). One
-// helper set serves all five — a key is compile-time-checked against the union.
+// workbench chrome (slice B) + the canvas and its overlays (slice C) + the
+// renderer's own refusal messages (slice E). One helper set serves all six —
+// a key is compile-time-checked against the union.
 const UI_STRINGS: Record<string, string> = {
   ...CHROME_STRINGS,
   ...PANEL_STRINGS,
   ...DIALOG_STRINGS,
   ...WORKBENCH_STRINGS,
   ...CANVAS_STRINGS,
+  ...REFUSAL_STRINGS,
 };
-export type UiKey = ChromeKey | PanelKey | DialogKey | WorkbenchKey | CanvasKey;
+export type UiKey =
+  | ChromeKey
+  | PanelKey
+  | DialogKey
+  | WorkbenchKey
+  | CanvasKey
+  | RefusalKey;
 type UiPluralKey =
   | ChromePluralKey
   | { [K in PanelKey]: K extends `${infer B}_one` ? B : never }[PanelKey]

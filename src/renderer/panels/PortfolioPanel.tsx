@@ -150,7 +150,7 @@ export function PortfolioPanel(): React.ReactElement {
         });
         await reloadFile(snapshotPath);
         await refresh();
-        setStatus(`Added ${(r as unknown as { name: string }).name}`);
+        setStatus(tChrome('panel.portfolio.added', { name: (r as unknown as { name: string }).name }));
       } catch (e: unknown) {
         setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         throw e;
@@ -185,7 +185,7 @@ export function PortfolioPanel(): React.ReactElement {
         await getCommandContext()?.app?.openPath(
           (r as unknown as { output: string }).output,
         );
-        setStatus(`Opened ${name}`);
+        setStatus(tChrome('panel.portfolio.opened', { name }));
       } catch (e: unknown) {
         setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
@@ -211,7 +211,7 @@ export function PortfolioPanel(): React.ReactElement {
           dest_dir: dir,
         });
         await app.openPortfolioMemberFile((r as unknown as { output: string }).output);
-        setStatus(`Opened ${name} in its own app`);
+        setStatus(tChrome('panel.portfolio.openedExternally', { name }));
       } catch (e: unknown) {
         setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
@@ -228,7 +228,7 @@ export function PortfolioPanel(): React.ReactElement {
       setStatus(tChrome('panel.portfolio.saving'));
       try {
         await call('extract_attachment', { file: activeFile.workingPath, name, output });
-        setStatus(`Saved ${name}`);
+        setStatus(tChrome('panel.portfolio.saved', { name }));
       } catch (e: unknown) {
         setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         throw e;
@@ -263,7 +263,7 @@ export function PortfolioPanel(): React.ReactElement {
         });
         await reloadFile(snapshotPath);
         await refresh();
-        setStatus(`Updated ${name}`);
+        setStatus(tChrome('panel.portfolio.updated', { name }));
       } catch (e: unknown) {
         setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         throw e;
@@ -314,7 +314,7 @@ export function PortfolioPanel(): React.ReactElement {
         });
         await reloadFile(snapshotPath);
         await refresh();
-        setStatus(`Removed ${name}`);
+        setStatus(tChrome('panel.portfolio.removed', { name }));
       } catch (e: unknown) {
         setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {

@@ -26,12 +26,19 @@ describe('language switch (N12)', () => {
     );
     expect(stored).toBe('es');
 
+    // N12 slice E: `<html lang>` follows the switch. It shipped hardcoded to
+    // "en", so a screen reader read Spanish text with English pronunciation
+    // rules — the UI language and the language the DOCUMENT claims to be in
+    // are the same fact and must not be able to disagree.
+    expect(await browser.execute(() => document.documentElement.lang)).toBe('es');
+
     // And back — the rest of the suite depends on English.
     await $('[data-testid="prefs-language"]').selectByAttribute('value', 'en');
     await browser.waitUntil(
       async () => (await $('[data-testid="menu-file"]').getText()) === 'File',
       { timeout: 10_000, timeoutMsg: 'the menu bar never returned to English' },
     );
+    expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
     await $('[data-testid="prefs-close"]').click();
   });
 });

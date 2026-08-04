@@ -818,7 +818,7 @@ function AppContent(): React.ReactElement {
   const handleFillFormValues = useCallback(
     async (path: string, values: Record<string, FormFieldValue>) => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       // Pre/post reads route through the engine (FC4b) — `read_form_fields` is
       // INTERNAL, so neither read runs the commit gate. The pre-read sees the
       // current working copy (== buffer); `file.snapshot` then flushes pending
@@ -845,7 +845,7 @@ function AppContent(): React.ReactElement {
         font_dir: await app.getEditFontPath(),
       });
       const result = await reloadFile(path);
-      if (!result) throw new Error('The file is no longer open.');
+      if (!result) throw new Error(tChrome('refusal.file.noLongerOpen'));
       dispatch({
         type: 'UPDATE_FILE',
         path,
@@ -860,13 +860,13 @@ function AppContent(): React.ReactElement {
   const handleAddFormField = useCallback(
     async (path: string, spec: NewFieldSpec) => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       const snapshotPath = await file.snapshot(f.workingPath);
       const bytes = await file.readBuffer(f.workingPath);
       const withField = await addFormField(bytes, spec);
       await file.writeBuffer(f.workingPath, withField);
       const result = await reloadFile(path);
-      if (!result) throw new Error('The file is no longer open.');
+      if (!result) throw new Error(tChrome('refusal.file.noLongerOpen'));
       dispatch({
         type: 'UPDATE_FILE',
         path,
@@ -929,7 +929,7 @@ function AppContent(): React.ReactElement {
       opts?: { convert?: boolean },
     ): Promise<string | void> => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       if (opts?.convert) {
         // 7.4 + 9.B1: render the replacement in the bundled fallback
@@ -960,7 +960,7 @@ function AppContent(): React.ReactElement {
       style: { size?: number; color?: [number, number, number] },
     ): Promise<string | void> => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       await performOperation(path, 'restyle_text_run', {
         page,
@@ -982,7 +982,7 @@ function AppContent(): React.ReactElement {
       opts?: ParagraphEditOpts,
     ): Promise<string | void> => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       // The fingerprint (member runs + logical text) makes the engine
       // re-derive its grouping and REFUSE if the page changed underneath —
@@ -1055,7 +1055,7 @@ function AppContent(): React.ReactElement {
       },
     ): Promise<string | void> => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       await performOperation(path, 'merge_paragraph_with_previous', {
         page,
@@ -1127,7 +1127,7 @@ function AppContent(): React.ReactElement {
       },
     ): Promise<string | void> => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       const params: Record<string, unknown> = {
         page,
@@ -1167,7 +1167,7 @@ function AppContent(): React.ReactElement {
       },
     ): Promise<string | void> => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       if (kind === 'transform') {
         if (!opts?.matrix) throw new Error('transform requires a target matrix');
@@ -1204,7 +1204,7 @@ function AppContent(): React.ReactElement {
       },
     ) => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
 
       if (kind !== 'extract' && !(await confirmEditOfSignedDoc(path, f.workingPath))) {
         return EDIT_DECLINED;
@@ -1363,7 +1363,7 @@ function AppContent(): React.ReactElement {
       opts: { targets?: { index: number; matrix: number[] }[]; indexes?: number[] },
     ): Promise<string | void> => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       if (kind === 'transform') {
         if (!opts.targets?.length) throw new Error('group transform requires targets');
@@ -1391,7 +1391,7 @@ function AppContent(): React.ReactElement {
       at?: [number, number],
     ): Promise<string | void> => {
       const f = state.files.get(path);
-      if (!f) throw new Error('The file is no longer open.');
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
 
       // P7 slice F: an SVG (picked or injected) places as REAL vector
