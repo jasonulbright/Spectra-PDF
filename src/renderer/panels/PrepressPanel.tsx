@@ -5,6 +5,9 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { ensureGsPath } from './SettingsPanel';
 import { dialog } from '../lib/tauri-bridge';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
+import type { PanelKey } from '../i18n-panels';
 
 // Phase 9.S5 — ICC-managed CMYK conversion for prepress (Ghostscript). Like
 // grayscale/pdfa it writes a new file (the "Optimize" tool group's pattern);
@@ -15,18 +18,18 @@ import { dialog } from '../lib/tauri-bridge';
 // nothing, the § I.0 silent-degradation class). It returns to the picker when
 // a user-picked destination profile is in play only if that profile defines
 // it — which we cannot know cheaply, so it stays withheld (recorded).
-const RENDER_INTENTS: { value: string; label: string }[] = [
-  { value: 'relative', label: 'Relative colorimetric (print default)' },
-  { value: 'perceptual', label: 'Perceptual (photographic)' },
-  { value: 'absolute', label: 'Absolute colorimetric (proofing)' },
+const RENDER_INTENTS: { value: string; label: PanelKey }[] = [
+  { value: 'relative', label: 'panel.prepress.intentRelative' },
+  { value: 'perceptual', label: 'panel.prepress.intentPerceptual' },
+  { value: 'absolute', label: 'panel.prepress.intentAbsolute' },
 ];
 
 // O6 tail: PDF/X print masters. X-3 is the colour-managed default; X-1a the
 // CMYK-only legacy exchange; X-4 allows live transparency.
-const PDFX_VERSIONS: { value: number; label: string }[] = [
-  { value: 3, label: 'PDF/X-3 (colour-managed, default)' },
-  { value: 1, label: 'PDF/X-1a (legacy CMYK exchange)' },
-  { value: 4, label: 'PDF/X-4 (keeps live transparency)' },
+const PDFX_VERSIONS: { value: number; label: PanelKey }[] = [
+  { value: 3, label: 'panel.prepress.x3' },
+  { value: 1, label: 'panel.prepress.x1a' },
+  { value: 4, label: 'panel.prepress.x4' },
 ];
 
 /** The destination-profile row shared by both actions: empty = Ghostscript's
@@ -38,6 +41,8 @@ const profileParam = (p: ProfileChoice): string =>
   p.kind === 'default' ? '' : p.kind === 'bundled' ? 'default_cmyk.icc' : p.path;
 
 export function PrepressPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call, saveFile } = useEngine();
   const [status, setStatus] = useState('');
@@ -58,7 +63,7 @@ export function PrepressPanel(): React.ReactElement {
     const output = await saveFile('cmyk.pdf');
     if (!output) return;
     setBusy(true);
-    setStatus('Converting to CMYK…');
+    setStatus(tChrome('panel.prepress.convertingCmyk'));
     try {
       const r = await call('convert_cmyk', {
         file: activeFile.workingPath,
@@ -69,9 +74,9 @@ export function PrepressPanel(): React.ReactElement {
       });
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.output_size / 1024).toFixed(0);
-      setStatus(`Saved CMYK PDF — ${orig} KB → ${out} KB`);
+      setStatus(tChrome('panel.prepress.cmykDone', { from: orig, to: out }));
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
@@ -82,7 +87,7 @@ export function PrepressPanel(): React.ReactElement {
     const output = await saveFile('pdfx.pdf');
     if (!output) return;
     setBusy(true);
-    setStatus('Creating PDF/X master…');
+    setStatus(tChrome('panel.prepress.creatingPdfx'));
     try {
       const r = await call('convert_pdfx', {
         file: activeFile.workingPath,
@@ -94,33 +99,31 @@ export function PrepressPanel(): React.ReactElement {
         gs_path: await ensureGsPath(),
       });
       setStatus(
-        `Saved ${r.pdfx_version} master` +
-          (r.embedded_profile
-            ? ' with the destination profile embedded in its output intent'
-            : ` — output intent names ${identifier}`),
+        tChrome('panel.prepress.pdfxDone', {
+          version: r.pdfx_version,
+          suffix: r.embedded_profile
+            ? tChrome('panel.prepress.pdfxEmbedded')
+            : tChrome('panel.prepress.pdfxNames', { identifier }),
+        }),
       );
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
   }, [activeFile, call, saveFile, pdfxVersion, profile, condition, identifier]);
 
   if (!activeFile)
-    return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to prepare for print" />;
+    return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.prepress.open')} />;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">
-        Working on: <span className="text-neutral-200">{activeFile.name}</span> ({activeFile.pageCount}{' '}
-        pages)
+        {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})
       </div>
-      <p className="text-sm text-neutral-500">
-        Converts the document&apos;s colours to DeviceCMYK for commercial printing, through a
-        colour-managed (ICC) transform. Writes a new file.
-      </p>
+      <p className="text-sm text-neutral-500">{tChrome('panel.prepress.blurb')}</p>
       <label className="flex items-center gap-2 text-sm text-neutral-300">
-        <span className="w-28 shrink-0 text-neutral-400">Render intent</span>
+        <span className="w-28 shrink-0 text-neutral-400">{tChrome('panel.prepress.renderIntent')}</span>
         <select
           data-testid="cmyk-render-intent"
           value={renderIntent}
@@ -129,16 +132,16 @@ export function PrepressPanel(): React.ReactElement {
         >
           {RENDER_INTENTS.map((ri) => (
             <option key={ri.value} value={ri.value}>
-              {ri.label}
+              {tChrome(ri.label)}
             </option>
           ))}
         </select>
       </label>
       <div className="flex items-center gap-2 text-sm text-neutral-300">
-        <span className="w-28 shrink-0 text-neutral-400">Destination</span>
+        <span className="w-28 shrink-0 text-neutral-400">{tChrome('panel.prepress.destination')}</span>
         <select
           data-testid="cmyk-dest-profile"
-          aria-label="Destination profile"
+          aria-label={tChrome('panel.prepress.destinationAria')}
           value={profile.kind}
           onChange={(e) => {
             const k = e.target.value;
@@ -147,9 +150,9 @@ export function PrepressPanel(): React.ReactElement {
           }}
           className="px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
         >
-          <option value="default">Ghostscript default CMYK</option>
-          <option value="bundled">Bundled profile (default_cmyk.icc)</option>
-          <option value="file">Choose an .icc file…</option>
+          <option value="default">{tChrome('panel.prepress.profileDefault')}</option>
+          <option value="bundled">{tChrome('panel.prepress.profileBundled')}</option>
+          <option value="file">{tChrome('panel.prepress.profileFile')}</option>
         </select>
         {profile.kind === 'file' && (
           <span className="text-xs text-neutral-400 truncate" title={profile.path}>
@@ -163,17 +166,13 @@ export function PrepressPanel(): React.ReactElement {
         disabled={busy}
         className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
       >
-        {busy ? 'Converting…' : 'Convert to CMYK'}
+        {busy ? tChrome('panel.prepress.converting') : tChrome('panel.prepress.convertCmyk')}
       </button>
 
       <div className="border-t border-neutral-800 pt-4 flex flex-col gap-3">
-        <p className="text-sm text-neutral-500">
-          Or produce a <span className="text-neutral-300">PDF/X print master</span> — the CMYK
-          conversion plus a conformance marker and an output intent naming the printing
-          condition (embedding the chosen destination profile when one is set above).
-        </p>
+        <p className="text-sm text-neutral-500">{tChrome('panel.prepress.pdfxBlurb')}</p>
         <label className="flex items-center gap-2 text-sm text-neutral-300">
-          <span className="w-28 shrink-0 text-neutral-400">Standard</span>
+          <span className="w-28 shrink-0 text-neutral-400">{tChrome('panel.prepress.standard')}</span>
           <select
             data-testid="pdfx-version"
             value={pdfxVersion}
@@ -182,13 +181,13 @@ export function PrepressPanel(): React.ReactElement {
           >
             {PDFX_VERSIONS.map((v) => (
               <option key={v.value} value={v.value}>
-                {v.label}
+                {tChrome(v.label)}
               </option>
             ))}
           </select>
         </label>
         <label className="flex items-center gap-2 text-sm text-neutral-300">
-          <span className="w-28 shrink-0 text-neutral-400">Condition</span>
+          <span className="w-28 shrink-0 text-neutral-400">{tChrome('panel.prepress.condition')}</span>
           <input
             data-testid="pdfx-condition"
             value={condition}
@@ -197,12 +196,12 @@ export function PrepressPanel(): React.ReactElement {
           />
         </label>
         <label className="flex items-center gap-2 text-sm text-neutral-300">
-          <span className="w-28 shrink-0 text-neutral-400">Identifier</span>
+          <span className="w-28 shrink-0 text-neutral-400">{tChrome('panel.prepress.identifier')}</span>
           <input
             data-testid="pdfx-identifier"
             value={identifier}
             onChange={(e) => setIdentifier(e.target.value)}
-            placeholder="Registered characterization, e.g. CGATS TR001 or FOGRA39"
+            placeholder={tChrome('panel.prepress.identifierPlaceholder')}
             className="flex-1 max-w-md px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
           />
         </label>
@@ -212,7 +211,7 @@ export function PrepressPanel(): React.ReactElement {
           disabled={busy}
           className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
         >
-          {busy ? 'Working…' : 'Create PDF/X'}
+          {busy ? tChrome('panel.prepress.working') : tChrome('panel.prepress.createPdfx')}
         </button>
       </div>
       <StatusBar message={status} busy={busy} />
