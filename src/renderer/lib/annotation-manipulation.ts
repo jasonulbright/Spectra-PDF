@@ -36,9 +36,11 @@ export function isTransformable(a: PageAnnotation): boolean {
 }
 
 /** Kinds that resize. Sticky notes are a fixed icon (their /Rect is
- * viewer-managed); everything else transformable scales. */
+ * viewer-managed) and a count mark is a fixed MARKER (N11 slice C — a resized
+ * count symbol would read as a different-weight count); everything else
+ * transformable scales. */
 export function isResizable(a: PageAnnotation): boolean {
-  return isTransformable(a) && a.kind !== 'note';
+  return isTransformable(a) && a.kind !== 'note' && a.kind !== 'count';
 }
 
 /** Smallest displayed box a resize may produce, normalized per axis. Keeps a

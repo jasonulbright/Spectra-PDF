@@ -158,6 +158,8 @@ export const CANVAS_STRINGS = {
   'canvas.pbar.kind.measure': 'Measurement',
   'canvas.pbar.kind.shape': 'Shape',
   'canvas.pbar.kind.callout': 'Callout',
+  'canvas.pbar.kind.count': 'Count mark',
+  'canvas.pbar.kind.countlegend': 'Takeoff legend',
   'canvas.pbar.markup.highlight': 'Highlight',
   'canvas.pbar.markup.underline': 'Underline',
   'canvas.pbar.markup.strikeout': 'Strike out',
@@ -582,6 +584,14 @@ export const CANVAS_STRINGS = {
   'canvas.redact.warning':
     "Text and images under each region are removed from the file's content, not just covered. Undo can restore the file while it stays open; once saved, the content is gone for good.",
   'canvas.redact.apply': 'Redact',
+
+  // Count & takeoff (N11 slice C). The GROUP NAME is user data and is never
+  // translated — it lands in /Subj and in the mark's "<group> <seq>" contents
+  // verbatim, the measure format-string rule. Only the chrome around it
+  // localizes: the strip's picker and its hints.
+  'canvas.count.groupPicker': 'Count group',
+  'canvas.count.armTitle': 'Count into “{{group}}”',
+  'canvas.count.noGroups': 'Add a count group in the Count & Takeoff panel',
 } as const;
 
 export type CanvasKey = keyof typeof CANVAS_STRINGS;

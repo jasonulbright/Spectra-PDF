@@ -175,6 +175,8 @@ export const PANEL_STRINGS = {
   'panel.comments.kind.measure': 'Measurement',
   'panel.comments.kind.shape': 'Shape',
   'panel.comments.kind.callout': 'Callout',
+  'panel.comments.kind.count': 'Count mark',
+  'panel.comments.kind.countlegend': 'Takeoff legend',
 
   'panel.tags.open': 'Open a PDF to edit its structure tags',
   'panel.tags.untagged':
@@ -757,6 +759,38 @@ export const PANEL_STRINGS = {
   'panel.ga.export': 'Export…',
   'panel.ga.delete': 'Delete',
   'panel.ga.addStep': 'Add step',
+
+  // Count & Takeoff (N11 slice C). Group NAMES are the user's own text and
+  // never pass through here; `newGroupName` is only the SEED for a fresh one,
+  // which the user then edits — after that it is data, not chrome.
+  'panel.takeoff.open': 'Open a PDF to count items on it',
+  'panel.takeoff.groups': 'Count groups',
+  'panel.takeoff.addGroup': 'New group',
+  'panel.takeoff.newGroupName': 'Group',
+  'panel.takeoff.empty':
+    'No count groups yet. Add one, then click on the page to count — each click places a marker, and clicking a marker again removes it.',
+  'panel.takeoff.armTitle': 'Count into this group',
+  'panel.takeoff.edit': 'Edit',
+  'panel.takeoff.nameAria': 'Group name',
+  'panel.takeoff.colorAria': 'Use the colour {{color}}',
+  'panel.takeoff.symbolAria': 'Use the {{symbol}} marker',
+  'panel.takeoff.forget': 'Forget group',
+  'panel.takeoff.forgetTitle':
+    'Remove this group from the remembered list. Marks already placed keep their group.',
+  'panel.takeoff.total': 'Total',
+  'panel.takeoff.colGroup': 'Group',
+  'panel.takeoff.colPage': 'Page',
+  'panel.takeoff.colCount': 'Count',
+  'panel.takeoff.placeLegend': 'Place legend',
+  'panel.takeoff.legendHint':
+    'Stamp a legend table onto the page. It records the counts as they are now — place it again when they change.',
+  'panel.takeoff.legendPlaced': 'Legend placed on the page.',
+  'panel.takeoff.nothingToLegend': 'Nothing counted yet — a legend would be empty.',
+  'panel.takeoff.exportCsv': 'Export CSV…',
+  'panel.takeoff.exportHint':
+    'Write the takeoff summary as a CSV: one row per group per page, plus a total.',
+  'panel.takeoff.exporting': 'Exporting…',
+  'panel.takeoff.exported': 'Exported {{total}} marks across {{groups}} groups.',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;

@@ -240,6 +240,19 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       check('dock close title', await $('[data-testid="tool-dock-close"]').getAttribute('title'));
       check('dock op switcher', await $('[data-testid="dock-op-rotate"]').getText());
       await sweep('[data-testid="tool-dock"]', leaks);
+
+      // N11 slice C: the Takeoff panel is a container of its own — its empty
+      // state, its column headings and its two actions are all catalog
+      // strings, and its group NAMES are user data that must stay bare (the
+      // sweep reads the chrome around them, not them).
+      expect(await invokeAppCommand('tools.panel.takeoff')).toBe(true);
+      await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
+      await browser.pause(200);
+      await sweep('[data-testid="tool-dock"]', leaks);
+      expect(await invokeAppCommand('tools.close')).toBe(true);
+      expect(await invokeAppCommand('tools.panel.rotate')).toBe(true);
+      await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
+
       // Back to the picker: the tile grid is a surface of its own.
       await $('[data-testid="tool-dock-grid"]').click();
       await browser.pause(200);

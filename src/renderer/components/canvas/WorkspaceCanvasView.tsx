@@ -52,6 +52,17 @@ import {
   subscribeSnapSettings,
 } from '../../lib/snap-settings';
 import {
+  countMarksOf,
+  derivedGroups,
+  mergeGroups,
+  type CountGroup,
+} from '../../lib/count-marks';
+import {
+  getTakeoffSettings,
+  rememberGroup,
+  subscribeTakeoffSettings,
+} from '../../lib/takeoff-settings';
+import {
   prunedToPages,
   withGuidePos,
   withoutGuide,
@@ -1546,6 +1557,23 @@ export function WorkspaceCanvasView({
         return { ...prev, ids: merged };
       }),
     [],
+  );
+
+  // N11 slice C: the count mode's Ctrl-marquee re-files the marks it covered
+  // into the armed group. The reducer renumbers them (a sequence is unique per
+  // group across the whole document), so all this passes is the group.
+  const onRegroupCountMarks = useCallback(
+    (docId: string, pageId: string, annotationIds: string[], group: CountGroup) =>
+      dispatch({
+        type: 'REGROUP_COUNT_MARKS',
+        docId,
+        pageId,
+        annotationIds,
+        group: group.name,
+        color: group.color,
+        symbol: group.symbol,
+      }),
+    [dispatch],
   );
 
   const onTransformAnnotations = useCallback(
@@ -3681,6 +3709,34 @@ export function WorkspaceCanvasView({
   // persisted preference is not workspace state. One owner, three readers
   // (menu command, status bar, canvas).
   const snapSettings = useSyncExternalStore(subscribeSnapSettings, getSnapSettings, getSnapSettings);
+
+  // --- Count & takeoff (N11 slice C): the group list the strip offers -------
+  // The DOCUMENT's own groups (derived from its marks) merged with the
+  // remembered ones — resolved here because this is the component that holds
+  // the document; the page cell and the panel each derive what they need.
+  const takeoffSettings = useSyncExternalStore(
+    subscribeTakeoffSettings,
+    getTakeoffSettings,
+    getTakeoffSettings,
+  );
+  const countGroups = useMemo<CountGroup[]>(() => {
+    const marks = (focusedDoc?.pages ?? []).flatMap((p) => countMarksOf(p.annotations));
+    return mergeGroups(derivedGroups(marks), takeoffSettings.groups);
+  }, [focusedDoc, takeoffSettings.groups]);
+  // Keep the REMEMBERED definition of the armed group in step with the file's.
+  // The file is the authority on how its own group looks (`mergeGroups`), so
+  // without this a group learned from one drawing could place its next mark in
+  // a different colour on another page — one group drawn two ways.
+  useEffect(() => {
+    const name = takeoffSettings.armed;
+    if (!name) return;
+    const fromFile = countGroups.find((g) => g.name === name);
+    if (!fromFile) return;
+    const remembered = takeoffSettings.groups.find((g) => g.name === name);
+    if (remembered && remembered.color === fromFile.color && remembered.symbol === fromFile.symbol)
+      return;
+    rememberGroup(fromFile);
+  }, [countGroups, takeoffSettings.armed, takeoffSettings.groups]);
   const [snapGeomByPage, setSnapGeomByPage] =
     useState<ReadonlyMap<string, PageSnapGeometry>>(NO_SNAP_GEOM);
   const snapGeomRef = useRef(snapGeomByPage);
@@ -3709,6 +3765,10 @@ export function WorkspaceCanvasView({
     tool === 'cropdraw' ||
     tool === 'addtext' ||
     tool === 'addimage' ||
+    // N11 slice C: a count mark is a PLACEMENT, so it snaps like every other
+    // one — landing a door count on the door's own corner is the whole point
+    // of counting on a drawing rather than near it.
+    tool === 'count' ||
     tool === 'select';
   const snapBuffer = focusedDoc ? state.files.get(focusedDoc.path)?.buffer : undefined;
   useEffect(() => {
@@ -4787,6 +4847,7 @@ export function WorkspaceCanvasView({
         onSetToolColor={setToolColor}
         stampPreset={stampPreset}
         onSetStampPreset={setStampPreset}
+        countGroups={countGroups}
         shapeType={shapeType}
         onSetShapeType={setShapeType}
         measureScale={measureScale}
@@ -4994,6 +5055,7 @@ export function WorkspaceCanvasView({
             onCalibrate,
             onMeasureContextMenu,
             onMarqueeSelect,
+            onRegroupCountMarks,
             onAddRedactionMark,
             onRemoveRedactionMark,
             onSetSignaturePlacement,
@@ -5242,6 +5304,7 @@ export function WorkspaceCanvasView({
           onCalibrate={onCalibrate}
           onMeasureContextMenu={onMeasureContextMenu}
           onMarqueeSelect={onMarqueeSelect}
+          onRegroupCountMarks={onRegroupCountMarks}
           onAddRedactionMark={onAddRedactionMark}
           onRemoveRedactionMark={onRemoveRedactionMark}
           onSetSignaturePlacement={onSetSignaturePlacement}

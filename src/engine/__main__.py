@@ -46,6 +46,7 @@ from engine.links import list_links, set_link_url, delete_link, add_links
 from engine.office_export import export_document, supported_formats
 from engine.image_export import export_images
 from engine.xfdf import export_xfdf, import_xfdf
+from engine.takeoff import export_count_summary
 from engine.attachments import (
     add_attachment,
     extract_attachment,
@@ -148,6 +149,7 @@ def main() -> None:
     server.register("set_page_labels", set_page_labels)
     server.register("export_xfdf", export_xfdf)
     server.register("import_xfdf", import_xfdf)
+    server.register("export_count_summary", export_count_summary)
     server.register("list_attachments", list_attachments)
     server.register("add_attachment", add_attachment)
     server.register("extract_attachment", extract_attachment)

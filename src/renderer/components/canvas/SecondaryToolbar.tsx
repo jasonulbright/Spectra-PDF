@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invokeCommand } from '../../commands/context';
 import { COMMANDS, SECONDARY_TOOLBAR_ACTIONS, TOOL_TITLES } from '../../commands/registry';
@@ -14,6 +14,13 @@ import {
   type CustomStamp,
 } from '../../lib/stamp-library';
 import { dialog, file } from '../../lib/tauri-bridge';
+import { CountSymbolGlyph } from '../CountSymbolGlyph';
+import type { CountGroup } from '../../lib/count-marks';
+import {
+  armCountGroup,
+  getTakeoffSettings,
+  subscribeTakeoffSettings,
+} from '../../lib/takeoff-settings';
 import {
   tChrome,
   tChromeCount,
@@ -77,6 +84,12 @@ export interface SecondaryToolbarProps {
   /** Stamp text preset; null = the default stamp. */
   stampPreset: StampPreset | null;
   onSetStampPreset: (preset: StampPreset | null) => void;
+  /** N11 slice C (count mode): the groups the picker offers — the DOCUMENT's
+   * own groups merged with the remembered ones, resolved by the canvas view
+   * because that is what holds the document. Which one is ARMED comes from the
+   * module store this component reads directly, so the strip and the Takeoff
+   * panel cannot disagree about it. */
+  countGroups: readonly CountGroup[];
   /** Shape mode (rung 2): which figure the gesture draws — a mode option in
    * the stamp-preset sense. */
   shapeType: ShapeType;
@@ -240,6 +253,7 @@ export function SecondaryToolbar({
   onSetToolColor,
   stampPreset,
   onSetStampPreset,
+  countGroups,
   shapeType,
   onSetShapeType,
   measureScale,
@@ -275,6 +289,14 @@ export function SecondaryToolbar({
   // Custom stamp library (parity map § 2): loaded once, persisted on every
   // change. Hooks live above the early return (rules of hooks).
   const [customStamps, setCustomStamps] = useState<CustomStamp[]>(() => loadCustomStamps());
+  // N11 slice C: which count group is armed. Read from the module store, not
+  // a prop — the Takeoff panel writes it and this strip must show the same
+  // answer without a second owner in between.
+  const takeoff = useSyncExternalStore(
+    subscribeTakeoffSettings,
+    getTakeoffSettings,
+    getTakeoffSettings,
+  );
   const [showNewStamp, setShowNewStamp] = useState(false);
   const [newStampLabel, setNewStampLabel] = useState('');
   const [newStampColor, setNewStampColor] = useState(ANNOTATION_PALETTE[3]);
@@ -811,6 +833,38 @@ export function SecondaryToolbar({
                 {tChromeCount('canvas.edit.groupCount', editImageCount)}
               </span>
             </span>
+          )}
+        </div>
+      )}
+      {tool === 'count' && (
+        // N11 slice C — the armed count group, on the strip where the mode is.
+        // The full manager (colours, symbols, tallies, legend, CSV) is the
+        // Takeoff dock panel; this is the one control the GESTURE needs, and
+        // it reads the same module store the panel writes.
+        <div
+          className="secondary-toolbar-opts"
+          role="group"
+          aria-label={tChrome('canvas.count.groupPicker')}
+        >
+          {countGroups.length === 0 ? (
+            <span className="secondary-toolbar-hint" data-testid="count-no-groups">
+              {tChrome('canvas.count.noGroups')}
+            </span>
+          ) : (
+            countGroups.map((g) => (
+              <button
+                key={g.name}
+                type="button"
+                data-testid={`count-group-${g.name}`}
+                className={'secondary-tool' + (takeoff.armed === g.name ? ' active' : '')}
+                aria-pressed={takeoff.armed === g.name}
+                title={tChrome('canvas.count.armTitle', { group: g.name })}
+                onClick={() => armCountGroup(g)}
+              >
+                <CountSymbolGlyph symbol={g.symbol} color={g.color} size={14} />
+                <span>{g.name}</span>
+              </button>
+            ))
           )}
         </div>
       )}

@@ -220,6 +220,7 @@ export interface DocumentViewProps {
   onCalibrate: (lengthPts: number) => void;
   onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
+  onRegroupCountMarks: (docId: string, pageId: string, annotationIds: string[], group: import('../../lib/count-marks').CountGroup) => void;
   // N3 marquee zoom applied locally — the split layer syncs sibling panes'
   // zoom to the returned value (quad zoom must stay equal).
   onMarqueeZoomApplied?: (zoom: number) => void;
@@ -988,6 +989,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onCalibrate={props.onCalibrate}
           onMeasureContextMenu={props.onMeasureContextMenu}
           onMarqueeSelect={props.onMarqueeSelect}
+          onRegroupCountMarks={props.onRegroupCountMarks}
           onZoomToRect={(pid, r) => {
             const z = zoomToPageRect(pid, r);
             if (z != null) props.onMarqueeZoomApplied?.(z);

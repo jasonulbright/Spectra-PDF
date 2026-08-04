@@ -37,6 +37,7 @@ import { PageLabelsPanel } from './panels/PageLabelsPanel';
 import { AttachmentsPanel } from './panels/AttachmentsPanel';
 import { PortfolioPanel, PortfolioAutoOpen } from './panels/PortfolioPanel';
 import { GuidedActionsPanel } from './panels/GuidedActionsPanel';
+import { TakeoffPanel } from './panels/TakeoffPanel';
 import { LayersPanel } from './panels/LayersPanel';
 import { AccessibilityPanel } from './panels/AccessibilityPanel';
 import { CommentsPanel } from './panels/CommentsPanel';
@@ -160,7 +161,7 @@ const panels: Record<Operation, React.ComponentType> = {
   accessibility: AccessibilityPanel, comments: CommentsPanel, preflight: PreflightPanel,
   links: LinksPanel, tags: TagsPanel, readingorder: ReadingOrderPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
-  actions: GuidedActionsPanel,
+  actions: GuidedActionsPanel, takeoff: TakeoffPanel,
 };
 
 function AppContent(): React.ReactElement {
@@ -1991,6 +1992,12 @@ function AppContent(): React.ReactElement {
           // coordinate the geometry's own?" — which needs the points, not
           // the padded bbox they sit inside.
           points: a.points ? [...a.points] : undefined,
+          // N11 slice C: the count mark's group/symbol/sequence — spec 107
+          // asserts the group RECONSTITUTES from the file, so it has to see
+          // what the mark says it belongs to.
+          countGroup: a.countGroup,
+          countSymbol: a.countSymbol,
+          countSeq: a.countSeq,
         }));
       },
       dispatchAddAnnotation: (docId, pageId, annotation) =>
