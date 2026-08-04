@@ -599,6 +599,7 @@ describe('invokeCommand', () => {
       jumpToPage: vi.fn(),
       jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
+      clearGuides: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
@@ -614,6 +615,7 @@ describe('invokeCommand', () => {
       jumpToPage: vi.fn(),
       jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
+      clearGuides: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     };
@@ -648,6 +650,7 @@ describe('invokeCommand', () => {
       jumpToPage: vi.fn(),
       jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
+      clearGuides: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
@@ -662,6 +665,7 @@ describe('invokeCommand', () => {
       jumpToPage: vi.fn(),
       jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
+      clearGuides: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
@@ -816,6 +820,7 @@ describe('invokeCommand', () => {
       jumpToPage: vi.fn(),
       jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
+      clearGuides: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open: vi.fn(), openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
@@ -831,6 +836,7 @@ describe('invokeCommand', () => {
       jumpToPage: vi.fn(),
       jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
+      clearGuides: vi.fn(),
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
