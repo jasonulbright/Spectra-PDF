@@ -7,7 +7,8 @@ import {
   type VerifyResult,
 } from '../../lib/signatures';
 import type { NavPanelComponentProps } from './types';
-import { tChrome } from '../../i18n';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../../i18n';
 
 // Signatures nav panel (Phase 4 M3.3b, § 5) — a compact READ view over the same
 // verify_signatures data the Tools ▸ Signatures panel shows. The Tools panel is
@@ -27,6 +28,8 @@ import { tChrome } from '../../i18n';
 // flushed to the working file before it's read. (Keying details on the effect.)
 
 export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { call } = useEngine();
   const [result, setResult] = useState<VerifyResult | null>(null);
   const [status, setStatus] = useState('');
@@ -67,7 +70,12 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
         if (!cancelled) setResult(res as unknown as VerifyResult);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        if (!cancelled)
+          setStatus(
+            tChrome('panel.common.error', {
+              message: e instanceof Error ? e.message : String(e),
+            }),
+          );
       })
       .finally(() => {
         if (!cancelled) setBusy(false);
@@ -83,7 +91,7 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
   if (!activeFile) {
     return (
       <div className="navpanel-empty" data-testid="signatures-nav-panel">
-        No document open.
+        {tChrome('nav.common.noDocument')}
       </div>
     );
   }
@@ -91,7 +99,7 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
   return (
     <div className="signatures-nav-panel flex flex-col h-full min-h-0" data-testid="signatures-nav-panel">
       <div className="navpanel-scroll flex-1">
-        {busy && <p className="navpanel-empty">Verifying signatures…</p>}
+        {busy && <p className="navpanel-empty">{tChrome('nav.sig.verifying')}</p>}
         {!busy && status && (
           <p className="navpanel-empty signatures-nav-error" data-testid="signatures-nav-error">
             {status}
@@ -99,21 +107,19 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
         )}
         {!busy && !status && result && !result.signed && (
           <p className="navpanel-empty" data-testid="signatures-nav-empty">
-            This PDF has no digital signatures.
+            {tChrome('nav.sig.none')}
           </p>
         )}
         {!busy && result && result.signed && (
           <>
             <div className="signatures-nav-count" data-testid="signatures-nav-count">
-              {result.signature_count} signature{result.signature_count === 1 ? '' : 's'}
+              {tChromeCount('nav.sig.count', result.signature_count)}
             </div>
             {result.signatures.map((sig, i) => (
               <SignatureRow key={sig.field ?? i} sig={sig} />
             ))}
             <div className="signatures-nav-caveat" data-testid="signatures-nav-caveat">
-              Signer identity is <strong>not verified against a trusted authority</strong> — these
-              results confirm cryptographic validity and whether the document changed after signing,
-              not who the signer really is.
+              {tChrome('nav.sig.caveat')}
             </div>
           </>
         )}
@@ -125,7 +131,7 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
           disabled={busy}
           className="signatures-nav-recheck-btn"
         >
-          Re-check
+          {tChrome('nav.sig.recheck')}
         </button>
       </div>
     </div>
@@ -139,20 +145,35 @@ function SignatureRow({ sig }: { sig: SignatureEntry }): React.ReactElement {
       <div className="signature-nav-head">
         <span className={`signature-nav-dot signature-nav-dot-${status}`} aria-hidden />
         <span className="signature-nav-signer" data-testid="signature-nav-signer" title={sig.signer ?? ''}>
-          {sig.signer ?? '(unknown signer)'}
+          {sig.signer ?? tChrome('nav.sig.unknownSigner')}
         </span>
       </div>
       <div className="signature-nav-status" data-testid="signature-nav-status">
         {tChrome(SIGNATURE_STATUS_LABEL[status])}
       </div>
       <div className="signature-nav-detail">
-        {sig.intact ? 'integrity intact' : 'integrity BROKEN'}
-        {' · '}
-        {sig.covers_whole_document ? 'whole document' : 'partial coverage'}
+        {/* One key, two finished clauses: the separator's placement is part of
+            the sentence, so it lives in the catalog and not in JSX. */}
+        {tChrome('nav.sig.detail', {
+          integrity: sig.intact ? tChrome('nav.sig.intact') : tChrome('nav.sig.broken'),
+          coverage: sig.covers_whole_document
+            ? tChrome('nav.sig.wholeDocument')
+            : tChrome('nav.sig.partialCoverage'),
+        })}
       </div>
-      {sig.field && <div className="signature-nav-detail">field: {sig.field}</div>}
-      {sig.signing_time && <div className="signature-nav-detail">claimed time: {sig.signing_time}</div>}
-      {sig.error && <div className="signature-nav-error">error: {sig.error}</div>}
+      {sig.field && (
+        <div className="signature-nav-detail">
+          {tChrome('nav.sig.field', { field: sig.field })}
+        </div>
+      )}
+      {sig.signing_time && (
+        <div className="signature-nav-detail">
+          {tChrome('nav.sig.claimedTime', { time: sig.signing_time })}
+        </div>
+      )}
+      {sig.error && (
+        <div className="signature-nav-error">{tChrome('nav.sig.error', { error: sig.error })}</div>
+      )}
     </div>
   );
 }

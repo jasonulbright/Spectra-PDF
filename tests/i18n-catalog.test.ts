@@ -17,6 +17,7 @@ import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
 import { DIALOG_STRINGS } from '../src/renderer/i18n-dialogs';
 import { WORKBENCH_STRINGS } from '../src/renderer/i18n-workbench';
 import { TOOL_DEFS } from '../src/renderer/commands/tools';
+import { NAV_PANEL_TITLES } from '../src/renderer/commands/navpanels';
 import { TOOLBAR_CATALOG } from '../src/renderer/commands/toolbars';
 import { FRIENDLY_NAMES } from '../src/renderer/hooks/useOperationQueue';
 import { STEP_CATALOG } from '../src/renderer/lib/guided-actions';
@@ -42,6 +43,11 @@ function expectedCatalog(): Record<string, string> {
   // menu and the dock cannot name a tool differently in one language.
   for (const tool of TOOL_DEFS) {
     out[`tool.desc.${tool.id}`] = tool.description;
+  }
+  // Nav-pane titles (the icon-strip tooltip and the panel header) — a data
+  // table with no command behind it, so its keys derive here.
+  for (const [id, title] of Object.entries(NAV_PANEL_TITLES)) {
+    out[`navpanel.${id}`] = title;
   }
   // Toolbar catalog group labels (the Customize Toolbar dialog's section
   // heads) — a data table, so its display strings derive keys here.

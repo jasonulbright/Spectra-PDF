@@ -7,6 +7,7 @@
 import type { AppAction, OpenDocument } from '../state/types';
 import type { MenuItem } from '../components/ContextMenu';
 import { workspacePageNumber } from './workspace-commit';
+import { tChrome, tChromeCount } from '../i18n';
 
 export interface PageMenuDeps {
   docs: OpenDocument[];
@@ -59,19 +60,23 @@ export function buildPageContextMenu(deps: PageMenuDeps): MenuItem[] {
 
   return [
     {
-      label: 'Open',
+      label: tChrome('pagemenu.open'),
       onClick: () => onOpen(docId, pageId),
     },
     { label: '', onClick: () => {}, separator: true },
     {
-      label: multi ? `Rotate ${selCount} pages right 90°` : 'Rotate right 90°',
+      label: multi
+        ? tChromeCount('pagemenu.rotateRightN', selCount)
+        : tChrome('pagemenu.rotateRight'),
       onClick: () =>
         multi
           ? dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: selectionIds(), delta: 90 })
           : rotateSingle(90),
     },
     {
-      label: multi ? `Rotate ${selCount} pages left 90°` : 'Rotate left 90°',
+      label: multi
+        ? tChromeCount('pagemenu.rotateLeftN', selCount)
+        : tChrome('pagemenu.rotateLeft'),
       onClick: () =>
         multi
           ? dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: selectionIds(), delta: 270 })
@@ -79,7 +84,7 @@ export function buildPageContextMenu(deps: PageMenuDeps): MenuItem[] {
     },
     { label: '', onClick: () => {}, separator: true },
     {
-      label: 'Extract text…',
+      label: tChrome('pagemenu.extractText'),
       onClick: () => {
         const pageNumber = workspacePageNumber(docs, doc, pageId);
         if (pageNumber != null) onExtractText(doc.path, pageNumber);
@@ -87,7 +92,7 @@ export function buildPageContextMenu(deps: PageMenuDeps): MenuItem[] {
     },
     { label: '', onClick: () => {}, separator: true },
     {
-      label: multi ? `Delete ${selCount} pages` : 'Delete page',
+      label: multi ? tChromeCount('pagemenu.deleteN', selCount) : tChrome('pagemenu.deletePage'),
       danger: true,
       // A file's last page can't be deleted (0-page PDFs can't exist) — closing
       // the file is the right gesture. For a multi-delete, disable only when the
