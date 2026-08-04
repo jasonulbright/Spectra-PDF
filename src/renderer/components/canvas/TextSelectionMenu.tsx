@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   buildTextMarkupAnnotations,
   selectionQuadsByPage,
@@ -7,6 +8,7 @@ import {
   type RectLike,
 } from '../../lib/text-selection-markup';
 import type { PageAnnotation, TextMarkupType } from '../../state/types';
+import { tChrome, type UiKey } from '../../i18n';
 
 // Authoring markup by gesture (the N-cluster's CREATE half): select text on
 // the page with the Select tool and a small bar offers Highlight / Underline /
@@ -17,11 +19,15 @@ import type { PageAnnotation, TextMarkupType } from '../../state/types';
 // Mounted by the reading view only, because that is the only view with a text
 // layer (the board is a thumbnail arrangement surface — see PageTextLayer).
 
-const STYLES: { type: TextMarkupType; label: string; glyph: string }[] = [
-  { type: 'highlight', label: 'Highlight', glyph: '▬' },
-  { type: 'underline', label: 'Underline', glyph: 'U' },
-  { type: 'strikeout', label: 'Strikeout', glyph: 'S' },
-  { type: 'squiggly', label: 'Squiggly', glyph: '∿' },
+// The GLYPHS are the bar's visual language and stay verbatim; only the
+// names cross into the catalog. Note these are the markup ACTIONS' names,
+// deliberately distinct from the properties bar's `canvas.pbar.markup.*`
+// (which names a selected annotation) — different sentence, different key.
+const STYLES: { type: TextMarkupType; key: UiKey; glyph: string }[] = [
+  { type: 'highlight', key: 'canvas.markup.highlight', glyph: '▬' },
+  { type: 'underline', key: 'canvas.markup.underline', glyph: 'U' },
+  { type: 'strikeout', key: 'canvas.markup.strikeout', glyph: 'S' },
+  { type: 'squiggly', key: 'canvas.markup.squiggly', glyph: '∿' },
 ];
 
 /** Default markup colour when no annotation colour is chosen (yellow, the
@@ -58,6 +64,7 @@ export function TextSelectionMenu({
   onAddAnnotation,
   onCreateLinks,
 }: TextSelectionMenuProps): React.JSX.Element | null {
+  useTranslation();
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   // The link editor replaces the buttons in place; `pending` holds the quads
   // captured when it opened, because typing a URL destroys the selection they
@@ -189,7 +196,7 @@ export function TextSelectionMenu({
     const target = url.trim();
     if (!pending || !onCreateLinks || busyRef.current) return;
     if (!target) {
-      setLinkError('Enter a URL.');
+      setLinkError(tChrome('canvas.markup.enterUrl'));
       return;
     }
     // Reentrancy taken before the first await — the double-click class the
@@ -211,7 +218,7 @@ export function TextSelectionMenu({
       className="text-selection-menu"
       data-testid="text-selection-menu"
       role="toolbar"
-      aria-label="Mark selected text"
+      aria-label={tChrome('canvas.markup.barLabel')}
       style={{ left: anchor.left, top: anchor.top }}
       // A press inside the bar must not clear the selection it acts on.
       onPointerDown={(e) => e.preventDefault()}
@@ -239,7 +246,7 @@ export function TextSelectionMenu({
             }}
           />
           <button type="button" data-testid="markup-link-apply" onClick={() => void submitLink()}>
-            Link
+            {tChrome('canvas.markup.link')}
           </button>
           {linkError && (
             <span className="text-selection-error" data-testid="markup-link-error" role="alert">
@@ -254,8 +261,8 @@ export function TextSelectionMenu({
               key={s.type}
               type="button"
               data-testid={`markup-${s.type}`}
-              title={s.label}
-              aria-label={s.label}
+              title={tChrome(s.key)}
+              aria-label={tChrome(s.key)}
               onClick={() => apply(s.type)}
             >
               <span aria-hidden="true">{s.glyph}</span>
@@ -265,8 +272,8 @@ export function TextSelectionMenu({
             <button
               type="button"
               data-testid="markup-link"
-              title="Link to a URL"
-              aria-label="Link to a URL"
+              title={tChrome('canvas.markup.linkTitle')}
+              aria-label={tChrome('canvas.markup.linkTitle')}
               onClick={startLink}
             >
               <span aria-hidden="true">🔗</span>

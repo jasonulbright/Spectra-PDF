@@ -16,6 +16,8 @@ import type { MeasureScale } from '../../lib/measure';
 import { MAX_ROW_WIDTH, ADD_GHOST_WIDTH } from '../../canvas/layout';
 import { GhostPage } from './DropGhost';
 import { PageCell } from './PageCell';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../../i18n';
 
 // Wrap cap for the flex strip. 12px = the strip-inner's horizontal padding
 // (border-box), so the content width flexbox wraps at equals layout.ts's
@@ -256,6 +258,8 @@ function DocumentRowImpl({
   onClearSignaturePlacement,
   onAddPages,
 }: DocumentRowProps): React.JSX.Element {
+  // memo() would otherwise hold the previous language's chrome after a switch.
+  useTranslation();
   const strip: React.JSX.Element[] = [];
   let visible = 0;
   const emitGhost = (): void => {
@@ -388,7 +392,7 @@ function DocumentRowImpl({
       key="__add_page"
       className="page-add-ghost"
       data-testid={`add-page-${doc.id}`}
-      title="Add pages from a file"
+      title={tChrome('canvas.doc.addPages')}
       onClick={(e) => {
         e.stopPropagation();
         onAddPages(doc.id, doc.pages.length);

@@ -3,6 +3,9 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { OpenDocument } from '../../state/types';
 import { PageView } from './PageView';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tNumber } from '../../i18n';
+import { formatKey } from '../../commands/keymap';
 
 // Full-screen presentation mode (I.6 view-mode tail — an Acrobat parity item).
 // One page fills the screen on a black backdrop; arrow/space/PageUp-Down/Home/End
@@ -30,6 +33,7 @@ export function PresentationView({
   startIndex,
   onExit,
 }: PresentationViewProps): React.JSX.Element {
+  useTranslation();
   const pageCount = doc.pages.length;
   const clamp = useCallback(
     (i: number) => Math.max(0, Math.min(pageCount - 1, i)),
@@ -133,7 +137,7 @@ export function PresentationView({
       tabIndex={-1}
       role="dialog"
       aria-modal="true"
-      aria-label="Presentation"
+      aria-label={tChrome('canvas.present.label')}
       onKeyDown={onKeyDown}
       className="fixed inset-0 z-[60] bg-black flex items-center justify-center outline-none select-none"
       // A click anywhere advances (the projector convention); a click on the
@@ -163,20 +167,23 @@ export function PresentationView({
         data-testid="presentation-counter"
         className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white/80 text-sm tabular-nums"
       >
-        {index + 1} / {pageCount}
+        {tChrome('canvas.present.counter', {
+          current: tNumber(index + 1),
+          total: tNumber(pageCount),
+        })}
       </div>
       <button
         type="button"
         data-testid="presentation-exit"
-        title="Exit presentation (Esc)"
-        aria-label="Exit presentation"
+        title={tChrome('canvas.present.exitTitle')}
+        aria-label={tChrome('canvas.present.exitAria')}
         onClick={(e) => {
           e.stopPropagation();
           exit();
         }}
         className="absolute top-4 right-4 px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white/80 text-xs"
       >
-        Esc
+        {formatKey('escape')}
       </button>
     </div>
   );
