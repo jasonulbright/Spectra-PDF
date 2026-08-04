@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifySignature, SIGNATURE_STATUS_LABEL, type SignatureEntry } from '../src/renderer/lib/signatures';
+import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
 
 // The one valid/modified/invalid decision shared by the Tools and nav-pane
 // Signatures panels (Phase 4 M3.3b) — so they can't disagree on what "valid" is.
@@ -38,9 +39,9 @@ describe('classifySignature', () => {
     expect(classifySignature(sig({ intact: false }))).toBe('invalid');
   });
 
-  it('every status has a label', () => {
-    expect(SIGNATURE_STATUS_LABEL.valid).toContain('valid');
-    expect(SIGNATURE_STATUS_LABEL.modified).toContain('changed after signing');
-    expect(SIGNATURE_STATUS_LABEL.invalid).toBe('Invalid');
+  it('every status has a label (N12: labels are catalog keys; the wording pin follows them into the record)', () => {
+    expect(PANEL_STRINGS[SIGNATURE_STATUS_LABEL.valid]).toContain('valid');
+    expect(PANEL_STRINGS[SIGNATURE_STATUS_LABEL.modified]).toContain('changed after signing');
+    expect(PANEL_STRINGS[SIGNATURE_STATUS_LABEL.invalid]).toBe('Invalid');
   });
 });
