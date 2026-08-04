@@ -113,7 +113,7 @@ describe('add text (Phase 9.A2)', () => {
     });
   });
 
-  it('authors ROTATED text (90°) that lists as a run box, not a paragraph; undo removes', async function () {
+  it('authors ROTATED text (90°) that lists as a run box AND as a paragraph; undo removes', async function () {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.addtext');
@@ -122,9 +122,18 @@ describe('add text (Phase 9.A2)', () => {
 
     const phrase = 'Sideways label';
     // A2-tail: rotate rides the same authored-op path; the engine wraps
-    // the block in one rotation frame. Rotated text NEVER groups into a
-    // paragraph (the shipped boundary), so the proof is: the phrase
-    // lists on the RUN-BOX layer and no paragraph carries it.
+    // the block in one rotation frame.
+    //
+    // 9.T13 INVERSION (the spec-42 / test_rotated_text_never_groups
+    // precedent — the capability this pinned is deliberately replaced).
+    // This case used to assert that NO paragraph carried the phrase,
+    // which was never a capability claim: it was the consequence of one
+    // page-space axis-alignment test. Admission now runs in the member's
+    // OWN transposed frame, so a quarter-turned run is an ordinary
+    // axis-aligned member there and groups like any other. The run box
+    // still lists (engine pin: paragraphs 1 AND runs 1), so the proof is
+    // now BOTH layers carry it. Off-quarter angles still refuse — that
+    // boundary is retained and the 37° case below is its pin.
     await commitAddText({ text: phrase, size: 14, rotate: 90 });
 
     expect(await invokeAppCommand('tools.edit')).toBe(true);
@@ -134,12 +143,15 @@ describe('add text (Phase 9.A2)', () => {
           const runs = await editTextRuns(id);
           if (runs.some((r) => r.text.includes('Sideways'))) {
             const para = await authoredParagraph('Sideways');
-            return para === null;
+            return para !== null;
           }
         }
         return false;
       },
-      { timeout: 30_000, timeoutMsg: 'the rotated authored run never listed on the run-box layer' },
+      {
+        timeout: 30_000,
+        timeoutMsg: 'the rotated authored run never listed on both the run-box and paragraph layers',
+      },
     );
 
     expect(await invokeAppCommand('edit.undo')).toBe(true);
