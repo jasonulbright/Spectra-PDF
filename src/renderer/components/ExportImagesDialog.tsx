@@ -4,6 +4,8 @@ import { useEngine } from '../hooks/useEngine';
 import { dialog } from '../lib/tauri-bridge';
 import { ensureGsPath } from '../panels/SettingsPanel';
 import { TEST_HARNESS_ENABLED, registerExportImages } from '../testHarness';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount, tNumber } from '../i18n';
 
 // File ▸ Export ▸ Images… (O1, image half): render pages of the ACTIVE
 // document to PNG/JPEG (one file per page) or a multi-page TIFF, on the
@@ -14,11 +16,11 @@ import { TEST_HARNESS_ENABLED, registerExportImages } from '../testHarness';
 // the gated `call` — the commit gate flushes pending page edits first and the
 // rendered images match what the user sees on canvas.
 
-const FORMATS: { value: string; label: string }[] = [
-  { value: 'png', label: 'PNG — one image per page' },
-  { value: 'jpeg', label: 'JPEG — one image per page' },
-  { value: 'tiff', label: 'TIFF — single multi-page file' },
-];
+const FORMATS = [
+  { value: 'png', key: 'dialog.exportImages.fmt.png' },
+  { value: 'jpeg', key: 'dialog.exportImages.fmt.jpeg' },
+  { value: 'tiff', key: 'dialog.exportImages.fmt.tiff' },
+] as const;
 
 const DPIS = [72, 96, 150, 300, 600];
 
@@ -37,6 +39,8 @@ export function ExportImagesDialog({
   file: { workingPath: string; name: string };
   onClose: () => void;
 }): React.JSX.Element {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { call } = useEngine();
   const [format, setFormat] = useState('png');
   const [dpi, setDpi] = useState(150);
@@ -117,20 +121,20 @@ export function ExportImagesDialog({
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Export pages as images"
+        aria-label={tChrome('dialog.exportImages.aria')}
         data-testid="export-images-dialog"
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[480px] max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
-          <h3 className="text-sm font-semibold">Export Pages as Images</h3>
+          <h3 className="text-sm font-semibold">{tChrome('dialog.exportImages.title')}</h3>
         </div>
         <div className="flex flex-col gap-4 px-5 py-4">
           <p className="text-xs text-neutral-400 break-all">{file.name}</p>
 
           <div>
             <label className="block text-sm text-neutral-400 mb-1" htmlFor="export-images-format">
-              Format
+              {tChrome('dialog.exportImages.format')}
             </label>
             <select
               id="export-images-format"
@@ -142,7 +146,7 @@ export function ExportImagesDialog({
             >
               {FORMATS.map((f) => (
                 <option key={f.value} value={f.value}>
-                  {f.label}
+                  {tChrome(f.key)}
                 </option>
               ))}
             </select>
@@ -151,7 +155,7 @@ export function ExportImagesDialog({
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-sm text-neutral-400 mb-1" htmlFor="export-images-dpi">
-                Resolution
+                {tChrome('dialog.exportImages.resolution')}
               </label>
               <select
                 id="export-images-dpi"
@@ -163,21 +167,21 @@ export function ExportImagesDialog({
               >
                 {DPIS.map((d) => (
                   <option key={d} value={d}>
-                    {d} dpi
+                    {tChrome('dialog.exportImages.dpiOption', { dpi: tNumber(d) })}
                   </option>
                 ))}
               </select>
             </div>
             <div className="flex-1">
               <label className="block text-sm text-neutral-400 mb-1" htmlFor="export-images-pages">
-                Pages (e.g. 1-3,5)
+                {tChrome('dialog.exportImages.pages')}
               </label>
               <input
                 id="export-images-pages"
                 data-testid="export-images-pages"
                 type="text"
                 className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
-                placeholder="All"
+                placeholder={tChrome('dialog.exportImages.pagesPlaceholder')}
                 spellCheck={false}
                 value={pages}
                 disabled={busy}
@@ -194,7 +198,7 @@ export function ExportImagesDialog({
               disabled={busy}
               onChange={(e) => setGray(e.target.checked)}
             />
-            Grayscale
+            {tChrome('dialog.exportImages.grayscale')}
           </label>
 
           {error && (
@@ -203,11 +207,15 @@ export function ExportImagesDialog({
             </p>
           )}
           {result && (
-            <p className="text-sm" data-testid="export-images-done" aria-live="polite">
-              Exported {result.pages_rendered} page{result.pages_rendered === 1 ? '' : 's'} →{' '}
-              <span className="break-all">
-                {result.outputs.length === 1 ? result.outputs[0] : `${result.outputs.length} files`}
-              </span>
+            <p className="text-sm break-all" data-testid="export-images-done" aria-live="polite">
+              {/* One whole message; the target is a single path or a
+                  pluralised file COUNT, resolved before interpolation. */}
+              {tChromeCount('dialog.exportImages.done', result.pages_rendered, {
+                target:
+                  result.outputs.length === 1
+                    ? result.outputs[0]
+                    : tChromeCount('dialog.exportImages.fileCount', result.outputs.length),
+              })}
             </p>
           )}
 
@@ -219,7 +227,7 @@ export function ExportImagesDialog({
               disabled={busy}
               onClick={() => void exportImages()}
             >
-              {busy ? 'Exporting…' : 'Export…'}
+              {tChrome(busy ? 'dialog.exportImages.exporting' : 'dialog.exportImages.export')}
             </button>
             <button
               type="button"
@@ -228,7 +236,7 @@ export function ExportImagesDialog({
               onClick={onClose}
               disabled={busy}
             >
-              Close
+              {tChrome('dialog.common.close')}
             </button>
           </div>
         </div>

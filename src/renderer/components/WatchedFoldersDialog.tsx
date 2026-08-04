@@ -10,6 +10,8 @@ import {
   unattendedBlocker,
 } from '../lib/guided-actions';
 import { TEST_HARNESS_ENABLED, registerWatchedFolders } from '../testHarness';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tStepTitle } from '../i18n';
 
 // Tools ▸ Watched Folders (O7). Drop a PDF into an intake folder and a saved
 // guided action runs over it automatically: processed copies mirror into the
@@ -29,6 +31,8 @@ export interface WatchedFoldersDialogProps {
 }
 
 export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): React.JSX.Element {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const [folders, setFolders] = useState<WatchedFolder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -76,7 +80,7 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
     if (!editing) return;
     const chosen = libraryActions.find((a) => a.id === editing.actionId);
     if (!chosen) {
-      setError('Choose which guided action runs on arrivals.');
+      setError(tChrome('dialog.watchers.needAction'));
       return;
     }
     // An unattended run has nobody to ask — same refusal as scheduling.
@@ -125,16 +129,13 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
       {editing === null ? (
         <div className="flex flex-col gap-3" data-testid="watchers-list-view">
           <p className="text-xs text-neutral-500">
-            A watched folder runs a saved guided action on every PDF dropped into it:
-            processed copies land in the destination, the originals file into the processed
-            folder. Watching runs while Spectra PDF is open (including minimized to the
-            tray); runs are logged with the batch logs.
+            {tChrome('dialog.watchers.blurb')}
           </p>
           {folders === null ? (
-            <p className="text-sm text-neutral-400">Loading…</p>
+            <p className="text-sm text-neutral-400">{tChrome('dialog.common.loading')}</p>
           ) : folders.length === 0 ? (
             <p className="text-sm text-neutral-400" data-testid="watchers-empty">
-              No watched folders yet.
+              {tChrome('dialog.watchers.empty')}
             </p>
           ) : (
             <div className="flex flex-col gap-2 max-h-72 overflow-y-auto" data-testid="watchers-list">
@@ -146,10 +147,10 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-neutral-200 flex-1 truncate">{f.name}</span>
-                    <span className="text-xs text-neutral-500">{f.enabled ? 'Watching' : 'Paused'}</span>
+                    <span className="text-xs text-neutral-500">{tChrome(f.enabled ? 'dialog.watchers.watching' : 'dialog.watchers.paused')}</span>
                   </div>
                   <div className="text-xs text-neutral-400 mt-0.5 truncate" title={f.source}>
-                    {f.source} → {f.dest}
+                    {tChrome('dialog.common.route', { source: f.source, dest: f.dest })}
                   </div>
                   <div className="flex gap-2 mt-1.5">
                     <button
@@ -158,12 +159,12 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
                       onClick={() => void act(() => watchers.upsert({ ...f, enabled: !f.enabled }))}
                       className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                     >
-                      {f.enabled ? 'Pause' : 'Resume'}
+                      {tChrome(f.enabled ? 'dialog.watchers.pause' : 'dialog.watchers.resume')}
                     </button>
                     <div className="flex-1" />
                     {confirmDelete === f.id ? (
                       <>
-                        <span className="text-xs text-amber-400 self-center">Delete it?</span>
+                        <span className="text-xs text-amber-400 self-center">{tChrome('dialog.common.deleteIt')}</span>
                         <button
                           data-testid={`watcher-delete-confirm-${f.id}`}
                           disabled={busy}
@@ -173,13 +174,13 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
                           }}
                           className="px-2 py-0.5 text-xs bg-red-700/80 hover:bg-red-600 disabled:opacity-50 rounded"
                         >
-                          Delete
+                          {tChrome('dialog.common.delete')}
                         </button>
                         <button
                           onClick={() => setConfirmDelete(null)}
                           className="px-2 py-0.5 text-xs text-neutral-400 hover:text-neutral-200"
                         >
-                          Keep
+                          {tChrome('dialog.common.keep')}
                         </button>
                       </>
                     ) : (
@@ -189,7 +190,7 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
                         onClick={() => setConfirmDelete(f.id)}
                         className="px-2 py-0.5 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-50"
                       >
-                        Delete
+                        {tChrome('dialog.common.delete')}
                       </button>
                     )}
                   </div>
@@ -208,7 +209,7 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
               onClick={onClose}
               className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
             >
-              Close
+              {tChrome('dialog.common.close')}
             </button>
             <button
               data-testid="watchers-new"
@@ -218,13 +219,13 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
               }}
               className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium"
             >
-              New watched folder
+              {tChrome('dialog.watchers.new')}
             </button>
           </div>
         </div>
       ) : (
         <div className="flex flex-col gap-3" data-testid="watchers-form">
-          <Field label="Name (blank = the action's name)">
+          <Field label={tChrome('dialog.watchers.nameLabel')}>
             <input
               data-testid="watcher-name"
               value={editing.name}
@@ -232,43 +233,46 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
               className="w-full px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
             />
           </Field>
-          <Field label="Guided action to run on arrivals">
+          <Field label={tChrome('dialog.watchers.actionLabel')}>
             <select
               data-testid="watcher-action"
               value={editing.actionId}
               onChange={(e) => setEditing({ ...editing, actionId: e.target.value })}
               className="w-full px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
             >
-              <option value="">Choose an action…</option>
+              <option value="">{tChrome('dialog.common.chooseAction')}</option>
               {libraryActions.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.name} — {a.steps.map((s) => stepDefFor(s.op).title).join(' → ')}
+                  {tChrome('dialog.common.actionOption', {
+                    name: a.name,
+                    steps: a.steps
+                      .map((s) => tStepTitle(s.op, stepDefFor(s.op).title))
+                      .join(' → '),
+                  })}
                 </option>
               ))}
             </select>
             <p className="text-xs text-neutral-500 mt-1">
-              The watcher keeps its own copy of the action. Actions that ask for values when
-              they run can't watch a folder — arrivals are processed with nobody at the
-              keyboard.
+              {tChrome('dialog.watchers.actionNote')}
             </p>
           </Field>
           <FolderField
-            label="Watched folder (the intake)"
+            label={tChrome('dialog.watchers.sourceLabel')}
             testid="watcher-source"
             value={editing.source}
-            onPick={() => void pick('Choose the folder to watch', (p) => setEditing({ ...editing, source: p }))}
+            onPick={() => void pick(tChrome('dialog.watchers.pickSource'), (p) => setEditing({ ...editing, source: p }))}
           />
           <FolderField
-            label="Destination (processed copies)"
+            label={tChrome('dialog.watchers.destLabel')}
             testid="watcher-dest"
             value={editing.dest}
-            onPick={() => void pick('Choose the destination folder', (p) => setEditing({ ...editing, dest: p }))}
+            onPick={() => void pick(tChrome('dialog.common.pickDest'), (p) => setEditing({ ...editing, dest: p }))}
           />
           <FolderField
-            label="Processed originals move to"
+            label={tChrome('dialog.watchers.doneLabel')}
             testid="watcher-done"
             value={editing.processedRoot}
-            onPick={() => void pick('Choose where processed originals go', (p) => setEditing({ ...editing, processedRoot: p }))}
+            onPick={() => void pick(tChrome('dialog.common.pickProcessed'), (p) => setEditing({ ...editing, processedRoot: p }))}
           />
           {error && (
             <p className="text-sm text-red-400" data-testid="watchers-form-error">
@@ -283,7 +287,7 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
               }}
               className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
             >
-              Cancel
+              {tChrome('dialog.common.cancel')}
             </button>
             <button
               data-testid="watcher-save"
@@ -291,7 +295,7 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
               onClick={() => void save()}
               className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
             >
-              {busy ? 'Saving…' : 'Start watching'}
+              {tChrome(busy ? 'dialog.common.saving' : 'dialog.watchers.start')}
             </button>
           </div>
         </div>
@@ -329,10 +333,10 @@ function FolderField({
           onClick={onPick}
           className="px-2.5 py-1 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium shrink-0"
         >
-          Choose…
+          {tChrome('dialog.common.choose')}
         </button>
         <span data-testid={testid} className="text-sm text-neutral-300 truncate" title={value}>
-          {value || 'Not set'}
+          {value || tChrome('dialog.common.notSet')}
         </span>
       </div>
     </div>
@@ -352,19 +356,19 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Watched Folders"
+        aria-label={tChrome('dialog.watchers.title')}
         data-testid="watchers-dialog"
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[620px] max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
-          <h3 className="text-sm font-semibold">Watched Folders</h3>
+          <h3 className="text-sm font-semibold">{tChrome('dialog.watchers.title')}</h3>
           <button
             data-testid="watchers-x"
             onClick={onClose}
             className="text-neutral-500 hover:text-neutral-300 text-sm"
           >
-            Close
+            {tChrome('dialog.common.close')}
           </button>
         </div>
         <div className="p-5">{children}</div>
