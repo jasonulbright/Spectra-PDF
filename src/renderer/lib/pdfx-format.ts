@@ -30,7 +30,18 @@ export interface PagePartition {
 // orientation); the builder maps it into PDF user space. Spectra PDF extension —
 // absent keeps PDFx-identical output.
 export interface ExportAnnotation {
-  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note' | 'measure' | 'shape' | 'callout';
+  kind:
+    | 'highlight'
+    | 'freetext'
+    | 'ink'
+    | 'stamp'
+    | 'textmarkup'
+    | 'note'
+    | 'measure'
+    | 'shape'
+    | 'callout'
+    | 'count'
+    | 'countlegend';
   x: number;
   y: number;
   w: number;
@@ -55,6 +66,13 @@ export interface ExportAnnotation {
   calloutBox?: [number, number, number, number];
   lineEndings?: [string, string];
   cloudIntensity?: number;
+  // count / countlegend (N11 slice C) — see PageAnnotation's field comments.
+  countGroup?: string;
+  countSymbol?: string;
+  countSeq?: number;
+  legendRows?: import('./count-marks').CountLegendRow[];
+  legendTitle?: string;
+  legendTotalWord?: string;
   // Present for imported annotations only — see PageAnnotation.importedOriginal
   // and the "importing existing annotations safely" design note. The builder
   // uses this to positively match and strip the ORIGINAL object from the

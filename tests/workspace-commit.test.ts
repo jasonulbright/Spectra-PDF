@@ -8,6 +8,9 @@ import { planCommit, buildCommitBytes, commitPageEdits } from '../src/renderer/l
 import { rotateAnnotationRect } from '../src/renderer/state/reducer';
 import { readManifest } from '../src/renderer/lib/pdfx-format';
 import { carriesManifest } from '../src/renderer/lib/doc-names';
+import { readRawAnnotationStyles } from '../src/renderer/lib/annotation-raw-style';
+import { importPageAnnotations } from '../src/renderer/lib/annotation-import';
+import { legendText } from '../src/renderer/lib/count-marks';
 import type { AppAction, OpenDocument, OpenFile, PageRef, Workspace } from '../src/renderer/state/types';
 
 const require = createRequire(import.meta.url);
@@ -686,6 +689,138 @@ describe('buildCommitBytes round-trip', () => {
         { name: 'Back', pages: 2 },
       ],
     });
+    await pdf.loadingTask.destroy();
+  });
+});
+
+// N11 slice C — count marks and the placed legend must survive the ROUND TRIP
+// through the file, because that is the whole design decision: the tallies are
+// derived from what the document carries, never from app state, so a drawing
+// counted on another machine has to open with its groups intact.
+describe('count marks + takeoff legend round-trip', () => {
+  it('bakes a count mark as /Stamp + /IT /Count + /Subj + /SpectraSymbol, and re-imports it', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', a, 'a', [
+          {
+            ...pageRef('a.pdf', 0),
+            annotations: [
+              {
+                id: 'c1',
+                kind: 'count',
+                x: 0.4,
+                y: 0.3,
+                w: 0.04,
+                h: 0.04,
+                color: '#e0393e',
+                countGroup: 'Doors',
+                countSymbol: 'square',
+                countSeq: 7,
+                note: 'Doors 7',
+              },
+            ],
+          },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const bytes = await buildCommitBytes(plan);
+
+    // The written dictionary — the interchange contract, read raw.
+    const out = await PDFDocument.load(bytes);
+    const styles = await readRawAnnotationStyles(bytes);
+    expect(styles).not.toBeNull();
+    const raw = styles![0][0];
+    expect(raw.it).toBe('Count');
+    expect(raw.subj).toBe('Doors');
+    expect(raw.spectraSymbol).toBe('square');
+    expect(out.getPageCount()).toBe(1);
+
+    // …and the re-import, which is what makes the group reconstitute.
+    const pdf = await loadPdf(bytes);
+    const page = await pdf.getPage(1);
+    const imported = await importPageAnnotations(page, styles![0]);
+    expect(imported).toHaveLength(1);
+    expect(imported[0].kind).toBe('count');
+    expect(imported[0].countGroup).toBe('Doors');
+    expect(imported[0].countSymbol).toBe('square');
+    // The SEQUENCE is read off /Contents: renumbering on import would rewrite
+    // labels the user reads off the sheet.
+    expect(imported[0].countSeq).toBe(7);
+    await pdf.loadingTask.destroy();
+  });
+
+  it('a plain /Stamp is NOT imported as a count mark', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', a, 'a', [
+          {
+            ...pageRef('a.pdf', 0),
+            annotations: [
+              { id: 's1', kind: 'stamp', x: 0.1, y: 0.1, w: 0.3, h: 0.08, color: '#2fbf71', note: 'APPROVED' },
+            ],
+          },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const bytes = await buildCommitBytes(plan);
+    const styles = await readRawAnnotationStyles(bytes);
+    const pdf = await loadPdf(bytes);
+    const page = await pdf.getPage(1);
+    const imported = await importPageAnnotations(page, styles![0]);
+    expect(imported).toHaveLength(1);
+    expect(imported[0].kind).toBe('stamp');
+    await pdf.loadingTask.destroy();
+  });
+
+  it('bakes the legend as /FreeText + /IT /CountLegend carrying its SNAPSHOT rows', async () => {
+    const { files } = await setup();
+    const a = files.get('a.pdf')!;
+    const rows = [
+      { symbol: 'circle', group: 'Doors', color: '#e0393e', count: 12 },
+      { symbol: 'square', group: 'Windows', color: '#2f6fed', count: 7 },
+    ];
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', a, 'a', [
+          {
+            ...pageRef('a.pdf', 0),
+            annotations: [
+              {
+                id: 'l1',
+                kind: 'countlegend',
+                x: 0.5,
+                y: 0.05,
+                w: 0.4,
+                h: 0.25,
+                color: '#e0393e',
+                note: legendText(rows, 'Takeoff', 'Total'),
+                legendRows: rows,
+                legendTitle: 'Takeoff',
+                legendTotalWord: 'Total',
+              },
+            ],
+          },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, files, ['a.pdf']);
+    const bytes = await buildCommitBytes(plan);
+    const styles = await readRawAnnotationStyles(bytes);
+    expect(styles![0][0].it).toBe('CountLegend');
+    const pdf = await loadPdf(bytes);
+    const page = await pdf.getPage(1);
+    const imported = await importPageAnnotations(page, styles![0]);
+    expect(imported).toHaveLength(1);
+    expect(imported[0].kind).toBe('countlegend');
+    // A snapshot: the numbers come back exactly as placed, not re-derived.
+    expect(imported[0].legendRows).toEqual(rows);
+    expect(imported[0].note).toContain('Total\t19');
     await pdf.loadingTask.destroy();
   });
 });

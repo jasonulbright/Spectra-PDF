@@ -14,6 +14,7 @@ import { getRenderTimings, clearRenderTimings } from './components/canvas/raster
 import { invokeCommand as invokeRegisteredCommand } from './commands/context';
 import { COMMANDS, type CommandId } from './commands/registry';
 import { setAppLanguage } from './i18n';
+import { getTakeoffSettings, setTakeoffSettings } from './lib/takeoff-settings';
 import type { FocusedTab } from './state/types';
 
 export interface TestStateSnapshot {
@@ -718,7 +719,7 @@ export interface TestHarness {
   getPageAnnotations: (
     docId: string,
     pageId: string,
-  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[] }[];
+  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[]; countGroup?: string; countSymbol?: string; countSeq?: number }[];
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
   commitPendingEdits: () => Promise<void>;
@@ -1029,6 +1030,18 @@ export interface TestHarness {
     pos: number;
     rotationAtDraw: 0 | 90 | 180 | 270;
   }[];
+  /** N11 slice C: seed the count GROUPS and arm one, deterministically.
+   *
+   * The groups are a persisted preference (localStorage), so a spec that
+   * clicked its way through the panel would inherit whatever the last run
+   * left behind and its group NAMES would drift. This resets the store to a
+   * known list; spec 107 still exercises the panel's own controls for the
+   * things only the panel can prove (the tally, the legend). */
+  takeoffSetGroups: (
+    groups: { name: string; color: string; symbol: string }[],
+    armed: string | null,
+  ) => void;
+  takeoffArmed: () => string | null;
   /** 9.D1 vector objects: list, select, delete. */
   editVectorPageIds: () => string[];
   editVectors: (pageId: string) => {
@@ -1137,7 +1150,7 @@ export interface TestHarnessDeps {
   getPageAnnotations: (
     docId: string,
     pageId: string,
-  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[] }[];
+  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[]; countGroup?: string; countSymbol?: string; countSeq?: number }[];
   dispatchAddAnnotation: (docId: string, pageId: string, annotation: TestAnnotationInput & { id: string }) => void;
   dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   dispatchRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
@@ -1806,6 +1819,12 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     snapGeometryPageIds: () => canvasEditImages?.snapGeometryPageIds() ?? [],
     snapGeometry: (pageId) => canvasEditImages?.snapGeometry(pageId) ?? [],
     guides: () => canvasEditImages?.guides() ?? [],
+    takeoffSetGroups: (groups, armed) =>
+      setTakeoffSettings({
+        groups: groups.map((g) => ({ ...g })),
+        armed: armed && groups.some((g) => g.name === armed) ? armed : null,
+      }),
+    takeoffArmed: () => getTakeoffSettings().armed,
     editVectorPageIds: () => canvasEditImages?.vectorPageIds() ?? [],
     editVectors: (pageId) => canvasEditImages?.vectors(pageId) ?? [],
     editVectorSelect: (pageId, index) => canvasEditImages?.selectVector(pageId, index),

@@ -71,6 +71,8 @@ pub enum CliCommand {
     XfdfExport(XfdfExportArgs),
     /// Import annotations from an XFDF file
     XfdfImport(XfdfImportArgs),
+    /// Export a count/takeoff summary of the document's count marks as CSV
+    CountSummary(CountSummaryArgs),
     /// List embedded file attachments (JSON)
     AttachList(AttachListArgs),
     /// Embed a file as an attachment
@@ -880,6 +882,15 @@ pub struct XfdfImportArgs {
     /// The XFDF file whose annotations to add
     #[arg(long)]
     pub xfdf: PathBuf,
+}
+
+#[derive(Args)]
+pub struct CountSummaryArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output CSV file
+    #[arg(short, long)]
+    pub output: PathBuf,
 }
 
 #[derive(Args)]
@@ -2106,6 +2117,14 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             json!({
                 "file": abs(&args.input).to_string_lossy(),
                 "xfdf": abs(&args.xfdf).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+            }),
+        ),
+
+        CliCommand::CountSummary(args) => engine.call(
+            "export_count_summary",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
                 "output": abs(&args.output).to_string_lossy(),
             }),
         ),

@@ -271,6 +271,7 @@ struct_tree.typeMustEmpty	exact	struct_tree	type must not be empty
 struct_tree.unknownProperties	pattern	struct_tree	unknown properties: {{v0}}
 system_fonts.fontFileFound	pattern	system_fonts	font file not found: {{path}}
 system_fonts.usableFontFile	pattern	system_fonts	not a usable font file: {{v0}}
+takeoff.outputFolderDoesExist	pattern	takeoff	Output folder does not exist: {{v0}}
 text_authoring.boldMustTrueFalse	pattern	text_authoring	bold must be true or false (got {{bold}})
 text_authoring.directionalFormattingCharactersCannot	exact	text_authoring	directional formatting characters cannot be laid out in a text box
 text_authoring.eachSpanNeedsInteger	exact	text_authoring	each span needs integer start and end

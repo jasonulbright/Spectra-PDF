@@ -20,6 +20,12 @@ import type { PDFPageProxy } from 'pdfjs-dist';
 import type { ImportedAnnotationFingerprint, PageAnnotation, TextMarkupType } from '../state/types';
 import { pdfPointToDisplay, pdfRectToDisplay } from './pdfx-build';
 import { takeRawStyle, type RawAnnotStyle } from './annotation-raw-style';
+import {
+  DEFAULT_COUNT_SYMBOL,
+  UNGROUPED,
+  symbolById,
+  type CountLegendRow,
+} from './count-marks';
 
 type ImportedSubtype = ImportedAnnotationFingerprint['subtype'];
 
@@ -187,6 +193,25 @@ export async function importPageAnnotations(
     if (a.subtype === 'FreeText' && (sidecar?.it === 'FreeTextCallout' || (a as { it?: string }).it === 'FreeTextCallout')) {
       const callout = importCallout(a, sidecar, box, rotation, color, contents, importedOriginal);
       if (callout) imported.push(callout);
+      continue;
+    }
+
+    // ── N11 slice C: takeoff count marks + placed legends ────────────
+    // Both are sidecar-gated exactly like the callout above: /IT, /Subj and
+    // the private keys only exist raw. Groups therefore reconstitute from the
+    // FILE rather than from app state — a drawing counted on another machine
+    // opens with its tallies intact.
+    if (a.subtype === 'Stamp' && sidecar?.it === 'Count') {
+      const mark = importCountMark(a, sidecar, box, rotation, color, contents, importedOriginal);
+      if (mark) imported.push(mark);
+      continue;
+    }
+    if (a.subtype === 'FreeText' && (sidecar?.it === 'CountLegend' || (a as { it?: string }).it === 'CountLegend')) {
+      const legend = importCountLegend(a, sidecar, box, rotation, color, contents, importedOriginal);
+      if (legend) imported.push(legend);
+      // Faithful-or-untouched: a legend whose snapshot rows can't be read
+      // stays a raster-only original rather than importing as a plain text
+      // box, which would re-commit WITHOUT its table.
       continue;
     }
 
@@ -410,6 +435,94 @@ function importShape(
     ...bb,
     points,
     ...(hasEnd ? { lineEndings: endings as [string, string] } : {}),
+  };
+}
+
+/**
+ * /Stamp + /IT /Count → kind 'count' (N11 slice C).
+ *
+ * The group is `/Subj` and the marker is `/SpectraSymbol`; the sequence is
+ * read off the end of `/Contents` ("<group> <seq>"), because the numbering is
+ * a LABEL the user reads and a re-import that renumbered would rewrite the
+ * sheet. An unknown symbol id falls back to the default marker rather than
+ * refusing — a file counted by a later build must still open.
+ */
+function importCountMark(
+  a: RawAnnotation,
+  sidecar: RawAnnotStyle | undefined,
+  box: ViewBox,
+  rotation: number,
+  color: string,
+  contents: string | undefined,
+  importedOriginal: ImportedAnnotationFingerprint,
+): PageAnnotation | null {
+  const d = pdfRectToDisplay(a.rect, box, rotation);
+  if (d.w <= 0 || d.h <= 0) return null;
+  const group = (sidecar?.subj ?? '').trim() || UNGROUPED;
+  const symbolId = sidecar?.spectraSymbol ?? DEFAULT_COUNT_SYMBOL;
+  const seqMatch = /(\d+)\s*$/.exec(contents ?? '');
+  return {
+    id: crypto.randomUUID(),
+    kind: 'count',
+    ...d,
+    color,
+    note: contents,
+    countGroup: group,
+    countSymbol: symbolById(symbolId).id,
+    countSeq: seqMatch ? Number(seqMatch[1]) : 1,
+    importedOriginal,
+  };
+}
+
+/**
+ * /FreeText + /IT /CountLegend → kind 'countlegend' (N11 slice C).
+ *
+ * The rows are a SNAPSHOT and live in the private /SpectraLegend; without a
+ * readable one there is nothing to re-emit faithfully, so the original is left
+ * untouched (returns null) instead of importing as a plain text box that would
+ * lose the table on the next commit.
+ */
+function importCountLegend(
+  a: RawAnnotation,
+  sidecar: RawAnnotStyle | undefined,
+  box: ViewBox,
+  rotation: number,
+  color: string,
+  contents: string | undefined,
+  importedOriginal: ImportedAnnotationFingerprint,
+): PageAnnotation | null {
+  if (!sidecar?.spectraLegend) return null;
+  let parsed: { title?: unknown; totalWord?: unknown; rows?: unknown };
+  try {
+    parsed = JSON.parse(sidecar.spectraLegend) as typeof parsed;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed.rows)) return null;
+  const rows: CountLegendRow[] = [];
+  for (const raw of parsed.rows) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.group !== 'string' || typeof r.count !== 'number') continue;
+    rows.push({
+      group: r.group,
+      count: r.count,
+      color: typeof r.color === 'string' ? r.color : color,
+      symbol: symbolById(typeof r.symbol === 'string' ? r.symbol : undefined).id,
+    });
+  }
+  const d = pdfRectToDisplay(a.rect, box, rotation);
+  if (d.w <= 0 || d.h <= 0) return null;
+  return {
+    id: crypto.randomUUID(),
+    kind: 'countlegend',
+    ...d,
+    color,
+    note: contents,
+    legendRows: rows,
+    legendTitle: typeof parsed.title === 'string' ? parsed.title : '',
+    legendTotalWord: typeof parsed.totalWord === 'string' ? parsed.totalWord : '',
+    importedOriginal,
   };
 }
 

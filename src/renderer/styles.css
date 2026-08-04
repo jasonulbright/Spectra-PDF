@@ -2232,6 +2232,50 @@
   pointer-events: none;
 }
 
+/* N11 slice C — a placed takeoff legend's on-canvas body. It mirrors what the
+   appearance stream prints (symbol · group · tally, then the total), and
+   scales with the box so the reading view's zoom does not desync the two. */
+.page-annot-legend {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6%;
+  overflow: hidden;
+  pointer-events: none;
+  line-height: 1.25;
+}
+
+.page-annot-legend-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.page-annot-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.page-annot-legend-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-annot-legend-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.page-annot-legend-total {
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+  margin-top: 2px;
+  padding-top: 2px;
+  font-weight: 600;
+}
+
 .page-annot-ink-live {
   position: absolute;
   inset: 0;

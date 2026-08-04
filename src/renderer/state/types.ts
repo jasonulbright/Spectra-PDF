@@ -90,7 +90,25 @@ export interface PageAnnotation {
   // extent (box + leader) so selection and manipulation cover everything;
   // calloutBox is the text sub-rect and `points` the leader [tip, knee,
   // attach], all in the same display-normalized page space.
-  kind: 'highlight' | 'freetext' | 'ink' | 'stamp' | 'textmarkup' | 'note' | 'measure' | 'shape' | 'callout';
+  // 'count' is a takeoff count mark (N11 slice C): a real /Stamp carrying
+  // /IT /Count, its group in /Subj, "<group> <seq>" in /Contents and a vector
+  // symbol appearance. Point-placed like 'note' (fixed marker size, so it
+  // moves but never resizes); tallies are DERIVED from these, never stored.
+  // 'countlegend' is a placed takeoff legend — a /FreeText + /IT /CountLegend
+  // whose rows are a SNAPSHOT (carried in `legendRows`, mirrored into the
+  // private /SpectraLegend so a re-commit reproduces what was placed).
+  kind:
+    | 'highlight'
+    | 'freetext'
+    | 'ink'
+    | 'stamp'
+    | 'textmarkup'
+    | 'note'
+    | 'measure'
+    | 'shape'
+    | 'callout'
+    | 'count'
+    | 'countlegend';
   x: number;
   y: number;
   w: number;
@@ -150,6 +168,19 @@ export interface PageAnnotation {
   measureRatio?: string;
   measureUnitsPerPt?: number;
   measureUnit?: string;
+  // count only (N11 slice C): the group's NAME (→ /Subj — user data, never
+  // translated), the marker symbol's id (→ the private /SpectraSymbol), and
+  // the mark's sequence number within its group (→ /Contents, with the group).
+  // The group's colour is the annotation's own `color`.
+  countGroup?: string;
+  countSymbol?: string;
+  countSeq?: number;
+  // countlegend only: the rows the legend was placed with — a snapshot, so a
+  // commit reproduces what the user saw rather than re-deriving numbers that
+  // have moved since. Mirrored into /SpectraLegend and read back on import.
+  legendRows?: import('../lib/count-marks').CountLegendRow[];
+  legendTitle?: string;
+  legendTotalWord?: string;
   // Present only for annotations imported from a pre-existing PDF object.
   // Never touched after import; edits to x/y/w/h/color/note/points do not
   // update it.
@@ -270,6 +301,11 @@ export type CanvasTool =
   // it. The THIRD ownerless mode beside select/hand — pure navigation, no
   // tool, commits nothing.
   | 'zoommarquee'
+  // Count (N11 slice C): click places a takeoff mark of the armed group at
+  // the point; clicking an existing mark of that group removes it (the
+  // "click again to un-count" convention). Ctrl-drag bands a marquee that
+  // re-files the marks it covers into the armed group. Count & Takeoff's mode.
+  | 'count'
   // Crop draw (P5b): band the region to KEEP; the Page Boxes panel receives
   // it as per-edge insets and commits through the same `set_page_boxes` op a
   // typed crop uses. The band is a REQUEST, not page state — nothing changes
@@ -580,6 +616,19 @@ export type AppAction =
       note: string;
     }
   | { type: 'REMOVE_ANNOTATIONS'; docId: string; pageId: string; annotationIds: string[] }
+  // N11 slice C: re-file count marks into another group (the Ctrl-marquee
+  // gesture). Colour and symbol travel with the group, and each moved mark is
+  // renumbered at the end of the target — its old number belonged to the
+  // group it left.
+  | {
+      type: 'REGROUP_COUNT_MARKS';
+      docId: string;
+      pageId: string;
+      annotationIds: string[];
+      group: string;
+      color: string;
+      symbol: string;
+    }
   | { type: 'SPLIT_DOC'; docId: string; atIndex: number; newDocId: string; newName: string }
   | { type: 'ROTATE_PAGE_REF'; docId: string; pageId: string; rotation: 0 | 90 | 180 | 270 }
   | { type: 'ROTATE_PAGE_REFS'; pageIds: string[]; delta: 90 | 180 | 270 }
