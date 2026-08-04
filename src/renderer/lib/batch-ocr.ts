@@ -13,6 +13,7 @@
 // handleApplyOcr. One conversion idiom everywhere.
 
 import { displayRectToPdf } from './pdfx-build';
+import { rawEngineMessage } from './engine-messages';
 import type { PageGeometry } from './redaction';
 import type { OcrApplyPage } from './ocr-apply';
 import type { OcrResult, OcrWord } from '../ocr/types';
@@ -397,8 +398,17 @@ export async function runBatchOcr(
   return { cancelled, results, skippedDirs };
 }
 
+/**
+ * The ENGLISH text of a failure, for the batch REPORT.
+ *
+ * N12 slice D: a report `reason` is written byte-identically into the batch
+ * log (`lib/batch-log.ts`, pinned by tests/batch-log.test.ts) and read back by
+ * whoever audits the run, so it stays English regardless of the UI language —
+ * the same boundary the operation log sits on. `rawEngineMessage` returns an
+ * engine refusal's original bytes; anything else is already its own text.
+ */
 function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return rawEngineMessage(err);
 }
 
 class BatchCancelledError extends Error {
