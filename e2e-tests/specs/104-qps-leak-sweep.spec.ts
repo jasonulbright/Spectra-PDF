@@ -220,14 +220,20 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       check('stamp preset approved', await $('[data-testid="stamp-preset-approved"]').getText());
       check('stamp new', await $('[data-testid="stamp-new-text"]').getText());
 
-      // ── PROPERTIES BAR (Ctrl+E): nothing is selected, so it shows its
-      // how-to-get-a-selection line plus the close affordance's title.
+      // ── PROPERTIES BAR (Ctrl+E). Nothing is SELECTED but a comment mode is
+      // armed, so it shows the tool-defaults branch — the "New <mode> color"
+      // heading that used to glue a raw mode id into an English sentence.
       expect(await invokeAppCommand('view.propertiesBar')).toBe(true);
       await $('[data-testid="properties-bar"]').waitForDisplayed({
         timeout: 10_000,
         timeoutMsg: 'the properties bar never opened',
       });
-      check('pbar empty', await $('[data-testid="pbar-empty"]').getText());
+      check('pbar kind', await $('[data-testid="pbar-kind"]').getText());
+      check(
+        'pbar new-colour group aria',
+        await $('[data-testid="properties-bar"] .properties-bar-swatches')
+          .getAttribute('aria-label'),
+      );
       check('pbar close title', await $('[data-testid="pbar-close"]').getAttribute('title'));
       check(
         'pbar toolbar aria',
