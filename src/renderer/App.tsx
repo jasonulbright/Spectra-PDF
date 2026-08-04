@@ -107,6 +107,8 @@ import {
 import { useKeymapDispatcher } from './commands/keymap';
 import { useAppModal } from './hooks/useAppModal';
 import type { AppCommandHandlers } from './commands/types';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from './i18n';
 
 // The Preferences shell — a component (not inline JSX) so it can carry the
 // shared dialog keyboard/focus contract (useAppModal, M6.5).
@@ -117,6 +119,8 @@ function PreferencesModal({
   category: PrefCategory;
   onClose: () => void;
 }): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const shellRef = useAppModal(onClose);
   return (
     <div data-app-modal className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={onClose}>
@@ -125,13 +129,15 @@ function PreferencesModal({
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Preferences"
+        aria-label={tChrome('app.prefs.aria')}
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[640px] max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
-          <h3 className="text-sm font-semibold">Preferences</h3>
-          <button data-testid="prefs-close" onClick={onClose} className="text-neutral-500 hover:text-neutral-300 text-sm">Close</button>
+          <h3 className="text-sm font-semibold">{tChrome('app.prefs.title')}</h3>
+          <button data-testid="prefs-close" onClick={onClose} className="text-neutral-500 hover:text-neutral-300 text-sm">
+            {tChrome('app.prefs.close')}
+          </button>
         </div>
         <div className="p-5">
           <SettingsPanel initialCategory={category} />
@@ -738,7 +744,10 @@ function AppContent(): React.ReactElement {
         | null,
     ) => {
       if (!action) {
-        await showNotice('Form button', `"${fieldName}" has no action attached.`);
+        await showNotice(
+          tChrome('app.formButton.title'),
+          tChrome('app.formButton.noAction', { field: fieldName }),
+        );
         return;
       }
       switch (action.kind) {
@@ -752,38 +761,44 @@ function AppContent(): React.ReactElement {
         }
         case 'uri': {
           const copy = await showProceedConfirm(
-            'Form button — external link',
-            `"${fieldName}" links to:\n\n${action.uri}\n\nThis app never opens external sites itself. Copy the address to the clipboard?`,
+            tChrome('app.formButton.externalTitle'),
+            tChrome('app.formButton.uri', { field: fieldName, uri: action.uri }),
           );
           if (copy) {
             try {
               await navigator.clipboard.writeText(action.uri);
             } catch {
-              await showNotice('Form button', 'Could not access the clipboard.');
+              await showNotice(
+                tChrome('app.formButton.title'),
+                tChrome('app.formButton.clipboardFailed'),
+              );
             }
           }
           return;
         }
         case 'javascript':
           await showNotice(
-            'Form button',
-            `"${fieldName}" runs document JavaScript, which this app does not execute.`,
+            tChrome('app.formButton.title'),
+            tChrome('app.formButton.javascript', { field: fieldName }),
           );
           return;
         case 'submit':
           await showNotice(
-            'Form button',
-            `"${fieldName}" submits the form to a server, which this app does not do. Fill the form and save or export it instead.`,
+            tChrome('app.formButton.title'),
+            tChrome('app.formButton.submit', { field: fieldName }),
           );
           return;
         case 'named':
           await showNotice(
-            'Form button',
-            `"${fieldName}" triggers the viewer action "${action.name}", which this app does not map.`,
+            tChrome('app.formButton.title'),
+            tChrome('app.formButton.named', { field: fieldName, action: action.name }),
           );
           return;
         default:
-          await showNotice('Form button', `"${fieldName}" carries an action this app does not support.`);
+          await showNotice(
+            tChrome('app.formButton.title'),
+            tChrome('app.formButton.unsupported', { field: fieldName }),
+          );
       }
     },
     [performOperation, showNotice, showProceedConfirm],
@@ -1553,7 +1568,12 @@ function AppContent(): React.ReactElement {
       const staged = await app.stageSendCopy(activeFile.workingPath, activeFile.name);
       await app.sendByEmail(staged);
     } catch (e: unknown) {
-      await showNotice('Send by Email', e instanceof Error ? e.message : String(e));
+      // The engine/OS failure text itself stays verbatim (the slice-D
+      // boundary); only the notice's TITLE is ours to translate.
+      await showNotice(
+        tChrome('app.sendEmail.title'),
+        e instanceof Error ? e.message : String(e),
+      );
     }
   }, [activeFile, commitOrAbort, showNotice]);
 
@@ -1580,9 +1600,7 @@ function AppContent(): React.ReactElement {
   const handleCloseFile = useCallback(async (filePath: string) => {
     const f = state.files.get(filePath);
     if (f && isFileDirty(f)) {
-      const result = await showConfirm(
-        `"${f.name}" has unsaved changes. Save before closing?`
-      );
+      const result = await showConfirm(tChrome('app.close.unsaved', { name: f.name }));
       if (result === 'cancel') return;
       if (result === 'save') {
         if (!(await commitOrAbort())) return;
@@ -1598,9 +1616,7 @@ function AppContent(): React.ReactElement {
     const dirtyFiles = allOpen.filter(isFileDirty);
     if (dirtyFiles.length > 0) {
       const names = dirtyFiles.map((f) => f.name).join(', ');
-      const result = await showConfirm(
-        `Unsaved changes in: ${names}. Save before closing all?`
-      );
+      const result = await showConfirm(tChrome('app.closeAll.unsaved', { names }));
       if (result === 'cancel') return;
       if (result === 'save') {
         if (!(await commitOrAbort())) return;
@@ -1620,7 +1636,7 @@ function AppContent(): React.ReactElement {
     const dirtyFiles = Array.from(state.files.values()).filter(isFileDirty);
     if (dirtyFiles.length > 0) {
       const names = dirtyFiles.map((f) => f.name).join(', ');
-      const result = await showConfirm(`Unsaved changes in: ${names}. Save before exiting?`);
+      const result = await showConfirm(tChrome('app.exit.unsaved', { names }));
       if (result === 'cancel') return;
       if (result === 'save') {
         if (!(await commitOrAbort())) return;
@@ -1774,9 +1790,7 @@ function AppContent(): React.ReactElement {
         return;
       }
       const names = dirtyFiles.map((f) => f.name).join(', ');
-      const result = await showConfirm(
-        `Unsaved changes in: ${names}. Save before closing?`
-      );
+      const result = await showConfirm(tChrome('app.window.unsaved', { names }));
       if (result === 'cancel') {
         return;
       }
