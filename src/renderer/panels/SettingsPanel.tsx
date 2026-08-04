@@ -5,7 +5,8 @@ import { deriveAccentVars } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
 import { useTranslation } from 'react-i18next';
-import { tChrome, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
+import { tChrome, tChromeCount, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
+import type { PanelKey } from '../i18n-panels';
 // Re-exported for the ~6 existing panel consumers; the implementation is the
 // leaf module (the keymap reads it too — see lib/app-settings.ts).
 export { getSettings } from '../lib/app-settings';
@@ -136,8 +137,8 @@ function GsInfoDisplay({ info, label }: { info: GsInfo | null; label: string }):
       <div className="font-medium text-neutral-200">{label}</div>
       <div className="flex flex-col gap-0.5 mt-1 text-xs text-neutral-400">
         <span>{info.product}</span>
-        <span>Version {info.version}</span>
-        <span>Vendor: {info.vendor}</span>
+        <span>{tChrome('panel.settings.version', { version: info.version })}</span>
+        <span>{tChrome('panel.settings.vendor', { vendor: info.vendor })}</span>
       </div>
     </div>
   );
@@ -156,12 +157,13 @@ function GsInfoDisplay({ info, label }: { info: GsInfo | null; label: string }):
 export const PREF_CATEGORIES = ['general', 'appearance', 'engine', 'tray', 'licenses'] as const;
 export type PrefCategory = (typeof PREF_CATEGORIES)[number];
 
-export const PREF_CATEGORY_LABELS: Record<PrefCategory, string> = {
-  general: 'General',
-  appearance: 'Appearance',
-  engine: 'Engine',
-  tray: 'Tray & Startup',
-  licenses: 'Updates & Licenses',
+// N12: values are catalog KEYS; the nav renders tChrome(label).
+export const PREF_CATEGORY_LABELS: Record<PrefCategory, PanelKey> = {
+  general: 'panel.settings.catGeneral',
+  appearance: 'panel.settings.catAppearance',
+  engine: 'panel.settings.catEngine',
+  tray: 'panel.settings.catTray',
+  licenses: 'panel.settings.catLicenses',
 };
 
 export interface SettingsPanelProps {
@@ -208,7 +210,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       return next;
     });
     if (key === 'theme') applyTheme(value as string);
-    setStatus('Settings saved');
+    setStatus(tChrome('panel.settings.saved'));
   }, []);
 
   const handleGsSourceChange = useCallback((source: 'builtin' | 'external') => {
@@ -218,7 +220,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       saveSettings(next);
       return next;
     });
-    setStatus('Settings saved');
+    setStatus(tChrome('panel.settings.saved'));
   }, [bundledGs, externalGs]);
 
   const activeGs = settings.gsSource === 'external' && externalGs ? externalGs : bundledGs;
@@ -235,15 +237,15 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             className={'prefs-cat' + (category === c ? ' active' : '')}
             onClick={() => setCategory(c)}
           >
-            {PREF_CATEGORY_LABELS[c]}
+            {tChrome(PREF_CATEGORY_LABELS[c])}
           </button>
         ))}
       </nav>
       <div className="prefs-body flex flex-col gap-6" data-testid={`prefs-body-${category}`}>
       {category === 'engine' && (
       <div>
-        <label className="block text-sm text-neutral-400 mb-2">Ghostscript Engine</label>
-        <GsInfoDisplay info={activeGs} label={settings.gsSource === 'external' ? 'External (System)' : 'Built-in (Bundled)'} />
+        <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.gsEngine')}</label>
+        <GsInfoDisplay info={activeGs} label={settings.gsSource === 'external' ? tChrome('panel.settings.gsExternal') : tChrome('panel.settings.gsBuiltin')} />
         {externalGs && (
           <div className="flex gap-2 mt-2">
             <button
@@ -254,7 +256,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
                   : 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
               }`}
             >
-              Built-in
+              {tChrome('panel.settings.builtin')}
             </button>
             <button
               onClick={() => handleGsSourceChange('external')}
@@ -264,42 +266,42 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
                   : 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
               }`}
             >
-              External
+              {tChrome('panel.settings.external')}
             </button>
           </div>
         )}
-        <p className="text-xs text-neutral-500 mt-1">Used for Compress and PDF/A conversion</p>
+        <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.settings.gsUsedFor')}</p>
       </div>
       )}
 
       {category === 'general' && (
       <>
       <div>
-        <label className="block text-sm text-neutral-400 mb-1">Identity name</label>
+        <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.settings.identityName')}</label>
         <input
           type="text"
           data-testid="pref-identity-name"
           value={settings.identityName}
           onChange={(e) => update('identityName', e.target.value)}
-          placeholder="Used by dynamic stamps’ {name} token"
+          placeholder={tChrome('panel.settings.identityPlaceholder')}
           className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm w-72"
         />
         <p className="text-xs text-neutral-500 mt-1">
-          Shown where a stamp label uses {'{name}'} — e.g. “Reviewed by {'{name}'} {'{date}'}”.
+          {tChrome('panel.settings.identityHint')}
         </p>
       </div>
       <div>
-        <label className="block text-sm text-neutral-400 mb-1">Default Compression Quality</label>
+        <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.settings.compressionQuality')}</label>
         <select
-          aria-label="Default compression quality"
+          aria-label={tChrome('panel.settings.compressionQuality')}
           value={settings.compressionQuality}
           onChange={(e) => update('compressionQuality', e.target.value)}
           className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
         >
-          <option value="screen">Screen (72 dpi, smallest)</option>
-          <option value="ebook">Ebook (150 dpi)</option>
-          <option value="printer">Printer (300 dpi)</option>
-          <option value="prepress">Prepress (300 dpi, highest)</option>
+          <option value="screen">{tChrome('panel.compress.screen')}</option>
+          <option value="ebook">{tChrome('panel.compress.ebook')}</option>
+          <option value="printer">{tChrome('panel.compress.printer')}</option>
+          <option value="prepress">{tChrome('panel.compress.prepress')}</option>
         </select>
       </div>
       <label className="flex items-center gap-2 cursor-pointer">
@@ -310,15 +312,14 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           onChange={() => update('singleKeyAccelerators', !settings.singleKeyAccelerators)}
         />
         <span className="text-sm text-neutral-300">
-          Use single-key accelerators to access tools
+          {tChrome('panel.settings.singleKey')}
         </span>
       </label>
       <p className="text-xs text-neutral-500 -mt-3">
-        H Hand · V Select · U Highlight · X Text · D Draw · K Stamp — off by
-        default
+        {tChrome('panel.settings.singleKeyHint')}
       </p>
       <div data-testid="batch-log-pref">
-        <label className="block text-sm text-neutral-400 mb-2">Batch OCR logs</label>
+        <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.batchLogs')}</label>
         <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"
@@ -327,23 +328,23 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             onChange={() => update('batchLogEnabled', !settings.batchLogEnabled)}
             className="rounded bg-neutral-800 border-neutral-700"
           />
-          <span className="text-sm text-neutral-300">Write a log file for each batch run</span>
+          <span className="text-sm text-neutral-300">{tChrome('panel.settings.batchLogWrite')}</span>
         </label>
         <div className="flex items-center gap-2 mt-2">
-          <span className="text-sm text-neutral-400">Keep logs for</span>
+          <span className="text-sm text-neutral-400">{tChrome('panel.settings.keepLogsFor')}</span>
           <select
-            aria-label="Keep batch OCR logs for"
+            aria-label={tChrome('panel.settings.keepLogsAria')}
             data-testid="pref-batch-log-retention"
             value={String(settings.batchLogRetentionDays)}
             disabled={!settings.batchLogEnabled}
             onChange={(e) => update('batchLogRetentionDays', Number(e.target.value))}
             className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50"
           >
-            <option value="7">7 days</option>
-            <option value="30">30 days</option>
-            <option value="90">90 days</option>
-            <option value="365">1 year</option>
-            <option value="0">Keep forever</option>
+            <option value="7">{tChrome('panel.settings.days7')}</option>
+            <option value="30">{tChrome('panel.settings.days30')}</option>
+            <option value="90">{tChrome('panel.settings.days90')}</option>
+            <option value="365">{tChrome('panel.settings.year1')}</option>
+            <option value="0">{tChrome('panel.settings.keepForever')}</option>
           </select>
           <button
             type="button"
@@ -351,18 +352,18 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             onClick={() => void batch.openLogFolder(settings.batchLogDir).catch(() => {})}
             className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
           >
-            Open log folder
+            {tChrome('panel.settings.openLogFolder')}
           </button>
         </div>
         <div className="flex items-center gap-2 mt-2">
-          <span className="text-sm text-neutral-400 shrink-0">Location</span>
+          <span className="text-sm text-neutral-400 shrink-0">{tChrome('panel.settings.location')}</span>
           <button
             type="button"
             data-testid="pref-batch-log-dir-pick"
             disabled={!settings.batchLogEnabled}
             onClick={() => {
               void dialog
-                .pickFolder('Choose where batch logs are written')
+                .pickFolder(tChrome('panel.settings.chooseLogFolder'))
                 .then((path) => {
                   if (path) update('batchLogDir', path);
                 })
@@ -370,14 +371,14 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             }}
             className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded font-medium shrink-0"
           >
-            Choose…
+            {tChrome('panel.settings.choose')}
           </button>
           <span
             data-testid="pref-batch-log-dir"
             className="text-sm text-neutral-300 truncate"
             title={settings.batchLogDir || undefined}
           >
-            {settings.batchLogDir || 'Default (this app’s data folder)'}
+            {settings.batchLogDir || tChrome('panel.settings.defaultLogDir')}
           </span>
           {settings.batchLogDir !== '' && (
             <button
@@ -386,19 +387,15 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
               onClick={() => update('batchLogDir', '')}
               className="px-2 py-1 text-xs text-neutral-500 hover:text-neutral-300 shrink-0"
             >
-              Use default
+              {tChrome('panel.settings.useDefault')}
             </button>
           )}
         </div>
         <p className="text-xs text-neutral-500 mt-1.5">
-          Each run writes one file listing every PDF and what happened to it. Older logs are
-          swept at the end of the next run — only files this app wrote, in this folder, are
-          ever removed.
+          {tChrome('panel.settings.batchLogHint')}
         </p>
         <p className="text-xs text-neutral-500 mt-1">
-          Set a shared location if runs will be scheduled under a different account: the
-          default folder belongs to whichever account ran the batch, so a scheduled run’s log
-          would not appear here.
+          {tChrome('panel.settings.batchLogSharedHint')}
         </p>
       </div>
       <VirtualPrinterBlock />
@@ -408,17 +405,17 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       {category === 'appearance' && (
       <>
       <div>
-        <label className="block text-sm text-neutral-400 mb-1">Theme</label>
+        <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.settings.theme')}</label>
         <select
-          aria-label="Theme"
+          aria-label={tChrome('panel.settings.theme')}
           value={settings.theme}
           onChange={(e) => update('theme', e.target.value)}
           className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
         >
-          <option value="system">System</option>
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="high-contrast">High contrast</option>
+          <option value="system">{tChrome('panel.settings.themeSystem')}</option>
+          <option value="dark">{tChrome('panel.settings.themeDark')}</option>
+          <option value="light">{tChrome('panel.settings.themeLight')}</option>
+          <option value="high-contrast">{tChrome('panel.settings.themeHighContrast')}</option>
         </select>
       </div>
       <div>
@@ -469,7 +466,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           }}
           className="rounded bg-neutral-800 border-neutral-700"
         />
-        <span className="text-sm text-neutral-400">Minimize to system tray on close</span>
+        <span className="text-sm text-neutral-400">{tChrome('panel.settings.minimizeToTray')}</span>
       </label>
 
       {settings.minimizeToTray && (
@@ -489,7 +486,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             }}
             className="rounded bg-neutral-800 border-neutral-700"
           />
-          <span className="text-sm text-neutral-400">Start minimized to tray</span>
+          <span className="text-sm text-neutral-400">{tChrome('panel.settings.startMinimized')}</span>
         </label>
       )}
 
@@ -501,11 +498,11 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             const next = !startWithWindows;
             setStartWithWindows(next);
             app.setStartupEnabled(next, next ? settings.startMinimized : false).catch(() => {});
-            setStatus('Settings saved');
+            setStatus(tChrome('panel.settings.saved'));
           }}
           className="rounded bg-neutral-800 border-neutral-700"
         />
-        <span className="text-sm text-neutral-400">Start with Windows</span>
+        <span className="text-sm text-neutral-400">{tChrome('panel.settings.startWithWindows')}</span>
       </label>
       </>
       )}
@@ -513,7 +510,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       {category === 'licenses' && (
       <>
       <div data-testid="updates-pref" className="mb-4">
-        <label className="block text-sm text-neutral-400 mb-2">Updates</label>
+        <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.updates')}</label>
         <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"
@@ -522,43 +519,18 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             onChange={() => update('checkUpdatesOnLaunch', !settings.checkUpdatesOnLaunch)}
             className="rounded bg-neutral-800 border-neutral-700"
           />
-          <span className="text-sm text-neutral-400">Check for updates on launch</span>
+          <span className="text-sm text-neutral-400">{tChrome('panel.settings.checkOnLaunch')}</span>
         </label>
         <p className="text-xs text-neutral-500 mt-1.5">
-          Spectra PDF never installs updates itself. When a newer release exists it
-          shows a notice, and opening it takes you to the download page. You can always
-          check manually with Help ▸ Check for Updates.
+          {tChrome('panel.settings.updatesHint')}
         </p>
       </div>
       <div data-testid="licenses-note">
-        <label className="block text-sm text-neutral-400 mb-2">Third-party components</label>
+        <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.thirdParty')}</label>
         <div className="text-xs text-neutral-500 space-y-1.5">
-          <p>
-            <span className="text-neutral-400">Ghostscript</span> (AGPL-3.0) and{' '}
-            <span className="text-neutral-400">LibreOffice</span> (MPL-2.0) are bundled unmodified
-            and invoked strictly as separate programs — never linked into this application.
-            Ghostscript handles Compress, Grayscale, PDF/A, Rebuild, and image export;
-            LibreOffice handles export to Word and other editable formats.
-          </p>
-          <p>
-            Also bundled or embedded: <span className="text-neutral-400">Python</span> (PSF license)
-            with <span className="text-neutral-400">pikepdf</span> (MPL-2.0),{' '}
-            <span className="text-neutral-400">pdfminer.six</span> (MIT), and{' '}
-            <span className="text-neutral-400">pyHanko</span> (MIT) among its packages;{' '}
-            <span className="text-neutral-400">pdf.js</span> (Apache-2.0);{' '}
-            <span className="text-neutral-400">pdf-lib</span> (MIT);{' '}
-            <span className="text-neutral-400">Tesseract</span> — the bundled OCR engine, also
-            run strictly as a separate program — and its language models (Apache-2.0), with the
-            redistribution notices for every library it links installed beside it;{' '}
-            the <span className="text-neutral-400">Liberation</span> and{' '}
-            <span className="text-neutral-400">Libertinus</span> fonts (SIL OFL 1.1);{' '}
-            <span className="text-neutral-400">Tauri</span> and the compiled Rust crates
-            (MIT/Apache-2.0 and similar).
-          </p>
-          <p>
-            The complete notices ship with the app: the aggregate list (with each
-            component&apos;s license and source) and the per-crate Rust listing.
-          </p>
+          <p>{tChrome('panel.settings.licensesP1')}</p>
+          <p>{tChrome('panel.settings.licensesP2')}</p>
+          <p>{tChrome('panel.settings.licensesP3')}</p>
         </div>
         <div className="flex gap-2 mt-3">
           <button
@@ -566,22 +538,22 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             className="text-xs px-2 py-1 rounded border border-neutral-700 text-neutral-300 hover:bg-neutral-800"
             onClick={() => {
               app.openThirdPartyLicenses('THIRD-PARTY-LICENSES.md')
-                .then(() => setStatus('Opened third-party licenses'))
-                .catch(() => setStatus('Could not open the licenses file'));
+                .then(() => setStatus(tChrome('panel.settings.openedLicenses')))
+                .catch(() => setStatus(tChrome('panel.settings.openLicensesFailed')));
             }}
           >
-            Open third-party licenses
+            {tChrome('panel.settings.openLicenses')}
           </button>
           <button
             data-testid="licenses-open-rust"
             className="text-xs px-2 py-1 rounded border border-neutral-700 text-neutral-300 hover:bg-neutral-800"
             onClick={() => {
               app.openThirdPartyLicenses('THIRD-PARTY-LICENSES-RUST.html')
-                .then(() => setStatus('Opened Rust crate notices'))
-                .catch(() => setStatus('Could not open the licenses file'));
+                .then(() => setStatus(tChrome('panel.settings.openedRust')))
+                .catch(() => setStatus(tChrome('panel.settings.openLicensesFailed')));
             }}
           >
-            Rust crate notices
+            {tChrome('panel.settings.rustNotices')}
           </button>
         </div>
       </div>
@@ -631,27 +603,26 @@ function VirtualPrinterBlock(): React.JSX.Element {
 
   return (
     <div data-testid="virtual-printer-pref">
-      <label className="block text-sm text-neutral-400 mb-2">Print to Spectra PDF</label>
+      <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.printTo')}</label>
       <p className="text-xs text-neutral-500 mb-2">
-        Installs a printer named “Spectra PDF” in every application’s print dialog.
-        Printing to it opens the pages here as a new PDF. Conversion happens on this PC with
-        the bundled tools; jobs are received only while this app is running (minimized to the
-        tray counts) — a job printed while it is closed waits in the Windows print queue.
+        {tChrome('panel.settings.printerBlurb')}
       </p>
       {vpStatus === null ? (
         <p className="text-sm text-neutral-500">Checking…</p>
       ) : (
         <>
           <p className="text-sm text-neutral-300" data-testid="virtual-printer-status">
-            {vpStatus.installed ? 'Printer installed' : 'Printer not installed'}
+            {vpStatus.installed
+              ? tChrome('panel.settings.printerInstalled')
+              : tChrome('panel.settings.printerNotInstalled')}
             {' · '}
             {vpStatus.listener === 'listening'
-              ? 'ready to receive jobs'
-              : `receiver down: ${vpStatus.listener}`}
+              ? tChrome('panel.settings.printerReady')
+              : tChrome('panel.settings.printerDown', { status: vpStatus.listener })}
           </p>
           {vpStatus.lastJobError !== '' && (
             <p className="text-xs text-amber-400 mt-1" data-testid="virtual-printer-job-error">
-              Last job failed: {vpStatus.lastJobError}
+              {tChrome('panel.settings.lastJobFailed', { error: vpStatus.lastJobError })}
             </p>
           )}
           <div className="flex items-center gap-2 mt-2">
@@ -663,7 +634,7 @@ function VirtualPrinterBlock(): React.JSX.Element {
                 onClick={() => void run(() => virtualPrinter.uninstall())}
                 className="px-2.5 py-1 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded font-medium"
               >
-                Remove printer…
+                {tChrome('panel.settings.removePrinter')}
               </button>
             ) : (
               <button
@@ -673,11 +644,11 @@ function VirtualPrinterBlock(): React.JSX.Element {
                 onClick={() => void run(() => virtualPrinter.install())}
                 className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
               >
-                Install printer…
+                {tChrome('panel.settings.installPrinter')}
               </button>
             )}
             <span className="text-xs text-neutral-500">
-              Windows asks for administrator approval — printers are system devices.
+              {tChrome('panel.settings.uacNote')}
             </span>
           </div>
           {vpError && (
