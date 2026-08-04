@@ -319,6 +319,9 @@ export function registerGuidedActionsHandlers(handlers: GuidedActionsHandlers | 
 export interface CanvasEditImagesHandlers {
   /** Page ids that currently have listed placements (edit mode armed). */
   pageIds: () => string[];
+  /** N11 slice A: page ids whose snap geometry has landed. */
+  snapGeometryPageIds: () => string[];
+  snapGeometry: (pageId: string) => { subpaths: number[][]; closed: boolean[] }[];
   /** False while a listing pass is in flight — the maps are keyed by
    * generation-tagged page ids and a rebuild empties them until the fresh
    * per-page engine round-trips land, so "empty" alone proves nothing. */
@@ -707,7 +710,7 @@ export interface TestHarness {
   getPageAnnotations: (
     docId: string,
     pageId: string,
-  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number }[];
+  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[] }[];
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
   commitPendingEdits: () => Promise<void>;
@@ -997,6 +1000,16 @@ export interface TestHarness {
     targets: { index: number; matrix: number[] }[],
   ) => Promise<void>;
   editImageDeleteSelected: () => Promise<void>;
+  /** N11 slice A: page ids whose SNAP geometry has landed. Snapping is
+   * fetched asynchronously per page, and "no snap happened" is both "there
+   * was nothing in range" and "the listing hasn't arrived yet" — the
+   * `listingSettled` lesson, same shape. A spec waits on this before
+   * asserting a snap. */
+  snapGeometryPageIds: () => string[];
+  /** N11 slice A: one page's snap geometry, display-normalized. A page with
+   * an entry but ZERO paths is a settled EMPTY listing, which is a different
+   * thing from "not fetched yet" — the spec waits for paths, not for keys. */
+  snapGeometry: (pageId: string) => { subpaths: number[][]; closed: boolean[] }[];
   /** 9.D1 vector objects: list, select, delete. */
   editVectorPageIds: () => string[];
   editVectors: (pageId: string) => {
@@ -1105,7 +1118,7 @@ export interface TestHarnessDeps {
   getPageAnnotations: (
     docId: string,
     pageId: string,
-  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number }[];
+  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[] }[];
   dispatchAddAnnotation: (docId: string, pageId: string, annotation: TestAnnotationInput & { id: string }) => void;
   dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   dispatchRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;
@@ -1771,6 +1784,8 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
       await canvasEditImages.deleteSelected();
     },
+    snapGeometryPageIds: () => canvasEditImages?.snapGeometryPageIds() ?? [],
+    snapGeometry: (pageId) => canvasEditImages?.snapGeometry(pageId) ?? [],
     editVectorPageIds: () => canvasEditImages?.vectorPageIds() ?? [],
     editVectors: (pageId) => canvasEditImages?.vectors(pageId) ?? [],
     editVectorSelect: (pageId, index) => canvasEditImages?.selectVector(pageId, index),
