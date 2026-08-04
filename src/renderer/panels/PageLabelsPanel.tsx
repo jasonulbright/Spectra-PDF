@@ -4,6 +4,8 @@ import { useEngine } from '../hooks/useEngine';
 import { file } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 interface Range {
   start: number; // 1-based first page of the range
@@ -18,7 +20,7 @@ const STYLES: { value: string; label: string }[] = [
   { value: 'R', label: 'I, II, III' },
   { value: 'a', label: 'a, b, c' },
   { value: 'A', label: 'A, B, C' },
-  { value: 'none', label: 'None (prefix only)' },
+  { value: 'none', label: '' }, // label resolved at render (localized)
 ];
 
 const toRoman = (n: number): string => {
@@ -59,6 +61,8 @@ function labelFor(ranges: Range[], page1: number): string {
 }
 
 export function PageLabelsPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
   const [ranges, setRanges] = useState<Range[]>([]);
@@ -117,11 +121,11 @@ export function PageLabelsPanel(): React.ReactElement {
     // Distinct 1-based starts within range.
     const starts = new Set(ranges.map((r) => r.start));
     if (starts.size !== ranges.length) {
-      setStatus('Two ranges start on the same page — each start must be unique');
+      setStatus(tChrome('panel.pageLabels.duplicateStart'));
       return;
     }
     setBusy(true);
-    setStatus('Applying…');
+    setStatus(tChrome('panel.pageLabels.applying'));
     try {
       const snapshotPath = await file.snapshot(activeFile.workingPath);
       await call('set_page_labels', {
@@ -132,16 +136,16 @@ export function PageLabelsPanel(): React.ReactElement {
       const buf = await file.readBuffer(activeFile.workingPath);
       const info = await call('get_page_count', { file: activeFile.workingPath });
       dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
-      setStatus(ranges.length === 0 ? 'Page labels removed' : `Applied ${ranges.length} label range${ranges.length === 1 ? '' : 's'}`);
+      setStatus(ranges.length === 0 ? tChrome('panel.pageLabels.removed') : tChromeCount('panel.pageLabels.applied', ranges.length));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
-      setStatus(`Error: ${msg}`);
+      setStatus(tChrome('panel.common.error', { message: msg }));
     } finally {
       setBusy(false);
     }
   }, [activeFile, ranges, call, dispatch]);
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to set page number labels" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.pageLabels.open')} />;
 
   const total = activeFile.pageCount;
   const previewPages = Array.from({ length: Math.min(total, 8) }, (_, i) => i + 1);
@@ -149,18 +153,17 @@ export function PageLabelsPanel(): React.ReactElement {
   return (
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">
-        Working on: <span className="text-neutral-200">{activeFile.name}</span> ({total} pages)
+        {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', total)})
       </div>
       <p className="text-xs text-neutral-500">
-        Number pages independently of their order — front matter as “i, ii, iii”, the body as “1, 2, 3”. Each range
-        starts on a page and runs until the next range. No ranges = plain physical numbers.
+        {tChrome('panel.pageLabels.blurb')}
       </p>
 
       <div className="flex flex-col gap-2">
         {ranges.map((r, i) => (
           <div key={i} className="flex items-end gap-2 flex-wrap" data-testid="pagelabel-range">
             <div>
-              <label className="block text-[11px] text-neutral-500 mb-0.5">From page</label>
+              <label className="block text-[11px] text-neutral-500 mb-0.5">{tChrome('panel.pageLabels.fromPage')}</label>
               <input
                 data-testid={`pagelabel-start-${i}`}
                 type="number"
@@ -172,18 +175,22 @@ export function PageLabelsPanel(): React.ReactElement {
               />
             </div>
             <div>
-              <label className="block text-[11px] text-neutral-500 mb-0.5">Style</label>
+              <label className="block text-[11px] text-neutral-500 mb-0.5">{tChrome('panel.pageLabels.style')}</label>
               <select
                 data-testid={`pagelabel-style-${i}`}
                 value={r.style}
                 onChange={(e) => updateRange(i, { style: e.target.value })}
                 className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm"
               >
-                {STYLES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                {STYLES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.value === 'none' ? tChrome('panel.pageLabels.styleNone') : s.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
-              <label className="block text-[11px] text-neutral-500 mb-0.5">Prefix</label>
+              <label className="block text-[11px] text-neutral-500 mb-0.5">{tChrome('panel.pageLabels.prefix')}</label>
               <input
                 type="text"
                 value={r.prefix}
@@ -192,7 +199,7 @@ export function PageLabelsPanel(): React.ReactElement {
               />
             </div>
             <div>
-              <label className="block text-[11px] text-neutral-500 mb-0.5">Start at</label>
+              <label className="block text-[11px] text-neutral-500 mb-0.5">{tChrome('panel.pageLabels.startAt')}</label>
               <input
                 type="number"
                 min={1}
@@ -206,7 +213,7 @@ export function PageLabelsPanel(): React.ReactElement {
               onClick={() => removeRange(i)}
               className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400"
             >
-              Remove
+              {tChrome('panel.pageLabels.remove')}
             </button>
           </div>
         ))}
@@ -215,12 +222,12 @@ export function PageLabelsPanel(): React.ReactElement {
           onClick={addRange}
           className="self-start px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700"
         >
-          + Add range
+          {tChrome('panel.pageLabels.addRange')}
         </button>
       </div>
 
       <div className="text-xs text-neutral-500">
-        Preview:{' '}
+        {tChrome('panel.pageLabels.preview')}{' '}
         <span className="text-neutral-300" data-testid="pagelabel-preview">
           {previewPages.map((p) => labelFor(ranges, p)).join(', ')}
           {total > previewPages.length ? ', …' : ''}
@@ -233,7 +240,7 @@ export function PageLabelsPanel(): React.ReactElement {
         disabled={busy}
         className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
       >
-        {busy ? 'Applying…' : 'Apply'}
+        {busy ? tChrome('panel.pageLabels.applying') : tChrome('panel.pageLabels.apply')}
       </button>
       <StatusBar message={status} busy={busy} />
     </div>
