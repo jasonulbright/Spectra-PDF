@@ -130,4 +130,61 @@ describe('preferences dialog', () => {
     );
     await $('[data-testid="prefs-close"]').click();
   });
+
+  // A LIVE theme swap, driven through the real select — spec 97's walk stamps
+  // data-theme directly, which is the right shortcut for a colour audit but
+  // means nothing here ever exercised applyTheme's ordering. The accent
+  // variables are derived FOR a shell; before this, they were derived once
+  // (for the dark one) and never re-derived on a switch, so a swap left the
+  // accent-as-text colour of the outgoing theme in place — cyan at 2.47:1 on
+  // the light shell. The invariant: after every switch, whatever is stamped
+  // and whatever --accent-text holds agree, at AA.
+  it('re-derives the accent for the theme the swap landed on', async () => {
+    const SHELL: Record<string, [number, number, number]> = {
+      dark: [0x17, 0x17, 0x17],
+      light: [0xff, 0xff, 0xff],
+      'high-contrast': [0, 0, 0],
+    };
+
+    await browser.keys(['Control', 'k']);
+    await $('[data-testid="prefs-cat-appearance"]').waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="prefs-cat-appearance"]').click();
+    const themeSelect = $('[data-testid="prefs-theme"]');
+    await themeSelect.waitForDisplayed({ timeout: 10_000 });
+
+    // Both directions, and the contrast theme, and back through System — the
+    // reverse direction is where a stale derivation hides.
+    for (const choice of ['light', 'dark', 'light', 'high-contrast', 'dark', 'system']) {
+      await themeSelect.selectByAttribute('value', choice);
+      const shown = await browser.execute(() => {
+        const root = document.documentElement;
+        return {
+          theme: root.getAttribute('data-theme'),
+          text: getComputedStyle(root).getPropertyValue('--accent-text').trim(),
+          accent: getComputedStyle(root).getPropertyValue('--accent').trim(),
+        };
+      });
+      // The stamp is synchronous in every branch, System included: the shell
+      // never shows the outgoing theme while an IPC round-trip completes.
+      if (choice !== 'system') expect(shown.theme).toBe(choice);
+      expect(Object.keys(SHELL)).toContain(shown.theme!);
+      expect(shown.accent).toMatch(/^#[0-9A-F]{6}$/i);
+
+      const rgb = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(shown.text);
+      expect(rgb).not.toBeNull();
+      const lum = (c: [number, number, number]) => {
+        const lin = (v: number) => {
+          const s = v / 255;
+          return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+      };
+      const l1 = lum([Number(rgb![1]), Number(rgb![2]), Number(rgb![3])]);
+      const l2 = lum(SHELL[shown.theme!]);
+      const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      expect(ratio).toBeGreaterThanOrEqual(shown.theme === 'high-contrast' ? 7 : 4.5);
+    }
+
+    await $('[data-testid="prefs-close"]').click();
+  });
 });

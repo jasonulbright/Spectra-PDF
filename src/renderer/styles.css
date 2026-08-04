@@ -208,7 +208,7 @@
 [data-theme="light"] .focus\:border-emerald-500:focus { border-color: #047857; }
 
 /* Focus ring */
-[data-theme="light"] .focus\:border-blue-500:focus { border-color: var(--accent, #0078d4); }
+[data-theme="light"] .focus\:border-blue-500:focus { border-color: var(--accent-text, #0078d4); }
 
 /* Thumbnail borders — shadow-sm is invisible on white backgrounds */
 [data-theme="light"] .bg-white.shadow-sm { border: 1px solid #d1d5db; }
@@ -266,7 +266,7 @@
 :root[style*="--accent"] .ring-blue-500 { --tw-ring-color: var(--accent); }
 :root[style*="--accent"] .border-blue-500 { border-color: var(--accent); }
 :root[style*="--accent"] .border-dashed.border-blue-500 { border-color: var(--accent); }
-:root[style*="--accent"] .focus\:border-blue-500:focus { border-color: var(--accent); }
+:root[style*="--accent"] .focus\:border-blue-500:focus { border-color: var(--accent-text, var(--accent)); }
 /* Accent AS TEXT gets its own lifted variable: hover now shifts DARKER for
    dark accents (away from white button text), so reusing it as link text on
    the dark shell would sit under 3:1. --accent-text is the accent lifted to
@@ -576,7 +576,7 @@
   font-size: 13px;
   outline: none;
 }
-.search-panel-input:focus { border-color: var(--accent, #0078d4); }
+.search-panel-input:focus { border-color: var(--accent-text, #0078d4); }
 .search-results { padding: 4px 0; }
 .search-summary {
   padding: 4px 10px 6px;
@@ -617,7 +617,7 @@
 
 [data-theme="light"] .search-panel-input-row { border-bottom-color: #e5e7eb; }
 [data-theme="light"] .search-panel-input { background: #f3f4f6; border-color: #d1d5db; }
-[data-theme="light"] .search-panel-input:focus { border-color: var(--accent, #0078d4); }
+[data-theme="light"] .search-panel-input:focus { border-color: var(--accent-text, #0078d4); }
 [data-theme="light"] .search-file-name { color: #6b7280; }
 [data-theme="light"] .search-hit:hover { background: #f3f4f6; }
 [data-theme="light"] .search-hit-page { color: #1f2937; }
@@ -2380,7 +2380,7 @@
   transition: background-color 90ms ease, border-color 90ms ease;
 }
 .tool-tile:hover { background: #262626; border-color: #3d3d3d; }
-.tool-tile:focus-visible { outline: 2px solid var(--accent, #0078d4); outline-offset: 1px; }
+.tool-tile:focus-visible { outline: 2px solid var(--accent-text, #0078d4); outline-offset: 1px; }
 .tool-tile-icon {
   display: flex;
   align-items: center;
@@ -2525,7 +2525,7 @@
 }
 .tool-op:hover { background: #262626; color: #e5e5e5; }
 .tool-op.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
-.tool-op:focus-visible { outline: 2px solid var(--accent, #0078d4); outline-offset: 1px; }
+.tool-op:focus-visible { outline: 2px solid var(--accent-text, #0078d4); outline-offset: 1px; }
 
 [data-theme="light"] .tools-center-heading { color: #111827; }
 [data-theme="light"] .tools-center-sub { color: #6b7280; }
@@ -3124,7 +3124,7 @@
 }
 .secondary-tool:hover { background: #262626; color: #e5e5e5; }
 .secondary-tool.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
-.secondary-tool:focus-visible { outline: 2px solid var(--accent, #0078d4); outline-offset: 1px; }
+.secondary-tool:focus-visible { outline: 2px solid var(--accent-text, #0078d4); outline-offset: 1px; }
 .stamp-preset {
   padding: 1px 7px;
   font-size: 10px;
@@ -3178,7 +3178,7 @@
 }
 .prefs-cat:hover { background: #262626; color: #e5e5e5; }
 .prefs-cat.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
-.prefs-cat:focus-visible { outline: 2px solid var(--accent, #0078d4); outline-offset: 1px; }
+.prefs-cat:focus-visible { outline: 2px solid var(--accent-text, #0078d4); outline-offset: 1px; }
 .prefs-body { min-width: 0; }
 
 [data-theme="light"] .prefs-cat { color: #4b5563; }
@@ -3212,7 +3212,7 @@
   cursor: default;
 }
 .text-selection-menu button:hover { background: #333333; }
-.text-selection-menu button:focus-visible { outline: 2px solid var(--accent, #0078d4); outline-offset: 1px; }
+.text-selection-menu button:focus-visible { outline: 2px solid var(--accent-text, #0078d4); outline-offset: 1px; }
 
 [data-theme="light"] .text-selection-menu { border-color: #d1d5db; background: #ffffff; }
 [data-theme="light"] .text-selection-menu button { color: #111827; }
@@ -3360,7 +3360,7 @@
    #065f46 hover flipped it to dark green under that same black text (1.9:1). */
 [data-theme="high-contrast"] .hover\:bg-emerald-500:hover { background-color: #34d399; }
 [data-theme="high-contrast"] .focus\:border-emerald-500:focus { border-color: #69f0ae; }
-[data-theme="high-contrast"] .focus\:border-blue-500:focus { border-color: var(--accent, #0078d4); }
+[data-theme="high-contrast"] .focus\:border-blue-500:focus { border-color: var(--accent-text, #0078d4); }
 [data-theme="high-contrast"] .bg-white.shadow-sm { border: 1px solid #2e2e2e; }
 [data-theme="high-contrast"] ::-webkit-scrollbar-thumb { background-color: #2e2e2e; }
 [data-theme="high-contrast"] ::-webkit-scrollbar-track { background-color: #0d0d0d; }
@@ -3394,7 +3394,7 @@
 :root[data-backdrop="mica"][data-theme="high-contrast"] .app-banner.bg-blue-900\/60, :root[data-backdrop="mica"][data-theme="high-contrast"] .app-banner.bg-red-600\/20 { background-color: #000000; }
 [data-theme="high-contrast"] .search-panel-input-row { border-bottom-color: #1a1a1a; }
 [data-theme="high-contrast"] .search-panel-input { background: #0d0d0d; border-color: #2e2e2e; }
-[data-theme="high-contrast"] .search-panel-input:focus { border-color: var(--accent, #0078d4); }
+[data-theme="high-contrast"] .search-panel-input:focus { border-color: var(--accent-text, #0078d4); }
 [data-theme="high-contrast"] .search-file-name { color: #d0d0d0; }
 [data-theme="high-contrast"] .search-hit:hover { background: #0d0d0d; }
 [data-theme="high-contrast"] .search-hit-page { color: #ffffff; }
