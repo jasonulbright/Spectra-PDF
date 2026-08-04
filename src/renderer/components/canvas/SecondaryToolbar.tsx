@@ -15,6 +15,7 @@ import {
 } from '../../lib/stamp-library';
 import { dialog, file } from '../../lib/tauri-bridge';
 import { CountSymbolGlyph } from '../CountSymbolGlyph';
+import { SymbolPalette, symbolDisplayName } from '../SymbolPalette';
 import type { CountGroup } from '../../lib/count-marks';
 import {
   armCountGroup,
@@ -28,6 +29,10 @@ import {
   tNumber,
   tToolTitle,
 } from '../../i18n';
+
+/** N11 slice D: the colour a symbol arms in when the tool has no colour set —
+ * markup red, the same default a drawing shape takes. */
+const SYMBOL_STAMP_COLOR = '#e0393e';
 
 /** Read + downscale a picked raster into a library-sized PNG data URL (long
  * edge capped — stamps are page furniture, not photo archives, and the
@@ -298,6 +303,10 @@ export function SecondaryToolbar({
     getTakeoffSettings,
   );
   const [showNewStamp, setShowNewStamp] = useState(false);
+  // N11 slice D: the symbol palette rides in the stamp picker, collapsed by
+  // default — it is a searchable library, not a row of pills, and the strip is
+  // a strip.
+  const [showSymbols, setShowSymbols] = useState(false);
   const [newStampLabel, setNewStampLabel] = useState('');
   const [newStampColor, setNewStampColor] = useState(ANNOTATION_PALETTE[3]);
   const persistStamps = (list: CustomStamp[]): void => {
@@ -359,8 +368,14 @@ export function SecondaryToolbar({
 
   const modes = owner.canvasTools;
   const actions = SECONDARY_TOOLBAR_ACTIONS[owner.id];
-  // Only the ANNOTATION modes carry a colour; a stamp carries its preset's.
-  const colored = modes.includes(tool) && tool !== 'stamp' && owner.id === 'comment';
+  // Only the ANNOTATION modes carry a colour; a stamp carries its preset's —
+  // except a SYMBOL stamp (N11 slice D), which is line art the drafter colours
+  // like any other markup, and placing twenty of them in the wrong colour to
+  // recolour them one by one afterwards is not a workflow.
+  const colored =
+    modes.includes(tool) &&
+    (tool !== 'stamp' || !!stampPreset?.symbolParts) &&
+    owner.id === 'comment';
 
   return (
     <div className="secondary-toolbar" data-testid="secondary-toolbar" data-tool={owner.id}>
@@ -973,6 +988,55 @@ export function SecondaryToolbar({
           >
             {tChrome('canvas.stamp.fromImage')}
           </button>
+          <button
+            type="button"
+            data-testid="stamp-symbols-toggle"
+            className={'secondary-tool' + (showSymbols ? ' active' : '')}
+            aria-expanded={showSymbols}
+            title={tChrome('canvas.stamp.symbolsHint')}
+            onClick={() => setShowSymbols((v) => !v)}
+          >
+            {tChrome('canvas.stamp.symbols')}
+          </button>
+        </div>
+      )}
+      {tool === 'stamp' && showSymbols && (
+        // N11 slice D — the SAME palette the Takeoff panel picks markers from
+        // (one registry, two consumers). Dragging a symbol onto the page
+        // places it; clicking arms it for click-placement, exactly like a
+        // preset pill.
+        //
+        // A POPOVER, not another row of the strip (the snap-popover
+        // precedent). A wrapped full-width row inside the strip overflowed its
+        // box and was painted UNDER the document view, which left a palette
+        // that looked present, answered `waitForDisplayed`, and could not be
+        // pressed. It would also have reflowed the page every time it opened.
+        <div
+          className="symbol-palette-popover"
+          role="group"
+          aria-label={tChrome('panel.symbols.title')}
+        >
+          <SymbolPalette
+            mode="place"
+            idPrefix="stamp-symbol"
+            compact
+            color={toolColor ?? SYMBOL_STAMP_COLOR}
+            selectedId={stampPreset?.symbolId}
+            onPick={(hit) =>
+              onSetStampPreset(
+                stampPreset?.symbolId === hit.symbol.id
+                  ? null
+                  : {
+                      // The ID is identity; the localized name is the stamp's
+                      // TEXT (it lands in /Contents like a preset's word).
+                      label: symbolDisplayName(hit.set, hit.symbol),
+                      color: toolColor ?? SYMBOL_STAMP_COLOR,
+                      symbolId: hit.symbol.id,
+                      symbolParts: hit.symbol.parts,
+                    },
+              )
+            }
+          />
         </div>
       )}
       {tool === 'stamp' && showNewStamp && (

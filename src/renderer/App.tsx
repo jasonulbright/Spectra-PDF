@@ -1998,6 +1998,12 @@ function AppContent(): React.ReactElement {
           countGroup: a.countGroup,
           countSymbol: a.countSymbol,
           countSeq: a.countSeq,
+          // N11 slice D: which registry symbol a placed stamp / count marker
+          // draws, and how many PARTS its carried geometry has — spec 108
+          // asserts the artwork travels with the annotation, so "did the
+          // geometry survive?" must be answerable without the geometry itself.
+          symbolId: a.symbolId,
+          symbolParts: a.symbolParts?.length,
         }));
       },
       dispatchAddAnnotation: (docId, pageId, annotation) =>

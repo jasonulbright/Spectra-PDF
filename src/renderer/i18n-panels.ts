@@ -773,7 +773,6 @@ export const PANEL_STRINGS = {
   'panel.takeoff.edit': 'Edit',
   'panel.takeoff.nameAria': 'Group name',
   'panel.takeoff.colorAria': 'Use the colour {{color}}',
-  'panel.takeoff.symbolAria': 'Use the {{symbol}} marker',
   'panel.takeoff.forget': 'Forget group',
   'panel.takeoff.forgetTitle':
     'Remove this group from the remembered list. Marks already placed keep their group.',
@@ -791,6 +790,64 @@ export const PANEL_STRINGS = {
     'Write the takeoff summary as a CSV: one row per group per page, plus a total.',
   'panel.takeoff.exporting': 'Exporting…',
   'panel.takeoff.exported': 'Exported {{total}} marks across {{groups}} groups.',
+  'panel.takeoff.marker': 'Marker',
+
+  // Symbol palettes (N11 slice D). A BUILT-IN symbol's name is our word and
+  // localizes, exactly like a built-in stamp's; an IMPORTED set's name and its
+  // symbols' names are the user's own data and are shown verbatim — never
+  // translated, and never used as identity (ids are).
+  'panel.symbols.title': 'Symbols',
+  'panel.symbols.hint':
+    'Drag a symbol onto the page to place it, or pick one as a count group’s marker.',
+  'panel.symbols.search': 'Search symbols',
+  'panel.symbols.searchAria': 'Search symbols',
+  'panel.symbols.import': 'Import set…',
+  'panel.symbols.importHint': 'Load a symbol set from a JSON file — the format Export writes.',
+  'panel.symbols.export': 'Export',
+  'panel.symbols.remove': 'Remove',
+  'panel.symbols.removeHint': 'Remove this set. Symbols already placed keep their artwork.',
+  'panel.symbols.imported': 'Imported the set {{name}}.',
+  'panel.symbols.updated': 'Updated the set {{name}}.',
+  'panel.symbols.exported': 'Exported the set {{name}}.',
+  'panel.symbols.removed': 'Removed the set {{name}}.',
+  'panel.symbols.noMatch': 'No symbols match.',
+  'panel.symbols.markerSet': '{{group}} now counts with {{name}}.',
+  'panel.symbols.noArmedGroup': 'Arm a count group first to use a symbol as its marker.',
+  'panel.symbols.placeHint': 'Drag {{name}} onto the page, or click to arm it',
+
+  'panel.symbols.set.markers': 'Markers',
+  'panel.symbols.set.aec': 'AEC general',
+
+  'panel.symbols.name.circle': 'Circle',
+  'panel.symbols.name.square': 'Square',
+  'panel.symbols.name.triangle': 'Triangle',
+  'panel.symbols.name.diamond': 'Diamond',
+  'panel.symbols.name.cross': 'Cross',
+  'panel.symbols.name.ex': 'X',
+  'panel.symbols.name.hexagon': 'Hexagon',
+  'panel.symbols.name.star': 'Star',
+  'panel.symbols.name.target': 'Target',
+
+  'panel.symbols.name.aec-door': 'Door swing',
+  'panel.symbols.name.aec-window': 'Window',
+  'panel.symbols.name.aec-receptacle': 'Receptacle',
+  'panel.symbols.name.aec-switch': 'Switch',
+  'panel.symbols.name.aec-light': 'Ceiling light',
+  'panel.symbols.name.aec-fixture-linear': 'Linear fixture',
+  'panel.symbols.name.aec-smoke-detector': 'Smoke detector',
+  'panel.symbols.name.aec-thermostat': 'Thermostat',
+  'panel.symbols.name.aec-exit-sign': 'Exit sign',
+  'panel.symbols.name.aec-data-outlet': 'Data outlet',
+  'panel.symbols.name.aec-junction-box': 'Junction box',
+  'panel.symbols.name.aec-floor-drain': 'Floor drain',
+  'panel.symbols.name.aec-diffuser': 'Supply diffuser',
+  'panel.symbols.name.aec-return-grille': 'Return grille',
+  'panel.symbols.name.aec-sprinkler': 'Sprinkler head',
+  'panel.symbols.name.aec-valve': 'Valve',
+  'panel.symbols.name.aec-north-arrow': 'North arrow',
+  'panel.symbols.name.aec-detail-bubble': 'Detail bubble',
+  'panel.symbols.name.aec-elevation-marker': 'Elevation marker',
+  'panel.symbols.name.aec-fire-extinguisher': 'Fire extinguisher',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;

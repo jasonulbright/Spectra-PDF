@@ -264,6 +264,11 @@ export interface PageAnnotationSnapshot {
   countGroup?: string;
   countSymbol?: string;
   countSeq?: number;
+  /** N11 slice D: the registry symbol a placed stamp / count marker draws, and
+   * how many PARTS of carried geometry travel with it (spec 108 asserts the
+   * artwork survives save + reopen even where the SET does not). */
+  symbolId?: string;
+  symbolParts?: number;
 }
 
 /** Every pending annotation on one page, workspace order (= z-order). */
@@ -299,6 +304,40 @@ export async function takeoffArmed(): Promise<string | null> {
   return (await browser.execute(function () {
     return (window as any).__SPECTRA_TEST__.takeoffArmed();
   })) as string | null;
+}
+
+/** N11 slice D — import a symbol SET from a path (the native picker is the
+ * only step skipped). Resolves `{ id, outcome }`, or rejects with the refusal
+ * message a malformed file earns. */
+export async function symbolImportFromPath(
+  path: string,
+): Promise<{ id: string; outcome: string } | string> {
+  return (await browser.executeAsync(
+    function (p: string, done: (r: unknown) => void) {
+      (window as any).__SPECTRA_TEST__
+        .symbolImportFromPath(p)
+        .then((r: unknown) => done(r))
+        // The refusal MESSAGE is the interesting half — a spec asserts on it,
+        // so it comes back as a string rather than as a rejected promise the
+        // bridge would flatten to "unknown error".
+        .catch((e: unknown) => done(String(e instanceof Error ? e.message : e)));
+    },
+    path,
+  )) as { id: string; outcome: string } | string;
+}
+
+export async function symbolSets(): Promise<
+  { id: string; name: string; builtin: boolean; symbols: string[] }[]
+> {
+  return (await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.symbolSets();
+  })) as { id: string; name: string; builtin: boolean; symbols: string[] }[];
+}
+
+export async function symbolResetSets(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.symbolResetSets();
+  });
 }
 
 export async function commitPendingEdits(): Promise<void> {

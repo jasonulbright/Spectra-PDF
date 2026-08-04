@@ -141,6 +141,10 @@ export const CANVAS_STRINGS = {
   'canvas.stamp.labelPlaceholder': 'Label — {date} {time} {name} allowed',
   'canvas.stamp.add': 'Add',
   'canvas.stamp.defaultName': 'Stamp',
+  // N11 slice D — the symbol palette inside the stamp picker.
+  'canvas.stamp.symbols': 'Symbols…',
+  'canvas.stamp.symbolsHint':
+    'Vector symbols — drag one onto the page, or click to place it with the next click',
 
   'canvas.toolbar.colorGroup': 'Annotation colour',
 
