@@ -4,6 +4,8 @@ import { useEngine } from '../hooks/useEngine';
 import { file } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 interface Link {
   page: number;
@@ -14,6 +16,8 @@ interface Link {
 }
 
 export function LinksPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
   const [links, setLinks] = useState<Link[]>([]);
@@ -48,7 +52,7 @@ export function LinksPanel(): React.ReactElement {
     async (method: string, params: Record<string, unknown>, done: string) => {
       if (!activeFile) return;
       setBusy(true);
-      setStatus('Working…');
+      setStatus(tChrome('panel.common.working'));
       try {
         const snapshotPath = await file.snapshot(activeFile.workingPath);
         await call(method, { file: activeFile.workingPath, output: activeFile.workingPath, ...params });
@@ -58,7 +62,7 @@ export function LinksPanel(): React.ReactElement {
         await refresh();
         setStatus(done);
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
         setBusy(false);
       }
@@ -69,35 +73,35 @@ export function LinksPanel(): React.ReactElement {
   const saveUrl = useCallback(
     (l: Link) => {
       if (!draft.trim()) {
-        setStatus('Enter a URL');
+        setStatus(tChrome('panel.links.enterUrl'));
         return;
       }
       setEditing(null);
-      void runMutation('set_link_url', { page: l.page, index: l.index, url: draft.trim() }, 'Link updated');
+      void runMutation('set_link_url', { page: l.page, index: l.index, url: draft.trim() }, tChrome('panel.links.updated'));
     },
     [draft, runMutation],
   );
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to manage its links" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.links.open')} />;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">
-        Working on: <span className="text-neutral-200">{activeFile.name}</span>
+        {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span>
       </div>
       {links.length === 0 ? (
-        <p className="text-sm text-neutral-500" data-testid="links-empty">This document has no links.</p>
+        <p className="text-sm text-neutral-500" data-testid="links-empty">{tChrome('panel.links.empty')}</p>
       ) : (
         <div className="flex flex-col gap-1" data-testid="links-list">
           <div className="text-sm text-neutral-300" data-testid="links-summary">
-            {links.length} link{links.length === 1 ? '' : 's'}
+            {tChromeCount('panel.links.summary', links.length)}
           </div>
           {links.map((l) => {
             const isEditing = editing?.page === l.page && editing?.index === l.index;
             return (
               <div key={`${l.page}:${l.index}`} data-testid="link-item" className="flex items-center gap-2 px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded">
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs text-neutral-500">Page {l.page} · {l.kind}</div>
+                  <div className="text-xs text-neutral-500">{tChrome('panel.links.pageKind', { page: l.page, kind: l.kind })}</div>
                   {isEditing ? (
                     <input
                       data-testid={`link-url-input-${l.page}-${l.index}`}
@@ -112,7 +116,7 @@ export function LinksPanel(): React.ReactElement {
                       className="w-full mt-0.5 px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
                     />
                   ) : (
-                    <div className="text-sm text-neutral-200 truncate" title={l.target}>{l.target || '(no target)'}</div>
+                    <div className="text-sm text-neutral-200 truncate" title={l.target}>{l.target || tChrome('panel.links.noTarget')}</div>
                   )}
                 </div>
                 {isEditing ? (
@@ -122,7 +126,7 @@ export function LinksPanel(): React.ReactElement {
                     disabled={busy}
                     className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded"
                   >
-                    Save
+                    {tChrome('panel.links.save')}
                   </button>
                 ) : (
                   <button
@@ -134,16 +138,16 @@ export function LinksPanel(): React.ReactElement {
                     disabled={busy}
                     className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                   >
-                    Set URL
+                    {tChrome('panel.links.setUrl')}
                   </button>
                 )}
                 <button
                   data-testid={`link-delete-${l.page}-${l.index}`}
-                  onClick={() => void runMutation('delete_link', { page: l.page, index: l.index }, 'Link removed')}
+                  onClick={() => void runMutation('delete_link', { page: l.page, index: l.index }, tChrome('panel.links.removed'))}
                   disabled={busy}
                   className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-50"
                 >
-                  Delete
+                  {tChrome('panel.links.delete')}
                 </button>
               </div>
             );
