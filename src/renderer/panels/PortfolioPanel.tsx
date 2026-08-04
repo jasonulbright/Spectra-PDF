@@ -6,6 +6,8 @@ import { getCommandContext } from '../commands/context';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerPortfolioHandlers } from '../testHarness';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 interface Member {
   name: string;
@@ -31,6 +33,8 @@ const isPdfMember = (m: Member): boolean =>
   m.mime === 'application/pdf' || /\.pdf$/i.test(m.name);
 
 export function PortfolioPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call, callRaw, saveFile } = useEngine();
   const [info, setInfo] = useState<PortfolioInfo | null>(null);
@@ -79,7 +83,7 @@ export function PortfolioPanel(): React.ReactElement {
   const createWithPaths = useCallback(
     async (output: string, sources: string[], titleArg?: string) => {
       setBusy(true);
-      setStatus('Creating portfolio…');
+      setStatus(tChrome('panel.portfolio.creating'));
       try {
         // callRaw, deliberately: the members are PICKED DISK FILES
         // (non-workspace targets — the batch-OCR precedent) and the output is
@@ -90,11 +94,11 @@ export function PortfolioPanel(): React.ReactElement {
           sources,
           ...(t ? { title: t } : {}),
         });
-        setStatus('Portfolio created');
+        setStatus(tChrome('panel.portfolio.created'));
         setTitle('');
         await getCommandContext()?.app?.openPath(output);
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         throw e;
       } finally {
         setBusy(false);
@@ -115,7 +119,7 @@ export function PortfolioPanel(): React.ReactElement {
   const handleConvert = useCallback(async () => {
     if (!activeFile) return;
     setBusy(true);
-    setStatus('Converting…');
+    setStatus(tChrome('panel.portfolio.converting'));
     try {
       const snapshotPath = await file.snapshot(activeFile.workingPath);
       await call('make_portfolio', {
@@ -124,9 +128,9 @@ export function PortfolioPanel(): React.ReactElement {
       });
       await reloadFile(snapshotPath);
       await refresh();
-      setStatus('This document is now a portfolio');
+      setStatus(tChrome('panel.portfolio.converted'));
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
@@ -136,7 +140,7 @@ export function PortfolioPanel(): React.ReactElement {
     async (source: string) => {
       if (!activeFile) return;
       setBusy(true);
-      setStatus('Adding…');
+      setStatus(tChrome('panel.portfolio.adding'));
       try {
         const snapshotPath = await file.snapshot(activeFile.workingPath);
         const r = await call('add_attachment', {
@@ -148,7 +152,7 @@ export function PortfolioPanel(): React.ReactElement {
         await refresh();
         setStatus(`Added ${(r as unknown as { name: string }).name}`);
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         throw e;
       } finally {
         setBusy(false);
@@ -167,7 +171,7 @@ export function PortfolioPanel(): React.ReactElement {
     async (name: string) => {
       if (!activeFile) return;
       setBusy(true);
-      setStatus('Opening…');
+      setStatus(tChrome('panel.portfolio.opening'));
       try {
         // Extract to the managed per-portfolio folder (Rust owns the path),
         // then open the REAL file through the one open funnel — a real tab,
@@ -183,7 +187,7 @@ export function PortfolioPanel(): React.ReactElement {
         );
         setStatus(`Opened ${name}`);
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
         setBusy(false);
       }
@@ -198,7 +202,7 @@ export function PortfolioPanel(): React.ReactElement {
     async (name: string) => {
       if (!activeFile) return;
       setBusy(true);
-      setStatus('Opening…');
+      setStatus(tChrome('panel.portfolio.opening'));
       try {
         const dir = await app.portfolioMemberDir(activeFile.path);
         const r = await call('extract_member_to_dir', {
@@ -209,7 +213,7 @@ export function PortfolioPanel(): React.ReactElement {
         await app.openPortfolioMemberFile((r as unknown as { output: string }).output);
         setStatus(`Opened ${name} in its own app`);
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
         setBusy(false);
       }
@@ -221,12 +225,12 @@ export function PortfolioPanel(): React.ReactElement {
     async (name: string, output: string) => {
       if (!activeFile) return;
       setBusy(true);
-      setStatus('Saving…');
+      setStatus(tChrome('panel.portfolio.saving'));
       try {
         await call('extract_attachment', { file: activeFile.workingPath, name, output });
         setStatus(`Saved ${name}`);
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         throw e;
       } finally {
         setBusy(false);
@@ -248,7 +252,7 @@ export function PortfolioPanel(): React.ReactElement {
     async (name: string, source: string) => {
       if (!activeFile) return;
       setBusy(true);
-      setStatus('Updating…');
+      setStatus(tChrome('panel.portfolio.updating'));
       try {
         const snapshotPath = await file.snapshot(activeFile.workingPath);
         await call('update_portfolio_member', {
@@ -261,7 +265,7 @@ export function PortfolioPanel(): React.ReactElement {
         await refresh();
         setStatus(`Updated ${name}`);
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         throw e;
       } finally {
         setBusy(false);
@@ -300,7 +304,7 @@ export function PortfolioPanel(): React.ReactElement {
     async (name: string) => {
       if (!activeFile) return;
       setBusy(true);
-      setStatus('Removing…');
+      setStatus(tChrome('panel.portfolio.removing'));
       try {
         const snapshotPath = await file.snapshot(activeFile.workingPath);
         await call('remove_attachment', {
@@ -312,7 +316,7 @@ export function PortfolioPanel(): React.ReactElement {
         await refresh();
         setStatus(`Removed ${name}`);
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
         setBusy(false);
       }
@@ -322,13 +326,13 @@ export function PortfolioPanel(): React.ReactElement {
 
   const createSection = (
     <div className="flex flex-col gap-2" data-testid="portfolio-create-section">
-      <div className="text-sm font-medium text-neutral-300">Create a portfolio</div>
+      <div className="text-sm font-medium text-neutral-300">{tChrome('panel.portfolio.createHeading')}</div>
       <input
         type="text"
         data-testid="portfolio-title"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        placeholder="Title (optional)"
+        placeholder={tChrome('panel.portfolio.titlePlaceholder')}
         disabled={busy}
         className="px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm text-neutral-200 placeholder-neutral-500"
       />
@@ -339,11 +343,11 @@ export function PortfolioPanel(): React.ReactElement {
           disabled={busy}
           className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
         >
-          Pick files and create…
+          {tChrome('panel.portfolio.pickAndCreate')}
         </button>
       </div>
       <p className="text-xs text-neutral-500">
-        Bundles any files into one PDF portfolio with a generated cover sheet.
+        {tChrome('panel.portfolio.createBlurb')}
       </p>
     </div>
   );
@@ -354,7 +358,7 @@ export function PortfolioPanel(): React.ReactElement {
         {createSection}
         <NoFileOpen
           onOpen={openNewFiles}
-          message="Or open an existing portfolio to manage its files"
+          message={tChrome('panel.portfolio.openAlt')}
         />
       </div>
     );
@@ -363,12 +367,12 @@ export function PortfolioPanel(): React.ReactElement {
   return (
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">
-        Working on: <span className="text-neutral-200">{activeFile.name}</span>
+        {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span>
       </div>
 
       {info && !info.is_portfolio && (
         <div className="flex flex-col gap-2" data-testid="portfolio-not">
-          <p className="text-sm text-neutral-500">This document is not a portfolio.</p>
+          <p className="text-sm text-neutral-500">{tChrome('panel.portfolio.notPortfolio')}</p>
           <div>
             <button
               data-testid="portfolio-convert"
@@ -376,11 +380,11 @@ export function PortfolioPanel(): React.ReactElement {
               disabled={busy}
               className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
             >
-              Convert this document into a portfolio
+              {tChrome('panel.portfolio.convert')}
             </button>
           </div>
           <p className="text-xs text-neutral-500">
-            Its attachments, if any, become the portfolio’s files.
+            {tChrome('panel.portfolio.convertBlurb')}
           </p>
         </div>
       )}
@@ -389,7 +393,7 @@ export function PortfolioPanel(): React.ReactElement {
         <div className="flex flex-col gap-2" data-testid="portfolio-members">
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium text-neutral-300" data-testid="portfolio-count">
-              {info.count === 1 ? '1 file' : `${info.count} files`} in this portfolio
+              {tChromeCount('panel.portfolio.count', info.count)}
             </div>
             <button
               data-testid="portfolio-add"
@@ -397,12 +401,12 @@ export function PortfolioPanel(): React.ReactElement {
               disabled={busy}
               className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
             >
-              Add file…
+              {tChrome('panel.portfolio.addFile')}
             </button>
           </div>
           {info.members.length === 0 ? (
             <p className="text-sm text-neutral-500" data-testid="portfolio-empty">
-              This portfolio has no files yet.
+              {tChrome('panel.portfolio.empty')}
             </p>
           ) : (
             <div className="flex flex-col gap-1" data-testid="portfolio-list">
@@ -429,17 +433,17 @@ export function PortfolioPanel(): React.ReactElement {
                       disabled={busy}
                       className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                     >
-                      Open
+                      {tChrome('panel.portfolio.openBtn')}
                     </button>
                   ) : (
                     <button
                       data-testid={`portfolio-open-os-${m.name}`}
-                      title="Open with the app your PC uses for this file type"
+                      title={tChrome('panel.portfolio.openOsTitle')}
                       onClick={() => handleOpenMemberExternal(m.name)}
                       disabled={busy}
                       className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                     >
-                      Open
+                      {tChrome('panel.portfolio.openBtn')}
                     </button>
                   )}
                   <button
@@ -448,16 +452,16 @@ export function PortfolioPanel(): React.ReactElement {
                     disabled={busy}
                     className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                   >
-                    Save…
+                    {tChrome('panel.portfolio.saveBtn')}
                   </button>
                   <button
                     data-testid={`portfolio-update-${m.name}`}
                     onClick={() => handleUpdateMember(m.name)}
                     disabled={busy}
                     className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
-                    title="Replace this file’s contents from a file on disk"
+                    title={tChrome('panel.portfolio.updateTitle')}
                   >
-                    Update…
+                    {tChrome('panel.portfolio.updateBtn')}
                   </button>
                   <button
                     data-testid={`portfolio-remove-${m.name}`}
@@ -465,7 +469,7 @@ export function PortfolioPanel(): React.ReactElement {
                     disabled={busy}
                     className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-50"
                   >
-                    Remove
+                    {tChrome('panel.portfolio.removeBtn')}
                   </button>
                 </div>
               ))}
