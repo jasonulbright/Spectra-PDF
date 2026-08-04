@@ -1986,6 +1986,11 @@ function AppContent(): React.ReactElement {
           strokeWidth: a.strokeWidth,
           fillColor: a.fillColor,
           opacity: a.opacity,
+          // N11 slice A: the VERTEX list. A snapped point is exact where a
+          // raw pointer is not, so the spec's honest question is "is this
+          // coordinate the geometry's own?" — which needs the points, not
+          // the padded bbox they sit inside.
+          points: a.points ? [...a.points] : undefined,
         }));
       },
       dispatchAddAnnotation: (docId, pageId, annotation) =>
