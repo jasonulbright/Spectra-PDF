@@ -1,13 +1,16 @@
 # Changelog
 
-## 1.0.17 — Drafting tools, and an interface that speaks Spanish
+## 1.0.17 — Drafting tools, long documents, and an interface that speaks Spanish
 
 Markup lands where you aim it: snapping to the drawing's own geometry,
 rulers, a grid in real-world units, and guides you drag off the rulers.
 Quantities get a proper home — count items into named groups, watch the
 tallies add up, stamp a legend onto the sheet, and export the takeoff as a
 spreadsheet. Symbols arrive as a searchable palette you drag from, with
-your own sets loadable from a file. And the whole interface now speaks
+your own sets loadable from a file. Long documents stop paying for their
+length — a thousand-page file zooms and navigates like a short one.
+Vertical text gains ground too: a column can be restyled, and text set
+sideways inside one now reflows with it. And the whole interface speaks
 Spanish.
 
 ### Drafting aids
@@ -91,6 +94,53 @@ Spanish.
 - **The interface announces its language.** Assistive technology is told
   which language the interface is in, so it reads Spanish text with
   Spanish pronunciation.
+
+### Long documents
+- **Full zoom at any length.** Actual Size and Fit Width now mean what
+  they say however many pages a document has. A long file used to be
+  quietly capped to a smaller zoom than you asked for; it no longer is.
+- **Page navigation stays exact.** Jumping to a page deep in a very long
+  document lands on that page and holds there, and scrolling to the end
+  reports the last page — the same at six hundred pages as at six.
+
+### Vertical text
+- **Vertical paragraphs restyle.** A column of vertical text takes a font
+  family, bold and italic like any other paragraph, including a vertical
+  face installed on your machine. What a vertical column genuinely cannot
+  take is now stated as the absence it is, rather than refused with a
+  reason that had stopped being true.
+- **A face with no vertical metrics is refused by name.** Choosing a font
+  that cannot set text down the page says so — and says which of the two
+  reasons applies — instead of laying horizontal letterforms into a
+  vertical column.
+- **Sideways text joins the column.** Text turned a quarter turn — the way
+  a date or a Latin word sits inside a Japanese column — now belongs to
+  the paragraph it is part of and reflows with it. All four quarter turns
+  edit as paragraphs, whether or not a column is involved, and a
+  superscript on rotated text stays a superscript.
+- **An upright block inside a column refuses by name.** A horizontal block
+  set inside a vertical column is not reflowed, and says so, rather than
+  moving the text around it and leaving the block behind.
+
+### Fixes
+- **Deleting several images at once after an undo.** Selecting a group of
+  images and deleting them could silently do nothing once an earlier edit
+  had been undone. The selection now follows the document as it changes,
+  and an edit that can no longer find its page says so on screen instead
+  of doing nothing.
+- **Switching themes keeps the right accent.** Swapping between light,
+  dark and high contrast applies the theme and its accent colour as one
+  step, so a slower answer can no longer overwrite a newer one and leave a
+  mismatched highlight behind.
+- **Accent colour reads properly in light mode.** Accent-coloured text and
+  focus outlines are worked out per theme, so they meet the contrast
+  standard on a light background as well as a dark one — and under high
+  contrast the accent is held to a readable minimum whatever colour
+  Windows supplies.
+- **Scheduled runs on a non-English Windows.** Whether a scheduled run is
+  enabled is read from the task itself rather than from the status text
+  Windows translates, so the Enable/Disable button is right in any Windows
+  language.
 
 ## 1.0.16 — Deeper image, vector, and paragraph editing
 
