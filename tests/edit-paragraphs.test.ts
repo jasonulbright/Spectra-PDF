@@ -325,6 +325,43 @@ describe('fetchEditTextListing projection', () => {
     expect(plain.paragraphs[0].vertical).toBe(false);
   });
 
+  it('threads the orientation; absent or unknown means horizontal (9.T13)', async () => {
+    // The frame decides the resize grips' direction and the box-left
+    // origin, so an engine that omits it must land on the IDENTITY map —
+    // the shipped geometry — rather than leaving the field undefined.
+    const turned = {
+      ...listing,
+      paragraphs: [{ ...listing.paragraphs[0], orientation: 'rotated-ccw' }],
+    };
+    const out = await fetchEditTextListing(
+      async () => turned,
+      'C:\\w.pdf',
+      1,
+      { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+    );
+    expect(out.paragraphs[0].orientation).toBe('rotated-ccw');
+
+    const plain = await fetchEditTextListing(
+      async () => listing,
+      'C:\\w.pdf',
+      1,
+      { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+    );
+    expect(plain.paragraphs[0].orientation).toBe('horizontal');
+
+    const junk = {
+      ...listing,
+      paragraphs: [{ ...listing.paragraphs[0], orientation: 'sideways-ish' }],
+    };
+    const odd = await fetchEditTextListing(
+      async () => junk,
+      'C:\\w.pdf',
+      1,
+      { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
+    );
+    expect(odd.paragraphs[0].orientation).toBe('horizontal');
+  });
+
   it('threads the bidi base direction; absent means left-to-right (9.T3)', async () => {
     // The editor sets the text box's `dir` from this, so an engine that
     // omits it must land on 'ltr' rather than leaving the field undefined —
