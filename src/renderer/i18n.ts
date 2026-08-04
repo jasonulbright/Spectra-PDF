@@ -18,6 +18,7 @@ import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chr
 import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
 import { loadSettings } from './lib/app-settings';
+import { OCR_LANGUAGES } from './ocr/languages';
 
 export const SHIPPED_LOCALES: readonly string[] = ['en', 'es'];
 
@@ -109,6 +110,33 @@ export function tCommandTitle(commandId: string, englishTitle: string): string {
 /** Translate a top-level menu or submenu label by its stable id. */
 export function tMenuLabel(menuId: string, englishLabel: string): string {
   return i18next.t(`menu.${menuId}`, { defaultValue: englishLabel });
+}
+
+/**
+ * A RECOGNITION LANGUAGE's name in the current UI language.
+ *
+ * Language names are the one class of UI string that must NOT be authored
+ * into the catalogs: every locale's ICU data already spells all 47 of them,
+ * and hand-translating that table per shipped locale is 47 chances to be
+ * wrong. `Intl.DisplayNames` reads them from the platform instead — which is
+ * why `OcrLanguage` carries an explicit BCP-47 tag beside Tesseract's own
+ * code. The English label is the fallback if the platform has no name.
+ *
+ * Consequence to know: these names are NOT pseudo-localized under `qps`
+ * (they never pass through the catalog), so the leak sweep must not read a
+ * bare language name as an untranslated string.
+ */
+export function tOcrLanguage(code: string): string {
+  const entry = OCR_LANGUAGES.find((l) => l.code === code);
+  if (!entry) return code;
+  try {
+    return (
+      new Intl.DisplayNames([i18next.language], { type: 'language' }).of(entry.bcp47) ??
+      entry.label
+    );
+  } catch {
+    return entry.label;
+  }
 }
 
 /** Locale-aware number formatting (brief 37: `Intl.NumberFormat`, never a
