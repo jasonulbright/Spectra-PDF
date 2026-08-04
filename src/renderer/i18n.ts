@@ -17,6 +17,7 @@ import esChrome from './locales/es/chrome.json';
 import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chrome';
 import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
+import { WORKBENCH_STRINGS, type WorkbenchKey } from './i18n-workbench';
 import { loadSettings } from './lib/app-settings';
 import { OCR_LANGUAGES } from './ocr/languages';
 
@@ -103,13 +104,50 @@ export default i18next;
  * missing at runtime, never a shipped state — the parity gate keeps the
  * catalogs complete.
  */
-export function tCommandTitle(commandId: string, englishTitle: string): string {
-  return i18next.t(`cmd.${commandId}`, { defaultValue: englishTitle });
+export function tCommandTitle(commandId: string, englishTitle: string, lng?: string): string {
+  return i18next.t(`cmd.${commandId}`, {
+    defaultValue: englishTitle,
+    ...(lng ? { lng } : {}),
+  });
 }
 
 /** Translate a top-level menu or submenu label by its stable id. */
 export function tMenuLabel(menuId: string, englishLabel: string): string {
   return i18next.t(`menu.${menuId}`, { defaultValue: englishLabel });
+}
+
+/**
+ * A TOOL's name, and an OPERATION's name, in the UI language.
+ *
+ * Both read the COMMAND key rather than a second key of their own: every tool
+ * is `tools.open.<id>` and every operation is `tools.panel.<op>` in the
+ * registry, whose titles ARE these strings and are already generated into
+ * `cmd.*`. Minting `tool.title.*` would let the Tools menu and the dock
+ * header disagree about a tool's name in one language — which is precisely
+ * the drift `commands/tools.ts` was written to end in English.
+ *
+ * `lng` pins a language — the omnisearch passes the live one so its ranking
+ * memo genuinely DEPENDS on it (a memo that reads the ambient language would
+ * keep the previous language's hits after a switch).
+ */
+export function tToolTitle(toolId: string, englishTitle: string, lng?: string): string {
+  return tCommandTitle(`tools.open.${toolId}`, englishTitle, lng);
+}
+export function tOperationTitle(op: string, englishTitle: string, lng?: string): string {
+  return tCommandTitle(`tools.panel.${op}`, englishTitle, lng);
+}
+
+/** A tool's one-line blurb (the tile tooltip). No command carries it, so the
+ * catalog gate derives `tool.desc.*` from TOOL_DEFS like the other tables. */
+export function tToolDescription(
+  toolId: string,
+  englishDescription: string,
+  lng?: string,
+): string {
+  return i18next.t(`tool.desc.${toolId}`, {
+    defaultValue: englishDescription,
+    ...(lng ? { lng } : {}),
+  });
 }
 
 /**
@@ -172,19 +210,21 @@ export function tToolbarGroup(groupId: string, englishLabel: string): string {
   return i18next.t(`toolbar.group.${groupId}`, { defaultValue: englishLabel });
 }
 
-// The typed UI records, merged: chrome (slice A) + panels and dialogs
-// (slice B). One helper set serves all three — a key is compile-time-checked
-// against the union.
+// The typed UI records, merged: chrome (slice A) + panels, dialogs and the
+// workbench chrome (slice B). One helper set serves all four — a key is
+// compile-time-checked against the union.
 const UI_STRINGS: Record<string, string> = {
   ...CHROME_STRINGS,
   ...PANEL_STRINGS,
   ...DIALOG_STRINGS,
+  ...WORKBENCH_STRINGS,
 };
-export type UiKey = ChromeKey | PanelKey | DialogKey;
+export type UiKey = ChromeKey | PanelKey | DialogKey | WorkbenchKey;
 type UiPluralKey =
   | ChromePluralKey
   | { [K in PanelKey]: K extends `${infer B}_one` ? B : never }[PanelKey]
-  | { [K in DialogKey]: K extends `${infer B}_one` ? B : never }[DialogKey];
+  | { [K in DialogKey]: K extends `${infer B}_one` ? B : never }[DialogKey]
+  | { [K in WorkbenchKey]: K extends `${infer B}_one` ? B : never }[WorkbenchKey];
 
 /**
  * Translate a JSX/dynamic UI string by its typed key (the CHROME_STRINGS /
