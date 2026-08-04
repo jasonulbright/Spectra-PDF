@@ -46,6 +46,10 @@ import { PageCell } from './PageCell';
 import { pagesInRow, rowCountOf, rowOfPage, type PageLayout } from '../../canvas/spread-layout';
 import { TextSelectionMenu } from './TextSelectionMenu';
 import type { PageQuads } from '../../lib/text-selection-markup';
+import type { GuideAxis, PageGuide } from '../../lib/guides';
+import { rulerTicks, type RulerTick } from '../../lib/rulers';
+import { DEFAULT_MEASURE_SCALE, measureUnitsPerPoint } from '../../lib/measure';
+import { tChrome, tNumber } from '../../i18n';
 
 // The continuous reading view (Phase 4 M4, § 6): one document, a single
 // vertical column of the SAME PageCells the board uses (§ 6.2 — the reuse
@@ -70,6 +74,11 @@ const FIT_WIDTH_GUTTER = 16;
 // press in select mode is a no-op; the annotate/redact/form tools handle their
 // own pointer events inside PageCell. Stable identity preserves PageCell's memo.
 const NO_PAGE_POINTER = (): void => {};
+
+// N11 slice B: the ruler strips' thickness, in CSS pixels. Published to CSS as
+// `--ruler-size` on the frame so the grid tracks and the drag preview's offset
+// cannot drift apart — one number, one owner.
+const RULER_PX = 18;
 
 export interface DocumentViewProps {
   doc: OpenDocument;
@@ -101,6 +110,11 @@ export interface DocumentViewProps {
   /** N11 slice A: per-page snap geometry + the live snap preferences. */
   snapGeomByPage: ReadonlyMap<string, import('../../lib/snap-geometry').PageSnapGeometry>;
   snapSettings: import('../../lib/snap-settings').SnapSettings;
+  /** N11 slice B: ruler guides for this document, grouped by page. */
+  guidesByPage: ReadonlyMap<string, PageGuide[]>;
+  onAddGuide: (pageId: string, axis: GuideAxis, pos: number, rotationAtDraw: 0 | 90 | 180 | 270) => void;
+  onMoveGuide: (guideId: string, axis: GuideAxis, pos: number, rotationAtDraw: 0 | 90 | 180 | 270) => void;
+  onRemoveGuide: (guideId: string) => void;
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
@@ -681,6 +695,162 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     [centerOn, actualSize, fitWidth, zoomToPageRect],
   );
 
+  // ── Rulers and guides (N11 slice B) ───────────────────────────────────
+  // The rulers read against the page nearest the top of the viewport, and
+  // their origin is that page's own top-left corner — a ruler that measured
+  // the SCROLLER would tell you where you are in a pane, which is not a
+  // quantity anyone drafting cares about.
+  //
+  // The origin comes from a DOM rect, never from `row * rowH`. That is the P12
+  // rule taken at its word: past the element cap the spacer is scaled and rows
+  // TRANSLATE under it, so a document-space offset is not where the page is —
+  // whereas a rect is right at every scroll position, on every document, by
+  // construction.
+  const showRulers = props.snapSettings.showRulers;
+  const [rulerGeom, setRulerGeom] = useState<{
+    left: number;
+    top: number;
+    widthPx: number;
+    heightPx: number;
+    pageId: string;
+    hostW: number;
+    hostH: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    if (!showRulers) {
+      setRulerGeom(null);
+      return;
+    }
+    const el = scrollRef.current;
+    if (!el) return;
+    const host = el.getBoundingClientRect();
+    let best: { rect: DOMRect; id: string } | null = null;
+    for (const cell of Array.from(el.querySelectorAll<HTMLElement>('[data-page-id]'))) {
+      const r = cell.getBoundingClientRect();
+      if (r.bottom <= host.top || r.top >= host.bottom) continue; // off screen
+      const id = cell.getAttribute('data-page-id');
+      if (!id) continue;
+      if (!best || r.top < best.rect.top) best = { rect: r, id };
+    }
+    if (!best) {
+      setRulerGeom(null);
+      return;
+    }
+    const next = {
+      left: best.rect.left - host.left,
+      top: best.rect.top - host.top,
+      widthPx: best.rect.width,
+      heightPx: best.rect.height,
+      pageId: best.id,
+      hostW: host.width,
+      hostH: host.height,
+    };
+    setRulerGeom((prev) =>
+      prev &&
+      prev.pageId === next.pageId &&
+      Math.abs(prev.left - next.left) < 0.5 &&
+      Math.abs(prev.top - next.top) < 0.5 &&
+      Math.abs(prev.widthPx - next.widthPx) < 0.5 &&
+      Math.abs(prev.hostW - next.hostW) < 0.5 &&
+      Math.abs(prev.hostH - next.hostH) < 0.5
+        ? prev
+        : next,
+    );
+  }, [showRulers, scrollTop, virtualTop, zoom, viewportH, first, last, contentWidth, pageHeight]);
+
+  const rulerPage = rulerGeom ? viewPages.find((p) => p.id === rulerGeom.pageId) ?? null : null;
+  const unitsPerPt = measureUnitsPerPoint(props.measureScale ?? DEFAULT_MEASURE_SCALE);
+  const rulerUnit = (props.measureScale ?? DEFAULT_MEASURE_SCALE).toUnit;
+  // Pixels per PDF point, off the rect and the page's own displayed size in
+  // points — so a rotated or oddly-sized page reads correctly without the
+  // ruler knowing anything about zoom.
+  const pxPerPt =
+    rulerGeom && rulerPage
+      ? rulerGeom.widthPx /
+        (rulerPage.rotation === 90 || rulerPage.rotation === 270 ? rulerPage.height : rulerPage.width)
+      : 0;
+  const hTicks: RulerTick[] =
+    rulerGeom && pxPerPt > 0
+      ? rulerTicks({
+          originPx: rulerGeom.left,
+          extentPx: rulerGeom.hostW,
+          pxPerPt,
+          unitsPerPt,
+        })
+      : [];
+  const vTicks: RulerTick[] =
+    rulerGeom && pxPerPt > 0
+      ? rulerTicks({
+          originPx: rulerGeom.top,
+          extentPx: rulerGeom.hostH,
+          pxPerPt,
+          unitsPerPt,
+        })
+      : [];
+
+  // The cursor position markers on both rulers, in host coordinates.
+  const [rulerCursor, setRulerCursor] = useState<{ x: number; y: number } | null>(null);
+  // A live drag off a ruler: the guide-to-be, followed until release.
+  const [guideDraft, setGuideDraft] = useState<{ axis: GuideAxis; x: number; y: number } | null>(
+    null,
+  );
+  const guideDraftTeardown = useRef<(() => void) | null>(null);
+  useEffect(() => () => guideDraftTeardown.current?.(), []);
+  const onAddGuideRef = useRef(props.onAddGuide);
+  onAddGuideRef.current = props.onAddGuide;
+  const viewPagesRef = useRef(viewPages);
+  viewPagesRef.current = viewPages;
+
+  /** Press on a ruler → drag onto the page → a guide.
+   *
+   * Pointer events with WINDOW-level listeners, the canvas invariant: HTML5
+   * DnD cannot complete in this webview, and the release routinely lands on a
+   * different element than the press. */
+  const handleRulerDown = (axis: GuideAxis, e: React.PointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = scrollRef.current;
+    if (!el) return;
+    const host = el.getBoundingClientRect();
+    let last = { x: e.clientX, y: e.clientY };
+    setGuideDraft({ axis, x: last.x - host.left, y: last.y - host.top });
+    const onMove = (ev: PointerEvent): void => {
+      last = { x: ev.clientX, y: ev.clientY };
+      setGuideDraft({ axis, x: last.x - host.left, y: last.y - host.top });
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('blur', onCancel);
+      guideDraftTeardown.current = null;
+      setGuideDraft(null);
+      if (!commit) return;
+      // Which page did it land on? Ask the DOM rather than inverting the
+      // layout: the answer has to agree with what the user saw under the
+      // pointer, and elementFromPoint is that answer by definition.
+      const target = document.elementFromPoint(last.x, last.y) as HTMLElement | null;
+      const cell = target?.closest('[data-page-id]') as HTMLElement | null;
+      const pageId = cell?.getAttribute('data-page-id');
+      if (!cell || !pageId) return; // released off the paper — nothing placed
+      const r = cell.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return;
+      const pos = axis === 'x' ? (last.x - r.left) / r.width : (last.y - r.top) / r.height;
+      if (pos < 0 || pos > 1) return;
+      const page = viewPagesRef.current.find((p) => p.id === pageId);
+      if (!page) return;
+      onAddGuideRef.current(pageId, axis, pos, page.rotation);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    guideDraftTeardown.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onCancel);
+  };
+
   // Rows are computed inline each render (PageCell is memo'd, so unchanged
   // cells skip re-render; the per-page overlay maps come pre-grouped from WCV).
   const rows: React.JSX.Element[] = [];
@@ -724,6 +894,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           editVectors={props.editVectorsByPage.get(page.id)}
           snapGeometry={props.snapGeomByPage.get(page.id)}
           snapSettings={props.snapSettings}
+          guides={props.guidesByPage.get(page.id)}
+          onMoveGuide={props.onMoveGuide}
+          onRemoveGuide={props.onRemoveGuide}
           selectedVectorIndex={
             props.selectedVector?.pageId === page.id ? props.selectedVector.index : null
           }
@@ -853,33 +1026,120 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   }
 
   return (
+    // The ruler frame. With rulers OFF it is `display: contents`, so the
+    // scroller stays a direct child of the pane's flex column and the layout
+    // is bit-for-bit what shipped — the reading view's geometry is not
+    // something a drafting aid gets to perturb. With rulers ON it becomes a
+    // grid whose first row/column are the rulers.
     <div
-      ref={scrollRef}
-      className="docview-scroll"
-      data-testid="document-view"
-      tabIndex={0}
-      onScroll={onScroll}
-      style={props.tool === 'hand' ? { cursor: 'grab' } : undefined}
-      // Hand (M6.2): drag-scroll the reading pane. CAPTURE phase, so the
-      // press never reaches a page cell — hand must not select, band, or
-      // start an edit; it only holds the paper.
-      onPointerDownCapture={props.tool === 'hand' ? handleHandDown : undefined}
+      className={'docview-frame' + (showRulers ? ' with-rulers' : '')}
+      style={{ ['--ruler-size' as string]: `${RULER_PX}px` } as React.CSSProperties}
+      onPointerMove={
+        showRulers
+          ? (e) => {
+              const el = scrollRef.current;
+              if (!el) return;
+              const host = el.getBoundingClientRect();
+              setRulerCursor({ x: e.clientX - host.left, y: e.clientY - host.top });
+            }
+          : undefined
+      }
+      onPointerLeave={showRulers ? () => setRulerCursor(null) : undefined}
     >
+      {showRulers && (
+        <>
+          <div className="docview-ruler-corner" aria-hidden="true">
+            {/* Notation, identical in every locale (the measure-unit rule). */}
+            {rulerUnit}
+          </div>
+          <div
+            className="docview-ruler docview-ruler-h"
+            data-testid="ruler-h"
+            role="presentation"
+            aria-label={tChrome('canvas.rulers.horizontal')}
+            title={tChrome('canvas.rulers.dragHint')}
+            onPointerDown={(e) => handleRulerDown('y', e)}
+          >
+            {hTicks.map((t) => (
+              <div
+                key={`h${t.pos}`}
+                className={'ruler-tick' + (t.major ? ' major' : '')}
+                style={{ left: t.pos }}
+              >
+                {t.major && <span className="ruler-label">{tNumber(t.value)}</span>}
+              </div>
+            ))}
+            {rulerCursor && (
+              <div className="ruler-cursor" data-testid="ruler-cursor-h" style={{ left: rulerCursor.x }} />
+            )}
+          </div>
+          <div
+            className="docview-ruler docview-ruler-v"
+            data-testid="ruler-v"
+            role="presentation"
+            aria-label={tChrome('canvas.rulers.vertical')}
+            title={tChrome('canvas.rulers.dragHint')}
+            onPointerDown={(e) => handleRulerDown('x', e)}
+          >
+            {vTicks.map((t) => (
+              <div
+                key={`v${t.pos}`}
+                className={'ruler-tick' + (t.major ? ' major' : '')}
+                style={{ top: t.pos }}
+              >
+                {t.major && <span className="ruler-label">{tNumber(t.value)}</span>}
+              </div>
+            ))}
+            {rulerCursor && (
+              <div className="ruler-cursor" data-testid="ruler-cursor-v" style={{ top: rulerCursor.y }} />
+            )}
+          </div>
+        </>
+      )}
       <div
-        className="docview-spacer"
-        style={{ height: smap.spacerHeight, width: contentWidth, position: 'relative' }}
+        ref={scrollRef}
+        className="docview-scroll"
+        data-testid="document-view"
+        tabIndex={0}
+        onScroll={onScroll}
+        style={props.tool === 'hand' ? { cursor: 'grab' } : undefined}
+        // Hand (M6.2): drag-scroll the reading pane. CAPTURE phase, so the
+        // press never reaches a page cell — hand must not select, band, or
+        // start an edit; it only holds the paper.
+        onPointerDownCapture={props.tool === 'hand' ? handleHandDown : undefined}
       >
-        {rows}
+        <div
+          className="docview-spacer"
+          style={{ height: smap.spacerHeight, width: contentWidth, position: 'relative' }}
+        >
+          {rows}
+        </div>
+        <TextSelectionMenu
+          scrollerRef={scrollRef}
+          docId={doc.id}
+          active={props.tool === 'select'}
+          viewRotation={viewRotation}
+          annotationColor={props.annotationColor}
+          onAddAnnotation={props.onAddAnnotation}
+          onCreateLinks={props.onCreateLinks}
+        />
       </div>
-      <TextSelectionMenu
-        scrollerRef={scrollRef}
-        docId={doc.id}
-        active={props.tool === 'select'}
-        viewRotation={viewRotation}
-        annotationColor={props.annotationColor}
-        onAddAnnotation={props.onAddAnnotation}
-        onCreateLinks={props.onCreateLinks}
-      />
+      {/* The guide being dragged off a ruler, drawn across the pane so it is
+          visible before it lands on a page. A FRAME child, not a scroller
+          child: the scroller scrolls, and a preview that scrolled away from
+          the pointer would be worse than none. Its coordinates are
+          scroller-relative, so they carry the ruler's own offset. */}
+      {guideDraft && (
+        <div
+          className={'docview-guide-draft ' + (guideDraft.axis === 'x' ? 'axis-x' : 'axis-y')}
+          data-testid="guide-draft"
+          style={
+            guideDraft.axis === 'x'
+              ? { left: guideDraft.x + RULER_PX }
+              : { top: guideDraft.y + RULER_PX }
+          }
+        />
+      )}
     </div>
   );
 });

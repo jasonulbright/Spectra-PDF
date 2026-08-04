@@ -37,6 +37,13 @@ const PT_PER: Record<MeasureUnit, number> = {
   m: 72_000 / 25.4,
 };
 
+/** PDF points in one of the measure units — the ONE conversion table, read by
+ * N11's grid spacing (a paper-unit grid is `spacing × ptPerUnit(unit)`). A
+ * function rather than the exported record so nobody can mutate the table. */
+export function ptPerUnit(unit: MeasureUnit): number {
+  return PT_PER[unit];
+}
+
 /** Length of a display-normalized flat polyline [x0,y0,x1,y1,…] in PDF
  * points, against the DISPLAYED page dims (axes already swapped at 90/270 by
  * the caller). Fewer than two points measure zero. */

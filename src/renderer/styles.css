@@ -3519,6 +3519,145 @@
   white-space: nowrap;
 }
 
+/* ── N11 slice B: rulers, grid, guides ────────────────────────────────────
+   The ruler FRAME. With rulers off it is `display: contents`, so the scroller
+   stays a direct child of the pane's flex column and the reading view's
+   geometry is bit-for-bit what shipped — a drafting aid must not perturb the
+   layout it draws over. With them on it becomes a two-track grid. */
+.docview-frame { display: contents; }
+.docview-frame.with-rulers {
+  display: grid;
+  position: relative;
+  grid-template-columns: var(--ruler-size, 18px) 1fr;
+  grid-template-rows: var(--ruler-size, 18px) 1fr;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.docview-ruler-corner {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  color: var(--ink-soft, #a3a3a3);
+  background: var(--panel-bg, #1f1f1f);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.docview-ruler {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel-bg, #1f1f1f);
+  color: var(--ink-soft, #a3a3a3);
+  font-size: 9px;
+  user-select: none;
+  touch-action: none;
+}
+.docview-ruler-h {
+  grid-column: 2;
+  grid-row: 1;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: row-resize; /* dragging DOWN off it makes a horizontal guide */
+}
+.docview-ruler-v {
+  grid-column: 1;
+  grid-row: 2;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: col-resize;
+}
+.docview-frame.with-rulers .docview-scroll { grid-column: 2; grid-row: 2; }
+.docview-ruler-h .ruler-tick {
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 4px;
+  border-left: 1px solid currentColor;
+  opacity: 0.55;
+}
+.docview-ruler-h .ruler-tick.major { height: 9px; opacity: 0.9; }
+.docview-ruler-v .ruler-tick {
+  position: absolute;
+  right: 0;
+  height: 0;
+  width: 4px;
+  border-top: 1px solid currentColor;
+  opacity: 0.55;
+}
+.docview-ruler-v .ruler-tick.major { width: 9px; opacity: 0.9; }
+.docview-ruler-h .ruler-label {
+  position: absolute;
+  left: 2px;
+  top: -10px;
+  white-space: nowrap;
+}
+/* Vertical ruler labels read bottom-to-top, the drafting convention. */
+.docview-ruler-v .ruler-label {
+  position: absolute;
+  left: -1px;
+  top: 2px;
+  transform-origin: 0 0;
+  transform: rotate(90deg);
+  white-space: nowrap;
+}
+.ruler-cursor {
+  position: absolute;
+  background: #f59e0b;
+  pointer-events: none;
+}
+.docview-ruler-h .ruler-cursor { top: 0; bottom: 0; width: 1px; }
+.docview-ruler-v .ruler-cursor { left: 0; right: 0; height: 1px; }
+/* The guide being dragged off a ruler — a frame child, so it does not scroll
+   away from the pointer that is placing it. */
+.docview-guide-draft {
+  position: absolute;
+  background: #22d3ee;
+  pointer-events: none;
+  z-index: 30;
+}
+.docview-guide-draft.axis-x { top: 0; bottom: 0; width: 1px; }
+.docview-guide-draft.axis-y { left: 0; right: 0; height: 1px; }
+
+/* The grid, drawn over the raster and under the annotation layer. The page
+   raster's forced-color rule applies here too (N14): a high-contrast theme
+   re-tints the shell, never the document surface. */
+.page-grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  stroke: rgba(37, 99, 235, 0.28);
+  stroke-width: 1;
+  forced-color-adjust: none;
+}
+[data-theme="light"] .page-grid { stroke: rgba(37, 99, 235, 0.22); }
+[data-theme="high-contrast"] .page-grid { stroke: rgba(0, 0, 0, 0.45); }
+
+/* Guides: a visible hairline plus a wider INVISIBLE grab strip, so a 1px line
+   is still catchable by a pointer. The strip is only interactive under the
+   Select tool (PageCell decides), so a drawing gesture is never swallowed. */
+.page-guides { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.page-guide {
+  position: absolute;
+  pointer-events: auto;
+  background: transparent;
+}
+.page-guide::before {
+  content: '';
+  position: absolute;
+  background: #22d3ee;
+}
+.page-guide-x { top: 0; bottom: 0; width: 9px; margin-left: -4px; cursor: col-resize; }
+.page-guide-x::before { top: 0; bottom: 0; left: 4px; width: 1px; }
+.page-guide-y { left: 0; right: 0; height: 9px; margin-top: -4px; cursor: row-resize; }
+.page-guide-y::before { left: 0; right: 0; top: 4px; height: 1px; }
+.page-guide.dragging::before { background: #f59e0b; }
+[data-theme="high-contrast"] .page-guide::before { background: #0000ff; }
+
 /* The status bar's Snap segment: the toggle, its caret, and the options
    popover that opens upward (the bar is docked at the bottom). */
 .canvas-status-snap {
@@ -3567,3 +3706,12 @@
   color: inherit;
   font-variant-numeric: tabular-nums;
 }
+.canvas-status-snap-select {
+  margin-left: auto;
+  padding: 1px 4px;
+  background: transparent;
+  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.16));
+  border-radius: 4px;
+  color: inherit;
+}
+.canvas-status-snap-select:disabled { opacity: 0.55; }
