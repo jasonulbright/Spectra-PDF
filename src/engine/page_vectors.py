@@ -43,7 +43,7 @@ from pathlib import Path
 import pikepdf
 
 from engine import color_spaces
-from engine.bezier import cubic_bbox_points
+from engine.bezier import cubic_bbox_points, flatten_cubic
 from engine.content_walk import ClipTracker, DEFAULT_COLOR, GraphicsTextState, mat_mult, transform_point
 from engine.page_images import (
     _do_instruction,
@@ -74,6 +74,16 @@ _PAINT_VISIBLE = _PAINT_FILL | _PAINT_STROKE | _PAINT_BOTH
 # All painting operators (visible + the no-op `n`) — any of them CLOSES the
 # current path (and resets the buffer).
 _PAINT_ALL = _PAINT_VISIBLE | {"n"}
+# Paint operators that CLOSE the current subpath before painting (§8.5.3.3).
+_PAINT_CLOSING = {"s", "b", "b*"}
+
+# N11 slice A: the chord tolerance `list_page_geometry` flattens curves to, in
+# DEVICE points. 0.25 pt is below a hairline — a snapped endpoint is exact to
+# the eye — and it is what bounds the payload on a dense drawing sheet.
+GEOMETRY_TOL = 0.25
+# Coordinates round to this many decimals: 0.01 pt ≈ 3.5 µm, far below
+# anything perceivable, and it makes the payload byte-STABLE for one file.
+GEOMETRY_DECIMALS = 2
 
 
 class _PathPoints:
@@ -86,12 +96,47 @@ class _PathPoints:
     grammar needs (`v` reuses the current point as its first control, `y`
     duplicates its endpoint, `h` returns to the subpath start — §8.5.2).
     Malformed operand shapes contribute nothing — a listing never aborts
-    on bad geometry."""
+    on bad geometry.
 
-    def __init__(self):
+    N11 slice A adds an OPT-IN second product: the path's device-space
+    SUBPATHS, curves flattened to `GEOMETRY_TOL`. It is opt-in because the
+    bbox listing (`list_page_vectors`, every Edit-tool pass) has no use for
+    per-vertex geometry and must not pay for flattening it — `geometry=False`
+    keeps that walk byte-for-byte the behaviour it always had."""
+
+    def __init__(self, geometry: bool = False):
         self.pts: list = []
         self.cur = None  # user-space current point
         self.start = None  # user-space subpath start
+        self.dev_cur = None  # the current point, already in device space
+        # N11: flattened device-space subpaths (opt-in).
+        self.geometry = geometry
+        self.subpaths: list = []  # finished [[x,y,x,y,…], …]
+        self.sub_closed: list = []  # parallel: was the subpath explicitly closed?
+        self._sub = None  # the open subpath, or None
+
+    # ── N11 subpath bookkeeping ──────────────────────────────────────────
+    def _flush(self, closed: bool) -> None:
+        if self._sub is not None and len(self._sub) >= 4:
+            self.subpaths.append(self._sub)
+            self.sub_closed.append(closed)
+        self._sub = None
+
+    def _open_at(self, dev_pt) -> None:
+        self._sub = [dev_pt[0], dev_pt[1]]
+
+    def _extend(self, dev_pts) -> None:
+        if self._sub is None:
+            # A draw with no explicit `m` (after `re`/`h`, or a malformed
+            # stream): resume from the current point when there is one.
+            if self.cur is None:
+                return
+            self._open_at(self.dev_cur)
+        for p in dev_pts:
+            # Flattening and repeated `l` to the same spot both produce
+            # duplicates; a zero-length segment is not a snap candidate.
+            if abs(self._sub[-2] - p[0]) > 1e-9 or abs(self._sub[-1] - p[1]) > 1e-9:
+                self._sub.extend((p[0], p[1]))
 
     def feed(self, operator: str, operands: list, ctm) -> None:
         try:
@@ -102,11 +147,20 @@ class _PathPoints:
         if operator == "m" and len(vals) >= 2:
             self.cur = (vals[0], vals[1])
             self.start = self.cur
-            self.pts.append(dev(self.cur))
+            d = dev(self.cur)
+            self.dev_cur = d
+            self.pts.append(d)
+            if self.geometry:
+                self._flush(False)
+                self._open_at(d)
         elif operator == "l" and len(vals) >= 2:
             end = (vals[0], vals[1])
-            self.pts.append(dev(end))
+            d = dev(end)
+            self.pts.append(d)
+            if self.geometry:
+                self._extend([d])
             self.cur = end
+            self.dev_cur = d
         elif operator in ("c", "v", "y") and len(vals) >= (6 if operator == "c" else 4):
             if self.cur is None:
                 return  # malformed: a curve with no current point
@@ -116,24 +170,57 @@ class _PathPoints:
                 c1, c2, end = self.cur, (vals[0], vals[1]), (vals[2], vals[3])
             else:  # y
                 c1, c2, end = (vals[0], vals[1]), (vals[2], vals[3]), (vals[2], vals[3])
-            self.pts.extend(
-                cubic_bbox_points(dev(self.cur), dev(c1), dev(c2), dev(end))
-            )
+            d0, d1, d2, d3 = dev(self.cur), dev(c1), dev(c2), dev(end)
+            self.pts.extend(cubic_bbox_points(d0, d1, d2, d3))
+            if self.geometry:
+                # Control points map to device space FIRST — an affine map of
+                # a Bézier is the Bézier of the mapped control points, so the
+                # tolerance is a DEVICE-space tolerance (what the user sees),
+                # not a user-space one scaled by an unknown CTM.
+                self._extend(flatten_cubic(d0, d1, d2, d3, GEOMETRY_TOL))
             self.cur = end
+            self.dev_cur = d3
         elif operator == "re" and len(vals) >= 4:
             x, y, w, h = vals[0], vals[1], vals[2], vals[3]
             for corner in ((x, y), (x + w, y), (x, y + h), (x + w, y + h)):
                 self.pts.append(dev(corner))
+            if self.geometry:
+                # `re` is `m l l l h` — its own CLOSED subpath, in the winding
+                # order the operator defines (not the bbox-corner order above).
+                self._flush(False)
+                ring: list = []
+                for corner in ((x, y), (x + w, y), (x + w, y + h), (x, y + h)):
+                    d = dev(corner)
+                    ring.extend((d[0], d[1]))
+                self.subpaths.append(ring)
+                self.sub_closed.append(True)
             self.cur = (x, y)
             self.start = self.cur
+            self.dev_cur = dev(self.cur)
         elif operator == "h":
             if self.start is not None:
                 self.cur = self.start
+                self.dev_cur = dev(self.start)
+            if self.geometry:
+                self._flush(True)
+
+    def finish(self, implicit_close: bool) -> tuple:
+        """The path's subpaths at paint time. `implicit_close` is the paint
+        operator's own closing semantics — a FILL closes every subpath by
+        definition (the boundary segment is drawn), and `s`/`b`/`b*` close the
+        current one; `S` alone closes nothing."""
+        self._flush(implicit_close)
+        closed = [c or implicit_close for c in self.sub_closed]
+        return self.subpaths, closed
 
     def reset(self) -> None:
         self.pts = []
         self.cur = None
         self.start = None
+        self.dev_cur = None
+        self.subpaths = []
+        self.sub_closed = []
+        self._sub = None
 
 
 def _color_rgb(color_state, resources=None, pdf=None):
@@ -177,6 +264,62 @@ def _color_rgb(color_state, resources=None, pdf=None):
     return color_spaces.resolve_color(space_op, value_op, resources, pdf)
 
 
+def _emit_placement(out: list, xobj, ctm, clips, depth: int, do_chain) -> None:
+    """N11 slice A: append the device-space QUAD an XObject (or inline image)
+    paints into, as a `"placement"` entry.
+
+    An IMAGE fills the unit square by definition (§8.9.5.2), so its quad is
+    the unit square's four corners under the CTM. A FORM does NOT — its extent
+    is its own `/BBox` through its `/Matrix` (§8.10.2), and using the unit
+    square for it would put snap targets on a rectangle that has nothing to do
+    with what is drawn. (The brief says "unit square"; that is right for the
+    image case it was written about and wrong for a form, so the form takes
+    its BBox — the as-built delta is recorded in brief 38.)
+    """
+    corners = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
+    m = ctm
+    if xobj is not None:
+        try:
+            subtype = str(xobj.get("/Subtype", ""))
+        except Exception:
+            return
+        if subtype == "/Form":
+            bbox = xobj.get("/BBox")
+            if bbox is None:
+                return
+            try:
+                b = [float(v) for v in bbox]
+            except (TypeError, ValueError):
+                return
+            x0, y0 = min(b[0], b[2]), min(b[1], b[3])
+            x1, y1 = max(b[0], b[2]), max(b[1], b[3])
+            corners = ((x0, y0), (x1, y0), (x1, y1), (x0, y1))
+            m = mat_mult(_as_matrix(xobj.get("/Matrix")) or IDENTITY, ctm)
+        elif subtype != "/Image":
+            return  # a PostScript XObject paints nothing
+    quad: list = []
+    for cx, cy in corners:
+        px, py = transform_point(m, cx, cy)
+        quad.extend((px, py))
+    xs = quad[0::2]
+    ys = quad[1::2]
+    vrect = (min(xs), min(ys), max(xs), max(ys))
+    out.append(
+        {
+            "index": len(out),
+            "rect": [vrect[0], vrect[1], vrect[2], vrect[3]],
+            "matrix": list(m),
+            "kind": "placement",
+            "subpaths": [quad],
+            "closed": [True],
+            "nested": depth > 0,
+            "_do_chain": list(do_chain),
+            "_edit_depth": depth,
+            "clipped": clips.clips_away(vrect),
+        }
+    )
+
+
 def _walk_vectors(
     instructions: list,
     pdf=None,
@@ -189,6 +332,7 @@ def _walk_vectors(
     base_stroke=DEFAULT_COLOR,
     out=None,
     base_clip=None,
+    geometry: bool = False,
 ) -> list:
     """One dict per PAINTED, non-clip path in depth-first encounter order.
     Recurses into Form XObjects (9.D4) when `pdf`/`resources` are supplied, so
@@ -199,7 +343,15 @@ def _walk_vectors(
     delete, round-36 HIGH) and, for a nested path, `_form_name` (the DIRECT
     page-level form to copy-on-write) + `_root_do_idx` (the page `Do` to swap)
     + `_edit_depth` (only depth-1 nesting edits in v1; deeper lists but refuses
-    the edit — copying a chain of forms is out of scope)."""
+    the edit — copying a chain of forms is out of scope).
+
+    `geometry=True` (N11 slice A, `list_page_geometry` only) additionally
+    attaches each painted path's flattened device-space `subpaths`/`closed`
+    and emits a `"placement"` entry per `Do`/inline image — the unit square
+    (image) or the form's /BBox, mapped through the live CTM. It is OPT-IN so
+    the shipped bbox listing's output and cost are untouched: with it off,
+    `out`'s entries and their INDICES are exactly what they always were, which
+    is what the editors' object ids depend on."""
     if out is None:
         out = []
     state = GraphicsTextState(base_ctm, fill_color=base_fill, stroke_color=base_stroke)
@@ -212,7 +364,7 @@ def _walk_vectors(
     path_start = None  # instruction index of the current path's first construct op
     start_ctm = None  # CTM at the first construction op (the wrap-start space)
     construct_idxs: list = []  # EXACT indices of this path's construction ops
-    path_pts = _PathPoints()  # device-space bbox points (curve-exact, P8)
+    path_pts = _PathPoints(geometry)  # device-space bbox points (curve-exact, P8)
     has_clip = False
     line_width = base_line_width  # `w` (PDF default 1.0) — a form inherits the caller's
     w_stack: list = []  # line width IS graphics state — q/Q-scoped like the rest
@@ -289,9 +441,18 @@ def _walk_vectors(
                     scale = math.sqrt(abs(c[0] * c[3] - c[1] * c[2]))
                     hw = max(0.0, line_width) / 2.0 * scale
                 vrect = (min(xs) - hw, min(ys) - hw, max(xs) + hw, max(ys) + hw)
+                geom = {}
+                if geometry:
+                    subs, sub_closed = path_pts.finish(
+                        operator in _PAINT_FILL
+                        or operator in _PAINT_BOTH
+                        or operator in _PAINT_CLOSING
+                    )
+                    geom = {"subpaths": subs, "closed": sub_closed}
                 out.append(
                     {
                         "index": len(out),
+                        **geom,
                         "rect": [vrect[0], vrect[1], vrect[2], vrect[3]],
                         "matrix": list(state.ctm),
                         "_start_ctm": list(start_ctm if start_ctm is not None else state.ctm),
@@ -327,6 +488,11 @@ def _walk_vectors(
         if operator == "Do" and pdf is not None and operands and depth < MAX_FORM_DEPTH:
             fname = str(operands[0])
             xobj = _lookup_xobject(fname, resources, resources)
+            if geometry:
+                # N11: an image's (or form's) placement QUAD is a snap target
+                # in both references — corners, edge midpoints, centre. The
+                # walk already holds the CTM at the `Do`, so it costs nothing.
+                _emit_placement(out, xobj, state.ctm, clips, depth, do_chain)
             # P7 slice F: a MARKED vector-graphic form (a placed SVG) is one
             # unit owned by the IMAGE-placement machinery — listing its
             # interior paths here would offer per-path edits that fork a
@@ -355,6 +521,7 @@ def _walk_vectors(
                     base_stroke=state.stroke_color,
                     out=out,
                     base_clip=clips.clip,
+                    geometry=geometry,
                 )
         if operator == "sh":
             # P8 slice D: a shading paint is an OBJECT (the king selects
@@ -407,6 +574,12 @@ def _walk_vectors(
             path_start, start_ctm, construct_idxs, has_clip = None, None, [], False
             path_pts.reset()
             continue
+        if geometry and operator == "INLINE IMAGE":
+            # An inline image (`BI … ID … EI`) paints the unit square under the
+            # live CTM exactly like an image `Do` — same quad, same snap
+            # targets. Excluding it would make a scanned detail snappable or
+            # not depending on how the producer embedded it.
+            _emit_placement(out, None, state.ctm, clips, depth, do_chain)
         # Any other operator (a show, Do, inline image, d line-state): not
         # part of a path — and not part of a clean `sh` frame either. A path
         # left unpainted before other content is abandoned (malformed input)
@@ -448,6 +621,70 @@ def list_page_vectors(file: str, page: int) -> dict:
             for k in _INTERNAL:
                 v.pop(k, None)  # internal to the walk; the public listing omits them
         return {"page": int(page), "vectors": vectors}
+
+
+def list_page_geometry(file: str, page: int) -> dict:
+    """The SNAP GEOMETRY of 1-based `page` (N11 slice A) — device-space
+    subpaths per painted path, plus a quad per placed image/form.
+
+    Why a second listing rather than a field on `list_page_vectors`: that one
+    returns a per-path BBOX, and a polyline's interior vertices, a diagonal's
+    true endpoints, a ring's centre and every intersection are not derivable
+    from a bbox. This one reuses the SAME walk — CTM composition, the
+    form-XObject chain, the `v`/`y` grammar, `ClipTracker` — so there is one
+    answer to "what geometry is on this page", never two that disagree.
+
+    Payload shape, per entry:
+      `index`  its own ordinal in THIS listing (placements interleave, so it
+               is deliberately NOT the `list_page_vectors` object id — the two
+               listings are separate ordinal spaces and nothing cross-refers);
+      `kind`   fill | stroke | fillstroke | placement;
+      `subpaths` flat [x,y,x,y,…] device-space polylines, curves flattened to
+               `GEOMETRY_TOL`, rounded to `GEOMETRY_DECIMALS`;
+      `closed` parallel flags — a closed subpath has the last→first segment
+               and contributes a CENTRE candidate.
+
+    Same device frame as `list_page_vectors`' `rect`, so `pdfRectToDisplay`'s
+    projection applies unchanged. Clipped-away geometry is excluded (the S8
+    rule the walk already applies). Per page, on demand — never whole-document;
+    that is what bounds the payload on a 60-sheet drawing set.
+    """
+    with pikepdf.open(file) as pdf:
+        total = len(pdf.pages)
+        if not (1 <= int(page) <= total):
+            raise ValueError(f"page {page} is out of range (1-{total})")
+        p = pdf.pages[int(page) - 1]
+        walked = _walk_vectors(
+            list(pikepdf.parse_content_stream(p)),
+            pdf=pdf,
+            resources=_resolve_resources(p),
+            geometry=True,
+        )
+        r = GEOMETRY_DECIMALS
+        paths: list = []
+        for item in walked:
+            if item.get("clipped"):
+                continue
+            subs = item.get("subpaths") or []
+            closed = item.get("closed") or []
+            rounded: list = []
+            keep_closed: list = []
+            for sub, is_closed in zip(subs, closed):
+                if len(sub) < 4:
+                    continue  # a lone moveto draws nothing
+                rounded.append([round(float(v), r) for v in sub])
+                keep_closed.append(bool(is_closed))
+            if not rounded:
+                continue
+            paths.append(
+                {
+                    "index": len(paths),
+                    "kind": item["kind"],
+                    "closed": keep_closed,
+                    "subpaths": rounded,
+                }
+            )
+        return {"page": int(page), "paths": paths}
 
 
 def _sh_names_used(content_source, resources) -> set:

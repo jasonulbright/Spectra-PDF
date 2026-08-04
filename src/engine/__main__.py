@@ -92,6 +92,7 @@ from engine.page_images import (
 )
 from engine.page_vectors import (
     delete_page_vector,
+    list_page_geometry,
     list_page_vectors,
     restyle_page_vector,
     transform_page_vector,
@@ -215,6 +216,7 @@ def main() -> None:
     server.register("add_page_vector_graphic", add_page_vector_graphic)
     server.register("crop_page_image", crop_page_image)
     server.register("list_page_vectors", list_page_vectors)
+    server.register("list_page_geometry", list_page_geometry)
     server.register("delete_page_vector", delete_page_vector)
     server.register("transform_page_vector", transform_page_vector)
     server.register("restyle_page_vector", restyle_page_vector)
