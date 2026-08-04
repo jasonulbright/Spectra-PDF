@@ -4,6 +4,8 @@ import { useEngine } from '../hooks/useEngine';
 import { file } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 interface Layer {
   index: number;
@@ -12,6 +14,8 @@ interface Layer {
 }
 
 export function LayersPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
   const [layers, setLayers] = useState<Layer[]>([]);
@@ -43,7 +47,7 @@ export function LayersPanel(): React.ReactElement {
     async (layer: Layer) => {
       if (!activeFile) return;
       setBusy(true);
-      setStatus(layer.visible ? `Hiding ${layer.name}…` : `Showing ${layer.name}…`);
+      setStatus(layer.visible ? tChrome('panel.layers.hiding', { name: layer.name }) : tChrome('panel.layers.showing', { name: layer.name }));
       try {
         const snapshotPath = await file.snapshot(activeFile.workingPath);
         await call('set_layer_visibility', {
@@ -56,9 +60,9 @@ export function LayersPanel(): React.ReactElement {
         const info = await call('get_page_count', { file: activeFile.workingPath });
         dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
         await refresh();
-        setStatus(`${layer.name} ${layer.visible ? 'hidden' : 'shown'}`);
+        setStatus(layer.visible ? tChrome('panel.layers.hidden', { name: layer.name }) : tChrome('panel.layers.shown', { name: layer.name }));
       } catch (e: unknown) {
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
         setBusy(false);
       }
@@ -66,18 +70,18 @@ export function LayersPanel(): React.ReactElement {
     [activeFile, call, dispatch, refresh],
   );
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to manage its layers" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.layers.open')} />;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">
-        Working on: <span className="text-neutral-200">{activeFile.name}</span>
+        {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span>
       </div>
       {layers.length === 0 ? (
-        <p className="text-sm text-neutral-500" data-testid="layers-empty">This document has no layers.</p>
+        <p className="text-sm text-neutral-500" data-testid="layers-empty">{tChrome('panel.layers.empty')}</p>
       ) : (
         <div className="flex flex-col gap-1" data-testid="layers-list">
-          <p className="text-xs text-neutral-500">Toggle a layer to show or hide it in the document.</p>
+          <p className="text-xs text-neutral-500">{tChrome('panel.layers.hint')}</p>
           {layers.map((l) => (
             <label
               key={l.index}
