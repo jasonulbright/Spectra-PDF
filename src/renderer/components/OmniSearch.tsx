@@ -8,7 +8,7 @@ import { showableDoc } from '../state/selectors';
 import { ToolIcon } from './tool-icons';
 import { TILE_GLYPH } from './ToolsCenter';
 import { useTranslation } from 'react-i18next';
-import { tChrome } from '../i18n';
+import { tChrome, tToolDescription, tToolTitle } from '../i18n';
 
 // U2 — the universal search box in the toolbar row (Phase 11, § U2).
 //
@@ -46,7 +46,8 @@ const MAX_TEXT_HITS = 8;
 
 export function OmniSearch(): React.JSX.Element {
   // N12: re-render on language change; strings resolve via tChrome.
-  useTranslation();
+  const { i18n } = useTranslation();
+  const language = i18n.language;
   const state = useAppState();
   const { search, snippetsFor, version } = useSearchContext();
   const [query, setQuery] = useState('');
@@ -63,9 +64,20 @@ export function OmniSearch(): React.JSX.Element {
     return () => clearTimeout(id);
   }, [query]);
 
+  // N12: rank over the LOCALIZED names, not TOOL_DEFS' English. A search box
+  // that scores what the user cannot see is a search box that returns nothing
+  // for every query typed in the UI language — the ranking's own tie-break
+  // (`localeCompare`) already assumes the strings are the displayed ones.
   const toolHits: ToolHit[] = useMemo(
     () =>
-      rankToolMatches(debounced, TOOL_DEFS)
+      rankToolMatches(
+        debounced,
+        TOOL_DEFS.map((t) => ({
+          id: t.id,
+          title: tToolTitle(t.id, t.title, language),
+          description: tToolDescription(t.id, t.description, language),
+        })),
+      )
         .slice(0, MAX_TOOL_HITS)
         .map((t) => ({
           kind: 'tool' as const,
@@ -74,7 +86,7 @@ export function OmniSearch(): React.JSX.Element {
           description: t.description,
           enabled: isCommandEnabled(`tools.open.${t.id}`),
         })),
-    [debounced],
+    [debounced, language],
   );
 
   const docs = state.workspace.documents;

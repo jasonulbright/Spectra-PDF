@@ -2,6 +2,8 @@ import React from 'react';
 import { TOOL_DEFS, type ToolId } from '../commands/tools';
 import { isCommandEnabled } from '../commands/context';
 import { ToolIcon } from './tool-icons';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tToolDescription, tToolTitle } from '../i18n';
 
 // The Tools tab's landing surface (Phase 4 M5, § 7): a grid of tiles, one per
 // tool, rendered from `commands/tools.ts` — the same data the task panes and the
@@ -20,13 +22,15 @@ export interface ToolsCenterProps {
 }
 
 export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.JSX.Element {
+  // N12: re-render on language change; strings resolve via tChrome/tTool*.
+  useTranslation();
   return (
     <div
       className={'tools-center' + (embedded ? ' tools-center-embedded' : '')}
       data-testid="tools-center"
     >
-      {!embedded && <h2 className="tools-center-heading">Tools</h2>}
-      {!embedded && <p className="tools-center-sub">Choose what you want to do with your document.</p>}
+      {!embedded && <h2 className="tools-center-heading">{tChrome('tools.heading')}</h2>}
+      {!embedded && <p className="tools-center-sub">{tChrome('tools.sub')}</p>}
       <div className="tools-grid">
         {TOOL_DEFS.map((tool) => {
           // Grey what can't run, exactly as the menu bar does for the same
@@ -48,7 +52,7 @@ export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.J
             // text in a tile the description dominated. The disabled reason
             // still wins the attribute — "why can't I click this" beats "what
             // does this do" when the answer is that it can't run yet.
-            title={enabled ? tool.description : 'Open a PDF first'}
+            title={enabled ? tToolDescription(tool.id, tool.description) : tChrome('tools.openFirst')}
             onClick={() => onOpenTool(tool.id)}
           >
             <span className="tool-tile-icon" aria-hidden="true">
@@ -57,7 +61,7 @@ export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.J
                   The mode-only tools (Comment/Redact) name a representative op. */}
               <ToolIcon op={TILE_GLYPH[tool.id]} size={15} />
             </span>
-            <span className="tool-tile-title">{tool.title}</span>
+            <span className="tool-tile-title">{tToolTitle(tool.id, tool.title)}</span>
           </button>
           );
         })}
