@@ -235,6 +235,55 @@ _RTL_FACES = {
 }
 
 
+# 9.T12: the Mongolian face (Noto Sans Mongolian — OFL-1.1, vendored by
+# sync-edit-fonts.ps1). ONE face, Regular only, so the style map degrades
+# exactly as the CJK map does for italic.
+#
+# Chosen on the SAME measurement that chose IBM Plex over Noto Sans Arabic
+# (`mongolian-measure.local.py`, run against this face and against Mongolian
+# Baiti as the script's reference implementation):
+#   * every cluster has exactly ONE advancing glyph — ligating clusters
+#     included — so a per-code /ToUnicode can spell the text back and a
+#     shaped edit is not a one-way trip;
+#   * no `.notdef` anywhere in the corpus, Latin and digits included (the
+#     `full` build, deliberately: the `unhinted` one has NO Latin coverage,
+#     and a Mongolian column with a year in it would have refused);
+#   * real per-glyph horizontal advances (284–1065 per 1000/em across the
+#     corpus), which is the metric the column's length comes from.
+# The face is embedded HORIZONTALLY through `build_shaped_font` under a
+# rotated Tm — never `build_vertical_font` under /Identity-V, because a
+# Mongolian face states no vertical advance worth embedding as /W2.
+_MONGOLIAN_FACES = {
+    "regular": "NotoSansMongolian-Regular.ttf",
+    "bold": "NotoSansMongolian-Regular.ttf",
+    "italic": "NotoSansMongolian-Regular.ttf",
+    "bolditalic": "NotoSansMongolian-Regular.ttf",
+}
+
+
+def resolve_mongolian_font(font_path: str, text: str, style: str = "regular") -> str:
+    """The bundled face that can DRAW Mongolian-family `text` (9.T12).
+
+    Raises ValueError naming the text when the bundled face cannot express
+    it — the signal the reflow turns into an honest refusal rather than a
+    silent substitution of a script the reader cannot read."""
+    from engine.shaping import face_can_shape
+
+    if not os.path.isdir(font_path):
+        return font_path
+    st = style if style in _MONGOLIAN_FACES else "regular"
+    for name in (_MONGOLIAN_FACES[st], _MONGOLIAN_FACES["regular"]):
+        candidate = os.path.join(font_path, name)
+        if not os.path.isfile(candidate):
+            break
+        # Coverage is not enough for a joining script: the face must produce
+        # real joining forms, not `.notdef`s.
+        if face_can_shape(candidate, text):
+            return candidate
+        break
+    raise ValueError(f"no bundled Mongolian font can express {text!r}")
+
+
 def resolve_rtl_font(font_path: str, text: str, style: str = "regular") -> str:
     """The bundled face that can DRAW `text` — the Arabic face when the text
     joins cursively, else whichever RTL face covers it (T3).

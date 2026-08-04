@@ -191,6 +191,7 @@ def _axis_aligned(m) -> bool:
 # vertical forms cost a table rather than a pipeline.
 HORIZONTAL = "horizontal"
 VERTICAL_RL = "vertical-rl"
+VERTICAL_LR = "vertical-lr"
 ROTATED_CW = "rotated-cw"
 ROTATED_CCW = "rotated-ccw"
 ROTATED_180 = "rotated-180"
@@ -202,6 +203,16 @@ ROTATED_180 = "rotated-180"
 _ORIENTATIONS = {
     HORIZONTAL: (1.0, 0.0, 0.0, 1.0),
     VERTICAL_RL: (0.0, -1.0, 1.0, 0.0),
+    # 9.T12: the same reading axis (page −y → +x′) with the columns stacking
+    # the OTHER way — Mongolian, Todo, Sibe, Manchu, Phags-pa, Soyombo. Its
+    # determinant is −1, i.e. it is a REFLECTION rather than a rotation, and
+    # that is not an implementation detail to hide: a column set advances
+    # toward the side its glyphs' own "up" points at, where every other
+    # writing mode in the table stacks away from it. `_transposed_linear`
+    # answers for it in one line (the cross axis negates), and the sign then
+    # carries through the rise, the reading-order tiebreak and the growth
+    # direction with no further case analysis.
+    VERTICAL_LR: (0.0, -1.0, -1.0, 0.0),
     # A 90°-clockwise-rotated run of a HORIZONTAL font reads down the page,
     # exactly like a CJK column — so it rides the SAME map, and that shared
     # map is what lets sideways Latin join a vertical column instead of
@@ -213,14 +224,26 @@ _ORIENTATIONS = {
 
 # The FRAME is the map itself. Members co-group only inside one frame (it
 # rides in `lkey`), so a vertical-rl column can never merge with a rotated-
-# ccw block, while an upright column glyph and a sideways Latin run — same
-# map, different orientation — group as the one paragraph they visually are.
+# ccw block — nor with a vertical-LR one, which is how 9.T12's column
+# direction gets the A4 merge guard for free — while an upright column glyph
+# and a sideways Latin run — same map, different orientation — group as the
+# one paragraph they visually are.
 _FRAME_NAME = {
     _ORIENTATIONS[HORIZONTAL]: HORIZONTAL,
     _ORIENTATIONS[VERTICAL_RL]: VERTICAL_RL,
+    _ORIENTATIONS[VERTICAL_LR]: VERTICAL_LR,
     _ORIENTATIONS[ROTATED_CCW]: ROTATED_CCW,
     _ORIENTATIONS[ROTATED_180]: ROTATED_180,
 }
+
+# 9.T12: the two column directions, as the listing names them.
+COLUMNS_RTL = "rtl"
+COLUMNS_LTR = "ltr"
+
+# The orientations whose reading axis runs DOWN the page — the ones a column
+# direction is a question about at all. A member classified here is a column
+# candidate whose final orientation waits on the direction evidence.
+_DOWN_READING = frozenset((VERTICAL_RL, VERTICAL_LR, ROTATED_CW))
 
 
 def _t(frame: tuple, x: float, y: float) -> tuple[float, float]:
@@ -251,7 +274,7 @@ def _frame_page_span(frame: tuple, box) -> tuple[float, float]:
     return (min(xs), max(xs))
 
 
-def _orientation_of(m, vertical: bool) -> str | None:
+def _orientation_of(m, vertical: bool, columns: str = COLUMNS_RTL) -> str | None:
     """The member's orientation CANDIDATE, or None when nothing can admit it.
 
     The discriminator between an upright vertical glyph and a horizontal run
@@ -259,18 +282,33 @@ def _orientation_of(m, vertical: bool) -> str | None:
     identical matrices — recon § 2): a vertical-writing member advances down
     its own text space, a horizontal one advances along +x and gets its
     downward travel, if any, from the rotation. Anything skewed, mirrored or
-    off-quarter answers None and stays on the 7.2 run-box surface."""
+    off-quarter answers None and stays on the 7.2 run-box surface.
+
+    9.T12: `columns` says which way a DOWN-READING member's columns advance.
+    It defaults to `rtl` — the shipped assumption — so every call that does
+    not supply evidence gets exactly the shipped answer, and every CJK
+    document alive lands byte for byte where it lands now."""
     a, b, c, d, _e, _f = m
+    ltr = columns == COLUMNS_LTR
     if vertical:
         # The writing mode decides; the strict test below still requires the
         # glyphs to be upright (the shipped B4a/B4b geometry).
-        return VERTICAL_RL
+        return VERTICAL_LR if ltr else VERTICAL_RL
     lim = MATRIX_TOL * max(abs(a), abs(b), abs(c), abs(d), 1e-9)
     if abs(b) <= lim:
         return HORIZONTAL if a > 0 else (ROTATED_180 if a < 0 else None)
     if abs(a) <= lim:
-        return ROTATED_CW if b < 0 else (ROTATED_CCW if b > 0 else None)
+        if b < 0:
+            return VERTICAL_LR if ltr else ROTATED_CW
+        return ROTATED_CCW if b > 0 else None
     return None
+
+
+def _frame_reflects(frame: tuple) -> bool:
+    """Whether the frame is a REFLECTION (determinant −1) rather than a
+    rotation. Exactly one orientation is: `vertical-lr` (9.T12)."""
+    m11, m12, m21, m22 = frame
+    return (m11 * m22 - m12 * m21) < 0
 
 
 def _transposed_linear(m, vertical: bool, frame: tuple) -> tuple | None:
@@ -281,7 +319,15 @@ def _transposed_linear(m, vertical: bool, frame: tuple) -> tuple | None:
     skew), evaluated one frame later. For `horizontal` the map is the
     identity and the test is byte-identical to the shipped one; for a CJK
     column it is equivalent to the page-space test B4b ran, since the map
-    only permutes which entries are compared."""
+    only permutes which entries are compared.
+
+    9.T12: `+y′` is not "the glyph's up" — it is the OPPOSITE of the
+    direction lines stack in, which is what the horizontal model actually
+    means by up. The two coincide for every rotation, and they are opposite
+    under the one reflection in the table, because a left-to-right column set
+    advances toward the side its glyphs' up points at. So the cross axis
+    NEGATES for a reflecting frame — one line, and it keeps `d′ > 0` true by
+    construction instead of turning it into a per-frame case."""
     a, b, c, d, _e, _f = m
     if vertical:
         # Identity-V: the pen travels along text-space −y, and the axis
@@ -289,11 +335,33 @@ def _transposed_linear(m, vertical: bool, frame: tuple) -> tuple | None:
         adv, perp = (-c, -d), (a, b)
     else:
         adv, perp = (a, b), (c, d)
+    if _frame_reflects(frame):
+        perp = (-perp[0], -perp[1])
     a2, b2 = _t(frame, *adv)
     c2, d2 = _t(frame, *perp)
     if not _axis_aligned((a2, b2, c2, d2, 0.0, 0.0)):
         return None
     return (a2, b2, c2, d2)
+
+
+def _rise_scale(m, vertical: bool, frame: tuple, adv: float, perp: float) -> float:
+    """The SIGNED scale of the axis `Ts` displaces along, in the frame — or
+    0.0 when it lands on the inline axis, which is the case the paragraph
+    refuses (an upright vertical member's rise is a sideways shift the model
+    structurally cannot express).
+
+    Ts always displaces along the GLYPH's own up vector, so this is that
+    vector transposed. Every shipped mode reduces to the number it had
+    before: horizontal +d, rotated-cw +d′; a reflecting frame gets the
+    negative, which is correct — its +y′ points the other way from the
+    glyph's up, so a positive Ts is a negative model rise."""
+    _a, _b, c, d, _e, _f = m
+    ux, uy = _t(frame, c, d)
+    if abs(uy) <= MATRIX_TOL * max(abs(ux), 1e-9):
+        # The glyph's up runs along the INLINE axis: an upright vertical
+        # member. Report the inline scale, exactly as the shipped code did.
+        return adv if vertical else perp
+    return uy
 
 
 def _linear_key(m) -> tuple:
@@ -346,8 +414,97 @@ def _ptext_and_gaps(det) -> tuple[str, list[float], list[str]]:
     return "".join(parts), gaps, units
 
 
+def _column_direction_evidence(text: str) -> str | None:
+    """9.T12 § 5.1 — which way THIS run's columns advance, from its own
+    strong characters, or None when it carries none.
+
+    Script evidence DECIDES: a run whose strong characters are Mongolian
+    (Todo, Sibe and Manchu ride the same block), Phags-pa, Zanabazar Square
+    or Soyombo sets left-to-right columns; anything else with a strong
+    character is the right-to-left convention every shipped document uses.
+    A run with no strong character at all — digits, a rule, bare punctuation
+    — abstains, and the paragraph-level tiebreak below answers for it."""
+    from engine.shaping import sets_columns_left_to_right
+
+    if sets_columns_left_to_right(text):
+        return COLUMNS_LTR
+    if any(unicodedata.category(ch).startswith("L") for ch in text):
+        return COLUMNS_RTL
+    return None
+
+
+def _column_directions(pending: list[dict]) -> dict[int, str]:
+    """run index → the column direction its member lays out under.
+
+    Members are bucketed by (stream, TRANSPOSED linear key) — the members
+    that could co-group — because the direction is a property of a column
+    SET, not of one show. The transposed key is direction-INDEPENDENT (the
+    reflection negates the cross axis, so a′ and d′ come out the same either
+    way), which is what makes this decidable before the frame is chosen.
+
+    Inside a bucket: a member with its own script evidence uses it, full
+    stop, so a Mongolian column and a CJK column that happen to share a size
+    take different frames and never co-group. A member with NO evidence
+    takes the bucket's answer: left-to-right only when the bucket's evidenced
+    members ALL say so; failing that, the draw-order tiebreak; failing that,
+    the shipped default. Every fallback lands on `rtl`, so a wrong guess can
+    only ever fail toward what ships today."""
+    buckets: dict[tuple, list[dict]] = defaultdict(list)
+    for item in pending:
+        if item["kind"] in _DOWN_READING:
+            buckets[(item["stream"], item["tkey"])].append(item)
+    out: dict[int, str] = {}
+    for bucket in buckets.values():
+        evidence = {
+            item["index"]: _column_direction_evidence(item["ptext"]) for item in bucket
+        }
+        seen = {d for d in evidence.values() if d is not None}
+        if seen == {COLUMNS_LTR}:
+            fallback = COLUMNS_LTR
+        elif seen:
+            fallback = COLUMNS_RTL
+        else:
+            fallback = _draw_order_direction(bucket)
+        for item in bucket:
+            out[item["index"]] = evidence[item["index"]] or fallback
+    return out
+
+
+def _draw_order_direction(bucket: list[dict]) -> str:
+    """9.T12 § 5.1 — the tiebreak, used ONLY when a column set carries no
+    strong character of either class.
+
+    Compare the columns' CONTENT order (the global run index, which is DFS
+    content order) with their x order. Strict agreement with left-to-right
+    picks `ltr`; anything else — disagreement, a single column, no columns —
+    keeps `rtl`, because the default being the status quo is what replaces
+    the involution proof T3 had and this cannot have."""
+    columns: list[tuple[float, int]] = []  # (page x, first content index)
+    for item in sorted(bucket, key=lambda i: i["index"]):
+        x = item["pen"][0]
+        tol = max(0.5 * item["em"], 0.5)
+        for i, (cx, _first) in enumerate(columns):
+            if abs(cx - x) <= tol:
+                columns[i] = (cx, min(columns[i][1], item["index"]))
+                break
+        else:
+            columns.append((x, item["index"]))
+    if len(columns) < 2:
+        return COLUMNS_RTL
+    by_content = sorted(columns, key=lambda c: c[1])
+    if all(by_content[i][0] < by_content[i + 1][0] for i in range(len(by_content) - 1)):
+        return COLUMNS_LTR
+    return COLUMNS_RTL
+
+
 def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
-    members: list[_Member] = []
+    # 9.T12: TWO passes, because a down-reading member's frame depends on
+    # evidence that spans the members. Pass one classifies and measures
+    # everything that does not need the frame; `_column_directions` then
+    # answers the one question left; pass two builds. For every member that
+    # is not a column candidate the two passes are one, and the built member
+    # is byte-identical to the shipped single-pass one.
+    pending: list[dict] = []
     for run, det in zip(runs, detail):
         m = det["combined"]
         cap = det["cap"]
@@ -359,9 +516,43 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         # move is the whole of T13: a 90°-rotated run of a horizontal font
         # is an ordinary axis-aligned member once transposed, so every
         # grouping heuristic downstream learns nothing.
-        orientation = _orientation_of(m, vertical)
-        if orientation is None:
+        kind = _orientation_of(m, vertical)
+        if kind is None:
             continue  # skewed/mirrored/off-quarter: the run-box surface
+        transposed0 = _transposed_linear(m, vertical, _ORIENTATIONS[kind])
+        if transposed0 is None:
+            continue  # not upright in its own frame: the run-box surface
+        ptext, gaps_1000, punits = _ptext_and_gaps(det)
+        pending.append({
+            "run": run,
+            "det": det,
+            "m": m,
+            "cap": cap,
+            "vertical": vertical,
+            "kind": kind,
+            "index": run["index"],
+            "stream": det["stream"],
+            "tkey": _linear_key(transposed0 + (0.0, 0.0)),
+            "ptext": ptext,
+            "gaps_1000": gaps_1000,
+            "punits": punits,
+            "pen": (m[4], m[5]),
+            "em": max(det["style"]["size"] * abs(transposed0[3]), 0.01),
+        })
+    directions = _column_directions(pending)
+
+    members: list[_Member] = []
+    for item in pending:
+        run = item["run"]
+        det = item["det"]
+        m = item["m"]
+        cap = item["cap"]
+        vertical = item["vertical"]
+        orientation = item["kind"]
+        if orientation in _DOWN_READING:
+            orientation = _orientation_of(
+                m, vertical, directions.get(item["index"], COLUMNS_RTL)
+            )
         frame = _ORIENTATIONS[orientation]
         transposed = _transposed_linear(m, vertical, frame)
         if transposed is None:
@@ -405,7 +596,9 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         # REAL (untransposed) rect in both modes — paragraph boxes union
         # these, so the listing draws real page rects with no un-mapping.
         mem.rect = det["rect"]
-        mem.ptext, mem.gaps_1000, mem.punits = _ptext_and_gaps(det)
+        mem.ptext = item["ptext"]
+        mem.gaps_1000 = item["gaps_1000"]
+        mem.punits = item["punits"]
         mem.editable = bool(run["editable"])
         # 9-§I.0-S8: the run's clip flag rides through so a paragraph whose
         # every member is clipped away lists as invisible (aggregated in
@@ -423,7 +616,11 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         # puts a rise; the INLINE axis (+x′) for a vertical writing member,
         # which is why that case refuses below. Both shipped modes take `d`
         # here exactly as before (horizontal perp = d, vertical adv = d).
-        mem.rise_scale = adv if vertical else perp
+        # 9.T12 made it a derivation rather than a table: the glyph's up
+        # vector, transposed. It reduces to the same numbers everywhere the
+        # frame is a rotation, and NEGATES under the one reflection, where a
+        # positive Ts really does move the glyph toward −y′.
+        mem.rise_scale = _rise_scale(m, vertical, frame, adv, perp)
         mem.rise_user = style["rise"] * mem.rise_scale
         mem.tm = det["tm"]
         mem.ctm = det["ctm"]
@@ -596,6 +793,17 @@ class _Paragraph:
         if vert is not None:
             return vert.orientation
         return _widest(self.lines[0].members).orientation
+
+    @property
+    def columns(self) -> str:
+        """9.T12 — which way this paragraph's columns advance, for the
+        listing. Derived from the FRAME (the direction rides inside `lkey`,
+        so every member agrees by construction): the reflecting frame is the
+        left-to-right one and nothing else is. A horizontal paragraph reports
+        `rtl` too — the field is only meaningful for a column, and inventing
+        a third value for "not applicable" would make every consumer branch
+        on a case it does not have."""
+        return COLUMNS_LTR if _frame_reflects(self.frame) else COLUMNS_RTL
 
     @property
     def vertical(self) -> bool:
@@ -1261,6 +1469,13 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
                 # hold sideways members. The renderer's resize grips and
                 # box-left origin read this, never `vertical`.
                 "orientation": p.orientation,
+                # 9.T12, additive: which way the columns advance — `rtl`
+                # (the CJK convention, and the value every horizontal
+                # paragraph reports) or `ltr` (Mongolian and its relatives).
+                # Derivable from `orientation`, and carried anyway because a
+                # consumer asking "which way does this read?" should not
+                # have to know which of five names is the reflection.
+                "columns": p.columns,
                 # 9.T3, additive: the paragraph's bidi base direction. The
                 # editor sets the textarea's `dir` from this, so the caret,
                 # selection and typing behave as the reading order the text
@@ -1580,6 +1795,20 @@ def _requires_shaping(ch: str) -> bool:
     return shaping.requires_shaping(ch)
 
 
+def _shaping_needed(text: str) -> bool:
+    from engine import shaping
+
+    return shaping.requires_shaping(text)
+
+
+def _is_mongolian(ch: str) -> bool:
+    """9.T12: a joining character of the Mongolian family — the one cursive
+    script whose text is LEFT to right and whose bundled face is its own."""
+    from engine import shaping
+
+    return shaping.requires_shaping(ch) and shaping.sets_columns_left_to_right(ch)
+
+
 def _face_sort_key(key: tuple) -> tuple:
     """Total order over face keys `(family_or_None, bold, italic, features,
     alt_index)` — None family sorts as "" so the sort never compares NoneType
@@ -1787,7 +2016,7 @@ def _styled_chars(
                     rb, ri = bool(fk[1]), bool(fk[2])
                 else:
                     rb, ri = rtl_style.get(member.index, (False, False))
-                rk = (RTL_FAMILY, rb, ri, (), 0)
+                rk = (MONGOL_FAMILY if _is_mongolian(ch) else RTL_FAMILY, rb, ri, (), 0)
                 fb_by_face.setdefault(rk, set()).add(ch)
                 styled.append((ch, ref(member, rk, col, siz)))
                 i += 1
@@ -1995,6 +2224,12 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
 # automatic, TEXT-driven switch a joining script forces, the same shape T5's
 # CJK switch has. `_face_sort_key` orders it with the named families.
 RTL_FAMILY = "rtl"
+# 9.T12: the same idea for the one joining script that is NOT right-to-left.
+# It needs its own key rather than riding RTL_FAMILY because the two resolve
+# DIFFERENT bundled faces from the same paragraph — a Mongolian column with an
+# Arabic quotation in it is two subsets, and one key would ask one face to
+# express both scripts and refuse the whole edit.
+MONGOL_FAMILY = "mongolian"
 # 9.T26: the face key meaning "shape with the DOCUMENT'S OWN embedded
 # program" — reachable only when the paragraph's font passes the in-place
 # gate, never from user input (`_validated_family` refuses anything that is
@@ -2014,7 +2249,27 @@ VERTICAL_FAMILY = "vertical"
 _VERTICAL_KEY = (VERTICAL_FAMILY, False, False, (), 0)
 
 
-def _shape_styled_runs(styled: list, key: tuple, face: str) -> tuple[list, list]:
+def _shape_word(face: str, word: str, sideways: bool):
+    """ONE call for every shaping site — 9.T12.
+
+    Direction comes from the TEXT (a Mongolian word shaped right-to-left
+    comes back reversed), and `sideways` asks for a COLUMN's rendering, where
+    the face's own `vert` forms of the punctuation are what the reader is
+    owed. It must be one call because the T26 PREQUALIFICATION and the
+    EMISSION have to shape identically: the prequalification decides whether
+    the document's own font can carry the edit by checking what each glyph
+    would spell, and a different glyph set there than here would qualify a
+    font that then writes a /ToUnicode collision."""
+    from engine import shaping
+
+    if sideways:
+        return shaping.shape_sideways(face, word)
+    return shaping.shape(face, word, rtl=shaping.shapes_right_to_left(word))
+
+
+def _shape_styled_runs(
+    styled: list, key: tuple, face: str, sideways: bool = False
+) -> tuple[list, list]:
     """9.T3 — collapse each run of same-style joining-script characters in
     `styled` into ONE shaped entry, and return (new styled, shaped runs).
 
@@ -2044,7 +2299,7 @@ def _shape_styled_runs(styled: list, key: tuple, face: str) -> tuple[list, list]
             j += 1
         word = "".join(chunk)
         try:
-            run = shaping.shape(face, word, rtl=True)
+            run = _shape_word(face, word, sideways)
         except Exception:
             out.extend(styled[i:j])
             i = j
@@ -3882,8 +4137,23 @@ def _prepare_styled(
     # script, which has to be SHAPED into a face that still knows how.
     # The per-member weight/slant comes along so a bold Arabic run lands
     # on the bold face rather than flattening.
+    #
+    # 9.T12 widened the GATE, and the widening is a defect fix. It used to
+    # read `para.bidi` — "does this paragraph reorder?" — as a stand-in for
+    # "does this paragraph shape", which is true of thirteen of the fourteen
+    # joining scripts and false of Mongolian, the one that joins WITHOUT
+    # being right-to-left. So Mongolian text re-emitted per character:
+    # disconnected isolated forms, the exact broken output the T3 rule says
+    # is never an option. The question the code wants is `requires_shaping`,
+    # and now that is the question it asks. Every other script's answer is
+    # unchanged (an Arabic paragraph has strong RTL, so `para.bidi` was
+    # already True), which is why this widens nothing that was working.
     rtl_style = None
-    if bidi_aware and para.bidi and not para.vertical:
+    if bidi_aware and not para.vertical and (
+        para.bidi
+        or _shaping_needed(para.text)
+        or _shaping_needed(str(new_text))
+    ):
         from engine.font_fallback import classify_font_style
         from engine.text_runs import _lookup_font
 
@@ -3940,10 +4210,11 @@ def _prepare_styled(
                     gid_of0 = {n: i for i, n in enumerate(_tt.getGlyphOrder())}
                 finally:
                     _tt.close()
+                sideways0 = para.frame != _ORIENTATIONS[HORIZONTAL]
                 for token in str(new_text).split():
                     if not _shaping.requires_shaping(token):
                         continue
-                    run0 = _shaping.shape(candidate, token, rtl=True)
+                    run0 = _shape_word(candidate, token, sideways0)
                     for name, spells in run0.clusters:
                         gid = gid_of0[name]
                         existing = cap0._code2uni.get(gid)
@@ -4036,7 +4307,10 @@ def _prepare_styled(
                 # all become the one number.
                 from fontTools.ttLib import TTFont as _TT
 
-                styled, shaped_runs = _shape_styled_runs(styled, key, inplace_face)
+                styled, shaped_runs = _shape_styled_runs(
+                    styled, key, inplace_face,
+                    sideways=para.frame != _ORIENTATIONS[HORIZONTAL],
+                )
                 _tt = _TT(inplace_face, fontNumber=0, lazy=True)
                 try:
                     _order = _tt.getGlyphOrder()
@@ -4093,18 +4367,35 @@ def _prepare_styled(
                     glyph_encode=_ip_genc, glyph_width=_ip_gwidth,
                 )
                 continue
-            if fam == RTL_FAMILY:
-                # 9.T3: resolve the bundled RTL face, SHAPE every word
+            if fam in (RTL_FAMILY, MONGOL_FAMILY):
+                # 9.T3: resolve the bundled shaping face, SHAPE every word
                 # that routed here against it, then embed a subset that
                 # carries the resulting glyphs. The order is forced: the
                 # subset has to contain the shaper's output, and the
                 # shaper needs the face.
-                from engine.font_fallback import build_shaped_font, resolve_rtl_font
+                #
+                # 9.T12: the Mongolian key resolves its OWN face and embeds
+                # it HORIZONTALLY — `build_shaped_font` under a rotated Tm,
+                # never `build_vertical_font` under /Identity-V. A Mongolian
+                # face states no vertical advance worth embedding as /W2
+                # (Mongolian Baiti, the script's reference implementation,
+                # carries no `vmtx` at all), so an /Identity-V embed would
+                # have to invent the pitch — the § 1.5b defect again.
+                from engine.font_fallback import (
+                    build_shaped_font,
+                    resolve_mongolian_font,
+                    resolve_rtl_font,
+                )
 
-                face = resolve_rtl_font(
+                resolve = (
+                    resolve_mongolian_font if fam == MONGOL_FAMILY else resolve_rtl_font
+                )
+                face = resolve(
                     str(font_path), chars, style=style_key(kbold, kitalic)
                 )
-                styled, shaped_runs = _shape_styled_runs(styled, key, face)
+                styled, shaped_runs = _shape_styled_runs(
+                    styled, key, face, sideways=para.frame != _ORIENTATIONS[HORIZONTAL]
+                )
                 fdict, fenc, fwidth, genc, gwidth = build_shaped_font(
                     pdf, face, chars, shaped_runs
                 )
