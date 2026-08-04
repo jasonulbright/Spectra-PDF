@@ -137,6 +137,12 @@ export function tOperationTitle(op: string, englishTitle: string, lng?: string):
   return tCommandTitle(`tools.panel.${op}`, englishTitle, lng);
 }
 
+/** A NAV PANEL's title (icon-strip tooltip + panel header). NAV_PANEL_TITLES
+ * is a data table, so the catalog gate derives `navpanel.*` from it. */
+export function tNavPanelTitle(panelId: string, englishTitle: string): string {
+  return i18next.t(`navpanel.${panelId}`, { defaultValue: englishTitle });
+}
+
 /** A tool's one-line blurb (the tile tooltip). No command carries it, so the
  * catalog gate derives `tool.desc.*` from TOOL_DEFS like the other tables. */
 export function tToolDescription(

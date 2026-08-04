@@ -9,6 +9,8 @@ import { computeReorderTarget } from '../../lib/page-reorder';
 import { ContextMenu } from '../ContextMenu';
 import type { NavPanelComponentProps } from './types';
 import type { PageRef } from '../../state/types';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../../i18n';
 
 // Pages (thumbnails) panel — Phase 4 M3.1 (§ 5.1). Small renders of the active
 // file's pages through the same pdf.js proxy the board uses (one per file via
@@ -141,6 +143,10 @@ function Thumbnail({
 }
 
 export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelComponentProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome. The
+  // context menu's own labels are built when it OPENS (a right-click creates a
+  // fresh `menu`), so they always read the language current at that moment.
+  useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
   const proxies = usePdfProxies(state.files);
@@ -384,7 +390,11 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
   );
 
   if (!activeFile) {
-    return <div className="navpanel-empty" data-testid="pages-panel">No document open.</div>;
+    return (
+      <div className="navpanel-empty" data-testid="pages-panel">
+        {tChrome('nav.common.noDocument')}
+      </div>
+    );
   }
 
   return (
@@ -394,7 +404,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       className="navpanel-scroll pages-panel"
       tabIndex={0}
       role="region"
-      aria-label="Page thumbnails"
+      aria-label={tChrome('nav.pages.aria')}
       onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
     >
       <div style={{ height: items.length * ROW_H, position: 'relative' }}>

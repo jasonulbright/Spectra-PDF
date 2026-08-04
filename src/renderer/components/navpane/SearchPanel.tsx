@@ -7,6 +7,8 @@ import { FindModeToggles } from '../../search/FindModeToggles';
 import { dialog, batch } from '../../lib/tauri-bridge';
 import type { SearchOptions } from '../../search/normalize';
 import type { NavPanelComponentProps } from './types';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../../i18n';
 
 // Search nav panel (Phase 4 M3.3, § 5.4) — a result-list view with TWO scopes:
 //   • "Open documents" — over the ONE shared workspace index (SearchProvider),
@@ -59,6 +61,8 @@ const EMPTY_OPEN_RESULT: OpenScopeResult = { groups: [], totalHits: 0, error: nu
 const baseName = (p: string): string => p.split(/[\\/]/).pop() || p;
 
 export function SearchPanel({ activeFile }: NavPanelComponentProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const state = useAppState();
   const { search, snippetsFor, version } = useSearchContext();
   const { callRaw } = useEngine();
@@ -193,7 +197,7 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
     void getCommandContext()?.app?.openPathAtPage(path, page);
   };
   const chooseFolder = async () => {
-    const picked = await dialog.pickFolder('Choose a folder to search');
+    const picked = await dialog.pickFolder(tChrome('nav.search.chooseFolderDialog'));
     if (picked) setFolder(picked);
   };
 
@@ -207,7 +211,11 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
           data-testid="search-input"
           className="search-panel-input"
           type="text"
-          placeholder={scope === 'open' ? 'Search all open documents' : 'Search PDFs in a folder'}
+          placeholder={
+            scope === 'open'
+              ? tChrome('nav.search.placeholderOpen')
+              : tChrome('nav.search.placeholderDisk')
+          }
           spellCheck={false}
           autoComplete="off"
           value={query}
@@ -226,7 +234,7 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
           onClick={() => setScope('open')}
           className={`px-2 py-0.5 rounded border ${scope === 'open' ? 'bg-blue-600 text-white border-blue-500' : 'bg-neutral-900 text-neutral-400 border-neutral-700 hover:bg-neutral-700'}`}
         >
-          Open documents
+          {tChrome('nav.search.scopeOpen')}
         </button>
         <button
           type="button"
@@ -235,7 +243,7 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
           onClick={() => setScope('disk')}
           className={`px-2 py-0.5 rounded border ${scope === 'disk' ? 'bg-blue-600 text-white border-blue-500' : 'bg-neutral-900 text-neutral-400 border-neutral-700 hover:bg-neutral-700'}`}
         >
-          On disk
+          {tChrome('nav.search.scopeDisk')}
         </button>
         {scope === 'disk' && (
           <button
@@ -245,7 +253,7 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
             title={folder ?? undefined}
             className="ml-auto px-2 py-0.5 rounded border bg-neutral-900 text-neutral-300 border-neutral-700 hover:bg-neutral-700 truncate max-w-[140px]"
           >
-            {folder ? baseName(folder) : 'Choose folder…'}
+            {folder ? baseName(folder) : tChrome('nav.search.chooseFolder')}
           </button>
         )}
       </div>
@@ -253,23 +261,29 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
       <div className="navpanel-scroll search-results flex-1" data-testid="search-results">
         {scope === 'open' && (
           <>
-            {!activeFile && <p className="navpanel-empty">No document open.</p>}
+            {!activeFile && <p className="navpanel-empty">{tChrome('nav.common.noDocument')}</p>}
             {activeFile && !hasQuery && (
-              <p className="navpanel-empty">Type to search the open documents.</p>
+              <p className="navpanel-empty">{tChrome('nav.search.typeToSearchOpen')}</p>
             )}
             {activeFile && hasQuery && error && (
               <p className="navpanel-empty" data-testid="search-error" style={{ color: '#f87171' }}>
-                {errorKind === 'timeout' ? error : `Invalid regular expression: ${error}`}
+                {/* A TIMEOUT message is the search core's own sentence; only the
+                    invalid-pattern case gets our frame around the regex error. */}
+                {errorKind === 'timeout'
+                  ? error
+                  : tChrome('nav.search.invalidRegex', { error })}
               </p>
             )}
             {activeFile && hasQuery && !error && totalHits === 0 && (
               <p className="navpanel-empty" data-testid="search-no-results">
-                No matches for “{debounced.trim()}”.
+                {tChrome('nav.search.noMatches', { query: debounced.trim() })}
               </p>
             )}
             {totalHits > 0 && (
               <div className="search-summary" data-testid="search-summary" aria-live="polite">
-                {totalHits} page{totalHits === 1 ? '' : 's'} in {groups.length} file{groups.length === 1 ? '' : 's'}
+                {tChromeCount('nav.search.summary', totalHits, {
+                  files: tChromeCount('nav.search.fileCount', groups.length),
+                })}
               </div>
             )}
             {groups.map((g) => (
@@ -284,9 +298,11 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
                     data-testid="search-hit"
                     className="search-hit"
                     onClick={() => openHit(h.pageId)}
-                    title={`Go to page ${h.pageNumber}`}
+                    title={tChrome('nav.search.goToPage', { page: h.pageNumber })}
                   >
-                    <span className="search-hit-page">Page {h.pageNumber}</span>
+                    <span className="search-hit-page">
+                      {tChrome('nav.search.page', { page: h.pageNumber })}
+                    </span>
                     {h.snippet && <span className="search-hit-snippet">{h.snippet}</span>}
                   </button>
                 ))}
@@ -297,31 +313,47 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
 
         {scope === 'disk' && (
           <>
-            {!folder && <p className="navpanel-empty">Choose a folder to search its PDFs.</p>}
-            {folder && !hasQuery && <p className="navpanel-empty">Type to search this folder.</p>}
+            {!folder && (
+              <p className="navpanel-empty">{tChrome('nav.search.chooseFolderFirst')}</p>
+            )}
+            {folder && !hasQuery && (
+              <p className="navpanel-empty">{tChrome('nav.search.typeToSearchFolder')}</p>
+            )}
             {folder && hasQuery && searching && (
-              <p className="navpanel-empty" data-testid="search-disk-busy">Searching…</p>
+              <p className="navpanel-empty" data-testid="search-disk-busy">
+                {tChrome('nav.search.searching')}
+              </p>
             )}
             {folder && hasQuery && !searching && disk?.error && (
               <p className="navpanel-empty" data-testid="search-error" style={{ color: '#f87171' }}>
-                Invalid regular expression: {disk.error}
+                {tChrome('nav.search.invalidRegex', { error: disk.error })}
               </p>
             )}
             {folder && hasQuery && !searching && disk && !disk.error && disk.hits.length === 0 && (
               <p className="navpanel-empty" data-testid="search-no-results">
-                No matches for “{debounced.trim()}” in {baseName(folder)}.
+                {tChrome('nav.search.noMatchesIn', {
+                  query: debounced.trim(),
+                  folder: baseName(folder),
+                })}
               </p>
             )}
             {disk && !disk.error && disk.hits.length > 0 && (
               <div className="search-summary" data-testid="search-summary" aria-live="polite">
-                {disk.hits.length} page{disk.hits.length === 1 ? '' : 's'} in {diskGroups.length} file
-                {diskGroups.length === 1 ? '' : 's'} ({disk.files_searched} searched)
-                {disk.truncated && ` — first ${disk.files_searched} of ${disk.files_total} files`}
+                {tChromeCount('nav.search.diskSummary', disk.hits.length, {
+                  files: tChromeCount('nav.search.fileCount', diskGroups.length),
+                  searched: disk.files_searched,
+                  truncated: disk.truncated
+                    ? tChrome('nav.search.truncatedSuffix', {
+                        shown: disk.files_searched,
+                        total: disk.files_total,
+                      })
+                    : '',
+                })}
               </div>
             )}
             {disk && disk.errors.length > 0 && (
               <div className="search-summary" data-testid="search-disk-errors" style={{ color: '#fbbf24' }}>
-                {disk.errors.length} file{disk.errors.length === 1 ? '' : 's'} could not be read
+                {tChromeCount('nav.search.unreadable', disk.errors.length)}
               </div>
             )}
             {diskGroups.map((g) => (
@@ -336,9 +368,14 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
                     data-testid="search-hit"
                     className="search-hit"
                     onClick={() => openDiskHit(h.path, h.page)}
-                    title={`Open ${baseName(h.path)} at page ${h.page}`}
+                    title={tChrome('nav.search.openAtPage', {
+                      name: baseName(h.path),
+                      page: h.page,
+                    })}
                   >
-                    <span className="search-hit-page">Page {h.page}</span>
+                    <span className="search-hit-page">
+                      {tChrome('nav.search.page', { page: h.page })}
+                    </span>
                     {h.snippet && <span className="search-hit-snippet">{h.snippet}</span>}
                   </button>
                 ))}
