@@ -14,6 +14,7 @@ import { COMMANDS } from '../src/renderer/commands/registry';
 import { MENUS, type MenuNode } from '../src/renderer/commands/menus';
 import { CHROME_STRINGS } from '../src/renderer/i18n-chrome';
 import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
+import { STEP_CATALOG } from '../src/renderer/lib/guided-actions';
 
 const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
@@ -25,6 +26,21 @@ function expectedCatalog(): Record<string, string> {
   const out: Record<string, string> = { ...CHROME_STRINGS, ...PANEL_STRINGS };
   for (const [id, cmd] of Object.entries(COMMANDS)) {
     out[`cmd.${id}`] = cmd.title;
+  }
+  // Guided-actions step catalog (serialized DATA — display strings derive
+  // keys here, like the command titles). OCR language options excluded:
+  // they await the Intl.DisplayNames switch in the dialogs pass.
+  for (const def of STEP_CATALOG) {
+    out[`gaction.step.${def.op}`] = def.title;
+    for (const p of def.params) {
+      out[`gaction.param.${def.op}.${p.key}`] = p.label;
+      if (p.hint) out[`gaction.hint.${def.op}.${p.key}`] = p.hint;
+      if (p.options && !(def.op === 'ocr_file' && p.key === 'language')) {
+        for (const o of p.options) {
+          out[`gaction.opt.${def.op}.${p.key}.${o.value}`] = o.label;
+        }
+      }
+    }
   }
   const walk = (nodes: MenuNode[]): void => {
     for (const n of nodes) {
