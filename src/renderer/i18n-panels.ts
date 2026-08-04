@@ -340,6 +340,24 @@ export const PANEL_STRINGS = {
   'panel.links.save': 'Save',
   'panel.links.setUrl': 'Set URL',
   'panel.links.delete': 'Delete',
+
+  'panel.pageLabels.open': 'Open a PDF to set page number labels',
+  'panel.pageLabels.blurb':
+    'Number pages independently of their order — front matter as “i, ii, iii”, the body as “1, 2, 3”. Each range starts on a page and runs until the next range. No ranges = plain physical numbers.',
+  'panel.pageLabels.styleNone': 'None (prefix only)',
+  'panel.pageLabels.fromPage': 'From page',
+  'panel.pageLabels.style': 'Style',
+  'panel.pageLabels.prefix': 'Prefix',
+  'panel.pageLabels.startAt': 'Start at',
+  'panel.pageLabels.remove': 'Remove',
+  'panel.pageLabels.addRange': '+ Add range',
+  'panel.pageLabels.preview': 'Preview:',
+  'panel.pageLabels.applying': 'Applying…',
+  'panel.pageLabels.apply': 'Apply',
+  'panel.pageLabels.duplicateStart': 'Two ranges start on the same page — each start must be unique',
+  'panel.pageLabels.removed': 'Page labels removed',
+  'panel.pageLabels.applied_one': 'Applied {{count}} label range',
+  'panel.pageLabels.applied_other': 'Applied {{count}} label ranges',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;
