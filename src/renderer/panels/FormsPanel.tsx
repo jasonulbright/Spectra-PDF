@@ -7,6 +7,8 @@ import { StatusBar } from '../components/StatusBar';
 import { readFormFields } from '../lib/forms';
 import { mergeUntouched } from '../lib/late-read';
 import type { FormField, FormFieldValue } from '../lib/forms';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 /** Value equality across the FormFieldValue union (arrays compared element-wise). */
 function valueEquals(a: FormFieldValue | undefined, b: FormFieldValue | undefined): boolean {
@@ -19,6 +21,8 @@ function valueEquals(a: FormFieldValue | undefined, b: FormFieldValue | undefine
 }
 
 export function FormsPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
   const workingPath = activeFile?.workingPath ?? null;
@@ -85,7 +89,7 @@ export function FormsPanel(): React.ReactElement {
         if (cancelled) return;
         setFields([]);
         setHasXFA(false);
-        setStatus(`Error reading fields: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.forms.errorReading', { message: e instanceof Error ? e.message : String(e) }));
       })
       .finally(() => {
         if (!cancelled) setReading(false);
@@ -116,11 +120,11 @@ export function FormsPanel(): React.ReactElement {
     }
     const changedCount = Object.keys(edits).length;
     if (changedCount === 0 && !flatten) {
-      setStatus('No changes to apply');
+      setStatus(tChrome('panel.forms.noChanges'));
       return;
     }
     setBusy(true);
-    setStatus(flatten ? 'Filling and flattening…' : 'Filling form…');
+    setStatus(flatten ? tChrome('panel.forms.fillingFlattening') : tChrome('panel.forms.filling'));
     try {
       // FC4 (§I.0 S1/S3): snapshot (runs the commit gate) → fill through the
       // ENGINE (Unicode-capable + multi-select optionlist) → reload → UPDATE_
@@ -148,22 +152,22 @@ export function FormsPanel(): React.ReactElement {
       });
       setStatus(
         flatten
-          ? 'Form filled and flattened (fields locked)'
-          : `Filled ${changedCount} field${changedCount === 1 ? '' : 's'}`,
+          ? tChrome('panel.forms.filledFlattened')
+          : tChromeCount('panel.forms.filled', changedCount),
       );
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
   }, [activeFile, fields, values, flatten, dispatch, call]);
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to fill its form fields" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.forms.open')} />;
 
   return (
     <div className="flex flex-col gap-4 h-full">
       <div className="text-sm text-neutral-400 shrink-0">
-        Working on: <span className="text-neutral-200">{activeFile.name}</span> ({activeFile.pageCount} pages)
+        {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})
       </div>
 
       {hasXFA && (
@@ -171,18 +175,17 @@ export function FormsPanel(): React.ReactElement {
           data-testid="forms-xfa-warning"
           className="shrink-0 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200"
         >
-          This form uses XFA (dynamic forms), which isn't supported. Only its standard AcroForm
-          fields are shown below; filling will save a plain AcroForm copy.
+          {tChrome('panel.forms.xfaWarning')}
         </div>
       )}
 
       {reading ? (
-        <div className="text-sm text-neutral-500">Reading form fields…</div>
+        <div className="text-sm text-neutral-500">{tChrome('panel.forms.reading')}</div>
       ) : fields.length === 0 ? (
-        <div className="text-sm text-neutral-500">This PDF has no form fields.</div>
+        <div className="text-sm text-neutral-500">{tChrome('panel.forms.noFields')}</div>
       ) : (
         <>
-          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1" tabIndex={0} role="region" aria-label="Form fields">
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1" tabIndex={0} role="region" aria-label={tChrome('panel.forms.fieldsAria')}>
             {fields.map((f) => (
               <FieldRow
                 key={f.name}
@@ -201,7 +204,7 @@ export function FormsPanel(): React.ReactElement {
                 onChange={() => setFlatten((v) => !v)}
                 className="rounded bg-neutral-800 border-neutral-700"
               />
-              Flatten (lock fields after filling)
+              {tChrome('panel.forms.flatten')}
             </label>
             <button
               data-testid="forms-apply"
@@ -209,7 +212,7 @@ export function FormsPanel(): React.ReactElement {
               disabled={busy || editableCount === 0}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
             >
-              {busy ? 'Applying…' : flatten ? 'Fill & Flatten' : 'Fill Form'}
+              {busy ? tChrome('panel.forms.applying') : flatten ? tChrome('panel.forms.fillFlatten') : tChrome('panel.forms.fillForm')}
             </button>
           </div>
         </>
@@ -232,8 +235,8 @@ function FieldRow({
   const label = (
     <div className="flex items-center gap-2 mb-1">
       <span className="text-sm text-neutral-300">{field.name}</span>
-      {field.required && <span className="text-[10px] text-amber-400 uppercase">required</span>}
-      {field.readOnly && <span className="text-[10px] text-neutral-500 uppercase">read-only</span>}
+      {field.required && <span className="text-[10px] text-amber-400 uppercase">{tChrome('panel.forms.required')}</span>}
+      {field.readOnly && <span className="text-[10px] text-neutral-500 uppercase">{tChrome('panel.forms.readOnly')}</span>}
       {(field.type === 'button' || field.type === 'signature') && (
         <span className="text-[10px] text-neutral-500 uppercase">{field.type}</span>
       )}
@@ -293,7 +296,7 @@ function FieldRow({
           className="rounded bg-neutral-800 border-neutral-700"
         />
         <span className="text-sm text-neutral-300">{field.name}</span>
-        {field.required && <span className="text-[10px] text-amber-400 uppercase">required</span>}
+        {field.required && <span className="text-[10px] text-amber-400 uppercase">{tChrome('panel.forms.required')}</span>}
       </label>
     );
   }
@@ -309,7 +312,7 @@ function FieldRow({
           onChange={(e) => onChange(e.target.value)}
           className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
         >
-          <option value="">— none —</option>
+          <option value="">{tChrome('panel.forms.none')}</option>
           {(field.options ?? []).map((opt) => (
             <option key={opt} value={opt}>
               {opt}
