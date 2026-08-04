@@ -8,12 +8,12 @@ import {
   openByPaths,
   getState,
   invokeAppCommand,
-  editImagePageIds,
   editImagePlacements,
   editImageSelect,
   editImageSelection,
   editImageTransformMany,
   editImageDeleteSelected,
+  settledEditImagePageIds,
 } from '../support/harness.js';
 
 // P7 multi-select — group transform and group delete against the built
@@ -25,7 +25,10 @@ import {
 // commit path the frame's pointerup takes.
 //
 // Page ids regenerate on every whole-file commit (the non-authored-rebuild
-// rule) — always re-fetch editImagePageIds()[0] after a commit.
+// rule) — always re-fetch the page id from a SETTLED listing after a commit.
+// A commit lands as two passes (bytes, then the reindex's regenerated ids);
+// binding a selection to a mid-pass reading names a page that is already
+// dead, and the action then refuses. That is the defect this spec caught.
 
 const RED_DOT_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -36,25 +39,41 @@ function matrixClose(a: number[] | undefined, b: number[], eps = 0.5): boolean {
   return !!a && a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= eps);
 }
 
-/** The current first page's placement matrices in index order (post-rebuild). */
-async function currentMatrices(): Promise<number[][]> {
-  const ids = await editImagePageIds();
-  if (ids.length === 0) return [];
-  const placements = await editImagePlacements(ids[0]);
-  return placements.map((p) => p.matrix);
-}
-
+/**
+ * The listing maps are keyed by GENERATION-TAGGED page ids: a whole-file op
+ * rotates every id, the canvas prunes the dead keys the moment it sees the
+ * rotation, and the fresh listing is a per-page engine round-trip behind. So
+ * "the page has no placements" and "the fresh listing hasn't landed" are the
+ * same reading, and an assertion that accepts it passes over an op that did
+ * NOTHING — which is exactly what hid the stale-binding defect this round.
+ * Every wait below therefore reads only a SETTLED listing.
+ */
 async function waitForMatrices(targets: number[][], msg: string): Promise<string> {
+  let settledPageId = '';
   await browser.waitUntil(
     async () => {
-      const ms = await currentMatrices();
-      return (
-        ms.length === targets.length && targets.every((t, i) => matrixClose(ms[i], t))
-      );
+      const ids = await settledEditImagePageIds();
+      if (ids === null || ids.length === 0) return false; // in flight / no page
+      const ms = (await editImagePlacements(ids[0])).map((p) => p.matrix);
+      if (ms.length !== targets.length) return false;
+      if (!targets.every((t, i) => matrixClose(ms[i], t))) return false;
+      settledPageId = ids[0];
+      return true;
     },
     { timeout: 30_000, timeoutMsg: msg },
   );
-  return (await editImagePageIds())[0];
+  return settledPageId;
+}
+
+/** A settled listing with no placements at all — every image is gone. */
+async function waitForNoPlacements(msg: string): Promise<void> {
+  await browser.waitUntil(
+    async () => {
+      const ids = await settledEditImagePageIds();
+      return ids !== null && ids.length === 0;
+    },
+    { timeout: 30_000, timeoutMsg: msg },
+  );
 }
 
 describe('image multi-select (P7)', () => {
@@ -86,13 +105,13 @@ describe('image multi-select (P7)', () => {
     );
 
     expect(await invokeAppCommand('tools.open.edit')).toBe(true);
-    await browser.waitUntil(async () => (await editImagePageIds()).length > 0, {
-      timeout: 30_000,
-      timeoutMsg: 'edit placements never loaded',
-    });
-    const pageId = (await editImagePageIds())[0];
-    expect(matrixClose((await currentMatrices())[0], [100, 0, 0, 80, 40, 60])).toBe(true);
-    expect(matrixClose((await currentMatrices())[1], [120, 0, 0, 90, 220, 150])).toBe(true);
+    const pageId = await waitForMatrices(
+      [
+        [100, 0, 0, 80, 40, 60],
+        [120, 0, 0, 90, 220, 150],
+      ],
+      'edit placements never loaded',
+    );
 
     // Additive selection: 0, then +1 → the group is [0, 1].
     await editImageSelect(pageId, 0);
@@ -139,33 +158,35 @@ describe('image multi-select (P7)', () => {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.open.edit');
-    await browser.waitUntil(async () => (await editImagePageIds()).length > 0, {
-      timeout: 30_000,
-      timeoutMsg: 'edit placements never loaded',
-    });
-    const pageId = (await editImagePageIds())[0];
+    // The previous test's undo commits in TWO passes (bytes, then the
+    // reindex's regenerated page ids). Bind the selection to a SETTLED
+    // listing — a mid-pass reading names a page whose id is already dead,
+    // and the delete would then refuse (silently, before this round).
+    const pageId = await waitForMatrices(
+      [
+        [100, 0, 0, 80, 40, 60],
+        [120, 0, 0, 90, 220, 150],
+      ],
+      'edit placements never settled after the previous undo',
+    );
     await editImageSelect(pageId, 0);
     await editImageSelect(pageId, 1, true);
+    expect((await editImageSelection())?.indexes).toEqual([0, 1]);
     await editImageDeleteSelected();
 
-    // Both placements gone (the page drops out of the listing entirely).
-    await browser.waitUntil(async () => (await editImagePageIds()).length === 0, {
-      timeout: 30_000,
-      timeoutMsg: 'the group delete never applied',
-    });
+    // Both placements gone (the page drops out of the listing entirely) —
+    // asserted against a SETTLED listing, so a delete that did nothing
+    // cannot satisfy it through the mid-rebuild empty window.
+    await waitForNoPlacements('the group delete never applied');
 
     // ONE undo brings back both.
     expect(await invokeAppCommand('edit.undo')).toBe(true);
-    await browser.waitUntil(
-      async () => {
-        const ms = await currentMatrices();
-        return (
-          ms.length === 2 &&
-          matrixClose(ms[0], [100, 0, 0, 80, 40, 60]) &&
-          matrixClose(ms[1], [120, 0, 0, 90, 220, 150])
-        );
-      },
-      { timeout: 30_000, timeoutMsg: 'one undo did not resurrect both placements' },
+    await waitForMatrices(
+      [
+        [100, 0, 0, 80, 40, 60],
+        [120, 0, 0, 90, 220, 150],
+      ],
+      'one undo did not resurrect both placements',
     );
   });
 });
