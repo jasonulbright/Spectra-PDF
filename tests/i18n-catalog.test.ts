@@ -16,6 +16,7 @@ import { CHROME_STRINGS } from '../src/renderer/i18n-chrome';
 import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
 import { DIALOG_STRINGS } from '../src/renderer/i18n-dialogs';
 import { TOOLBAR_CATALOG } from '../src/renderer/commands/toolbars';
+import { FRIENDLY_NAMES } from '../src/renderer/hooks/useOperationQueue';
 import { STEP_CATALOG } from '../src/renderer/lib/guided-actions';
 
 const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
@@ -37,6 +38,11 @@ function expectedCatalog(): Record<string, string> {
   // heads) — a data table, so its display strings derive keys here.
   for (const group of TOOLBAR_CATALOG) {
     out[`toolbar.group.${group.id}`] = group.label;
+  }
+  // Operation-queue op names, likewise a table (the queue LINE's composition
+  // shapes live in DIALOG_STRINGS as whole interpolated messages).
+  for (const [method, name] of Object.entries(FRIENDLY_NAMES)) {
+    out[`opqueue.op.${method}`] = name;
   }
   // Guided-actions step catalog (serialized DATA — display strings derive
   // keys here, like the command titles). OCR language options excluded:
