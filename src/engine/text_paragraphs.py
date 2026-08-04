@@ -3380,6 +3380,7 @@ def _prepare_styled(
         # block — naming it there makes it a FUNCTION-LOCAL, so this
         # earlier use must bring its own or it reads as unassigned.
         from engine.font_fallback import (
+            face_has_vertical_metrics,
             face_shapes_vertically,
             resolve_vertical_font,
         )
@@ -3388,6 +3389,16 @@ def _prepare_styled(
         if not font_path:
             raise ValueError("fallback font path is required to restyle")
         if isinstance(family_override, str) and os.path.isabs(family_override):
+            # Two absences, named apart (brief 39 § 3.1): a face with no
+            # `vmtx` makes no vertical statement at all — the § 1.5b class,
+            # where the shaper's synthesized advance made a Latin face look
+            # vertical — and a face WITH the machinery may still lack a
+            # vertical form for some character. A bug report can tell them
+            # apart only if the refusals do.
+            if not face_has_vertical_metrics(family_override):
+                raise ValueError(
+                    "that font has no vertical metrics — pick one that does"
+                )
             if not face_shapes_vertically(family_override, para.text):
                 raise ValueError(
                     "that font has no vertical forms — pick one that does"
