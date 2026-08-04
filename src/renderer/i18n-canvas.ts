@@ -407,6 +407,155 @@ export const CANVAS_STRINGS = {
   'canvas.edittext.keepColour': 'Keep current colour',
   'canvas.edittext.colour': 'Colour {{color}}',
   'canvas.edittext.applyStyle': 'Apply style',
+
+  // ── The workspace canvas view ────────────────────────────────────────
+  'canvas.view.noDocuments': 'No documents open',
+  'canvas.view.dropHint': 'Drop PDF files anywhere, or open them to lay them out here',
+  'canvas.view.openPdf': 'Open PDF',
+
+  // Measure re-calibration popover. The CURRENT note is the engine's own
+  // formatted measurement and passes through verbatim.
+  'canvas.recal.areaTitle': 'This area measures',
+  'canvas.recal.distanceTitle': 'This distance measures',
+  'canvas.recal.now': '(now: {{note}})',
+  // "sq" + the unit symbol: the word is ours, the symbol is notation.
+  'canvas.recal.sqUnit': 'sq {{unit}}',
+  'canvas.recal.override': 'Override this measurement',
+  'canvas.recal.setScale': 'Set scale from it',
+
+  // Edit-tool notices. `canvas.edit.cancelled` was ELEVEN copies of one
+  // literal; the engine's own refusal text still passes through verbatim.
+  'canvas.edit.cancelled': 'Edit cancelled — the document was left unchanged.',
+  'canvas.edit.textNotEditable': 'This text is not editable.',
+  'canvas.edit.imagePageGone': 'The page this image was placed on no longer exists.',
+
+  // Multi-file failures. The per-file line is one shared shape (file name +
+  // the ENGINE's own message, verbatim); each op's banner is its own whole
+  // sentence around the joined reasons — never a glued suffix.
+  'canvas.common.fileFailure': '{{name}}: {{message}}',
+  'canvas.forms.fillFailed': 'Filling failed — {{reasons}}. Those values are still pending.',
+  'canvas.ocr.applyFailed': 'Applying OCR text failed — {{reasons}}',
+  'canvas.ocr.skipped_one': '{{count}} scanned page skipped (no longer available)',
+  'canvas.ocr.skipped_other': '{{count}} scanned pages skipped (no longer available)',
+  'canvas.ocr.noReadyPages': 'no OCR-ready pages to apply',
+  'canvas.redact.failed': 'Redaction failed — {{reasons}}. Those marks are still pending.',
+  'canvas.redact.failedSingle': 'Redaction failed — {{reasons}}. The marks are still pending.',
+  'canvas.redact.saveMarksFailed': 'Saving marks failed — {{reasons}}.',
+  'canvas.doc.mergedCannotClose':
+    '"{{name}}" is merged into another document — Apply changes first, then close it.',
+
+  // Link authoring refusals.
+  'canvas.link.pagesGone': 'Those pages are no longer in the document.',
+  'canvas.link.nothingSelected': 'Nothing selected to link.',
+
+  // The on-canvas sign card.
+  'canvas.sign.fieldTitle': 'Sign field "{{field}}"',
+  'canvas.sign.stampTitle': 'Sign with a visible stamp',
+  'canvas.sign.fieldBlurb':
+    'The signature fills this existing field (its own box is the stamp); the signed copy is written to a NEW file — this file is left unchanged.',
+  'canvas.sign.stampBlurb':
+    'The stamp is drawn at the box you placed; the signed copy is written to a NEW file — this file is left unchanged.',
+  'canvas.sign.password': 'Password',
+  'canvas.sign.reason': 'Reason',
+  'canvas.sign.location': 'Location',
+  'canvas.sign.optional': 'optional',
+  'canvas.sign.signing': 'Signing…',
+  'canvas.sign.apply': 'Sign & Save…',
+  'canvas.sign.enterPassword': 'Enter the signer password.',
+  'canvas.sign.applyEditsFirst': 'Apply the pending page changes first, then sign the field.',
+  'canvas.sign.pageChanged': 'The page this signature was placed on changed — draw the box again.',
+  'canvas.sign.pageGone': 'The page this signature was placed on no longer exists.',
+  'canvas.sign.fileClosed': 'The file this signature was placed on is no longer open.',
+  // The done banner was FOUR JSX fragments glued around a <strong> — one
+  // sentence per outcome now, the emphasis dropped for translatability (the
+  // Settings licence-notice precedent).
+  'canvas.sign.doneOk':
+    'Signed as {{signer}} — valid, covers the whole document. Saved to {{output}}',
+  'canvas.sign.doneBad':
+    'Signed as {{signer}} — but the signature did not verify as expected. Saved to {{output}}',
+  'canvas.sign.unknownSigner': '(unknown)',
+
+  // The new-form-field card.
+  'canvas.newfield.title': 'New form field',
+  'canvas.newfield.blurb': 'The field is created at the box you placed and is fillable right away.',
+  'canvas.newfield.name': 'Name',
+  'canvas.newfield.type': 'Type',
+  'canvas.newfield.type.text': 'Text',
+  'canvas.newfield.type.checkbox': 'Checkbox',
+  'canvas.newfield.type.radio': 'Radio group',
+  'canvas.newfield.type.dropdown': 'Dropdown',
+  'canvas.newfield.type.optionlist': 'Option list',
+  'canvas.newfield.type.signature': 'Signature (empty)',
+  'canvas.newfield.multiline': 'Multiline',
+  'canvas.newfield.options': 'Options',
+  'canvas.newfield.optionsPlaceholder': 'one per line (or comma-separated)',
+  'canvas.newfield.creating': 'Creating…',
+  'canvas.newfield.create': 'Create field',
+  'canvas.newfield.pageChanged': 'The page this field was placed on changed — draw the box again.',
+  'canvas.newfield.pageGone': 'The page this field was placed on no longer exists.',
+
+  // The add-text card.
+  'canvas.addtext.title': 'Add text',
+  'canvas.addtext.blurb':
+    'Text fills the box you drew and wraps to its width. It stays searchable and editable.',
+  'canvas.addtext.placeholder': 'Type the text to add…',
+  'canvas.addtext.spans': 'Spans',
+  'canvas.addtext.spansTitle': 'Select text above, choose a look, then Style selection',
+  'canvas.addtext.sizePlaceholder': 'size',
+  'canvas.addtext.styleSelection': 'Style selection',
+  'canvas.addtext.selectTextFirst': 'Select some text above first, then apply the span style.',
+  'canvas.addtext.pickAStyleFirst': 'Pick a size, colour, or style for the span first.',
+  // The span CHIP is a compact symbolic readout: the range is notation, and
+  // each optional segment is its own finished unit (the Comments panel's
+  // "(N skipped)" suffix precedent), never an English fragment glued in code.
+  'canvas.addtext.spanRange': '{{start}}–{{end}}',
+  'canvas.addtext.spanSize': ' · {{size}}pt',
+  'canvas.addtext.spanBold': ' · B',
+  'canvas.addtext.spanItalic': ' · I',
+  'canvas.addtext.spanChipTitle': '"{{text}}"',
+  'canvas.addtext.font': 'Font',
+  'canvas.addtext.family.sans': 'Sans-serif',
+  'canvas.addtext.family.serif': 'Serif',
+  'canvas.addtext.family.mono': 'Monospace',
+  'canvas.addtext.size': 'Size',
+  'canvas.addtext.degrees': '{{deg}}°',
+  'canvas.addtext.rotateTitle':
+    'Rotation — cycle the quarter turns (the field beside takes any angle)',
+  'canvas.addtext.rotateDegTitle':
+    'Rotation in degrees — any angle (T19); quarter turns keep the reading-direction layout',
+  'canvas.addtext.bold': 'B',
+  'canvas.addtext.boldTitle': 'Bold — authors in the bundled bold face',
+  'canvas.addtext.kern': 'AV',
+  'canvas.addtext.kernTitle':
+    "Kerning — tightens pairs like AV and To using the face's own metrics",
+  'canvas.addtext.italic': 'I',
+  'canvas.addtext.italicTitle': 'Italic — authors in the bundled italic face',
+  'canvas.addtext.smallCaps': 'Sc',
+  'canvas.addtext.smallCapsTitle':
+    'Small caps — authors in Libertinus Serif (carries real small caps)',
+  'canvas.addtext.alternates': 'Alt',
+  'canvas.addtext.alternatesTitle': 'Stylistic alternates (salt) — authors in Libertinus Serif',
+  'canvas.addtext.altIndexTitle': 'Which stylistic alternate to use, when the face offers several',
+  'canvas.addtext.colour': 'Colour',
+  'canvas.addtext.overflow': 'The text extends below the box — it will continue past it.',
+  'canvas.addtext.adding': 'Adding…',
+  'canvas.addtext.enterText': 'Enter some text to add.',
+  'canvas.addtext.pageChanged': 'The page this text was placed on changed — draw the box again.',
+  'canvas.addtext.pageGone': 'The page this text was placed on no longer exists.',
+
+  // The redaction confirm — the one canvas action that destroys content.
+  'canvas.redact.title': 'Redact content',
+  // Two counts, one sentence: the outer key agrees with the REGION count and
+  // takes the already-pluralized page phrase as a finished unit.
+  'canvas.redact.confirm_one':
+    'Permanently remove the content under {{count}} marked region across {{pages}}?',
+  'canvas.redact.confirm_other':
+    'Permanently remove the content under {{count}} marked regions across {{pages}}?',
+  'canvas.redact.pageCount_one': '{{count}} page',
+  'canvas.redact.pageCount_other': '{{count}} pages',
+  'canvas.redact.warning':
+    "Text and images under each region are removed from the file's content, not just covered. Undo can restore the file while it stays open; once saved, the content is gone for good.",
+  'canvas.redact.apply': 'Redact',
 } as const;
 
 export type CanvasKey = keyof typeof CANVAS_STRINGS;

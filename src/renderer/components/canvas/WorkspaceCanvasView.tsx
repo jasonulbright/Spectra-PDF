@@ -91,6 +91,8 @@ import {
 } from '../../lib/annotation-manipulation';
 import { PropertiesBar } from './PropertiesBar';
 import { CanvasStatusBar } from './CanvasStatusBar';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount, tNumber } from '../../i18n';
 
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
@@ -291,6 +293,7 @@ function RecalibratePopover({
   onApply: (value: number, unit: MeasureUnit, mode: 'scale' | 'override') => void;
   onClose: () => void;
 }): React.JSX.Element {
+  useTranslation();
   const [value, setValue] = useState('');
   const [unit, setUnit] = useState<MeasureUnit>('ft');
   const parsed = parseFloat(value);
@@ -314,9 +317,11 @@ function RecalibratePopover({
       onClick={(e) => e.stopPropagation()}
     >
       <div className="recal-popover-row recal-popover-title">
-        {measureKind === 'area' ? 'This area measures' : 'This distance measures'}
+        {tChrome(
+          measureKind === 'area' ? 'canvas.recal.areaTitle' : 'canvas.recal.distanceTitle',
+        )}
         <span className="recal-popover-current" title={currentNote}>
-          (now: {currentNote})
+          {tChrome('canvas.recal.now', { note: currentNote })}
         </span>
       </div>
       <div className="recal-popover-row">
@@ -335,7 +340,7 @@ function RecalibratePopover({
         <select data-testid="recal-unit" value={unit} onChange={(e) => setUnit(e.target.value as MeasureUnit)}>
           {MEASURE_UNITS.map((u) => (
             <option key={u} value={u}>
-              {measureKind === 'area' ? `sq ${u}` : u}
+              {measureKind === 'area' ? tChrome('canvas.recal.sqUnit', { unit: u }) : u}
             </option>
           ))}
         </select>
@@ -347,7 +352,7 @@ function RecalibratePopover({
           disabled={!valid}
           onClick={() => onApply(parsed, unit, 'override')}
         >
-          Override this measurement
+          {tChrome('canvas.recal.override')}
         </button>
         <button
           type="button"
@@ -355,10 +360,10 @@ function RecalibratePopover({
           disabled={!valid}
           onClick={() => onApply(parsed, unit, 'scale')}
         >
-          Set scale from it
+          {tChrome('canvas.recal.setScale')}
         </button>
         <button type="button" data-testid="recal-cancel" onClick={onClose}>
-          Cancel
+          {tChrome('canvas.common.cancel')}
         </button>
       </div>
     </div>
@@ -397,6 +402,7 @@ export function WorkspaceCanvasView({
   onAddFormField,
   dropResolverRef,
 }: WorkspaceCanvasViewProps): React.ReactElement {
+  useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
   const docs = state.workspace.documents;
@@ -882,7 +888,7 @@ export function WorkspaceCanvasView({
       // create indistinguishable from a done one (the 18-canvas-forms load
       // flake: a 30s wait for a field that was never created) — reject.
       if (!placement || !placementDocsCurrent(state.files, docs, placement.path)) {
-        const msg = 'The page this field was placed on changed — draw the box again.';
+        const msg = tChrome('canvas.newfield.pageChanged');
         setNfError(msg);
         throw new Error(msg);
       }
@@ -898,7 +904,7 @@ export function WorkspaceCanvasView({
           const [vx0, vy0, vx1, vy1] = p.view;
           return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
         });
-        if (!built) throw new Error('The page this field was placed on no longer exists.');
+        if (!built) throw new Error(tChrome('canvas.newfield.pageGone'));
         await onAddFormField(built.path, {
           name: params.name.trim(),
           type: params.type,
@@ -1128,12 +1134,12 @@ export function WorkspaceCanvasView({
       // text on the wrong page. Silently resolving made a skipped commit
       // indistinguishable from a done one — reject.
       if (!placement || !placementDocsCurrent(state.files, docs, placement.path)) {
-        const msg = 'The page this text was placed on changed — draw the box again.';
+        const msg = tChrome('canvas.addtext.pageChanged');
         setAtError(msg);
         throw new Error(msg);
       }
       if (!params.text.trim()) {
-        setAtError('Enter some text to add.');
+        setAtError(tChrome('canvas.addtext.enterText'));
         return;
       }
       creatingTextRef.current = true;
@@ -1148,7 +1154,7 @@ export function WorkspaceCanvasView({
           const [vx0, vy0, vx1, vy1] = p.view;
           return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
         });
-        if (!built) throw new Error('The page this text was placed on no longer exists.');
+        if (!built) throw new Error(tChrome('canvas.addtext.pageGone'));
         const result = await onAddText(
           built.path,
           built.appearance.page,
@@ -1341,11 +1347,16 @@ export function WorkspaceCanvasView({
           });
         } catch (err) {
           const name = path.split(/[\\/]/).pop() || path;
-          failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+          failures.push(
+            tChrome('canvas.common.fileFailure', {
+              name,
+              message: err instanceof Error ? err.message : String(err),
+            }),
+          );
         }
       }
       if (failures.length > 0) {
-        setFormsError(`Filling failed — ${failures.join('; ')}. Those values are still pending.`);
+        setFormsError(tChrome('canvas.forms.fillFailed', { reasons: failures.join('; ') }));
       }
       return failures;
     } finally {
@@ -1910,7 +1921,7 @@ export function WorkspaceCanvasView({
       setSignDone(null);
       setSignError(
         state.pageDirtyPaths.includes(path)
-          ? 'Apply the pending page changes first, then sign the field.'
+          ? tChrome('canvas.sign.applyEditsFirst')
           : null,
       );
     },
@@ -2092,25 +2103,30 @@ export function WorkspaceCanvasView({
           await onApplyOcrLayer(payload.path, payload.pages);
         } catch (err) {
           const name = payload.path.split(/[\\/]/).pop() || payload.path;
-          failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+          failures.push(
+            tChrome('canvas.common.fileFailure', {
+              name,
+              message: err instanceof Error ? err.message : String(err),
+            }),
+          );
         }
       }
       // A source dropped between the ready-snapshot and its turn (page
       // closed/moved, or its OCR invalidated mid-run) must be surfaced, not
       // silently skipped — the user thinks every scanned page was persisted.
       if (skippedSources.length > 0) {
-        failures.push(`${skippedSources.length} scanned page(s) skipped (no longer available)`);
+        failures.push(tChromeCount('canvas.ocr.skipped', skippedSources.length));
       }
       if (payloads.length === 0 && skippedSources.length === 0) {
-        failures.push('no OCR-ready pages to apply');
+        failures.push(tChrome('canvas.ocr.noReadyPages'));
       }
       if (failures.length > 0) {
-        setOcrApplyError(`Applying OCR text failed — ${failures.join('; ')}`);
+        setOcrApplyError(tChrome('canvas.ocr.applyFailed', { reasons: failures.join('; ') }));
       }
       return failures;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setOcrApplyError(`Applying OCR text failed — ${msg}`);
+      setOcrApplyError(tChrome('canvas.ocr.applyFailed', { reasons: msg }));
       return [msg];
     } finally {
       applyingOcrRef.current = false;
@@ -2448,7 +2464,7 @@ export function WorkspaceCanvasView({
     try {
       const notice = await onEditVector('delete', focusedDoc.path, pageNumber, index);
       if (notice === EDIT_DECLINED) {
-        setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+        setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
       } else {
         setSelectedVector(null);
       }
@@ -2480,7 +2496,7 @@ export function WorkspaceCanvasView({
         });
         if (notice === EDIT_DECLINED) {
           setEditNotice({
-            text: 'Edit cancelled — the document was left unchanged.',
+            text: tChrome('canvas.edit.cancelled'),
             error: false,
           });
         }
@@ -2515,7 +2531,7 @@ export function WorkspaceCanvasView({
         const notice = await onEditVector('restyle', focusedDoc.path, pageNumber, index, opts);
         if (notice === EDIT_DECLINED) {
           setEditNotice({
-            text: 'Edit cancelled — the document was left unchanged.',
+            text: tChrome('canvas.edit.cancelled'),
             error: false,
           });
         }
@@ -2539,7 +2555,10 @@ export function WorkspaceCanvasView({
         // The refusal SELECTS the run too — the toolbar must reflect what
         // was just clicked, not a previous image selection (review-caught).
         setEditSel({ kind: 'text', pageId, index });
-        setEditNotice({ text: run.reason ?? 'This text is not editable.', error: true });
+        setEditNotice({
+          text: run.reason ?? tChrome('canvas.edit.textNotEditable'),
+          error: true,
+        });
         return;
       }
       setEditNotice(null);
@@ -2734,7 +2753,7 @@ export function WorkspaceCanvasView({
               return next;
             });
           }
-          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+          setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
         }
       } catch (err) {
         if (previousListing) {
@@ -2788,7 +2807,7 @@ export function WorkspaceCanvasView({
               return next;
             });
           }
-          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+          setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
         }
       } catch (err) {
         if (previousListing) {
@@ -2864,7 +2883,7 @@ export function WorkspaceCanvasView({
               return next;
             });
           }
-          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+          setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
         }
       } catch (err) {
         if (previousListing) {
@@ -2952,7 +2971,7 @@ export function WorkspaceCanvasView({
               return next;
             });
           }
-          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+          setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
         } else if (typeof result === 'string') {
           setEditNotice({ text: result, error: false });
         }
@@ -3036,7 +3055,7 @@ export function WorkspaceCanvasView({
               return next;
             });
           }
-          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+          setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
         } else if (typeof notice === 'string') {
           setEditNotice({ text: notice, error: false });
         }
@@ -3143,7 +3162,7 @@ export function WorkspaceCanvasView({
         });
         if (notice === EDIT_DECLINED) {
           imageReselectRef.current = null;
-          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+          setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
         } else if (typeof notice === 'string') {
           setEditNotice({ text: notice, error: false });
         }
@@ -3182,7 +3201,7 @@ export function WorkspaceCanvasView({
         });
         if (notice === EDIT_DECLINED) {
           imageReselectRef.current = null;
-          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+          setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
         } else if (typeof notice === 'string') {
           setEditNotice({ text: notice, error: false });
         }
@@ -3442,7 +3461,7 @@ export function WorkspaceCanvasView({
             bakedRotate: p.rotate,
           };
         });
-        if (!built) throw new Error('The page this image was placed on no longer exists.');
+        if (!built) throw new Error(tChrome('canvas.edit.imagePageGone'));
         // P7 (slice C): the PageCell click sentinel (w=h=0) degenerates the
         // appearance rect to the click point — route it as a natural-size
         // `at` placement instead of a drawn box.
@@ -3455,7 +3474,7 @@ export function WorkspaceCanvasView({
             ])
           : await onAddImage(built.path, built.appearance.page, built.appearance.rect);
         if (notice === EDIT_DECLINED) {
-          setEditNotice({ text: 'Edit cancelled — the document was left unchanged.', error: false });
+          setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
         } else if (typeof notice === 'string') {
           setEditNotice({ text: notice, error: false });
         }
@@ -3784,9 +3803,11 @@ export function WorkspaceCanvasView({
       );
       if (payloads.length === 0) {
         throw new Error(
-          skippedPageIds.length > 0
-            ? 'Those pages are no longer in the document.'
-            : 'Nothing selected to link.',
+          tChrome(
+            skippedPageIds.length > 0
+              ? 'canvas.link.pagesGone'
+              : 'canvas.link.nothingSelected',
+          ),
         );
       }
       for (const payload of payloads) await onAddLinks(payload.path, payload.links);
@@ -3821,16 +3842,21 @@ export function WorkspaceCanvasView({
           setMarks((prev) => prev.filter((m) => !applied.has(m.id)));
         } catch (err) {
           const name = payload.path.split(/[\\/]/).pop() || payload.path;
-          failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+          failures.push(
+            tChrome('canvas.common.fileFailure', {
+              name,
+              message: err instanceof Error ? err.message : String(err),
+            }),
+          );
         }
       }
       if (failures.length > 0) {
-        setRedactError(`Redaction failed — ${failures.join('; ')}. Those marks are still pending.`);
+        setRedactError(tChrome('canvas.redact.failed', { reasons: failures.join('; ') }));
       }
       return failures;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setRedactError(`Redaction failed — ${msg}. The marks are still pending.`);
+      setRedactError(tChrome('canvas.redact.failedSingle', { reasons: msg }));
       return [msg];
     } finally {
       applyingRef.current = false;
@@ -3881,7 +3907,12 @@ export function WorkspaceCanvasView({
           await onSaveRedactionMarks(payload.path, payload.regions);
         } catch (err) {
           const name = payload.path.split(/[\\/]/).pop() || payload.path;
-          failures.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+          failures.push(
+            tChrome('canvas.common.fileFailure', {
+              name,
+              message: err instanceof Error ? err.message : String(err),
+            }),
+          );
         }
       }
       for (const path of [...markPathsEverRef.current]) {
@@ -3894,12 +3925,12 @@ export function WorkspaceCanvasView({
         }
       }
       if (failures.length > 0) {
-        setRedactError(`Saving marks failed — ${failures.join('; ')}.`);
+        setRedactError(tChrome('canvas.redact.saveMarksFailed', { reasons: failures.join('; ') }));
       }
       return failures;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setRedactError(`Saving marks failed — ${msg}.`);
+      setRedactError(tChrome('canvas.redact.saveMarksFailed', { reasons: msg }));
       return [msg];
     } finally {
       savingRef.current = false;
@@ -3930,7 +3961,7 @@ export function WorkspaceCanvasView({
       return;
     }
     if (!sigPassword && sigSource.mode === 'pfx') {
-      setSignError('Enter the signer password.');
+      setSignError(tChrome('canvas.sign.enterPassword'));
       return;
     }
     if (fieldTarget && state.pageDirtyPaths.includes(fieldTarget.path)) {
@@ -3939,7 +3970,7 @@ export function WorkspaceCanvasView({
       // Unlike the value fill — which re-resolves renames by fingerprint —
       // a signature is not silently re-appliable, so refuse until the page
       // edits are applied and the target re-clicked against the fresh read.
-      setSignError('Apply the pending page changes first, then sign the field.');
+      setSignError(tChrome('canvas.sign.applyEditsFirst'));
       return;
     }
     if (placement && !placementDocsCurrent(state.files, docs, placement.path)) {
@@ -3949,7 +3980,7 @@ export function WorkspaceCanvasView({
       // could land on the wrong page. The invalidation effect clears the
       // placement when the buffer change lands; this covers the in-flight
       // window where it hasn't yet. Loud, not silent — the card stays open.
-      setSignError('The page this signature was placed on changed — draw the box again.');
+      setSignError(tChrome('canvas.sign.pageChanged'));
       return;
     }
     signingRef.current = true;
@@ -3971,7 +4002,7 @@ export function WorkspaceCanvasView({
           return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
         });
         if (!built) {
-          setSignError('The page this signature was placed on no longer exists.');
+          setSignError(tChrome('canvas.sign.pageGone'));
           return;
         }
         filePath = built.path;
@@ -3979,7 +4010,7 @@ export function WorkspaceCanvasView({
       }
       const file = state.files.get(filePath);
       if (!file) {
-        setSignError('The file this signature was placed on is no longer open.');
+        setSignError(tChrome('canvas.sign.fileClosed'));
         return;
       }
       const baseName = (filePath.split(/[\\/]/).pop() ?? 'document').replace(/\.pdfx?$/i, '');
@@ -4319,9 +4350,7 @@ export function WorkspaceCanvasView({
         // and refusing would be spurious. Leaving the canvas commits (the
         // gate), so this canvas-side guard is the only one needed.
         if (pathBlockedFromClose(docs, state.pageDirtyPaths, doc.path)) {
-          setMergeNotice(
-            `"${doc.name}" is merged into another document — Apply changes first, then close it.`,
-          );
+          setMergeNotice(tChrome('canvas.doc.mergedCannotClose', { name: doc.name }));
           return;
         }
         onCloseFile(doc.path);
@@ -4377,15 +4406,17 @@ export function WorkspaceCanvasView({
     return (
       <div className="canvas-view flex-1 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-lg text-neutral-400 mb-1">No documents open</p>
+          <p className="text-lg text-neutral-400 mb-1">
+            {tChrome('canvas.view.noDocuments')}
+          </p>
           <p className="text-sm text-neutral-500 mb-4">
-            Drop PDF files anywhere, or open them to lay them out here
+            {tChrome('canvas.view.dropHint')}
           </p>
           <button
             onClick={onOpenFiles}
             className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium"
           >
-            Open PDF
+            {tChrome('canvas.view.openPdf')}
           </button>
         </div>
       </div>
@@ -5026,17 +5057,19 @@ export function WorkspaceCanvasView({
         >
           <div className="text-sm text-neutral-200 font-medium">
             {sigFieldTarget
-              ? `Sign field "${sigFieldTarget.fieldName}"`
-              : 'Sign with a visible stamp'}
+              ? tChrome('canvas.sign.fieldTitle', { field: sigFieldTarget.fieldName })
+              : tChrome('canvas.sign.stampTitle')}
           </div>
           <p className="text-[11px] text-neutral-500 -mt-1.5">
-            {sigFieldTarget
-              ? 'The signature fills this existing field (its own box is the stamp); the signed copy is written to a NEW file — this file is left unchanged.'
-              : 'The stamp is drawn at the box you placed; the signed copy is written to a NEW file — this file is left unchanged.'}
+            {tChrome(
+              sigFieldTarget ? 'canvas.sign.fieldBlurb' : 'canvas.sign.stampBlurb',
+            )}
           </p>
           <SignerSourceFields value={sigSource} onChange={setSigSource} idPrefix="canvas-sign" />
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Password</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">
+              {tChrome('canvas.sign.password')}
+            </span>
             <input
               data-testid="canvas-sign-password"
               type="password"
@@ -5046,21 +5079,25 @@ export function WorkspaceCanvasView({
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Reason</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">
+              {tChrome('canvas.sign.reason')}
+            </span>
             <input
               type="text"
               value={sigReason}
-              placeholder="optional"
+              placeholder={tChrome('canvas.sign.optional')}
               onChange={(e) => setSigReason(e.target.value)}
               className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Location</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">
+              {tChrome('canvas.sign.location')}
+            </span>
             <input
               type="text"
               value={sigLocation}
-              placeholder="optional"
+              placeholder={tChrome('canvas.sign.optional')}
               onChange={(e) => setSigLocation(e.target.value)}
               className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
             />
@@ -5076,7 +5113,7 @@ export function WorkspaceCanvasView({
               }}
               className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
-              Cancel
+              {tChrome('canvas.common.cancel')}
             </button>
             <button
               data-testid="canvas-sign-apply"
@@ -5084,7 +5121,7 @@ export function WorkspaceCanvasView({
               disabled={signingBusy}
               className="px-2.5 py-1 text-xs text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-50 rounded font-medium"
             >
-              {signingBusy ? 'Signing…' : 'Sign & Save…'}
+              {tChrome(signingBusy ? 'canvas.sign.signing' : 'canvas.sign.apply')}
             </button>
           </div>
         </div>
@@ -5095,12 +5132,16 @@ export function WorkspaceCanvasView({
           data-testid="new-field-form"
           className="absolute bottom-4 left-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
         >
-          <div className="text-sm text-neutral-200 font-medium">New form field</div>
+          <div className="text-sm text-neutral-200 font-medium">
+            {tChrome('canvas.newfield.title')}
+          </div>
           <p className="text-[11px] text-neutral-500 -mt-1.5">
-            The field is created at the box you placed and is fillable right away.
+            {tChrome('canvas.newfield.blurb')}
           </p>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Name</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">
+              {tChrome('canvas.newfield.name')}
+            </span>
             <input
               data-testid="new-field-name"
               type="text"
@@ -5110,19 +5151,21 @@ export function WorkspaceCanvasView({
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Type</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">
+              {tChrome('canvas.newfield.type')}
+            </span>
             <select
               data-testid="new-field-type"
               value={nfType}
               onChange={(e) => setNfType(e.target.value as NewFieldType)}
               className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
             >
-              <option value="text">Text</option>
-              <option value="checkbox">Checkbox</option>
-              <option value="radio">Radio group</option>
-              <option value="dropdown">Dropdown</option>
-              <option value="optionlist">Option list</option>
-              <option value="signature">Signature (empty)</option>
+              <option value="text">{tChrome('canvas.newfield.type.text')}</option>
+              <option value="checkbox">{tChrome('canvas.newfield.type.checkbox')}</option>
+              <option value="radio">{tChrome('canvas.newfield.type.radio')}</option>
+              <option value="dropdown">{tChrome('canvas.newfield.type.dropdown')}</option>
+              <option value="optionlist">{tChrome('canvas.newfield.type.optionlist')}</option>
+              <option value="signature">{tChrome('canvas.newfield.type.signature')}</option>
             </select>
           </div>
           {nfType === 'text' && (
@@ -5133,17 +5176,19 @@ export function WorkspaceCanvasView({
                 onChange={() => setNfMultiline((v) => !v)}
                 className="rounded bg-neutral-800 border-neutral-700"
               />
-              Multiline
+              {tChrome('canvas.newfield.multiline')}
             </label>
           )}
           {(nfType === 'radio' || nfType === 'dropdown' || nfType === 'optionlist') && (
             <div className="flex items-start gap-2">
-              <span className="text-xs text-neutral-400 w-20 shrink-0 pt-1">Options</span>
+              <span className="text-xs text-neutral-400 w-20 shrink-0 pt-1">
+                {tChrome('canvas.newfield.options')}
+              </span>
               <textarea
                 data-testid="new-field-options"
                 value={nfOptions}
                 rows={3}
-                placeholder="one per line (or comma-separated)"
+                placeholder={tChrome('canvas.newfield.optionsPlaceholder')}
                 onChange={(e) => setNfOptions(e.target.value)}
                 className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500 resize-y"
               />
@@ -5158,7 +5203,7 @@ export function WorkspaceCanvasView({
               }}
               className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
-              Cancel
+              {tChrome('canvas.common.cancel')}
             </button>
             <button
               data-testid="new-field-create"
@@ -5166,7 +5211,7 @@ export function WorkspaceCanvasView({
               disabled={creatingField}
               className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded font-medium"
             >
-              {creatingField ? 'Creating…' : 'Create field'}
+              {tChrome(creatingField ? 'canvas.newfield.creating' : 'canvas.newfield.create')}
             </button>
           </div>
         </div>
@@ -5177,9 +5222,11 @@ export function WorkspaceCanvasView({
           data-testid="add-text-form"
           className="absolute bottom-4 left-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
         >
-          <div className="text-sm text-neutral-200 font-medium">Add text</div>
+          <div className="text-sm text-neutral-200 font-medium">
+            {tChrome('canvas.addtext.title')}
+          </div>
           <p className="text-[11px] text-neutral-500 -mt-1.5">
-            Text fills the box you drew and wraps to its width. It stays searchable and editable.
+            {tChrome('canvas.addtext.blurb')}
           </p>
           <textarea
             data-testid="add-text-input"
@@ -5187,7 +5234,7 @@ export function WorkspaceCanvasView({
             value={atText}
             rows={3}
             autoFocus
-            placeholder="Type the text to add…"
+            placeholder={tChrome('canvas.addtext.placeholder')}
             onChange={(e) => {
               setAtText(e.target.value);
               // T15: character positions drift under edits — clear spans
@@ -5203,15 +5250,18 @@ export function WorkspaceCanvasView({
             className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500 resize-y"
           />
           <div className="flex items-center gap-1.5 flex-wrap" data-testid="add-text-span-row">
-            <span className="text-xs text-neutral-400 w-16 shrink-0" title="Select text above, choose a look, then Style selection">
-              Spans
+            <span
+              className="text-xs text-neutral-400 w-16 shrink-0"
+              title={tChrome('canvas.addtext.spansTitle')}
+            >
+              {tChrome('canvas.addtext.spans')}
             </span>
             <input
               data-testid="add-text-span-size"
               type="number"
               min={1}
               max={999}
-              placeholder="size"
+              placeholder={tChrome('canvas.addtext.sizePlaceholder')}
               value={atSpanSize}
               onChange={(e) => setAtSpanSize(e.target.value)}
               className="w-14 px-1.5 py-0.5 bg-neutral-800 border border-neutral-700 rounded text-xs"
@@ -5230,14 +5280,14 @@ export function WorkspaceCanvasView({
               onClick={() => setAtSpanBold((v) => !v)}
               className={`px-1.5 py-0.5 text-xs font-bold rounded border ${atSpanBold ? 'border-emerald-500 text-emerald-400' : 'border-neutral-700 text-neutral-400'}`}
             >
-              B
+              {tChrome('canvas.addtext.bold')}
             </button>
             <button
               type="button"
               onClick={() => setAtSpanItalic((v) => !v)}
               className={`px-1.5 py-0.5 text-xs italic rounded border ${atSpanItalic ? 'border-emerald-500 text-emerald-400' : 'border-neutral-700 text-neutral-400'}`}
             >
-              I
+              {tChrome('canvas.addtext.italic')}
             </button>
             <button
               data-testid="add-text-span-apply"
@@ -5248,7 +5298,7 @@ export function WorkspaceCanvasView({
                 const start = ta.selectionStart ?? 0;
                 const end = ta.selectionEnd ?? 0;
                 if (start >= end) {
-                  setAtError('Select some text above first, then apply the span style.');
+                  setAtError(tChrome('canvas.addtext.selectTextFirst'));
                   return;
                 }
                 const size = parseFloat(atSpanSize);
@@ -5264,7 +5314,7 @@ export function WorkspaceCanvasView({
                 if (atSpanBold) span.bold = true;
                 if (atSpanItalic) span.italic = true;
                 if (span.size === undefined && !span.color && !span.bold && !span.italic) {
-                  setAtError('Pick a size, colour, or style for the span first.');
+                  setAtError(tChrome('canvas.addtext.pickAStyleFirst'));
                   return;
                 }
                 setAtError(null);
@@ -5278,7 +5328,7 @@ export function WorkspaceCanvasView({
               }}
               className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
-              Style selection
+              {tChrome('canvas.addtext.styleSelection')}
             </button>
           </div>
           {atSpans.length > 0 && (
@@ -5287,12 +5337,19 @@ export function WorkspaceCanvasView({
                 <span
                   key={`${s.start}-${s.end}-${i}`}
                   className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] bg-neutral-800 border border-neutral-700 rounded text-neutral-300"
-                  title={`"${atText.slice(s.start, s.end)}"`}
+                  title={tChrome('canvas.addtext.spanChipTitle', {
+                    text: atText.slice(s.start, s.end),
+                  })}
                 >
-                  {s.start}–{s.end}
-                  {s.size !== undefined ? ` · ${s.size}pt` : ''}
-                  {s.bold ? ' · B' : ''}
-                  {s.italic ? ' · I' : ''}
+                  {tChrome('canvas.addtext.spanRange', {
+                    start: tNumber(s.start),
+                    end: tNumber(s.end),
+                  })}
+                  {s.size !== undefined
+                    ? tChrome('canvas.addtext.spanSize', { size: tNumber(s.size) })
+                    : ''}
+                  {s.bold ? tChrome('canvas.addtext.spanBold') : ''}
+                  {s.italic ? tChrome('canvas.addtext.spanItalic') : ''}
                   {s.color ? (
                     <span
                       className="inline-block w-2.5 h-2.5 rounded-sm"
@@ -5311,20 +5368,24 @@ export function WorkspaceCanvasView({
             </div>
           )}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-16 shrink-0">Font</span>
+            <span className="text-xs text-neutral-400 w-16 shrink-0">
+              {tChrome('canvas.addtext.font')}
+            </span>
             <select
               data-testid="add-text-family"
               value={atFamily}
               onChange={(e) => setAtFamily(e.target.value as 'sans' | 'serif' | 'mono')}
               className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
             >
-              <option value="sans">Sans-serif</option>
-              <option value="serif">Serif</option>
-              <option value="mono">Monospace</option>
+              <option value="sans">{tChrome('canvas.addtext.family.sans')}</option>
+              <option value="serif">{tChrome('canvas.addtext.family.serif')}</option>
+              <option value="mono">{tChrome('canvas.addtext.family.mono')}</option>
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-16 shrink-0">Size</span>
+            <span className="text-xs text-neutral-400 w-16 shrink-0">
+              {tChrome('canvas.addtext.size')}
+            </span>
             <input
               data-testid="add-text-size"
               type="number"
@@ -5344,7 +5405,7 @@ export function WorkspaceCanvasView({
             <button
               type="button"
               data-testid="add-text-rotate"
-              title="Rotation — cycle the quarter turns (the field beside takes any angle)"
+              title={tChrome('canvas.addtext.rotateTitle')}
               onClick={() =>
                 setAtRotate((r) => {
                   const next = (Math.floor(r / 90) * 90 + 90) % 360;
@@ -5362,12 +5423,14 @@ export function WorkspaceCanvasView({
               >
                 →
               </span>{' '}
-              {Math.round(atRotate * 10) / 10}°
+              {tChrome('canvas.addtext.degrees', {
+                deg: tNumber(Math.round(atRotate * 10) / 10),
+              })}
             </button>
             <input
               type="number"
               data-testid="add-text-rotate-deg"
-              title="Rotation in degrees — any angle (T19); quarter turns keep the reading-direction layout"
+              title={tChrome('canvas.addtext.rotateDegTitle')}
               min={-360}
               max={720}
               step={1}
@@ -5385,7 +5448,7 @@ export function WorkspaceCanvasView({
               type="button"
               data-testid="add-text-bold"
               aria-pressed={atBold}
-              title="Bold — authors in the bundled bold face"
+              title={tChrome('canvas.addtext.boldTitle')}
               onClick={() => setAtBold((b) => !b)}
               className={`px-2 py-1 text-xs font-bold border rounded ${
                 atBold
@@ -5393,13 +5456,13 @@ export function WorkspaceCanvasView({
                   : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
               }`}
             >
-              B
+              {tChrome('canvas.addtext.bold')}
             </button>
             <button
               type="button"
               data-testid="add-text-kern"
               aria-pressed={atKern}
-              title="Kerning — tightens pairs like AV and To using the face's own metrics"
+              title={tChrome('canvas.addtext.kernTitle')}
               onClick={() => setAtKern((k) => !k)}
               className={`px-2 py-1 text-xs border rounded ${
                 atKern
@@ -5407,13 +5470,13 @@ export function WorkspaceCanvasView({
                   : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
               }`}
             >
-              AV
+              {tChrome('canvas.addtext.kern')}
             </button>
             <button
               type="button"
               data-testid="add-text-italic"
               aria-pressed={atItalic}
-              title="Italic — authors in the bundled italic face"
+              title={tChrome('canvas.addtext.italicTitle')}
               onClick={() => setAtItalic((i) => !i)}
               className={`px-2 py-1 text-xs italic border rounded ${
                 atItalic
@@ -5421,7 +5484,7 @@ export function WorkspaceCanvasView({
                   : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
               }`}
             >
-              I
+              {tChrome('canvas.addtext.italic')}
             </button>
             {/* 9.K2 OpenType features. Authoring always renders a bundled face,
                 so a feature switches to Libertinus Serif (Liberation has none). */}
@@ -5429,7 +5492,7 @@ export function WorkspaceCanvasView({
               type="button"
               data-testid="add-text-smallcaps"
               aria-pressed={atSmallCaps}
-              title="Small caps — authors in Libertinus Serif (carries real small caps)"
+              title={tChrome('canvas.addtext.smallCapsTitle')}
               onClick={() => setAtSmallCaps((s) => !s)}
               className={`px-2 py-1 text-xs border rounded ${
                 atSmallCaps
@@ -5438,13 +5501,13 @@ export function WorkspaceCanvasView({
               }`}
               style={{ fontVariantCaps: 'all-small-caps' }}
             >
-              Sc
+              {tChrome('canvas.addtext.smallCaps')}
             </button>
             <button
               type="button"
               data-testid="add-text-alternates"
               aria-pressed={atAlternates}
-              title="Stylistic alternates (salt) — authors in Libertinus Serif"
+              title={tChrome('canvas.addtext.alternatesTitle')}
               onClick={() => setAtAlternates((a) => !a)}
               className={`px-2 py-1 text-xs border rounded ${
                 atAlternates
@@ -5452,7 +5515,7 @@ export function WorkspaceCanvasView({
                   : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
               }`}
             >
-              Alt
+              {tChrome('canvas.addtext.alternates')}
             </button>
             {atAlternates && (
               <input
@@ -5462,14 +5525,16 @@ export function WorkspaceCanvasView({
                 max={99}
                 step={1}
                 value={atAltIndex}
-                title="Which stylistic alternate to use, when the face offers several"
+                title={tChrome('canvas.addtext.altIndexTitle')}
                 onChange={(e) =>
                   setAtAltIndex(Math.max(0, Math.min(99, Math.trunc(parseFloat(e.target.value) || 0))))
                 }
                 className="w-12 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
               />
             )}
-            <span className="text-xs text-neutral-400 flex-1 text-right shrink-0">Colour</span>
+            <span className="text-xs text-neutral-400 flex-1 text-right shrink-0">
+              {tChrome('canvas.addtext.colour')}
+            </span>
             <input
               data-testid="add-text-color"
               type="color"
@@ -5480,7 +5545,7 @@ export function WorkspaceCanvasView({
           </div>
           {atFits === false && (
             <div data-testid="add-text-overflow" className="text-xs text-amber-400">
-              The text extends below the box — it will continue past it.
+              {tChrome('canvas.addtext.overflow')}
             </div>
           )}
           {atError && <div data-testid="add-text-error" className="text-xs text-red-400">{atError}</div>}
@@ -5489,7 +5554,7 @@ export function WorkspaceCanvasView({
               onClick={() => onClearAddTextPlacement()}
               className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
-              Cancel
+              {tChrome('canvas.common.cancel')}
             </button>
             <button
               data-testid="add-text-create"
@@ -5497,7 +5562,7 @@ export function WorkspaceCanvasView({
               disabled={creatingText}
               className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded font-medium"
             >
-              {creatingText ? 'Adding…' : 'Add text'}
+              {tChrome(creatingText ? 'canvas.addtext.adding' : 'canvas.addtext.title')}
             </button>
           </div>
         </div>
@@ -5513,11 +5578,10 @@ export function WorkspaceCanvasView({
           }`}
         >
           <span className="flex-1">
-            Signed as <strong>{signDone.signer ?? '(unknown)'}</strong>
-            {signDone.ok
-              ? ' — valid, covers the whole document. '
-              : ' — but the signature did not verify as expected. '}
-            Saved to {signDone.output}
+            {tChrome(signDone.ok ? 'canvas.sign.doneOk' : 'canvas.sign.doneBad', {
+              signer: signDone.signer ?? tChrome('canvas.sign.unknownSigner'),
+              output: signDone.output,
+            })}
           </span>
           <button onClick={() => setSignDone(null)} className="hover:text-white">×</button>
         </div>
@@ -5550,20 +5614,18 @@ export function WorkspaceCanvasView({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-5 py-3 border-b border-neutral-800">
-              <h3 className="text-sm font-semibold">Redact content</h3>
+              <h3 className="text-sm font-semibold">{tChrome('canvas.redact.title')}</h3>
             </div>
             <div className="px-5 py-4 text-sm text-neutral-300 space-y-2">
               <p>
-                Permanently remove the content under {liveMarks.length} marked region
-                {liveMarks.length === 1 ? '' : 's'} across{' '}
-                {new Set(liveMarks.map((m) => m.pageId)).size} page
-                {new Set(liveMarks.map((m) => m.pageId)).size === 1 ? '' : 's'}?
+                {tChromeCount('canvas.redact.confirm', liveMarks.length, {
+                  pages: tChromeCount(
+                    'canvas.redact.pageCount',
+                    new Set(liveMarks.map((m) => m.pageId)).size,
+                  ),
+                })}
               </p>
-              <p className="text-xs text-neutral-400">
-                Text and images under each region are removed from the file's content, not just
-                covered. Undo can restore the file while it stays open; once saved, the content is
-                gone for good.
-              </p>
+              <p className="text-xs text-neutral-400">{tChrome('canvas.redact.warning')}</p>
             </div>
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-neutral-800">
               <button
@@ -5571,7 +5633,7 @@ export function WorkspaceCanvasView({
                 onClick={() => setConfirmRedact(false)}
                 className="px-3 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
               >
-                Cancel
+                {tChrome('canvas.common.cancel')}
               </button>
               <button
                 data-testid="redact-confirm-btn"
@@ -5581,7 +5643,7 @@ export function WorkspaceCanvasView({
                 }}
                 className="px-3 py-1 text-xs text-white bg-red-600 hover:bg-red-500 rounded font-medium"
               >
-                Redact
+                {tChrome('canvas.redact.apply')}
               </button>
             </div>
           </div>
