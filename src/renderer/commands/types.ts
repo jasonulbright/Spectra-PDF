@@ -158,6 +158,11 @@ export interface CanvasServices {
    * when the box isn't on screen (organize view) — the command's `when`
    * gates on the view mode, this is the belt for the render race. */
   goToPage(): boolean;
+  /** N11 slice B: drop every ruler guide (View ▸ Clear Guides). Guides are
+   * per-document VIEW state owned by the canvas — the redaction-mark
+   * lifetime — so the command routes here rather than through the reducer or
+   * the snap-preference store. */
+  clearGuides(): void;
   /** F6: arm the canvas's visible-signature placement from a PANEL, with the
    * panel's signer details prefilled into the canvas sign card. Optional —
    * present only while the canvas view is mounted with a document. */

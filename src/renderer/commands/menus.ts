@@ -231,6 +231,18 @@ export const MENUS: MenuDef[] = [
       cmd('view.readingMode', 'menuitem-view-reading-mode'),
       cmd('view.propertiesBar', 'menuitem-view-properties-bar'),
       cmd('view.snapping', 'menuitem-view-snapping'),
+      {
+        kind: 'submenu',
+        id: 'view-rulers-grids',
+        label: 'Rulers & Grids',
+        items: [
+          cmd('view.rulers', 'menuitem-view-rulers'),
+          cmd('view.grid', 'menuitem-view-grid'),
+          sep,
+          cmd('view.guides', 'menuitem-view-guides'),
+          cmd('view.clearGuides', 'menuitem-view-clear-guides'),
+        ],
+      },
       cmd('view.customizeToolbar', 'menuitem-view-customize-toolbar'),
       cmd('view.presentation', 'menuitem-view-presentation'),
       cmd('tools.open.organize', 'menuitem-view-organize'),

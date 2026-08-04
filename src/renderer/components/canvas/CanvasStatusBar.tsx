@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { DocViewMode } from '../../state/types';
 import { tChrome, tChromeCount, type UiKey } from '../../i18n';
-import type { SnapType } from '../../lib/snap';
+import { SNAP_ANGLE_MAX, SNAP_ANGLE_MIN, type SnapType } from '../../lib/snap';
+import { GRID_SPACING_MAX, GRID_SPACING_MIN } from '../../lib/rulers';
+import { MEASURE_UNITS, type MeasureUnit } from '../../lib/measure';
 import {
   SNAP_RADIUS_MAX,
   SNAP_RADIUS_MIN,
@@ -23,20 +25,22 @@ import {
 // stable (only the removed duplicate Find toggle is gone).
 
 /**
- * The snap types the popover offers TODAY.
+ * The snap types the popover offers.
  *
- * `guide` and `grid` are real types in `lib/snap.ts` (their candidate math is
- * written and tested) but their SOURCES — ruler guides and a configurable
- * grid — arrive with slice B. A checkbox that toggles something with no
- * source is a control that does nothing, which the completeness rule forbids
- * shipping; the persisted settings already carry all seven, so slice B adds
- * two rows here and migrates nothing.
+ * All SEVEN as of slice B: `guide` and `grid` were written and tested in
+ * `lib/snap.ts` from birth but stayed hidden while they had no sources, since
+ * a checkbox that toggles something with no source is a control that does
+ * nothing. Ruler guides and the configurable grid are those sources, so the
+ * rows appear — and because the persisted settings carried all seven from
+ * birth, nothing migrates.
  */
 const SNAP_TYPE_ROWS: readonly { type: SnapType; label: UiKey }[] = [
   { type: 'endpoint', label: 'canvas.snap.type.endpoint' },
   { type: 'intersection', label: 'canvas.snap.type.intersection' },
   { type: 'midpoint', label: 'canvas.snap.type.midpoint' },
   { type: 'center', label: 'canvas.snap.type.center' },
+  { type: 'guide', label: 'canvas.snap.type.guide' },
+  { type: 'grid', label: 'canvas.snap.type.grid' },
   { type: 'edge', label: 'canvas.snap.type.edge' },
 ];
 
@@ -45,9 +49,13 @@ const SNAP_TYPE_ROWS: readonly { type: SnapType; label: UiKey }[] = [
  * file, so they persist in app settings — the parent owns that write. */
 function SnapSegment({
   snap,
+  scaleUnit,
   onChange,
 }: {
   snap: SnapSettings;
+  /** The measuring scale's REPORTED unit — what a scaled grid's spacing is
+   * read in. Shown in the unit slot so "1" is never ambiguous. */
+  scaleUnit: MeasureUnit;
   onChange: (next: SnapSettings) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -130,6 +138,99 @@ function SnapSegment({
             {/* `px` is notation, identical in every locale. */}
             <span aria-hidden="true">px</span>
           </label>
+          <label className="canvas-status-snap-row" title={tChrome('chrome.status.snapAngleTitle')}>
+            <span>{tChrome('chrome.status.snapAngle')}</span>
+            <input
+              type="number"
+              data-testid="snap-angle"
+              min={SNAP_ANGLE_MIN}
+              max={SNAP_ANGLE_MAX}
+              value={snap.angleDeg}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (!Number.isFinite(v)) return;
+                onChange({
+                  ...snap,
+                  angleDeg: Math.min(SNAP_ANGLE_MAX, Math.max(SNAP_ANGLE_MIN, Math.round(v))),
+                });
+              }}
+              className="canvas-status-snap-number"
+            />
+            {/* The degree sign is notation, like `px`. */}
+            <span aria-hidden="true">°</span>
+          </label>
+          <div className="canvas-status-snap-title">{tChrome('chrome.status.snapGridTitle')}</div>
+          <label className="canvas-status-snap-row">
+            <input
+              type="checkbox"
+              data-testid="grid-show"
+              checked={snap.showGrid}
+              onChange={(e) => onChange({ ...snap, showGrid: e.target.checked })}
+            />
+            <span>{tChrome('chrome.status.snapGridShow')}</span>
+          </label>
+          <label className="canvas-status-snap-row">
+            <span>{tChrome('chrome.status.snapGridSpacing')}</span>
+            <input
+              type="number"
+              data-testid="grid-spacing"
+              min={GRID_SPACING_MIN}
+              max={GRID_SPACING_MAX}
+              step="any"
+              value={snap.grid.spacing}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (!Number.isFinite(v) || v <= 0) return;
+                onChange({
+                  ...snap,
+                  grid: {
+                    ...snap.grid,
+                    spacing: Math.min(GRID_SPACING_MAX, Math.max(GRID_SPACING_MIN, v)),
+                  },
+                });
+              }}
+              className="canvas-status-snap-number"
+            />
+          </label>
+          <label className="canvas-status-snap-row">
+            <span>{tChrome('chrome.status.snapGridUnit')}</span>
+            {/* Unit SYMBOLS are notation (the measure-unit rule) — the label
+                localizes, the options do not. Disabled while the spacing is
+                read in the drawing scale's own unit, which the scale names. */}
+            <select
+              data-testid="grid-unit"
+              aria-label={tChrome('chrome.status.snapGridUnit')}
+              disabled={snap.grid.useScale}
+              value={snap.grid.useScale ? scaleUnit : snap.grid.unit}
+              onChange={(e) =>
+                onChange({
+                  ...snap,
+                  grid: { ...snap.grid, unit: e.target.value as MeasureUnit },
+                })
+              }
+              className="canvas-status-snap-select"
+            >
+              {MEASURE_UNITS.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label
+            className="canvas-status-snap-row"
+            title={tChrome('chrome.status.snapGridScaledTitle')}
+          >
+            <input
+              type="checkbox"
+              data-testid="grid-scaled"
+              checked={snap.grid.useScale}
+              onChange={(e) =>
+                onChange({ ...snap, grid: { ...snap.grid, useScale: e.target.checked } })
+              }
+            />
+            <span>{tChrome('chrome.status.snapGridScaled')}</span>
+          </label>
         </div>
       )}
     </div>
@@ -179,6 +280,8 @@ interface CanvasStatusBarProps {
   /** N11 slice A: the snap segment. Absent on the Organize board, which has
    * no drawing gestures to snap. */
   snap?: SnapSettings;
+  /** Slice B: the live measuring scale's reported unit, for the grid rows. */
+  snapScaleUnit?: MeasureUnit;
   onSnapChange?: (next: SnapSettings) => void;
 }
 
@@ -308,7 +411,11 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
       )}
       <div className="flex-1" />
       {props.snap && props.onSnapChange && (
-        <SnapSegment snap={props.snap} onChange={props.onSnapChange} />
+        <SnapSegment
+          snap={props.snap}
+          scaleUnit={props.snapScaleUnit ?? 'in'}
+          onChange={props.onSnapChange}
+        />
       )}
       <button
         type="button"
