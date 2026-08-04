@@ -7,6 +7,7 @@ import {
   type VerifyResult,
 } from '../../lib/signatures';
 import type { NavPanelComponentProps } from './types';
+import { tChrome } from '../../i18n';
 
 // Signatures nav panel (Phase 4 M3.3b, § 5) — a compact READ view over the same
 // verify_signatures data the Tools ▸ Signatures panel shows. The Tools panel is
@@ -142,7 +143,7 @@ function SignatureRow({ sig }: { sig: SignatureEntry }): React.ReactElement {
         </span>
       </div>
       <div className="signature-nav-status" data-testid="signature-nav-status">
-        {SIGNATURE_STATUS_LABEL[status]}
+        {tChrome(SIGNATURE_STATUS_LABEL[status])}
       </div>
       <div className="signature-nav-detail">
         {sig.intact ? 'integrity intact' : 'integrity BROKEN'}

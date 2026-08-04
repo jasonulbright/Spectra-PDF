@@ -52,9 +52,12 @@ export function classifySignature(sig: SignatureEntry): SignatureStatus {
   return 'valid';
 }
 
-/** Badge text per status — identical wording across both panels. */
-export const SIGNATURE_STATUS_LABEL: Record<SignatureStatus, string> = {
-  invalid: 'Invalid',
-  modified: 'Valid — document changed after signing',
-  valid: 'Cryptographically valid',
-};
+/** Badge text per status — identical wording across both panels. N12: the
+ * values are CATALOG KEYS (both consumers render `tChrome(...)`), kept here
+ * so the two surfaces still cannot drift on the wording — they share the
+ * key, and the catalog owns the text. */
+export const SIGNATURE_STATUS_LABEL = {
+  invalid: 'panel.sig.statusInvalid',
+  modified: 'panel.sig.statusModified',
+  valid: 'panel.sig.statusValid',
+} as const satisfies Record<SignatureStatus, string>;
