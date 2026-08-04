@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { CanvasTool, PageAnnotation } from '../../state/types';
 import { ANNOTATION_PALETTE } from './PageCell';
 import {
@@ -10,6 +11,7 @@ import {
   type RotateDirection,
   type SizeMatchMode,
 } from '../../lib/annotation-manipulation';
+import { tChrome, tChromeCount, tNumber, type UiKey } from '../../i18n';
 
 /** Kinds the style controls (stroke width / opacity / fill) apply to. */
 const styleable = (a: PageAnnotation): boolean =>
@@ -65,52 +67,65 @@ interface PropertiesBarProps {
   onClose: () => void;
 }
 
-const KIND_LABELS: Record<PageAnnotation['kind'], string> = {
-  highlight: 'Highlight box',
-  freetext: 'Text box',
-  ink: 'Ink stroke',
-  stamp: 'Stamp',
-  textmarkup: 'Text markup',
-  note: 'Sticky note',
-  measure: 'Measurement',
-  shape: 'Shape',
-  callout: 'Callout',
+const KIND_KEYS: Record<PageAnnotation['kind'], UiKey> = {
+  highlight: 'canvas.pbar.kind.highlight',
+  freetext: 'canvas.pbar.kind.freetext',
+  ink: 'canvas.pbar.kind.ink',
+  stamp: 'canvas.pbar.kind.stamp',
+  textmarkup: 'canvas.pbar.kind.textmarkup',
+  note: 'canvas.pbar.kind.note',
+  measure: 'canvas.pbar.kind.measure',
+  shape: 'canvas.pbar.kind.shape',
+  callout: 'canvas.pbar.kind.callout',
 };
 
-const SHAPE_LABELS: Record<string, string> = {
-  rect: 'Rectangle',
-  ellipse: 'Ellipse',
-  line: 'Line',
-  arrow: 'Arrow',
-  polygon: 'Polygon',
-  polyline: 'Polyline',
-  cloud: 'Cloud',
+// The shape names are the SAME words the secondary toolbar's shape picker
+// shows, so they read the same keys — a second copy would let one strip call
+// a figure an Ellipse while the other calls it an Oval in the same language.
+const SHAPE_KEYS: Record<string, UiKey> = {
+  rect: 'canvas.shape.rect',
+  ellipse: 'canvas.shape.ellipse',
+  line: 'canvas.shape.line',
+  arrow: 'canvas.shape.arrow',
+  polygon: 'canvas.shape.polygon',
+  polyline: 'canvas.shape.polyline',
+  cloud: 'canvas.shape.cloud',
 };
 
-const MARKUP_LABELS: Record<string, string> = {
-  highlight: 'Highlight',
-  underline: 'Underline',
-  strikeout: 'Strike out',
-  squiggly: 'Squiggly',
+const MARKUP_KEYS: Record<string, UiKey> = {
+  highlight: 'canvas.pbar.markup.highlight',
+  underline: 'canvas.pbar.markup.underline',
+  strikeout: 'canvas.pbar.markup.strikeout',
+  squiggly: 'canvas.pbar.markup.squiggly',
+};
+
+/** The "New <mode> color" heading, one whole sentence per comment mode. */
+const NEW_COLOR_KEYS: Record<string, UiKey> = {
+  highlight: 'canvas.pbar.newColor.highlight',
+  freetext: 'canvas.pbar.newColor.freetext',
+  ink: 'canvas.pbar.newColor.ink',
+  stamp: 'canvas.pbar.newColor.stamp',
 };
 
 // The comment modes whose tool defaults the bar can show.
 const COMMENT_MODES: readonly CanvasTool[] = ['highlight', 'freetext', 'ink', 'stamp'];
 
-const ALIGN_BUTTONS: { mode: AlignMode; label: string; glyph: string }[] = [
-  { mode: 'left', label: 'Align left edges', glyph: '⭰' },
-  { mode: 'centerH', label: 'Align horizontal centers', glyph: '⇹' },
-  { mode: 'right', label: 'Align right edges', glyph: '⭲' },
-  { mode: 'top', label: 'Align top edges', glyph: '⭱' },
-  { mode: 'centerV', label: 'Align vertical centers', glyph: '⇳' },
-  { mode: 'bottom', label: 'Align bottom edges', glyph: '⭳' },
+// The align wording is shared with the image align/distribute row on the
+// secondary toolbar — same glyphs, same sentence, one key each.
+const ALIGN_BUTTONS: { mode: AlignMode; key: UiKey; glyph: string }[] = [
+  { mode: 'left', key: 'canvas.edit.alignLeft', glyph: '⭰' },
+  { mode: 'centerH', key: 'canvas.edit.alignCenterh', glyph: '⇹' },
+  { mode: 'right', key: 'canvas.edit.alignRight', glyph: '⭲' },
+  { mode: 'top', key: 'canvas.edit.alignTop', glyph: '⭱' },
+  { mode: 'centerV', key: 'canvas.edit.alignCenterv', glyph: '⇳' },
+  { mode: 'bottom', key: 'canvas.edit.alignBottom', glyph: '⭳' },
 ];
 
-const ZORDER_BUTTONS: { dir: 'front' | 'forward' | 'backward' | 'back'; label: string; glyph: string }[] = [
-  { dir: 'front', label: 'Bring to front', glyph: '⤒' },
-  { dir: 'forward', label: 'Bring forward', glyph: '↑' },
-  { dir: 'backward', label: 'Send backward', glyph: '↓' },
-  { dir: 'back', label: 'Send to back', glyph: '⤓' },
+const ZORDER_BUTTONS: { dir: 'front' | 'forward' | 'backward' | 'back'; key: UiKey; glyph: string }[] = [
+  { dir: 'front', key: 'canvas.pbar.z.front', glyph: '⤒' },
+  { dir: 'forward', key: 'canvas.pbar.z.forward', glyph: '↑' },
+  { dir: 'backward', key: 'canvas.pbar.z.backward', glyph: '↓' },
+  { dir: 'back', key: 'canvas.pbar.z.back', glyph: '⤓' },
 ];
 
 export function PropertiesBar({
@@ -131,28 +146,33 @@ export function PropertiesBar({
   onRotateFlip,
   onClose,
 }: PropertiesBarProps): React.JSX.Element {
+  useTranslation();
   const a = selected?.annotation ?? null;
   const label = a
     ? a.kind === 'textmarkup'
-      ? (MARKUP_LABELS[a.markupType ?? 'highlight'] ?? 'Text markup')
+      ? tChrome(MARKUP_KEYS[a.markupType ?? 'highlight'] ?? 'canvas.pbar.kind.textmarkup')
       : a.kind === 'shape'
-        ? (SHAPE_LABELS[a.shapeType ?? 'rect'] ?? 'Shape')
-        : KIND_LABELS[a.kind]
+        ? tChrome(SHAPE_KEYS[a.shapeType ?? 'rect'] ?? 'canvas.pbar.kind.shape')
+        : tChrome(KIND_KEYS[a.kind])
     : null;
   const multi = selectedGroup.length > 1;
   const movableCount = selectedGroup.filter(isTransformable).length;
   const resizableCount = selectedGroup.filter(isResizable).length;
   const showToolDefaults = !a && !multi && COMMENT_MODES.includes(tool);
   const zOrder = (
-    <span className="properties-bar-swatches" role="group" aria-label="Z-order">
+    <span
+      className="properties-bar-swatches"
+      role="group"
+      aria-label={tChrome('canvas.pbar.zorderGroup')}
+    >
       {ZORDER_BUTTONS.map((b) => (
         <button
           key={b.dir}
           type="button"
           data-testid={`pbar-z-${b.dir}`}
           className="properties-bar-action"
-          title={b.label}
-          aria-label={b.label}
+          title={tChrome(b.key)}
+          aria-label={tChrome(b.key)}
           onClick={() => onReorder(b.dir)}
         >
           {b.glyph}
@@ -165,32 +185,36 @@ export function PropertiesBar({
   const styleRef = selectedGroup.find(styleable) ?? null;
   const anyFillable = selectedGroup.some(fillable);
   const styleControls = styleRef ? (
-    <span className="properties-bar-swatches" role="group" aria-label="Style">
+    <span
+      className="properties-bar-swatches"
+      role="group"
+      aria-label={tChrome('canvas.pbar.styleGroup')}
+    >
       <select
         data-testid="pbar-stroke-width"
         className="properties-bar-select"
-        title="Stroke width"
-        aria-label="Stroke width"
+        title={tChrome('canvas.pbar.strokeWidth')}
+        aria-label={tChrome('canvas.pbar.strokeWidth')}
         value={String(styleRef.strokeWidth ?? (styleRef.kind === 'callout' ? 1 : 2))}
         onChange={(e) => onRestyle({ strokeWidth: parseFloat(e.target.value) })}
       >
         {['1', '2', '3', '4', '6', '8', '12'].map((v) => (
           <option key={v} value={v}>
-            {v} pt
+            {tChrome('canvas.pbar.strokeWidthOption', { width: tNumber(Number(v)) })}
           </option>
         ))}
       </select>
       <select
         data-testid="pbar-opacity"
         className="properties-bar-select"
-        title="Opacity"
-        aria-label="Opacity"
+        title={tChrome('canvas.pbar.opacity')}
+        aria-label={tChrome('canvas.pbar.opacity')}
         value={String(Math.round((styleRef.opacity ?? 1) * 100))}
         onChange={(e) => onRestyle({ opacity: parseInt(e.target.value, 10) / 100 })}
       >
         {['25', '50', '75', '100'].map((v) => (
           <option key={v} value={v}>
-            {v}%
+            {tChrome('canvas.pbar.opacityOption', { percent: tNumber(Number(v)) })}
           </option>
         ))}
       </select>
@@ -200,8 +224,8 @@ export function PropertiesBar({
             type="button"
             data-testid="pbar-fill-none"
             className={'properties-bar-action' + (styleRef.fillColor ? '' : ' active')}
-            title="No fill"
-            aria-label="No fill"
+            title={tChrome('canvas.pbar.noFill')}
+            aria-label={tChrome('canvas.pbar.noFill')}
             onClick={() => onRestyle({ fillColor: null })}
           >
             ∅
@@ -213,7 +237,7 @@ export function PropertiesBar({
               data-testid={`pbar-fill-${c.slice(1)}`}
               className={'properties-bar-swatch pbar-fill-swatch' + (styleRef.fillColor === c ? ' active' : '')}
               style={{ backgroundColor: c }}
-              title={`Fill with ${c}`}
+              title={tChrome('canvas.pbar.fillWith', { color: c })}
               aria-pressed={styleRef.fillColor === c}
               onClick={() => onRestyle({ fillColor: c })}
             />
@@ -226,13 +250,17 @@ export function PropertiesBar({
   // the point list, so a quarter-turn is exactly representable in the file.
   const anyRotatable = selectedGroup.some(isRotatable);
   const rotateFlip = anyRotatable ? (
-    <span className="properties-bar-swatches" role="group" aria-label="Rotate and flip">
+    <span
+      className="properties-bar-swatches"
+      role="group"
+      aria-label={tChrome('canvas.pbar.rotateFlipGroup')}
+    >
       <button
         type="button"
         data-testid="pbar-rotate-ccw"
         className="properties-bar-action"
-        title="Rotate 90° counter-clockwise"
-        aria-label="Rotate 90° counter-clockwise"
+        title={tChrome('canvas.edit.rotateCcw')}
+        aria-label={tChrome('canvas.edit.rotateCcw')}
         onClick={() => onRotateFlip({ rotate: 'ccw' })}
       >
         ⟲
@@ -241,8 +269,8 @@ export function PropertiesBar({
         type="button"
         data-testid="pbar-rotate-cw"
         className="properties-bar-action"
-        title="Rotate 90° clockwise"
-        aria-label="Rotate 90° clockwise"
+        title={tChrome('canvas.edit.rotateCw')}
+        aria-label={tChrome('canvas.edit.rotateCw')}
         onClick={() => onRotateFlip({ rotate: 'cw' })}
       >
         ⟳
@@ -251,8 +279,8 @@ export function PropertiesBar({
         type="button"
         data-testid="pbar-flip-h"
         className="properties-bar-action"
-        title="Flip horizontal"
-        aria-label="Flip horizontal"
+        title={tChrome('canvas.pbar.flipH')}
+        aria-label={tChrome('canvas.pbar.flipH')}
         onClick={() => onRotateFlip({ flip: 'h' })}
       >
         ⇋
@@ -261,8 +289,8 @@ export function PropertiesBar({
         type="button"
         data-testid="pbar-flip-v"
         className="properties-bar-action"
-        title="Flip vertical"
-        aria-label="Flip vertical"
+        title={tChrome('canvas.pbar.flipV')}
+        aria-label={tChrome('canvas.pbar.flipV')}
         onClick={() => onRotateFlip({ flip: 'v' })}
       >
         ⇵
@@ -280,20 +308,23 @@ export function PropertiesBar({
   const cloudRef =
     selectedGroup.find((m) => m.kind === 'shape' && m.shapeType === 'cloud') ?? null;
   const ENDING_OPTIONS = ['None', 'OpenArrow', 'ClosedArrow'] as const;
-  const ENDING_LABELS: Record<string, string> = {
-    None: 'Plain',
-    OpenArrow: 'Open arrow',
-    ClosedArrow: 'Closed arrow',
-  };
+  // One key per (ending, which-end) pair — "Open arrow" + " start" would be
+  // two glued fragments, and their order is not universal.
+  const endingKey = (v: string, end: 'Start' | 'End'): UiKey =>
+    `canvas.pbar.ending${end}.${v}` as UiKey;
   const kindSheet = (endingsRef || cloudRef) ? (
-    <span className="properties-bar-swatches" role="group" aria-label="Shape options">
+    <span
+      className="properties-bar-swatches"
+      role="group"
+      aria-label={tChrome('canvas.pbar.shapeOptionsGroup')}
+    >
       {endingsRef && (
         <>
           <select
             data-testid="pbar-ending-start"
             className="properties-bar-select"
-            title="Line start"
-            aria-label="Line start"
+            title={tChrome('canvas.pbar.lineStart')}
+            aria-label={tChrome('canvas.pbar.lineStart')}
             value={endingsRef.lineEndings?.[0] ?? 'None'}
             onChange={(e) =>
               onRestyle({
@@ -302,15 +333,15 @@ export function PropertiesBar({
           >
             {ENDING_OPTIONS.map((v) => (
               <option key={v} value={v}>
-                {ENDING_LABELS[v]} start
+                {tChrome(endingKey(v, 'Start'))}
               </option>
             ))}
           </select>
           <select
             data-testid="pbar-ending-end"
             className="properties-bar-select"
-            title="Line end"
-            aria-label="Line end"
+            title={tChrome('canvas.pbar.lineEnd')}
+            aria-label={tChrome('canvas.pbar.lineEnd')}
             value={endingsRef.lineEndings?.[1] ?? (endingsRef.shapeType === 'arrow' ? 'OpenArrow' : 'None')}
             onChange={(e) =>
               onRestyle({
@@ -319,7 +350,7 @@ export function PropertiesBar({
           >
             {ENDING_OPTIONS.map((v) => (
               <option key={v} value={v}>
-                {ENDING_LABELS[v]} end
+                {tChrome(endingKey(v, 'End'))}
               </option>
             ))}
           </select>
@@ -329,14 +360,14 @@ export function PropertiesBar({
         <select
           data-testid="pbar-cloud-intensity"
           className="properties-bar-select"
-          title="Cloud intensity"
-          aria-label="Cloud intensity"
+          title={tChrome('canvas.pbar.cloudIntensity')}
+          aria-label={tChrome('canvas.pbar.cloudIntensity')}
           value={String(cloudRef.cloudIntensity ?? 2)}
           onChange={(e) => onRestyle({ cloudIntensity: parseInt(e.target.value, 10) })}
         >
           {['1', '2', '3'].map((v) => (
             <option key={v} value={v}>
-              Cloud {v}
+              {tChrome('canvas.pbar.cloudOption', { level: tNumber(Number(v)) })}
             </option>
           ))}
         </select>
@@ -344,22 +375,31 @@ export function PropertiesBar({
     </span>
   ) : null;
   return (
-    <div className="properties-bar" data-testid="properties-bar" role="toolbar" aria-label="Properties bar">
+    <div
+      className="properties-bar"
+      data-testid="properties-bar"
+      role="toolbar"
+      aria-label={tChrome('canvas.pbar.barLabel')}
+    >
       {multi ? (
         <>
           <span className="properties-bar-kind" data-testid="pbar-kind">
-            {selectedGroup.length} selected
+            {tChromeCount('canvas.pbar.selectedCount', selectedGroup.length)}
           </span>
           {movableCount >= 2 && (
-            <span className="properties-bar-swatches" role="group" aria-label="Align">
+            <span
+              className="properties-bar-swatches"
+              role="group"
+              aria-label={tChrome('canvas.pbar.alignGroup')}
+            >
               {ALIGN_BUTTONS.map((b) => (
                 <button
                   key={b.mode}
                   type="button"
                   data-testid={`pbar-align-${b.mode}`}
                   className="properties-bar-action"
-                  title={b.label}
-                  aria-label={b.label}
+                  title={tChrome(b.key)}
+                  aria-label={tChrome(b.key)}
                   onClick={() => onAlign(b.mode)}
                 >
                   {b.glyph}
@@ -368,13 +408,17 @@ export function PropertiesBar({
             </span>
           )}
           {movableCount >= 3 && (
-            <span className="properties-bar-swatches" role="group" aria-label="Distribute">
+            <span
+              className="properties-bar-swatches"
+              role="group"
+              aria-label={tChrome('canvas.pbar.distributeGroup')}
+            >
               <button
                 type="button"
                 data-testid="pbar-distribute-horizontal"
                 className="properties-bar-action"
-                title="Distribute horizontally (even gaps)"
-                aria-label="Distribute horizontally"
+                title={tChrome('canvas.edit.alignDisth')}
+                aria-label={tChrome('canvas.pbar.distHAria')}
                 onClick={() => onDistribute('horizontal')}
               >
                 ⇢⇠
@@ -383,8 +427,8 @@ export function PropertiesBar({
                 type="button"
                 data-testid="pbar-distribute-vertical"
                 className="properties-bar-action"
-                title="Distribute vertically (even gaps)"
-                aria-label="Distribute vertically"
+                title={tChrome('canvas.edit.alignDistv')}
+                aria-label={tChrome('canvas.pbar.distVAria')}
                 onClick={() => onDistribute('vertical')}
               >
                 ⇣⇡
@@ -392,13 +436,17 @@ export function PropertiesBar({
             </span>
           )}
           {resizableCount >= 2 && (
-            <span className="properties-bar-swatches" role="group" aria-label="Match size">
+            <span
+              className="properties-bar-swatches"
+              role="group"
+              aria-label={tChrome('canvas.pbar.matchSizeGroup')}
+            >
               <button
                 type="button"
                 data-testid="pbar-size-width"
                 className="properties-bar-action"
-                title="Match widths (to the first selected)"
-                aria-label="Match widths"
+                title={tChrome('canvas.pbar.matchWidths')}
+                aria-label={tChrome('canvas.pbar.matchWidthsAria')}
                 onClick={() => onSizeMatch('width')}
               >
                 ⭤
@@ -407,8 +455,8 @@ export function PropertiesBar({
                 type="button"
                 data-testid="pbar-size-height"
                 className="properties-bar-action"
-                title="Match heights (to the first selected)"
-                aria-label="Match heights"
+                title={tChrome('canvas.pbar.matchHeights')}
+                aria-label={tChrome('canvas.pbar.matchHeightsAria')}
                 onClick={() => onSizeMatch('height')}
               >
                 ⭥
@@ -417,8 +465,8 @@ export function PropertiesBar({
                 type="button"
                 data-testid="pbar-size-both"
                 className="properties-bar-action"
-                title="Match size (to the first selected)"
-                aria-label="Match size"
+                title={tChrome('canvas.pbar.matchBoth')}
+                aria-label={tChrome('canvas.pbar.matchBothAria')}
                 onClick={() => onSizeMatch('both')}
               >
                 ⛶
@@ -429,7 +477,11 @@ export function PropertiesBar({
           {kindSheet}
           {rotateFlip}
           {zOrder}
-          <span className="properties-bar-swatches" role="group" aria-label="Recolor all">
+          <span
+            className="properties-bar-swatches"
+            role="group"
+            aria-label={tChrome('canvas.pbar.recolorAllGroup')}
+          >
             {ANNOTATION_PALETTE.map((c) => (
               <button
                 key={c}
@@ -437,7 +489,7 @@ export function PropertiesBar({
                 data-testid={`pbar-color-${c.slice(1)}`}
                 className="properties-bar-swatch"
                 style={{ backgroundColor: c }}
-                title={`Recolor all to ${c}`}
+                title={tChrome('canvas.pbar.recolorAll', { color: c })}
                 onClick={() => onRecolorGroup(c)}
               />
             ))}
@@ -448,22 +500,31 @@ export function PropertiesBar({
             className="properties-bar-action"
             onClick={() => onRemoveGroup()}
           >
-            Delete
+            {tChrome('canvas.common.delete')}
           </button>
         </>
       ) : a && selected ? (
         <>
           <span className="properties-bar-kind" data-testid="pbar-kind">{label}</span>
           <span className="properties-bar-meta" data-testid="pbar-place">
-            p.{selected.pageNumber} ·{' '}
-            {Math.round(a.w * selected.pageWidth)}×{Math.round(a.h * selected.pageHeight)} pt
+            {tChrome('canvas.pbar.place', {
+              page: tNumber(selected.pageNumber),
+              width: tNumber(Math.round(a.w * selected.pageWidth)),
+              height: tNumber(Math.round(a.h * selected.pageHeight)),
+            })}
           </span>
           {a.note !== undefined && a.note !== '' && (
             <span className="properties-bar-note" title={a.note} data-testid="pbar-note">
-              “{a.note.length > 40 ? `${a.note.slice(0, 39)}…` : a.note}”
+              {tChrome('canvas.pbar.note', {
+                note: a.note.length > 40 ? `${a.note.slice(0, 39)}…` : a.note,
+              })}
             </span>
           )}
-          <span className="properties-bar-swatches" role="group" aria-label="Color">
+          <span
+            className="properties-bar-swatches"
+            role="group"
+            aria-label={tChrome('canvas.pbar.colorGroup')}
+          >
             {ANNOTATION_PALETTE.map((c) => (
               <button
                 key={c}
@@ -471,7 +532,7 @@ export function PropertiesBar({
                 data-testid={`pbar-color-${c.slice(1)}`}
                 className={'properties-bar-swatch' + (a.color === c ? ' active' : '')}
                 style={{ backgroundColor: c }}
-                title={`Recolor to ${c}`}
+                title={tChrome('canvas.pbar.recolorTo', { color: c })}
                 aria-pressed={a.color === c}
                 onClick={() => onRecolor(selected.docId, selected.pageId, a.id, c)}
               />
@@ -487,15 +548,19 @@ export function PropertiesBar({
             className="properties-bar-action"
             onClick={() => onRemove(selected.docId, selected.pageId, a.id)}
           >
-            Delete
+            {tChrome('canvas.common.delete')}
           </button>
         </>
       ) : showToolDefaults ? (
         <>
           <span className="properties-bar-kind" data-testid="pbar-kind">
-            New {tool === 'freetext' ? 'text box' : tool} color
+            {tChrome(NEW_COLOR_KEYS[tool] ?? 'canvas.pbar.newColorGroup')}
           </span>
-          <span className="properties-bar-swatches" role="group" aria-label="New annotation color">
+          <span
+            className="properties-bar-swatches"
+            role="group"
+            aria-label={tChrome('canvas.pbar.newColorGroup')}
+          >
             {ANNOTATION_PALETTE.map((c) => (
               <button
                 key={c}
@@ -503,7 +568,7 @@ export function PropertiesBar({
                 data-testid={`pbar-tool-color-${c.slice(1)}`}
                 className={'properties-bar-swatch' + (toolColor === c ? ' active' : '')}
                 style={{ backgroundColor: c }}
-                title={`Use ${c} for new annotations`}
+                title={tChrome('canvas.pbar.useForNew', { color: c })}
                 aria-pressed={toolColor === c}
                 onClick={() => onSetToolColor(toolColor === c ? null : c)}
               />
@@ -512,15 +577,15 @@ export function PropertiesBar({
         </>
       ) : (
         <span className="properties-bar-empty" data-testid="pbar-empty">
-          Click a comment with the Select tool to see its properties — Ctrl-click or Ctrl-drag for several.
+          {tChrome('canvas.pbar.empty')}
         </span>
       )}
       <button
         type="button"
         className="properties-bar-close"
         data-testid="pbar-close"
-        title="Hide the properties bar (Ctrl+E)"
-        aria-label="Hide the properties bar"
+        title={tChrome('canvas.pbar.close')}
+        aria-label={tChrome('canvas.pbar.closeAria')}
         onClick={onClose}
       >
         ×
