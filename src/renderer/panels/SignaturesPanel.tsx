@@ -15,6 +15,8 @@ import {
   type SignatureEntry,
   type VerifyResult,
 } from '../lib/signatures';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 interface SignResult {
   output: string;
@@ -27,6 +29,8 @@ interface SignResult {
 }
 
 export function SignaturesPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   // 9.F5: the SAME undoable in-place flow the canvas edits use, so signing in
@@ -78,7 +82,7 @@ export function SignaturesPanel(): React.ReactElement {
   const runVerify = useCallback(async () => {
     if (!workingPath) return;
     setBusy(true);
-    setStatus('Verifying signatures…');
+    setStatus(tChrome('panel.sig.verifying'));
     setResult(null);
     try {
       const res = (await call('verify_signatures', {
@@ -88,7 +92,7 @@ export function SignaturesPanel(): React.ReactElement {
       setResult(res);
       setStatus('');
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
@@ -156,7 +160,7 @@ export function SignaturesPanel(): React.ReactElement {
       return;
     }
     if (!password && source.mode === 'pfx') {
-      setSignError('Enter the signer password.');
+      setSignError(tChrome('panel.sig.enterPassword'));
       return;
     }
     const suggested = activeFile.name.replace(/\.pdfx?$/i, '') + '-signed.pdf';
@@ -231,7 +235,7 @@ export function SignaturesPanel(): React.ReactElement {
       return;
     }
     if (!password && source.mode === 'pfx') {
-      setSignError('Enter the signer password.');
+      setSignError(tChrome('panel.sig.enterPassword'));
       return;
     }
     signInPlaceRef.current = true;
@@ -300,13 +304,13 @@ export function SignaturesPanel(): React.ReactElement {
     return () => registerSignHandler(null);
   }, [call]);
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to check its signatures" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.sig.open')} />;
 
   return (
     <div className="flex flex-col gap-4 h-full">
       <div className="shrink-0 flex items-center gap-3">
         <div className="text-sm text-neutral-400">
-          Signatures in <span className="text-neutral-200">{activeFile.name}</span>
+          {tChrome('panel.sig.heading')} <span className="text-neutral-200">{activeFile.name}</span>
         </div>
         <button
           data-testid="signatures-recheck"
@@ -314,7 +318,7 @@ export function SignaturesPanel(): React.ReactElement {
           disabled={busy}
           className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
         >
-          Re-check
+          {tChrome('panel.sig.recheck')}
         </button>
         <button
           data-testid="sign-open"
@@ -324,13 +328,13 @@ export function SignaturesPanel(): React.ReactElement {
           }}
           className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded font-medium"
         >
-          Sign this PDF…
+          {tChrome('panel.sig.signPdf')}
         </button>
       </div>
 
       {result && !result.signed && !busy && (
         <div data-testid="signatures-empty" className="text-sm text-neutral-500">
-          This PDF has no digital signatures.
+          {tChrome('panel.sig.none')}
         </div>
       )}
 
@@ -340,9 +344,9 @@ export function SignaturesPanel(): React.ReactElement {
             data-testid="signatures-summary"
             className="shrink-0 text-sm text-neutral-300"
           >
-            {result.signature_count} signature{result.signature_count === 1 ? '' : 's'} found.
+            {tChromeCount('panel.sig.found', result.signature_count)}
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1" tabIndex={0} role="region" aria-label="Signatures">
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1" tabIndex={0} role="region" aria-label={tChrome('panel.sig.listAria')}>
             {result.signatures.map((sig, i) => (
               <SignatureCard
                 key={sig.field ?? i}
@@ -366,10 +370,7 @@ export function SignaturesPanel(): React.ReactElement {
               data-testid="trust-caveat"
               className="shrink-0 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded text-xs text-amber-200/90"
             >
-              Signer identity is <strong>not verified against a trusted authority</strong> — these
-              results confirm cryptographic validity and whether the document was changed after
-              signing, not who the signer really is. Add a trust anchor below to verify identity
-              against a CA you trust.
+              {tChrome('panel.sig.trustCaveat')}
             </div>
           ) : (
             <div
@@ -381,8 +382,8 @@ export function SignaturesPanel(): React.ReactElement {
               }`}
             >
               {result.summary.trust_verified
-                ? `Signer identity verified against your ${trustRoots.length} trust anchor${trustRoots.length === 1 ? '' : 's'}.`
-                : 'The signer does not chain to any of your trust anchors.'}
+                ? tChromeCount('panel.sig.trustVerified', trustRoots.length)
+                : tChrome('panel.sig.trustFailed')}
             </div>
           )}
         </>
@@ -390,7 +391,7 @@ export function SignaturesPanel(): React.ReactElement {
 
       <div className="shrink-0 flex flex-col gap-1" data-testid="trust-anchors">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-neutral-400">Trust anchors</span>
+          <span className="text-xs text-neutral-400">{tChrome('panel.sig.trustAnchors')}</span>
           <button
             data-testid="trust-anchor-add"
             onClick={() => {
@@ -401,7 +402,7 @@ export function SignaturesPanel(): React.ReactElement {
             }}
             className="px-2 py-0.5 text-[11px] bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded"
           >
-            Add CA certificate…
+            {tChrome('panel.sig.addCa')}
           </button>
         </div>
         {trustRoots.map((p) => (
@@ -413,7 +414,7 @@ export function SignaturesPanel(): React.ReactElement {
               data-testid="trust-anchor-remove"
               onClick={() => saveTrustRoots(trustRoots.filter((r) => r !== p))}
               className="text-neutral-600 hover:text-red-400"
-              aria-label={`Remove trust anchor ${p}`}
+              aria-label={tChrome('panel.sig.removeAnchor', { path: p })}
             >
               ×
             </button>
@@ -426,12 +427,9 @@ export function SignaturesPanel(): React.ReactElement {
           data-testid="sign-form"
           className="shrink-0 rounded border border-neutral-700 bg-neutral-900/60 p-3 flex flex-col gap-3"
         >
-          <div className="text-sm text-neutral-300 font-medium">Sign this document</div>
+          <div className="text-sm text-neutral-300 font-medium">{tChrome('panel.sig.signHeading')}</div>
           <p className="text-xs text-neutral-500 -mt-1">
-            Applies an invisible signature. <strong>Sign in place</strong> signs the open document
-            (undoable; written to disk on Save); <strong>Sign &amp; Save a copy</strong> writes a new
-            signed file and leaves the current one unchanged. Comments, form filling, and added
-            pages keep signatures valid; other edits invalidate them.
+            {tChrome('panel.sig.signBlurb')}
           </p>
           {/* F6: the visible-signature path from the PANEL — hands off to the
               canvas placement flow with these signer details prefilled, so
@@ -442,14 +440,14 @@ export function SignaturesPanel(): React.ReactElement {
               type="button"
               onClick={() => getCanvasServices()?.startVisibleSignature?.(source)}
               className="self-start px-2 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded"
-              title="Place a visible signature: draw its box on the page; these signer details carry over"
+              title={tChrome('panel.sig.visibleTitle')}
             >
-              Visible signature…
+              {tChrome('panel.sig.visibleBtn')}
             </button>
           )}
           <SignerSourceFields value={source} onChange={setSource} idPrefix="sign" />
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Password</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('panel.sig.password')}</span>
             <input
               data-testid="sign-password"
               type="password"
@@ -459,23 +457,23 @@ export function SignaturesPanel(): React.ReactElement {
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Reason</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('panel.sig.reason')}</span>
             <input
               data-testid="sign-reason"
               type="text"
               value={reason}
-              placeholder="optional"
+              placeholder={tChrome('panel.sig.optional')}
               onChange={(e) => setReason(e.target.value)}
               className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Location</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('panel.sig.location')}</span>
             <input
               data-testid="sign-location"
               type="text"
               value={location}
-              placeholder="optional"
+              placeholder={tChrome('panel.sig.optional')}
               onChange={(e) => setLocation(e.target.value)}
               className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
@@ -490,15 +488,15 @@ export function SignaturesPanel(): React.ReactElement {
                 if (!e.target.checked) setLtv(false);
               }}
             />
-            PAdES (ETSI) signature profile
+            {tChrome('panel.sig.pades')}
           </label>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">TSA URL</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('panel.sig.tsaUrl')}</span>
             <input
               data-testid="sign-tsa-url"
               type="text"
               value={tsaUrl}
-              placeholder="optional — RFC 3161 timestamp server (e.g. http://timestamp.digicert.com)"
+              placeholder={tChrome('panel.sig.tsaPlaceholder')}
               onChange={(e) => setTsaUrl(e.target.value)}
               className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
@@ -511,8 +509,7 @@ export function SignaturesPanel(): React.ReactElement {
               disabled={!pades}
               onChange={(e) => setLtv(e.target.checked)}
             />
-            Embed validation info for long-term validation (LTV — requires PAdES; fetches
-            revocation data from the certificate&apos;s own endpoints)
+            {tChrome('panel.sig.ltv')}
           </label>
           {signError && <div className="text-xs text-red-400">{signError}</div>}
           <div className="flex justify-end gap-2">
@@ -524,7 +521,7 @@ export function SignaturesPanel(): React.ReactElement {
               }}
               className="px-3 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
-              Cancel
+              {tChrome('panel.sig.cancel')}
             </button>
             <button
               data-testid="sign-in-place"
@@ -532,7 +529,7 @@ export function SignaturesPanel(): React.ReactElement {
               disabled={signing}
               className="px-3 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
             >
-              {signing ? 'Signing…' : 'Sign in place'}
+              {signing ? tChrome('panel.sig.signing') : tChrome('panel.sig.signInPlace')}
             </button>
             <button
               data-testid="sign-apply"
@@ -540,7 +537,7 @@ export function SignaturesPanel(): React.ReactElement {
               disabled={signing}
               className="px-3 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
             >
-              {signing ? 'Signing…' : 'Sign & Save a copy…'}
+              {signing ? tChrome('panel.sig.signing') : tChrome('panel.sig.signSaveCopy')}
             </button>
           </div>
         </div>
@@ -551,12 +548,12 @@ export function SignaturesPanel(): React.ReactElement {
           data-testid="sign-result"
           className="shrink-0 px-3 py-2 bg-green-600/15 border border-green-600/40 rounded text-sm text-green-200"
         >
-          Signed as <strong>{signResult.signer ?? '(unknown)'}</strong>
+          {tChrome('panel.sig.signedAs')} <strong>{signResult.signer ?? tChrome('panel.sig.unknownSigner')}</strong>
           {signResult.valid && signResult.intact && signResult.covers_whole_document
-            ? ' — cryptographically valid, covers the whole document.'
-            : ' — but the produced signature did not verify as expected.'}
+            ? tChrome('panel.sig.signedOk')
+            : tChrome('panel.sig.signedBad')}
           <div className="text-xs text-green-300/70 mt-0.5 truncate" title={signResult.output}>
-            Saved to {signResult.output}
+            {tChrome('panel.sig.savedTo', { path: signResult.output })}
           </div>
         </div>
       )}
@@ -574,18 +571,18 @@ function SignatureCard({ sig, onJump }: { sig: SignatureEntry; onJump?: () => vo
     modified: 'bg-amber-500/15 text-amber-200 border-amber-500/40',
     valid: 'bg-green-600/15 text-green-300 border-green-600/40',
   }[status];
-  const badge = { text: SIGNATURE_STATUS_LABEL[status], cls };
+  const badge = { text: tChrome(SIGNATURE_STATUS_LABEL[status]), cls };
 
   return (
     <div data-testid="signature-card" className="rounded border border-neutral-800 bg-neutral-900/50 p-3 flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2">
         <span data-testid="signature-signer" className="text-sm text-neutral-200 font-medium truncate">
-          {sig.signer ?? '(unknown signer)'}
+          {sig.signer ?? tChrome('panel.sig.unknownSigner')}
         </span>
         <span className={`shrink-0 px-2 py-0.5 text-[11px] rounded border ${badge.cls}`}>{badge.text}</span>
       </div>
       <div className="text-xs text-neutral-500 flex flex-wrap gap-x-4 gap-y-0.5">
-        {sig.field && <span>field: {sig.field}</span>}
+        {sig.field && <span>{tChrome('panel.sig.field', { name: sig.field })}</span>}
         {sig.page !== undefined && (
           onJump ? (
             <button
@@ -593,30 +590,32 @@ function SignatureCard({ sig, onJump }: { sig: SignatureEntry; onJump?: () => vo
               className="text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline"
               onClick={onJump}
             >
-              page {sig.page} →
+              {tChrome('panel.sig.pageJump', { page: sig.page })}
             </button>
           ) : (
-            <span>page {sig.page}</span>
+            <span>{tChrome('panel.sig.page', { page: sig.page })}</span>
           )
         )}
         <span>
-          integrity: {sig.intact ? 'intact' : 'BROKEN'}
+          {sig.intact ? tChrome('panel.sig.integrityIntact') : tChrome('panel.sig.integrityBroken')}
           {' · '}
-          {sig.covers_whole_document ? 'covers whole document' : 'does not cover whole document'}
+          {sig.covers_whole_document
+            ? tChrome('panel.sig.coversWhole')
+            : tChrome('panel.sig.coversPartial')}
         </span>
-        {sig.digest_algorithm && <span>digest: {sig.digest_algorithm}</span>}
+        {sig.digest_algorithm && <span>{tChrome('panel.sig.digest', { algo: sig.digest_algorithm })}</span>}
         {sig.pades && <span data-testid="signature-pades">PAdES</span>}
         {sig.timestamped ? (
           <span data-testid="signature-timestamp">
-            TSA time: {sig.timestamp_time ?? '(unreadable)'}
-            {sig.timestamp_valid ? '' : ' (timestamp not verified)'}
+            {tChrome('panel.sig.tsaTime', { time: sig.timestamp_time ?? tChrome('panel.sig.tsaUnreadable') })}
+            {sig.timestamp_valid ? '' : tChrome('panel.sig.tsaNotVerified')}
           </span>
         ) : (
-          sig.signing_time && <span>claimed time: {sig.signing_time}</span>
+          sig.signing_time && <span>{tChrome('panel.sig.claimedTime', { time: sig.signing_time })}</span>
         )}
-        {sig.trusted && <span data-testid="signature-trusted">identity trusted</span>}
+        {sig.trusted && <span data-testid="signature-trusted">{tChrome('panel.sig.identityTrusted')}</span>}
       </div>
-      {sig.error && <div className="text-xs text-red-400">error: {sig.error}</div>}
+      {sig.error && <div className="text-xs text-red-400">{tChrome('panel.sig.errorLine', { message: sig.error })}</div>}
     </div>
   );
 }
