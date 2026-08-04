@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { invokeCommand } from '../../commands/context';
 import { COMMANDS, SECONDARY_TOOLBAR_ACTIONS, TOOL_TITLES } from '../../commands/registry';
 import { toolById } from '../../commands/tools';
@@ -13,6 +14,13 @@ import {
   type CustomStamp,
 } from '../../lib/stamp-library';
 import { dialog, file } from '../../lib/tauri-bridge';
+import {
+  tChrome,
+  tChromeCount,
+  tCommandTitle,
+  tNumber,
+  tToolTitle,
+} from '../../i18n';
 
 /** Read + downscale a picked raster into a library-sized PNG data URL (long
  * edge capped — stamps are page furniture, not photo archives, and the
@@ -153,6 +161,17 @@ export interface SecondaryToolbarProps {
   ) => void;
 }
 
+type CanvasStringKey = Parameters<typeof tChrome>[0];
+
+/** The tooltip key for an align/distribute mode. The GLYPH stays in the table
+ * (it is the same visual language as the PropertiesBar's annotation row); only
+ * the wording crosses into the catalog. */
+function alignTitleKey(
+  mode: 'left' | 'centerh' | 'right' | 'top' | 'centerv' | 'bottom' | 'disth' | 'distv',
+): CanvasStringKey {
+  return `canvas.edit.align${mode.charAt(0).toUpperCase()}${mode.slice(1)}` as CanvasStringKey;
+}
+
 /** Rung 3: "Measured N pt = [value][unit] Apply" — the calibration drag's
  * follow-up. Local state per pending span (keyed remount on lengthPts). */
 function CalibrationApplyRow({
@@ -164,13 +183,23 @@ function CalibrationApplyRow({
   onApply: (value: number, unit: MeasureUnit) => void;
   onCancel: () => void;
 }): React.JSX.Element {
+  useTranslation();
   const [value, setValue] = useState('');
   const [unit, setUnit] = useState<MeasureUnit>('ft');
   const parsed = parseFloat(value);
   const valid = Number.isFinite(parsed) && parsed > 0;
   return (
-    <div className="secondary-toolbar-opts" role="group" aria-label="Calibration" data-testid="calibration-row">
-      <span className="secondary-toolbar-hint">Measured {lengthPts.toFixed(1)} pt =</span>
+    <div className="secondary-toolbar-opts" role="group"
+      aria-label={tChrome('canvas.measure.calibrationGroup')}
+      data-testid="calibration-row">
+      <span className="secondary-toolbar-hint">
+        {tChrome('canvas.measure.measured', {
+          length: tNumber(lengthPts, {
+            minimumFractionDigits: 1,
+            maximumFractionDigits: 1,
+          }),
+        })}
+      </span>
       <input
         type="number"
         min={0}
@@ -195,10 +224,10 @@ function CalibrationApplyRow({
         ))}
       </select>
       <button type="button" className="secondary-tool" data-testid="calibration-apply" disabled={!valid} onClick={() => onApply(parsed, unit)}>
-        Apply
+        {tChrome('canvas.common.apply')}
       </button>
       <button type="button" className="secondary-tool" data-testid="calibration-cancel" onClick={onCancel}>
-        Cancel
+        {tChrome('canvas.common.cancel')}
       </button>
     </div>
   );
@@ -242,6 +271,7 @@ export function SecondaryToolbar({
   onToggleImageCrop,
   onRotateImage,
 }: SecondaryToolbarProps): React.JSX.Element | null {
+  useTranslation();
   // Custom stamp library (parity map § 2): loaded once, persisted on every
   // change. Hooks live above the early return (rules of hooks).
   const [customStamps, setCustomStamps] = useState<CustomStamp[]>(() => loadCustomStamps());
@@ -267,7 +297,9 @@ export function SecondaryToolbar({
     if (!path) return;
     const img = await importStampImage(path);
     if (!img) return;
-    const stem = path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'Stamp';
+    const stem =
+      path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') ||
+      tChrome('canvas.stamp.defaultName');
     persistStamps([
       ...customStamps,
       {
@@ -286,6 +318,9 @@ export function SecondaryToolbar({
     // placing a stamp that no longer exists in the library would be spooky.
     if (
       gone &&
+      // A BUILT-IN preset carries an id; only a custom one can be the stamp
+      // being removed, whatever its label happens to say.
+      !stampPreset?.id &&
       stampPreset?.label === gone.label &&
       (stampPreset?.imageData ?? undefined) === gone.imageData
     ) {
@@ -307,14 +342,14 @@ export function SecondaryToolbar({
 
   return (
     <div className="secondary-toolbar" data-testid="secondary-toolbar" data-tool={owner.id}>
-      <span className="secondary-toolbar-title">{owner.title}</span>
+      <span className="secondary-toolbar-title">{tToolTitle(owner.id, owner.title)}</span>
 
       {/* The tool's modes. One button per mode it owns — the pill's job, minus
           the seven modes belonging to tools you didn't pick. */}
       {/* Every mode it owns gets a button, INCLUDING a lone one: Prepare Form
           owns only `formfields`, and § 3.2 calls for its "+ Add Field" control
           by name — gating on >1 silently deleted it, and Redact's too. */}
-      <div className="secondary-toolbar-modes" role="group" aria-label={`${owner.title} tools`}>
+      <div className="secondary-toolbar-modes" role="group" aria-label={tChrome('canvas.toolbar.modes', { tool: tToolTitle(owner.id, owner.title) })}>
           {modes.map((m) => (
             <button
               key={m}
@@ -324,7 +359,7 @@ export function SecondaryToolbar({
               className={'secondary-tool' + (tool === m ? ' active' : '')}
               onClick={() => invokeCommand(`tools.${m}`)}
             >
-              {TOOL_TITLES[m]}
+              {tCommandTitle(`tools.${m}`, TOOL_TITLES[m])}
             </button>
           ))}
       </div>
@@ -339,7 +374,7 @@ export function SecondaryToolbar({
               className="secondary-tool"
               onClick={() => invokeCommand(id)}
             >
-              {COMMANDS[id].title}
+              {tCommandTitle(id, COMMANDS[id].title)}
             </button>
           ))}
         </div>
@@ -348,18 +383,22 @@ export function SecondaryToolbar({
       {/* Mode OPTIONS — they configure the armed mode, so they belong to the
           tool and move here from the floating cluster. */}
       {owner.id === 'comment' && tool === 'shape' && (
-        <div className="secondary-toolbar-opts" role="group" aria-label="Shape">
+        <div
+          className="secondary-toolbar-opts"
+          role="group"
+          aria-label={tChrome('canvas.toolbar.shapeGroup')}
+        >
           {(
             [
-              ['rect', 'Rectangle'],
-              ['ellipse', 'Ellipse'],
-              ['line', 'Line'],
-              ['arrow', 'Arrow'],
-              ['polygon', 'Polygon'],
-              ['polyline', 'Polyline'],
-              ['cloud', 'Cloud'],
-            ] as [ShapeType, string][]
-          ).map(([t, label]) => (
+              ['rect', 'canvas.shape.rect'],
+              ['ellipse', 'canvas.shape.ellipse'],
+              ['line', 'canvas.shape.line'],
+              ['arrow', 'canvas.shape.arrow'],
+              ['polygon', 'canvas.shape.polygon'],
+              ['polyline', 'canvas.shape.polyline'],
+              ['cloud', 'canvas.shape.cloud'],
+            ] as [ShapeType, CanvasStringKey][]
+          ).map(([t, labelKey]) => (
             <button
               key={t}
               type="button"
@@ -368,7 +407,7 @@ export function SecondaryToolbar({
               className={'secondary-tool' + (shapeType === t ? ' active' : '')}
               onClick={() => onSetShapeType(t)}
             >
-              {label}
+              {tChrome(labelKey)}
             </button>
           ))}
         </div>
@@ -381,15 +420,19 @@ export function SecondaryToolbar({
         />
       )}
       {owner.id === 'measure' && (
-        <div className="secondary-toolbar-opts" role="group" aria-label="Measure options">
-          <span className="secondary-toolbar-hint">Scale</span>
+        <div
+          className="secondary-toolbar-opts"
+          role="group"
+          aria-label={tChrome('canvas.measure.optionsGroup')}
+        >
+          <span className="secondary-toolbar-hint">{tChrome('canvas.measure.scale')}</span>
           <input
             type="number"
             min={0}
             step="any"
             value={measureScale.from}
             data-testid="measure-scale-from"
-            aria-label="Scale: paper amount"
+            aria-label={tChrome('canvas.measure.paperAmount')}
             className="measure-scale-input"
             onChange={(e) =>
               onSetMeasureScale({ ...measureScale, from: parseFloat(e.target.value) || 0 })
@@ -398,7 +441,7 @@ export function SecondaryToolbar({
           <select
             value={measureScale.fromUnit}
             data-testid="measure-scale-from-unit"
-            aria-label="Scale: paper unit"
+            aria-label={tChrome('canvas.measure.paperUnit')}
             className="measure-scale-select"
             onChange={(e) =>
               onSetMeasureScale({ ...measureScale, fromUnit: e.target.value as MeasureUnit })
@@ -415,7 +458,7 @@ export function SecondaryToolbar({
             step="any"
             value={measureScale.to}
             data-testid="measure-scale-to"
-            aria-label="Scale: real-world amount"
+            aria-label={tChrome('canvas.measure.realAmount')}
             className="measure-scale-input"
             onChange={(e) =>
               onSetMeasureScale({ ...measureScale, to: parseFloat(e.target.value) || 0 })
@@ -424,7 +467,7 @@ export function SecondaryToolbar({
           <select
             value={measureScale.toUnit}
             data-testid="measure-scale-to-unit"
-            aria-label="Scale: real-world unit"
+            aria-label={tChrome('canvas.measure.realUnit')}
             className="measure-scale-select"
             onChange={(e) =>
               onSetMeasureScale({ ...measureScale, toUnit: e.target.value as MeasureUnit })
@@ -441,7 +484,7 @@ export function SecondaryToolbar({
               data-testid="measure-leave-markup"
               onChange={onToggleMeasureLeaveMarkup}
             />
-            Leave markup
+            {tChrome('canvas.measure.leaveMarkup')}
           </label>
           {measureResult && (
             <span className="secondary-toolbar-hint measure-result" data-testid="measure-result" aria-live="polite">
@@ -451,10 +494,14 @@ export function SecondaryToolbar({
         </div>
       )}
       {owner.id === 'edit' && (
-        <div className="secondary-toolbar-opts" role="group" aria-label="Image actions">
+        <div
+          className="secondary-toolbar-opts"
+          role="group"
+          aria-label={tChrome('canvas.edit.actionsGroup')}
+        >
           {!editHasSelection && !editBusy && !editNotice && (
             <span className="secondary-toolbar-hint" data-testid="edit-hint">
-              Click an image, a paragraph, or a line of text on the page
+              {tChrome('canvas.edit.hint')}
             </span>
           )}
           {editSelectionKind === 'text' && !editBusy && !editTextEditable && editTextReason && (
@@ -470,12 +517,16 @@ export function SecondaryToolbar({
               disabled={!editTextEditable || editBusy}
               onClick={onEditTextOpen}
             >
-              {editSelectionKind === 'para' ? 'Edit Paragraph…' : 'Edit Text…'}
+              {tChrome(
+                editSelectionKind === 'para'
+                  ? 'canvas.edit.editParagraph'
+                  : 'canvas.edit.editText',
+              )}
             </button>
           )}
           {editBusy && (
             <span className="secondary-toolbar-hint" data-testid="edit-busy" aria-live="polite">
-              Working…
+              {tChrome('canvas.common.working')}
             </span>
           )}
           {editNotice && !editBusy && (
@@ -503,12 +554,12 @@ export function SecondaryToolbar({
             }
             title={
               editImagePlacementKind === 'vector'
-                ? 'A vector graphic cannot be replaced with a raster image — delete it and add a new graphic'
+                ? tChrome('canvas.edit.vectorNoReplace')
                 : undefined
             }
             onClick={() => onEditAction('replace')}
           >
-            Replace…
+            {tChrome('canvas.edit.replace')}
           </button>
           <button
             type="button"
@@ -522,12 +573,12 @@ export function SecondaryToolbar({
             }
             title={
               editImagePlacementKind === 'vector'
-                ? 'A vector graphic has no image bytes to extract'
+                ? tChrome('canvas.edit.vectorNoExtract')
                 : undefined
             }
             onClick={() => onEditAction('extract')}
           >
-            Extract…
+            {tChrome('canvas.edit.extract')}
           </button>
           <button
             type="button"
@@ -536,7 +587,7 @@ export function SecondaryToolbar({
             disabled={editSelectionKind !== 'image' || editBusy}
             onClick={() => onEditAction('delete')}
           >
-            Delete
+            {tChrome('canvas.common.delete')}
           </button>
           {/* 9.C3 image adjustments — enabled only with an image selected. */}
           <button
@@ -545,17 +596,17 @@ export function SecondaryToolbar({
             className="secondary-tool"
             aria-pressed={imageCropArmed}
             disabled={editSelectionKind !== 'image' || editImageCount > 1 || editBusy}
-            title="Crop — drag inside the image to keep a region"
+            title={tChrome('canvas.edit.cropTitle')}
             onClick={onToggleImageCrop}
           >
-            Crop
+            {tChrome('canvas.edit.crop')}
           </button>
           <button
             type="button"
             data-testid="edit-action-rotate-ccw"
             className="secondary-tool"
             disabled={editSelectionKind !== 'image' || editBusy}
-            title="Rotate 90° counter-clockwise"
+            title={tChrome('canvas.edit.rotateCcw')}
             onClick={() => onRotateImage(1)}
           >
             ↺ 90°
@@ -565,7 +616,7 @@ export function SecondaryToolbar({
             data-testid="edit-action-rotate-cw"
             className="secondary-tool"
             disabled={editSelectionKind !== 'image' || editBusy}
-            title="Rotate 90° clockwise"
+            title={tChrome('canvas.edit.rotateCw')}
             onClick={() => onRotateImage(-1)}
           >
             ↻ 90°
@@ -581,8 +632,11 @@ export function SecondaryToolbar({
           {/* P7 slice D: blend mode — seeded from the listing, committed
               through the same gs frame as opacity (one merged frame). */}
           {editSelectionKind === 'image' && editImageBlend !== null && (
-            <label className="secondary-toolbar-blend" title="Blend mode">
-              <span>Blend</span>
+            <label
+              className="secondary-toolbar-blend"
+              title={tChrome('canvas.edit.blendTitle')}
+            >
+              <span>{tChrome('canvas.edit.blend')}</span>
               <select
                 data-testid="edit-image-blend"
                 value={editImageBlend}
@@ -608,7 +662,7 @@ export function SecondaryToolbar({
                   'Luminosity',
                 ].map((m) => (
                   <option key={m} value={m}>
-                    {m.replace(/([a-z])([A-Z])/g, '$1 $2')}
+                    {tChrome(`canvas.blend.${m}` as CanvasStringKey)}
                   </option>
                 ))}
               </select>
@@ -617,8 +671,11 @@ export function SecondaryToolbar({
           {/* P7 slice E: gradient mask — kind select seeds/starts the fade;
               the on-canvas dots then steer its direction; alphas here. */}
           {editSelectionKind === 'image' && editImageMask !== null && (
-            <label className="secondary-toolbar-blend" title="Gradient fade mask">
-              <span>Fade</span>
+            <label
+              className="secondary-toolbar-blend"
+              title={tChrome('canvas.edit.fadeTitle')}
+            >
+              <span>{tChrome('canvas.edit.fade')}</span>
               <select
                 data-testid="edit-image-mask-kind"
                 value={editImageMask.kind}
@@ -641,16 +698,19 @@ export function SecondaryToolbar({
                   }
                 }}
               >
-                <option value="none">None</option>
-                <option value="linear">Linear</option>
-                <option value="radial">Radial</option>
+                <option value="none">{tChrome('canvas.edit.fadeNone')}</option>
+                <option value="linear">{tChrome('canvas.edit.fadeLinear')}</option>
+                <option value="radial">{tChrome('canvas.edit.fadeRadial')}</option>
               </select>
             </label>
           )}
           {editSelectionKind === 'image' &&
             editImageMask !== null &&
             editImageMask.kind !== 'none' && (
-              <label className="secondary-toolbar-blend" title="Fade start and end opacity (%)">
+              <label
+                className="secondary-toolbar-blend"
+                title={tChrome('canvas.edit.fadeAlphaTitle')}
+              >
                 <input
                   type="number"
                   data-testid="edit-image-mask-a0"
@@ -699,26 +759,30 @@ export function SecondaryToolbar({
           {/* P7 multi-select: align/distribute the group — per-member
               translates through the ONE multi commit (one undo entry). */}
           {editImageCount > 1 && (
-            <span role="group" aria-label="Align images" className="secondary-toolbar-align">
+            <span
+              role="group"
+              aria-label={tChrome('canvas.edit.alignGroup')}
+              className="secondary-toolbar-align"
+            >
               {/* Same glyph set as the PropertiesBar's annotation align row —
                   one visual language for "align" across the product. */}
               {(
                 [
-                  ['left', 'Align left edges', '⭰'],
-                  ['centerh', 'Align horizontal centers', '⇹'],
-                  ['right', 'Align right edges', '⭲'],
-                  ['top', 'Align top edges', '⭱'],
-                  ['centerv', 'Align vertical centers', '⇳'],
-                  ['bottom', 'Align bottom edges', '⭳'],
+                  ['left', '⭰'],
+                  ['centerh', '⇹'],
+                  ['right', '⭲'],
+                  ['top', '⭱'],
+                  ['centerv', '⇳'],
+                  ['bottom', '⭳'],
                 ] as const
-              ).map(([mode, title, glyph]) => (
+              ).map(([mode, glyph]) => (
                 <button
                   key={mode}
                   type="button"
                   data-testid={`edit-align-${mode}`}
                   className="secondary-tool"
                   disabled={editBusy}
-                  title={title}
+                  title={tChrome(alignTitleKey(mode))}
                   onClick={() => onAlignImages(mode)}
                 >
                   {glyph}
@@ -727,49 +791,65 @@ export function SecondaryToolbar({
               {editImageCount > 2 &&
                 (
                   [
-                    ['disth', 'Distribute horizontally (even gaps)', '⇢⇠'],
-                    ['distv', 'Distribute vertically (even gaps)', '⇣⇡'],
+                    ['disth', '⇢⇠'],
+                    ['distv', '⇣⇡'],
                   ] as const
-                ).map(([mode, title, glyph]) => (
+                ).map(([mode, glyph]) => (
                   <button
                     key={mode}
                     type="button"
                     data-testid={`edit-align-${mode}`}
                     className="secondary-tool"
                     disabled={editBusy}
-                    title={title}
+                    title={tChrome(alignTitleKey(mode))}
                     onClick={() => onAlignImages(mode)}
                   >
                     {glyph}
                   </button>
                 ))}
               <span className="secondary-toolbar-hint" data-testid="edit-group-count">
-                {editImageCount} selected
+                {tChromeCount('canvas.edit.groupCount', editImageCount)}
               </span>
             </span>
           )}
         </div>
       )}
       {tool === 'stamp' && (
-        <div className="secondary-toolbar-opts" role="group" aria-label="Stamp preset">
-          {STAMP_PRESETS.map((p) => (
-            <button
-              key={p.label}
-              type="button"
-              data-testid={`stamp-preset-${p.label.toLowerCase()}`}
-              aria-pressed={stampPreset?.label === p.label && !stampPreset?.imageData}
-              title={p.label}
-              className="stamp-preset"
-              onClick={() => onSetStampPreset(stampPreset?.label === p.label && !stampPreset?.imageData ? null : p)}
-              style={{
-                color: p.color,
-                borderColor: p.color,
-                backgroundColor: stampPreset?.label === p.label && !stampPreset?.imageData ? `${p.color}33` : 'transparent',
-              }}
-            >
-              {p.label}
-            </button>
-          ))}
+        <div
+          className="secondary-toolbar-opts"
+          role="group"
+          aria-label={tChrome('canvas.stamp.presetGroup')}
+        >
+          {STAMP_PRESETS.map((preset) => {
+            // The WORD localizes (it is stamped into the document); the
+            // stable id is what identity, test ids and comparisons use.
+            const p: StampPreset = {
+              ...preset,
+              label: tChrome(`canvas.stamp.preset.${preset.id}` as CanvasStringKey),
+            };
+            // Armed-ness reads the stable ID, never the label: a live language
+            // switch rewords the armed preset, and a label comparison would
+            // silently unpress the button the user is standing on.
+            const armed = stampPreset?.id === preset.id;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                data-testid={`stamp-preset-${preset.id}`}
+                aria-pressed={armed}
+                title={p.label}
+                className="stamp-preset"
+                onClick={() => onSetStampPreset(armed ? null : p)}
+                style={{
+                  color: p.color,
+                  borderColor: p.color,
+                  backgroundColor: armed ? `${p.color}33` : 'transparent',
+                }}
+              >
+                {p.label}
+              </button>
+            );
+          })}
           {customStamps.map((s) => {
             const active =
               stampPreset?.label === s.label && (stampPreset?.imageData ?? undefined) === s.imageData;
@@ -783,7 +863,7 @@ export function SecondaryToolbar({
                     s.imageData
                       ? s.label
                       : hasStampTokens(s.label)
-                        ? `${s.label} — dynamic: tokens resolve when placed`
+                        ? tChrome('canvas.stamp.dynamic', { label: s.label })
                         : s.label
                   }
                   className="stamp-preset"
@@ -814,7 +894,7 @@ export function SecondaryToolbar({
                   type="button"
                   data-testid={`stamp-custom-del-${s.id}`}
                   className="stamp-custom-del"
-                  title="Remove this stamp from the library"
+                  title={tChrome('canvas.stamp.remove')}
                   onClick={() => removeCustomStamp(s.id)}
                 >
                   ×
@@ -829,7 +909,7 @@ export function SecondaryToolbar({
             aria-expanded={showNewStamp}
             onClick={() => setShowNewStamp((v) => !v)}
           >
-            New stamp…
+            {tChrome('canvas.stamp.new')}
           </button>
           <button
             type="button"
@@ -837,18 +917,22 @@ export function SecondaryToolbar({
             className="secondary-tool"
             onClick={() => void addImageStamp()}
           >
-            From image…
+            {tChrome('canvas.stamp.fromImage')}
           </button>
         </div>
       )}
       {tool === 'stamp' && showNewStamp && (
-        <div className="secondary-toolbar-opts" role="group" aria-label="New custom stamp">
+        <div
+          className="secondary-toolbar-opts"
+          role="group"
+          aria-label={tChrome('canvas.stamp.newGroup')}
+        >
           <input
             type="text"
             data-testid="stamp-new-label"
             value={newStampLabel}
             onChange={(e) => setNewStampLabel(e.target.value)}
-            placeholder="Label — {date} {time} {name} allowed"
+            placeholder={tChrome('canvas.stamp.labelPlaceholder')}
             className="stamp-new-label"
           />
           {ANNOTATION_PALETTE.map((c) => (
@@ -870,13 +954,17 @@ export function SecondaryToolbar({
             disabled={!newStampLabel.trim()}
             onClick={addTextStamp}
           >
-            Add
+            {tChrome('canvas.stamp.add')}
           </button>
         </div>
       )}
 
       {colored && (
-        <div className="secondary-toolbar-opts" role="group" aria-label="Annotation colour">
+        <div
+          className="secondary-toolbar-opts"
+          role="group"
+          aria-label={tChrome('canvas.toolbar.colorGroup')}
+        >
           {ANNOTATION_PALETTE.map((c) => (
             <button
               key={c}
@@ -911,6 +999,7 @@ function OpacitySlider({
   disabled: boolean;
   onCommit: (value: number) => void;
 }): React.JSX.Element {
+  useTranslation();
   const [value, setValue] = useState(Math.round(seed * 100));
   const commit = (): void => {
     const v = value / 100;
@@ -928,8 +1017,8 @@ function OpacitySlider({
     'PageDown',
   ]);
   return (
-    <label className="secondary-toolbar-opacity" title="Image opacity">
-      Opacity
+    <label className="secondary-toolbar-opacity" title={tChrome('canvas.edit.opacityTitle')}>
+      {tChrome('canvas.edit.opacity')}
       <input
         type="range"
         data-testid="edit-image-opacity"
@@ -944,7 +1033,9 @@ function OpacitySlider({
           if (commitKeys.has(e.key)) commit();
         }}
       />
-      <span data-testid="edit-image-opacity-value">{value}%</span>
+      <span data-testid="edit-image-opacity-value">
+        {tChrome('canvas.edit.opacityValue', { value: tNumber(value) })}
+      </span>
     </label>
   );
 }
