@@ -59,13 +59,19 @@ describe('edit text (Phase 7.2+7.3)', () => {
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const page = doc.addPage([400, 300]);
-    // Rotated: stays on the run-box surface under the 7.5 paragraph layer.
+    // Rotated OFF-QUARTER, so this run stays on the run-box surface under
+    // the 7.5 paragraph layer — which is what this spec is about. It used
+    // to be a clean 90 degrees, and 9.T13 lifted exactly that case: a
+    // quarter turn is now an ordinary axis-aligned member in its own
+    // transposed frame and GROUPS. What T13 deliberately kept is the
+    // `a' > 0 and d' > 0` test, so skew and off-quarter angles still
+    // decompose to run boxes.
     page.drawText('Original words here', {
       x: 60,
       y: 40,
       size: 14,
       font,
-      rotate: degrees(90),
+      rotate: degrees(30),
     });
     writeFileSync(pdfPath, await doc.save());
   });
