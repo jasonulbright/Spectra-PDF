@@ -9,6 +9,14 @@ import { carryDocumentCatalog } from './catalog-carry';
 import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
 import { cloudBumps } from './annotation-manipulation';
+import {
+  LEGEND_FONT_SIZE,
+  LEGEND_PAD,
+  LEGEND_ROW_H,
+  LEGEND_SYMBOL_W,
+  legendLayout,
+  symbolById,
+} from './count-marks';
 
 function applyRotation(copied: import('pdf-lib').PDFPage, page: ExportPage): void {
   if (!page.rotation) return;
@@ -105,6 +113,44 @@ export function pdfRectToDisplay(
   const x = Math.min(...xs);
   const y = Math.min(...ys);
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+// N11 slice C — a count symbol's unit-square parts as PDF path operators.
+//
+// The parts are authored y-DOWN (display orientation, `count-marks.ts`); PDF
+// user space is y-UP, so v flips here and nowhere else. A circle becomes four
+// cubics with the standard kappa — the appearance must print crisply at any
+// scale, which is the whole reason the symbol registry is vector.
+const KAPPA = 0.5522847498;
+
+function symbolOps(parts: readonly import('./count-marks').SymbolPart[], w: number, h: number): string {
+  const X = (u: number): number => round2(u * w);
+  const Y = (v: number): number => round2((1 - v) * h);
+  let out = '';
+  for (const part of parts) {
+    if (part.kind === 'circle') {
+      const { cx, cy, r } = part;
+      const kx = r * KAPPA;
+      const ky = r * KAPPA;
+      out +=
+        `${X(cx + r)} ${Y(cy)} m ` +
+        `${X(cx + r)} ${Y(cy + ky)} ${X(cx + kx)} ${Y(cy + r)} ${X(cx)} ${Y(cy + r)} c ` +
+        `${X(cx - kx)} ${Y(cy + r)} ${X(cx - r)} ${Y(cy + ky)} ${X(cx - r)} ${Y(cy)} c ` +
+        `${X(cx - r)} ${Y(cy - ky)} ${X(cx - kx)} ${Y(cy - r)} ${X(cx)} ${Y(cy - r)} c ` +
+        `${X(cx + kx)} ${Y(cy - r)} ${X(cx + r)} ${Y(cy - ky)} ${X(cx + r)} ${Y(cy)} c h `;
+      continue;
+    }
+    const pts = part.points;
+    for (let i = 0; i + 1 < pts.length; i += 2) {
+      out += `${X(pts[i])} ${Y(pts[i + 1])} ${i === 0 ? 'm' : 'l'} `;
+    }
+    if (part.closed) out += 'h ';
+  }
+  return out;
+}
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
 }
 
 const HIGHLIGHT_ALPHA = 0.4;
@@ -671,6 +717,145 @@ function addAnnotations(
       if (a.opacity !== undefined && a.opacity < 1) annot.set(PDFName.of('CA'), context.obj(a.opacity));
       annot.set(PDFName.of('DA'), PDFHexString.fromText(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
+    } else if (a.kind === 'count') {
+      // A TAKEOFF COUNT MARK — a real /Stamp, so it survives save/reload as an
+      // annotation and degrades honestly (any viewer shows a printable symbol
+      // with a subject and a "<group> <seq>" contents). The private keys ride
+      // beside it on the /SpectraMask precedent already shipped in P7 slice E:
+      //
+      //   /IT /Count           the intent. §12.5.6.10 requires a conforming
+      //                        reader to IGNORE an intent it doesn't know, so
+      //                        an unrecognized /IT on a /Stamp is safe by the
+      //                        spec's own rule rather than by convention.
+      //   /Subj                the group NAME — user data, verbatim.
+      //   /Contents            "<group> <seq>".
+      //   /NM                  the stable mark id.
+      //   /SpectraSymbol       which vector symbol the marker draws.
+      const symbol = symbolById(a.countSymbol);
+      const strokeW = 1.5;
+      const gsRef = context.register(context.obj({ Type: 'ExtGState', ca: 0.18 }));
+      // The path is emitted ONCE and painted twice (translucent fill, then the
+      // opaque outline) — `B` would apply the alpha to both.
+      const ops = symbolOps(symbol.parts, dispW, dispH);
+      const content =
+        `q /GS0 gs ${r} ${g} ${b} rg ${ops}f Q ` +
+        `${r} ${g} ${b} RG ${strokeW} w 1 J 1 j ${ops}S`;
+      const ap = context.register(
+        context.stream(content, {
+          Type: 'XObject',
+          Subtype: 'Form',
+          FormType: 1,
+          BBox: [0, 0, dispW, dispH],
+          Matrix: apMatrixFor(rotation),
+          Resources: { ExtGState: { GS0: gsRef } },
+        }),
+      );
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: 'Stamp',
+        Rect: [x0, y0, x1, y1],
+        C: [r, g, b],
+        F: 4, // print
+        IT: 'Count',
+        AP: { N: ap },
+      });
+      annot.set(PDFName.of('Subj'), PDFHexString.fromText(a.countGroup ?? ''));
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note ?? ''));
+      // /NM is derived from (group, sequence), not from the in-memory
+      // annotation id: the pair is unique by construction and ROUND-TRIPS,
+      // where a fresh uuid would be minted on every import and the mark's
+      // stable name would churn on every save.
+      annot.set(
+        PDFName.of('NM'),
+        PDFString.of(`count-${a.countGroup ?? ''}-${a.countSeq ?? 0}`),
+      );
+      annot.set(PDFName.of('SpectraSymbol'), PDFName.of(symbol.id));
+    } else if (a.kind === 'countlegend') {
+      // A PLACED LEGEND — /FreeText + /IT /CountLegend, with the table drawn
+      // in the appearance (symbol swatches included, so the legend reads as
+      // the marks do) and the same table as plain text in /Contents.
+      //
+      // The rows are a SNAPSHOT and ride in the private /SpectraLegend so a
+      // re-commit reproduces exactly what was placed. Re-deriving them at
+      // commit time would silently rewrite a legend the user placed
+      // deliberately, which is the same class of lie as a stored tally.
+      const rows = a.legendRows ?? [];
+      const title = a.legendTitle ?? '';
+      const totalWord = a.legendTotalWord ?? '';
+      const layout = legendLayout(rows, title);
+      const fontRef = context.register(
+        context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica', Encoding: 'WinAnsiEncoding' }),
+      );
+      const boldRef = context.register(
+        context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica-Bold', Encoding: 'WinAnsiEncoding' }),
+      );
+      // Scale the laid-out table onto whatever box the annotation now has, so
+      // a resized legend scales instead of clipping.
+      const sx = layout.widthPt > 0 ? dispW / layout.widthPt : 1;
+      const sy = layout.heightPt > 0 ? dispH / layout.heightPt : 1;
+      const fs = LEGEND_FONT_SIZE;
+      const textAt = (
+        tx: number,
+        yDown: number,
+        font: string,
+        color: [number, number, number],
+        text: string,
+      ): string =>
+        `BT /${font} ${fs} Tf ${color[0]} ${color[1]} ${color[2]} rg ` +
+        `${round2(tx)} ${round2(layout.heightPt - yDown)} Td (${escapePdfText(text)}) Tj ET `;
+      const rightAt = (yDown: number, font: string, text: string): string => {
+        const w = text.length * fs * 0.55;
+        return textAt(layout.widthPt - LEGEND_PAD - w, yDown, font, [0.1, 0.1, 0.1], text);
+      };
+      let content =
+        `q ${round2(sx)} 0 0 ${round2(sy)} 0 0 cm ` +
+        `1 1 1 rg 0 0 ${round2(layout.widthPt)} ${round2(layout.heightPt)} re f ` +
+        `${r} ${g} ${b} RG 1 w 0.5 0.5 ${round2(layout.widthPt - 1)} ${round2(layout.heightPt - 1)} re S ` +
+        textAt(LEGEND_PAD, LEGEND_PAD + LEGEND_ROW_H * 0.8, 'HelvB', [0.1, 0.1, 0.1], title);
+      for (const row of layout.rows) {
+        const [sr, sg, sb] = hexToRgb(row.color);
+        const sym = symbolById(row.symbol);
+        // The swatch is the symbol itself, drawn at row height in a nested
+        // q/Q so its own translation never leaks into the text that follows.
+        content +=
+          `q 1 0 0 1 ${round2(LEGEND_PAD)} ${round2(layout.heightPt - row.y - fs * 0.2 - LEGEND_SYMBOL_W + 2)} cm ` +
+          `${sr} ${sg} ${sb} RG 1 w 1 J 1 j ${symbolOps(sym.parts, LEGEND_SYMBOL_W, LEGEND_SYMBOL_W)}S Q ` +
+          textAt(LEGEND_PAD + LEGEND_SYMBOL_W + 4, row.y, 'Helv', [0.1, 0.1, 0.1], row.group) +
+          rightAt(row.y, 'Helv', String(row.count));
+      }
+      content +=
+        `0.5 0.5 0.5 RG 0.5 w ${round2(LEGEND_PAD)} ${round2(layout.heightPt - layout.totalY - fs * 0.4)} m ` +
+        `${round2(layout.widthPt - LEGEND_PAD)} ${round2(layout.heightPt - layout.totalY - fs * 0.4)} l S ` +
+        textAt(LEGEND_PAD, layout.totalY, 'HelvB', [0.1, 0.1, 0.1], totalWord) +
+        rightAt(layout.totalY, 'HelvB', String(layout.total)) +
+        'Q';
+      const ap = context.register(
+        context.stream(content, {
+          Type: 'XObject',
+          Subtype: 'Form',
+          FormType: 1,
+          BBox: [0, 0, dispW, dispH],
+          Matrix: apMatrixFor(rotation),
+          Resources: { Font: { Helv: fontRef, HelvB: boldRef } },
+        }),
+      );
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: 'FreeText',
+        Rect: [x0, y0, x1, y1],
+        C: [r, g, b],
+        F: 4, // print
+        IT: 'CountLegend',
+        AP: { N: ap },
+      });
+      annot.set(PDFName.of('DA'), PDFHexString.fromText(`0.1 0.1 0.1 rg /Helv ${fs} Tf`));
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note ?? ''));
+      annot.set(
+        PDFName.of('SpectraLegend'),
+        PDFHexString.fromText(
+          JSON.stringify({ title, totalWord, rows }),
+        ),
+      );
     } else if (a.kind === 'stamp' && a.imageData && stampImages.get(a.imageData)) {
       // A custom IMAGE stamp: the appearance draws the pre-embedded raster —
       // no border, no fill, the king's look. /Contents keeps the display name.

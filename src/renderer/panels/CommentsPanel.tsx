@@ -46,6 +46,8 @@ const KIND_KEY: Record<string, PanelKey> = {
   measure: 'panel.comments.kind.measure',
   shape: 'panel.comments.kind.shape',
   callout: 'panel.comments.kind.callout',
+  count: 'panel.comments.kind.count',
+  countlegend: 'panel.comments.kind.countlegend',
 };
 
 function labelFor(kind: string, markupType?: string): string {

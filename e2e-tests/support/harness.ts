@@ -259,6 +259,11 @@ export interface PageAnnotationSnapshot {
   opacity?: number;
   /** N11: the vertex list, for the geometry assertions a snap needs. */
   points?: number[];
+  /** N11 slice C: which count group a mark belongs to, its marker symbol and
+   * its sequence — spec 107 asserts these RECONSTITUTE from the saved file. */
+  countGroup?: string;
+  countSymbol?: string;
+  countSeq?: number;
 }
 
 /** Every pending annotation on one page, workspace order (= z-order). */
@@ -273,6 +278,27 @@ export async function getPageAnnotations(
     docId,
     pageId,
   );
+}
+
+/** N11 slice C: seed the count groups + arm one (a persisted preference, so
+ * a spec must not inherit what the last run left behind). */
+export async function takeoffSetGroups(
+  groups: { name: string; color: string; symbol: string }[],
+  armed: string | null,
+): Promise<void> {
+  await browser.execute(
+    function (g, a) {
+      (window as any).__SPECTRA_TEST__.takeoffSetGroups(g, a);
+    },
+    groups,
+    armed as any,
+  );
+}
+
+export async function takeoffArmed(): Promise<string | null> {
+  return (await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.takeoffArmed();
+  })) as string | null;
 }
 
 export async function commitPendingEdits(): Promise<void> {

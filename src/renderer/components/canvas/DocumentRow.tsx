@@ -159,6 +159,7 @@ interface DocumentRowProps {
   onCalibrate: (lengthPts: number) => void;
   onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
+  onRegroupCountMarks: (docId: string, pageId: string, annotationIds: string[], group: import('../../lib/count-marks').CountGroup) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -256,6 +257,7 @@ function DocumentRowImpl({
   onCalibrate,
   onMeasureContextMenu,
   onMarqueeSelect,
+  onRegroupCountMarks,
   onAddRedactionMark,
   onRemoveRedactionMark,
   onSetSignaturePlacement,
@@ -383,6 +385,7 @@ function DocumentRowImpl({
         onCalibrate={onCalibrate}
         onMeasureContextMenu={onMeasureContextMenu}
         onMarqueeSelect={onMarqueeSelect}
+        onRegroupCountMarks={onRegroupCountMarks}
         onAddRedactionMark={onAddRedactionMark}
         onRemoveRedactionMark={onRemoveRedactionMark}
         onSetSignaturePlacement={onSetSignaturePlacement}

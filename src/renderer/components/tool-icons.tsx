@@ -237,6 +237,15 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M2 14l2.5 2.5L7 14" />
     </>
   ),
+  // Three count marks and a tally stroke — the takeoff gesture itself.
+  takeoff: (
+    <>
+      <circle cx="6" cy="7" r="2.5" />
+      <circle cx="6" cy="17" r="2.5" />
+      <circle cx="13" cy="12" r="2.5" />
+      <path d="M18 5v14M21 5v14" />
+    </>
+  ),
   // Chain link.
   links: (
     <>

@@ -77,6 +77,8 @@ const KIND_KEYS: Record<PageAnnotation['kind'], UiKey> = {
   measure: 'canvas.pbar.kind.measure',
   shape: 'canvas.pbar.kind.shape',
   callout: 'canvas.pbar.kind.callout',
+  count: 'canvas.pbar.kind.count',
+  countlegend: 'canvas.pbar.kind.countlegend',
 };
 
 // The shape names are the SAME words the secondary toolbar's shape picker

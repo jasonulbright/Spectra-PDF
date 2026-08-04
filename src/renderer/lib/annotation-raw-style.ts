@@ -7,7 +7,7 @@
 // commit-time strip. No sidecar (encrypted file, parse failure) degrades to
 // pdf.js-only import: the shape kinds then stay UNIMPORTED rather than
 // imported blind — faithful-or-untouched.
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
 
 export interface RawAnnotStyle {
@@ -36,6 +36,15 @@ export interface RawAnnotStyle {
   measure?: boolean;
   /** /RD [left top right bottom] insets (FreeText callouts). */
   rd?: [number, number, number, number];
+  /** /Subj — the annotation's subject. pdf.js does not surface it, and it is
+   * where an N11 count mark carries its GROUP name. */
+  subj?: string;
+  /** The private /SpectraSymbol name — which vector symbol a count mark's
+   * marker draws (the /SpectraMask precedent). */
+  spectraSymbol?: string;
+  /** The private /SpectraLegend JSON — a placed takeoff legend's snapshot
+   * rows. Text, so it survives any producer that rewrites the dictionary. */
+  spectraLegend?: string;
 }
 
 function num(v: unknown): number | undefined {
@@ -76,6 +85,14 @@ function colorHex(arr: unknown): string | undefined {
 
 function nameOf(v: unknown): string | undefined {
   return v instanceof PDFName ? v.decodeText() : undefined;
+}
+
+/** A PDF text string (literal or hex) as JS text; a /Name decodes too, since
+ * the private /SpectraSymbol is written as one. */
+function textOf(v: unknown): string | undefined {
+  if (v instanceof PDFName) return v.decodeText();
+  if (v instanceof PDFString || v instanceof PDFHexString) return v.decodeText();
+  return undefined;
 }
 
 /** Per-page raw annotation styles, in /Annots order. Returns null when the
@@ -147,6 +164,9 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
             vertices: numArray(dict.lookupMaybe(PDFName.of('Vertices'), PDFArray)),
             l: numArray(dict.lookupMaybe(PDFName.of('L'), PDFArray)),
             measure: !!dict.get(PDFName.of('Measure')),
+            subj: textOf(dict.lookup(PDFName.of('Subj'))),
+            spectraSymbol: textOf(dict.lookup(PDFName.of('SpectraSymbol'))),
+            spectraLegend: textOf(dict.lookup(PDFName.of('SpectraLegend'))),
             ...(rd && rd.length === 4 ? { rd: rd as [number, number, number, number] } : {}),
           });
           } catch {

@@ -4,6 +4,9 @@ import { NO_OVERRIDES } from '../lib/toolbar-layout';
 // Safe from the reducer: commands/tools has type-only imports, so it carries no
 // runtime dependency back into the state or component layers.
 import { toolById, toolForOp, armedModeOf, type ToolDef } from '../commands/tools';
+// Pure math only (no DOM, no storage) — the count tier's sequence allocation
+// lives here because the reducer is the only place that holds a whole document.
+import { countContents, countMarksOf, groupOf, nextSequence } from '../lib/count-marks';
 
 // Re-project a display-normalized annotation rect when its page's display
 // rotates by `delta` quarter-turns clockwise: annotation coords always live
@@ -1013,11 +1016,74 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       const page = doc?.pages.find((p) => p.id === action.pageId);
       if (!doc || !page) return state;
+      // N11 slice C: a count mark's SEQUENCE is allocated here, not at the
+      // gesture. The number is unique per group across the whole DOCUMENT and
+      // a page cell can only see its own page — the reducer is the one place
+      // that holds every page, so it is the only place that can number a mark
+      // correctly. (`nextSequence` is one past the highest ever used, so a
+      // delete never causes two marks to claim the same label.)
+      let annotation = action.annotation;
+      if (annotation.kind === 'count') {
+        const group = groupOf(annotation);
+        const all = doc.pages.flatMap((p) => countMarksOf(p.annotations));
+        const seq = nextSequence(all, group);
+        annotation = {
+          ...annotation,
+          countGroup: group,
+          countSeq: seq,
+          note: countContents(group, seq),
+        };
+      }
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
         pages: d.pages.map((p) =>
           p.id === action.pageId
-            ? { ...p, annotations: [...(p.annotations ?? []), action.annotation] }
+            ? { ...p, annotations: [...(p.annotations ?? []), annotation] }
+            : p,
+        ),
+      }));
+      return applyPageEdit(state, documents, [doc.path]);
+    }
+    case 'REGROUP_COUNT_MARKS': {
+      // Re-file marks into the armed group (the Ctrl-marquee gesture). Colour
+      // and symbol follow the group — a group drawn two ways is not a group —
+      // and each moved mark takes a FRESH sequence at the end of the target,
+      // because its old number belonged to the group it left.
+      const doc = state.workspace.documents.find((d) => d.id === action.docId);
+      const page = doc?.pages.find((p) => p.id === action.pageId);
+      if (!doc || !page?.annotations?.length) return state;
+      const chosen = new Set(action.annotationIds);
+      const moving = page.annotations.filter(
+        (a) => chosen.has(a.id) && a.kind === 'count' && groupOf(a) !== action.group,
+      );
+      if (moving.length === 0) return state;
+      const all = doc.pages.flatMap((p) => countMarksOf(p.annotations));
+      let seq = nextSequence(all, action.group);
+      const renumbered = new Map<string, { seq: number; note: string }>();
+      for (const m of moving) {
+        renumbered.set(m.id, { seq, note: countContents(action.group, seq) });
+        seq += 1;
+      }
+      const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
+        ...d,
+        pages: d.pages.map((p) =>
+          p.id === action.pageId
+            ? {
+                ...p,
+                annotations: p.annotations!.map((a) => {
+                  const next = renumbered.get(a.id);
+                  if (!next) return a;
+                  return {
+                    ...a,
+                    countGroup: action.group,
+                    countSymbol: action.symbol,
+                    countSeq: next.seq,
+                    color: action.color,
+                    note: next.note,
+                    ...(a.importedOriginal ? { geometryDiverged: true } : {}),
+                  };
+                }),
+              }
             : p,
         ),
       }));
@@ -1117,8 +1183,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
               ...a,
               x: e.x,
               y: e.y,
-              w: a.kind === 'note' ? a.w : e.w,
-              h: a.kind === 'note' ? a.h : e.h,
+              // 'count' joins 'note' as a FIXED-size marker: a count symbol
+              // is a marker, not a region, and a resized one would read as a
+              // different-weight count.
+              w: a.kind === 'note' || a.kind === 'count' ? a.w : e.w,
+              h: a.kind === 'note' || a.kind === 'count' ? a.h : e.h,
               ...(e.points && a.points ? { points: e.points } : {}),
               ...(e.strokes && a.strokes ? { strokes: e.strokes } : {}),
               ...(e.note !== undefined && a.kind === 'measure' ? { note: e.note } : {}),

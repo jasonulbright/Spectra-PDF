@@ -105,7 +105,7 @@ export function planCommit(
           ...(p.annotations?.length
             ? {
                 annotations: p.annotations.map(
-                  ({ kind, x, y, w, h, color, note, points, strokes, imageData, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, importedOriginal }) => ({
+                  ({ kind, x, y, w, h, color, note, points, strokes, imageData, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, importedOriginal }) => ({
                     kind,
                     x,
                     y,
@@ -130,6 +130,16 @@ export function planCommit(
                     calloutBox,
                     lineEndings,
                     cloudIntensity,
+                    // N11 slice C — the count mark's group/symbol/sequence and
+                    // the placed legend's snapshot rows. The ALLOWLIST trap
+                    // again: a field absent from this map never reaches the
+                    // builder, however faithfully the type carries it.
+                    countGroup,
+                    countSymbol,
+                    countSeq,
+                    legendRows,
+                    legendTitle,
+                    legendTotalWord,
                     importedOriginal,
                   }),
                 ),

@@ -82,6 +82,7 @@ export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = 
   prepareform: 'forms',
   redact: 'delete',
   measure: 'measure',
+  takeoff: 'takeoff',
   actions: 'actions',
   ocr: 'extract_text',
   compare: 'compare',
