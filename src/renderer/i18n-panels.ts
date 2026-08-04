@@ -110,6 +110,24 @@ export const PANEL_STRINGS = {
   'panel.grayscale.convertingBtn': 'Converting...',
   'panel.grayscale.convert': 'Convert to Grayscale',
   'panel.grayscale.result': '{{from}} KB → {{to}} KB',
+
+  'panel.pdfVersion.open': 'Open a PDF to change its version',
+  'panel.pdfVersion.current': 'Current version: PDF {{version}}',
+  'panel.pdfVersion.currentLabel': 'Current version:',
+  'panel.pdfVersion.target': 'Target Version',
+  'panel.pdfVersion.versionAria': 'PDF version',
+  'panel.pdfVersion.setting': 'Setting PDF version...',
+  'panel.pdfVersion.settingBtn': 'Setting version...',
+  'panel.pdfVersion.set': 'Set Version',
+  'panel.pdfVersion.done': 'PDF {{from}} → PDF {{to}}',
+
+  'panel.pdfa.open': 'Open a PDF to convert to PDF/A',
+  'panel.pdfa.level': 'Conformance Level',
+  'panel.pdfa.levelAria': 'PDF/A conformance level',
+  'panel.pdfa.converting': 'Converting to PDF/A...',
+  'panel.pdfa.convertingBtn': 'Converting...',
+  'panel.pdfa.convert': 'Convert to PDF/A',
+  'panel.pdfa.done': 'Converted to {{level}} ({{size}} KB)',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;
