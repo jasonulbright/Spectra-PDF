@@ -16,6 +16,8 @@ import { ChromeIcon } from '../chrome-icons';
 import { TEST_HARNESS_ENABLED, registerCanvasOutline } from '../../testHarness';
 import type { OpenFile, PdfBuffer } from '../../state/types';
 import type { NavPanelComponentProps } from './types';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../../i18n';
 
 // Bookmarks nav panel (Phase 4 M3.2) — the ONE bookmarks surface, merging the
 // canvas OutlineSidebar (drag-reorder + click-to-jump, § 2n.2) with the
@@ -57,6 +59,8 @@ interface DragState {
 }
 
 export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { call } = useEngine();
   const dispatch = useAppDispatch();
   const [nodes, setNodes] = useState<OutlineNode[]>([]);
@@ -146,9 +150,15 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         if (activeFileRef.current?.buffer !== targetBuffer) return;
         setNodes((res.outline as OutlineNode[]) ?? []);
         setLoadedBuffer(targetBuffer);
-        setStatus(res.truncated ? 'Outline truncated (too many bookmarks)' : '');
+        setStatus(res.truncated ? tChrome('nav.bookmarks.truncated') : '');
       })
-      .catch((e: unknown) => setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`));
+      .catch((e: unknown) =>
+        setStatus(
+          tChrome('panel.common.error', {
+            message: e instanceof Error ? e.message : String(e),
+          }),
+        ),
+      );
     return () => {
       cancelled = true;
     };
@@ -167,7 +177,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const persist = useCallback(
     async (next: OutlineNode[], target: OpenFile): Promise<void> => {
       const stillShown = () => activeFileRef.current?.path === target.path;
-      if (stillShown()) setStatus('Saving…');
+      if (stillShown()) setStatus(tChrome('nav.bookmarks.saving'));
       try {
         const snapshotPath = await file.snapshot(target.workingPath);
         await call('set_outline', {
@@ -189,7 +199,11 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         }
       } catch (e: unknown) {
         if (stillShown()) {
-          setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+          setStatus(
+            tChrome('panel.common.error', {
+              message: e instanceof Error ? e.message : String(e),
+            }),
+          );
           setLoadedBuffer(null); // reload from disk on failure so the view matches
         }
       }
@@ -252,7 +266,10 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const addRoot = useCallback(() => {
     const target = mutableTarget();
     if (!target) return;
-    const next = [...nodesRef.current, { title: 'Untitled', page: null, children: [] }];
+    const next = [
+      ...nodesRef.current,
+      { title: tChrome('nav.bookmarks.untitled'), page: null, children: [] },
+    ];
     setNodes(next);
     rebaseIfEditing(next);
     void queuePersist(next, target);
@@ -264,7 +281,10 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       if (!target) return;
       const next = updateAt(nodesRef.current, path, (n) => ({
         ...n,
-        children: [...n.children, { title: 'Untitled', page: null, children: [] }],
+        children: [
+          ...n.children,
+          { title: tChrome('nav.bookmarks.untitled'), page: null, children: [] },
+        ],
       }));
       setNodes(next);
       rebaseIfEditing(next);
@@ -454,14 +474,24 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
     (activeFile.buffer === loadedBuffer || (savesInFlight.current.get(activeFile.path) ?? 0) > 0);
 
   if (!activeFile) {
-    return <div className="navpanel-empty" data-testid="bookmarks-panel">No document open.</div>;
+    return (
+      <div className="navpanel-empty" data-testid="bookmarks-panel">
+        {tChrome('nav.common.noDocument')}
+      </div>
+    );
   }
 
   return (
     <div className="bookmarks-panel flex flex-col h-full min-h-0" data-testid="bookmarks-panel">
       <div className="navpanel-scroll bookmarks-list flex-1" ref={listRef}>
-        {!loaded && <p className="navpanel-empty" data-testid="bookmarks-loading">Loading bookmarks…</p>}
-        {loaded && flat.length === 0 && <p className="navpanel-empty">No bookmarks yet.</p>}
+        {!loaded && (
+          <p className="navpanel-empty" data-testid="bookmarks-loading">
+            {tChrome('nav.bookmarks.loading')}
+          </p>
+        )}
+        {loaded && flat.length === 0 && (
+          <p className="navpanel-empty">{tChrome('nav.bookmarks.empty')}</p>
+        )}
         {loaded && flat.map((f) => {
           const key = f.path.join('.');
           const isDragged = draggedPath != null && isPathPrefix(draggedPath, f.path);
@@ -479,7 +509,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
                 <span
                   className="bookmark-handle"
                   data-testid="bookmark-handle"
-                  title="Drag to reorder / nest"
+                  title={tChrome('nav.bookmarks.dragHandle')}
                   onPointerDown={(e) => onHandlePointerDown(f.path, e)}
                 >
                   <ChromeIcon icon="overflow" size={12} />
@@ -493,11 +523,15 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
                     if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                   }}
                   className="bookmark-title-input"
-                  placeholder="Untitled"
+                  placeholder={tChrome('nav.bookmarks.untitled')}
                 />
                 <button
                   className="bookmark-jump"
-                  title={f.node.page != null ? `Jump to page ${f.node.page}` : 'No target page'}
+                  title={
+                    f.node.page != null
+                      ? tChrome('nav.bookmarks.jumpToPage', { page: f.node.page })
+                      : tChrome('nav.bookmarks.noTargetPage')
+                  }
                   disabled={f.node.page == null}
                   onClick={() => jumpTo(f.node.page)}
                 >
@@ -510,7 +544,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
                   max={activeFile.pageCount}
                   value={f.node.page ?? ''}
                   placeholder="—"
-                  title="Target page"
+                  title={tChrome('nav.bookmarks.targetPage')}
                   onChange={(e) => {
                     const v =
                       e.target.value === ''
@@ -525,7 +559,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
                   className="bookmark-page-input"
                 />
                 <button
-                  title="Add child bookmark"
+                  title={tChrome('nav.bookmarks.addChild')}
                   onClick={() => addChild(f.path)}
                   className="bookmark-btn opacity-0 group-hover:opacity-100"
                 >
@@ -533,7 +567,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
                 </button>
                 <button
                   data-testid="bookmark-delete"
-                  title="Delete bookmark (and children)"
+                  title={tChrome('nav.bookmarks.delete')}
                   onClick={() => deleteNode(f.path)}
                   className="bookmark-btn bookmark-btn-danger opacity-0 group-hover:opacity-100"
                 >
@@ -552,7 +586,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
           disabled={!loaded}
           className="bookmark-add-btn disabled:opacity-50"
         >
-          + Add bookmark
+          {tChrome('nav.bookmarks.add')}
         </button>
         {status && <span className="bookmark-status">{status}</span>}
       </div>
