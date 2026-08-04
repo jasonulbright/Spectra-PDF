@@ -233,6 +233,60 @@ export const CANVAS_STRINGS = {
     'Click a comment with the Select tool to see its properties — Ctrl-click or Ctrl-drag for several.',
   'canvas.pbar.close': 'Hide the properties bar (Ctrl+E)',
   'canvas.pbar.closeAria': 'Hide the properties bar',
+
+  // ── The text-selection markup bar ────────────────────────────────────
+  'canvas.markup.barLabel': 'Mark selected text',
+  'canvas.markup.highlight': 'Highlight',
+  'canvas.markup.underline': 'Underline',
+  'canvas.markup.strikeout': 'Strikeout',
+  'canvas.markup.squiggly': 'Squiggly',
+  'canvas.markup.link': 'Link',
+  'canvas.markup.linkTitle': 'Link to a URL',
+  'canvas.markup.enterUrl': 'Enter a URL.',
+
+  // ── The find bar ─────────────────────────────────────────────────────
+  'canvas.find.placeholder': 'Find in documents',
+  // The composed count follows the nav-pane precedent: the OUTER key
+  // pluralizes on the match count and takes the page count as a finished
+  // grammatical unit, so a translator controls both agreements.
+  'canvas.find.summary_one': '{{count}} match on {{pages}}',
+  'canvas.find.summary_other': '{{count}} matches on {{pages}}',
+  'canvas.find.pageCount_one': '{{count}} page',
+  'canvas.find.pageCount_other': '{{count}} pages',
+  'canvas.find.noResults': 'No results',
+  'canvas.find.invalidPattern': 'Invalid pattern',
+  'canvas.find.patternTooSlow': 'Pattern too slow',
+  'canvas.find.cursor': '{{current}}/{{total}}',
+  'canvas.find.cursorTotal': '{{total}}',
+  'canvas.find.prev': 'Previous match page (Shift+Enter)',
+  'canvas.find.next': 'Next match page (Enter)',
+  'canvas.find.ocrProgress': 'Recognizing {{count}}…',
+  'canvas.find.ocrProgressTitle': 'Reading scanned pages',
+  'canvas.find.ocrLanguage': 'OCR language for scanned pages',
+  'canvas.find.applyOcrTitle':
+    'Write the recognized text into the scanned pages as an invisible, searchable text layer',
+  'canvas.find.applying': 'Applying…',
+  'canvas.find.makeSearchable': 'Make searchable',
+  'canvas.find.close': 'Close (Esc)',
+
+  // ── The organizer's document header / row chrome ─────────────────────
+  'canvas.doc.moveUp': 'Move up',
+  'canvas.doc.moveDown': 'Move down',
+  'canvas.doc.mergeUp': "Merge into the document above (copies this document's pages to its end)",
+  'canvas.doc.remove': 'Remove document',
+  'canvas.doc.addPages': 'Add pages from a file',
+  'canvas.doc.addDocument': 'Add document',
+
+  // ── Presentation view ────────────────────────────────────────────────
+  'canvas.present.label': 'Presentation',
+  'canvas.present.counter': '{{current}} / {{total}}',
+  'canvas.present.exitTitle': 'Exit presentation (Esc)',
+  'canvas.present.exitAria': 'Exit presentation',
+
+  // ── The image/vector transform overlay handles ───────────────────────
+  'canvas.imgtx.skew': 'Skew — drag along the edge',
+  'canvas.imgtx.gradientStart': 'Gradient start',
+  'canvas.imgtx.gradientEnd': 'Gradient end',
 } as const;
 
 export type CanvasKey = keyof typeof CANVAS_STRINGS;

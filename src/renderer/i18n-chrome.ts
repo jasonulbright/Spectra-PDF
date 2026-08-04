@@ -74,6 +74,20 @@ export const CHROME_STRINGS = {
   'chrome.search.openFirst': 'Open a PDF first',
   'chrome.empty.openToStart': 'Open a PDF to get started',
   'chrome.empty.openPdf': 'Open PDF',
+
+  // ── Keyboard-shortcut display (N12 slice C) ──────────────────────────
+  // The shortcut a menu row, a toolbar tooltip or the presentation exit
+  // shows. Only the MODIFIER and the NAMED keys localize — a letter key is
+  // the letter on the reader's own keyboard, and '+' is the chord separator
+  // every Windows locale writes (Ctrl+Mayús+S), so it stays notation in the
+  // joiner rather than becoming a one-character catalog key.
+  'shortcut.ctrl': 'Ctrl',
+  'shortcut.shift': 'Shift',
+  'shortcut.key.delete': 'Del',
+  'shortcut.key.backspace': 'Backspace',
+  'shortcut.key.tab': 'Tab',
+  'shortcut.key.escape': 'Esc',
+  'shortcut.key.space': 'Space',
 } as const;
 
 export type ChromeKey = keyof typeof CHROME_STRINGS;

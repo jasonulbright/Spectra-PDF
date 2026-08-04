@@ -15,6 +15,8 @@ import {
   userToDisplay,
   type Mat,
 } from '../../lib/image-transform';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../../i18n';
 
 // Phase 9.C1 — direct-manipulation transform of the selected image placement.
 // The outline + move body are an SVG polygon (crisp via non-scaling-stroke,
@@ -64,6 +66,7 @@ export default function ImageTransformOverlay({
   onCommitCrop,
   onCommitMask,
 }: Props): React.ReactElement {
+  useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Mat | null>(null);
   const [cropBand, setCropBand] = useState<[number, number, number, number] | null>(null);
@@ -400,7 +403,7 @@ export default function ImageTransformOverlay({
             key={`s${i}`}
             className="page-imgtx-skew"
             data-testid={`img-skew-edge-${i}`}
-            title="Skew — drag along the edge"
+            title={tChrome('canvas.imgtx.skew')}
             style={dot(p)}
             onPointerDown={(e) => start(e, skewGesture(i as 0 | 1 | 2 | 3))}
           />
@@ -442,14 +445,14 @@ export default function ImageTransformOverlay({
               <div
                 className="page-imgtx-maskdot from"
                 data-testid="img-mask-from"
-                title="Gradient start"
+                title={tChrome('canvas.imgtx.gradientStart')}
                 style={dot(fp)}
                 onPointerDown={(e) => startMaskDot(e, 'from')}
               />
               <div
                 className="page-imgtx-maskdot to"
                 data-testid="img-mask-to"
-                title="Gradient end"
+                title={tChrome('canvas.imgtx.gradientEnd')}
                 style={dot(tp)}
                 onPointerDown={(e) => startMaskDot(e, 'to')}
               />
