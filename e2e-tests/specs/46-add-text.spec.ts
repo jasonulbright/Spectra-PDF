@@ -40,9 +40,11 @@ async function editTextRuns(
 
 async function editParagraphs(
   pageId: string,
-): Promise<{ index: number; text: string; lineCount: number; alignment: string }[]> {
+): Promise<
+  { index: number; text: string; lineCount: number; alignment: string; orientation: string }[]
+> {
   return await browser.execute<
-    { index: number; text: string; lineCount: number; alignment: string }[],
+    { index: number; text: string; lineCount: number; alignment: string; orientation: string }[],
     [string]
   >(function (p) {
     return (window as any).__SPECTRA_TEST__.editParagraphs(p);
@@ -52,10 +54,17 @@ async function editParagraphs(
 // The authored paragraph, once the post-commit re-index lists it.
 async function authoredParagraph(
   needle: string,
-): Promise<{ pageId: string; text: string; lineCount: number } | null> {
+): Promise<{ pageId: string; text: string; lineCount: number; orientation: string } | null> {
   for (const pageId of await editTextPageIds()) {
     const para = (await editParagraphs(pageId)).find((p) => p.text.includes(needle));
-    if (para) return { pageId, text: para.text, lineCount: para.lineCount };
+    if (para) {
+      return {
+        pageId,
+        text: para.text,
+        lineCount: para.lineCount,
+        orientation: para.orientation,
+      };
+    }
   }
   return null;
 }
@@ -126,44 +135,33 @@ describe('add text (Phase 9.A2)', () => {
     //
     // 9.T13 INVERSION (the spec-42 / test_rotated_text_never_groups
     // precedent — the capability this pinned is deliberately replaced).
-    // This case used to assert that NO paragraph carried the phrase,
-    // which was never a capability claim: it was the consequence of one
-    // page-space axis-alignment test. Admission now runs in the member's
-    // OWN transposed frame, so a quarter-turned run is an ordinary
-    // axis-aligned member there and groups like any other. The run box
-    // still lists (engine pin: paragraphs 1 AND runs 1), so the proof is
-    // now BOTH layers carry it. Off-quarter angles still refuse — that
-    // boundary is retained and the 37° case below is its pin.
+    // This case used to require the phrase on the RUN-BOX layer with NO
+    // paragraph carrying it. Neither half survives T13, and the probe
+    // (`probe-rot90.local.ts`) shows why: admission now runs in the
+    // member's OWN transposed frame, so a quarter-turned run is an
+    // ordinary axis-aligned member there and GROUPS. Once it groups the
+    // run-box layer is empty — and it is empty for the 0° control too,
+    // so "on the run layer" was never the authoring proof it read as,
+    // and the old undo check (an always-empty runs list) was vacuous.
+    // The honest pin is the paragraph layer, including the ORIENTATION,
+    // which is the whole content of T13. Off-quarter angles still refuse
+    // — that boundary is retained and the 37° case below is its pin.
     await commitAddText({ text: phrase, size: 14, rotate: 90 });
 
     expect(await invokeAppCommand('tools.edit')).toBe(true);
-    await browser.waitUntil(
-      async () => {
-        for (const id of await editTextPageIds()) {
-          const runs = await editTextRuns(id);
-          if (runs.some((r) => r.text.includes('Sideways'))) {
-            const para = await authoredParagraph('Sideways');
-            return para !== null;
-          }
-        }
-        return false;
-      },
-      {
-        timeout: 30_000,
-        timeoutMsg: 'the rotated authored run never listed on both the run-box and paragraph layers',
-      },
-    );
+    await browser.waitUntil(async () => (await authoredParagraph('Sideways')) !== null, {
+      timeout: 30_000,
+      timeoutMsg: 'the rotated authored text never listed as a paragraph',
+    });
+    // A quarter turn is carried as an orientation, not as a horizontal
+    // paragraph that happens to sit sideways.
+    expect((await authoredParagraph('Sideways'))?.orientation).toBe('rotated-ccw');
 
     expect(await invokeAppCommand('edit.undo')).toBe(true);
-    await browser.waitUntil(
-      async () => {
-        for (const id of await editTextPageIds()) {
-          if ((await editTextRuns(id)).some((r) => r.text.includes('Sideways'))) return false;
-        }
-        return true;
-      },
-      { timeout: 30_000, timeoutMsg: 'undo did not remove the rotated authored text' },
-    );
+    await browser.waitUntil(async () => (await authoredParagraph('Sideways')) === null, {
+      timeout: 30_000,
+      timeoutMsg: 'undo did not remove the rotated authored text',
+    });
   });
 
   it('authors FREE-ANGLE text (T19): a 37° block lists as a run box; undo removes', async function () {
