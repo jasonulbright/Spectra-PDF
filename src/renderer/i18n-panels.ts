@@ -396,6 +396,28 @@ export const PANEL_STRINGS = {
   'panel.watermark.pagesLabel': 'Pages (e.g. 1,3,5 or all)',
   'panel.watermark.pagesAria': 'Pages to watermark',
   'panel.watermark.scriptsNote': "Latin, Cyrillic, and Greek supported; other scripts (e.g. CJK) aren't yet.",
+
+  'panel.rebuild.open': 'Open a PDF to rebuild',
+  'panel.rebuild.blurb':
+    'Deep rebuild via Ghostscript. Re-renders every page through the GS interpreter into a fresh PDF. Fixes font embedding issues, colorspace problems, and corrupt content streams.',
+  'panel.rebuild.note':
+    'Note: May lose interactive elements (form fields, JavaScript actions). Use Tier 1 Repair first for lighter fixes.',
+  'panel.rebuild.rebuilding': 'Rebuilding PDF (Tier 2: Ghostscript round-trip)...',
+  'panel.rebuild.rebuildingBtn': 'Rebuilding...',
+  'panel.rebuild.rebuild': 'Rebuild',
+  'panel.rebuild.done': 'Rebuilt: {{from}} KB -> {{to}} KB, {{pages}} pages.',
+
+  'panel.preflight.open': 'Open a PDF to run print preflight',
+  'panel.preflight.analysing': 'Analysing…',
+  'panel.preflight.rerun': 'Re-run',
+  'panel.preflight.allPassed': 'Ready to print — all {{count}} checks passed.',
+  'panel.preflight.passed': '{{count}} passed',
+  'panel.preflight.toReview': '{{count}} to review',
+  'panel.preflight.failed': '{{count}} failed',
+  'panel.preflight.ofTotal': 'of {{count}}.',
+  'panel.preflight.images_one': '{{count}} image',
+  'panel.preflight.images_other': '{{count}} images',
+  'panel.preflight.colour': ' · colour: {{families}}',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;

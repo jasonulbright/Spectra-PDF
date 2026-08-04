@@ -4,8 +4,12 @@ import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { ensureGsPath } from './SettingsPanel';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 export function RebuildPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call, saveFile } = useEngine();
   const [status, setStatus] = useState('');
@@ -15,30 +19,25 @@ export function RebuildPanel(): React.ReactElement {
     if (!activeFile) return;
     const output = await saveFile('rebuilt.pdf');
     if (!output) return;
-    setBusy(true); setStatus('Rebuilding PDF (Tier 2: Ghostscript round-trip)...');
+    setBusy(true); setStatus(tChrome('panel.rebuild.rebuilding'));
     try {
       const r = await call('rebuild', { file: activeFile.workingPath, output, gs_path: await ensureGsPath() });
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.rebuilt_size / 1024).toFixed(0);
-      setStatus(`Rebuilt: ${orig} KB -> ${out} KB, ${r.pages} pages.`);
-    } catch (e: unknown) { setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`); }
+      setStatus(tChrome('panel.rebuild.done', { from: orig, to: out, pages: r.pages }));
+    } catch (e: unknown) { setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); }
     finally { setBusy(false); }
   }, [activeFile, call, saveFile]);
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to rebuild" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.rebuild.open')} />;
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="text-sm text-neutral-400">Working on: <span className="text-neutral-200">{activeFile.name}</span> ({activeFile.pageCount} pages)</div>
-      <p className="text-sm text-neutral-500">
-        Deep rebuild via Ghostscript. Re-renders every page through the GS interpreter into a fresh PDF.
-        Fixes font embedding issues, colorspace problems, and corrupt content streams.
-      </p>
-      <p className="text-xs text-amber-500/80">
-        Note: May lose interactive elements (form fields, JavaScript actions). Use Tier 1 Repair first for lighter fixes.
-      </p>
+      <div className="text-sm text-neutral-400">{tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})</div>
+      <p className="text-sm text-neutral-500">{tChrome('panel.rebuild.blurb')}</p>
+      <p className="text-xs text-amber-500/80">{tChrome('panel.rebuild.note')}</p>
       <button onClick={handleRebuild} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
-        {busy ? 'Rebuilding...' : 'Rebuild'}
+        {busy ? tChrome('panel.rebuild.rebuildingBtn') : tChrome('panel.rebuild.rebuild')}
       </button>
       <StatusBar message={status} busy={busy} />
     </div>
