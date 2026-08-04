@@ -2177,6 +2177,13 @@ export function WorkspaceCanvasView({
     index: number;
   } | null>(null);
   const editFetchTokenRef = useRef(0);
+  // Non-zero while a listing pass is in flight (its token). A consumer that
+  // reads the maps mid-pass sees a TRANSIENT empty page — indistinguishable
+  // from "this page really has no images" — so the honest question is not
+  // "is the map empty?" but "is the map settled AND empty?". Exposed to the
+  // harness (specs asserted a delete against an unsettled listing and would
+  // have passed a no-op); no product code branches on it.
+  const editListingPendingRef = useRef(0);
   const editBuffer = focusedDoc ? state.files.get(focusedDoc.path)?.buffer : undefined;
   // The DESTRUCTIVE clears (selection + the open editor with the user's
   // typed text) fire only when the edit context truly changed — tool,
@@ -2237,6 +2244,43 @@ export function WorkspaceCanvasView({
       setSelectedVector(null);
       vectorReselectRef.current = null;
     }
+    // § F, the id-holder rule applied to the EDIT LISTINGS. These maps are
+    // keyed by generation-tagged page ids, and a whole-file op REBUILDS the
+    // file: `docs` rotates to a fresh generation one render before the
+    // refetch below can publish anything (the two-pass anatomy described
+    // above). In that window the PUBLISHED maps still name DEAD pages — and
+    // everything that starts a selection reads them: a click on a
+    // still-drawn box, the harness's pageIds(). The selection then holds an
+    // id `workspacePageNumber` can no longer resolve, so the very next
+    // action refuses (e2e-caught, deterministic: a group delete issued right
+    // after an undo never applied). Prune to what still exists
+    // SYNCHRONOUSLY, before the first await, so a dead id is never offered.
+    // Prune, not adopt: a non-authored rebuild is precisely the case where
+    // nothing survives, and the reselect stashes below are the adoption
+    // channel that puts the selection back onto the fresh ids.
+    if (focusedDoc) {
+      const liveIds = new Set(focusedDoc.pages.map((p) => p.id));
+      const dropStale = <V,>(prev: ReadonlyMap<string, V>): ReadonlyMap<string, V> => {
+        let stale = false;
+        for (const k of prev.keys()) {
+          if (!liveIds.has(k)) {
+            stale = true;
+            break;
+          }
+        }
+        if (!stale) return prev; // identity preserved → React bails out
+        const next = new Map<string, V>();
+        for (const [k, v] of prev) if (liveIds.has(k)) next.set(k, v);
+        return next;
+      };
+      setEditImagesByPage(dropStale);
+      setEditGeomByPage(dropStale);
+      setEditVectorsByPage(dropStale);
+      setEditTextByPage(dropStale);
+      setEditSel((prev) => (prev && !liveIds.has(prev.pageId) ? null : prev));
+      setSelectedVector((prev) => (prev && !liveIds.has(prev.pageId) ? null : prev));
+      setEditingText((prev) => (prev && !liveIds.has(prev.pageId) ? null : prev));
+    }
     if (tool !== 'edit' || !focusedDoc || !editBuffer) {
       setEditImagesByPage(NO_EDIT_IMAGES);
       setEditVectorsByPage(NO_EDIT_VECTORS);
@@ -2244,10 +2288,12 @@ export function WorkspaceCanvasView({
       setEditTextByPage(NO_EDIT_TEXT);
       setSelectedVector(null);
       if (ctxChanged) setEditNotice(null);
+      editListingPendingRef.current = 0;
       return;
     }
     const doc = focusedDoc;
-    void (async () => {
+    editListingPendingRef.current = token;
+    const runListingPass = async (): Promise<void> => {
       try {
         await runCommitGate();
       } catch {
@@ -2375,7 +2421,13 @@ export function WorkspaceCanvasView({
         setEditGeomByPage(new Map(nextGeom));
         setEditTextByPage(new Map(nextText));
       }
-    })();
+    };
+    // Only the CURRENT pass may report settled: a superseded pass bailing
+    // out early must not clear the newer one's flag, and neither must it
+    // clear the `-1` an in-flight action set while dropping a page's boxes.
+    void runListingPass().finally(() => {
+      if (editListingPendingRef.current === token) editListingPendingRef.current = 0;
+    });
   }, [tool, focusedDoc, editBuffer, docs, state.files, engineCall]);
 
   // A mutation's status line (neutral notice or red error) + in-flight flag.
@@ -3009,7 +3061,15 @@ export function WorkspaceCanvasView({
     ): Promise<void> => {
       if (!editSel || editSel.kind !== 'image' || !focusedDoc || editBusy) return;
       const pageNumber = workspacePageNumber(docs, focusedDoc, editSel.pageId);
-      if (pageNumber == null) return;
+      // The selection outlived its page (its generation-tagged id no longer
+      // resolves — a rebuild landed between the click and the action). Refuse
+      // LOUDLY: a silent return is a menu item that does nothing, which is
+      // how this shipped broken.
+      if (pageNumber == null) {
+        setEditSel(null);
+        setEditNotice({ text: tChrome('canvas.edit.imagePageGone'), error: true });
+        return;
+      }
       const target = editSel;
       setEditBusy(true);
       setEditNotice(null);
@@ -3032,6 +3092,12 @@ export function WorkspaceCanvasView({
           next.delete(target.pageId);
           return next;
         });
+        // A refetch is now OWED: the map is deliberately missing a page that
+        // still has images. Anything asking "is this page empty?" must not
+        // read this window as an answer (the sentinel is replaced by the
+        // refetch pass's own token; the decline/error arms below clear it
+        // when no refetch will come).
+        editListingPendingRef.current = -1;
       }
       try {
         // P7: a group delete is ONE engine call (one undo entry) — every
@@ -3056,11 +3122,23 @@ export function WorkspaceCanvasView({
             });
           }
           setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
+          if (editListingPendingRef.current === -1) editListingPendingRef.current = 0;
         } else if (typeof notice === 'string') {
           setEditNotice({ text: notice, error: false });
         }
       } catch (err) {
         imageReselectRef.current = null;
+        // A failed op left the file untouched, so no refetch is coming —
+        // put the boxes back (the decline arm's rule) instead of leaving
+        // the page silently box-less until the next unrelated pass.
+        if (kind !== 'extract' && previousPlacements) {
+          setEditImagesByPage((prev) => {
+            const next = new Map(prev);
+            next.set(target.pageId, previousPlacements);
+            return next;
+          });
+        }
+        if (editListingPendingRef.current === -1) editListingPendingRef.current = 0;
         setEditNotice({
           text: err instanceof Error ? err.message : String(err),
           error: true,
@@ -3152,7 +3230,12 @@ export function WorkspaceCanvasView({
     async (pageId: string, index: number, matrix: number[]): Promise<void> => {
       if (!focusedDoc || editBusy) return;
       const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
-      if (pageNumber == null) return;
+      // Same refusal as runEditAction: the gesture's page died under it.
+      if (pageNumber == null) {
+        setEditSel(null);
+        setEditNotice({ text: tChrome('canvas.edit.imagePageGone'), error: true });
+        return;
+      }
       setEditBusy(true);
       setEditNotice(null);
       imageReselectRef.current = { pageNumber, indexes: [index] };
@@ -3187,7 +3270,12 @@ export function WorkspaceCanvasView({
     ): Promise<void> => {
       if (!focusedDoc || editBusy || targets.length === 0) return;
       const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
-      if (pageNumber == null) return;
+      // Same refusal as runEditAction: the group's page died under it.
+      if (pageNumber == null) {
+        setEditSel(null);
+        setEditNotice({ text: tChrome('canvas.edit.imagePageGone'), error: true });
+        return;
+      }
       setEditBusy(true);
       setEditNotice(null);
       // An align can move a SUBSET while the whole group must re-select.
@@ -3549,6 +3637,10 @@ export function WorkspaceCanvasView({
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasEditImages({
       pageIds: () => [...editImagesRef.current.keys()],
+      // False while a listing pass is in flight. An empty listing is BOTH
+      // "no images here" and "the fresh listing hasn't landed yet", so a
+      // spec asserting on emptiness alone can pass over a no-op.
+      listingSettled: () => editListingPendingRef.current === 0,
       placements: (pageId) =>
         (editImagesRef.current.get(pageId) ?? []).map((p) => ({
           index: p.index,

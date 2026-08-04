@@ -319,6 +319,10 @@ export function registerGuidedActionsHandlers(handlers: GuidedActionsHandlers | 
 export interface CanvasEditImagesHandlers {
   /** Page ids that currently have listed placements (edit mode armed). */
   pageIds: () => string[];
+  /** False while a listing pass is in flight — the maps are keyed by
+   * generation-tagged page ids and a rebuild empties them until the fresh
+   * per-page engine round-trips land, so "empty" alone proves nothing. */
+  listingSettled: () => boolean;
   placements: (
     pageId: string,
   ) => {
@@ -957,6 +961,9 @@ export interface TestHarness {
   portfolioUpdateRun: (name: string, source: string) => Promise<unknown>;
   portfolioSaveMemberRun: (name: string, output: string) => Promise<unknown>;
   editImagePageIds: () => string[];
+  /** Whether the edit-listing pass has settled — pair it with
+   * `editImagePageIds()` before concluding a page has no images. */
+  editImageListingSettled: () => boolean;
   editImagePlacements: (
     pageId: string,
   ) => {
@@ -1743,6 +1750,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       return portfolioHandlers.saveMember(name, output);
     },
     editImagePageIds: () => canvasEditImages?.pageIds() ?? [],
+    editImageListingSettled: () => canvasEditImages?.listingSettled() ?? false,
     editImagePlacements: (pageId) => canvasEditImages?.placements(pageId) ?? [],
     editImageSelect: (pageId, index, additive) =>
       canvasEditImages?.select(pageId, index, additive),
