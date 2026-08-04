@@ -10,6 +10,11 @@
 // engine surface: the catalog is a curation over ops that already ship.
 
 import { OCR_LANGUAGES } from '../ocr/languages';
+// N12: the unattended-run refusal is USER-FACING copy, so it resolves
+// through the catalog. That is the one non-pure import here — i18n is
+// itself a data module (catalogs + i18next), so the helpers below stay
+// unit-testable with no DOM.
+import { tChrome, tStepTitle } from '../i18n';
 
 // Slice 2 grew the catalog: OCR (the batch pipeline's single-file arm),
 // header/footer (one positioned text per step — several positions compose as
@@ -302,16 +307,14 @@ export function unattendedBlocker(action: GuidedAction): string | null {
     const def = stepDefFor(step.op);
     const asked = askedParamKeys(step);
     if (asked.length === 0) continue;
+    // N12: one whole interpolated message per refusal (the two halves
+    // used to be concatenated template fragments). The asked-for PARAM
+    // KEYS stay verbatim — they are the action file's own vocabulary.
+    const vars = { index: i + 1, step: tStepTitle(step.op, def.title) };
     if (def.params.some((p) => p.secret && asked.includes(p.key))) {
-      return (
-        `Step ${i + 1} (${def.title}) needs a password when it runs, and passwords are ` +
-        `never stored in an action — it cannot run unattended.`
-      );
+      return tChrome('dialog.unattended.secret', vars);
     }
-    return (
-      `Step ${i + 1} (${def.title}) asks for values when it runs (${asked.join(', ')}) — ` +
-      `a scheduled run has nobody to ask. Store the values in the action first.`
-    );
+    return tChrome('dialog.unattended.asks', { ...vars, params: asked.join(', ') });
   }
   return null;
 }
