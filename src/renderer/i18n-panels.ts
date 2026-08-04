@@ -275,6 +275,27 @@ export const PANEL_STRINGS = {
   'panel.hf.batesStartAria': 'Bates starting number',
   'panel.hf.batesDigits': 'Bates digits',
   'panel.hf.batesDigitsAria': 'Bates digit count',
+
+  'panel.forms.open': 'Open a PDF to fill its form fields',
+  'panel.forms.xfaWarning':
+    "This form uses XFA (dynamic forms), which isn't supported. Only its standard AcroForm fields are shown below; filling will save a plain AcroForm copy.",
+  'panel.forms.reading': 'Reading form fields…',
+  'panel.forms.noFields': 'This PDF has no form fields.',
+  'panel.forms.fieldsAria': 'Form fields',
+  'panel.forms.flatten': 'Flatten (lock fields after filling)',
+  'panel.forms.applying': 'Applying…',
+  'panel.forms.fillFlatten': 'Fill & Flatten',
+  'panel.forms.fillForm': 'Fill Form',
+  'panel.forms.noChanges': 'No changes to apply',
+  'panel.forms.fillingFlattening': 'Filling and flattening…',
+  'panel.forms.filling': 'Filling form…',
+  'panel.forms.filledFlattened': 'Form filled and flattened (fields locked)',
+  'panel.forms.filled_one': 'Filled {{count}} field',
+  'panel.forms.filled_other': 'Filled {{count}} fields',
+  'panel.forms.errorReading': 'Error reading fields: {{message}}',
+  'panel.forms.required': 'required',
+  'panel.forms.readOnly': 'read-only',
+  'panel.forms.none': '— none —',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;
