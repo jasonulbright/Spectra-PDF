@@ -6,6 +6,8 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { getDocumentProxy } from '../lib/pdfDocCache';
 import { mergeUntouched } from '../lib/late-read';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 import {
   STANDARD_STRUCT_TYPES,
   pathKey,
@@ -44,6 +46,8 @@ function draftOf(node: StructNode): Draft {
 }
 
 export function TagsPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
   const [tree, setTree] = useState<StructTree | null>(null);
@@ -180,7 +184,7 @@ export function TagsPanel(): React.ReactElement {
     ) => {
       if (!activeFile) return;
       setBusy(true);
-      setStatus('Working…');
+      setStatus(tChrome('panel.common.working'));
       pendingSelect.current = reselect;
       // The refresh this mutation triggers SHOULD resync the draft: the values
       // are being written, so the tree that comes back is the new truth.
@@ -194,7 +198,7 @@ export function TagsPanel(): React.ReactElement {
         setStatus(done);
       } catch (e: unknown) {
         pendingSelect.current = null;
-        setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
       } finally {
         setBusy(false);
       }
@@ -210,17 +214,17 @@ export function TagsPanel(): React.ReactElement {
       if (draft[key] !== before[key]) props[key] = draft[key];
     }
     if (Object.keys(props).length === 0) {
-      setStatus('No changes to apply');
+      setStatus(tChrome('panel.tags.noChanges'));
       return;
     }
     if ('type' in props && !props.type.trim()) {
-      setStatus('The tag type must not be empty');
+      setStatus(tChrome('panel.tags.typeEmpty'));
       return;
     }
     void runMutation(
       'set_struct_props',
       { path: selected.path, props },
-      'Tag updated',
+      tChrome('panel.tags.updated'),
       pathKey(selected.path),
     );
   }, [selected, draft, runMutation]);
@@ -242,7 +246,7 @@ export function TagsPanel(): React.ReactElement {
       void runMutation(
         'move_struct_node',
         { path: p, direction },
-        'Tag moved',
+        tChrome('panel.tags.moved'),
         after ? pathKey(after) : null,
       );
     },
@@ -256,7 +260,7 @@ export function TagsPanel(): React.ReactElement {
     void runMutation(
       'add_struct_node',
       { parent_path: parent, stype: newType },
-      `${newType} tag added`,
+      tChrome('panel.tags.added', { type: newType }),
       // The engine appends: the new node's child index is the parent's
       // current child count.
       pathKey([...parent, selected ? selected.children.length : (tree?.root.length ?? 0)]),
@@ -268,12 +272,12 @@ export function TagsPanel(): React.ReactElement {
     void runMutation(
       'delete_struct_node',
       { path: selected.path },
-      'Tag deleted (its content is now untagged)',
+      tChrome('panel.tags.deleted'),
       null,
     );
   }, [selected, runMutation]);
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to edit its structure tags" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.tags.open')} />;
 
   const siblingCount = (p: number[]): number => {
     if (!tree) return 0;
@@ -301,7 +305,7 @@ export function TagsPanel(): React.ReactElement {
               type="button"
               data-testid={`tag-toggle-${key}`}
               aria-expanded={isOpen}
-              aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${node.type}`}
+              aria-label={tChrome(isOpen ? 'panel.tags.collapse' : 'panel.tags.expand', { type: node.type })}
               onClick={() =>
                 setExpanded((prev) => {
                   const next = new Set(prev);
@@ -327,7 +331,7 @@ export function TagsPanel(): React.ReactElement {
             <span className="text-sm text-neutral-200">&lt;{node.type}&gt;</span>
             {node.title && <span className="text-xs text-neutral-400 truncate">{node.title}</span>}
             {node.alt && (
-              <span className="text-xs text-emerald-500/80" title={`Alt text: ${node.alt}`}>
+              <span className="text-xs text-emerald-500/80" title={tChrome('panel.tags.altTitle', { alt: node.alt })}>
                 alt
               </span>
             )}
@@ -353,13 +357,12 @@ export function TagsPanel(): React.ReactElement {
   return (
     <div className="flex flex-col gap-4 h-full min-h-0">
       <div className="text-sm text-neutral-400 shrink-0">
-        Working on: <span className="text-neutral-200">{activeFile.name}</span>
+        {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span>
       </div>
       {!tree || !tree.tagged ? (
         <div className="flex flex-col gap-3">
           <p className="text-sm text-neutral-500" data-testid="tags-untagged">
-            This document has no structure tags. Tag editing needs a tagged PDF — tags are what
-            assistive technology reads, and this file was produced without them.
+            {tChrome('panel.tags.untagged')}
           </p>
           {/* P20: the content-analysis half — builds a FIRST tree (headings
               by size, paragraphs, figures, page-stream order) that this
@@ -371,23 +374,22 @@ export function TagsPanel(): React.ReactElement {
               data-testid="tags-autotag"
               disabled={busy}
               onClick={() =>
-                void runMutation('autotag', {}, 'Tags added — review them below.', null)
+                void runMutation('autotag', {}, tChrome('panel.tags.autotagDone'), null)
               }
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
             >
-              Add tags automatically
+              {tChrome('panel.tags.autotag')}
             </button>
           </div>
           <p className="text-xs text-neutral-500">
-            Builds a first structure from the page content — headings by size, paragraphs,
-            figures — in page order. Refine the roles here and the sequence in Reading Order.
+            {tChrome('panel.tags.autotagHint')}
           </p>
         </div>
       ) : (
         <div className="flex flex-col gap-3 flex-1 min-h-0">
           <div className="flex items-center gap-2 shrink-0">
             <div className="text-sm text-neutral-300" data-testid="tags-summary">
-              {tree.count} tag{tree.count === 1 ? '' : 's'}
+              {tChromeCount('panel.tags.summary', tree.count)}
             </div>
             <div className="flex-1" />
             <select
@@ -395,7 +397,7 @@ export function TagsPanel(): React.ReactElement {
               value={newType}
               onChange={(e) => setNewType(e.target.value)}
               disabled={busy}
-              aria-label="Type for the new tag"
+              aria-label={tChrome('panel.tags.newTypeAria')}
               className="px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-xs"
             >
               {STANDARD_STRUCT_TYPES.map((t) => (
@@ -407,13 +409,13 @@ export function TagsPanel(): React.ReactElement {
               data-testid="tags-new"
               onClick={addTag}
               disabled={busy}
-              title={selected ? `Add an empty child tag under <${selected.type}>` : 'Add an empty top-level tag'}
+              title={selected ? tChrome('panel.tags.addChildTitle', { type: selected.type }) : tChrome('panel.tags.addTopTitle')}
               className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
             >
-              {selected ? 'New child' : 'New tag'}
+              {selected ? tChrome('panel.tags.newChild') : tChrome('panel.tags.newTag')}
             </button>
           </div>
-          <ul className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-0.5" data-testid="tags-tree" tabIndex={0} aria-label="Structure tags">
+          <ul className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-0.5" data-testid="tags-tree" tabIndex={0} aria-label={tChrome('panel.tags.treeAria')}>
             {tree.root.map(renderNode)}
           </ul>
           {selected && (
@@ -423,29 +425,29 @@ export function TagsPanel(): React.ReactElement {
             >
               <div className="flex items-center gap-1">
                 <span className="text-sm text-neutral-200 flex-1">
-                  &lt;{selected.type}&gt;{mapped ? ` — maps to ${mapped}` : ''}
+                  &lt;{selected.type}&gt;{mapped ? tChrome('panel.tags.mapsTo', { role: mapped }) : ''}
                 </span>
                 <button type="button" data-testid="tags-move-up" onClick={() => move('up')}
                   disabled={busy || last === 0}
-                  title="Move before the previous sibling" aria-label="Move up"
+                  title={tChrome('panel.tags.moveUpTitle')} aria-label={tChrome('panel.tags.moveUp')}
                   className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded">↑</button>
                 <button type="button" data-testid="tags-move-down" onClick={() => move('down')}
                   disabled={busy || last >= siblingCount(selected.path) - 1}
-                  title="Move after the next sibling" aria-label="Move down"
+                  title={tChrome('panel.tags.moveDownTitle')} aria-label={tChrome('panel.tags.moveDown')}
                   className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded">↓</button>
                 <button type="button" data-testid="tags-move-out" onClick={() => move('outdent')}
                   disabled={busy || selected.path.length < 2}
-                  title="Move out — becomes the parent's next sibling" aria-label="Outdent"
+                  title={tChrome('panel.tags.outdentTitle')} aria-label={tChrome('panel.tags.outdent')}
                   className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded">⇤</button>
                 <button type="button" data-testid="tags-move-in" onClick={() => move('indent')}
                   disabled={busy || last === 0}
-                  title="Nest under the previous sibling" aria-label="Indent"
+                  title={tChrome('panel.tags.indentTitle')} aria-label={tChrome('panel.tags.indent')}
                   className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded">⇥</button>
                 <button type="button" data-testid="tags-delete" onClick={deleteTag}
                   disabled={busy}
-                  title="Delete this tag and its child tags — the page content stays, untagged"
+                  title={tChrome('panel.tags.deleteTitle')}
                   className="px-2 py-0.5 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-40">
-                  Delete
+                  {tChrome('panel.tags.delete')}
                 </button>
               </div>
               {(() => {
@@ -458,35 +460,35 @@ export function TagsPanel(): React.ReactElement {
               })()}
               <div className="grid grid-cols-2 gap-2">
                 <label className="flex flex-col gap-0.5 text-xs text-neutral-400">
-                  Type
+                  {tChrome('panel.tags.type')}
                   <input data-testid="tag-type-input" type="text" list="struct-types" value={draft.type}
                     onChange={(e) => editDraft({ type: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyProps(); }}
                     className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm text-neutral-200" />
                 </label>
                 <label className="flex flex-col gap-0.5 text-xs text-neutral-400">
-                  Title
+                  {tChrome('panel.tags.title')}
                   <input data-testid="tag-title-input" type="text" value={draft.title}
                     onChange={(e) => editDraft({ title: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyProps(); }}
                     className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm text-neutral-200" />
                 </label>
                 <label className="flex flex-col gap-0.5 text-xs text-neutral-400 col-span-2">
-                  Alt text (what assistive technology reads for a figure)
+                  {tChrome('panel.tags.alt')}
                   <input data-testid="tag-alt-input" type="text" value={draft.alt}
                     onChange={(e) => editDraft({ alt: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyProps(); }}
                     className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm text-neutral-200" />
                 </label>
                 <label className="flex flex-col gap-0.5 text-xs text-neutral-400">
-                  Actual text
+                  {tChrome('panel.tags.actualText')}
                   <input data-testid="tag-actualtext-input" type="text" value={draft.actual_text}
                     onChange={(e) => editDraft({ actual_text: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyProps(); }}
                     className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm text-neutral-200" />
                 </label>
                 <label className="flex flex-col gap-0.5 text-xs text-neutral-400">
-                  Language (e.g. en-US)
+                  {tChrome('panel.tags.lang')}
                   <input data-testid="tag-lang-input" type="text" value={draft.lang}
                     onChange={(e) => editDraft({ lang: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyProps(); }}
@@ -501,7 +503,7 @@ export function TagsPanel(): React.ReactElement {
               <div>
                 <button type="button" data-testid="tags-apply" onClick={applyProps} disabled={busy}
                   className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded">
-                  Apply
+                  {tChrome('panel.tags.apply')}
                 </button>
               </div>
             </div>
