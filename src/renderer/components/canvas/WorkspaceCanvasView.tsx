@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { usePdfProxies } from '../../hooks/usePdfProxies';
 import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
@@ -34,6 +42,15 @@ import type { OcrApplyPage } from '../../lib/ocr-apply';
 import type { OcrWord } from '../../ocr/types';
 import { fetchEditPlacements } from '../../lib/edit-images';
 import { fetchEditVectors, type EditVectorObject } from '../../lib/edit-vectors';
+import {
+  fetchSnapGeometry,
+  type PageSnapGeometry,
+} from '../../lib/snap-geometry';
+import {
+  getSnapSettings,
+  setSnapSettings,
+  subscribeSnapSettings,
+} from '../../lib/snap-settings';
 import type { EditImagePlacement } from '../../lib/edit-images';
 import { EDIT_DECLINED } from '../../lib/edit-text';
 import { pageIdAtSourceIndex } from '../../lib/durable-identity';
@@ -372,6 +389,10 @@ function RecalibratePopover({
 const NO_EDIT_IMAGES: ReadonlyMap<string, EditImagePlacement[]> = new Map();
 const NO_EDIT_VECTORS: ReadonlyMap<string, EditVectorObject[]> = new Map();
 const NO_EDIT_GEOM: ReadonlyMap<string, PageGeometry> = new Map();
+// N11 slice A: per-page snap geometry, and how many pages either side of the
+// reading position get one.
+const NO_SNAP_GEOM: ReadonlyMap<string, PageSnapGeometry> = new Map();
+const SNAP_PAGE_WINDOW = 2;
 const NO_EDIT_TEXT: ReadonlyMap<string, EditTextListing> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
 const NO_WORDS_BY_PAGE: ReadonlyMap<string, OcrWord[]> = new Map();
@@ -3576,6 +3597,148 @@ export function WorkspaceCanvasView({
     [docs, state.files, onAddImage, editBusy],
   );
 
+  // --- Snapping (N11 slice A): per-page geometry + the live preferences -----
+  // The preferences are a MODULE store, not reducer state: `View ▸ Snapping`
+  // is a registered command whose `run` has no access to this view, and a
+  // persisted preference is not workspace state. One owner, three readers
+  // (menu command, status bar, canvas).
+  const snapSettings = useSyncExternalStore(subscribeSnapSettings, getSnapSettings, getSnapSettings);
+  const [snapGeomByPage, setSnapGeomByPage] =
+    useState<ReadonlyMap<string, PageSnapGeometry>>(NO_SNAP_GEOM);
+  const snapGeomRef = useRef(snapGeomByPage);
+  snapGeomRef.current = snapGeomByPage;
+  const snapFetchTokenRef = useRef(0);
+  // Which canvas modes get PAGE geometry fetched. Freehand (ink/eraser) is
+  // excluded because it passes `snap:false` at the choke point anyway.
+  //
+  // `select` is excluded for a sharper reason: the fetch runs the COMMIT GATE
+  // (below), and the gate flushes pending page edits. Select is the default
+  // tool, so including it would silently commit a user's pending page moves
+  // and rotations the moment they opened a document — the "Apply changes"
+  // button would vanish with no action of theirs. Snapping still WORKS while
+  // moving an annotation in Select: markup candidates are derived in PageCell
+  // from state already in hand, with no engine call and no gate. Page-content
+  // snapping is armed by arming a mode that PLACES something, which is
+  // exactly where both references have it.
+  const snapConsumingTool =
+    tool === 'measuredist' ||
+    tool === 'measureperim' ||
+    tool === 'measurearea' ||
+    tool === 'measurecal' ||
+    tool === 'shape' ||
+    tool === 'callout' ||
+    tool === 'freetext' ||
+    tool === 'highlight' ||
+    tool === 'note' ||
+    tool === 'stamp' ||
+    tool === 'redact' ||
+    tool === 'signature' ||
+    tool === 'formfields' ||
+    tool === 'cropdraw' ||
+    tool === 'addtext' ||
+    tool === 'addimage';
+  const snapBuffer = focusedDoc ? state.files.get(focusedDoc.path)?.buffer : undefined;
+  useEffect(() => {
+    const token = ++snapFetchTokenRef.current;
+    // § F, the id-holder rule (the spec-99 discipline, same as the edit
+    // listings): these maps are keyed by GENERATION-TAGGED page ids, and a
+    // whole-file op rebuilds the file, so `docs` rotates to a fresh
+    // generation one render before this can publish anything. Prune to what
+    // still exists SYNCHRONOUSLY, before the first await — a dead id must
+    // never be offered to a gesture.
+    if (focusedDoc) {
+      const liveIds = new Set(focusedDoc.pages.map((p) => p.id));
+      setSnapGeomByPage((prev) => {
+        let stale = false;
+        for (const k of prev.keys()) {
+          if (!liveIds.has(k)) {
+            stale = true;
+            break;
+          }
+        }
+        if (!stale) return prev; // identity preserved → React bails out
+        const next = new Map<string, PageSnapGeometry>();
+        for (const [k, v] of prev) if (liveIds.has(k)) next.set(k, v);
+        return next;
+      });
+    }
+    if (
+      !snapSettings.enabled ||
+      !snapConsumingTool ||
+      !focusedDoc ||
+      !snapBuffer ||
+      docViewMode !== 'document'
+    ) {
+      setSnapGeomByPage(NO_SNAP_GEOM);
+      return;
+    }
+    const doc = focusedDoc;
+    // Bounded by the READING POSITION rather than by the virtualizer's
+    // mounted window: the window lives inside DocumentView and lifting it
+    // would restructure the virtualizer for no gain here. ±2 pages around the
+    // current page is the same order of magnitude and follows the reader,
+    // which is what actually bounds the payload on a 60-sheet set.
+    const centre = Math.max(0, currentPage - 1);
+    const from = Math.max(0, centre - SNAP_PAGE_WINDOW);
+    const to = Math.min(doc.pages.length - 1, centre + SNAP_PAGE_WINDOW);
+    const run = async (): Promise<void> => {
+      try {
+        // GATED, never callRaw: this reads the WORKING copy, and a pending
+        // page rotation or reorder changes the geometry being snapped to.
+        // The gate is what makes the answer match the view.
+        await runCommitGate();
+      } catch {
+        return;
+      }
+      if (snapFetchTokenRef.current !== token) return;
+      const f = state.files.get(doc.path);
+      if (!f?.buffer) return;
+      const proxy = await getDocumentProxy(doc.path, f.buffer);
+      const validIds = new Set(doc.pages.map((p) => p.id));
+      const next = new Map<string, PageSnapGeometry>();
+      for (const [k, v] of snapGeomRef.current) if (validIds.has(k)) next.set(k, v);
+      for (let i = from; i <= to; i++) {
+        const page = doc.pages[i];
+        if (!page) continue;
+        if (snapFetchTokenRef.current !== token) return;
+        if (next.has(page.id)) continue; // cached by page id (buffer identity is a dep)
+        const pageNumber = workspacePageNumber(docs, doc, page.id);
+        if (pageNumber == null) continue;
+        try {
+          const p = await proxy.getPage(page.sourcePageIndex + 1);
+          const [vx0, vy0, vx1, vy1] = p.view;
+          const geometry = {
+            box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+            bakedRotate: p.rotate,
+          };
+          const listing = await fetchSnapGeometry(
+            (m, params) => engineCall(m, params),
+            f.workingPath,
+            pageNumber,
+            geometry,
+          );
+          if (snapFetchTokenRef.current !== token) return;
+          next.set(page.id, listing);
+          setSnapGeomByPage(new Map(next)); // incremental fill
+        } catch {
+          // A page whose geometry can't be listed simply offers no page
+          // candidates; markup snapping still works there.
+        }
+      }
+    };
+    void run();
+  }, [
+    snapSettings.enabled,
+    snapConsumingTool,
+    focusedDoc,
+    snapBuffer,
+    docViewMode,
+    currentPage,
+    docs,
+    state.files,
+    engineCall,
+  ]);
+
   // Harness bridge for Edit ▸ Images + Text (7.1/7.2) — refs pattern.
   const editImagesRef = useRef(editImagesByPage);
   editImagesRef.current = editImagesByPage;
@@ -4644,6 +4807,8 @@ export function WorkspaceCanvasView({
             redactionMarksByPage,
             editImagesByPage,
             editVectorsByPage,
+            snapGeomByPage,
+            snapSettings,
             selectedVector,
             editImageTransform,
             onCommitImageTransform: commitImageTransform,
@@ -4909,6 +5074,8 @@ export function WorkspaceCanvasView({
           redactionMarksByPage={redactionMarksByPage}
           editImagesByPage={editImagesByPage}
           editVectorsByPage={editVectorsByPage}
+          snapGeomByPage={snapGeomByPage}
+          snapSettings={snapSettings}
           selectedVector={selectedVector}
           editImageTransform={editImageTransform}
           onCommitImageTransform={commitImageTransform}
@@ -5019,6 +5186,8 @@ export function WorkspaceCanvasView({
       {(!state.ui.readingMode || dirty || pendingFormCount > 0 || liveMarks.length > 0) && (
         <CanvasStatusBar
           docViewMode={docViewMode}
+          snap={snapSettings}
+          onSnapChange={setSnapSettings}
           onToggleView={() =>
             dispatch({
               type: 'UI_SET_DOC_VIEW_MODE',
