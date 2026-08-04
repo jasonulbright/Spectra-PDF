@@ -235,6 +235,76 @@ export const DIALOG_STRINGS = {
   'dialog.watchers.pickSource': 'Choose the folder to watch',
   'dialog.watchers.needAction': 'Choose which guided action runs on arrivals.',
   'dialog.watchers.start': 'Start watching',
+
+  // Recognition-language SUMMARY. The language NAMES themselves are never
+  // authored into the catalog — they come from Intl.DisplayNames, which every
+  // locale already knows (see tOcrLanguage).
+  'dialog.ocr.langCount_one': '{{count}} language',
+  'dialog.ocr.langCount_other': '{{count}} languages',
+  'dialog.ocr.langPair': '{{a}} + {{b}}',
+
+  'dialog.schedule.title': 'Scheduled Batch Runs',
+  'dialog.schedule.blurb':
+    'Scheduled runs happen through Windows Task Scheduler, so they run even when Spectra PDF is closed. Everything here is managed from this window — you never need to open Task Scheduler.',
+  'dialog.schedule.empty': 'No scheduled runs yet.',
+  'dialog.schedule.timing': 'Next: {{next}} · Last: {{last}}',
+  'dialog.schedule.timingResult': 'Next: {{next}} · Last: {{last}} ({{result}})',
+  'dialog.schedule.never': 'never',
+  'dialog.schedule.none': '—',
+  'dialog.schedule.guidedAction': 'Guided action: {{name}}',
+  'dialog.schedule.guidedActionSteps': 'Guided action: {{name}} — {{steps}}',
+  'dialog.schedule.unnamedAction': '(unnamed)',
+  'dialog.schedule.actionMissing':
+    'Its action file is missing — the run will fail until the schedule is recreated.',
+  'dialog.schedule.foreign':
+    'Edited outside this app — its settings cannot be shown here, but it will still run.',
+  'dialog.schedule.runNow': 'Run now',
+  'dialog.schedule.enable': 'Enable',
+  'dialog.schedule.disable': 'Disable',
+  'dialog.schedule.edit': 'Edit',
+  'dialog.schedule.new': 'New scheduled run',
+  'dialog.schedule.starting': 'Starting…',
+  'dialog.schedule.updating': 'Updating…',
+  'dialog.schedule.deleting': 'Deleting…',
+  'dialog.schedule.creating': 'Creating the schedule…',
+  'dialog.schedule.saved': 'Schedule saved',
+  'dialog.schedule.needAction': 'Choose which guided action to run.',
+  'dialog.schedule.name': 'Name',
+  'dialog.schedule.whatRuns': 'What runs',
+  'dialog.schedule.runTypeOcr': 'Batch OCR (make searchable)',
+  'dialog.schedule.runTypeAction': 'Guided action',
+  'dialog.schedule.actionLabel': 'Guided action',
+  'dialog.schedule.keepAction': '(keep the current action)',
+  'dialog.schedule.actionNote':
+    'The schedule keeps its own copy of the action; edit the schedule to pick up later changes. Actions that ask for values when they run can’t be scheduled.',
+  'dialog.schedule.sourceLabel': 'Source folder',
+  'dialog.schedule.destLabel': 'Destination folder',
+  'dialog.schedule.pickSource': 'Choose the folder to process',
+  'dialog.schedule.languages': 'Recognition languages — {{summary}}',
+  'dialog.schedule.runs': 'Runs',
+  'dialog.schedule.daily': 'Every day',
+  'dialog.schedule.weekly': 'Weekly',
+  'dialog.schedule.at': 'At',
+  'dialog.schedule.days': 'Days',
+  // Whole headers, suffix included: the two-tone "Account" + dim " — optional"
+  // was a concatenation, and where the qualifier sits in the phrase differs per
+  // language (the Settings-panel precedent for dropping inline emphasis spans).
+  'dialog.schedule.accountSection': 'Account — optional',
+  'dialog.schedule.filingSection': 'Filing and account — optional',
+  'dialog.schedule.movedLabel': 'Move processed originals to',
+  'dialog.schedule.errorsLabel': 'Move failed originals to',
+  'dialog.schedule.pickErrors': 'Choose where failed originals go',
+  'dialog.schedule.repair': 'Try to repair damaged files',
+  'dialog.schedule.accountLabel': 'Run as (blank = you)',
+  'dialog.schedule.passwordLabel': 'Password (leave blank for a managed service account)',
+  'dialog.schedule.passwordNote':
+    'Windows stores this, not Spectra PDF. The account also needs the “Log on as a batch job” right on this machine, or the schedule is created but never runs.',
+  'dialog.schedule.logDirLabel': 'Log folder (required when running as another account)',
+  'dialog.schedule.pickLogDir': 'Choose where run logs are written',
+  'dialog.schedule.logDirNote':
+    'The default log location belongs to whichever account runs the batch, so a run under another account would write its log where you cannot see it.',
+  'dialog.schedule.save': 'Save schedule',
+  'dialog.schedule.openLogs': 'Open log folder',
 } as const;
 
 export type DialogKey = keyof typeof DIALOG_STRINGS;

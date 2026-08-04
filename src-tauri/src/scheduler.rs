@@ -85,7 +85,14 @@ pub struct ScheduledRun {
     /// rather than hidden, because it will still FIRE.
     pub profile: Option<ScheduleProfile>,
     /// Task Scheduler's own status ("Ready", "Disabled", "Running", …).
+    /// DISPLAY ONLY — schtasks localizes it, so nothing may branch on its
+    /// text (the GUI used to decide the Enable/Disable button by looking for
+    /// the substring "disabled", which is wrong on every non-English
+    /// Windows). `enabled` below is the discriminant.
     pub status: String,
+    /// Whether the task is enabled, read from the task XML's
+    /// `<Settings><Enabled>` — a boolean, so it is locale-independent.
+    pub enabled: bool,
     pub next_run: String,
     pub last_run: String,
     pub last_result: String,
@@ -713,14 +720,23 @@ fn extract_tag(xml: &str, tag: &str) -> Option<String> {
 /// run-action command with real paths overflows it, and the truncation +
 /// quote desync turned the parsed profile into garbage. The XML is the full,
 /// properly-escaped definition.
-fn task_command_line(full_task_path: &str) -> Option<String> {
+fn task_command_line(full_task_path: &str) -> Option<(String, bool)> {
     let xml = run(schtasks().args(["/Query", "/TN", full_task_path, "/XML"])).ok()?;
     let cmd = extract_tag(&xml, "Command").unwrap_or_default();
     let args = extract_tag(&xml, "Arguments").unwrap_or_default();
+    // `<Enabled>` appears inside TRIGGERS as well, and a trigger precedes
+    // <Settings> in schtasks' XML — so the settings block is sliced out first
+    // and the tag read from THAT. Absent (or unreadable) means enabled, which
+    // is Task Scheduler's own default.
+    let enabled = extract_tag(&xml, "Settings")
+        .as_deref()
+        .and_then(|s| extract_tag(s, "Enabled"))
+        .map(|v| !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
     if cmd.is_empty() && args.is_empty() {
         return None;
     }
-    Some(format!("{cmd} {args}"))
+    Some((format!("{cmd} {args}"), enabled))
 }
 
 /// One row of schtasks' CSV output. Quoted fields, `""` for a literal quote.
@@ -802,13 +818,14 @@ pub async fn list_scheduled_runs() -> Result<Vec<ScheduledRun>, String> {
         }
         // The CSV's own command column is truncation-prone — the task XML is
         // the faithful source; the column stays as a last-resort fallback.
-        let command = task_command_line(&full).unwrap_or_else(|| get(i_cmd));
+        let (command, enabled) = task_command_line(&full).unwrap_or_else(|| (get(i_cmd), true));
         let profile = profile_from_command(&name, &command);
         let (action_name, action_steps, action_missing) = read_action_summary(profile.as_ref());
         runs.push(ScheduledRun {
             name: name.clone(),
             profile,
             status: get(i_status),
+            enabled,
             next_run: get(i_next),
             last_run: get(i_last),
             last_result: get(i_result),
