@@ -12,7 +12,12 @@ import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
 import { TOOL_DEFS, TOOL_IDS, toolById, toolForCanvasTool, worksOnPage, type ToolId } from './tools';
 import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
-import { toggleSnapping } from '../lib/snap-settings';
+import {
+  toggleGrid,
+  toggleGuides,
+  toggleRulers,
+  toggleSnapping,
+} from '../lib/snap-settings';
 
 // --- Pure enablement helpers (unit-tested; menus gray from these) ---------
 
@@ -165,6 +170,10 @@ export const COMMAND_IDS = [
   'view.readingMode',
   'view.propertiesBar',
   'view.snapping',
+  'view.rulers',
+  'view.grid',
+  'view.guides',
+  'view.clearGuides',
   'view.customizeToolbar',
   'view.singlePage',
   'view.twoUp',
@@ -623,6 +632,33 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Snapping',
     when: inCanvas,
     run: () => toggleSnapping(),
+  },
+  // Rulers / Grid / Guides (N11 slice B) — the same preference store for the
+  // same reason. Show Grid and Snap to Grid stay SEPARATE (the grid type's
+  // checkbox is in the Snap popover): drafting with a grid you snap to but
+  // cannot see is an ordinary way to work, and the king splits them too.
+  'view.rulers': {
+    title: 'Rulers',
+    when: inCanvas,
+    run: () => toggleRulers(),
+  },
+  'view.grid': {
+    title: 'Grid',
+    when: inCanvas,
+    run: () => toggleGrid(),
+  },
+  'view.guides': {
+    title: 'Guides',
+    when: inCanvas,
+    run: () => toggleGuides(),
+  },
+  // Clearing guides is the one of the four that is NOT a preference: guides
+  // are per-document VIEW state owned by the canvas (the redaction-mark
+  // lifetime), so this routes through CanvasServices like the find bar does.
+  'view.clearGuides': {
+    title: 'Clear Guides',
+    when: (ctx) => inCanvas(ctx) && ctx.canvas !== null,
+    run: (ctx) => ctx.canvas!.clearGuides(),
   },
   // Toolbar customization (I.6): per-item show/hide over the catalog. The
   // toolbar exists on every tab, so no canvas gate.

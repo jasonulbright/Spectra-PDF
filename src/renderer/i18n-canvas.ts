@@ -557,6 +557,18 @@ export const CANVAS_STRINGS = {
   'canvas.snap.type.edge': 'Edge',
   'canvas.snap.announce': 'Snapped to {{type}}',
 
+  // Rulers, grid and guides (N11 slice B). The ruler's NUMBERS go through
+  // `tNumber` and its unit symbol is notation (ft/in/mm), so neither carries
+  // a key; what localizes is the furniture around them — the accessible
+  // names, and the guide's own announcement when one is placed or removed.
+  'canvas.rulers.horizontal': 'Horizontal ruler',
+  'canvas.rulers.vertical': 'Vertical ruler',
+  'canvas.rulers.dragHint': 'Drag from a ruler onto the page to place a guide',
+  'canvas.grid.label': 'Drawing grid',
+  'canvas.guides.layer': 'Guides',
+  'canvas.guides.placed': 'Guide placed',
+  'canvas.guides.removed': 'Guide removed',
+
   // The redaction confirm — the one canvas action that destroys content.
   'canvas.redact.title': 'Redact content',
   // Two counts, one sentence: the outer key agrees with the REGION count and

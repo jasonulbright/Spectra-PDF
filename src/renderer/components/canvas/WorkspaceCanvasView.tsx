@@ -51,6 +51,14 @@ import {
   setSnapSettings,
   subscribeSnapSettings,
 } from '../../lib/snap-settings';
+import {
+  prunedToPages,
+  withGuidePos,
+  withoutGuide,
+  withoutPaths,
+  type GuideAxis,
+  type PageGuide,
+} from '../../lib/guides';
 import type { EditImagePlacement } from '../../lib/edit-images';
 import { EDIT_DECLINED } from '../../lib/edit-text';
 import { pageIdAtSourceIndex } from '../../lib/durable-identity';
@@ -393,6 +401,10 @@ const NO_EDIT_GEOM: ReadonlyMap<string, PageGeometry> = new Map();
 // reading position get one.
 const NO_SNAP_GEOM: ReadonlyMap<string, PageSnapGeometry> = new Map();
 const SNAP_PAGE_WINDOW = 2;
+// Stable empties, so a document with no guides hands PageCell the same
+// identity every render and its memo holds (the NO_MARKS precedent).
+const NO_GUIDES: PageGuide[] = [];
+const NO_GUIDES_BY_PAGE: ReadonlyMap<string, PageGuide[]> = new Map();
 const NO_EDIT_TEXT: ReadonlyMap<string, EditTextListing> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
 const NO_WORDS_BY_PAGE: ReadonlyMap<string, OcrWord[]> = new Map();
@@ -1447,6 +1459,11 @@ export function WorkspaceCanvasView({
         el.focus();
         return true;
       },
+      // View ▸ Clear Guides. Guides are canvas-owned VIEW state, so unlike the
+      // other three drafting toggles (which are persisted preferences and go
+      // through the snap-settings store) this one has to route through the
+      // services seam — the same reason the find bar does.
+      clearGuides: () => clearGuidesRef.current(),
     });
     return () => registerCanvasServices(null);
   }, [activeCanvasHandle]);
@@ -1903,6 +1920,60 @@ export function WorkspaceCanvasView({
     [],
   );
 
+  // ── Ruler guides (N11 slice B) ────────────────────────────────────────
+  // Per-document VIEW state, the redaction-mark lifetime exactly: never
+  // written into the file (the king's aren't either), invalidated on buffer
+  // identity, and pruned to pages that still exist so a dead generation-tagged
+  // id can never be offered to a gesture (§ F, the id-holder rule).
+  const [guides, setGuides] = useState<PageGuide[]>(NO_GUIDES);
+  const liveGuides = useMemo(() => {
+    if (guides.length === 0) return NO_GUIDES;
+    const live = new Set<string>();
+    for (const d of docs) for (const p of d.pages) live.add(p.id);
+    const kept = prunedToPages(guides, live);
+    return kept.length === guides.length ? guides : kept;
+  }, [guides, docs]);
+  const guidesByPage = useMemo(() => {
+    if (liveGuides.length === 0) return NO_GUIDES_BY_PAGE;
+    const map = new Map<string, PageGuide[]>();
+    for (const g of liveGuides) {
+      const arr = map.get(g.pageId);
+      if (arr) arr.push(g);
+      else map.set(g.pageId, [g]);
+    }
+    return map;
+  }, [liveGuides]);
+
+  const onAddGuide = useCallback(
+    (pageId: string, axis: GuideAxis, pos: number, rotationAtDraw: 0 | 90 | 180 | 270) => {
+      const doc = docs.find((d) => d.pages.some((p) => p.id === pageId));
+      if (!doc) return;
+      setGuides((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), path: doc.path, pageId, axis, pos, rotationAtDraw },
+      ]);
+    },
+    [docs],
+  );
+  const onMoveGuide = useCallback(
+    (guideId: string, axis: GuideAxis, pos: number, rotationAtDraw: 0 | 90 | 180 | 270) =>
+      // A moved guide is a freshly placed one: it takes the frame it landed
+      // in, so the projection stays a single quarter-turn from where the user
+      // last put it rather than an accumulating chain.
+      setGuides((prev) =>
+        withGuidePos(prev, guideId, pos).map((g) =>
+          g.id === guideId ? { ...g, axis, rotationAtDraw } : g,
+        ),
+      ),
+    [],
+  );
+  const onRemoveGuide = useCallback(
+    (guideId: string) => setGuides((prev) => withoutGuide(prev, guideId)),
+    [],
+  );
+  const clearGuidesRef = useRef<() => void>(() => {});
+  clearGuidesRef.current = () => setGuides(NO_GUIDES);
+
   // Single pending placement — drawing again anywhere replaces it. Placement
   // gestures are mutually exclusive: starting a signature placement clears a
   // pending new-field placement (and vice versa) so only one bottom-left
@@ -2041,6 +2112,13 @@ export function WorkspaceCanvasView({
     }
     if (invalidated.size > 0) {
       setMarks((prevMarks) => prevMarks.filter((m) => !invalidated.has(m.path)));
+      // Guides share the mark's lifetime exactly — same invalidation, same
+      // reason (a rebuilt file's pages are new objects; a guide bound to a
+      // dead page id is a guide pointing at nothing).
+      setGuides((prev) => {
+        const kept = withoutPaths(prev, invalidated);
+        return kept.length === prev.length ? prev : kept;
+      });
       setSigPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
       // New-field placement shares the positional-id hazard — same lifecycle.
       setNewFieldPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
@@ -3607,6 +3685,8 @@ export function WorkspaceCanvasView({
     useState<ReadonlyMap<string, PageSnapGeometry>>(NO_SNAP_GEOM);
   const snapGeomRef = useRef(snapGeomByPage);
   snapGeomRef.current = snapGeomByPage;
+  const liveGuidesRef = useRef(liveGuides);
+  liveGuidesRef.current = liveGuides;
   const snapFetchTokenRef = useRef(0);
   // Which canvas modes get PAGE geometry fetched. Freehand (ink/eraser) is
   // excluded because it passes `snap:false` at the choke point anyway, and
@@ -3797,6 +3877,18 @@ export function WorkspaceCanvasView({
         (snapGeomRef.current.get(pageId)?.paths ?? []).map((p) => ({
           subpaths: p.subpaths.map((sp) => [...sp]),
           closed: [...p.closed],
+        })),
+      // Slice B: the live guide list, in the STORED frame. The e2e drag off a
+      // ruler is real (the strips are ordinary chrome at known coordinates),
+      // so this is a READ-back, not a placement shortcut — a spec that placed
+      // guides through the harness would never exercise the gesture.
+      guides: () =>
+        liveGuidesRef.current.map((g) => ({
+          id: g.id,
+          pageId: g.pageId,
+          axis: g.axis,
+          pos: g.pos,
+          rotationAtDraw: g.rotationAtDraw,
         })),
       // False while a listing pass is in flight. An empty listing is BOTH
       // "no images here" and "the fresh listing hasn't landed yet", so a
@@ -4807,6 +4899,10 @@ export function WorkspaceCanvasView({
             editVectorsByPage,
             snapGeomByPage,
             snapSettings,
+            guidesByPage,
+            onAddGuide,
+            onMoveGuide,
+            onRemoveGuide,
             selectedVector,
             editImageTransform,
             onCommitImageTransform: commitImageTransform,
@@ -5185,6 +5281,7 @@ export function WorkspaceCanvasView({
         <CanvasStatusBar
           docViewMode={docViewMode}
           snap={snapSettings}
+          snapScaleUnit={measureScale.toUnit}
           onSnapChange={setSnapSettings}
           onToggleView={() =>
             dispatch({

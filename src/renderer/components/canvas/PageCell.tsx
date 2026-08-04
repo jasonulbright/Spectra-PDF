@@ -73,10 +73,12 @@ import { resolveStampTokens } from '../../lib/stamp-library';
 import { getSettings } from '../../lib/app-settings';
 import {
   buildSnapIndex,
+  constrainAngle,
   EMPTY_SNAP_INDEX,
   objectSnapPoints,
   snapDelta,
   snapPoint,
+  type SnapGuide,
   type SnapHit,
   type SnapIndex,
   type SnapOptions,
@@ -84,6 +86,8 @@ import {
   type SnapPoint,
   type SnapType,
 } from '../../lib/snap';
+import { gridForPage, gridLines } from '../../lib/rulers';
+import { guidesOnPage, isOffPage, toSnapGuides, type GuideAxis, type PageGuide } from '../../lib/guides';
 import type { SnapSettings } from '../../lib/snap-settings';
 import type { PageSnapGeometry } from '../../lib/snap-geometry';
 import {
@@ -109,6 +113,11 @@ import i18next, { tChrome, tNumber, type UiKey } from '../../i18n';
 // Measure overlays draw in amber — legible over both white paper and the
 // annotation palette's blues/yellows, and distinct from ink's default.
 const MEASURE_COLOR = '#f59e0b';
+
+// N11 slice B: the closest two grid lines may be drawn, in CSS pixels. Below
+// this the grid is a grey wash over the drawing rather than a reading aid, so
+// that axis is not drawn at all — snapping to it is unaffected.
+const GRID_MIN_PX = 4;
 
 // N11 slice A: the snap marker's per-type name key. A distinct GLYPH per type
 // (below) plus the name in a badge — a colour-only distinction would be
@@ -560,6 +569,22 @@ interface PageCellProps {
    * snapping existed, which is the guarantee the gesture specs assert. */
   snapGeometry?: PageSnapGeometry;
   snapSettings?: SnapSettings;
+  /** N11 slice B: this page's ruler guides, in the frame each was drawn in
+   * (they project here, the `projectMarkRect` precedent). Pre-filtered by
+   * page upstream, like every other per-page overlay. */
+  guides?: readonly PageGuide[];
+  /** Commit a guide drag. The moved guide is re-stamped into the CURRENT
+   * display frame — a moved guide is a freshly placed one, so its axis and
+   * `rotationAtDraw` come from where it landed rather than from where it
+   * originally came off the ruler. */
+  onMoveGuide?: (
+    guideId: string,
+    axis: GuideAxis,
+    pos: number,
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  /** Dragged past the page's edge — the king's "drag it back to the ruler". */
+  onRemoveGuide?: (guideId: string) => void;
   // Pending redaction marks on this page (transient view state — see
   // lib/redaction.ts); undefined when none.
   redactionMarks?: RedactionMark[];
@@ -913,6 +938,9 @@ function PageCellImpl({
   onMeasureResult,
   snapGeometry,
   snapSettings,
+  guides,
+  onMoveGuide,
+  onRemoveGuide,
   redactionMarks,
   editImages,
   editSelectedIndexes,
@@ -1059,12 +1087,109 @@ function PageCellImpl({
   // annotations are stored in the page.rotation frame and project by
   // `viewRotation`. Both land in the DISPLAY frame, which is the frame the
   // pointer and every one of the ten sites work in.
+  // The DISPLAYED page size in PDF points (axes swapped at 90/270; `page`
+  // already carries the effective rotation). Defined up here rather than beside
+  // the measure tool because slice B's GRID needs the same pair — a grid
+  // spacing is a length on paper, and this is what turns it into a fraction of
+  // the page.
+  const measDispW = page.rotation === 90 || page.rotation === 270 ? page.height : page.width;
+  const measDispH = page.rotation === 90 || page.rotation === 270 ? page.width : page.height;
+  const measScale = measureScale ?? DEFAULT_MEASURE_SCALE;
+
   const snapArmed = snapSettings?.enabled === true;
+  // The grid exists independently of whether it is DRAWN: "snap to a grid you
+  // cannot see" is an ordinary way to draft, and the king separates Show Grid
+  // from Snap to Grid for exactly that reason. `types.grid` gates the snap;
+  // `showGrid` gates the ink.
+  const gridCfg = snapSettings?.grid;
+  const grid = useMemo(
+    () => (gridCfg ? gridForPage(gridCfg, measScale, measDispW, measDispH) : null),
+    [gridCfg, measScale, measDispW, measDispH],
+  );
+  // Guides project through the rotation they were drawn in — the same rule a
+  // redaction mark follows, and for the same reason: the paper can turn under
+  // them, from Rotate View or a pending page-tier rotation.
+  const shownGuides = useMemo(
+    () =>
+      snapSettings?.showGuides === false
+        ? []
+        : guidesOnPage(guides ?? [], page.id, page.rotation),
+    [guides, page.id, page.rotation, snapSettings?.showGuides],
+  );
+  const snapGuides = useMemo<SnapGuide[]>(() => toSnapGuides(shownGuides), [shownGuides]);
+  /**
+   * The grid's LINE positions, or null when there is nothing to draw.
+   *
+   * Density is the whole subtlety: a 1 mm grid zoomed out is a grey wash that
+   * hides the drawing it exists to help you read, so an axis whose lines would
+   * land closer together than `GRID_MIN_PX` is simply not drawn. SNAPPING is
+   * unaffected — quantization needs no line list — which is the honest split:
+   * the aid stops being drawn when it stops being legible, it does not stop
+   * working.
+   */
+  const gridOverlay = useMemo<{ xs: number[]; ys: number[] } | null>(() => {
+    if (!snapSettings?.showGrid || !grid) return null;
+    const xs = grid.spacingX * displayWidth >= GRID_MIN_PX ? gridLines(grid.spacingX, grid.originX) : [];
+    const ys = grid.spacingY * pageHeight >= GRID_MIN_PX ? gridLines(grid.spacingY, grid.originY) : [];
+    return xs.length > 0 || ys.length > 0 ? { xs, ys } : null;
+  }, [snapSettings?.showGrid, grid, displayWidth, pageHeight]);
+
+  // A live guide drag, previewed locally and committed on release — the same
+  // shape every other canvas gesture uses (window listeners, one dispatch).
+  const [guideDrag, setGuideDrag] = useState<{ id: string; axis: GuideAxis; pos: number } | null>(
+    null,
+  );
+  const cancelGuideDrag = useRef<(() => void) | null>(null);
+  useEffect(() => () => cancelGuideDrag.current?.(), []);
+  const handleGuideDown = (id: string, axis: GuideAxis, e: React.PointerEvent<HTMLElement>): void => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const cell = (e.currentTarget as HTMLElement).closest('[data-page-id]') as HTMLElement | null;
+    if (!cell) return;
+    // Through the choke point like everything else — but UNCLAMPED, because
+    // "dragged past the edge" is the delete gesture and a clamped point can
+    // never express it. It does not snap: a guide IS a snap target, and one
+    // that jumped onto another would make two guides impossible to separate.
+    const posOf = (cx: number, cy: number): number => {
+      const p = pagePoint(cell, cx, cy, { snap: false, unclamped: true });
+      return axis === 'x' ? p.x : p.y;
+    };
+    let latest = posOf(e.clientX, e.clientY);
+    setGuideDrag({ id, axis, pos: latest });
+    const onMove = (ev: PointerEvent): void => {
+      latest = posOf(ev.clientX, ev.clientY);
+      setGuideDrag({ id, axis, pos: latest });
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('blur', onCancel);
+      cancelGuideDrag.current = null;
+      setGuideDrag(null);
+      if (!commit) return;
+      if (isOffPage(latest)) onRemoveGuide?.(id);
+      // Re-stamped into the CURRENT display frame: a moved guide is a freshly
+      // placed one, so it takes today's axis and rotation rather than
+      // carrying the frame it originally came off the ruler in.
+      else onMoveGuide?.(id, axis, latest, page.rotation);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    cancelGuideDrag.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onCancel);
+  };
   const snapOptions: SnapOptions = {
     radiusPx: snapSettings?.radiusPx ?? 0,
     viewW: displayWidth,
     viewH: pageHeight,
     types: snapSettings?.types ?? ({} as SnapOptions['types']),
+    guides: snapGuides,
+    grid,
   };
   const pageSnapPaths = useMemo<SnapPath[]>(() => {
     if (!snapArmed || !snapGeometry) return [];
@@ -1145,9 +1270,16 @@ function PageCellImpl({
       prev && hit && prev.type === hit.type && prev.x === hit.x && prev.y === hit.y ? prev : hit,
     );
   };
+  // The angle-constrain ANCHOR (slice B): the point Shift measures from — a
+  // drag's start, or a vertex sequence's last committed vertex. ONE owner, set
+  // by whichever gesture is live and cleared with it, so a new gesture can
+  // never inherit a stale anchor and a gesture with no anchor (the generic
+  // band, a placement click) simply cannot constrain.
+  const constrainAnchor = useRef<SnapPoint | null>(null);
   const endSnapGesture = (): void => {
     gestureLive.current = false;
     snapCycleRef.current = 0;
+    constrainAnchor.current = null;
     setSnapMarker(null);
   };
 
@@ -1159,11 +1291,35 @@ function PageCellImpl({
     /** Alt suspends snapping for the remainder of the gesture — read off the
      * event rather than tracked through key listeners, so a lost keyup or a
      * webview swallowing Alt can never strand the suspension. Independent of
-     * Shift (angle constrain, slice B), so the two compose. */
+     * Shift (angle constrain), so the two compose. */
     suspend?: boolean;
+    /** Shift holds the segment to the nearest angle increment, measured from
+     * `constrainAnchor`. Independent of the snap MASTER toggle: a drawing
+     * constraint is not a snap, and the king's Shift works with snapping off
+     * exactly as it does with it on. */
+    constrain?: boolean;
     /** A manipulation gesture's own index (the object excluded). */
     index?: SnapIndex;
+    /** Skip the 0..1 clamp. Only the GUIDE drag wants this: "dragged past the
+     * page edge" is how a guide is deleted, and a clamped point cannot say
+     * it. Every placement gesture keeps the clamp. */
+    unclamped?: boolean;
   }
+
+  /** Shift's constraint, applied to a point that did NOT snap. An explicit
+   * geometric target beats a constraint when both are available (the king's
+   * precedence), which is why every caller runs the snap first. */
+  const constrained = (p: { x: number; y: number }, on: boolean | undefined): { x: number; y: number } => {
+    const from = constrainAnchor.current;
+    if (!on || !from) return p;
+    return constrainAngle(
+      from,
+      p,
+      snapSettings?.angleDeg ?? 0,
+      displayWidth,
+      pageHeight,
+    );
+  };
 
   /**
    * THE choke point. Client coordinates → a display-normalized page point,
@@ -1176,22 +1332,24 @@ function PageCellImpl({
     o?: PagePointOpts,
   ): { x: number; y: number; snap: SnapHit | null } => {
     const rect = el.getBoundingClientRect();
-    const raw = {
-      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
-    };
+    const fx = (cx - rect.left) / rect.width;
+    const fy = (cy - rect.top) / rect.height;
+    const raw = o?.unclamped
+      ? { x: fx, y: fy }
+      : { x: Math.max(0, Math.min(1, fx)), y: Math.max(0, Math.min(1, fy)) };
     if (!snapArmed || o?.snap === false || o?.suspend) {
       // Unconditional, deliberately: a window listener holds the closure from
       // the render the gesture STARTED in, so a `if (snapMarker)` guard here
       // reads a stale value and can strand the marker on screen. The
       // functional update below is a no-op when there is nothing to clear.
       publishSnap(null);
-      return { ...raw, snap: null };
+      return { ...constrained(raw, o?.constrain), snap: null };
     }
     const res = snapPoint(o?.index ?? snapIndex, raw, snapOptions, snapCycleRef.current);
     if (res.candidates.length === 0) snapCycleRef.current = 0;
     publishSnap(res.hit);
-    return { x: res.point.x, y: res.point.y, snap: res.hit };
+    if (res.hit) return { x: res.point.x, y: res.point.y, snap: res.hit };
+    return { ...constrained(res.point, o?.constrain), snap: null };
   };
 
   /**
@@ -1206,15 +1364,30 @@ function PageCellImpl({
     own: readonly SnapPoint[],
     index: SnapIndex,
     suspend: boolean,
+    constrain = false,
   ): { dx: number; dy: number } => {
+    // Shift on a MOVE constrains the TRAVEL, so the anchor is the origin of
+    // the delta rather than a page point — same math, same increment, and it
+    // gives the king's axis-locked drag at 90°.
+    const held = (d: { dx: number; dy: number }): { dx: number; dy: number } => {
+      if (!constrain) return d;
+      const p = constrainAngle(
+        { x: 0, y: 0 },
+        { x: d.dx, y: d.dy },
+        snapSettings?.angleDeg ?? 0,
+        displayWidth,
+        pageHeight,
+      );
+      return { dx: p.x, dy: p.y };
+    };
     if (!snapArmed || suspend) {
       publishSnap(null);
-      return raw;
+      return held(raw);
     }
     const res = snapDelta(index, own, raw, snapOptions, snapCycleRef.current);
     if (res.candidates.length === 0) snapCycleRef.current = 0;
     publishSnap(res.hit);
-    return res.delta;
+    return res.hit ? res.delta : held(res.delta);
   };
 
   /** An annotation's display-frame candidate points (box corners, box centre,
@@ -1310,7 +1483,7 @@ function PageCellImpl({
       };
       ownPts ??= ownSnapPoints(group);
       moveIndex ??= snapIndexExcluding(group.map((m) => m.id));
-      const moved = pageDelta(raw, ownPts, moveIndex, ev.altKey);
+      const moved = pageDelta(raw, ownPts, moveIndex, ev.altKey, ev.shiftKey);
       const p0 = toStoredPoints([d0.x, d0.y]);
       const p1 = toStoredPoints([d0.x + moved.dx, d0.y + moved.dy]);
       return { dx: p1[0] - p0[0], dy: p1[1] - p0[1] };
@@ -1669,6 +1842,7 @@ function PageCellImpl({
     gestureLive.current = true;
     const el = e.currentTarget;
     const start = normPoint(el, e.clientX, e.clientY, e);
+    constrainAnchor.current = start;
     let lastP = start;
     setShapeDraft([start.x, start.y]);
     setShapeCursor(start);
@@ -1706,6 +1880,7 @@ function PageCellImpl({
       if (e.detail >= 2) return;
       shapeSeqActive.current = true;
       gestureLive.current = true;
+      constrainAnchor.current = p;
       let pts = [p.x, p.y];
       setShapeDraft(pts);
       setShapeCursor(p);
@@ -1734,6 +1909,7 @@ function PageCellImpl({
           return;
         }
         pts = [...pts, q.x, q.y];
+        constrainAnchor.current = q; // the anchor walks with the sequence
         setShapeDraft(pts);
       };
       cancelBand.current = cleanup;
@@ -1903,15 +2079,11 @@ function PageCellImpl({
   };
 
   // ── Measure (parity map § 2) ──────────────────────────────────────────
-  // Values are computed against the DISPLAYED page dims in PDF points (the
-  // axes swap at 90/270 — `page` here already carries the effective
-  // rotation, viewRotation composed by the reading view). Lengths are
-  // rotation-invariant, so the VALUE needs no un-projection; the left-behind
-  // annotation's points un-project exactly like ink's.
-  const measDispW = page.rotation === 90 || page.rotation === 270 ? page.height : page.width;
-  const measDispH = page.rotation === 90 || page.rotation === 270 ? page.width : page.height;
-  const measScale = measureScale ?? DEFAULT_MEASURE_SCALE;
-
+  // Values are computed against the DISPLAYED page dims in PDF points
+  // (`measDispW`/`measDispH`, defined up in the snapping block — the grid
+  // needs the same pair). Lengths are rotation-invariant, so the VALUE needs
+  // no un-projection; the left-behind annotation's points un-project exactly
+  // like ink's.
   const measureValueFor = (pts: number[]): string => {
     if (tool === 'measurearea') {
       const area = formatArea(ringAreaPts2(pts, measDispW, measDispH), measScale);
@@ -1959,9 +2131,12 @@ function PageCellImpl({
     el: HTMLElement,
     cx: number,
     cy: number,
-    ev?: { altKey?: boolean },
+    ev?: { altKey?: boolean; shiftKey?: boolean },
   ): { x: number; y: number } => {
-    const p = pagePoint(el, cx, cy, { suspend: ev?.altKey === true });
+    const p = pagePoint(el, cx, cy, {
+      suspend: ev?.altKey === true,
+      constrain: ev?.shiftKey === true,
+    });
     return { x: p.x, y: p.y };
   };
 
@@ -1971,6 +2146,7 @@ function PageCellImpl({
     gestureLive.current = true;
     const el = e.currentTarget;
     const start = normPoint(el, e.clientX, e.clientY, e);
+    constrainAnchor.current = start;
     let last = start;
     setMeasurePts([start.x, start.y]);
     setMeasureCursor(start);
@@ -2021,6 +2197,7 @@ function PageCellImpl({
       if (e.detail >= 2) return;
       measureSeqActive.current = true;
       gestureLive.current = true;
+      constrainAnchor.current = p;
       let pts = [p.x, p.y];
       setMeasurePts(pts);
       setMeasureCursor(p);
@@ -2052,6 +2229,9 @@ function PageCellImpl({
           return;
         }
         pts = [...pts, q.x, q.y];
+        // The anchor walks with the sequence: Shift holds the NEXT leg to an
+        // increment from the vertex just committed, not from the first one.
+        constrainAnchor.current = q;
         setMeasurePts(pts);
       };
       cancelBand.current = cleanup;
@@ -2396,6 +2576,62 @@ function PageCellImpl({
         displayWidth={displayWidth}
         displayHeight={pageHeight}
       />
+      {/* The grid draws UNDER the annotation layer and OVER the raster — it is
+          a drafting aid on the paper, never part of it. `forced-color-adjust`
+          is inherited from the page rasters' rule (N14): a high-contrast theme
+          re-tints the shell, never the document surface. */}
+      {gridOverlay && (
+        <svg
+          className="page-grid"
+          data-testid="page-grid"
+          viewBox="0 0 1 1"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+          focusable="false"
+        >
+          {gridOverlay.xs.map((x) => (
+            <line key={`gx${x}`} x1={x} y1={0} x2={x} y2={1} vectorEffect="non-scaling-stroke" />
+          ))}
+          {gridOverlay.ys.map((y) => (
+            <line key={`gy${y}`} x1={0} y1={y} x2={1} y2={y} vectorEffect="non-scaling-stroke" />
+          ))}
+        </svg>
+      )}
+      {shownGuides.length > 0 && (
+        <div
+          className="page-guides"
+          data-testid="page-guides"
+          role="group"
+          aria-label={tChrome('canvas.guides.layer')}
+        >
+          {shownGuides.map((g) => {
+            const live = guideDrag && guideDrag.id === g.id ? guideDrag : null;
+            const axis = live ? live.axis : g.axis;
+            const pos = live ? live.pos : g.pos;
+            return (
+              <div
+                key={g.id}
+                className={'page-guide page-guide-' + axis + (live ? ' dragging' : '')}
+                data-testid="page-guide"
+                data-guide-id={g.id}
+                data-guide-axis={axis}
+                data-guide-pos={pos}
+                style={{
+                  ...(axis === 'x' ? { left: `${pos * 100}%` } : { top: `${pos * 100}%` }),
+                  // Only the Select tool grabs a guide. Every other mode is
+                  // DRAWING, and a hit strip that stayed interactive would
+                  // swallow the first pixel of a measurement — the `ui.tool`
+                  // failure in miniature. The HANDLER alone is not enough:
+                  // an element with `pointer-events: auto` and no listener
+                  // still eats the press.
+                  pointerEvents: tool === 'select' ? 'auto' : 'none',
+                }}
+                onPointerDown={tool === 'select' ? (e) => handleGuideDown(g.id, axis, e) : undefined}
+              />
+            );
+          })}
+        </div>
+      )}
       {textLayer && (
         <PageTextLayer
           pdf={pdf}

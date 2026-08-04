@@ -322,6 +322,14 @@ export interface CanvasEditImagesHandlers {
   /** N11 slice A: page ids whose snap geometry has landed. */
   snapGeometryPageIds: () => string[];
   snapGeometry: (pageId: string) => { subpaths: number[][]; closed: boolean[] }[];
+  /** N11 slice B: the live ruler guides, in the frame each was drawn in. */
+  guides: () => {
+    id: string;
+    pageId: string;
+    axis: 'x' | 'y';
+    pos: number;
+    rotationAtDraw: 0 | 90 | 180 | 270;
+  }[];
   /** False while a listing pass is in flight — the maps are keyed by
    * generation-tagged page ids and a rebuild empties them until the fresh
    * per-page engine round-trips land, so "empty" alone proves nothing. */
@@ -1010,6 +1018,17 @@ export interface TestHarness {
    * an entry but ZERO paths is a settled EMPTY listing, which is a different
    * thing from "not fetched yet" — the spec waits for paths, not for keys. */
   snapGeometry: (pageId: string) => { subpaths: number[][]; closed: boolean[] }[];
+  /** N11 slice B: the ruler GUIDES currently on the document, in the frame
+   * each was drawn in. Read-back only — spec 106 drags them off the real
+   * ruler chrome, because a harness that placed them would prove nothing
+   * about the gesture. */
+  guides: () => {
+    id: string;
+    pageId: string;
+    axis: 'x' | 'y';
+    pos: number;
+    rotationAtDraw: 0 | 90 | 180 | 270;
+  }[];
   /** 9.D1 vector objects: list, select, delete. */
   editVectorPageIds: () => string[];
   editVectors: (pageId: string) => {
@@ -1786,6 +1805,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     snapGeometryPageIds: () => canvasEditImages?.snapGeometryPageIds() ?? [],
     snapGeometry: (pageId) => canvasEditImages?.snapGeometry(pageId) ?? [],
+    guides: () => canvasEditImages?.guides() ?? [],
     editVectorPageIds: () => canvasEditImages?.vectorPageIds() ?? [],
     editVectors: (pageId) => canvasEditImages?.vectors(pageId) ?? [],
     editVectorSelect: (pageId, index) => canvasEditImages?.selectVector(pageId, index),

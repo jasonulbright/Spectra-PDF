@@ -46,6 +46,20 @@ export const CHROME_STRINGS = {
   'chrome.status.snapOptions': 'Snap options',
   'chrome.status.snapTypes': 'Snap to',
   'chrome.status.snapRadius': 'Radius',
+  // Slice B: the angle increment and the grid live in the same popover, so
+  // the whole drafting-aid set is configured in one place. Unit SYMBOLS (in,
+  // ft, °) stay notation and carry no keys; the grid's unit is a <select>
+  // over those symbols, and its label is what localizes.
+  'chrome.status.snapAngle': 'Angle step',
+  'chrome.status.snapAngleTitle':
+    'Hold Shift while dragging to hold the segment to this angle',
+  'chrome.status.snapGridTitle': 'Grid',
+  'chrome.status.snapGridShow': 'Show grid',
+  'chrome.status.snapGridSpacing': 'Spacing',
+  'chrome.status.snapGridUnit': 'Grid unit',
+  'chrome.status.snapGridScaled': 'Drawing scale',
+  'chrome.status.snapGridScaledTitle':
+    'Read the spacing in the measuring scale’s real-world units instead of paper units',
   'chrome.status.zoom': 'Zoom',
   'chrome.status.zoomOut': 'Zoom out',
   'chrome.status.zoomIn': 'Zoom in',

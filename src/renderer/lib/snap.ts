@@ -537,6 +537,53 @@ export function snapDelta(
   };
 }
 
+// ── Angle constrain (N11 slice B) ────────────────────────────────────────
+// Shift, while a drag is live, holds the segment to the nearest increment.
+// Applied AFTER the point snap at the choke point, so an explicit geometric
+// target beats a constraint when both are available — the king's precedence.
+
+/** Increment bounds, in degrees. 90 is the ortho case; below 1 the constraint
+ * stops constraining anything. */
+export const SNAP_ANGLE_MIN = 1;
+export const SNAP_ANGLE_MAX = 90;
+export const DEFAULT_SNAP_ANGLE_DEG = 15;
+
+/**
+ * `to`, held to the nearest multiple of `incrementDeg` measured from `from`.
+ *
+ * PIXEL space, like the radius: a "45°" constraint has to look like 45° on
+ * screen, and a normalized-space angle on a landscape page would not.
+ *
+ * The constrained point is the PROJECTION of the pointer onto the chosen ray,
+ * not the pointer's length rotated onto it — moving the pointer sideways then
+ * changes only the direction it picks, never the length, which is what "ortho"
+ * feels like everywhere it exists. Projecting is safe precisely because the
+ * ray is the NEAREST one: the pointer is at most half an increment off it, so
+ * the projection keeps at least cos(45°) of the length for any increment up to
+ * 90 and can never flip behind the anchor.
+ */
+export function constrainAngle(
+  from: SnapPoint,
+  to: SnapPoint,
+  incrementDeg: number,
+  viewW: number,
+  viewH: number,
+): SnapPoint {
+  if (!(incrementDeg > 0) || !(viewW > 0) || !(viewH > 0)) return to;
+  const dx = (to.x - from.x) * viewW;
+  const dy = (to.y - from.y) * viewH;
+  if (dx === 0 && dy === 0) return to;
+  const step = (incrementDeg * Math.PI) / 180;
+  // Math.round carries the 0/360 wrap and negative angles for free: atan2
+  // returns (−π, π] and the rounding is on a continuous multiple, so the
+  // ray at 350° and the ray at −10° are the same ray.
+  const angle = Math.round(Math.atan2(dy, dx) / step) * step;
+  const ux = Math.cos(angle);
+  const uy = Math.sin(angle);
+  const proj = dx * ux + dy * uy;
+  return { x: from.x + (proj * ux) / viewW, y: from.y + (proj * uy) / viewH };
+}
+
 /** The candidate points a dragged annotation offers: its box corners, its box
  * centre, and its vertices when it has them. Pure, so the move gesture's
  * "snap the OBJECT, not the pointer" rule is testable without a DOM. */

@@ -11,6 +11,7 @@ import {
   gridPoint,
   objectSnapPoints,
   pickSnap,
+  constrainAngle,
   segmentIntersection,
   snapCandidates,
   snapDelta,
@@ -453,5 +454,86 @@ describe('the DELTA variant snaps the object, not the pointer', () => {
     expect(own).toContainEqual({ x: 0.05, y: 0.02 });
     expect(own).toContainEqual({ x: 0.05, y: 0.05 }); // the box centre
     expect(own).toHaveLength(6);
+  });
+});
+
+// ── N11 slice B: angle constrain ────────────────────────────────────────
+describe('constrainAngle (N11 slice B)', () => {
+  // A square view, so normalized units and pixels agree and the expected
+  // angles are readable. The anisotropic case gets its own test below.
+  const W = 1000;
+  const H = 1000;
+
+  it('holds a nearly-horizontal drag to exactly horizontal', () => {
+    const p = constrainAngle({ x: 0.2, y: 0.5 }, { x: 0.6, y: 0.52 }, 15, W, H);
+    expect(p.y).toBeCloseTo(0.5, 10); // the anchor's y — 0° is the nearest ray
+    expect(p.x).toBeGreaterThan(0.55); // and it keeps essentially all its reach
+  });
+
+  it('picks the NEAREST increment, not the first one', () => {
+    // 40° from horizontal, 15° increments → 45° is nearer than 30°.
+    const rad = (40 * Math.PI) / 180;
+    const to = { x: 0.5 + 0.3 * Math.cos(rad), y: 0.5 + 0.3 * Math.sin(rad) };
+    const p = constrainAngle({ x: 0.5, y: 0.5 }, to, 15, W, H);
+    const angle = (Math.atan2(p.y - 0.5, p.x - 0.5) * 180) / Math.PI;
+    expect(angle).toBeCloseTo(45, 6);
+  });
+
+  it('PROJECTS onto the ray rather than rotating the vector', () => {
+    // Straight up-right at 45° with the pointer 30° off it: projecting keeps
+    // cos(15°) of the length, rotating would keep all of it. The difference
+    // is the whole "moving sideways must not change the length" property.
+    const rad = (30 * Math.PI) / 180;
+    const len = 0.3;
+    const to = { x: 0.5 + len * Math.cos(rad), y: 0.5 + len * Math.sin(rad) };
+    const p = constrainAngle({ x: 0.5, y: 0.5 }, to, 45, W, H);
+    const got = Math.hypot(p.x - 0.5, p.y - 0.5);
+    expect(got).toBeCloseTo(len * Math.cos((15 * Math.PI) / 180), 10);
+  });
+
+  it('never flips behind the anchor, for any pointer direction at any increment', () => {
+    for (const inc of [1, 5, 15, 30, 45, 90]) {
+      for (let deg = -360; deg <= 360; deg += 7) {
+        const rad = (deg * Math.PI) / 180;
+        const to = { x: 0.5 + 0.2 * Math.cos(rad), y: 0.5 + 0.2 * Math.sin(rad) };
+        const p = constrainAngle({ x: 0.5, y: 0.5 }, to, inc, W, H);
+        const dot = (p.x - 0.5) * (to.x - 0.5) + (p.y - 0.5) * (to.y - 0.5);
+        expect(dot).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('wraps: 350° and −10° land on the same ray', () => {
+    const from = { x: 0.5, y: 0.5 };
+    const at = (deg: number): { x: number; y: number } => {
+      const rad = (deg * Math.PI) / 180;
+      return { x: from.x + 0.2 * Math.cos(rad), y: from.y + 0.2 * Math.sin(rad) };
+    };
+    const a = constrainAngle(from, at(350), 10, W, H);
+    const b = constrainAngle(from, at(-10), 10, W, H);
+    expect(a.x).toBeCloseTo(b.x, 12);
+    expect(a.y).toBeCloseTo(b.y, 12);
+  });
+
+  it('measures the angle in PIXELS, so a landscape page still constrains to 45° on screen', () => {
+    // 2:1 view. A normalized-space 45° would show as ~63° on screen; the
+    // pixel-space constraint must produce equal pixel components.
+    const p = constrainAngle({ x: 0, y: 0 }, { x: 0.4, y: 0.9 }, 45, 2000, 1000);
+    expect(p.x * 2000).toBeCloseTo(p.y * 1000, 8);
+  });
+
+  it('is a no-op for a zero-length drag or a non-positive increment', () => {
+    expect(constrainAngle({ x: 0.3, y: 0.3 }, { x: 0.3, y: 0.3 }, 15, W, H)).toEqual({
+      x: 0.3,
+      y: 0.3,
+    });
+    expect(constrainAngle({ x: 0, y: 0 }, { x: 0.4, y: 0.1 }, 0, W, H)).toEqual({
+      x: 0.4,
+      y: 0.1,
+    });
+    expect(constrainAngle({ x: 0, y: 0 }, { x: 0.4, y: 0.1 }, 15, 0, H)).toEqual({
+      x: 0.4,
+      y: 0.1,
+    });
   });
 });
