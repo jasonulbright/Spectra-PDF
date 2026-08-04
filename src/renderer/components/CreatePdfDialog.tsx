@@ -4,6 +4,8 @@ import { useEngine } from '../hooks/useEngine';
 import { dialog } from '../lib/tauri-bridge';
 import { ensureGsPath } from '../panels/SettingsPanel';
 import { TEST_HARNESS_ENABLED, registerCreatePdf } from '../testHarness';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 // File ▸ Create PDF from PostScript… (Phase 8, architecture/23): the
 // Distiller job on the bundled Ghostscript. A MENU dialog, not a tool
@@ -15,13 +17,13 @@ import { TEST_HARNESS_ENABLED, registerCreatePdf } from '../testHarness';
 // Quality presets speak Distiller's vocabulary in the UI and gs names on
 // the wire (engine/distill.py maps them to -dPDFSETTINGS).
 
-const PRESETS: { value: string; label: string }[] = [
-  { value: 'screen', label: 'Smallest Size (72 dpi)' },
-  { value: 'ebook', label: 'eBook (150 dpi)' },
-  { value: 'printer', label: 'Print Quality (300 dpi)' },
-  { value: 'prepress', label: 'Press Quality' },
-  { value: 'default', label: 'Standard (Ghostscript defaults)' },
-];
+const PRESETS = [
+  { value: 'screen', key: 'dialog.createPdf.preset.screen' },
+  { value: 'ebook', key: 'dialog.createPdf.preset.ebook' },
+  { value: 'printer', key: 'dialog.createPdf.preset.printer' },
+  { value: 'prepress', key: 'dialog.createPdf.preset.prepress' },
+  { value: 'default', key: 'dialog.createPdf.preset.default' },
+] as const;
 
 interface DistillResult {
   output: string;
@@ -39,6 +41,8 @@ export function CreatePdfDialog({
    * the dialog had closed — review-caught). */
   onOpenResult: (path: string) => Promise<void>;
 }): React.JSX.Element {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { callRaw } = useEngine();
   const [source, setSource] = useState<string | null>(null);
   const [preset, setPreset] = useState('printer');
@@ -128,16 +132,16 @@ export function CreatePdfDialog({
             onClick={() => void pickSource()}
             disabled={busy}
           >
-            Choose PostScript File…
+            {tChrome('dialog.createPdf.pick')}
           </button>
           <p className="text-xs text-neutral-400 mt-2 break-all" data-testid="create-pdf-source">
-            {source ?? 'No file chosen (.ps or .eps)'}
+            {source ?? tChrome('dialog.createPdf.noFile')}
           </p>
         </div>
 
         <div>
           <label className="block text-sm text-neutral-400 mb-1" htmlFor="create-pdf-preset">
-            Quality
+            {tChrome('dialog.createPdf.quality')}
           </label>
           <select
             id="create-pdf-preset"
@@ -149,7 +153,7 @@ export function CreatePdfDialog({
           >
             {PRESETS.map((p) => (
               <option key={p.value} value={p.value}>
-                {p.label}
+                {tChrome(p.key)}
               </option>
             ))}
           </select>
@@ -162,9 +166,11 @@ export function CreatePdfDialog({
         )}
 
         {result && (
-          <p className="text-sm" data-testid="create-pdf-done" aria-live="polite">
-            Created {result.pages} page{result.pages === 1 ? '' : 's'} →{' '}
-            <span className="break-all">{result.output}</span>
+          <p className="text-sm break-all" data-testid="create-pdf-done" aria-live="polite">
+            {/* One whole message — the path rides as an interpolation
+                rather than sitting in a trailing span the wording would
+                have to wrap around. */}
+            {tChromeCount('dialog.createPdf.done', result.pages, { path: result.output })}
           </p>
         )}
 
@@ -188,7 +194,7 @@ export function CreatePdfDialog({
                   .finally(() => setBusy(false));
               }}
             >
-              Open
+              {tChrome('dialog.common.open')}
             </button>
           )}
           <button
@@ -198,7 +204,7 @@ export function CreatePdfDialog({
             disabled={!source || busy}
             onClick={() => void convert()}
           >
-            {busy ? 'Converting…' : 'Convert…'}
+            {tChrome(busy ? 'dialog.createPdf.converting' : 'dialog.createPdf.convert')}
           </button>
           <button
             type="button"
@@ -207,7 +213,7 @@ export function CreatePdfDialog({
             onClick={onClose}
             disabled={busy}
           >
-            Close
+            {tChrome('dialog.common.close')}
           </button>
         </div>
       </div>
@@ -228,13 +234,13 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Create PDF from PostScript"
+        aria-label={tChrome('dialog.createPdf.title')}
         data-testid="create-pdf-dialog"
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[480px] max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
-          <h3 className="text-sm font-semibold">Create PDF from PostScript</h3>
+          <h3 className="text-sm font-semibold">{tChrome('dialog.createPdf.title')}</h3>
         </div>
         {children}
       </div>
