@@ -12,6 +12,7 @@ import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
 import { TOOL_DEFS, TOOL_IDS, toolById, toolForCanvasTool, worksOnPage, type ToolId } from './tools';
 import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
+import { toggleSnapping } from '../lib/snap-settings';
 
 // --- Pure enablement helpers (unit-tested; menus gray from these) ---------
 
@@ -163,6 +164,7 @@ export const COMMAND_IDS = [
   'view.presentation',
   'view.readingMode',
   'view.propertiesBar',
+  'view.snapping',
   'view.customizeToolbar',
   'view.singlePage',
   'view.twoUp',
@@ -611,6 +613,16 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Properties Bar',
     when: inCanvas,
     run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_PROPERTIES_BAR' }),
+  },
+  // Snapping (N11 slice A): the master toggle, mirrored from the status bar's
+  // Snap segment so it is keyboard- and OmniSearch-reachable. It flips a
+  // persisted PREFERENCE, not workspace state, so it writes through the
+  // snap-settings store rather than dispatching. Doc tabs only — there is
+  // nothing to snap without a page.
+  'view.snapping': {
+    title: 'Snapping',
+    when: inCanvas,
+    run: () => toggleSnapping(),
   },
   // Toolbar customization (I.6): per-item show/hide over the catalog. The
   // toolbar exists on every tab, so no canvas gate.

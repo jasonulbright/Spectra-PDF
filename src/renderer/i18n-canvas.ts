@@ -543,6 +543,20 @@ export const CANVAS_STRINGS = {
   'canvas.addtext.pageChanged': 'The page this text was placed on changed — draw the box again.',
   'canvas.addtext.pageGone': 'The page this text was placed on no longer exists.',
 
+  // Snapping (N11 slice A). The TYPE names double as the marker badge and as
+  // what the aria-live announcement reads out — one string, two surfaces, so
+  // a reader hearing "Endpoint" and a reader seeing it are told the same
+  // thing. The keyboard modifiers (Alt/Tab) are key NAMES, not translatable
+  // copy, and ride in as variables.
+  'canvas.snap.type.endpoint': 'Endpoint',
+  'canvas.snap.type.intersection': 'Intersection',
+  'canvas.snap.type.midpoint': 'Midpoint',
+  'canvas.snap.type.center': 'Centre',
+  'canvas.snap.type.guide': 'Guide',
+  'canvas.snap.type.grid': 'Grid',
+  'canvas.snap.type.edge': 'Edge',
+  'canvas.snap.announce': 'Snapped to {{type}}',
+
   // The redaction confirm — the one canvas action that destroys content.
   'canvas.redact.title': 'Redact content',
   // Two counts, one sentence: the outer key agrees with the REGION count and

@@ -48,6 +48,8 @@ interface DocumentRowProps {
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
+  snapGeomByPage: ReadonlyMap<string, import('../../lib/snap-geometry').PageSnapGeometry>;
+  snapSettings: import('../../lib/snap-settings').SnapSettings;
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
@@ -194,6 +196,8 @@ function DocumentRowImpl({
   redactionMarksByPage,
   editImagesByPage,
   editVectorsByPage,
+  snapGeomByPage,
+  snapSettings,
   selectedVector,
   editImageTransform,
   onCommitImageTransform,
@@ -295,6 +299,8 @@ function DocumentRowImpl({
         redactionMarks={redactionMarksByPage.get(page.id)}
         editImages={editImagesByPage.get(page.id)}
         editVectors={editVectorsByPage.get(page.id)}
+        snapGeometry={snapGeomByPage.get(page.id)}
+        snapSettings={snapSettings}
         selectedVectorIndex={selectedVector?.pageId === page.id ? selectedVector.index : null}
         editImageTransform={editImageTransform?.pageId === page.id ? editImageTransform : null}
         onCommitImageTransform={onCommitImageTransform}

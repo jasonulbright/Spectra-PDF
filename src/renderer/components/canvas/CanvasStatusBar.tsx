@@ -1,7 +1,13 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { DocViewMode } from '../../state/types';
-import { tChrome, tChromeCount } from '../../i18n';
+import { tChrome, tChromeCount, type UiKey } from '../../i18n';
+import type { SnapType } from '../../lib/snap';
+import {
+  SNAP_RADIUS_MAX,
+  SNAP_RADIUS_MIN,
+  type SnapSettings,
+} from '../../lib/snap-settings';
 
 // The docked status bar (Phase 10 slice A — 25-workbench-relayout.md § 3.A).
 // Replaces the floating bottom-right cluster: view state (page box, zoom,
@@ -15,6 +21,120 @@ import { tChrome, tChromeCount } from '../../i18n';
 // WorkspaceCanvasView untouched — this component just gives it a docked home.
 // Testids are UNCHANGED from the floating cluster so the e2e surface is
 // stable (only the removed duplicate Find toggle is gone).
+
+/**
+ * The snap types the popover offers TODAY.
+ *
+ * `guide` and `grid` are real types in `lib/snap.ts` (their candidate math is
+ * written and tested) but their SOURCES — ruler guides and a configurable
+ * grid — arrive with slice B. A checkbox that toggles something with no
+ * source is a control that does nothing, which the completeness rule forbids
+ * shipping; the persisted settings already carry all seven, so slice B adds
+ * two rows here and migrates nothing.
+ */
+const SNAP_TYPE_ROWS: readonly { type: SnapType; label: UiKey }[] = [
+  { type: 'endpoint', label: 'canvas.snap.type.endpoint' },
+  { type: 'intersection', label: 'canvas.snap.type.intersection' },
+  { type: 'midpoint', label: 'canvas.snap.type.midpoint' },
+  { type: 'center', label: 'canvas.snap.type.center' },
+  { type: 'edge', label: 'canvas.snap.type.edge' },
+];
+
+/** The Snap segment: a master toggle plus a popover of per-type checkboxes
+ * and the radius. Snap preferences are how you WORK, not a property of a
+ * file, so they persist in app settings — the parent owns that write. */
+function SnapSegment({
+  snap,
+  onChange,
+}: {
+  snap: SnapSettings;
+  onChange: (next: SnapSettings) => void;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent): void => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  return (
+    <div className="canvas-status-snap" ref={wrapRef}>
+      <button
+        type="button"
+        data-testid="snap-toggle"
+        aria-pressed={snap.enabled}
+        title={`${tChrome('chrome.status.snapTitle')} — ${tChrome('chrome.status.snapHint')}`}
+        onClick={() => onChange({ ...snap, enabled: !snap.enabled })}
+        className={'canvas-status-action canvas-status-quiet' + (snap.enabled ? ' active' : '')}
+      >
+        {tChrome('chrome.status.snap')}
+      </button>
+      <button
+        type="button"
+        data-testid="snap-options-toggle"
+        aria-expanded={open}
+        aria-label={tChrome('chrome.status.snapOptions')}
+        title={tChrome('chrome.status.snapOptions')}
+        onClick={() => setOpen((v) => !v)}
+        className="canvas-status-action canvas-status-quiet canvas-status-caret"
+      >
+        ▾
+      </button>
+      {open && (
+        <div className="canvas-status-snap-popover" data-testid="snap-options-popover" role="group" aria-label={tChrome('chrome.status.snapOptions')}>
+          <div className="canvas-status-snap-title">{tChrome('chrome.status.snapTypes')}</div>
+          {SNAP_TYPE_ROWS.map((row) => (
+            <label key={row.type} className="canvas-status-snap-row">
+              <input
+                type="checkbox"
+                data-testid={`snap-type-${row.type}`}
+                checked={snap.types[row.type]}
+                onChange={(e) =>
+                  onChange({
+                    ...snap,
+                    types: { ...snap.types, [row.type]: e.target.checked },
+                  })
+                }
+              />
+              <span>{tChrome(row.label)}</span>
+            </label>
+          ))}
+          <label className="canvas-status-snap-row">
+            <span>{tChrome('chrome.status.snapRadius')}</span>
+            <input
+              type="number"
+              data-testid="snap-radius"
+              min={SNAP_RADIUS_MIN}
+              max={SNAP_RADIUS_MAX}
+              value={snap.radiusPx}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (!Number.isFinite(v)) return;
+                onChange({
+                  ...snap,
+                  radiusPx: Math.min(SNAP_RADIUS_MAX, Math.max(SNAP_RADIUS_MIN, Math.round(v))),
+                });
+              }}
+              className="canvas-status-snap-number"
+            />
+            {/* `px` is notation, identical in every locale. */}
+            <span aria-hidden="true">px</span>
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export interface StatusBarPageBox {
   inputRef: React.Ref<HTMLInputElement>;
@@ -56,6 +176,10 @@ interface CanvasStatusBarProps {
   /** F10: write the pending marks into the file as /Redact annotations. */
   savingMarks: boolean;
   onSaveRedact: () => void;
+  /** N11 slice A: the snap segment. Absent on the Organize board, which has
+   * no drawing gestures to snap. */
+  snap?: SnapSettings;
+  onSnapChange?: (next: SnapSettings) => void;
 }
 
 export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element {
@@ -183,6 +307,9 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
         </div>
       )}
       <div className="flex-1" />
+      {props.snap && props.onSnapChange && (
+        <SnapSegment snap={props.snap} onChange={props.onSnapChange} />
+      )}
       <button
         type="button"
         data-testid="toggle-comments"

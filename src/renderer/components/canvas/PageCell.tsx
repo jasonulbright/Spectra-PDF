@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { showsFormWidgets } from '../../commands/tools';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
@@ -72,6 +72,21 @@ import {
 import { resolveStampTokens } from '../../lib/stamp-library';
 import { getSettings } from '../../lib/app-settings';
 import {
+  buildSnapIndex,
+  EMPTY_SNAP_INDEX,
+  objectSnapPoints,
+  snapDelta,
+  snapPoint,
+  type SnapHit,
+  type SnapIndex,
+  type SnapOptions,
+  type SnapPath,
+  type SnapPoint,
+  type SnapType,
+} from '../../lib/snap';
+import type { SnapSettings } from '../../lib/snap-settings';
+import type { PageSnapGeometry } from '../../lib/snap-geometry';
+import {
   isTransformable,
   isResizable,
   translated,
@@ -94,6 +109,50 @@ import i18next, { tChrome, tNumber, type UiKey } from '../../i18n';
 // Measure overlays draw in amber — legible over both white paper and the
 // annotation palette's blues/yellows, and distinct from ink's default.
 const MEASURE_COLOR = '#f59e0b';
+
+// N11 slice A: the snap marker's per-type name key. A distinct GLYPH per type
+// (below) plus the name in a badge — a colour-only distinction would be
+// invisible to a reader who cannot tell them apart, and the badge is what
+// the aria-live announcement reads out.
+const SNAP_TYPE_KEY: Record<SnapType, UiKey> = {
+  endpoint: 'canvas.snap.type.endpoint',
+  intersection: 'canvas.snap.type.intersection',
+  midpoint: 'canvas.snap.type.midpoint',
+  center: 'canvas.snap.type.center',
+  guide: 'canvas.snap.type.guide',
+  grid: 'canvas.snap.type.grid',
+  edge: 'canvas.snap.type.edge',
+};
+
+/** The snap marker's glyph: square = endpoint, × = intersection, triangle =
+ * midpoint, circle = centre, diamond = guide, dot = grid, chevron = edge.
+ * Drawn in its own 16×16 viewBox so the shapes stay undistorted whatever the
+ * page's aspect ratio (the annotation overlays' 0..1 viewBox would squash
+ * them). */
+function SnapGlyph({ type }: { type: SnapType }): React.JSX.Element {
+  const common = { fill: 'none', stroke: MEASURE_COLOR, strokeWidth: 1.6 } as const;
+  switch (type) {
+    case 'endpoint':
+      return <rect x={3.5} y={3.5} width={9} height={9} {...common} />;
+    case 'intersection':
+      return (
+        <g {...common}>
+          <line x1={3} y1={3} x2={13} y2={13} />
+          <line x1={13} y1={3} x2={3} y2={13} />
+        </g>
+      );
+    case 'midpoint':
+      return <polygon points="8,3 13.5,12.5 2.5,12.5" {...common} />;
+    case 'center':
+      return <circle cx={8} cy={8} r={5} {...common} />;
+    case 'guide':
+      return <polygon points="8,2.5 13.5,8 8,13.5 2.5,8" {...common} />;
+    case 'grid':
+      return <circle cx={8} cy={8} r={2.5} fill={MEASURE_COLOR} />;
+    default:
+      return <polyline points="4,4 11,8 4,12" {...common} />;
+  }
+}
 // Drawing shapes default to review red (the king's shape default).
 const SHAPE_COLOR = '#e0393e';
 
@@ -494,6 +553,13 @@ interface PageCellProps {
   measureScale?: MeasureScale;
   measureLeaveMarkup?: boolean;
   onMeasureResult?: (text: string) => void;
+  /** N11 slice A: this page's snap geometry (display-normalized at the page's
+   * BAKED orientation, like every other engine-derived overlay — the pending
+   * rotation is applied here at query time) plus the live snap preferences.
+   * Absent or disabled means every gesture behaves exactly as it did before
+   * snapping existed, which is the guarantee the gesture specs assert. */
+  snapGeometry?: PageSnapGeometry;
+  snapSettings?: SnapSettings;
   // Pending redaction marks on this page (transient view state — see
   // lib/redaction.ts); undefined when none.
   redactionMarks?: RedactionMark[];
@@ -845,6 +911,8 @@ function PageCellImpl({
   measureScale,
   measureLeaveMarkup = true,
   onMeasureResult,
+  snapGeometry,
+  snapSettings,
   redactionMarks,
   editImages,
   editSelectedIndexes,
@@ -977,6 +1045,193 @@ function PageCellImpl({
   const toStoredPoints = (pts: number[]): number[] =>
     viewRotation === 0 ? pts : rotateNormalizedPoints(pts, inverseView);
 
+  // ── Snapping (N11 slice A) ────────────────────────────────────────────
+  // Every gesture's client→page conversion goes through `pagePoint` below,
+  // and snapping is a PARAMETER of that one function. Ten sites used to do
+  // this arithmetic inline; that is the `ui.tool` situation verbatim — "fixed
+  // four times at four dispatchers before it was fixed once at the rule" —
+  // so a gesture added next year gets snapping by construction rather than by
+  // someone remembering.
+  //
+  // Frames: engine geometry arrives display-normalized at the page's BAKED
+  // orientation and is projected by the EFFECTIVE `page.rotation` (the same
+  // `rotateNormalizedRect(vec.rect, page.rotation)` the vector overlay uses);
+  // annotations are stored in the page.rotation frame and project by
+  // `viewRotation`. Both land in the DISPLAY frame, which is the frame the
+  // pointer and every one of the ten sites work in.
+  const snapArmed = snapSettings?.enabled === true;
+  const snapOptions: SnapOptions = {
+    radiusPx: snapSettings?.radiusPx ?? 0,
+    viewW: displayWidth,
+    viewH: pageHeight,
+    types: snapSettings?.types ?? ({} as SnapOptions['types']),
+  };
+  const pageSnapPaths = useMemo<SnapPath[]>(() => {
+    if (!snapArmed || !snapGeometry) return [];
+    const rot = page.rotation;
+    if (rot === 0) return snapGeometry.paths;
+    return snapGeometry.paths.map((p) => ({
+      subpaths: p.subpaths.map((s) => rotateNormalizedPoints([...s], rot)),
+      closed: p.closed,
+    }));
+  }, [snapArmed, snapGeometry, page.rotation]);
+  // Live markup is a snap source too — the king snaps to page content only,
+  // and snapping to the markup you already placed is a plus-extra that costs
+  // nothing (no engine call, the geometry is already in hand). Keyed by
+  // annotation id so a DRAGGED object can be excluded from its own targets.
+  const markupSnapPaths = useMemo<Map<string, SnapPath>>(() => {
+    const out = new Map<string, SnapPath>();
+    if (!snapArmed) return out;
+    for (const a of page.annotations ?? []) {
+      const b = viewRotation === 0 ? a : rotateNormalizedRect(a, viewRotation);
+      const subpaths: number[][] = [
+        [b.x, b.y, b.x + b.w, b.y, b.x + b.w, b.y + b.h, b.x, b.y + b.h],
+      ];
+      const closed: boolean[] = [true];
+      if (a.points && a.points.length >= 4) {
+        subpaths.push(
+          viewRotation === 0 ? [...a.points] : rotateNormalizedPoints([...a.points], viewRotation),
+        );
+        closed.push(false);
+      }
+      for (const stroke of a.strokes ?? []) {
+        if (stroke.length < 4) continue;
+        subpaths.push(
+          viewRotation === 0 ? [...stroke] : rotateNormalizedPoints([...stroke], viewRotation),
+        );
+        closed.push(false);
+      }
+      out.set(a.id, { subpaths, closed });
+    }
+    return out;
+  }, [snapArmed, page.annotations, viewRotation]);
+  const snapIndex = useMemo<SnapIndex>(
+    () =>
+      snapArmed
+        ? buildSnapIndex(pageSnapPaths, [...markupSnapPaths.values()])
+        : EMPTY_SNAP_INDEX,
+    [snapArmed, pageSnapPaths, markupSnapPaths],
+  );
+  /** The index a MANIPULATION gesture uses: the same targets minus the
+   * objects being dragged. Without the exclusion a moved corner snaps to
+   * where that same corner started, and the object refuses to leave. */
+  const snapIndexExcluding = (ids: readonly string[]): SnapIndex => {
+    if (!snapArmed) return EMPTY_SNAP_INDEX;
+    const keep: SnapPath[] = [];
+    for (const [id, path] of markupSnapPaths) if (!ids.includes(id)) keep.push(path);
+    return buildSnapIndex(pageSnapPaths, keep);
+  };
+
+  // The live marker: pure VIEW state, never the page tier (the redaction-mark
+  // rule). Tab advances the cycle while a gesture is live; leaving the radius
+  // resets it, so pressing Tab as many times as there are candidates lands
+  // back on the first.
+  const [snapMarker, setSnapMarker] = useState<SnapHit | null>(null);
+  const snapCycleRef = useRef(0);
+  const gestureLive = useRef(false);
+  useEffect(() => {
+    if (!snapArmed) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab' || !gestureLive.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      snapCycleRef.current += 1;
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [snapArmed]);
+  const publishSnap = (hit: SnapHit | null): void => {
+    setSnapMarker((prev) =>
+      prev && hit && prev.type === hit.type && prev.x === hit.x && prev.y === hit.y ? prev : hit,
+    );
+  };
+  const endSnapGesture = (): void => {
+    gestureLive.current = false;
+    snapCycleRef.current = 0;
+    setSnapMarker(null);
+  };
+
+  interface PagePointOpts {
+    /** false for gestures that must never snap: a freehand stroke (snapping
+     * every sample would deform it) and a SELECTION marquee (a selection is
+     * not a placement). */
+    snap?: boolean;
+    /** Alt suspends snapping for the remainder of the gesture — read off the
+     * event rather than tracked through key listeners, so a lost keyup or a
+     * webview swallowing Alt can never strand the suspension. Independent of
+     * Shift (angle constrain, slice B), so the two compose. */
+    suspend?: boolean;
+    /** A manipulation gesture's own index (the object excluded). */
+    index?: SnapIndex;
+  }
+
+  /**
+   * THE choke point. Client coordinates → a display-normalized page point,
+   * snapped when snapping is armed.
+   */
+  const pagePoint = (
+    el: HTMLElement,
+    cx: number,
+    cy: number,
+    o?: PagePointOpts,
+  ): { x: number; y: number; snap: SnapHit | null } => {
+    const rect = el.getBoundingClientRect();
+    const raw = {
+      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
+    };
+    if (!snapArmed || o?.snap === false || o?.suspend) {
+      // Unconditional, deliberately: a window listener holds the closure from
+      // the render the gesture STARTED in, so a `if (snapMarker)` guard here
+      // reads a stale value and can strand the marker on screen. The
+      // functional update below is a no-op when there is nothing to clear.
+      publishSnap(null);
+      return { ...raw, snap: null };
+    }
+    const res = snapPoint(o?.index ?? snapIndex, raw, snapOptions, snapCycleRef.current);
+    if (res.candidates.length === 0) snapCycleRef.current = 0;
+    publishSnap(res.hit);
+    return { x: res.point.x, y: res.point.y, snap: res.hit };
+  };
+
+  /**
+   * The second entry, and the asymmetry the choke point must carry: a MOVE
+   * snaps the dragged object's own geometry, not the pointer. Dragging a
+   * rectangle by its middle and having the pointer land on an endpoint is not
+   * what any CAD tool does — the corner nearest a target is what should land
+   * on it. Returns the corrected DISPLAY-frame travel.
+   */
+  const pageDelta = (
+    raw: { dx: number; dy: number },
+    own: readonly SnapPoint[],
+    index: SnapIndex,
+    suspend: boolean,
+  ): { dx: number; dy: number } => {
+    if (!snapArmed || suspend) {
+      publishSnap(null);
+      return raw;
+    }
+    const res = snapDelta(index, own, raw, snapOptions, snapCycleRef.current);
+    if (res.candidates.length === 0) snapCycleRef.current = 0;
+    publishSnap(res.hit);
+    return res.delta;
+  };
+
+  /** An annotation's display-frame candidate points (box corners, box centre,
+   * vertices) — what `pageDelta` moves and matches against the targets. */
+  const ownSnapPoints = (members: readonly PageAnnotation[]): SnapPoint[] => {
+    const out: SnapPoint[] = [];
+    for (const m of members) {
+      const b = viewRotation === 0 ? m : rotateNormalizedRect(m, viewRotation);
+      const pts =
+        m.points && viewRotation !== 0
+          ? rotateNormalizedPoints([...m.points], viewRotation)
+          : m.points;
+      out.push(...objectSnapPoints({ x: b.x, y: b.y, w: b.w, h: b.h, points: pts }));
+    }
+    return out;
+  };
+
   // ── Annotation manipulation (rung 1): move / resize / marquee ─────────
   // Gestures run with window-level listeners (the canvas invariant), preview
   // through local state in the STORED frame (so the render-side projection is
@@ -1028,23 +1283,36 @@ function PageCellImpl({
       (x) => groupIds.includes(x.id) && isTransformable(x),
     );
     if (group.length === 0) return;
-    const rect = cell.getBoundingClientRect();
     const startX = e.clientX;
     const startY = e.clientY;
     let activated = false;
+    // N11: this gesture snaps the OBJECT, not the pointer, so it needs the
+    // group's own candidate points and an index with those same objects
+    // EXCLUDED (or a moved corner snaps to where it started). Both are built
+    // LAZILY — a press that never becomes a drag must not pay for indexing a
+    // dense sheet, and a click on an annotation is the common case.
+    let ownPts: SnapPoint[] | null = null;
+    let moveIndex: SnapIndex | null = null;
 
     const storedDelta = (ev: PointerEvent): { dx: number; dy: number } => {
       // Un-project the pointer TRAVEL as two points — a delta is the
       // difference of un-projected positions, never an un-projected pair of
-      // raw distances (axes swap at 90/270).
-      const p0 = toStoredPoints([
-        (startX - rect.left) / rect.width,
-        (startY - rect.top) / rect.height,
-      ]);
-      const p1 = toStoredPoints([
-        (ev.clientX - rect.left) / rect.width,
-        (ev.clientY - rect.top) / rect.height,
-      ]);
+      // raw distances (axes swap at 90/270). One rect read serves both, so
+      // the pair can never straddle a layout change.
+      const rect = cell.getBoundingClientRect();
+      const d0 = {
+        x: (startX - rect.left) / rect.width,
+        y: (startY - rect.top) / rect.height,
+      };
+      const raw = {
+        dx: (ev.clientX - rect.left) / rect.width - d0.x,
+        dy: (ev.clientY - rect.top) / rect.height - d0.y,
+      };
+      ownPts ??= ownSnapPoints(group);
+      moveIndex ??= snapIndexExcluding(group.map((m) => m.id));
+      const moved = pageDelta(raw, ownPts, moveIndex, ev.altKey);
+      const p0 = toStoredPoints([d0.x, d0.y]);
+      const p1 = toStoredPoints([d0.x + moved.dx, d0.y + moved.dy]);
       return { dx: p1[0] - p0[0], dy: p1[1] - p0[1] };
     };
 
@@ -1053,6 +1321,7 @@ function PageCellImpl({
         if (Math.abs(ev.clientX - startX) < 3 && Math.abs(ev.clientY - startY) < 3) return;
         activated = true;
         manipActive.current = true;
+        gestureLive.current = true;
       }
       const { dx, dy } = storedDelta(ev);
       // The pressed annotation leads; its CLAMPED delta moves the group in
@@ -1072,6 +1341,7 @@ function PageCellImpl({
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('blur', onBlur);
       cancelManip.current = null;
+      endSnapGesture();
       if (!activated) {
         // A plain press-release. Ctrl-click on an already-selected member
         // TOGGLES it off; a plain click on one COLLAPSES the selection to
@@ -1131,7 +1401,6 @@ function PageCellImpl({
     e.preventDefault();
     const cell = cellElOf(e);
     if (!cell) return;
-    const rect = cell.getBoundingClientRect();
     // The annotation projected into the view frame — the frame the pointer
     // and the grabbed handle live in.
     const viewBox = viewRotation === 0 ? { x: a.x, y: a.y, w: a.w, h: a.h } : rotateNormalizedRect(a, viewRotation);
@@ -1145,12 +1414,19 @@ function PageCellImpl({
     const aspectByDefault = a.kind === 'stamp' && !!a.imageData;
     let activated = false;
     let lastStored: { x: number; y: number; w: number; h: number; points?: number[] } | null = null;
+    // A resize DRAGS one handle, so the pointer IS the moving geometry —
+    // `pagePoint`, not the delta entry — with this annotation excluded from
+    // its own targets. Built lazily, like the move gesture's.
+    let resizeIndex: SnapIndex | null = null;
 
     const applyAt = (ev: PointerEvent): void => {
-      const px = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-      const py = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
+      resizeIndex ??= snapIndexExcluding([a.id]);
+      const p = pagePoint(cell, ev.clientX, ev.clientY, {
+        suspend: ev.altKey,
+        index: resizeIndex,
+      });
       const keepAspect = aspectByDefault ? !ev.shiftKey : ev.shiftKey;
-      const r = resized(viewA, handle, px, py, keepAspect);
+      const r = resized(viewA, handle, p.x, p.y, keepAspect);
       const storedBox = toStoredRect({ x: r.x, y: r.y, w: r.w, h: r.h });
       const stored = {
         ...storedBox,
@@ -1163,6 +1439,7 @@ function PageCellImpl({
       if (!activated) {
         activated = true;
         manipActive.current = true;
+        gestureLive.current = true;
       }
       applyAt(ev);
     };
@@ -1173,6 +1450,7 @@ function PageCellImpl({
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('blur', onBlur);
       cancelManip.current = null;
+      endSnapGesture();
       if (!activated) return;
       manipActive.current = false;
       setManipPreview(null);
@@ -1226,11 +1504,14 @@ function PageCellImpl({
     e.preventDefault();
     e.stopPropagation();
     manipActive.current = true;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const norm = (cx: number, cy: number): { x: number; y: number } => ({
-      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
-    });
+    const el = e.currentTarget;
+    // A SELECTION marquee never snaps: it is not a placement, and a band that
+    // jumped to a vector endpoint would select a different set than the one
+    // the user drew around.
+    const norm = (cx: number, cy: number): { x: number; y: number } => {
+      const p = pagePoint(el, cx, cy, { snap: false });
+      return { x: p.x, y: p.y };
+    };
     const start = norm(e.clientX, e.clientY);
     let latest: AnnotationRect = { ...start, w: 0, h: 0 };
     setMarquee(latest);
@@ -1295,18 +1576,24 @@ function PageCellImpl({
     e.preventDefault();
     const cell = cellElOf(e);
     if (!cell) return;
-    const rect = cell.getBoundingClientRect();
     let activated = false;
     let last: ReturnType<typeof vertexDragged> | null = null;
+    // The dragged VERTEX is the moving geometry and the pointer carries it,
+    // so this is a `pagePoint` site — with the annotation itself excluded
+    // from the targets (a vertex must not snap to its own leader).
+    let vertexIndexTargets: SnapIndex | null = null;
     const onMove = (ev: PointerEvent): void => {
       if (!activated) {
         activated = true;
         manipActive.current = true;
+        gestureLive.current = true;
       }
-      const stored = toStoredPoints([
-        Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)),
-        Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height)),
-      ]);
+      vertexIndexTargets ??= snapIndexExcluding([a.id]);
+      const p = pagePoint(cell, ev.clientX, ev.clientY, {
+        suspend: ev.altKey,
+        index: vertexIndexTargets,
+      });
+      const stored = toStoredPoints([p.x, p.y]);
       last = vertexDragged(a, vertexIndex, stored[0], stored[1]);
       setManipPreview(new Map([[a.id, last]]));
     };
@@ -1317,6 +1604,7 @@ function PageCellImpl({
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('blur', onBlur);
       cancelManip.current = null;
+      endSnapGesture();
       if (!activated) return;
       manipActive.current = false;
       setManipPreview(null);
@@ -1378,13 +1666,14 @@ function PageCellImpl({
 
   const handleShapeLineDown = (e: React.PointerEvent<HTMLElement>): void => {
     bandActive.current = true;
+    gestureLive.current = true;
     const el = e.currentTarget;
-    const start = normPoint(el, e.clientX, e.clientY);
+    const start = normPoint(el, e.clientX, e.clientY, e);
     let lastP = start;
     setShapeDraft([start.x, start.y]);
     setShapeCursor(start);
     const onMove = (ev: PointerEvent): void => {
-      lastP = normPoint(el, ev.clientX, ev.clientY);
+      lastP = normPoint(el, ev.clientX, ev.clientY, ev);
       setShapeCursor(lastP);
     };
     const finish = (commit: boolean): void => {
@@ -1393,6 +1682,7 @@ function PageCellImpl({
       window.removeEventListener('pointercancel', onCancel);
       bandActive.current = false;
       cancelBand.current = null;
+      endSnapGesture();
       setShapeDraft(null);
       setShapeCursor(null);
       if (commit && (Math.abs(lastP.x - start.x) > 0.005 || Math.abs(lastP.y - start.y) > 0.005)) {
@@ -1409,20 +1699,23 @@ function PageCellImpl({
 
   const handleShapeVertexDown = (e: React.PointerEvent<HTMLElement>): void => {
     const el = e.currentTarget;
-    const p = normPoint(el, e.clientX, e.clientY);
+    const p = normPoint(el, e.clientX, e.clientY, e);
     if (!shapeSeqActive.current) {
       // The SECOND press of a double-click that just FINISHED a sequence
       // (via the click-the-last-vertex rule) must not seed a phantom new one.
       if (e.detail >= 2) return;
       shapeSeqActive.current = true;
+      gestureLive.current = true;
       let pts = [p.x, p.y];
       setShapeDraft(pts);
       setShapeCursor(p);
-      const onMove = (ev: PointerEvent): void => setShapeCursor(normPoint(el, ev.clientX, ev.clientY));
+      const onMove = (ev: PointerEvent): void =>
+        setShapeCursor(normPoint(el, ev.clientX, ev.clientY, ev));
       const cleanup = (): void => {
         window.removeEventListener('pointermove', onMove);
         shapeSeqActive.current = false;
         cancelBand.current = null;
+        endSnapGesture();
         appendShapeVertexRef.current = null;
         setShapeDraft(null);
         setShapeCursor(null);
@@ -1459,11 +1752,14 @@ function PageCellImpl({
 
   const handleEraseDown = (e: React.PointerEvent<HTMLElement>): void => {
     bandActive.current = true;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const norm = (cx: number, cy: number): { x: number; y: number } => ({
-      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
-    });
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    // A freehand swath never snaps — snapping every sample would deform the
+    // very stroke the gesture is drawing.
+    const norm = (cx: number, cy: number): { x: number; y: number } => {
+      const p = pagePoint(el, cx, cy, { snap: false });
+      return { x: p.x, y: p.y };
+    };
     const start = norm(e.clientX, e.clientY);
     let path = [start.x, start.y];
     setEraseSwath(path);
@@ -1478,6 +1774,7 @@ function PageCellImpl({
       window.removeEventListener('pointercancel', onCancel);
       bandActive.current = false;
       cancelBand.current = null;
+      endSnapGesture();
       setEraseSwath(null);
       if (!commit) return;
       // The cut runs in the STORED frame (strokes live there): un-project
@@ -1517,11 +1814,12 @@ function PageCellImpl({
 
   const handleInkDown = (e: React.PointerEvent<HTMLElement>): void => {
     bandActive.current = true;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const norm = (cx: number, cy: number): { x: number; y: number } => ({
-      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
-    });
+    const el = e.currentTarget;
+    // Freehand, like the eraser: never snapped.
+    const norm = (cx: number, cy: number): { x: number; y: number } => {
+      const p = pagePoint(el, cx, cy, { snap: false });
+      return { x: p.x, y: p.y };
+    };
     const start = norm(e.clientX, e.clientY);
     let points = [start.x, start.y];
     setInkPoints(points);
@@ -1537,6 +1835,7 @@ function PageCellImpl({
       window.removeEventListener('pointercancel', onCancel);
       bandActive.current = false;
       cancelBand.current = null;
+      endSnapGesture();
       setInkPoints(null);
       // Un-project the stroke into the stored frame FIRST, then take the
       // bbox — a bbox un-projected as a rect and one recomputed from
@@ -1653,24 +1952,30 @@ function PageCellImpl({
     });
   };
 
-  const normPoint = (el: HTMLElement, cx: number, cy: number): { x: number; y: number } => {
-    const rect = el.getBoundingClientRect();
-    return {
-      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
-    };
+  // N11: `normPoint` was the seed of the choke point and is now just
+  // `pagePoint` with snapping on — kept as a name only because four call
+  // sites read better with it. Do NOT add a second conversion beside it.
+  const normPoint = (
+    el: HTMLElement,
+    cx: number,
+    cy: number,
+    ev?: { altKey?: boolean },
+  ): { x: number; y: number } => {
+    const p = pagePoint(el, cx, cy, { suspend: ev?.altKey === true });
+    return { x: p.x, y: p.y };
   };
 
   /** Distance: a drag, like ink but keeping only the endpoints. */
   const handleMeasureDragDown = (e: React.PointerEvent<HTMLElement>): void => {
     bandActive.current = true;
+    gestureLive.current = true;
     const el = e.currentTarget;
-    const start = normPoint(el, e.clientX, e.clientY);
+    const start = normPoint(el, e.clientX, e.clientY, e);
     let last = start;
     setMeasurePts([start.x, start.y]);
     setMeasureCursor(start);
     const onMove = (ev: PointerEvent): void => {
-      last = normPoint(el, ev.clientX, ev.clientY);
+      last = normPoint(el, ev.clientX, ev.clientY, ev);
       setMeasureCursor(last);
     };
     const finish = (commit: boolean): void => {
@@ -1679,6 +1984,7 @@ function PageCellImpl({
       window.removeEventListener('pointercancel', onCancel);
       bandActive.current = false;
       cancelBand.current = null;
+      endSnapGesture();
       setMeasurePts(null);
       setMeasureCursor(null);
       const pts = [start.x, start.y, last.x, last.y];
@@ -1707,21 +2013,24 @@ function PageCellImpl({
   const appendVertexRef = useRef<((p: { x: number; y: number }, done: boolean) => void) | null>(null);
   const handleMeasureVertexDown = (e: React.PointerEvent<HTMLElement>): void => {
     const el = e.currentTarget;
-    const p = normPoint(el, e.clientX, e.clientY);
+    const p = normPoint(el, e.clientX, e.clientY, e);
     if (!measureSeqActive.current) {
       // Same phantom-sequence guard as shapes: a double-click whose first
       // press finished the sequence (click-the-last-vertex) must not have
       // its second press start a fresh one.
       if (e.detail >= 2) return;
       measureSeqActive.current = true;
+      gestureLive.current = true;
       let pts = [p.x, p.y];
       setMeasurePts(pts);
       setMeasureCursor(p);
-      const onMove = (ev: PointerEvent): void => setMeasureCursor(normPoint(el, ev.clientX, ev.clientY));
+      const onMove = (ev: PointerEvent): void =>
+        setMeasureCursor(normPoint(el, ev.clientX, ev.clientY, ev));
       const cleanup = (): void => {
         window.removeEventListener('pointermove', onMove);
         measureSeqActive.current = false;
         cancelBand.current = null;
+        endSnapGesture();
         appendVertexRef.current = null;
         setMeasurePts(null);
         setMeasureCursor(null);
@@ -1815,9 +2124,9 @@ function PageCellImpl({
       // N3: click places a native /Text sticky note at the point (fixed icon
       // size — rung 1's kind rule) and opens its text editor immediately,
       // the king's gesture. An editor left empty removes the note.
-      const rect = e.currentTarget.getBoundingClientRect();
-      const cx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const cy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      const { x: cx, y: cy } = pagePoint(e.currentTarget, e.clientX, e.clientY, {
+        suspend: e.altKey,
+      });
       const w = Math.min(0.2, 18 / measDispW);
       const h = Math.min(0.2, 18 / measDispH);
       const placed = toStoredRect({
@@ -1839,9 +2148,9 @@ function PageCellImpl({
     }
     if (tool === 'stamp') {
       if (!stampPreset) return; // no preset picked yet — clicks are a no-op
-      const rect = e.currentTarget.getBoundingClientRect();
-      const cx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const cy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      const { x: cx, y: cy } = pagePoint(e.currentTarget, e.clientX, e.clientY, {
+        suspend: e.altKey,
+      });
       // Image stamps size from their own aspect (normalized height = width ×
       // aspect × the displayed page's width/height ratio, so the image is
       // undistorted on paper); text stamps keep the fixed footprint.
@@ -1879,12 +2188,17 @@ function PageCellImpl({
       return;
     }
     bandActive.current = true;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const norm = (cx: number, cy: number): { x: number; y: number } => ({
-      x: Math.max(0, Math.min(1, (cx - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (cy - rect.top) / rect.height)),
-    });
-    const start = norm(e.clientX, e.clientY);
+    gestureLive.current = true;
+    const el = e.currentTarget;
+    // The generic band IS a placement (a highlight box, a redaction region, a
+    // signature/field/crop/add-text/add-image rect, a shape's rect or
+    // ellipse), so it snaps like the rest. `zoommarquee` rides it too and is
+    // harmless to snap — it lands on the same page geometry either way.
+    const norm = (cx: number, cy: number, alt = false): { x: number; y: number } => {
+      const p = pagePoint(el, cx, cy, { suspend: alt });
+      return { x: p.x, y: p.y };
+    };
+    const start = norm(e.clientX, e.clientY, e.altKey);
     // 'redact' shares the band mechanics but commits a transient mark, not a
     // PageAnnotation. `tool` is stable for the drag's duration — a mid-drag
     // tool switch cancels via the annotateMode effect below.
@@ -1893,7 +2207,7 @@ function PageCellImpl({
     setBand(latest);
 
     const onMove = (ev: PointerEvent): void => {
-      const p = norm(ev.clientX, ev.clientY);
+      const p = norm(ev.clientX, ev.clientY, ev.altKey);
       latest = {
         x: Math.min(start.x, p.x),
         y: Math.min(start.y, p.y),
@@ -1908,6 +2222,7 @@ function PageCellImpl({
       window.removeEventListener('pointercancel', onCancel);
       bandActive.current = false;
       cancelBand.current = null;
+      endSnapGesture();
       setBand(null);
       if (commit && tool === 'addimage' && (latest.w <= 0.01 || latest.h <= 0.01)) {
         // P7 (slice C): a bare CLICK places at natural size — the rect
@@ -3192,6 +3507,39 @@ function PageCellImpl({
             }}
           >
             {measureValueFor([...measurePts, measureCursor.x, measureCursor.y])}
+          </div>
+        </>
+      )}
+      {snapMarker && (
+        <>
+          <svg
+            className="page-snap-marker"
+            data-testid="snap-marker"
+            data-snap-type={snapMarker.type}
+            viewBox="0 0 16 16"
+            width={16}
+            height={16}
+            aria-hidden="true"
+            style={{ left: `${snapMarker.x * 100}%`, top: `${snapMarker.y * 100}%` }}
+          >
+            <SnapGlyph type={snapMarker.type} />
+          </svg>
+          <div
+            className="page-snap-badge"
+            data-testid="snap-type-badge"
+            style={{
+              left: `${Math.min(snapMarker.x * 100, 84)}%`,
+              top: `${Math.max(snapMarker.y * 100 - 4, 0)}%`,
+            }}
+          >
+            {tChrome(SNAP_TYPE_KEY[snapMarker.type])}
+          </div>
+          {/* The snap type must be available without sight (the spec-95/96
+              bar): the badge is visual, this is the announcement. */}
+          <div className="page-snap-live" aria-live="polite">
+            {tChrome('canvas.snap.announce', {
+              type: tChrome(SNAP_TYPE_KEY[snapMarker.type]),
+            })}
           </div>
         </>
       )}

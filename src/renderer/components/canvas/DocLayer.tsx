@@ -41,6 +41,8 @@ interface DocLayerProps {
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
+  snapGeomByPage: ReadonlyMap<string, import('../../lib/snap-geometry').PageSnapGeometry>;
+  snapSettings: import('../../lib/snap-settings').SnapSettings;
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
@@ -208,6 +210,8 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               redactionMarksByPage={props.redactionMarksByPage}
               editImagesByPage={props.editImagesByPage}
               editVectorsByPage={props.editVectorsByPage}
+              snapGeomByPage={props.snapGeomByPage}
+              snapSettings={props.snapSettings}
               selectedVector={props.selectedVector}
               editImageTransform={props.editImageTransform}
               onCommitImageTransform={props.onCommitImageTransform}

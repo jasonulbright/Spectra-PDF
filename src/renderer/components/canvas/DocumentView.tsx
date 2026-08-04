@@ -98,6 +98,9 @@ export interface DocumentViewProps {
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
+  /** N11 slice A: per-page snap geometry + the live snap preferences. */
+  snapGeomByPage: ReadonlyMap<string, import('../../lib/snap-geometry').PageSnapGeometry>;
+  snapSettings: import('../../lib/snap-settings').SnapSettings;
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
@@ -719,6 +722,8 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           redactionMarks={props.redactionMarksByPage.get(page.id)}
           editImages={props.editImagesByPage.get(page.id)}
           editVectors={props.editVectorsByPage.get(page.id)}
+          snapGeometry={props.snapGeomByPage.get(page.id)}
+          snapSettings={props.snapSettings}
           selectedVectorIndex={
             props.selectedVector?.pageId === page.id ? props.selectedVector.index : null
           }
