@@ -1,6 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { OpenDocument } from '../../state/types';
 import { ChevronUpIcon, ChevronDownIcon, CloseIcon, MergeUpIcon } from './icons';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../../i18n';
 
 interface DocHeaderProps {
   doc: OpenDocument;
@@ -24,6 +26,7 @@ function DocHeaderImpl({
   onRename,
   onMergeUp,
 }: DocHeaderProps): React.JSX.Element {
+  useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(doc.name);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -85,12 +88,12 @@ function DocHeaderImpl({
         </span>
       )}
       <span className="doc-pages">
-        {doc.pages.length} {doc.pages.length === 1 ? 'page' : 'pages'}
+        {tChromeCount('panel.common.pageCount', doc.pages.length)}
       </span>
       <div className="doc-actions">
         <button
           className="icon-btn"
-          title="Move up"
+          title={tChrome('canvas.doc.moveUp')}
           disabled={index === 0}
           onClick={() => onMove(doc.id, -1)}
         >
@@ -98,7 +101,7 @@ function DocHeaderImpl({
         </button>
         <button
           className="icon-btn"
-          title="Move down"
+          title={tChrome('canvas.doc.moveDown')}
           disabled={index === total - 1}
           onClick={() => onMove(doc.id, 1)}
         >
@@ -107,13 +110,17 @@ function DocHeaderImpl({
         <button
           className="icon-btn"
           data-testid={`merge-up-${doc.id}`}
-          title="Merge into the document above (copies this document's pages to its end)"
+          title={tChrome('canvas.doc.mergeUp')}
           disabled={index === 0}
           onClick={() => onMergeUp(doc.id)}
         >
           <MergeUpIcon size={14} />
         </button>
-        <button className="icon-btn" title="Remove document" onClick={() => onRemove(doc.id)}>
+        <button
+          className="icon-btn"
+          title={tChrome('canvas.doc.remove')}
+          onClick={() => onRemove(doc.id)}
+        >
           <CloseIcon size={14} />
         </button>
       </div>

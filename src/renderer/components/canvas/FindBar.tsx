@@ -3,10 +3,12 @@
 // idiom, plus match navigation (↑/↓/Enter) and the "Make searchable" action
 // (persist OCR text via the engine — the 2m addition PDFx doesn't have).
 import React, { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { SearchResult } from '../../search/engine';
 import type { SearchOptions } from '../../search/normalize';
 import { FindModeToggles } from '../../search/FindModeToggles';
 import { OCR_LANGUAGES } from '../../ocr/languages';
+import { tChrome, tChromeCount, tNumber, tOcrLanguage } from '../../i18n';
 
 interface FindBarProps {
   query: string;
@@ -30,10 +32,18 @@ interface FindBarProps {
 
 function countLabel(query: string, result: SearchResult): string {
   if (query.trim().length === 0) return '';
-  if (result.error) return result.errorKind === 'timeout' ? 'Pattern too slow' : 'Invalid pattern';
-  if (result.pages === 0) return 'No results';
-  const occ = result.occurrences;
-  return `${occ} match${occ === 1 ? '' : 'es'} on ${result.pages} page${result.pages === 1 ? '' : 's'}`;
+  if (result.error) {
+    return tChrome(
+      result.errorKind === 'timeout' ? 'canvas.find.patternTooSlow' : 'canvas.find.invalidPattern',
+    );
+  }
+  if (result.pages === 0) return tChrome('canvas.find.noResults');
+  // Two counts, one sentence: the outer key agrees with the MATCH count and
+  // takes the already-pluralized page phrase as a finished unit (the nav-pane
+  // search precedent) — never two English fragments glued together here.
+  return tChromeCount('canvas.find.summary', result.occurrences, {
+    pages: tChromeCount('canvas.find.pageCount', result.pages),
+  });
 }
 
 export function FindBar({
@@ -55,6 +65,7 @@ export function FindBar({
   onApplyOcr,
   onClose,
 }: FindBarProps): React.ReactElement {
+  useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -77,7 +88,7 @@ export function FindBar({
           result.error ? 'border-red-500 focus:border-red-500' : 'border-neutral-700 focus:border-blue-500'
         }`}
         type="text"
-        placeholder="Find in documents"
+        placeholder={tChrome('canvas.find.placeholder')}
         spellCheck={false}
         autoComplete="off"
         value={query}
@@ -106,11 +117,16 @@ export function FindBar({
       {matchCount > 0 && (
         <>
           <span data-testid="find-cursor" className="text-xs text-neutral-500 whitespace-nowrap">
-            {current >= 0 ? `${current + 1}/${matchCount}` : `${matchCount}`}
+            {current >= 0
+              ? tChrome('canvas.find.cursor', {
+                  current: tNumber(current + 1),
+                  total: tNumber(matchCount),
+                })
+              : tChrome('canvas.find.cursorTotal', { total: tNumber(matchCount) })}
           </span>
           <button
             data-testid="find-prev"
-            title="Previous match page (Shift+Enter)"
+            title={tChrome('canvas.find.prev')}
             onClick={onPrev}
             className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
           >
@@ -118,7 +134,7 @@ export function FindBar({
           </button>
           <button
             data-testid="find-next"
-            title="Next match page (Enter)"
+            title={tChrome('canvas.find.next')}
             onClick={onNext}
             className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
           >
@@ -127,21 +143,25 @@ export function FindBar({
         </>
       )}
       {ocrRemaining > 0 && (
-        <span data-testid="find-ocr-progress" className="text-xs text-amber-300/90 whitespace-nowrap" title="Reading scanned pages">
-          Recognizing {ocrRemaining}…
+        <span
+          data-testid="find-ocr-progress"
+          className="text-xs text-amber-300/90 whitespace-nowrap"
+          title={tChrome('canvas.find.ocrProgressTitle')}
+        >
+          {tChrome('canvas.find.ocrProgress', { count: tNumber(ocrRemaining) })}
         </span>
       )}
       {hasScanned && (
         <select
           data-testid="find-ocr-lang"
-          title="OCR language for scanned pages"
+          title={tChrome('canvas.find.ocrLanguage')}
           value={ocrLanguage}
           onChange={(e) => onOcrLanguage(e.target.value)}
           className="px-1.5 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-xs"
         >
           {OCR_LANGUAGES.map((language) => (
             <option key={language.code} value={language.code}>
-              {language.label}
+              {tOcrLanguage(language.code)}
             </option>
           ))}
         </select>
@@ -151,13 +171,13 @@ export function FindBar({
           data-testid="find-apply-ocr"
           disabled={applyingOcr}
           onClick={onApplyOcr}
-          title="Write the recognized text into the scanned pages as an invisible, searchable text layer"
+          title={tChrome('canvas.find.applyOcrTitle')}
           className="px-2 py-0.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium whitespace-nowrap"
         >
-          {applyingOcr ? 'Applying…' : 'Make searchable'}
+          {tChrome(applyingOcr ? 'canvas.find.applying' : 'canvas.find.makeSearchable')}
         </button>
       )}
-      <button title="Close (Esc)" onClick={onClose} className="px-1.5 py-0.5 text-xs text-neutral-400 hover:text-neutral-200">
+      <button title={tChrome('canvas.find.close')} onClick={onClose} className="px-1.5 py-0.5 text-xs text-neutral-400 hover:text-neutral-200">
         ×
       </button>
     </div>

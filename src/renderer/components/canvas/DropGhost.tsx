@@ -1,6 +1,8 @@
 import { ADD_PAGE_WIDTH, BASE_PAGE_HEIGHT } from '../../canvas/layout';
 import { DashedBorder } from './dashed-border';
 import { PlusIcon } from './icons';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../../i18n';
 
 const ROW_PAD_Y = 52 + 14;
 
@@ -29,13 +31,14 @@ interface AddDocGhostProps {
 }
 
 export function AddDocGhost({ width, onClick }: AddDocGhostProps): React.JSX.Element {
+  useTranslation();
   const height = ROW_PAD_Y + BASE_PAGE_HEIGHT;
   return (
     <button
       type="button"
       className="add-doc-row"
       style={{ width, height }}
-      title="Add document"
+      title={tChrome('canvas.doc.addDocument')}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -48,7 +51,7 @@ export function AddDocGhost({ width, onClick }: AddDocGhostProps): React.JSX.Ele
       >
         <DashedBorder width={ADD_PAGE_WIDTH} height={BASE_PAGE_HEIGHT} radius={9} dash="5 7" />
         <PlusIcon size={24} />
-        <span className="add-label">Add document</span>
+        <span className="add-label">{tChrome('canvas.doc.addDocument')}</span>
       </span>
     </button>
   );
