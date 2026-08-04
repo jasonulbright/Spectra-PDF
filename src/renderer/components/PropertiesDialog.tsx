@@ -119,7 +119,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
       });
       setStatus(tChrome('dialog.props.updated', { fields: (r.updated_fields as string[]).join(', ') }));
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
@@ -136,7 +136,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
       setTitle(''); setAuthor(''); setSubject(''); setKeywords('');
       setStatus(tChrome('dialog.props.stripped'));
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
