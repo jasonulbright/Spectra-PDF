@@ -14,6 +14,8 @@ import { COMMANDS } from '../src/renderer/commands/registry';
 import { MENUS, type MenuNode } from '../src/renderer/commands/menus';
 import { CHROME_STRINGS } from '../src/renderer/i18n-chrome';
 import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
+import { DIALOG_STRINGS } from '../src/renderer/i18n-dialogs';
+import { TOOLBAR_CATALOG } from '../src/renderer/commands/toolbars';
 import { STEP_CATALOG } from '../src/renderer/lib/guided-actions';
 
 const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
@@ -23,9 +25,18 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 const SHIPPED_LOCALES = ['en', 'es'];
 
 function expectedCatalog(): Record<string, string> {
-  const out: Record<string, string> = { ...CHROME_STRINGS, ...PANEL_STRINGS };
+  const out: Record<string, string> = {
+    ...CHROME_STRINGS,
+    ...PANEL_STRINGS,
+    ...DIALOG_STRINGS,
+  };
   for (const [id, cmd] of Object.entries(COMMANDS)) {
     out[`cmd.${id}`] = cmd.title;
+  }
+  // Toolbar catalog group labels (the Customize Toolbar dialog's section
+  // heads) — a data table, so its display strings derive keys here.
+  for (const group of TOOLBAR_CATALOG) {
+    out[`toolbar.group.${group.id}`] = group.label;
   }
   // Guided-actions step catalog (serialized DATA — display strings derive
   // keys here, like the command titles). OCR language options excluded:

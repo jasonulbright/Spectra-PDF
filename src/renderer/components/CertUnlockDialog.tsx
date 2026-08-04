@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { useTranslation } from 'react-i18next';
 import { dialog } from '../lib/tauri-bridge';
+import { tChrome } from '../i18n';
 
 /** F9: unlocking a certificate-encrypted (Adobe.PubSec) file — the pubkey
  * sibling of PasswordDialog. The user picks their PKCS#12 key bundle and
@@ -20,6 +22,8 @@ export function CertUnlockDialog({
   error,
   onResult,
 }: CertUnlockDialogProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const [pfx, setPfx] = useState<string | null>(null);
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -43,7 +47,7 @@ export function CertUnlockDialog({
   const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
     if (!pfx) {
-      setLocalError('Choose your key file (.pfx / .p12) first.');
+      setLocalError(tChrome('dialog.certUnlock.pickFirst'));
       return;
     }
     onResult({ pfx, password });
@@ -59,11 +63,10 @@ export function CertUnlockDialog({
           onInteractOutside={(e) => e.preventDefault()}
         >
           <Dialog.Title className="text-sm font-semibold text-neutral-100 mb-1">
-            Certificate Required
+            {tChrome('dialog.certUnlock.title')}
           </Dialog.Title>
           <Dialog.Description className="text-sm text-neutral-400 mb-4">
-            "{fileName}" is encrypted to certificate recipients. Open it with
-            your key file (.pfx / .p12) and that file's password.
+            {tChrome('dialog.certUnlock.body', { name: fileName })}
           </Dialog.Description>
           <form onSubmit={handleSubmit}>
             <div className="flex items-center gap-2 mb-2">
@@ -73,10 +76,10 @@ export function CertUnlockDialog({
                 onClick={() => void pickPfx()}
                 className="px-3 py-1.5 text-xs font-medium text-neutral-300 bg-neutral-700 hover:bg-neutral-600 rounded transition-colors shrink-0"
               >
-                Choose key file…
+                {tChrome('dialog.certUnlock.chooseKey')}
               </button>
               <span className="text-xs text-neutral-400 truncate" title={pfx ?? undefined}>
-                {pfx ? pfx.split(/[\\/]/).pop() : 'No key file chosen'}
+                {pfx ? pfx.split(/[\\/]/).pop() : tChrome('dialog.certUnlock.noKey')}
               </span>
             </div>
             <input
@@ -84,7 +87,7 @@ export function CertUnlockDialog({
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Key file password"
+              placeholder={tChrome('dialog.certUnlock.keyPassword')}
               autoFocus
               className="w-full px-3 py-2 text-sm bg-neutral-800 border border-neutral-700 rounded text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-blue-500 mb-2"
             />
@@ -97,14 +100,14 @@ export function CertUnlockDialog({
                 onClick={() => onResult('cancel')}
                 className="px-3 py-1.5 text-xs font-medium text-neutral-300 bg-neutral-700 hover:bg-neutral-600 rounded transition-colors"
               >
-                Cancel
+                {tChrome('dialog.common.cancel')}
               </button>
               <button
                 data-testid="certunlock-submit"
                 type="submit"
                 className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded transition-colors"
               >
-                Open
+                {tChrome('dialog.common.open')}
               </button>
             </div>
           </form>

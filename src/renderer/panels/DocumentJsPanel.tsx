@@ -6,7 +6,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerDocumentJsHandler } from '../testHarness';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount } from '../i18n';
+import { tChrome } from '../i18n';
 
 // Phase 9.S6 — the "Document JavaScripts" editor. Reads and rewrites the
 // catalog's /Names /JavaScript name tree as TEXT. The app NEVER executes the

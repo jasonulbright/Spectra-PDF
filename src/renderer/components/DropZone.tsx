@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../i18n';
 
 interface DropZoneProps {
   // position is the Tauri physical drop point (2n.3) — undefined on platforms
@@ -9,6 +11,8 @@ interface DropZoneProps {
 }
 
 export function DropZone({ onFilesDropped, children }: DropZoneProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const [dragging, setDragging] = useState(false);
   const callbackRef = useRef(onFilesDropped);
   callbackRef.current = onFilesDropped;
@@ -49,7 +53,7 @@ export function DropZone({ onFilesDropped, children }: DropZoneProps): React.Rea
       {children}
       {dragging && (
         <div className="absolute inset-0 bg-blue-600/20 border-2 border-dashed border-blue-500 rounded-lg flex items-center justify-center z-40 pointer-events-none">
-          <div className="text-blue-300 text-lg font-medium">Drop PDF files here</div>
+          <div className="text-blue-300 text-lg font-medium">{tChrome('dialog.dropZone.hint')}</div>
         </div>
       )}
     </div>

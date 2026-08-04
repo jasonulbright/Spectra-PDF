@@ -179,7 +179,7 @@ export function SignaturesPanel(): React.ReactElement {
       setSignResult(res);
       setShowSign(false);
     } catch (e: unknown) {
-      setSignError(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setSignError(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       // Clear the secret from component state on EVERY exit — success,
       // failure, or a cancelled save dialog (review-caught: a cancel used to
@@ -247,7 +247,7 @@ export function SignaturesPanel(): React.ReactElement {
       setResult(v); // the new signature lists immediately
       setShowSign(false);
     } catch (e: unknown) {
-      setSignError(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setSignError(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setPassword('');
       signInPlaceRef.current = false;
