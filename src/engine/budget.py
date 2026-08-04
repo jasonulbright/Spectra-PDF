@@ -73,11 +73,13 @@ def timed_out(what: str, budget: float, *, size_bytes: int = 0, pages: int = 0) 
 
 
 def run(cmd: list[str], *, what: str, budget: float, size_bytes: int = 0, pages: int = 0,
-        cwd: str | Path | None = None) -> subprocess.CompletedProcess:
+        cwd: str | Path | None = None, text: bool = False) -> subprocess.CompletedProcess:
     """`subprocess.run` with a derived budget and an honest timeout message.
 
     stdin is isolated: a bundled tool must never inherit the RPC pipe (the
     distill review's finding, applied to every subprocess this module runs).
+    `text` decodes stdout/stderr for the callers that read diagnostics as
+    strings; the binary default is what a codec's stdout needs.
     """
     try:
         return subprocess.run(
@@ -86,6 +88,33 @@ def run(cmd: list[str], *, what: str, budget: float, size_bytes: int = 0, pages:
             timeout=budget,
             stdin=subprocess.DEVNULL,
             cwd=str(cwd) if cwd is not None else None,
+            text=text,
         )
     except subprocess.TimeoutExpired:
         raise timed_out(what, budget, size_bytes=size_bytes, pages=pages) from None
+
+
+def gs(cmd: list[str], *, what: str, path: str | Path, pages: int = 0,
+       base: float = 300.0, per_mb: float = 12.0, per_page: float = 1.5,
+       text: bool = True) -> subprocess.CompletedProcess:
+    """One Ghostscript run over `path`, with the budget derived from it.
+
+    The whole gs family shares this so the § 5.5 defect cannot be half-fixed:
+    a fixed 300 s died on the 50 MB scan that issue #5 reported, and every
+    sibling op carried the same constant. The coefficients are one set on
+    purpose — a per-op table would drift, and the honest statement is "time
+    proportional to the work", not "this op is special".
+
+    **The floor is the family's OWN old constant, and that is deliberate.**
+    The defect was "too little time for a big file", never "too much for a
+    small one", so every input now gets AT LEAST what it got before and large
+    ones get more. Lowering the floor would have converted a slow-but-passing
+    small job into a new failure — fixing a timeout by introducing one.
+    """
+    size = 0
+    try:
+        size = Path(path).stat().st_size
+    except OSError:
+        pass
+    allowed = derive(base=base, size_bytes=size, pages=pages, per_mb=per_mb, per_page=per_page)
+    return run(cmd, what=what, budget=allowed, size_bytes=size, pages=pages, text=text)

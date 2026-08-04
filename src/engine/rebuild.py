@@ -5,8 +5,9 @@ Fixes font embedding issues, colorspace problems, corrupt content streams.
 Slower than Tier 1, may lose interactive elements (form fields, JS actions).
 """
 
-import subprocess
 from pathlib import Path
+
+from . import budget
 
 
 def rebuild(
@@ -49,7 +50,11 @@ def rebuild(
         str(input_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, stdin=subprocess.DEVNULL)  # stdin isolation (distill review)
+    # § 5.5: derived budget, not a fixed 600 s (budget.run isolates stdin).
+    # base=600: rebuild re-renders every page through the interpreter, and
+    # 600 s was its own floor before the derived budget (§ 5.5's rule — the
+    # floor never drops).
+    result = budget.gs(cmd, what="Ghostscript (rebuild)", path=input_path, base=600.0)
     if result.returncode != 0:
         stderr = result.stderr.strip()
         raise RuntimeError(f"Ghostscript rebuild failed: {stderr}")
