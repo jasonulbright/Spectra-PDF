@@ -305,6 +305,92 @@ export const DIALOG_STRINGS = {
     'The default log location belongs to whichever account runs the batch, so a run under another account would write its log where you cannot see it.',
   'dialog.schedule.save': 'Save schedule',
   'dialog.schedule.openLogs': 'Open log folder',
+
+  // Batch OCR. NOTE the boundary: a report row's `reason` is the RUN'S OWN
+  // record vocabulary — the same text the batch log file carries, pinned by
+  // tests — so it passes through verbatim inside a localized frame, exactly
+  // as the Preflight panel leaves engine findings alone.
+  'dialog.batch.title': 'Batch OCR Folder',
+  'dialog.batch.sourceLabel': 'Source folder',
+  'dialog.batch.destLabel': 'Destination folder',
+  'dialog.batch.pickSource': 'Choose the folder to make searchable',
+  'dialog.batch.scanning': 'Scanning folder…',
+  'dialog.batch.found_one': '{{count}} PDF found',
+  'dialog.batch.found_other': '{{count}} PDFs found',
+  'dialog.batch.noFolder': 'No folder chosen',
+  'dialog.batch.notMoving': 'Not moving them (default)',
+  'dialog.batch.inPlace': 'Replace the originals in place (no destination folder)',
+  'dialog.batch.inPlaceNote':
+    'Each file is processed to a staged copy beside it, read back and verified, then swapped over the original. Already-searchable files are left untouched. Runs as one operation — there is no per-file stop.',
+  'dialog.batch.conflictIdentity':
+    'These are the same folder (reached by two different paths) — choose a separate destination for the searchable copies.',
+  'dialog.batch.conflictInside':
+    'The destination must be outside the source folder — choose a separate folder for the searchable copies.',
+  'dialog.batch.languages': 'Recognition languages — {{summary}}',
+  'dialog.batch.languagesAria': 'Recognition languages',
+  'dialog.batch.multiLangNote':
+    'Several languages are recognized together, which is slower — and on a page that is only one of them, the single right language is usually more accurate. This is not automatic detection.',
+  'dialog.batch.blurb':
+    'Every PDF in the source folder is mirrored into the destination: scanned pages gain an invisible searchable text layer; already-searchable files are copied unchanged. Existing destination files with the same names are overwritten.',
+  'dialog.batch.filingSection': 'File the originals after processing — optional; moves your own files',
+  'dialog.batch.filingWarning':
+    'Everything below MOVES files out of your source folder. Left alone, the source folder is never modified — that is the default.',
+  'dialog.batch.movedLabel': 'Move processed originals to',
+  'dialog.batch.movedNote':
+    'Only after the searchable copy has been read back and verified. The folder structure is preserved, and a name that already exists is never overwritten.',
+  'dialog.batch.errorsLabel': 'Move failed originals to',
+  'dialog.batch.pickErrors': 'Choose where files that could not be processed go',
+  'dialog.batch.errorsNote':
+    'Password-protected and damaged files, so what is left behind in the source folder is what succeeded.',
+  'dialog.batch.repair': 'Try to repair damaged files',
+  'dialog.batch.repairNote':
+    'A file that will not open is rewritten (annotations, bookmarks and metadata are kept) and processed if that works. Password-protected files are not repairable and are left alone.',
+  'dialog.batch.replaceRepaired': 'Replace the damaged original with the repaired file',
+  'dialog.batch.replaceRepairedNote':
+    'Writes the repaired file back over the original — the repaired document, not the searchable copy.',
+  'dialog.batch.conflictInSource':
+    'That folder is inside the source folder — the next run would process these files again.',
+  'dialog.batch.conflictInDest':
+    'That folder is inside the destination folder — originals would be mixed in with the searchable copies.',
+  'dialog.batch.skippedDirs_one':
+    'Could not read {{count}} subfolder (it will be missing from the mirror): {{dirs}}',
+  'dialog.batch.skippedDirs_other':
+    'Could not read {{count}} subfolders (they will be missing from the mirror): {{dirs}}',
+  'dialog.batch.empty': 'No PDF files found in this folder.',
+  'dialog.batch.inPlaceConfirm': 'Replace the originals in the source folder? There is no undo.',
+  'dialog.batch.replaceOriginals': 'Replace originals',
+  'dialog.batch.start': 'Start',
+  'dialog.batch.stop': 'Stop',
+  'dialog.batch.stopping': 'Stopping…',
+  'dialog.batch.noStopInPlace': 'An in-place run is one operation — it cannot stop per file',
+  'dialog.batch.progressStopping':
+    'Stopping — finishing the current file… (Close again to abandon the run.)',
+  'dialog.batch.progressStarting': 'Starting…',
+  'dialog.batch.progress': 'File {{index}} of {{count}}: {{rel}} — {{verb}}',
+  'dialog.batch.verbRecognizing': 'recognizing page {{page}} of {{pageCount}}',
+  'dialog.batch.verbCopying': 'copying',
+  'dialog.batch.verbWriting': 'writing searchable copy',
+  'dialog.batch.verbScanning': 'checking pages',
+  'dialog.batch.verbLoading': 'loading',
+  'dialog.batch.stoppedPrefix': 'Stopped. {{summary}}',
+  'dialog.batch.sumOcrd': '{{count}} made searchable',
+  'dialog.batch.sumCopied': '{{count}} copied (already searchable)',
+  'dialog.batch.sumNoText': '{{count}} copied (no text recognized)',
+  'dialog.batch.sumSkipped': '{{count}} skipped',
+  'dialog.batch.cancelledNote': 'Files finished before the stop remain in the destination.',
+  'dialog.batch.movedCount_one': '{{count}} original moved',
+  'dialog.batch.movedCount_other': '{{count}} originals moved',
+  'dialog.batch.repairedCount': '{{count}} repaired',
+  'dialog.batch.moveFailures_one': '{{count}} original is still in the source folder:',
+  'dialog.batch.moveFailures_other': '{{count}} originals are still in the source folder:',
+  'dialog.batch.rowReason': '{{rel}} — {{reason}}',
+  'dialog.batch.rowCopied': '{{rel}} — copied ({{reason}})',
+  'dialog.batch.rowPartial': '{{rel}} — made searchable, but {{reason}}',
+  'dialog.batch.unreadableDirs': 'Unreadable subfolders (missing from the mirror): {{dirs}}',
+  'dialog.batch.logWritten': 'Log written: {{path}}',
+  'dialog.batch.openFolder': 'Open folder',
+  'dialog.batch.logError': 'The run finished, but its log could not be written: {{message}}',
+  'dialog.batch.again': 'Run another',
 } as const;
 
 export type DialogKey = keyof typeof DIALOG_STRINGS;
