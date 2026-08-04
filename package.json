@@ -6,17 +6,18 @@
     "dev": "cargo tauri dev",
     "dev:renderer": "vite --config vite.config.ts",
     "i18n:en": "powershell -Command \"$env:I18N_WRITE='1'; vitest run tests/i18n-catalog.test.ts\"",
-    "build:renderer": "node scripts/sync-ocr-assets.mjs && vite build --config vite.config.ts",
+    "build:renderer": "node scripts/sync-ocr-assets.mjs && node scripts/sync-pdfjs-assets.mjs && vite build --config vite.config.ts",
     "build": "cargo tauri build",
     "tauri": "tauri",
-    "prepackage": "powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 && powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1 && node scripts/sync-ocr-assets.mjs",
+    "prepackage": "powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 && powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1 && node scripts/sync-ocr-assets.mjs && node scripts/sync-pdfjs-assets.mjs",
     "package": "npm run prepackage && cargo tauri build",
     "package:unsigned": "npm run prepackage && cargo tauri build --config src-tauri/tauri.unsigned.conf.json",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "sync-ocr": "node scripts/sync-ocr-assets.mjs",
-    "postinstall": "node scripts/sync-ocr-assets.mjs"
+    "sync-pdfjs": "node scripts/sync-pdfjs-assets.mjs",
+    "postinstall": "node scripts/sync-ocr-assets.mjs && node scripts/sync-pdfjs-assets.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",

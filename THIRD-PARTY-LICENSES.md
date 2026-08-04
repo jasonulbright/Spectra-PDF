@@ -270,6 +270,26 @@ d3-selection and d3-zoom (ISC), Radix UI (MIT), the @tauri-apps JS API and
 plugin packages (MIT / Apache-2.0), Tailwind CSS (MIT), i18next and
 react-i18next (MIT).
 
+### pdf.js runtime assets
+
+pdf.js does not inline its image decoders, character maps, standard-14 font
+programs or its CMYK ICC profile — it fetches them at run time. They are
+staged out of the pinned `pdfjs-dist` package by
+`scripts/sync-pdfjs-assets.mjs` and ship inside the application at
+`pdfjs/`. Each set carries upstream's own notice text beside it, and those
+notices are what govern; the table names what is redistributed:
+
+| shipped at | component | license | notice shipped beside it |
+|---|---|---|---|
+| `pdfjs/wasm/jbig2.wasm` | pdf.js JBIG2 decoder (also serves `/CCITTFaxDecode`) | Apache-2.0 | `LICENSE_PDFJS_JBIG2`, `LICENSE_JBIG2` |
+| `pdfjs/wasm/openjpeg.wasm` | OpenJPEG, built by the pdf.js project | BSD-2-Clause | `LICENSE_PDFJS_OPENJPEG`, `LICENSE_OPENJPEG` |
+| `pdfjs/wasm/qcms_bg.wasm` | qcms (ICC colour management) | MIT | `LICENSE_PDFJS_QCMS`, `LICENSE_QCMS` |
+| `pdfjs/wasm/*_nowasm_fallback.js` | the pure-JS fallbacks for the above | same as their module | as above |
+| `pdfjs/cmaps/*.bcmap` | Adobe CMap resources, packed by pdf.js | BSD-3-Clause (Adobe) | `pdfjs/cmaps/LICENSE` |
+| `pdfjs/standard_fonts/Foxit*.pfb` | Foxit standard-14 substitutes | see notice | `LICENSE_FOXIT` |
+| `pdfjs/standard_fonts/Liberation*.ttf` | Liberation fonts | SIL OFL 1.1 | `LICENSE_LIBERATION` |
+| `pdfjs/iccs/CGATS001Compat-v2-micro.icc` | CGATS/SWOP-compatible CMYK profile | see notice | `pdfjs/iccs/LICENSE` |
+
 Rust crates compiled into the backend are listed in `src-tauri/Cargo.toml` /
 `Cargo.lock`; the complete per-crate license and notice listing ships with the
 application as `THIRD-PARTY-LICENSES-RUST.html` (see the top of this file).
