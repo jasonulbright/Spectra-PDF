@@ -41,6 +41,7 @@ compare.pageStructureLooksDamaged	pattern	compare	Page structure of {{name}} loo
 compare.toleranceMustBetween	exact	compare	tolerance must be between 0 and 255.
 compare.unsupportedPpmMaxvalExpected	pattern	compare	Unsupported PPM maxval {{maxval}} (expected 255)
 compress.ghostscriptFailed	pattern	compress,distill,image_export	Ghostscript failed: {{v0}}
+compress.mrcCompressionDpiSetting	exact	compress	MRC compression has no DPI setting — the text stays at the scan's own resolution, which is the point of it. Choose a preset instead.
 distill.alreadyPdfDistillingConverts	exact	distill	this is already a PDF — distilling converts PostScript; use Repair (Tier 2 rebuild) to re-render a PDF
 distill.ghostscriptProducedPdfPages	exact	distill	Ghostscript produced a PDF with no pages
 distill.ghostscriptProducedUnreadablePdf	pattern	distill	Ghostscript produced an unreadable PDF: {{exc}}
@@ -71,6 +72,7 @@ guided_actions.actionSteps	exact	guided_actions	the action has no steps
 guided_actions.destinationMustOutsideSource	exact	guided_actions	The destination must be outside the source folder -- choose a separate folder for the processed copies.
 guided_actions.encryptMustLastStep	exact	guided_actions	encrypt must be the last step
 guided_actions.encryptSetOpenOwner	exact	guided_actions	encrypt: set an open or an owner password
+guided_actions.mrcCompressionMustCome	exact	guided_actions	MRC compression must come after OCR — OCR reads the page image, and MRC replaces it
 guided_actions.processedOriginalsFolderMust	exact	guided_actions	The processed-originals folder must be outside the destination folder.
 guided_actions.processedOriginalsFolderMust2	exact	guided_actions	The processed-originals folder must be outside the source folder.
 guided_actions.stepParamsMustObject	pattern	guided_actions	step {{v0}} ({{op}}): params must be an object
@@ -102,6 +104,16 @@ links.pageOutRange	pattern	links,page_images,page_vectors,redact_marks,text_auth
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
+mrc.everyScannedPageFailed	exact	mrc	every scanned page failed mask verification — no MRC output was written
+mrc.ghostscriptAvailableMrcCannot	pattern	mrc	Ghostscript is not available at {{v0}} — MRC cannot verify the stencils it writes, and an unverified stencil is not shippable.
+mrc.ghostscriptAvailablePageImage	pattern	mrc	Ghostscript is not available at {{v0}} — the page image cannot be decoded, and MRC has no other way to read it.
+mrc.ghostscriptCouldRenderPage	pattern	mrc	Ghostscript could not render the page image: {{detail}}
+mrc.mrcBackgroundDivisorMust	pattern	mrc	the MRC background divisor must be 1-12, got {{bg_divisor}}
+mrc.mrcForegroundDivisorMust	pattern	mrc	the MRC foreground divisor must be 1-12, got {{fg_divisor}}
+mrc.pageDocumentScannedImage	exact	mrc	no page in this document is a scanned image — MRC compression has nothing to separate
+mrc.pdfJbigFilterMask	pattern	mrc	PDF/A-1 has no JBIG2 filter, so the mask codec {{mask_codec}} and the PDF/A-safe option cannot both apply — choose one.
+mrc.unknownMrcMaskCodec	pattern	mrc	unknown MRC mask codec: {{name}} (expected one of {{v1}})
+mrc.unknownMrcPresetExpected	pattern	mrc	unknown MRC preset: {{preset}} (expected one of {{v1}})
 mrc_codecs.ccittGMaskMust	pattern	mrc_codecs	a CCITT G4 mask must encode as ONE strip; libtiff wrote {{v0}} — the concatenated stream would decode progressively wrong.
 mrc_codecs.ghostscriptAvailableMaskStream	pattern	mrc_codecs	Ghostscript is not available at {{v0}} — a mask stream cannot be decoded back, and an unverified stencil is not shippable.
 mrc_codecs.jbigEncoderAvailableJbig	pattern	mrc_codecs	The JBIG2 encoder is not available: no jbig2.exe at {{v0}}. Run scripts/bundle-jbig2enc.ps1.
@@ -144,6 +156,7 @@ page_images.imagePlacementMatrixDegenerate	exact	page_images	image placement mat
 page_images.indexesMustListIntegers	exact	page_images	indexes must be a list of integers
 page_images.indexesMustNameLeast	exact	page_images	indexes must name at least one placement
 page_images.jpegFile	exact	page_images	not a JPEG file
+page_images.layeredReplacementNeedsLeast	exact	page_images	a layered replacement needs at least one layer image
 page_images.leastOneOpacityBlend	exact	page_images	at least one of opacity / blend / mask is required
 page_images.maskAlphasMustBetween	exact	page_images	mask alphas must be between 0 and 1
 page_images.maskKindMustLinear	exact	page_images	mask kind must be "linear", "radial" or "none"

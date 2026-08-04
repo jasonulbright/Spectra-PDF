@@ -319,3 +319,38 @@ class TestBudget:
 
     def test_a_missing_file_still_gets_the_floor(self, tmp_dir):
         assert budget.for_file(os.path.join(tmp_dir, "nope"), base=10, per_mb=100) == 10
+
+
+class TestGhostscriptBudgetFamily:
+    """§ 5.5 — the defect fixed at the FAMILY, so it cannot be half-landed."""
+
+    def test_the_floor_is_never_lower_than_the_constant_it_replaced(self, tmp_dir):
+        # The bug was "too little time for a big file", never "too much for a
+        # small one": every input must still get at least the old 300 s.
+        tiny = os.path.join(tmp_dir, "tiny.pdf")
+        with open(tiny, "wb") as fh:
+            fh.write(b"%PDF-1.7\n")
+        assert budget.derive(base=300.0, size_bytes=os.path.getsize(tiny), pages=1,
+                             per_mb=12.0, per_page=1.5) >= 300.0
+
+    def test_the_reported_case_now_gets_proportional_time(self):
+        # Issue #5: a 50 MB scan died at the fixed 300 s.
+        allowed = budget.derive(
+            base=300.0, size_bytes=50 << 20, pages=60, per_mb=12.0, per_page=1.5
+        )
+        assert allowed > 900.0
+
+    def test_no_engine_module_still_hard_codes_a_whole_document_gs_timeout(self):
+        # A grep pin, because the failure mode is a SIBLING left behind: the
+        # same constant sat in seven modules and fixing one would have read as
+        # done. Only the ops that render a whole document are in scope —
+        # prepress's 60 s ROM-profile extraction is not one of them.
+        engine_dir = Path(__file__).resolve().parent.parent / "src" / "engine"
+        offenders = []
+        for path in sorted(engine_dir.glob("*.py")):
+            if path.name == "budget.py":
+                continue  # its docstring quotes the constant it abolished
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if "timeout=300" in line or "timeout=600" in line:
+                    offenders.append(f"{path.name}: {line.strip()}")
+        assert not offenders, offenders

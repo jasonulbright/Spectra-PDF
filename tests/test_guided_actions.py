@@ -52,6 +52,44 @@ class TestValidateSteps:
         with pytest.raises(ValueError, match="no steps"):
             validate_steps([])
 
+    def test_mrc_compression_must_come_after_ocr(self):
+        # § 5.4, enforced rather than documented: `recognize` rasterizes FROM
+        # the page, so an OCR step after MRC would read the reconstruction
+        # instead of the scan the user actually has.
+        with pytest.raises(ValueError, match="MRC compression must come after OCR"):
+            validate_steps([
+                {"op": "compress", "params": {"quality": "mrc"}},
+                {"op": "ocr_file", "params": {"language": "eng"}},
+            ])
+        # The right order validates, and so does MRC with no OCR at all.
+        assert len(validate_steps([
+            {"op": "ocr_file", "params": {"language": "eng"}},
+            {"op": "compress", "params": {"quality": "mrc", "mrc_preset": "archival"}},
+        ])) == 2
+        assert len(validate_steps([{"op": "compress", "params": {"quality": "mrc"}}])) == 1
+        # An ordinary Ghostscript compress is unaffected — it does not
+        # replace the page image, so nothing about it constrains OCR.
+        assert len(validate_steps([
+            {"op": "compress", "params": {"quality": "ebook"}},
+            {"op": "ocr_file", "params": {}},
+        ])) == 2
+
+    def test_the_mrc_parameters_are_allowed_on_the_compress_step(self):
+        steps = validate_steps([
+            {
+                "op": "compress",
+                "params": {
+                    "quality": "mrc",
+                    "mrc_preset": "smallest",
+                    "mrc_mask_codec": "ccitt",
+                    "mrc_pdfa_safe": True,
+                    "mrc_bg_div": 3,
+                    "mrc_fg_div": 5,
+                },
+            }
+        ])
+        assert steps[0]["params"]["mrc_preset"] == "smallest"
+
     def test_encrypt_rules(self):
         with pytest.raises(ValueError, match="last step"):
             validate_steps([

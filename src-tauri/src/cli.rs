@@ -295,12 +295,21 @@ pub struct CompressArgs {
     /// Output PDF file
     #[arg(short, long)]
     pub output: PathBuf,
-    /// Compression quality: screen, ebook, printer, prepress
+    /// Compression quality: screen, ebook, printer, prepress, mrc
     #[arg(short, long, default_value = "ebook")]
     pub quality: String,
     /// Custom DPI (72-600). Overrides quality preset when set.
     #[arg(long)]
     pub dpi: Option<u32>,
+    /// MRC preset (--quality mrc only): archival, balanced, smallest
+    #[arg(long, default_value = "balanced")]
+    pub mrc_preset: String,
+    /// Force the MRC stencil codec: jbig2, jbig2-generic, ccitt
+    #[arg(long)]
+    pub mrc_mask_codec: Option<String>,
+    /// Keep every MRC filter inside PDF/A-1's set
+    #[arg(long)]
+    pub mrc_pdfa_safe: bool,
 }
 
 #[derive(Args)]
@@ -1343,6 +1352,15 @@ pub enum BatchOperation {
     Compress {
         #[arg(short, long, default_value = "ebook")]
         quality: String,
+        /// MRC preset (--quality mrc only): archival, balanced, smallest
+        #[arg(long, default_value = "balanced")]
+        mrc_preset: String,
+        /// Force the MRC stencil codec: jbig2, jbig2-generic, ccitt
+        #[arg(long)]
+        mrc_mask_codec: Option<String>,
+        /// Keep every MRC filter inside PDF/A-1's set
+        #[arg(long)]
+        mrc_pdfa_safe: bool,
     },
     /// Rotate all PDFs
     Rotate {
@@ -1689,6 +1707,12 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "output": abs(&args.output).to_string_lossy(),
                 "quality": args.quality,
                 "gs_path": gs.to_string_lossy(),
+                // O8: ignored by the Ghostscript branch, read by the MRC one.
+                // One op, one dispatch — a second subcommand is how a surface
+                // gets left behind.
+                "mrc_preset": args.mrc_preset,
+                "mrc_mask_codec": args.mrc_mask_codec.clone().unwrap_or_default(),
+                "mrc_pdfa_safe": args.mrc_pdfa_safe,
             });
             if let Some(dpi) = args.dpi {
                 params["dpi"] = json!(dpi);
@@ -2925,13 +2949,21 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
         eprintln!("[{}/{}] {}", i + 1, total, filename);
 
         let result = match &args.operation {
-            BatchOperation::Compress { quality } => engine.call(
+            BatchOperation::Compress {
+                quality,
+                mrc_preset,
+                mrc_mask_codec,
+                mrc_pdfa_safe,
+            } => engine.call(
                 "compress",
                 json!({
                     "file": pdf.to_string_lossy(),
                     "output": out_path.to_string_lossy(),
                     "quality": quality,
                     "gs_path": gs.to_string_lossy(),
+                    "mrc_preset": mrc_preset,
+                    "mrc_mask_codec": mrc_mask_codec.clone().unwrap_or_default(),
+                    "mrc_pdfa_safe": mrc_pdfa_safe,
                 }),
             ),
             BatchOperation::Rotate { angle, pages } => engine.call(
