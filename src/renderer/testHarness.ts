@@ -402,6 +402,9 @@ export interface CanvasEditImagesHandlers {
     lineCount: number;
     alignment: string;
     vertical: boolean;
+    /** 9.T13: the frame the paragraph's layout ran in (horizontal /
+     * vertical-rl / rotated-cw / rotated-ccw / rotated-180). */
+    orientation: string;
     colors: string[];
     sizes: number[];
   }[];
@@ -942,6 +945,9 @@ export interface TestHarness {
     lineCount: number;
     alignment: string;
     vertical: boolean;
+    /** 9.T13: the frame the paragraph's layout ran in (horizontal /
+     * vertical-rl / rotated-cw / rotated-ccw / rotated-180). */
+    orientation: string;
     colors: string[];
     sizes: number[];
   }[];
