@@ -1,6 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { useEngine } from '../hooks/useEngine';
+import { useTranslation } from 'react-i18next';
 import { dialog } from '../lib/tauri-bridge';
+import { tChrome, tDate } from '../i18n';
 
 // The signer source both sign flows (SignaturesPanel invisible form, canvas
 // visible-signature popover) share: a PKCS#12 file, a PEM key+cert pair, a
@@ -31,13 +33,13 @@ export function signerSourceParams(
   source: SignerSource,
 ): { params: Record<string, string>; error?: never } | { params?: never; error: string } {
   if (source.mode === 'pfx') {
-    if (!source.pfxPath) return { error: 'Choose a signer (.pfx) file first.' };
+    if (!source.pfxPath) return { error: tChrome('dialog.signer.needPfx') };
     return { params: { pfx_path: source.pfxPath } };
   }
   if (source.mode === 'pkcs11') {
-    if (!source.modulePath) return { error: 'Choose the PKCS#11 module (.dll) first.' };
-    if (!source.tokenLabel.trim()) return { error: 'Enter the token label.' };
-    if (!source.certLabel.trim()) return { error: 'Enter the certificate label on the token.' };
+    if (!source.modulePath) return { error: tChrome('dialog.signer.needModule') };
+    if (!source.tokenLabel.trim()) return { error: tChrome('dialog.signer.needToken') };
+    if (!source.certLabel.trim()) return { error: tChrome('dialog.signer.needCertLabel') };
     const params: Record<string, string> = {
       pkcs11_module: source.modulePath,
       pkcs11_token: source.tokenLabel.trim(),
@@ -47,7 +49,7 @@ export function signerSourceParams(
     return { params };
   }
   if (!source.keyPath || !source.certPath)
-    return { error: 'Choose both the PEM key file and the certificate file.' };
+    return { error: tChrome('dialog.signer.needPem') };
   return { params: { key_path: source.keyPath, cert_path: source.certPath } };
 }
 
@@ -68,6 +70,8 @@ export function SignerSourceFields({
   /** Distinguishes testids when two forms exist (panel vs canvas). */
   idPrefix: string;
 }): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { call } = useEngine();
   const [showGenerate, setShowGenerate] = useState(false);
   const [genName, setGenName] = useState('');
@@ -100,11 +104,11 @@ export function SignerSourceFields({
   const handleGenerate = useCallback(async () => {
     const cn = genName.trim();
     if (!cn) {
-      setGenError('Enter a signer name.');
+      setGenError(tChrome('dialog.signer.needName'));
       return;
     }
     if (!genPassword) {
-      setGenError('Choose a password — the file will contain a private key.');
+      setGenError(tChrome('dialog.signer.needPassword'));
       return;
     }
     const dest = await dialog.saveFile({ defaultPath: `${cn.replace(/[\\/:*?"<>|]+/g, '_')}.pfx` });
@@ -134,12 +138,13 @@ export function SignerSourceFields({
   }, [genName, genOrg, genPassword, call, onChange]);
 
   const fileName = (p: string | null): React.ReactNode =>
-    p ? p.split(/[\\/]/).pop() : <span className="text-neutral-600">none chosen</span>;
+    p ? p.split(/[\\/]/).pop()
+      : <span className="text-neutral-600">{tChrome('dialog.signer.noneChosen')}</span>;
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <span className="text-xs text-neutral-400 w-20 shrink-0">Signer</span>
+        <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.label')}</span>
         <div className="flex rounded overflow-hidden border border-neutral-700">
           {(['pfx', 'pem', 'pkcs11'] as const).map((m) => (
             <button
@@ -160,7 +165,13 @@ export function SignerSourceFields({
                   : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
               }`}
             >
-              {m === 'pfx' ? '.pfx file' : m === 'pem' ? 'PEM key + cert' : 'Token (PKCS#11)'}
+              {tChrome(
+                m === 'pfx'
+                  ? 'dialog.signer.modePfx'
+                  : m === 'pem'
+                    ? 'dialog.signer.modePem'
+                    : 'dialog.signer.modeToken',
+              )}
             </button>
           ))}
         </div>
@@ -171,15 +182,15 @@ export function SignerSourceFields({
             setGenError(null);
           }}
           className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
-          title="Create a new self-signed signing identity (.pfx)"
+          title={tChrome('dialog.signer.createTitle')}
         >
-          Create new…
+          {tChrome('dialog.signer.create')}
         </button>
       </div>
 
       {value.mode === 'pfx' ? (
         <div className="flex items-center gap-2">
-          <span className="text-xs text-neutral-400 w-20 shrink-0">.pfx file</span>
+          <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.modePfx')}</span>
           <span
             data-testid={`${idPrefix}-pfx-path`}
             className="flex-1 text-xs text-neutral-300 truncate"
@@ -192,13 +203,13 @@ export function SignerSourceFields({
             onClick={() => void pickPfx()}
             className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
           >
-            Choose…
+            {tChrome('dialog.signer.choose')}
           </button>
         </div>
       ) : value.mode === 'pkcs11' ? (
         <>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Module</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.module')}</span>
             <span
               className="flex-1 text-xs text-neutral-300 truncate"
               title={value.modulePath ?? undefined}
@@ -210,48 +221,47 @@ export function SignerSourceFields({
               onClick={() => void pickModule()}
               className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
-              Choose…
+              {tChrome('dialog.signer.choose')}
             </button>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Token</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.token')}</span>
             <input
               data-testid={`${idPrefix}-token-label`}
               value={value.tokenLabel}
               onChange={(e) => onChange({ ...value, tokenLabel: e.target.value })}
-              placeholder="Token label"
+              placeholder={tChrome('dialog.signer.tokenPlaceholder')}
               className="flex-1 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Cert label</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.certLabel')}</span>
             <input
               data-testid={`${idPrefix}-cert-label`}
               value={value.certLabel}
               onChange={(e) => onChange({ ...value, certLabel: e.target.value })}
-              placeholder="Certificate label on the token"
+              placeholder={tChrome('dialog.signer.certPlaceholder')}
               className="flex-1 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Key label</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.keyLabel')}</span>
             <input
               data-testid={`${idPrefix}-key-label`}
               value={value.keyLabel}
               onChange={(e) => onChange({ ...value, keyLabel: e.target.value })}
-              placeholder="Blank = same as certificate label"
+              placeholder={tChrome('dialog.signer.keyPlaceholder')}
               className="flex-1 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
             />
           </div>
           <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
-            The password field is the token PIN. The module is your device
-            vendor's PKCS#11 .dll.
+            {tChrome('dialog.signer.tokenNote')}
           </p>
         </>
       ) : (
         <>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Key file</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.keyFile')}</span>
             <span className="flex-1 text-xs text-neutral-300 truncate" title={value.keyPath ?? undefined}>
               {fileName(value.keyPath)}
             </span>
@@ -260,11 +270,11 @@ export function SignerSourceFields({
               onClick={() => void pickKey()}
               className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
-              Choose…
+              {tChrome('dialog.signer.choose')}
             </button>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Certificate</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.certificate')}</span>
             <span className="flex-1 text-xs text-neutral-300 truncate" title={value.certPath ?? undefined}>
               {fileName(value.certPath)}
             </span>
@@ -273,23 +283,23 @@ export function SignerSourceFields({
               onClick={() => void pickCert()}
               className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
-              Choose…
+              {tChrome('dialog.signer.choose')}
             </button>
           </div>
           <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
-            The certificate file may be a fullchain (signer first).
+            {tChrome('dialog.signer.pemNote')}
           </p>
         </>
       )}
 
       {showGenerate && (
         <div className="rounded border border-neutral-700 bg-neutral-900/70 p-2.5 flex flex-col gap-2">
-          <div className="text-xs text-neutral-300 font-medium">New self-signed signer</div>
+          <div className="text-xs text-neutral-300 font-medium">{tChrome('dialog.signer.newTitle')}</div>
           <p className="text-[11px] text-neutral-500 -mt-1">
-            Proves possession of this new key — it does not prove your identity to third parties.
+            {tChrome('dialog.signer.newNote')}
           </p>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Name</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.name')}</span>
             <input
               data-testid={`${idPrefix}-generate-name`}
               type="text"
@@ -299,17 +309,17 @@ export function SignerSourceFields({
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Organization</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.organization')}</span>
             <input
               type="text"
               value={genOrg}
-              placeholder="optional"
+              placeholder={tChrome('dialog.signer.optional')}
               onChange={(e) => setGenOrg(e.target.value)}
               className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">Password</span>
+            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.password')}</span>
             <input
               data-testid={`${idPrefix}-generate-password`}
               type="password"
@@ -328,7 +338,7 @@ export function SignerSourceFields({
               }}
               className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
-              Cancel
+              {tChrome('dialog.common.cancel')}
             </button>
             <button
               data-testid={`${idPrefix}-generate-apply`}
@@ -336,7 +346,7 @@ export function SignerSourceFields({
               disabled={genBusy}
               className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
             >
-              {genBusy ? 'Generating…' : 'Generate & Save…'}
+              {tChrome(genBusy ? 'dialog.signer.generating' : 'dialog.signer.generate')}
             </button>
           </div>
         </div>
@@ -347,8 +357,12 @@ export function SignerSourceFields({
           data-testid={`${idPrefix}-generate-done`}
           className="text-[11px] text-green-300/90 bg-green-600/10 border border-green-600/30 rounded px-2 py-1"
         >
-          Created <strong>{genDone.common_name}</strong> (valid until{' '}
-          {genDone.not_after.slice(0, 10)}) and selected it. Enter its password to sign.
+          {/* One whole message, not a sentence assembled around a <strong>:
+              the clause order differs per language (the Settings precedent). */}
+          {tChrome('dialog.signer.created', {
+            name: genDone.common_name,
+            date: tDate(genDone.not_after),
+          })}
         </div>
       )}
     </div>
