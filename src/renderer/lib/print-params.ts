@@ -5,6 +5,11 @@
 // with an unexpected-argument error at run time. The Python side pins the
 // same set from its signature (TestPrintPdf.test_wire_contract...).
 
+// N12: the VALIDATION messages below are dialog chrome, so they resolve
+// through the catalog. The wire contract this module builds is untouched
+// — engine keys and values stay exactly as pinned.
+import { tChrome, tChromeCount } from '../i18n';
+
 export const MAX_COPIES = 999;
 
 export type FitMode = 'fit' | 'actual' | 'scale';
@@ -107,13 +112,13 @@ export function pageRangeError(spec: string, pageCount: number): string | null {
   if (normalized === '') return null;
   for (const token of normalized.split(',')) {
     const m = /^(\d+)(?:-(\d+))?$/.exec(token);
-    if (!m) return `Invalid page range: “${token || spec}”`;
+    if (!m) return tChrome('dialog.print.errInvalidRange', { token: token || spec });
     const start = Number(m[1]);
     const end = m[2] !== undefined ? Number(m[2]) : start;
-    if (start < 1 || end < 1) return 'Page numbers start at 1';
-    if (end < start) return `Descending range: “${token}”`;
+    if (start < 1 || end < 1) return tChrome('dialog.print.errPagesStartAtOne');
+    if (end < start) return tChrome('dialog.print.errDescending', { token });
     if (end > pageCount) {
-      return `Page ${end} is beyond the document (${pageCount} page${pageCount === 1 ? '' : 's'})`;
+      return tChromeCount('dialog.print.errBeyond', pageCount, { page: end });
     }
   }
   return null;
@@ -126,25 +131,25 @@ export function normalizePageRange(spec: string): string {
 
 /** Copies must be a whole number 1..999; returns an error message or null. */
 export function copiesError(raw: string): string | null {
-  if (!/^\d+$/.test(raw.trim())) return 'Copies must be a whole number';
+  if (!/^\d+$/.test(raw.trim())) return tChrome('dialog.print.errCopiesWhole');
   const n = Number(raw.trim());
-  if (n < 1 || n > MAX_COPIES) return `Copies must be between 1 and ${MAX_COPIES}`;
+  if (n < 1 || n > MAX_COPIES) return tChrome('dialog.print.errCopiesRange', { max: MAX_COPIES });
   return null;
 }
 
 /** Custom scale 1..1000 percent. */
 export function scaleError(raw: string): string | null {
   const n = Number(raw.trim());
-  if (!Number.isFinite(n) || raw.trim() === '') return 'Scale must be a number';
-  if (n < 1 || n > 1000) return 'Scale must be between 1 and 1000 percent';
+  if (!Number.isFinite(n) || raw.trim() === '') return tChrome('dialog.print.errScaleNumber');
+  if (n < 1 || n > 1000) return tChrome('dialog.print.errScaleRange');
   return null;
 }
 
 /** Poster tile scale 1..2000 percent. */
 export function posterScaleError(raw: string): string | null {
   const n = Number(raw.trim());
-  if (!Number.isFinite(n) || raw.trim() === '') return 'Tile scale must be a number';
-  if (n < 1 || n > 2000) return 'Tile scale must be between 1 and 2000 percent';
+  if (!Number.isFinite(n) || raw.trim() === '') return tChrome('dialog.print.errTileNumber');
+  if (n < 1 || n > 2000) return tChrome('dialog.print.errTileRange');
   return null;
 }
 
@@ -155,10 +160,10 @@ export function posterOverlapError(
   sheetHeight: number | null,
 ): string | null {
   const n = Number(raw.trim());
-  if (!Number.isFinite(n) || raw.trim() === '') return 'Overlap must be a number';
-  if (n < 0) return 'Overlap cannot be negative';
+  if (!Number.isFinite(n) || raw.trim() === '') return tChrome('dialog.print.errOverlapNumber');
+  if (n < 0) return tChrome('dialog.print.errOverlapNegative');
   if (sheetWidth !== null && sheetHeight !== null && n >= Math.min(sheetWidth, sheetHeight) / 2) {
-    return 'Overlap must be smaller than half the paper';
+    return tChrome('dialog.print.errOverlapTooBig');
   }
   return null;
 }
