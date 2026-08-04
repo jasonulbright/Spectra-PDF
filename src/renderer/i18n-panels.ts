@@ -81,6 +81,35 @@ export const PANEL_STRINGS = {
   'panel.repair.busy': 'Repairing...',
   'panel.repair.repair': 'Repair',
   'panel.repair.reportAria': 'Validation report',
+
+  'panel.optimize.open': 'Open a PDF to optimize',
+  'panel.optimize.linearize': 'Linearize (web-optimize)',
+  'panel.optimize.linearizeHint': 'Enables progressive loading in web browsers',
+  'panel.optimize.stripMeta': 'Strip metadata',
+  'panel.optimize.stripMetaHint': 'Removes author, title, timestamps, and other document info',
+  'panel.optimize.compressStreams': 'Compress object streams',
+  'panel.optimize.compressStreamsHint': 'Reduces file size by compressing internal structures',
+  'panel.optimize.optimizing': 'Optimizing...',
+  'panel.optimize.optimize': 'Optimize',
+  'panel.optimize.result': '{{from}} KB → {{to}} KB ({{ratio}}% reduction)',
+
+  'panel.extractText.open': 'Open a PDF to extract text',
+  'panel.extractText.pagesLabel': 'Pages (e.g. 1,3 or all)',
+  'panel.extractText.pagesAria': 'Pages to extract',
+  'panel.extractText.extracting': 'Extracting text...',
+  'panel.extractText.extractingBtn': 'Extracting...',
+  'panel.extractText.extract': 'Extract',
+  'panel.extractText.copy': 'Copy',
+  'panel.extractText.copied': 'Copied to clipboard',
+  'panel.extractText.done': 'Extracted {{chars}} characters from {{pages}} pages',
+  'panel.extractText.doneOne': 'Extracted {{chars}} characters from page {{page}}',
+
+  'panel.grayscale.open': 'Open a PDF to convert to grayscale',
+  'panel.grayscale.blurb': 'Converts all colors to grayscale. Useful for B&W printing or archival.',
+  'panel.grayscale.converting': 'Converting to grayscale...',
+  'panel.grayscale.convertingBtn': 'Converting...',
+  'panel.grayscale.convert': 'Convert to Grayscale',
+  'panel.grayscale.result': '{{from}} KB → {{to}} KB',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;
