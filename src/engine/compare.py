@@ -25,9 +25,10 @@ docs/architecture/09-phase2g-compare.md for both rationales.
 
 import difflib
 import re
-import subprocess
 import tempfile
 from pathlib import Path
+
+from . import budget
 
 import pikepdf
 from pdfminer.high_level import extract_text as pdfminer_extract
@@ -334,7 +335,15 @@ def _render_ppm_range(
         f"-sOutputFile={out_dir / (prefix + '-%d.ppm')}",
         str(file),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    # § 5.5: derived from the file being rasterized and the page span asked
+    # for, not a fixed 600 s — a 200-page scan is the normal case here.
+    result = budget.gs(
+        cmd,
+        what=f"Ghostscript (render {Path(file).name})",
+        path=file,
+        pages=max(int(last) - int(first) + 1, 1),
+        base=600.0,  # this call's own floor before the derived budget
+    )
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         raise RuntimeError(f"Ghostscript render failed for {Path(file).name}: {stderr[-500:]}")

@@ -44,7 +44,23 @@ from engine.watermark import watermark
 
 # op name -> (callable, allowed data params, needed tool-path params).
 _STEPS: dict = {
-    "compress": (compress, frozenset({"quality", "dpi"}), frozenset({"gs_path"})),
+    "compress": (
+        compress,
+        frozenset(
+            {
+                "quality",
+                "dpi",
+                # O8: `quality="mrc"` routes the SAME step to the MRC pass, so
+                # watched folders and scheduled runs get it with no new op.
+                "mrc_preset",
+                "mrc_mask_codec",
+                "mrc_bg_div",
+                "mrc_fg_div",
+                "mrc_pdfa_safe",
+            }
+        ),
+        frozenset({"gs_path", "jbig2_path"}),
+    ),
     "grayscale": (grayscale, frozenset(), frozenset({"gs_path"})),
     "convert_pdfa": (convert_pdfa, frozenset({"level"}), frozenset({"gs_path"})),
     "strip_metadata": (strip_metadata, frozenset(), frozenset()),
@@ -104,6 +120,19 @@ def validate_steps(steps) -> list[dict]:
             params["placements"] = [
                 {"position": str(params.pop("position")), "text": str(params.pop("text"))}
             ]
+        if op == "compress" and str(params.get("quality", "")).strip().lower() == "mrc":
+            # ORDER, enforced rather than documented (§ 5.4): recognition
+            # rasterizes from the page, so OCR after MRC would read the
+            # RECONSTRUCTION instead of the scan it was meant to read.
+            later_ocr = any(
+                isinstance(s2, dict) and s2.get("op") == "ocr_file"
+                for s2 in steps[i + 1 :]
+            )
+            if later_ocr:
+                raise ValueError(
+                    "MRC compression must come after OCR — OCR reads the page image, "
+                    "and MRC replaces it"
+                )
         if op == "encrypt":
             if i != len(steps) - 1:
                 raise ValueError("encrypt must be the last step")
