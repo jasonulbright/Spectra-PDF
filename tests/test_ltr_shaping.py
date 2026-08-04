@@ -392,3 +392,108 @@ class TestByteEmittersShape:
         out = str(tmp_path / "plain.pdf")
         fill_form_fields(form, out, {"applicant.name": "Jane Doe"}, font_dir=FONTS)
         assert not _is_shaped(out)
+
+
+# ── 9.T12 — the one joining script that is not right-to-left ─────────────
+
+MONGOLIAN_FACE = os.path.join(FONTS, "NotoSansMongolian-Regular.ttf")
+MONGOL_WORD = "ᠮᠣᠩᠭᠣᠯ"
+
+
+class TestMongolianShaping:
+    """9.T12 — direction is a property of the TEXT, and a COLUMN gets the
+    face's own upright punctuation.
+
+    Before this, every shaping site derived direction as `joins or
+    has_strong_rtl`, which is right for thirteen of the fourteen joining
+    scripts and hands back a REVERSED glyph stream for Mongolian.
+    """
+
+    def test_direction_comes_from_the_text(self):
+        assert shaping.shapes_right_to_left("مرحبا") is True  # Arabic
+        assert shaping.shapes_right_to_left("שלום") is True  # Hebrew, joins nothing
+        assert shaping.shapes_right_to_left(MONGOL_WORD) is False  # joins, LTR
+        assert shaping.shapes_right_to_left("plain") is False
+
+    def test_the_column_direction_evidence_is_a_text_test(self):
+        assert shaping.sets_columns_left_to_right(MONGOL_WORD) is True
+        assert shaping.sets_columns_left_to_right("ꡀ") is True  # Phags-pa
+        assert shaping.sets_columns_left_to_right("日本語") is False
+        assert shaping.sets_columns_left_to_right("2026") is False
+
+    @pytest.mark.skipif(
+        not os.path.isfile(MONGOLIAN_FACE),
+        reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
+    )
+    def test_the_vert_map_is_read_from_gsub_and_covers_punctuation(self):
+        # Measured, not assumed (`vert-harvest.local.py`): neither Mongolian
+        # face's `vert` touches a single LETTER — both cover only punctuation
+        # and brackets. Brief 39 § 5.4 proposed harvesting the map from a
+        # second `ttb` SHAPING pass on a recon observation that a letter
+        # changed under `ttb`; that difference is the cursive shaper picking
+        # other positional forms, not `vert`, and in this face the two passes
+        # do not even have the same glyph COUNT (a ligature forms under `ltr`
+        # and not under `ttb`). The feature is what we want, so the feature
+        # is what we read.
+        vmap = shaping.vertical_forms(MONGOLIAN_FACE)
+        assert vmap
+        for name in shaping.shape(MONGOLIAN_FACE, MONGOL_WORD, rtl=False).glyph_names:
+            assert name not in vmap
+
+    @pytest.mark.skipif(
+        not os.path.isfile(MONGOLIAN_FACE),
+        reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
+    )
+    def test_a_column_gets_the_upright_punctuation_and_letters_untouched(self):
+        flat = shaping.shape(MONGOLIAN_FACE, "、", rtl=False)
+        side = shaping.shape_sideways(MONGOLIAN_FACE, "、")
+        assert flat.glyph_names != side.glyph_names
+        assert side.glyph_names[0].endswith(".vert")
+        # ...and the substituted glyph's advance is the FONT's, not invented.
+        assert side.advance_1000 > 0
+
+        letters = shaping.shape(MONGOLIAN_FACE, MONGOL_WORD, rtl=False)
+        sideways = shaping.shape_sideways(MONGOLIAN_FACE, MONGOL_WORD)
+        assert sideways.glyph_names == letters.glyph_names
+        assert sideways.advance_1000 == pytest.approx(letters.advance_1000)
+
+    @pytest.mark.skipif(
+        not os.path.isfile(MONGOLIAN_FACE),
+        reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
+    )
+    def test_the_face_measurement_that_accepted_it(self):
+        # The T25 conditions, as a pin rather than a memory (brief 39 § 5.3):
+        # one ADVANCING glyph per cluster, no `.notdef`, and real per-glyph
+        # advances. A face that decomposed a letter into two advancing glyphs
+        # could not be spelled back by a per-code /ToUnicode, which is exactly
+        # why Noto Sans Arabic lost the T3 comparison.
+        for word in (MONGOL_WORD, "ᠨᠠᠷᠠᠨ", "2026", "Latin"):
+            run = shaping.shape(MONGOLIAN_FACE, word, rtl=False)
+            assert run.glyphs, word
+            spelled = [spells for _n, spells in run.clusters if spells]
+            advancing = [1 for _n, adv, _x, _y in run.glyphs if adv]
+            assert len(advancing) == len(spelled), word
+        # Real per-letter advances, not one synthesized number.
+        advs = {round(a, 1) for _n, a, _x, _y in shaping.shape(
+            MONGOLIAN_FACE, "ᠨᠠᠷᠠᠨ", rtl=False
+        ).glyphs}
+        assert len(advs) > 1
+
+    @pytest.mark.skipif(
+        not os.path.isfile(MONGOLIAN_FACE),
+        reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
+    )
+    def test_a_vertical_form_with_no_advance_refuses_rather_than_guessing(
+        self, monkeypatch
+    ):
+        # The harvest's one refusal: `vert` names a glyph the face has no
+        # `hmtx` entry for. The column's LENGTH is measured from that number,
+        # and inventing it is the § 1.5b defect wearing a different hat.
+        monkeypatch.setattr(
+            shaping, "vertical_forms", lambda _p: {
+                n: "nosuchglyph"
+                for n in shaping.shape(MONGOLIAN_FACE, MONGOL_WORD, rtl=False).glyph_names
+            }
+        )
+        with pytest.raises(ValueError, match="has no advance"):
+            shaping.shape_sideways(MONGOLIAN_FACE, MONGOL_WORD)
