@@ -73,6 +73,12 @@ export interface ExportAnnotation {
   legendRows?: import('./count-marks').CountLegendRow[];
   legendTitle?: string;
   legendTotalWord?: string;
+  // stamp / count (N11 slice D) — a vector symbol's registry id and its own
+  // carried geometry. See PageAnnotation's field comments: the parts travel
+  // with the annotation so an imported set's symbol draws where the set is
+  // absent.
+  symbolId?: string;
+  symbolParts?: readonly import('./count-marks').SymbolPart[];
   // Present for imported annotations only — see PageAnnotation.importedOriginal
   // and the "importing existing annotations safely" design note. The builder
   // uses this to positively match and strip the ORIGINAL object from the

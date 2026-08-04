@@ -15,8 +15,10 @@ import {
   LEGEND_ROW_H,
   LEGEND_SYMBOL_W,
   legendLayout,
+  partsToJson,
   symbolById,
 } from './count-marks';
+import type { SymbolPart } from './count-marks';
 
 function applyRotation(copied: import('pdf-lib').PDFPage, page: ExportPage): void {
   if (!page.rotation) return;
@@ -151,6 +153,16 @@ function symbolOps(parts: readonly import('./count-marks').SymbolPart[], w: numb
 
 function round2(v: number): number {
   return Math.round(v * 100) / 100;
+}
+
+/** A stamp's vector geometry, or null when it is a text/image stamp. The
+ * carried snapshot is the authority (N11 slice D); a bare id falls back to the
+ * registry's built-ins, which is all this pure module can see. */
+function symbolPartsOf(a: ExportAnnotation): readonly SymbolPart[] | null {
+  if (a.symbolParts && a.symbolParts.length > 0) return a.symbolParts;
+  if (!a.symbolId) return null;
+  const built = symbolById(a.symbolId);
+  return built.id === a.symbolId ? built.parts : null;
 }
 
 const HIGHLIGHT_ALPHA = 0.4;
@@ -731,12 +743,16 @@ function addAnnotations(
       //   /Contents            "<group> <seq>".
       //   /NM                  the stable mark id.
       //   /SpectraSymbol       which vector symbol the marker draws.
+      // The mark's OWN carried geometry wins over the registry lookup: a group
+      // whose marker came from an imported set must draw the same on a machine
+      // that never imported that set (N11 slice D).
       const symbol = symbolById(a.countSymbol);
+      const parts = a.symbolParts ?? symbol.parts;
       const strokeW = 1.5;
       const gsRef = context.register(context.obj({ Type: 'ExtGState', ca: 0.18 }));
       // The path is emitted ONCE and painted twice (translucent fill, then the
       // opaque outline) — `B` would apply the alpha to both.
-      const ops = symbolOps(symbol.parts, dispW, dispH);
+      const ops = symbolOps(parts, dispW, dispH);
       const content =
         `q /GS0 gs ${r} ${g} ${b} rg ${ops}f Q ` +
         `${r} ${g} ${b} RG ${strokeW} w 1 J 1 j ${ops}S`;
@@ -769,7 +785,16 @@ function addAnnotations(
         PDFName.of('NM'),
         PDFString.of(`count-${a.countGroup ?? ''}-${a.countSeq ?? 0}`),
       );
-      annot.set(PDFName.of('SpectraSymbol'), PDFName.of(symbol.id));
+      annot.set(PDFName.of('SpectraSymbol'), PDFName.of(a.countSymbol || symbol.id));
+      // Only a NON-built-in marker needs its geometry written: every build has
+      // the built-in ones, and a snapshot per mark on a 400-mark sheet would be
+      // 400 copies of a shape the id already names.
+      if (a.symbolParts) {
+        annot.set(
+          PDFName.of('SpectraSymbolParts'),
+          PDFHexString.fromText(partsToJson(a.symbolParts)),
+        );
+      }
     } else if (a.kind === 'countlegend') {
       // A PLACED LEGEND — /FreeText + /IT /CountLegend, with the table drawn
       // in the appearance (symbol swatches included, so the legend reads as
@@ -856,6 +881,40 @@ function addAnnotations(
           JSON.stringify({ title, totalWord, rows }),
         ),
       );
+    } else if (a.kind === 'stamp' && symbolPartsOf(a)) {
+      // A SYMBOL STAMP (N11 slice D) — the stamp library's third species. It
+      // commits as an ordinary /Stamp whose appearance is the symbol's own
+      // path operators, so it prints crisply at any scale and degrades in any
+      // other viewer to exactly the drawing that was placed.
+      //
+      //   /SpectraSymbol       which registry symbol it is.
+      //   /SpectraSymbolParts  its geometry, carried with it — the id alone
+      //                        would resolve to the DEFAULT marker on a
+      //                        machine that never imported the set, which
+      //                        would silently redraw someone's drawing.
+      const parts = symbolPartsOf(a)!;
+      const strokeW = 1.5;
+      const ops = symbolOps(parts, dispW, dispH);
+      const ap = context.register(
+        context.stream(`${r} ${g} ${b} RG ${strokeW} w 1 J 1 j ${ops}S`, {
+          Type: 'XObject',
+          Subtype: 'Form',
+          FormType: 1,
+          BBox: [0, 0, dispW, dispH],
+          Matrix: apMatrixFor(rotation),
+        }),
+      );
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: 'Stamp',
+        Rect: [x0, y0, x1, y1],
+        C: [r, g, b],
+        F: 4, // print
+        AP: { N: ap },
+      });
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note ?? ''));
+      if (a.symbolId) annot.set(PDFName.of('SpectraSymbol'), PDFName.of(a.symbolId));
+      annot.set(PDFName.of('SpectraSymbolParts'), PDFHexString.fromText(partsToJson(parts)));
     } else if (a.kind === 'stamp' && a.imageData && stampImages.get(a.imageData)) {
       // A custom IMAGE stamp: the appearance draws the pre-embedded raster —
       // no border, no fill, the king's look. /Contents keeps the display name.

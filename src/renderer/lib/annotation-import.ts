@@ -23,6 +23,7 @@ import { takeRawStyle, type RawAnnotStyle } from './annotation-raw-style';
 import {
   DEFAULT_COUNT_SYMBOL,
   UNGROUPED,
+  partsFromJson,
   symbolById,
   type CountLegendRow,
 } from './count-marks';
@@ -205,6 +206,20 @@ export async function importPageAnnotations(
       const mark = importCountMark(a, sidecar, box, rotation, color, contents, importedOriginal);
       if (mark) imported.push(mark);
       continue;
+    }
+    // N11 slice D: a placed vector SYMBOL — a /Stamp with no /IT that carries
+    // its own geometry. Without this branch a moved symbol would re-commit as
+    // a TEXT stamp (the generic stamp import's shape), turning the drawing
+    // into its own label.
+    if (a.subtype === 'Stamp' && sidecar?.it === undefined && sidecar?.spectraSymbolParts) {
+      const symbol = importSymbolStamp(a, sidecar, box, rotation, color, contents, importedOriginal);
+      if (symbol) {
+        imported.push(symbol);
+        continue;
+      }
+      // Unreadable geometry falls through to the ordinary stamp import: the
+      // annotation is still a stamp, and its original appearance is what shows
+      // until it is edited.
     }
     if (a.subtype === 'FreeText' && (sidecar?.it === 'CountLegend' || (a as { it?: string }).it === 'CountLegend')) {
       const legend = importCountLegend(a, sidecar, box, rotation, color, contents, importedOriginal);
@@ -460,6 +475,11 @@ function importCountMark(
   if (d.w <= 0 || d.h <= 0) return null;
   const group = (sidecar?.subj ?? '').trim() || UNGROUPED;
   const symbolId = sidecar?.spectraSymbol ?? DEFAULT_COUNT_SYMBOL;
+  // N11 slice D: a marker from an imported SET carries its geometry beside the
+  // id. Sanitized (bytes from a file are untrusted exactly like an imported
+  // set file's), and an unreadable snapshot falls back to the id's built-in
+  // rather than dropping the mark.
+  const parts = partsFromJson(sidecar?.spectraSymbolParts);
   const seqMatch = /(\d+)\s*$/.exec(contents ?? '');
   return {
     id: crypto.randomUUID(),
@@ -468,8 +488,46 @@ function importCountMark(
     color,
     note: contents,
     countGroup: group,
-    countSymbol: symbolById(symbolId).id,
+    // The ID passes through as the file spells it: a symbol this build does
+    // not know is still that symbol, and `symbolById` only decides what to
+    // DRAW when no geometry came with it.
+    countSymbol: parts ? symbolId : symbolById(symbolId).id,
+    ...(parts ? { symbolParts: parts } : {}),
     countSeq: seqMatch ? Number(seqMatch[1]) : 1,
+    importedOriginal,
+  };
+}
+
+/**
+ * /Stamp + /SpectraSymbolParts (and no /IT) → a vector symbol stamp
+ * (N11 slice D).
+ *
+ * The GEOMETRY is the annotation: the id only re-identifies it against the
+ * registry, and a set the reader never imported makes the id meaningless
+ * while the artwork stays exact. Sanitized before it is artwork — these bytes
+ * become PDF path operators again on the next commit.
+ */
+function importSymbolStamp(
+  a: RawAnnotation,
+  sidecar: RawAnnotStyle | undefined,
+  box: ViewBox,
+  rotation: number,
+  color: string,
+  contents: string | undefined,
+  importedOriginal: ImportedAnnotationFingerprint,
+): PageAnnotation | null {
+  const parts = partsFromJson(sidecar?.spectraSymbolParts);
+  if (!parts) return null;
+  const d = pdfRectToDisplay(a.rect, box, rotation);
+  if (d.w <= 0 || d.h <= 0) return null;
+  return {
+    id: crypto.randomUUID(),
+    kind: 'stamp',
+    ...d,
+    color,
+    note: contents,
+    ...(sidecar?.spectraSymbol ? { symbolId: sidecar.spectraSymbol } : {}),
+    symbolParts: parts,
     importedOriginal,
   };
 }

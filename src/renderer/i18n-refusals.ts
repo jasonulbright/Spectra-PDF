@@ -76,6 +76,28 @@ export const REFUSAL_STRINGS = {
   'refusal.file.noLongerOpen': 'The file is no longer open.',
   'refusal.file.noActiveDocument': 'No active document.',
   'refusal.file.noActiveToSign': 'No active file to sign.',
+
+  // ── Symbol sets: importing a set FILE (N11 slice D) ──────────────────
+  // The guided-actions import shape exactly: one interpolated key per
+  // problem, naming the offending SYMBOL ID (the file's own vocabulary, so it
+  // stays verbatim — a translated id would name something the file being
+  // fixed does not contain). A refused file imports nothing.
+  'refusal.symbolSet.notJson': 'Not a valid JSON file.',
+  'refusal.symbolSet.notASet':
+    'Not a symbol set — expected an object with "name" and "symbols".',
+  'refusal.symbolSet.noSymbols': 'The set contains no symbols.',
+  'refusal.symbolSet.tooManySymbols': 'A set may hold at most {{max}} symbols.',
+  'refusal.symbolSet.setId':
+    'The set id may use only letters, digits, dot, dash and underscore.',
+  'refusal.symbolSet.builtinId':
+    '"{{id}}" is a built-in set — give the imported set its own id.',
+  'refusal.symbolSet.symbolShape': 'Symbol {{index}} is not a symbol object.',
+  'refusal.symbolSet.symbolId':
+    'Symbol {{index}} needs an id of letters, digits, dot, dash or underscore.',
+  'refusal.symbolSet.duplicateId': 'The set uses the id "{{id}}" twice.',
+  'refusal.symbolSet.idInUse': 'The id "{{id}}" is already used by the set {{set}}.',
+  'refusal.symbolSet.parts':
+    'Symbol "{{id}}": every part must be a poly or circle drawn inside the unit square.',
 } as const;
 
 export type RefusalKey = keyof typeof REFUSAL_STRINGS;

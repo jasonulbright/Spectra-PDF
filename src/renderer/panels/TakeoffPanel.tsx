@@ -5,6 +5,7 @@ import { useEngine } from '../hooks/useEngine';
 import { dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { CountSymbolGlyph } from '../components/CountSymbolGlyph';
+import { SymbolPalette, symbolDisplayName } from '../components/SymbolPalette';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tNumber } from '../i18n';
 import {
@@ -292,24 +293,19 @@ export function TakeoffPanel(): React.ReactElement {
                       />
                     ))}
                   </div>
-                  <div className="flex items-center gap-1 flex-wrap">
-                    {COUNT_SYMBOLS.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        data-testid={`takeoff-symbol-${s.id}`}
-                        aria-label={tChrome('panel.takeoff.symbolAria', { symbol: s.id })}
-                        aria-pressed={g.symbol === s.id}
-                        onClick={() => updateGroup(g, { symbol: s.id })}
-                        className={
-                          'p-0.5 rounded border ' +
-                          (g.symbol === s.id ? 'border-neutral-400' : 'border-transparent')
-                        }
-                      >
-                        <CountSymbolGlyph symbol={s.id} color={g.color} size={14} />
-                      </button>
-                    ))}
-                  </div>
+                  {/* N11 slice D: the marker comes from the whole symbol
+                      REGISTRY — the built-in markers, the built-in AEC set and
+                      every imported one — through the same palette the stamp
+                      picker places from. One registry, two consumers. */}
+                  <div className="text-xs text-neutral-400">{tChrome('panel.takeoff.marker')}</div>
+                  <SymbolPalette
+                    mode="pick"
+                    idPrefix="takeoff-symbol"
+                    compact
+                    color={g.color}
+                    selectedId={g.symbol}
+                    onPick={(hit) => updateGroup(g, { symbol: hit.symbol.id })}
+                  />
                   <button
                     type="button"
                     data-testid={`takeoff-forget-${g.name}`}
@@ -378,6 +374,36 @@ export function TakeoffPanel(): React.ReactElement {
           {tChrome('panel.takeoff.exportCsv')}
         </button>
       </div>
+      {/* N11 slice D — the symbol library. It lives here because the dock has
+          the room for set management (import / export / remove), and the same
+          palette is what the stamp picker places from: one registry, two
+          consumers. Dragging a symbol onto the page places it; clicking one
+          makes it the ARMED group's marker. */}
+      <div className="flex flex-col gap-1 border-t border-neutral-800 pt-2">
+        <span className="text-sm text-neutral-300">{tChrome('panel.symbols.title')}</span>
+        <p className="text-xs text-neutral-500">{tChrome('panel.symbols.hint')}</p>
+        <SymbolPalette
+          mode="place"
+          manage
+          idPrefix="symbol"
+          color={armed?.color ?? COUNT_GROUP_COLORS[0]}
+          selectedId={armed?.symbol}
+          onPick={(hit) => {
+            if (!armed) {
+              setStatus(tChrome('panel.symbols.noArmedGroup'));
+              return;
+            }
+            updateGroup(armed, { symbol: hit.symbol.id });
+            setStatus(
+              tChrome('panel.symbols.markerSet', {
+                group: armed.name,
+                name: symbolDisplayName(hit.set, hit.symbol),
+              }),
+            );
+          }}
+        />
+      </div>
+
       {status && <div className="text-xs text-neutral-400" data-testid="takeoff-status">{status}</div>}
     </div>
   );
