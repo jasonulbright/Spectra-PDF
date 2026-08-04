@@ -152,6 +152,21 @@ License text shipped at: `resources/fonts/LICENSE-NotoHebrew-OFL.txt`
 (vendored hash-pinned from the same release; upstream copy:
 <https://github.com/notofonts/hebrew/blob/main/OFL.txt>)
 
+**Noto Sans Mongolian** (Regular) —
+© Google, licensed under the **SIL Open Font License 1.1**. Bundled
+(vendored by `scripts/sync-edit-fonts.ps1`, hash-pinned from the
+`NotoSansMongolian-v3.002` release of
+<https://github.com/notofonts/mongolian>) as the **shaping** face for
+vertical Mongolian columns: Mongolian joins cursively, a PDF's own subset
+has committed to final glyph ids, and a viewer never re-shapes — so an
+edited Mongolian column is re-shaped and re-embedded through this face
+whenever the document's own program cannot drive the shaper itself. The
+`full` build is the one vendored, because the `unhinted` build carries no
+Latin or digit coverage and a column with a year in it would refuse.
+License text shipped at: `resources/fonts/LICENSE-NotoMongolian-OFL.txt`
+(vendored hash-pinned from the same release; upstream copy:
+<https://github.com/notofonts/mongolian/blob/main/OFL.txt>)
+
 ## OCR — Tesseract + language data
 
 - **Tesseract OCR** — **Apache-2.0** — <https://github.com/tesseract-ocr/tesseract>

@@ -59,6 +59,7 @@ export type FaceSelector = string;
 export type ParagraphOrientation =
   | 'horizontal'
   | 'vertical-rl'
+  | 'vertical-lr'
   | 'rotated-cw'
   | 'rotated-ccw'
   | 'rotated-180';
@@ -66,6 +67,7 @@ export type ParagraphOrientation =
 const ORIENTATIONS: ParagraphOrientation[] = [
   'horizontal',
   'vertical-rl',
+  'vertical-lr',
   'rotated-cw',
   'rotated-ccw',
   'rotated-180',
@@ -117,12 +119,15 @@ export interface EditParagraph {
    * geometry question, which `orientation` answers. */
   vertical: boolean;
   /** 9.T13: the paragraph's ORIENTATION — the frame its layout ran in.
-   * `horizontal` | `vertical-rl` | `rotated-cw` | `rotated-ccw` |
-   * `rotated-180`. This is what the resize grips and the box-left origin
-   * read: a standalone rotated block reads down (or up) the page with no
-   * vertical writing mode in it at all, and a column may hold sideways
-   * members. `vertical-rl` and `rotated-cw` denote the SAME map — they
-   * differ only in what the text IS, never in where it goes. */
+   * `horizontal` | `vertical-rl` | `vertical-lr` | `rotated-cw` |
+   * `rotated-ccw` | `rotated-180`. This is what the resize grips and the
+   * box-left origin read: a standalone rotated block reads down (or up) the
+   * page with no vertical writing mode in it at all, and a column may hold
+   * sideways members. `vertical-rl` and `rotated-cw` denote the SAME map —
+   * they differ only in what the text IS, never in where it goes.
+   * 9.T12's `vertical-lr` reads down the page like both of them and stacks
+   * its columns the other way, so it shares their INLINE axis (which is all
+   * the grips ask) while never co-grouping with either. */
   orientation: ParagraphOrientation;
   /** 9.T3: the paragraph's bidi base direction. The page draws right-to-left
    * text in VISUAL order (a PDF pen only moves one way); the engine

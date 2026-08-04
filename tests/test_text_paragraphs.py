@@ -4388,3 +4388,304 @@ class TestCrossStreamParagraphs:
         assert len(cross) == 1  # the halves DO group (the evidence holds)
         assert cross[0]["editable"] is False
         assert "direction" in cross[0]["reason"]
+
+
+# ── 9.T12 — Mongolian left-to-right columns ──────────────────────────────
+
+MONG_FONTS = os.path.join(os.path.dirname(__file__), "..", "resources", "fonts")
+MONG_FACE = os.path.join(MONG_FONTS, "NotoSansMongolian-Regular.ttf")
+
+# "mongol" and "naran" — real words, chosen because they exercise the two
+# things the round trip must survive: a ligating cluster (ᠩᠭ) and a plain
+# glyph-per-character run.
+MONGOL = "ᠮᠣᠩᠭᠣᠯ"
+NARAN = "ᠨᠠᠷᠠᠨ"
+
+
+def _mong_program():
+    """The vendored Mongolian face's bytes, or None when the bundle is not
+    provisioned (the `gs`/SoftHSM precedent: degrade, never fail)."""
+    if not os.path.isfile(MONG_FACE):
+        return None
+    with open(MONG_FACE, "rb") as fh:
+        return fh.read()
+
+
+def _mong_font(pdf, mapping, program=None, base="/AAAAAA+Mong"):
+    """A Type0/Identity-H font over `mapping` (code → character).
+
+    `program` embeds a real font file, which is what makes the T26 in-place
+    route reachable; without it the edit must substitute the bundled face.
+    """
+    entries = "\n".join(f"<{c:04x}> <{ord(ch):04x}>" for c, ch in mapping.items())
+    tou = (
+        "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
+        "1 begincodespacerange <0000> <ffff> endcodespacerange\n"
+        f"{len(mapping)} beginbfchar\n{entries}\nendbfchar\nendcmap end end\n"
+    ).encode("ascii")
+    fd = Dictionary(Type=Name("/FontDescriptor"), FontName=Name(base), Flags=4)
+    if program is not None:
+        fd["/FontFile2"] = pdf.make_stream(program)
+    desc = pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name(base),
+            CIDSystemInfo=Dictionary(
+                Registry=b"Adobe", Ordering=b"Identity", Supplement=0
+            ),
+            DW=1000,
+            CIDToGIDMap=Name("/Identity"),
+            FontDescriptor=pdf.make_indirect(fd),
+        )
+    )
+    return pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type0"),
+            BaseFont=Name(base),
+            Encoding=Name("/Identity-H"),
+            DescendantFonts=Array([desc]),
+            ToUnicode=pdf.make_stream(tou),
+        )
+    )
+
+
+def _mong_page(tmp_dir, words, xs, program=None, name="mong.pdf", size=10):
+    """Columns of `words` at page x positions `xs`, each a 90°-CW-rotated
+    run of a HORIZONTAL font — which is what a real Mongolian producer
+    emits and what the T12 recon proved (the face has no `vmtx` that would
+    make an /Identity-V embed honest)."""
+    src = os.path.join(tmp_dir, name)
+    pdf = pikepdf.new()
+    chars = dict.fromkeys("".join(words))
+    mapping = {i + 1: ch for i, ch in enumerate(chars)}
+    rev = {ch: c for c, ch in mapping.items()}
+    font = _mong_font(pdf, mapping, program=program)
+    parts = []
+    for word, x in zip(words, xs):
+        hexes = "".join(f"{rev[c]:04x}" for c in word)
+        parts.append(
+            f"BT /F1 {size} Tf 0 -1 1 0 {x} 700 Tm <{hexes}> Tj ET ".encode("ascii")
+        )
+    _page(pdf, b"".join(parts), {"/F1": font})
+    pdf.save(src)
+    pdf.close()
+    return src
+
+
+class TestMongolianColumns:
+    """9.T12 (brief 39 § 5) — left-to-right columns.
+
+    The direction is decided by SCRIPT EVIDENCE, tie-broken by draw order,
+    and defaults to the shipped right-to-left assumption so that every CJK
+    document alive lands exactly where it lands now. It rides inside `lkey`,
+    so a cross-direction merge is refused by the A4 guard for free.
+    """
+
+    def test_a_two_column_mongolian_page_reads_leftmost_first(self, tmp_dir):
+        # Columns at x=300 and x=314: the LEFT one reads first, which is the
+        # whole of T12 and the exact opposite of the CJK convention pinned
+        # by `test_two_column_vertical_paragraph_groups_as_one`.
+        src = _mong_page(tmp_dir, [MONGOL, NARAN], [300, 314])
+        paras = _paras(src)
+        assert len(paras) == 1
+        p = paras[0]
+        assert p["orientation"] == "vertical-lr"
+        assert p["columns"] == "ltr"
+        assert p["line_count"] == 2
+        assert p["text"] == f"{MONGOL} {NARAN}"
+        assert p["editable"] is True
+        # The writing MODE is horizontal — the column is the matrix's doing.
+        assert p["vertical"] is False
+
+    def test_the_same_page_drawn_right_to_left_still_reads_leftmost_first(
+        self, tmp_dir
+    ):
+        # Draw order reversed: the script evidence is what decides, so the
+        # answer does not move. (The draw-order signal only ever breaks a
+        # tie between columns carrying no strong character at all.)
+        src = _mong_page(tmp_dir, [NARAN, MONGOL], [314, 300])
+        p = _paras(src)[0]
+        assert p["columns"] == "ltr"
+        assert p["text"] == f"{MONGOL} {NARAN}"
+
+    def test_a_cjk_column_is_untouched(self, tmp_dir):
+        # The byte-identity guard that keeps the default safe: the shipped
+        # two-column CJK fixture still groups right-to-left, rightmost first.
+        src = _vpage(
+            tmp_dir,
+            b"BT /FV 10 Tf 300 700 Td <000300040005> Tj -14 0 Td <00030004> Tj ET",
+        )
+        p = _paras(src)[0]
+        assert p["orientation"] == "vertical-rl"
+        assert p["columns"] == "rtl"
+        assert p["text"] == "あいうあい"
+
+    def test_growth_adds_a_column_rightward(self, tmp_dir):
+        # The mirror of `test_vertical_growth_adds_a_column_leftward`, and it
+        # needs no code of its own: the inverse map does it.
+        src = _mong_page(tmp_dir, [MONGOL, NARAN], [300, 314], program=_mong_program())
+        p = _paras(src)[0]
+        out = os.path.join(tmp_dir, "grown.pdf")
+        longer = " ".join([MONGOL, NARAN] * 4)
+        _apply(src, out, p, longer, font_path=MONG_FONTS)
+        grown = _paras(out)[0]
+        assert grown["line_count"] > p["line_count"]
+        assert grown["box"][0] == pytest.approx(p["box"][0], abs=0.05)
+        assert grown["box"][2] > p["box"][2]
+
+    def test_ltr_and_rtl_columns_never_co_group(self, tmp_dir):
+        # Same stream, same size, adjacent — and two frames, so two
+        # paragraphs. The direction rides inside `lkey`, which is what makes
+        # this structural rather than a heuristic.
+        src = os.path.join(tmp_dir, "mixed.pdf")
+        pdf = pikepdf.new()
+        chars = dict.fromkeys(MONGOL)
+        mapping = {i + 1: ch for i, ch in enumerate(chars)}
+        rev = {ch: c for c, ch in mapping.items()}
+        mong = _mong_font(pdf, mapping)
+        cjk_map = {i + 1: ch for i, ch in enumerate("日本語")}
+        cjk_rev = {ch: c for c, ch in cjk_map.items()}
+        cjk = _mong_font(pdf, cjk_map, base="/AAAAAA+CJKh")
+        hm = "".join(f"{rev[c]:04x}" for c in MONGOL)
+        hc = "".join(f"{cjk_rev[c]:04x}" for c in "日本語")
+        _page(
+            pdf,
+            (
+                f"BT /F1 10 Tf 0 -1 1 0 300 700 Tm <{hm}> Tj ET "
+                f"BT /F2 10 Tf 0 -1 1 0 314 700 Tm <{hc}> Tj ET"
+            ).encode("ascii"),
+            {"/F1": mong, "/F2": cjk},
+        )
+        pdf.save(src)
+        pdf.close()
+        paras = _paras(src)
+        assert len(paras) == 2
+        assert {p["orientation"] for p in paras} == {"vertical-lr", "rotated-cw"}
+
+    def test_the_tiebreak_answers_only_for_direction_less_columns(self):
+        from engine.text_paragraphs import COLUMNS_LTR, COLUMNS_RTL, _draw_order_direction
+
+        def item(index, x):
+            return {"index": index, "pen": (x, 700.0), "em": 10.0}
+
+        # Content order agrees with left-to-right: `ltr`.
+        assert _draw_order_direction([item(0, 300.0), item(1, 314.0)]) == COLUMNS_LTR
+        # Content order runs the other way: the shipped default.
+        assert _draw_order_direction([item(0, 314.0), item(1, 300.0)]) == COLUMNS_RTL
+        # One column is no evidence at all.
+        assert _draw_order_direction([item(0, 300.0)]) == COLUMNS_RTL
+
+    def test_script_evidence_decides_before_the_tiebreak_is_asked(self):
+        from engine.text_paragraphs import (
+            COLUMNS_LTR,
+            COLUMNS_RTL,
+            _column_direction_evidence,
+        )
+
+        assert _column_direction_evidence(MONGOL) == COLUMNS_LTR
+        assert _column_direction_evidence("日本語") == COLUMNS_RTL
+        assert _column_direction_evidence("ꡀꡁ") == COLUMNS_LTR  # Phags-pa
+        assert _column_direction_evidence("2026") is None
+        assert _column_direction_evidence("、。") is None
+
+    def test_the_reflecting_frame_keeps_the_admission_test_intact(self):
+        # The one reflection in the table: its cross axis negates, so
+        # `a' > 0 and d' > 0` still holds and no downstream site learns that
+        # a frame can flip handedness.
+        from engine.text_paragraphs import (
+            _ORIENTATIONS,
+            VERTICAL_LR,
+            _frame_reflects,
+            _transposed_linear,
+        )
+
+        assert _frame_reflects(_ORIENTATIONS[VERTICAL_LR]) is True
+        for name, frame in _ORIENTATIONS.items():
+            if name != VERTICAL_LR:
+                assert _frame_reflects(frame) is False, name
+        S = 10.0
+        got = _transposed_linear(
+            (0.0, -S, S, 0.0, 0.0, 0.0), False, _ORIENTATIONS[VERTICAL_LR]
+        )
+        assert got is not None
+        a2, b2, c2, d2 = got
+        assert (a2, d2) == pytest.approx((S, S))
+        assert (b2, c2) == pytest.approx((0.0, 0.0))
+
+    def test_a_rise_on_a_left_to_right_column_member_points_the_right_way(self):
+        # Ts displaces along the GLYPH's own up vector. Under the reflecting
+        # frame that is −y′, so the model rise is NEGATIVE — and getting the
+        # sign wrong would move a superscript into the previous column.
+        from engine.text_paragraphs import (
+            _ORIENTATIONS,
+            ROTATED_CW,
+            VERTICAL_LR,
+            _rise_scale,
+        )
+
+        m = (0.0, -10.0, 10.0, 0.0, 0.0, 0.0)
+        rl = _rise_scale(m, False, _ORIENTATIONS[ROTATED_CW], 10.0, 10.0)
+        lr = _rise_scale(m, False, _ORIENTATIONS[VERTICAL_LR], 10.0, 10.0)
+        assert rl == pytest.approx(10.0)
+        assert lr == pytest.approx(-10.0)
+
+    @pytest.mark.skipif(
+        not os.path.isfile(MONG_FACE),
+        reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
+    )
+    def test_an_edit_keeps_the_documents_own_font_when_it_can(self, tmp_dir):
+        # 9.T26 is the PREFERRED route and the common case: a real Mongolian
+        # PDF embeds a Mongolian program, so the edit shapes with it and
+        # emits its own glyph ids. Nothing new embeds.
+        src = _mong_page(tmp_dir, [MONGOL, NARAN], [300, 314], program=_mong_program())
+        p = _paras(src)[0]
+        out = os.path.join(tmp_dir, "inplace.pdf")
+        _apply(src, out, p, p["text"], font_path=MONG_FONTS)
+        with pikepdf.open(out) as pdf:
+            fonts = pdf.pages[0]["/Resources"]["/Font"]
+            assert list(fonts.keys()) == ["/F1"]
+        back = _paras(out)[0]
+        assert back["text"] == p["text"]
+        assert back["columns"] == "ltr"
+
+    @pytest.mark.skipif(
+        not os.path.isfile(MONG_FACE),
+        reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
+    )
+    def test_an_edit_substitutes_the_bundled_face_when_it_cannot(self, tmp_dir):
+        # No embedded program: the ladder falls to the vendored Mongolian
+        # face, embedded HORIZONTALLY through `build_shaped_font`. The
+        # re-listing proves the shaped subset spells itself back — the round
+        # trip is the feature, and a shaped edit that cannot be read back is
+        # a one-way trip (the T25 lesson).
+        src = _mong_page(tmp_dir, [MONGOL, NARAN], [300, 314])
+        p = _paras(src)[0]
+        out = os.path.join(tmp_dir, "subst.pdf")
+        _apply(src, out, p, p["text"], font_path=MONG_FONTS)
+        with pikepdf.open(out) as pdf:
+            fonts = pdf.pages[0]["/Resources"]["/Font"]
+            embedded = [
+                str(fonts[k].get("/BaseFont"))
+                for k in fonts.keys()
+                if "Mongolian" in str(fonts[k].get("/BaseFont"))
+            ]
+            assert embedded, dict(fonts)
+            # HORIZONTAL, never /Identity-V: the face states no vertical
+            # advance worth writing into /W2.
+            assert all(
+                str(fonts[k].get("/Encoding")) != "/Identity-V" for k in fonts.keys()
+            )
+        assert _paras(out)[0]["text"] == p["text"]
+
+    @pytest.mark.skipif(
+        not os.path.isfile(MONG_FACE),
+        reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
+    )
+    def test_a_character_no_bundled_mongolian_face_can_draw_refuses_by_name(self):
+        from engine.font_fallback import resolve_mongolian_font
+
+        # A Mongolian-block code point with no glyph anywhere.
+        with pytest.raises(ValueError, match="no bundled Mongolian font"):
+            resolve_mongolian_font(MONG_FONTS, "᢮᢯᢭")
