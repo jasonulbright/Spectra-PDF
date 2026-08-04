@@ -12,6 +12,7 @@ import {
   getFirstAnnotation,
   getPageAnnotations,
   closeAllFiles,
+  openMenuItem,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -56,8 +57,7 @@ describe('ink capture with stroke merging (N5)', () => {
     await setView('canvas');
 
     // Arm Comment ▸ Draw through the real menu + strip (the user's path).
-    await $('[data-testid="menu-tools"]').click();
-    await $('[data-testid="menuitem-tool-comment"]').waitForDisplayed();
+    await openMenuItem('menu-tools', 'menuitem-tool-comment');
     await $('[data-testid="menuitem-tool-comment"]').click();
     await $('[data-testid="tool-ink"]').waitForDisplayed();
     await $('[data-testid="tool-ink"]').click();
@@ -103,8 +103,7 @@ describe('ink capture with stroke merging (N5)', () => {
     await closeAllFiles();
     await openByPaths([SAMPLE_PDF]);
     await setView('canvas');
-    await $('[data-testid="menu-tools"]').click();
-    await $('[data-testid="menuitem-tool-comment"]').waitForDisplayed();
+    await openMenuItem('menu-tools', 'menuitem-tool-comment');
     await $('[data-testid="menuitem-tool-comment"]').click();
     await $('[data-testid="tool-ink"]').waitForDisplayed();
     await $('[data-testid="tool-ink"]').click();
