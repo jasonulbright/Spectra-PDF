@@ -17,6 +17,7 @@ import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
 import { DIALOG_STRINGS } from '../src/renderer/i18n-dialogs';
 import { WORKBENCH_STRINGS } from '../src/renderer/i18n-workbench';
 import { CANVAS_STRINGS } from '../src/renderer/i18n-canvas';
+import { REFUSAL_STRINGS } from '../src/renderer/i18n-refusals';
 import { TOOL_DEFS } from '../src/renderer/commands/tools';
 import { NAV_PANEL_TITLES } from '../src/renderer/commands/navpanels';
 import { TOOLBAR_CATALOG } from '../src/renderer/commands/toolbars';
@@ -37,6 +38,7 @@ function expectedCatalog(): Record<string, string> {
     ...DIALOG_STRINGS,
     ...WORKBENCH_STRINGS,
     ...CANVAS_STRINGS,
+    ...REFUSAL_STRINGS,
   };
   for (const [id, cmd] of Object.entries(COMMANDS)) {
     out[`cmd.${id}`] = cmd.title;
@@ -118,6 +120,54 @@ describe('i18n catalogs (N12)', () => {
       const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
       const keys = Object.keys(JSON.parse(readFileSync(p, 'utf8'))).sort();
       expect(keys, `locale ${locale} key set diverges from en`).toEqual(enKeys);
+    }
+  });
+
+  // N12 slice E — the locale-QA gates. The catalog review ran both of these
+  // over the es catalog by hand; they are tests so a future locale (or a new
+  // key) cannot regress them silently. A dropped `{{name}}` is the worst
+  // class of translation bug: the sentence still reads, and the value it was
+  // supposed to name simply vanishes.
+  it('every locale carries EXACTLY en\'s interpolation placeholders per key', () => {
+    const en = JSON.parse(readFileSync(EN_PATH, 'utf8')) as Record<string, string>;
+    const placeholders = (s: string): string =>
+      [...s.matchAll(/\{\{([^}]*)\}\}/g)].map((m) => m[1].trim()).sort().join(',');
+    for (const locale of SHIPPED_LOCALES) {
+      if (locale === 'en') continue;
+      const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
+      const cat = JSON.parse(readFileSync(p, 'utf8')) as Record<string, string>;
+      for (const [k, v] of Object.entries(en)) {
+        expect(placeholders(cat[k]), `${locale}:${k} placeholders diverge from en`).toBe(
+          placeholders(v),
+        );
+      }
+    }
+  });
+
+  it('every plural pair is complete in every locale and the two forms differ', () => {
+    const en = JSON.parse(readFileSync(EN_PATH, 'utf8')) as Record<string, string>;
+    const bases = Object.keys(en)
+      .filter((k) => k.endsWith('_one'))
+      .map((k) => k.slice(0, -'_one'.length));
+    expect(bases.length).toBeGreaterThan(0);
+    for (const locale of SHIPPED_LOCALES) {
+      const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
+      const cat = JSON.parse(readFileSync(p, 'utf8')) as Record<string, string>;
+      for (const base of bases) {
+        expect(cat[`${base}_one`], `${locale}:${base}_one missing`).toBeTruthy();
+        expect(cat[`${base}_other`], `${locale}:${base}_other missing`).toBeTruthy();
+        // Identical forms are LEGITIMATE where the source does not inflect
+        // either ("{{count}} selected" reads the same at 1 and at 3, while
+        // Spanish still inflects it). What is never legitimate is a locale
+        // collapsing a distinction the source makes — that is one form
+        // pasted over the other.
+        if (en[`${base}_one`] !== en[`${base}_other`]) {
+          expect(
+            cat[`${base}_one`] === cat[`${base}_other`],
+            `${locale}:${base} collapses a plural distinction en makes`,
+          ).toBe(false);
+        }
+      }
     }
   });
 

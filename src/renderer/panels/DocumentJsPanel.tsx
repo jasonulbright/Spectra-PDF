@@ -149,7 +149,7 @@ export function DocumentJsPanel(): React.ReactElement {
     registerDocumentJsHandler({
       set: async (list) => {
         const p = activePathRef.current;
-        if (!p) throw new Error('No active document.');
+        if (!p) throw new Error(tChrome('refusal.file.noActiveDocument'));
         await performOperation(p, 'set_document_js', { scripts: list });
         await load();
       },

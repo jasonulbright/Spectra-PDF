@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.17 — The interface speaks Spanish
+
+### Language
+- **Spanish.** The whole interface is translated — menus, toolbars, the
+  tool dock and every panel in it, dialogs, the navigation pane, the
+  on-page editing chrome, and the messages the app shows when it cannot
+  do something. Nothing is half-translated: a language is offered only
+  once its wording is complete.
+- **Settings ▸ Language.** Choose System default or a language outright.
+  The app follows Windows by default, and remembers your choice.
+- **It switches live.** Pick a language and the interface changes
+  immediately — no restart, nothing to reopen, and the document you are
+  working on is untouched.
+- **Numbers, dates, and plurals follow the language.** Counts, sizes, and
+  timestamps are written the way the chosen language writes them, rather
+  than translated word by word.
+- **Recognition languages read naturally.** The OCR language list is
+  shown in your interface language, using the names Windows itself uses.
+- **The interface announces its language.** Assistive technology is told
+  which language the interface is in, so it reads Spanish text with
+  Spanish pronunciation.
+
 ## 1.0.16 — Deeper image, vector, and paragraph editing
 
 Images gain skew, multi-select groups, blend modes, and gradient fades —
