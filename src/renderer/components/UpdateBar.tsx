@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { app } from '../lib/tauri-bridge';
 import { check } from '@tauri-apps/plugin-updater';
+import { useTranslation } from 'react-i18next';
 import { loadSettings } from '../lib/app-settings';
+import { tChrome } from '../i18n';
 
 // NOTIFY-ONLY updates (owner ruling 2026-07-25: "no self respecting enterprise
 // allows auto-updates"). This bar tells you a newer release exists and hands
@@ -25,6 +27,8 @@ interface UpdateBarProps {
 }
 
 export function UpdateBar({ checkSignal = 0 }: UpdateBarProps): React.ReactElement | null {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const [state, setState] = useState<UpdateState>('idle');
   const [version, setVersion] = useState('');
 
@@ -92,34 +96,36 @@ export function UpdateBar({ checkSignal = 0 }: UpdateBarProps): React.ReactEleme
       data-testid="update-bar"
       className="app-banner flex items-center gap-3 px-4 py-1.5 bg-blue-900/60 border-b border-blue-800 text-sm shrink-0"
     >
-      {state === 'checking' && <span className="text-blue-200">Checking for updates…</span>}
+      {state === 'checking' && (
+        <span className="text-blue-200">{tChrome('dialog.update.checking')}</span>
+      )}
       {state === 'uptodate' && (
         <>
-          <span className="text-blue-200">You’re up to date.</span>
+          <span className="text-blue-200">{tChrome('dialog.update.upToDate')}</span>
           <button
             data-testid="update-dismiss"
             onClick={() => setState('idle')}
             className="px-2 py-0.5 text-blue-400 hover:text-blue-200 text-xs"
           >
-            Dismiss
+            {tChrome('dialog.update.dismiss')}
           </button>
         </>
       )}
       {state === 'disabled' && (
         <>
-          <span className="text-blue-200">Updates are managed by your organization.</span>
+          <span className="text-blue-200">{tChrome('dialog.update.managed')}</span>
           <button
             data-testid="update-dismiss"
             onClick={() => setState('idle')}
             className="px-2 py-0.5 text-blue-400 hover:text-blue-200 text-xs"
           >
-            Dismiss
+            {tChrome('dialog.update.dismiss')}
           </button>
         </>
       )}
       {state === 'available' && (
         <>
-          <span className="text-blue-200">Update available: v{version}</span>
+          <span className="text-blue-200">{tChrome('dialog.update.available', { version })}</span>
           <button
             data-testid="update-view-release"
             onClick={() => {
@@ -128,14 +134,14 @@ export function UpdateBar({ checkSignal = 0 }: UpdateBarProps): React.ReactEleme
             }}
             className="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 rounded text-xs font-medium"
           >
-            View release
+            {tChrome('dialog.update.viewRelease')}
           </button>
           <button
             data-testid="update-dismiss"
             onClick={() => setState('idle')}
             className="px-2 py-0.5 text-blue-400 hover:text-blue-200 text-xs"
           >
-            Dismiss
+            {tChrome('dialog.update.dismiss')}
           </button>
         </>
       )}

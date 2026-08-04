@@ -1,5 +1,7 @@
 import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../i18n';
 
 export type ConfirmResult = 'save' | 'discard' | 'cancel';
 
@@ -18,6 +20,8 @@ interface ConfirmDialogProps {
 }
 
 export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title }: ConfirmDialogProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   return (
     <Dialog.Root open={open} onOpenChange={(isOpen) => { if (!isOpen) onResult('cancel'); }}>
       <Dialog.Portal>
@@ -28,7 +32,13 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
           onInteractOutside={(e) => e.preventDefault()}
         >
           <Dialog.Title className="text-sm font-semibold text-neutral-100 mb-1">
-            {title ?? (kind === 'proceed' ? 'Are you sure?' : kind === 'notice' ? 'Notice' : 'Unsaved Changes')}
+            {title ?? tChrome(
+              kind === 'proceed'
+                ? 'dialog.confirm.titleProceed'
+                : kind === 'notice'
+                  ? 'dialog.confirm.titleNotice'
+                  : 'dialog.confirm.titleUnsaved',
+            )}
           </Dialog.Title>
           <Dialog.Description className="text-sm text-neutral-400 mb-5" data-testid="confirm-message">
             {message}
@@ -41,7 +51,7 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
                 autoFocus
                 className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded transition-colors"
               >
-                OK
+                {tChrome('dialog.common.ok')}
               </button>
             </div>
           ) : (
@@ -51,7 +61,7 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
                 onClick={() => onResult('discard')}
                 className="px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-200 bg-neutral-800 hover:bg-neutral-700 rounded transition-colors"
               >
-                Don't Save
+                {tChrome('dialog.confirm.dontSave')}
               </button>
             )}
             <button
@@ -59,7 +69,7 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
               className="px-3 py-1.5 text-xs font-medium text-neutral-300 bg-neutral-700 hover:bg-neutral-600 rounded transition-colors"
               autoFocus={kind === 'proceed'}
             >
-              Cancel
+              {tChrome('dialog.common.cancel')}
             </button>
             <button
               data-testid="confirm-affirm"
@@ -70,7 +80,7 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
               // not commit it, so focus starts on Cancel (review-caught).
               autoFocus={kind !== 'proceed'}
             >
-              {kind === 'proceed' ? 'Continue' : 'Save'}
+              {tChrome(kind === 'proceed' ? 'dialog.confirm.continue' : 'dialog.common.save')}
             </button>
           </div>
           )}

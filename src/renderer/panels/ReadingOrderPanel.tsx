@@ -14,8 +14,7 @@ import {
   type StructTree,
 } from '../lib/struct-tree';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount } from '../i18n';
-import type { PanelKey } from '../i18n-panels';
+import { tChrome } from '../i18n';
 
 // The Reading Order panel (§ I.6) — the per-page view of the structure tree's
 // traversal order, which is the order assistive technology reads the page in.

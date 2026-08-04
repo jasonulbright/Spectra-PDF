@@ -1,5 +1,7 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppModal } from '../hooks/useAppModal';
+import { tChrome, tCommandTitle, tToolbarGroup } from '../i18n';
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { TOOLBAR_CATALOG } from '../commands/toolbars';
 import { COMMANDS } from '../commands/registry';
@@ -20,6 +22,8 @@ interface CustomizeToolbarDialogProps {
 }
 
 export function CustomizeToolbarDialog({ onClose }: CustomizeToolbarDialogProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
   const overrides = state.ui.toolbarOverrides;
@@ -37,22 +41,21 @@ export function CustomizeToolbarDialog({ onClose }: CustomizeToolbarDialogProps)
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Customize toolbar"
+        aria-label={tChrome('dialog.customize.aria')}
         className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[420px] max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 pt-4 pb-2">
-          <h2 className="text-lg font-semibold">Customize Toolbar</h2>
+          <h2 className="text-lg font-semibold">{tChrome('dialog.customize.title')}</h2>
           <p className="text-xs text-neutral-500 mt-1">
-            Choose which buttons the main toolbar shows. Changes apply immediately and are
-            remembered.
+            {tChrome('dialog.customize.blurb')}
           </p>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-2 flex flex-col gap-3">
           {TOOLBAR_CATALOG.map((group) => (
             <div key={group.id}>
               <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-1">
-                {group.label}
+                {tToolbarGroup(group.id, group.label)}
               </div>
               <div className="flex flex-col gap-0.5">
                 {group.items.map((item) => {
@@ -82,7 +85,9 @@ export function CustomizeToolbarDialog({ onClose }: CustomizeToolbarDialogProps)
                       <span className="w-5 h-5 flex items-center justify-center text-neutral-400">
                         <ChromeIcon icon={item.icon} />
                       </span>
-                      <span className="text-sm text-neutral-200">{COMMANDS[item.command].title}</span>
+                      <span className="text-sm text-neutral-200">
+                        {tCommandTitle(item.command, COMMANDS[item.command].title)}
+                      </span>
                     </label>
                   );
                 })}
@@ -97,7 +102,7 @@ export function CustomizeToolbarDialog({ onClose }: CustomizeToolbarDialogProps)
             disabled={isDefault}
             className="px-3 py-1 text-sm bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 rounded"
           >
-            Reset to default
+            {tChrome('dialog.customize.reset')}
           </button>
           <div className="flex-1" />
           <button
@@ -105,7 +110,7 @@ export function CustomizeToolbarDialog({ onClose }: CustomizeToolbarDialogProps)
             onClick={onClose}
             className="px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
           >
-            Close
+            {tChrome('dialog.common.close')}
           </button>
         </div>
       </div>

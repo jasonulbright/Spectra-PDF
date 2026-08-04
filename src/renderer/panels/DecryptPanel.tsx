@@ -4,7 +4,7 @@ import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount } from '../i18n';
+import { tChrome } from '../i18n';
 
 export function DecryptPanel(): React.ReactElement {
   // N12: re-render on language change; strings resolve via tChrome.

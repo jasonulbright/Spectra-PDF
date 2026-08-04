@@ -5,7 +5,7 @@ import { file } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount } from '../i18n';
+import { tChrome } from '../i18n';
 
 interface Layer {
   index: number;
