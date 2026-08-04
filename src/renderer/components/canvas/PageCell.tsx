@@ -5028,12 +5028,7 @@ function ParagraphEditor({
           <select
             data-testid="edit-para-family"
             value={family}
-            disabled={para.vertical}
-            title={tChrome(
-              para.vertical
-                ? 'canvas.editpara.verticalKeepsFont'
-                : 'canvas.editpara.familyTitle',
-            )}
+            title={tChrome('canvas.editpara.familyTitle')}
             onChange={(e) => {
               // A5b dual role: a real family + a PARTIAL selection → per-span
               // face on that range; otherwise the shipped whole-paragraph
@@ -5052,7 +5047,20 @@ function ParagraphEditor({
             }}
           >
             <option value="">{tChrome('canvas.editpara.keepFont')}</option>
-            <optgroup label={tChrome('canvas.editpara.bundled')}>
+            {/* 9.T4 + brief 39 § 3.4: the three bundled families are
+                HORIZONTAL, and a vertical paragraph's substitution resolves
+                the bundled CJK face regardless of which one is picked — so
+                on a column they are disabled and say why, rather than
+                silently resolving to something else. An INSTALLED face is a
+                real choice for a column (T6) and refuses by name when it
+                lacks the vertical machinery. */}
+            <optgroup
+              label={tChrome('canvas.editpara.bundled')}
+              disabled={para.vertical}
+              title={
+                para.vertical ? tChrome('canvas.editpara.verticalNoBundledFace') : undefined
+              }
+            >
               <option value="sans">Liberation Sans</option>
               <option value="serif">Liberation Serif</option>
               <option value="mono">Liberation Mono</option>
@@ -5088,10 +5096,7 @@ function ParagraphEditor({
           data-testid="edit-para-bold"
           className={`page-editpara-style${(faceField ? faceField.bold : bold) ? ' pressed' : ''}`}
           aria-pressed={faceField ? faceField.bold : bold}
-          disabled={para.vertical}
-          title={tChrome(
-            para.vertical ? 'canvas.editpara.verticalKeepsFont' : 'canvas.editpara.boldTitle',
-          )}
+          title={tChrome('canvas.editpara.boldTitle')}
           onClick={() => {
             // A5b dual role: a PARTIAL selection toggles bold on that range
             // (keeping its other axes); a caret or whole-text selection
@@ -5130,10 +5135,7 @@ function ParagraphEditor({
           data-testid="edit-para-italic"
           className={`page-editpara-style page-editpara-style-i${(faceField ? faceField.italic : italic) ? ' pressed' : ''}`}
           aria-pressed={faceField ? faceField.italic : italic}
-          disabled={para.vertical}
-          title={tChrome(
-            para.vertical ? 'canvas.editpara.verticalKeepsFont' : 'canvas.editpara.italicTitle',
-          )}
+          title={tChrome('canvas.editpara.italicTitle')}
           onClick={() => {
             // A5b dual role: PARTIAL → per-span italic on that range; caret
             // or whole-text → the shipped whole-paragraph toggle. Per SEGMENT
@@ -5160,8 +5162,11 @@ function ParagraphEditor({
         {/* 9.K2 OpenType features — dual role like B/I. A partial selection
             applies the feature to that range (per span, riding the face
             entry); a caret or whole-text selection applies it to the whole
-            paragraph. Disabled for vertical text: applying a feature switches
-            to a horizontal bundled face, which the engine refuses. */}
+            paragraph. Still disabled for vertical text after T4/brief 39 —
+            but for the REAL reason, not the family one: a column's embed
+            goes through `build_vertical_font`, which carries the face's
+            upright forms and no feature request at all, so a feature toggle
+            would be a control that quietly did nothing. */}
         <button
           type="button"
           data-testid="edit-para-smallcaps"
@@ -5171,7 +5176,9 @@ function ParagraphEditor({
           aria-pressed={faceField ? faceField.smallCaps : smallCaps}
           disabled={para.vertical}
           title={tChrome(
-            para.vertical ? 'canvas.editpara.verticalKeepsFont' : 'canvas.editpara.smallCapsTitle',
+            para.vertical
+              ? 'canvas.editpara.verticalSmallCaps'
+              : 'canvas.editpara.smallCapsTitle',
           )}
           onClick={() => {
             const sel = spanTarget();
@@ -5203,7 +5210,7 @@ function ParagraphEditor({
           disabled={para.vertical}
           title={tChrome(
             para.vertical
-              ? 'canvas.editpara.verticalKeepsFont'
+              ? 'canvas.editpara.verticalAlternates'
               : 'canvas.editpara.alternatesTitle',
           )}
           onClick={() => {
