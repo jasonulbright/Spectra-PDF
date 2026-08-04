@@ -3,6 +3,8 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 interface Check {
   id: string;
@@ -27,6 +29,8 @@ const ICON: Record<Check['status'], { glyph: string; color: string }> = {
 };
 
 export function PreflightPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const [report, setReport] = useState<Report | null>(null);
@@ -39,13 +43,13 @@ export function PreflightPanel(): React.ReactElement {
   const run = useCallback(async () => {
     if (!workingPath) return;
     setBusy(true);
-    setStatus('Analysing…');
+    setStatus(tChrome('panel.preflight.analysing'));
     try {
       const res = await call('preflight', { file: workingPath });
       setReport(res as unknown as Report);
       setStatus('');
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
@@ -59,13 +63,13 @@ export function PreflightPanel(): React.ReactElement {
     void run();
   }, [buffer, workingPath, run]);
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to run print preflight" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.preflight.open')} />;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="text-sm text-neutral-400">
-          Working on: <span className="text-neutral-200">{activeFile.name}</span>
+          {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span>
         </div>
         <button
           data-testid="preflight-recheck"
@@ -73,20 +77,24 @@ export function PreflightPanel(): React.ReactElement {
           disabled={busy}
           className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
         >
-          Re-run
+          {tChrome('panel.preflight.rerun')}
         </button>
       </div>
 
       {report && (
         <div className="text-sm text-neutral-300" data-testid="preflight-summary">
           {report.failed === 0 && report.warnings === 0 ? (
-            <span className="text-green-400">Ready to print — all {report.total} checks passed.</span>
+            <span className="text-green-400">{tChrome('panel.preflight.allPassed', { count: report.total })}</span>
           ) : (
             <>
-              <span className="text-green-400">{report.passed} passed</span>
-              {report.warnings > 0 && <>, <span className="text-amber-400">{report.warnings} to review</span></>}
-              {report.failed > 0 && <>, <span className="text-red-400">{report.failed} failed</span></>}
-              {' '}of {report.total}.
+              <span className="text-green-400">{tChrome('panel.preflight.passed', { count: report.passed })}</span>
+              {report.warnings > 0 && (
+                <>, <span className="text-amber-400">{tChrome('panel.preflight.toReview', { count: report.warnings })}</span></>
+              )}
+              {report.failed > 0 && (
+                <>, <span className="text-red-400">{tChrome('panel.preflight.failed', { count: report.failed })}</span></>
+              )}
+              {' '}{tChrome('panel.preflight.ofTotal', { count: report.total })}
             </>
           )}
         </div>
@@ -108,8 +116,9 @@ export function PreflightPanel(): React.ReactElement {
 
       {report && (
         <div className="text-xs text-neutral-500">
-          {report.images} image{report.images === 1 ? '' : 's'}
-          {report.color_families.length > 0 && ` · colour: ${report.color_families.join(', ')}`}
+          {tChromeCount('panel.preflight.images', report.images)}
+          {report.color_families.length > 0 &&
+            tChrome('panel.preflight.colour', { families: report.color_families.join(', ') })}
         </div>
       )}
       <StatusBar message={status} busy={busy} />
