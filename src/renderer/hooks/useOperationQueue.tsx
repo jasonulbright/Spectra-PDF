@@ -2,6 +2,7 @@ import React, { createContext, useContext, useCallback, useState, useRef } from 
 import type { QueueItem } from '../components/OperationQueue';
 import { app } from '../lib/tauri-bridge';
 import { tChrome, tChromeCount, tQueueOp } from '../i18n';
+import { rawEngineMessage } from '../lib/engine-messages';
 
 interface QueueContextValue {
   items: QueueItem[];
@@ -334,11 +335,14 @@ export function QueueProvider({ children }: { children: React.ReactNode }): Reac
         return result;
       },
       (err) => {
+        // The queue LINE renders in the UI language; the LOG stays English
+        // (N12 slice D — an engine refusal keeps its original text in the
+        // diagnostic sink, exactly as the label above passes `lng: 'en'`).
         const message = err instanceof Error ? err.message : String(err);
         setItems((prev) => prev.map((item) =>
           item.id === id ? { ...item, status: 'error' as const, message } : item
         ));
-        logLine('ERROR', message);
+        logLine('ERROR', rawEngineMessage(err));
         throw err;
       },
     );

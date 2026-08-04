@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { engine, dialog } from '../lib/tauri-bridge';
+import { EngineError } from '../lib/engine-messages';
 import { runCommitGate } from '../lib/commit-gate';
 import { lockKeysFor, withFileLock } from '../lib/engine-lock';
 import { useOperationQueue, isTrackableMethod } from './useOperationQueue';
@@ -87,7 +88,11 @@ export function useEngine() {
       pending.current.delete(res.id);
 
       if (res.error) {
-        req.reject(new Error(res.error.message));
+        // N12 slice D — the engine-message boundary. The refusal keeps its
+        // English in `raw` (the log, the batch report and the CLI read that);
+        // `message` renders it through the catalog when the UI shows it, and
+        // passes it through verbatim when the table doesn't know it.
+        req.reject(new EngineError(res.error.message));
       } else {
         req.resolve(res.result as EngineResult);
       }

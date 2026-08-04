@@ -22,6 +22,7 @@ import { NAV_PANEL_TITLES } from '../src/renderer/commands/navpanels';
 import { TOOLBAR_CATALOG } from '../src/renderer/commands/toolbars';
 import { FRIENDLY_NAMES } from '../src/renderer/hooks/useOperationQueue';
 import { STEP_CATALOG } from '../src/renderer/lib/guided-actions';
+import { ENGINE_MESSAGE_ROWS } from '../src/renderer/lib/engine-messages';
 
 const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
@@ -75,6 +76,13 @@ function expectedCatalog(): Record<string, string> {
         }
       }
     }
+  }
+  // N12 slice D — the ENGINE refusals. English lives in the engine (and in
+  // the checked-in table that mirrors it, gated by tests/test_engine_messages
+  // .py), so the en catalog derives from the table exactly like the other
+  // data tables: never hand-authored, never allowed to drift from the source.
+  for (const row of ENGINE_MESSAGE_ROWS) {
+    out[`engine.${row.key}`] = row.message;
   }
   const walk = (nodes: MenuNode[]): void => {
     for (const n of nodes) {
