@@ -544,6 +544,17 @@ export const PANEL_STRINGS = {
   'panel.portfolio.saving': 'Saving…',
   'panel.portfolio.updating': 'Updating…',
   'panel.portfolio.removing': 'Removing…',
+  // N12 slice E — the DONE lines. The slice-B sweep threaded the …ing
+  // states but not these six, because each was a `${}` TEMPLATE rather than
+  // a bare literal; the attribute/literal regexes never saw them. Each is
+  // one interpolated key ({{name}} is an attachment's own file name and
+  // stays verbatim), never "Added " + name.
+  'panel.portfolio.added': 'Added {{name}}',
+  'panel.portfolio.opened': 'Opened {{name}}',
+  'panel.portfolio.openedExternally': 'Opened {{name}} in its own app',
+  'panel.portfolio.saved': 'Saved {{name}}',
+  'panel.portfolio.updated': 'Updated {{name}}',
+  'panel.portfolio.removed': 'Removed {{name}}',
   'panel.portfolio.createHeading': 'Create a portfolio',
   'panel.portfolio.titlePlaceholder': 'Title (optional)',
   'panel.portfolio.pickAndCreate': 'Pick files and create…',
@@ -635,6 +646,7 @@ export const PANEL_STRINGS = {
   'panel.settings.builtin': 'Built-in',
   'panel.settings.external': 'External',
   'panel.settings.gsUsedFor': 'Used for Compress and PDF/A conversion',
+  'panel.settings.categoriesAria': 'Preferences categories',
   'panel.settings.version': 'Version {{version}}',
   'panel.settings.vendor': 'Vendor: {{vendor}}',
   'panel.settings.identityName': 'Identity name',

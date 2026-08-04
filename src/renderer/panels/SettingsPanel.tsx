@@ -227,7 +227,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
 
   return (
     <div className="prefs">
-      <nav className="prefs-nav" aria-label="Preferences categories">
+      <nav className="prefs-nav" aria-label={tChrome('panel.settings.categoriesAria')}>
         {PREF_CATEGORIES.map((c) => (
           <button
             key={c}

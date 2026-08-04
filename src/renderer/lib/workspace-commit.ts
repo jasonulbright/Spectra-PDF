@@ -2,6 +2,10 @@ import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
 import { carriesManifest } from './doc-names';
 import type { ExportPage } from './pdfx-format';
 import type { AppAction, OpenDocument, OpenFile, PdfBuffer, Workspace } from '../state/types';
+// N12 slice E: the one refusal here that reaches the user resolves through
+// the catalog (the concurrent-entry throw below is an internal invariant —
+// a programming error nobody is meant to read, so it stays English).
+import { tChrome } from '../i18n';
 
 // A page's 1-based position within its file's committed order: pages of all
 // same-path documents in workspace order — what the file looks like after
@@ -76,7 +80,7 @@ export function planCommit(
     if (!bytes) {
       const source = files.get(path);
       if (!source?.buffer) {
-        throw new Error(`Cannot commit: source file is no longer open (${path})`);
+        throw new Error(tChrome('refusal.commit.sourceClosed', { path }));
       }
       bytes = toBytes(source.buffer);
       bytesByPath.set(path, bytes);
