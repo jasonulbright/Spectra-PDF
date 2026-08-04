@@ -143,6 +143,96 @@ export const CANVAS_STRINGS = {
   'canvas.stamp.defaultName': 'Stamp',
 
   'canvas.toolbar.colorGroup': 'Annotation colour',
+
+  // ── The properties bar (I.6, Acrobat's Ctrl+E) ───────────────────────
+  'canvas.pbar.barLabel': 'Properties bar',
+  // What the selected annotation IS, in human words. Deliberately NOT the
+  // Comments panel's `panel.comments.kind.*` — those are the PDF's own
+  // subtype names (FreeText, StrikeOut) and this bar speaks plain language.
+  'canvas.pbar.kind.highlight': 'Highlight box',
+  'canvas.pbar.kind.freetext': 'Text box',
+  'canvas.pbar.kind.ink': 'Ink stroke',
+  'canvas.pbar.kind.stamp': 'Stamp',
+  'canvas.pbar.kind.textmarkup': 'Text markup',
+  'canvas.pbar.kind.note': 'Sticky note',
+  'canvas.pbar.kind.measure': 'Measurement',
+  'canvas.pbar.kind.shape': 'Shape',
+  'canvas.pbar.kind.callout': 'Callout',
+  'canvas.pbar.markup.highlight': 'Highlight',
+  'canvas.pbar.markup.underline': 'Underline',
+  'canvas.pbar.markup.strikeout': 'Strike out',
+  'canvas.pbar.markup.squiggly': 'Squiggly',
+
+  'canvas.pbar.zorderGroup': 'Z-order',
+  'canvas.pbar.z.front': 'Bring to front',
+  'canvas.pbar.z.forward': 'Bring forward',
+  'canvas.pbar.z.backward': 'Send backward',
+  'canvas.pbar.z.back': 'Send to back',
+
+  'canvas.pbar.styleGroup': 'Style',
+  'canvas.pbar.strokeWidth': 'Stroke width',
+  'canvas.pbar.strokeWidthOption': '{{width}} pt',
+  'canvas.pbar.opacity': 'Opacity',
+  'canvas.pbar.opacityOption': '{{percent}}%',
+  'canvas.pbar.noFill': 'No fill',
+  'canvas.pbar.fillWith': 'Fill with {{color}}',
+
+  'canvas.pbar.rotateFlipGroup': 'Rotate and flip',
+  'canvas.pbar.flipH': 'Flip horizontal',
+  'canvas.pbar.flipV': 'Flip vertical',
+
+  'canvas.pbar.shapeOptionsGroup': 'Shape options',
+  'canvas.pbar.lineStart': 'Line start',
+  'canvas.pbar.lineEnd': 'Line end',
+  // One key per (ending, end) PAIR: "Open arrow" + " start" is two fragments
+  // whose order differs per language, which is the concatenation the brief
+  // bans. The VALUE stays the PDF's /LE name.
+  'canvas.pbar.endingStart.None': 'Plain start',
+  'canvas.pbar.endingStart.OpenArrow': 'Open arrow start',
+  'canvas.pbar.endingStart.ClosedArrow': 'Closed arrow start',
+  'canvas.pbar.endingEnd.None': 'Plain end',
+  'canvas.pbar.endingEnd.OpenArrow': 'Open arrow end',
+  'canvas.pbar.endingEnd.ClosedArrow': 'Closed arrow end',
+  'canvas.pbar.cloudIntensity': 'Cloud intensity',
+  'canvas.pbar.cloudOption': 'Cloud {{level}}',
+
+  'canvas.pbar.selectedCount_one': '{{count}} selected',
+  'canvas.pbar.selectedCount_other': '{{count}} selected',
+  'canvas.pbar.alignGroup': 'Align',
+  'canvas.pbar.distributeGroup': 'Distribute',
+  'canvas.pbar.distHAria': 'Distribute horizontally',
+  'canvas.pbar.distVAria': 'Distribute vertically',
+  'canvas.pbar.matchSizeGroup': 'Match size',
+  'canvas.pbar.matchWidths': 'Match widths (to the first selected)',
+  'canvas.pbar.matchWidthsAria': 'Match widths',
+  'canvas.pbar.matchHeights': 'Match heights (to the first selected)',
+  'canvas.pbar.matchHeightsAria': 'Match heights',
+  'canvas.pbar.matchBoth': 'Match size (to the first selected)',
+  'canvas.pbar.matchBothAria': 'Match size',
+
+  'canvas.pbar.recolorAllGroup': 'Recolor all',
+  'canvas.pbar.recolorAll': 'Recolor all to {{color}}',
+  'canvas.pbar.colorGroup': 'Color',
+  'canvas.pbar.recolorTo': 'Recolor to {{color}}',
+  // The whole placement readout is ONE sentence: "p." is an abbreviation a
+  // translator replaces, and the ×-separated size is not two fragments.
+  'canvas.pbar.place': 'p.{{page}} · {{width}}×{{height}} pt',
+  // The quotation marks are locale typography, so they live in the catalog.
+  'canvas.pbar.note': '“{{note}}”',
+
+  'canvas.pbar.newColorGroup': 'New annotation color',
+  // One key per comment mode: "New " + mode + " color" glued a raw mode id
+  // into an English sentence — untranslatable, and it printed the id.
+  'canvas.pbar.newColor.highlight': 'New highlight color',
+  'canvas.pbar.newColor.freetext': 'New text box color',
+  'canvas.pbar.newColor.ink': 'New ink color',
+  'canvas.pbar.newColor.stamp': 'New stamp color',
+  'canvas.pbar.useForNew': 'Use {{color}} for new annotations',
+
+  'canvas.pbar.empty':
+    'Click a comment with the Select tool to see its properties — Ctrl-click or Ctrl-drag for several.',
+  'canvas.pbar.close': 'Hide the properties bar (Ctrl+E)',
+  'canvas.pbar.closeAria': 'Hide the properties bar',
 } as const;
 
 export type CanvasKey = keyof typeof CANVAS_STRINGS;
