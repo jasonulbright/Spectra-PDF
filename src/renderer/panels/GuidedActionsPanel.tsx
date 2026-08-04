@@ -22,6 +22,8 @@ import {
   type GuidedAction,
   type GuidedStepOp,
 } from '../lib/guided-actions';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tStepTitle, tStepParam, tStepOption, tStepHint } from '../i18n';
 
 // Guided actions (parity map § 2 — the king's Action Wizard), slice 1: named
 // sequences of existing gated engine ops, authored in a compact editor and
@@ -57,6 +59,8 @@ type PanelView =
 type StepStatus = 'pending' | 'running' | 'done' | { error: string };
 
 export function GuidedActionsPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call, callRaw, saveFile } = useEngine();
   const [actions, setActions] = useState<GuidedAction[]>(() => loadGuidedActions());
@@ -212,9 +216,9 @@ export function GuidedActionsPanel(): React.ReactElement {
   const runActionOnFolder = useCallback(
     async (action: GuidedAction) => {
       if (running) return;
-      const source = await dialog.pickFolder('Folder of PDFs to process');
+      const source = await dialog.pickFolder(tChrome('panel.ga.pickSource'));
       if (!source) return;
-      const dest = await dialog.pickFolder('Destination for the processed copies');
+      const dest = await dialog.pickFolder(tChrome('panel.ga.pickDest'));
       if (!dest) return;
       const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
       if (anyAsked) {
@@ -232,7 +236,7 @@ export function GuidedActionsPanel(): React.ReactElement {
   const runActionInPlace = useCallback(
     async (action: GuidedAction) => {
       if (running) return;
-      const source = await dialog.pickFolder('Folder of PDFs to process IN PLACE');
+      const source = await dialog.pickFolder(tChrome('panel.ga.pickInPlace'));
       if (!source) return;
       const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
       if (anyAsked) {
@@ -347,14 +351,14 @@ export function GuidedActionsPanel(): React.ReactElement {
     return (
       <div className="flex flex-col gap-4" data-testid="actions-editor">
         <div className="text-sm font-medium text-neutral-300">
-          {view.isNew ? 'New guided action' : 'Edit guided action'}
+          {view.isNew ? tChrome('panel.ga.newAction') : tChrome('panel.ga.editAction')}
         </div>
         <input
           type="text"
           data-testid="action-name"
           value={action.name}
           onChange={(e) => setAction({ ...action, name: e.target.value })}
-          placeholder="Action name"
+          placeholder={tChrome('panel.ga.namePlaceholder')}
           className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
         />
         <div className="flex flex-col gap-2" data-testid="action-steps">
@@ -368,7 +372,7 @@ export function GuidedActionsPanel(): React.ReactElement {
               >
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-neutral-200 flex-1">
-                    {i + 1}. {def.title}
+                    {i + 1}. {tStepTitle(def.op, def.title)}
                   </span>
                   <button
                     type="button"
@@ -404,7 +408,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                     }
                     className="px-1.5 py-0.5 text-xs text-neutral-400 hover:text-red-400"
                   >
-                    Remove
+                    {tChrome('panel.ga.remove')}
                   </button>
                 </div>
                 {def.params.length > 0 && (
@@ -418,7 +422,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                             className="text-xs text-neutral-500 px-1.5 py-1 border border-dashed border-neutral-700 rounded"
                             data-testid={`action-step-${i}-${p.key}-secret`}
                           >
-                            {p.label}: asked when the action runs
+                            {tChrome('panel.ga.askedWhenRuns', { label: tStepParam(def.op, p.key, p.label) })}
                           </span>
                         );
                       }
@@ -432,8 +436,12 @@ export function GuidedActionsPanel(): React.ReactElement {
                         setAction({ ...action, steps });
                       };
                       return (
-                        <label key={p.key} className="flex items-center gap-1 text-xs text-neutral-400" title={p.hint}>
-                          {p.label}
+                        <label
+                          key={p.key}
+                          className="flex items-center gap-1 text-xs text-neutral-400"
+                          title={p.hint ? tStepHint(def.op, p.key, p.hint) : undefined}
+                        >
+                          {tStepParam(def.op, p.key, p.label)}
                           {p.kind === 'select' ? (
                             <select
                               data-testid={`action-step-${i}-${p.key}`}
@@ -451,7 +459,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                             >
                               {p.options!.map((o) => (
                                 <option key={o.value} value={o.value}>
-                                  {o.label}
+                                  {tStepOption(def.op, p.key, o.value, o.label)}
                                 </option>
                               ))}
                             </select>
@@ -477,7 +485,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                           )}
                           <span
                             className="flex items-center gap-0.5 text-neutral-500"
-                            title="Ask for this value each time the action runs"
+                            title={tChrome('panel.ga.askTitle')}
                           >
                             <input
                               type="checkbox"
@@ -485,7 +493,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                               checked={isAsked}
                               onChange={toggleAsk}
                             />
-                            ask
+                            {tChrome('panel.ga.ask')}
                           </span>
                         </label>
                       );
@@ -513,7 +521,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             onClick={() => saveEdited(action, view.isNew)}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium"
           >
-            Save action
+            {tChrome('panel.ga.saveAction')}
           </button>
           <button
             type="button"
@@ -524,7 +532,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             }}
             className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm"
           >
-            Cancel
+            {tChrome('panel.ga.cancel')}
           </button>
         </div>
       </div>
@@ -561,7 +569,7 @@ export function GuidedActionsPanel(): React.ReactElement {
     return (
       <div className="flex flex-col gap-4" data-testid="actions-prerun">
         <div className="text-sm font-medium text-neutral-300">
-          Before running “{action.name}”
+          {tChrome('panel.ga.beforeRunning', { name: action.name })}
         </div>
         {action.steps.map((step, i) => {
           const asked = askedParamKeys(step);
@@ -570,9 +578,9 @@ export function GuidedActionsPanel(): React.ReactElement {
           return (
             <div key={i} className="flex flex-col gap-2 px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded">
               <div className="text-sm text-neutral-200">
-                {i + 1}. {def.title}
+                {i + 1}. {tStepTitle(def.op, def.title)}
                 {def.terminalOutput && (
-                  <span className="text-xs text-neutral-500"> — writes a new file you pick next</span>
+                  <span className="text-xs text-neutral-500">{tChrome('panel.ga.writesNewFile')}</span>
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -580,7 +588,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                   const p = def.params.find((x) => x.key === key)!;
                   return (
                     <label key={key} className="flex items-center gap-1 text-xs text-neutral-400">
-                      {p.label}
+                      {tStepParam(def.op, p.key, p.label)}
                       {p.kind === 'select' ? (
                         <select
                           data-testid={`prerun-${i}-${key}`}
@@ -589,7 +597,9 @@ export function GuidedActionsPanel(): React.ReactElement {
                           className="px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
                         >
                           {p.options!.map((o) => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
+                            <option key={o.value} value={o.value}>
+                              {tStepOption(def.op, key, o.value, o.label)}
+                            </option>
                           ))}
                         </select>
                       ) : (
@@ -621,7 +631,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             onClick={start}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium"
           >
-            Start
+            {tChrome('panel.ga.start')}
           </button>
           <button
             type="button"
@@ -629,7 +639,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             onClick={() => setView({ kind: 'list' })}
             className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm"
           >
-            Cancel
+            {tChrome('panel.ga.cancel')}
           </button>
         </div>
       </div>
@@ -642,11 +652,11 @@ export function GuidedActionsPanel(): React.ReactElement {
     return (
       <div className="flex flex-col gap-4" data-testid="actions-folderrun">
         <div className="text-sm font-medium text-neutral-300">
-          Folder run — “{view.action.name}”
+          {tChrome('panel.ga.folderRun', { name: view.action.name })}
         </div>
         {!report && !error && (
           <p className="text-sm text-neutral-400" data-testid="folderrun-busy" aria-live="polite">
-            Processing the folder…
+            {tChrome('panel.ga.processing')}
           </p>
         )}
         {error && (
@@ -655,7 +665,7 @@ export function GuidedActionsPanel(): React.ReactElement {
         {report && (
           <>
             <p className="text-sm text-neutral-200" data-testid="folderrun-summary">
-              {report.ok} processed · {report.failed} failed · {report.total} total
+              {tChrome('panel.ga.folderSummary', { ok: report.ok, failed: report.failed, total: report.total })}
             </p>
             {report.failed > 0 && (
               <div className="flex flex-col gap-1" data-testid="folderrun-errors">
@@ -670,7 +680,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             )}
             {report.log_path && (
               <p className="text-xs text-neutral-500" data-testid="folderrun-log">
-                Log: {report.log_path}
+                {tChrome('panel.ga.log', { path: report.log_path })}
               </p>
             )}
           </>
@@ -683,7 +693,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             onClick={() => setView({ kind: 'list' })}
             className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
           >
-            Back to actions
+            {tChrome('panel.ga.backToActions')}
           </button>
         </div>
       </div>
@@ -696,7 +706,7 @@ export function GuidedActionsPanel(): React.ReactElement {
     const allDone = runStatuses.length > 0 && runStatuses.every((s) => s === 'done');
     return (
       <div className="flex flex-col gap-4" data-testid="actions-run">
-        <div className="text-sm font-medium text-neutral-300">Running “{view.action.name}”</div>
+        <div className="text-sm font-medium text-neutral-300">{tChrome('panel.ga.running', { name: view.action.name })}</div>
         <div className="flex flex-col gap-1">
           {view.action.steps.map((step, i) => {
             const s = runStatuses[i] ?? 'pending';
@@ -710,7 +720,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                 <span className="w-4 text-center">
                   {s === 'done' ? '✓' : s === 'running' ? '…' : typeof s === 'object' ? '✕' : '·'}
                 </span>
-                <span className="flex-1 text-neutral-200">{stepDefFor(step.op).title}</span>
+                <span className="flex-1 text-neutral-200">{tStepTitle(step.op, stepDefFor(step.op).title)}</span>
                 {typeof s === 'object' && (
                   <span className="text-xs text-red-400" title={s.error}>
                     {s.error.length > 60 ? `${s.error.slice(0, 59)}…` : s.error}
@@ -722,12 +732,12 @@ export function GuidedActionsPanel(): React.ReactElement {
         </div>
         {allDone && (
           <p className="text-sm text-green-400" data-testid="run-done">
-            Done — every step applied. Each step is one Undo.
+            {tChrome('panel.ga.done')}
           </p>
         )}
         {failed && (
           <p className="text-sm text-red-400" data-testid="run-failed">
-            Stopped at the failed step; earlier steps stay applied (undoable).
+            {tChrome('panel.ga.stopped')}
           </p>
         )}
         <div>
@@ -738,7 +748,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             onClick={() => setView({ kind: 'list' })}
             className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
           >
-            Back to actions
+            {tChrome('panel.ga.backToActions')}
           </button>
         </div>
       </div>
@@ -749,16 +759,16 @@ export function GuidedActionsPanel(): React.ReactElement {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-neutral-300">Guided actions</div>
+        <div className="text-sm font-medium text-neutral-300">{tChrome('panel.ga.heading')}</div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             data-testid="action-import"
-            title="Import an action from a file (exported here or written for the CLI)"
+            title={tChrome('panel.ga.importTitle')}
             onClick={() => void importAction()}
             className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
           >
-            Import…
+            {tChrome('panel.ga.import')}
           </button>
           <button
             type="button"
@@ -766,7 +776,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             onClick={startNew}
             className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded font-medium"
           >
-            New action…
+            {tChrome('panel.ga.new')}
           </button>
         </div>
       </div>
@@ -777,8 +787,7 @@ export function GuidedActionsPanel(): React.ReactElement {
       )}
       {actions.length === 0 ? (
         <p className="text-sm text-neutral-500" data-testid="actions-empty">
-          No actions yet. An action runs a sequence of steps — compress,
-          watermark, encrypt… — over the open document with one click.
+          {tChrome('panel.ga.empty')}
         </p>
       ) : (
         <div className="flex flex-col gap-1" data-testid="actions-list">
@@ -791,7 +800,7 @@ export function GuidedActionsPanel(): React.ReactElement {
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-neutral-200 truncate">{a.name}</div>
                 <div className="text-xs text-neutral-500">
-                  {a.steps.map((s) => stepDefFor(s.op).title).join(' → ')}
+                  {a.steps.map((s) => tStepTitle(s.op, stepDefFor(s.op).title)).join(' → ')}
                 </div>
               </div>
               <button
@@ -801,22 +810,22 @@ export function GuidedActionsPanel(): React.ReactElement {
                 onClick={() => void runAction(a)}
                 className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
               >
-                Run
+                {tChrome('panel.ga.run')}
               </button>
               <button
                 type="button"
                 data-testid={`action-folder-${a.id}`}
                 disabled={running}
-                title="Run this action on every PDF under a folder (originals untouched; copies mirror into a destination)"
+                title={tChrome('panel.ga.folderTitle')}
                 onClick={() => void runActionOnFolder(a)}
                 className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
               >
-                Folder…
+                {tChrome('panel.ga.folder')}
               </button>
               {confirmInPlace === a.id ? (
                 <>
                   <span className="text-xs text-amber-400 self-center" data-testid={`action-inplace-warning-${a.id}`}>
-                    Replaces the originals — no undo.
+                    {tChrome('panel.ga.inPlaceWarning')}
                   </span>
                   <button
                     type="button"
@@ -828,14 +837,14 @@ export function GuidedActionsPanel(): React.ReactElement {
                     }}
                     className="px-2 py-1 text-xs text-white bg-red-700/90 hover:bg-red-600 disabled:opacity-50 rounded"
                   >
-                    Replace
+                    {tChrome('panel.ga.replace')}
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmInPlace(null)}
                     className="px-2 py-1 text-xs text-neutral-400 hover:text-neutral-200"
                   >
-                    Keep
+                    {tChrome('panel.ga.keep')}
                   </button>
                 </>
               ) : (
@@ -843,11 +852,11 @@ export function GuidedActionsPanel(): React.ReactElement {
                   type="button"
                   data-testid={`action-inplace-${a.id}`}
                   disabled={running}
-                  title="Run this action over a folder REPLACING the originals (staged, verified, then swapped per file)"
+                  title={tChrome('panel.ga.inPlaceTitle')}
                   onClick={() => setConfirmInPlace(a.id)}
                   className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                 >
-                  In place…
+                  {tChrome('panel.ga.inPlace')}
                 </button>
               )}
               <button
@@ -859,7 +868,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                 }}
                 className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
               >
-                Edit
+                {tChrome('panel.ga.edit')}
               </button>
               <button
                 type="button"
@@ -869,23 +878,23 @@ export function GuidedActionsPanel(): React.ReactElement {
                     ...actions,
                     {
                       id: crypto.randomUUID(),
-                      name: `${a.name} (copy)`,
+                      name: tChrome('panel.ga.copySuffix', { name: a.name }),
                       steps: a.steps.map((s) => ({ ...s, params: { ...s.params } })),
                     },
                   ])
                 }
                 className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
               >
-                Duplicate
+                {tChrome('panel.ga.duplicate')}
               </button>
               <button
                 type="button"
                 data-testid={`action-export-${a.id}`}
-                title="Save this action as a file — shareable, and runnable via the CLI's run-action"
+                title={tChrome('panel.ga.exportTitle')}
                 onClick={() => void exportAction(a)}
                 className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
               >
-                Export…
+                {tChrome('panel.ga.export')}
               </button>
               <button
                 type="button"
@@ -893,14 +902,14 @@ export function GuidedActionsPanel(): React.ReactElement {
                 onClick={() => persist(actions.filter((x) => x.id !== a.id))}
                 className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400"
               >
-                Delete
+                {tChrome('panel.ga.delete')}
               </button>
             </div>
           ))}
         </div>
       )}
       {!activeFile && (
-        <NoFileOpen onOpen={openNewFiles} message="Open a PDF to run an action on it" />
+        <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.ga.open')} />
       )}
       <StatusBar message="" busy={running} />
     </div>
@@ -919,7 +928,7 @@ function AddStepPicker({ onAdd }: { onAdd: (op: GuidedStepOp) => void }): React.
       >
         {STEP_CATALOG.map((d) => (
           <option key={d.op} value={d.op}>
-            {d.title}
+            {tStepTitle(d.op, d.title)}
           </option>
         ))}
       </select>
@@ -929,7 +938,7 @@ function AddStepPicker({ onAdd }: { onAdd: (op: GuidedStepOp) => void }): React.
         onClick={() => onAdd(op)}
         className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm"
       >
-        Add step
+        {tChrome('panel.ga.addStep')}
       </button>
     </>
   );
