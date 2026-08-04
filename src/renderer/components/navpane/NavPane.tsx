@@ -3,6 +3,8 @@ import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { ChromeIcon } from '../chrome-icons';
 import { NAV_PANEL_DEFS, navPanelDef } from './registry';
 import type { NavPanelComponentProps } from './types';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tNavPanelTitle } from '../../i18n';
 
 // The left navigation pane (Phase 4 M3, § 5): a thin, always-docked icon strip
 // (one button per AVAILABLE panel) + the active panel body at the persisted
@@ -14,6 +16,8 @@ import type { NavPanelComponentProps } from './types';
 type NavPaneProps = Omit<NavPanelComponentProps, 'activeFile'> & { activeFile: NavPanelComponentProps['activeFile'] };
 
 export function NavPane(props: NavPaneProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
   const { open, panel, width } = state.ui.navPane;
@@ -59,13 +63,14 @@ export function NavPane(props: NavPaneProps): React.ReactElement {
           // not the raw persisted id — which may be a not-yet-built panel
           // (review-caught: strip would show nothing pressed while pages shows).
           const isActive = open && activeDef.id === def.id;
+          const title = tNavPanelTitle(def.id, def.title);
           return (
           <button
             key={def.id}
             type="button"
             data-testid={`navicon-${def.id}`}
-            title={def.title}
-            aria-label={def.title}
+            title={title}
+            aria-label={title}
             aria-pressed={isActive}
             onClick={() => dispatch({ type: 'UI_OPEN_NAV_PANEL', panel: def.id })}
             className={'nav-icon-btn' + (isActive ? ' active' : '')}
@@ -83,7 +88,7 @@ export function NavPane(props: NavPaneProps): React.ReactElement {
           data-testid="nav-panel-body"
         >
           <div className="nav-panel-header" data-testid="nav-panel-title">
-            {activeDef.title}
+            {tNavPanelTitle(activeDef.id, activeDef.title)}
           </div>
           <div className="flex-1 min-h-0 relative">
             <ActivePanel {...props} />
@@ -92,7 +97,7 @@ export function NavPane(props: NavPaneProps): React.ReactElement {
             className="nav-resize-handle"
             data-testid="nav-resize-handle"
             onPointerDown={onResizeDown}
-            title="Drag to resize"
+            title={tChrome('nav.resize')}
           />
         </div>
       )}
