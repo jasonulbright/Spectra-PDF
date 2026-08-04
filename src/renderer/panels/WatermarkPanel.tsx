@@ -4,12 +4,16 @@ import { useEngine } from '../hooks/useEngine';
 import { file, app } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 // Muted set for stamp text — full-strength annotation colors read as marker
 // ink, not a watermark.
 const WATERMARK_COLORS = ['#808080', '#e0393e', '#2f6fed', '#2fbf71'];
 
 export function WatermarkPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
   const [text, setText] = useState('CONFIDENTIAL');
@@ -24,7 +28,7 @@ export function WatermarkPanel(): React.ReactElement {
   const handleApply = useCallback(async () => {
     if (!activeFile) return;
     if (!text.trim()) {
-      setStatus('Error: watermark text is empty');
+      setStatus(tChrome('panel.watermark.emptyText'));
       return;
     }
     const pages =
@@ -35,11 +39,11 @@ export function WatermarkPanel(): React.ReactElement {
     // pages" there, and quietly stamping nothing (or, worse, everything)
     // on a typo helps no one.
     if (pages && pages.length === 0) {
-      setStatus('Error: no valid page numbers — use e.g. 1,3,5 or all');
+      setStatus(tChrome('panel.watermark.badPages'));
       return;
     }
     setBusy(true);
-    setStatus('Applying watermark...');
+    setStatus(tChrome('panel.watermark.applying'));
     try {
       // Same whole-file-op shape as RotatePanel: snapshot first (runs the
       // commit gate), engine writes the working copy in place, UPDATE_FILE
@@ -63,42 +67,42 @@ export function WatermarkPanel(): React.ReactElement {
       const info = await call('get_page_count', { file: activeFile.workingPath });
       dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer, snapshotPath });
       const count = (result as unknown as { pages_watermarked: number }).pages_watermarked;
-      setStatus(`Watermarked ${count} page${count === 1 ? '' : 's'}`);
+      setStatus(tChromeCount('panel.watermark.done', count));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
-      setStatus(`Error: ${msg}`);
+      setStatus(tChrome('panel.common.error', { message: msg }));
     } finally {
       setBusy(false);
     }
   }, [activeFile, text, opacity, angle, color, layer, pageInput, call, dispatch]);
 
-  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to watermark" />;
+  if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.watermark.open')} />;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">
-        Working on: <span className="text-neutral-200">{activeFile.name}</span> ({activeFile.pageCount} pages)
+        {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})
       </div>
       <div>
-        <label className="block text-sm text-neutral-400 mb-1">Text</label>
+        <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.text')}</label>
         <input
           data-testid="watermark-text"
-          aria-label="Watermark text"
+          aria-label={tChrome('panel.watermark.textAria')}
           type="text"
           value={text}
           onChange={(e) => setText(e.target.value)}
           className="w-64 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
         />
         <p className="text-xs text-neutral-500 mt-1">
-          Latin, Cyrillic, and Greek supported; other scripts (e.g. CJK) aren't yet.
+          {tChrome('panel.watermark.scriptsNote')}
         </p>
       </div>
       <div className="flex gap-6 items-end flex-wrap">
         <div>
-          <label className="block text-sm text-neutral-400 mb-1">Opacity ({Math.round(opacity * 100)}%)</label>
+          <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.opacity', { pct: Math.round(opacity * 100) })}</label>
           <input
             data-testid="watermark-opacity"
-            aria-label="Opacity"
+            aria-label={tChrome('panel.watermark.opacityAria')}
             type="range"
             min={0.05}
             max={1}
@@ -109,10 +113,10 @@ export function WatermarkPanel(): React.ReactElement {
           />
         </div>
         <div>
-          <label className="block text-sm text-neutral-400 mb-1">Angle (°)</label>
+          <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.angle')}</label>
           <input
             data-testid="watermark-angle"
-            aria-label="Angle in degrees"
+            aria-label={tChrome('panel.watermark.angleAria')}
             type="number"
             min={-180}
             max={180}
@@ -122,7 +126,7 @@ export function WatermarkPanel(): React.ReactElement {
           />
         </div>
         <div>
-          <label className="block text-sm text-neutral-400 mb-1">Color</label>
+          <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.color')}</label>
           <div className="flex items-center gap-1.5 py-1.5">
             {WATERMARK_COLORS.map((c) => (
               <button
@@ -140,23 +144,23 @@ export function WatermarkPanel(): React.ReactElement {
           </div>
         </div>
         <div>
-          <label className="block text-sm text-neutral-400 mb-1">Placement</label>
+          <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.placement')}</label>
           <select
-            aria-label="Placement"
+            aria-label={tChrome('panel.watermark.placement')}
             data-testid="watermark-layer"
             value={layer}
             onChange={(e) => setLayer(e.target.value as 'over' | 'under')}
             className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
           >
-            <option value="over">Over content</option>
-            <option value="under">Behind content</option>
+            <option value="over">{tChrome('panel.watermark.over')}</option>
+            <option value="under">{tChrome('panel.watermark.under')}</option>
           </select>
         </div>
         <div>
-          <label className="block text-sm text-neutral-400 mb-1">Pages (e.g. 1,3,5 or all)</label>
+          <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.pagesLabel')}</label>
           <input
             data-testid="watermark-pages"
-            aria-label="Pages to watermark"
+            aria-label={tChrome('panel.watermark.pagesAria')}
             type="text"
             value={pageInput}
             onChange={(e) => setPageInput(e.target.value)}
@@ -170,7 +174,7 @@ export function WatermarkPanel(): React.ReactElement {
         disabled={busy}
         className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
       >
-        {busy ? 'Applying...' : 'Apply Watermark'}
+        {busy ? tChrome('panel.watermark.applyingBtn') : tChrome('panel.watermark.apply')}
       </button>
       <StatusBar message={status} busy={busy} />
     </div>

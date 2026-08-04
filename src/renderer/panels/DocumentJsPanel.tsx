@@ -5,6 +5,8 @@ import { useOperations } from '../hooks/useOperations';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerDocumentJsHandler } from '../testHarness';
+import { useTranslation } from 'react-i18next';
+import { tChrome, tChromeCount } from '../i18n';
 
 // Phase 9.S6 — the "Document JavaScripts" editor. Reads and rewrites the
 // catalog's /Names /JavaScript name tree as TEXT. The app NEVER executes the
@@ -20,6 +22,8 @@ interface DocScript {
 }
 
 export function DocumentJsPanel(): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const { performOperation } = useOperations();
@@ -107,17 +111,17 @@ export function DocumentJsPanel(): React.ReactElement {
     // Validate up front for a clear message (the engine also refuses).
     const names = scripts.map((s) => s.name.trim());
     if (names.some((n) => !n)) {
-      setError('Every script needs a name.');
+      setError(tChrome('panel.docjs.needsName'));
       return;
     }
     if (new Set(names).size !== names.length) {
-      setError('Two scripts have the same name — names must be unique.');
+      setError(tChrome('panel.docjs.duplicateName'));
       return;
     }
     savingRef.current = true;
     setBusy(true);
     setError(null);
-    setStatus('Saving document scripts…');
+    setStatus(tChrome('panel.docjs.saving'));
     try {
       await performOperation(activeFile.path, 'set_document_js', {
         scripts: scripts.map((s) => ({ name: s.name.trim(), js: s.js })),
@@ -162,13 +166,13 @@ export function DocumentJsPanel(): React.ReactElement {
   }, [performOperation, call, load]);
 
   if (!activeFile)
-    return <NoFileOpen onOpen={openNewFiles} message="Open a PDF to edit its document JavaScript" />;
+    return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.docjs.open')} />;
 
   return (
     <div className="flex flex-col gap-3 h-full">
       <div className="shrink-0 flex items-center gap-3">
         <div className="text-sm text-neutral-400">
-          Document JavaScript in <span className="text-neutral-200">{activeFile.name}</span>
+          {tChrome('panel.docjs.heading')} <span className="text-neutral-200">{activeFile.name}</span>
         </div>
         <button
           data-testid="docjs-add"
@@ -176,7 +180,7 @@ export function DocumentJsPanel(): React.ReactElement {
           disabled={busy}
           className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded font-medium"
         >
-          + Add script
+          {tChrome('panel.docjs.addScript')}
         </button>
         <button
           data-testid="docjs-save"
@@ -184,18 +188,17 @@ export function DocumentJsPanel(): React.ReactElement {
           disabled={!dirty || busy}
           className="px-2.5 py-1 text-xs bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 rounded font-medium"
         >
-          Save scripts
+          {tChrome('panel.docjs.saveScripts')}
         </button>
       </div>
 
       <p className="shrink-0 text-xs text-neutral-500 -mt-1">
-        These scripts run when the document is opened in a PDF reader. This editor never runs
-        them — it only reads and writes the text.
+        {tChrome('panel.docjs.blurb')}
       </p>
 
       {scripts.length === 0 && !busy ? (
         <div data-testid="docjs-empty" className="text-sm text-neutral-500">
-          This PDF has no document-level JavaScript. Use <em>Add script</em> to create one.
+          {tChrome('panel.docjs.empty')}
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex gap-3">
@@ -205,7 +208,7 @@ export function DocumentJsPanel(): React.ReactElement {
             className="w-44 shrink-0 overflow-y-auto rounded border border-neutral-800 bg-neutral-900/50 p-1 flex flex-col gap-0.5"
             tabIndex={0}
             role="region"
-            aria-label="Document scripts"
+            aria-label={tChrome('panel.docjs.listAria')}
           >
             {scripts.map((s, i) => (
               <li key={i}>
@@ -219,7 +222,7 @@ export function DocumentJsPanel(): React.ReactElement {
                   }`}
                   title={s.name}
                 >
-                  {s.name || '(unnamed)'}
+                  {s.name || tChrome('panel.docjs.unnamed')}
                 </button>
               </li>
             ))}
@@ -229,7 +232,7 @@ export function DocumentJsPanel(): React.ReactElement {
           {sel && (
             <div className="flex-1 min-w-0 flex flex-col gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-xs text-neutral-400 shrink-0">Name</span>
+                <span className="text-xs text-neutral-400 shrink-0">{tChrome('panel.docjs.name')}</span>
                 <input
                   data-testid="docjs-name"
                   type="text"
@@ -244,7 +247,7 @@ export function DocumentJsPanel(): React.ReactElement {
                   disabled={busy}
                   className="px-2.5 py-1 text-xs bg-red-700/70 hover:bg-red-600 disabled:opacity-40 rounded font-medium"
                 >
-                  Delete
+                  {tChrome('panel.docjs.delete')}
                 </button>
               </div>
               <textarea
@@ -254,7 +257,7 @@ export function DocumentJsPanel(): React.ReactElement {
                 disabled={busy}
                 onChange={(e) => updateSelected({ js: e.target.value })}
                 className="flex-1 min-h-0 w-full px-2.5 py-2 bg-neutral-950 border border-neutral-700 rounded text-xs font-mono resize-none focus:outline-none focus:border-blue-500"
-                placeholder="// document-level JavaScript"
+                placeholder={tChrome('panel.docjs.placeholder')}
               />
             </div>
           )}
