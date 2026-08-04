@@ -3476,3 +3476,94 @@
   filter: none;
 }
 /* ── end high-contrast (generated) ── */
+
+/* Snapping (N11 slice A). The marker rides the snapped point in its own
+   16×16 box (the annotation overlays' 0..1 viewBox would squash the glyphs),
+   the badge names the type beside it, and the live region carries the same
+   name for a reader who cannot see either. */
+.page-snap-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+  overflow: visible;
+}
+.page-snap-badge {
+  position: absolute;
+  transform: translate(8px, -100%);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(23, 23, 23, 0.92);
+  border: 1px solid #f59e0b;
+  color: #fbbf24;
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+}
+[data-theme="light"] .page-snap-badge {
+  background: rgba(255, 255, 255, 0.95);
+  color: #92400e;
+}
+[data-theme="high-contrast"] .page-snap-badge {
+  background: rgba(255, 255, 255, 0.95);
+  color: #92400e;
+}
+/* Announced, never drawn — the badge is the visual half. */
+.page-snap-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The status bar's Snap segment: the toggle, its caret, and the options
+   popover that opens upward (the bar is docked at the bottom). */
+.canvas-status-snap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+.canvas-status-caret {
+  padding-left: 4px;
+  padding-right: 4px;
+  font-size: 10px;
+}
+.canvas-status-snap-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  min-width: 168px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--panel-bg, rgba(23, 23, 23, 0.98));
+  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.16));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 40;
+}
+.canvas-status-snap-title {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-bottom: 4px;
+}
+.canvas-status-snap-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.canvas-status-snap-number {
+  width: 56px;
+  margin-left: auto;
+  padding: 1px 4px;
+  background: transparent;
+  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.16));
+  border-radius: 4px;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
