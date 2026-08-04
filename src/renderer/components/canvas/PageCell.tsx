@@ -89,7 +89,7 @@ import {
 } from '../../lib/annotation-manipulation';
 import type { ShapeType } from '../../state/types';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tNumber, type UiKey } from '../../i18n';
+import i18next, { tChrome, tNumber, type UiKey } from '../../i18n';
 
 // Measure overlays draw in amber — legible over both white paper and the
 // annotation palette's blues/yellows, and distinct from ink's default.
@@ -1862,7 +1862,12 @@ function PageCellImpl({
       // records when it was placed; committing later must not re-date it.
       const label = stampPreset.imageData
         ? stampPreset.label
-        : resolveStampTokens(stampPreset.label, new Date(), getSettings().identityName);
+        : resolveStampTokens(
+            stampPreset.label,
+            new Date(),
+            getSettings().identityName,
+            i18next.language,
+          );
       onAddAnnotation(docId, page.id, {
         id: crypto.randomUUID(),
         kind: 'stamp',
