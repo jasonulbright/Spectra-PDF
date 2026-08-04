@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { useTranslation } from 'react-i18next';
+import { tChrome } from '../i18n';
 
 export type PasswordResult = { password: string } | 'cancel';
 
@@ -11,6 +13,8 @@ interface PasswordDialogProps {
 }
 
 export function PasswordDialog({ open, fileName, error, onResult }: PasswordDialogProps): React.ReactElement {
+  // N12: re-render on language change; strings resolve via tChrome.
+  useTranslation();
   const [password, setPassword] = useState('');
 
   useEffect(() => {
@@ -32,10 +36,10 @@ export function PasswordDialog({ open, fileName, error, onResult }: PasswordDial
           onInteractOutside={(e) => e.preventDefault()}
         >
           <Dialog.Title className="text-sm font-semibold text-neutral-100 mb-1">
-            Password Required
+            {tChrome('dialog.password.title')}
           </Dialog.Title>
           <Dialog.Description className="text-sm text-neutral-400 mb-4">
-            "{fileName}" is password-protected. Enter the password to open it.
+            {tChrome('dialog.password.body', { name: fileName })}
           </Dialog.Description>
           <form onSubmit={handleSubmit}>
             <input
@@ -43,7 +47,7 @@ export function PasswordDialog({ open, fileName, error, onResult }: PasswordDial
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password"
+              placeholder={tChrome('dialog.password.placeholder')}
               autoFocus
               className="w-full px-3 py-2 text-sm bg-neutral-800 border border-neutral-700 rounded text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-blue-500 mb-2"
             />
@@ -56,14 +60,14 @@ export function PasswordDialog({ open, fileName, error, onResult }: PasswordDial
                 onClick={() => onResult('cancel')}
                 className="px-3 py-1.5 text-xs font-medium text-neutral-300 bg-neutral-700 hover:bg-neutral-600 rounded transition-colors"
               >
-                Cancel
+                {tChrome('dialog.common.cancel')}
               </button>
               <button
                 data-testid="password-submit"
                 type="submit"
                 className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded transition-colors"
               >
-                Open
+                {tChrome('dialog.common.open')}
               </button>
             </div>
           </form>
