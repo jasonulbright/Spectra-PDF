@@ -21,3 +21,12 @@ python-pkcs11==0.9.5
 # its isolated form. The bidi half is engine/bidi.py, ours, because the
 # reflow needs the reordering PERMUTATION and no binding exposes it.
 uharfbuzz==0.56.0
+# O8 MRC compression: exact integral-image local statistics (Sauvola), the
+# connected-component pass that keeps photographs and halftones OUT of the
+# 1-bit mask, and the masked-mean inpaint that averages the background over
+# PAPER pixels only. The Pillow-only form measured in recon is an
+# APPROXIMATION of the sliding window with no correctness story, and the
+# ghosted background it produces collapses OCR on the very pages this feature
+# exists for. BSD-3-Clause; a cp314 win_amd64 wheel exists, so nothing
+# compiles at packaging time.
+numpy==2.5.1

@@ -64,6 +64,7 @@ jobs:
           mkdir -p resources/fonts
           mkdir -p resources/libreoffice
           mkdir -p resources/tesseract
+          mkdir -p resources/jbig2enc
         shell: bash
 
       # `cargo test` rather than `cargo check`: check compiles without running
@@ -235,6 +236,7 @@ jobs:
         run: |
           mkdir -p resources/fonts
           mkdir -p resources/libreoffice
+          mkdir -p resources/jbig2enc
         shell: bash
 
       - name: Vendor Ghostscript (the visual-compare e2e drives the real GS raster)

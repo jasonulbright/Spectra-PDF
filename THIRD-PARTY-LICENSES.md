@@ -28,6 +28,46 @@ remains under the AGPL-3.0; its complete corresponding source is available at th
 link above, is also attached as an asset to Spectra PDF's own GitHub releases
 (from v2.8.2), and is available from us on request.
 
+## JBIG2 encoder (jbig2enc)
+
+- **Version:** 0.32 (unmodified upstream prebuilt; version- and SHA-256-pinned
+  — vendored by `scripts/bundle-jbig2enc.ps1`, which verifies the official
+  release asset's SHA-256 before extracting it)
+- **License:** Apache License 2.0
+- **Role:** Invoked by Spectra PDF as a separate process (no linking) to encode
+  the 1-bit text stencil of an MRC-compressed scan as `/JBIG2Decode`. Nothing
+  else in the stack can encode JBIG2 — qpdf and Ghostscript decode only.
+- **Binary source:** <https://github.com/agl/jbig2enc/releases/tag/0.32>
+- **Corresponding source:** <https://github.com/agl/jbig2enc>
+- **License text shipped at:** `resources/jbig2enc/LICENSE-jbig2enc.txt`
+- **Patent note shipped at:** `resources/jbig2enc/PATENTS-jbig2enc.txt` —
+  upstream's own note that JBIG2 describes processes which may be patented.
+
+The shipped `jbig2.exe` is a STATIC build: the libraries below are linked
+inside that single executable rather than sitting beside it. Upstream's own
+dependency manifest ships with it as `resources/jbig2enc/depmf.json` and is
+what `scripts/jbig2enc-licenses.tsv` is checked against at build time — the
+bundling script refuses to ship when a component named there has no row, or
+when a row's version disagrees with it.
+
+| Component | Version | License | Notice shipped at |
+|---|---|---|---|
+| jbig2enc | 0.32 | Apache-2.0 | `resources/jbig2enc/LICENSE-jbig2enc.txt` |
+| leptonica | 1.87.0 | BSD-2-Clause | `resources/jbig2enc/licenses/LICENSE-leptonica.txt` |
+| libtiff | 4.7.1 | libtiff AND BSD-4.3TAHOE | `.../LICENSE-libtiff.txt` |
+| libjpeg-turbo | 3.1.4.1 | BSD-3-Clause AND IJG | `.../LICENSE-libjpeg-turbo.txt` |
+| libpng | 1.6.58 | libpng-2.0 | `.../LICENSE-libpng.txt` |
+| zlib-ng | 2.3.3 | Zlib | `.../LICENSE-zlib-ng.txt` |
+| openjp2 (OpenJPEG) | 2.5.4 | BSD-2-Clause | `.../LICENSE-openjpeg.txt` |
+| libwebp | 1.6.0 | BSD-3-Clause | `.../LICENSE-libwebp.txt` |
+| giflib | 5.2.2 | MIT | `.../LICENSE-giflib.txt` |
+
+Each notice was fetched ONCE, from a URL pinned to the component version above,
+reviewed as a git diff and committed at `scripts/jbig2enc-licenses/`; the build
+copies them offline. The binary is frozen by its checksum, so the licences that
+apply are frozen with it — see `scripts/fetch-jbig2enc-licenses.ps1`, which is
+a maintenance tool run only when the pin moves.
+
 ## LibreOffice
 
 - **Version:** 26.2.5 (unmodified upstream; version- and sha256-pinned — vendored
@@ -65,6 +105,7 @@ below were read from those wheels' METADATA):
 | fonttools | MIT | <https://github.com/fonttools/fonttools> |
 | idna | BSD-3-Clause | <https://github.com/kjd/idna> |
 | lxml | BSD-3-Clause | <https://github.com/lxml/lxml> |
+| numpy | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | <https://github.com/numpy/numpy> |
 | oscrypto | MIT | <https://github.com/wbond/oscrypto> |
 | packaging | Apache-2.0 OR BSD-2-Clause | <https://github.com/pypa/packaging> |
 | pdfminer.six | MIT | <https://github.com/pdfminer/pdfminer.six> |

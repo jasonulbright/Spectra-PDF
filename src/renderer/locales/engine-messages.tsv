@@ -29,6 +29,7 @@ batch_ocr.placeModeCannotAlso	exact	batch_ocr,guided_actions	In-place mode canno
 batch_ocr.placeModeTakesDestination	exact	batch_ocr,guided_actions	In-place mode takes no destination -- the originals are replaced.
 batch_ocr.sourceDestinationSameFile	exact	batch_ocr	source and destination are the same file
 batch_ocr.sourceFolderFound	pattern	batch_ocr,guided_actions	Source folder not found: {{source}}
+budget.timeBudgetNeedsPositive	exact	budget	a time budget needs a positive floor
 check.fileFound	pattern	check,rebuild,recognize,recover,repair	File not found: {{file}}
 color_spaces.expectedNumberGotProcedure	exact	color_spaces	expected number, got procedure
 compare.binaryPpmP	pattern	compare	Not a binary PPM (P6): {{v0}}
@@ -101,6 +102,18 @@ links.pageOutRange	pattern	links,page_images,page_vectors,redact_marks,text_auth
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
+mrc_codecs.ccittGMaskMust	pattern	mrc_codecs	a CCITT G4 mask must encode as ONE strip; libtiff wrote {{v0}} — the concatenated stream would decode progressively wrong.
+mrc_codecs.ghostscriptAvailableMaskStream	pattern	mrc_codecs	Ghostscript is not available at {{v0}} — a mask stream cannot be decoded back, and an unverified stencil is not shippable.
+mrc_codecs.jbigEncoderAvailableJbig	pattern	mrc_codecs	The JBIG2 encoder is not available: no jbig2.exe at {{v0}}. Run scripts/bundle-jbig2enc.ps1.
+mrc_codecs.jbigEncoderProducedOutput	pattern	mrc_codecs	The JBIG2 encoder produced no output for page {{v0}}.
+mrc_codecs.jbigEncoderProducedSymbol	exact	mrc_codecs	The JBIG2 encoder produced no symbol dictionary — the shared /JBIG2Globals stream every page refers to is missing.
+mrc_codecs.jpegQualityMustGot	pattern	mrc_codecs	JPEG quality must be 1-100, got {{quality}}
+mrc_codecs.jpegRateMustGot	pattern	mrc_codecs	a JPEG2000 rate must be >= 1, got {{rate}}
+mrc_codecs.maskMustBitImage	pattern	mrc_codecs	a mask must be a 1-bit image (Pillow mode '1'), got mode {{v0}}
+mrc_codecs.maskVerificationCouldDecode	pattern	mrc_codecs	mask verification could not decode the stencil: {{detail}}
+mrc_codecs.maskVerificationFailedEmbedded	pattern	mrc_codecs	mask verification failed: the embedded {{v0}} stencil decodes to {{got}} ink coverage, the mask it came from has {{v2}}.
+mrc_codecs.unknownJbigMode	pattern	mrc_codecs	unknown JBIG2 mode: {{mode}}
+mrc_codecs.unknownMaskCodecExpected	pattern	mrc_codecs	unknown mask codec: {{codec}} (expected one of {{v1}})
 ocr_layer.ocrWordsApply	exact	ocr_layer	No OCR words to apply.
 office_export.libreofficeAvailableSofficePath	exact	office_export	LibreOffice is not available (no soffice path)
 office_export.libreofficeConversionFailedExit	pattern	office_export	LibreOffice conversion failed (exit {{v0}}): {{v1}}
