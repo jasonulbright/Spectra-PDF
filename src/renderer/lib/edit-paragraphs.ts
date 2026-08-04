@@ -50,6 +50,37 @@ export interface EditSpan {
  */
 export type FaceSelector = string;
 
+/**
+ * 9.T13 — the frame a paragraph's layout ran in, as the engine names it.
+ * The signed axis permutation behind each is the engine's; the renderer
+ * only needs to know which page direction the paragraph's INLINE axis
+ * points along, which is what the grips and the resize origin ask.
+ */
+export type ParagraphOrientation =
+  | 'horizontal'
+  | 'vertical-rl'
+  | 'rotated-cw'
+  | 'rotated-ccw'
+  | 'rotated-180';
+
+const ORIENTATIONS: ParagraphOrientation[] = [
+  'horizontal',
+  'vertical-rl',
+  'rotated-cw',
+  'rotated-ccw',
+  'rotated-180',
+];
+
+/** An engine orientation string, or `horizontal` — the shipped geometry —
+ * for anything unrecognized. A listing from an older engine has no field
+ * at all, and the horizontal frame is the identity map, so that fallback
+ * is the no-op rather than a guess. */
+export function asOrientation(raw: string | undefined): ParagraphOrientation {
+  return ORIENTATIONS.includes(raw as ParagraphOrientation)
+    ? (raw as ParagraphOrientation)
+    : 'horizontal';
+}
+
 export interface EditParagraph {
   /** Engine paragraph id (listing order). */
   index: number;
@@ -80,10 +111,19 @@ export interface EditParagraph {
    * classification — descriptor flags/angle + name hints). */
   bold: boolean;
   italic: boolean;
-  /** 9.B4b: writing mode. Vertical paragraphs reflow (transposed layout)
-   * but REFUSE substitution restyles and convert — the bundled faces are
-   * horizontal — so the editor disables those controls. */
+  /** 9.B4b: writing mode — the paragraph holds text drawn in a vertical
+   * (Identity-V) writing mode. It decides FONT questions (which face a
+   * restyle resolves, which controls the editor offers); it is NOT the
+   * geometry question, which `orientation` answers. */
   vertical: boolean;
+  /** 9.T13: the paragraph's ORIENTATION — the frame its layout ran in.
+   * `horizontal` | `vertical-rl` | `rotated-cw` | `rotated-ccw` |
+   * `rotated-180`. This is what the resize grips and the box-left origin
+   * read: a standalone rotated block reads down (or up) the page with no
+   * vertical writing mode in it at all, and a column may hold sideways
+   * members. `vertical-rl` and `rotated-cw` denote the SAME map — they
+   * differ only in what the text IS, never in where it goes. */
+  orientation: ParagraphOrientation;
   /** 9.T3: the paragraph's bidi base direction. The page draws right-to-left
    * text in VISUAL order (a PDF pen only moves one way); the engine
    * normalizes it to logical order for editing, so the textarea must be told
@@ -216,6 +256,8 @@ interface EngineParagraphListing {
     bold: boolean;
     italic: boolean;
     vertical?: boolean;
+    /** 9.T13: the frame the paragraph's layout ran in. */
+    orientation?: string;
     /** 9.T3: base direction is right-to-left. */
     rtl?: boolean;
     /** 9-§I.0-S8: EVERY member clipped away → the paragraph is invisible.
@@ -292,6 +334,7 @@ export async function fetchEditTextListing(
       bold: Boolean(p.bold),
       italic: Boolean(p.italic),
       vertical: Boolean(p.vertical),
+      orientation: asOrientation(p.orientation),
       rtl: Boolean(p.rtl),
       runSizes: Array.from(
         new Set(

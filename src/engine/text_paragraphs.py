@@ -137,7 +137,19 @@ class _Member:
         "segments",
         "operator",
         "a",
+        "b",
+        "c",
         "d",
+        # 9.T13: the member's ORIENTATION (which quarter turn / writing
+        # mode it is), the FRAME that orientation transposes through, and
+        # the two scalars the frame makes of its linear part — `adv` is the
+        # advance axis's user scale (+x′) and `perp` the perpendicular's
+        # (+y′). Horizontal: adv=a, perp=d. Vertical: adv=d, perp=a.
+        "orientation",
+        "frame",
+        "adv",
+        "perp",
+        "rise_scale",
         "x0",
         "x1",
         "y",
@@ -166,6 +178,122 @@ def _axis_aligned(m) -> bool:
     a, b, c, d, _e, _f = m
     lim = MATRIX_TOL * max(abs(a), abs(d), 1e-9)
     return abs(b) <= lim and abs(c) <= lim and a > 0 and d > 0
+
+
+# ── writing orientation (9.T13, brief 39 § 2) ─────────────────────────────
+#
+# The writing mode is not a boolean but an ORIENTATION, and an orientation's
+# entire content is a SIGNED AXIS PERMUTATION T: the map sending a
+# paragraph's reading direction to +x′ and its line-stacking direction to
+# −y′ — the horizontal model's own frame. 9.B4b already did this for one
+# case (T(x, y) = (−y, x) admits a CJK column); T13 is the same idea with
+# the map chosen per member instead of hardcoded, which is why rotated-glyph
+# vertical forms cost a table rather than a pipeline.
+HORIZONTAL = "horizontal"
+VERTICAL_RL = "vertical-rl"
+ROTATED_CW = "rotated-cw"
+ROTATED_CCW = "rotated-ccw"
+ROTATED_180 = "rotated-180"
+
+# (m11, m12, m21, m22): T(x, y) = (m11·x + m12·y, m21·x + m22·y). Every map
+# here is ORTHOGONAL, so T⁻¹ is its transpose — which is the whole reason
+# the untranspose needs no case analysis and cannot drift from the forward
+# map.
+_ORIENTATIONS = {
+    HORIZONTAL: (1.0, 0.0, 0.0, 1.0),
+    VERTICAL_RL: (0.0, -1.0, 1.0, 0.0),
+    # A 90°-clockwise-rotated run of a HORIZONTAL font reads down the page,
+    # exactly like a CJK column — so it rides the SAME map, and that shared
+    # map is what lets sideways Latin join a vertical column instead of
+    # being silently left out of it.
+    ROTATED_CW: (0.0, -1.0, 1.0, 0.0),
+    ROTATED_CCW: (0.0, 1.0, -1.0, 0.0),
+    ROTATED_180: (-1.0, 0.0, 0.0, -1.0),
+}
+
+# The FRAME is the map itself. Members co-group only inside one frame (it
+# rides in `lkey`), so a vertical-rl column can never merge with a rotated-
+# ccw block, while an upright column glyph and a sideways Latin run — same
+# map, different orientation — group as the one paragraph they visually are.
+_FRAME_NAME = {
+    _ORIENTATIONS[HORIZONTAL]: HORIZONTAL,
+    _ORIENTATIONS[VERTICAL_RL]: VERTICAL_RL,
+    _ORIENTATIONS[ROTATED_CCW]: ROTATED_CCW,
+    _ORIENTATIONS[ROTATED_180]: ROTATED_180,
+}
+
+
+def _t(frame: tuple, x: float, y: float) -> tuple[float, float]:
+    """Page space → the paragraph's transposed frame."""
+    m11, m12, m21, m22 = frame
+    return (m11 * x + m12 * y, m21 * x + m22 * y)
+
+
+def _t_inv(frame: tuple, x: float, y: float) -> tuple[float, float]:
+    """The transposed frame → page space. The TRANSPOSE of `_t`'s matrix,
+    which is its inverse because every frame is orthogonal."""
+    m11, m12, m21, m22 = frame
+    return (m11 * x + m21 * y, m12 * x + m22 * y)
+
+
+def _frame_page_span(frame: tuple, box) -> tuple[float, float]:
+    """The page's extent along the frame's INLINE axis (x'), which is what
+    the single-line symmetric-margin rule measures against.
+
+    9.B4b did this by hand for one frame (a column's x' extent is T of the
+    page's y extent, x' = -y); T13 derives it from the frame, so a rotated
+    block gets the same rule with no new case."""
+    x0, y0, x1, y1 = (float(v) for v in box)
+    xs = [
+        _t(frame, x, y)[0]
+        for x, y in ((x0, y0), (x1, y0), (x0, y1), (x1, y1))
+    ]
+    return (min(xs), max(xs))
+
+
+def _orientation_of(m, vertical: bool) -> str | None:
+    """The member's orientation CANDIDATE, or None when nothing can admit it.
+
+    The discriminator between an upright vertical glyph and a horizontal run
+    drawn at the same matrix is the FONT, never the matrix (they are
+    identical matrices — recon § 2): a vertical-writing member advances down
+    its own text space, a horizontal one advances along +x and gets its
+    downward travel, if any, from the rotation. Anything skewed, mirrored or
+    off-quarter answers None and stays on the 7.2 run-box surface."""
+    a, b, c, d, _e, _f = m
+    if vertical:
+        # The writing mode decides; the strict test below still requires the
+        # glyphs to be upright (the shipped B4a/B4b geometry).
+        return VERTICAL_RL
+    lim = MATRIX_TOL * max(abs(a), abs(b), abs(c), abs(d), 1e-9)
+    if abs(b) <= lim:
+        return HORIZONTAL if a > 0 else (ROTATED_180 if a < 0 else None)
+    if abs(a) <= lim:
+        return ROTATED_CW if b < 0 else (ROTATED_CCW if b > 0 else None)
+    return None
+
+
+def _transposed_linear(m, vertical: bool, frame: tuple) -> tuple | None:
+    """The member's linear part IN THE TRANSPOSED FRAME — (a′, b′, c′, d′) —
+    or None when the frame does not admit it.
+
+    This IS the shipped `_axis_aligned` predicate (`a′ > 0 ∧ d′ > 0`, no
+    skew), evaluated one frame later. For `horizontal` the map is the
+    identity and the test is byte-identical to the shipped one; for a CJK
+    column it is equivalent to the page-space test B4b ran, since the map
+    only permutes which entries are compared."""
+    a, b, c, d, _e, _f = m
+    if vertical:
+        # Identity-V: the pen travels along text-space −y, and the axis
+        # PERPENDICULAR to the column is the glyph's own +x.
+        adv, perp = (-c, -d), (a, b)
+    else:
+        adv, perp = (a, b), (c, d)
+    a2, b2 = _t(frame, *adv)
+    c2, d2 = _t(frame, *perp)
+    if not _axis_aligned((a2, b2, c2, d2, 0.0, 0.0)):
+        return None
+    return (a2, b2, c2, d2)
 
 
 def _linear_key(m) -> tuple:
@@ -222,14 +350,25 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
     members: list[_Member] = []
     for run, det in zip(runs, detail):
         m = det["combined"]
-        if not _axis_aligned(m):
-            continue  # rotated/skewed text stays on the run-box surface
         cap = det["cap"]
         if cap is None:
             continue  # no active font: degenerate, run-box surface
-        style = det["style"]
-        a, _b, _c, d, e, f = m
         vertical = bool(cap.vertical)
+        # 9.T13: admission is the shipped axis-alignment test, asked in the
+        # member's OWN transposed frame instead of in page space. That one
+        # move is the whole of T13: a 90°-rotated run of a horizontal font
+        # is an ordinary axis-aligned member once transposed, so every
+        # grouping heuristic downstream learns nothing.
+        orientation = _orientation_of(m, vertical)
+        if orientation is None:
+            continue  # skewed/mirrored/off-quarter: the run-box surface
+        frame = _ORIENTATIONS[orientation]
+        transposed = _transposed_linear(m, vertical, frame)
+        if transposed is None:
+            continue  # not upright in its own frame: the run-box surface
+        adv, _b2, _c2, perp = transposed
+        style = det["style"]
+        a, b, c, d, e, f = m
         mem = _Member()
         mem.index = run["index"]
         mem.stream = det["stream"]
@@ -238,31 +377,31 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.segments = det["segments"]
         mem.operator = det["operator"]
         mem.a = a
+        mem.b = b
+        mem.c = c
         mem.d = d
+        mem.orientation = orientation
+        mem.frame = frame
+        mem.adv = adv
+        mem.perp = perp
         mem.vertical = vertical
         space_1000 = (
             cap.char_width(" ") if cap.can_encode(" ") else FALLBACK_SPACE_1000
         )
-        if vertical:
-            # 9.B4b: ONE 90° transposition T(x, y) = (−y, x) admits a
-            # vertical run into the horizontal model — the downward
-            # advance from the pen (e, f) maps to +x′, the column's x to
-            # the line baseline y′, the em width (size×a, the column
-            # axis) to the line size, and the space width scales by d
-            # (Tz never applies vertically; the B4a advances are the
-            # widths). Every heuristic downstream then applies unchanged;
-            # the emission untransposes at its Tm anchors (T⁻¹).
-            mem.x0 = -f
-            mem.x1 = -f + det["raw_width"] * d
-            mem.y = e
-            mem.eff = max(style["size"] * a, 0.01)
-            mem.space_w = space_1000 / 1000.0 * style["size"] * d
-        else:
-            mem.x0 = e
-            mem.x1 = e + det["raw_width"] * style["h_scale"] * a
-            mem.y = f
-            mem.eff = max(style["size"] * d, 0.01)
-            mem.space_w = space_1000 / 1000.0 * style["size"] * style["h_scale"] * a
+        # 9.B4b generalized: the pen (e, f) maps through the frame to the
+        # transposed anchor (x0, y); the advance sum runs along +x′ at the
+        # `adv` scale; the em ACROSS the writing axis is the line size. Tz
+        # never applies to a vertical writing mode (spec 9.4.4: Th is
+        # tx-only) — but it DOES apply to a rotated horizontal run, whose
+        # advance is an ordinary horizontal one that the matrix turns, so
+        # the h_scale term follows the FONT's mode, not the frame.
+        x0, y = _t(frame, e, f)
+        h_scale = 1.0 if vertical else style["h_scale"]
+        mem.x0 = x0
+        mem.x1 = x0 + det["raw_width"] * h_scale * adv
+        mem.y = y
+        mem.eff = max(style["size"] * perp, 0.01)
+        mem.space_w = space_1000 / 1000.0 * style["size"] * h_scale * adv
         # REAL (untransposed) rect in both modes — paragraph boxes union
         # these, so the listing draws real page rects with no un-mapping.
         mem.rect = det["rect"]
@@ -278,13 +417,23 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.blocking_reason = (
             run["reason"] if (not run["editable"] and run["text"].strip()) else None
         )
-        mem.rise_user = style["rise"] * d
+        # 9.T13: Ts displaces along the glyph's own +y, so the axis it
+        # LANDS on is orientation-specific — the perpendicular (+y′) for a
+        # horizontal or a rotated member, where the horizontal model already
+        # puts a rise; the INLINE axis (+x′) for a vertical writing member,
+        # which is why that case refuses below. Both shipped modes take `d`
+        # here exactly as before (horizontal perp = d, vertical adv = d).
+        mem.rise_scale = adv if vertical else perp
+        mem.rise_user = style["rise"] * mem.rise_scale
         mem.tm = det["tm"]
         mem.ctm = det["ctm"]
-        # 9.B4b: the writing mode rides INSIDE lkey — modes can never
-        # co-group, AND the A4 merge's existing lkey guard refuses a
-        # cross-mode merge for free (no new merge code).
-        mem.lkey = _linear_key(m) + (vertical,)
+        # 9.B4b/T13: the FRAME rides INSIDE lkey, over the TRANSPOSED linear
+        # part — frames can never co-group (so the A4 merge's existing lkey
+        # guard refuses a cross-frame merge for free, no new merge code),
+        # while an upright column glyph and a sideways Latin run of the same
+        # size share a transposed key and group as the one paragraph they
+        # visually are.
+        mem.lkey = _linear_key(transposed + (0.0, 0.0)) + (frame,)
         # Stream-scoped resources for family classification (9.B1) — a
         # nested form's font is not in page resources (review-caught).
         mem.resources = det.get("resources")
@@ -355,7 +504,7 @@ def _cluster_lines(members: list[_Member]) -> list[_Line]:
     for cluster in merged:
         base = _widest(cluster)
         for m in cluster:
-            rise = m.style["rise"] * m.d + (m.y - base.y)
+            rise = m.style["rise"] * m.rise_scale + (m.y - base.y)
             m.rise_user = 0.0 if abs(rise) < 0.05 * base.eff else rise
         ordered = sorted(cluster, key=lambda m: m.x0)
         piece: list[_Member] = [ordered[0]]
@@ -425,10 +574,37 @@ class _Paragraph:
         return sorted(m.index for m in self.members)
 
     @property
+    def frame(self) -> tuple:
+        # 9.T13: all members share one FRAME by group construction (it rides
+        # in lkey) — the paragraph's frame is any member's. GEOMETRY asks
+        # this: which axis permutation the layout ran under, and therefore
+        # how the emission untransposes.
+        return self.lines[0].members[0].frame
+
+    @property
+    def orientation(self) -> str:
+        """What the paragraph IS, for the listing — which is a finer
+        question than its frame, because `vertical-rl` and `rotated-cw`
+        SHARE a frame (that shared map is what lets sideways Latin join a
+        CJK column). A paragraph holding any vertical-writing member is a
+        column and says so; otherwise the dominant member's own quarter
+        turn names it. Consumers that need GEOMETRY get the same answer
+        from either, since the two names denote one map."""
+        vert = next(
+            (m for line in self.lines for m in line.members if m.vertical), None
+        )
+        if vert is not None:
+            return vert.orientation
+        return _widest(self.lines[0].members).orientation
+
+    @property
     def vertical(self) -> bool:
-        # 9.B4b: all members share one writing mode by group construction
-        # (the mode rides in lkey) — the paragraph's mode is any member's.
-        return self.lines[0].members[0].vertical
+        # The WRITING MODE — after T13 no longer the same question as the
+        # frame, because a column may hold upright Identity-V members AND
+        # sideways horizontal ones. True iff any member draws vertically,
+        # which is what every writing-mode-specific decision actually asks
+        # (which face a restyle resolves; whether a rise is expressible).
+        return any(m.vertical for line in self.lines for m in line.members)
 
 
 def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
@@ -553,10 +729,12 @@ def _line_pieces(line: _Line, gaps: list[float]) -> list[tuple[str, int]]:
             if gap > 0 and gap >= WORD_GAP_FRACTION * prev.space_w:
                 if not (pieces and pieces[-1][0].endswith(" ")):
                     pieces.append((" ", prev.index, [" "]))
-                # 9.B4b: the gap converts to 1000ths at the ADVANCE
-                # axis's user scale — d for vertical (Tz never applies
-                # vertically), h_scale×a for horizontal (unchanged).
-                axis = prev.d if prev.vertical else prev.a * prev.style["h_scale"]
+                # 9.B4b/T13: the gap converts to 1000ths at the ADVANCE
+                # axis's user scale — the member's transposed `adv`, times
+                # h_scale unless the FONT is vertical (Tz never applies to a
+                # vertical writing mode). Byte-identical in both shipped
+                # modes: horizontal adv = a, vertical adv = d.
+                axis = prev.adv * (1.0 if prev.vertical else prev.style["h_scale"])
                 denom = axis * prev.style["size"]
                 if denom > 1e-9:
                     gaps.append(gap / denom * 1000.0)
@@ -799,7 +977,7 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
                 "this paragraph crosses drawing layers that disagree about "
                 "its text direction"
             )
-        elif p.vertical and any(m.rise_user != 0.0 for m in p.members):
+        elif any(m.vertical and m.rise_user != 0.0 for m in p.members):
             # 9.B4b review (round 28 HIGH): a vertical member's rise_user
             # carries a REAL-X displacement (its transposed-y offset from
             # the column baseline — e.g. a ruby/superscript run attached
@@ -808,6 +986,14 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
             # a sideways shift, so an edit would silently restack the run
             # INTO the column. Fail closed, the v1 refusal family; the
             # runs stay individually editable on the 7.2 surface.
+            #
+            # 9.T13 NARROWED this from per-paragraph to per-MEMBER, because
+            # the reasoning is orientation-specific: a ROTATED member's Ts
+            # displaces along its glyph's own up vector, which the frame
+            # sends to +y′ — the perpendicular, exactly where the horizontal
+            # model puts a rise. So a rise on a rotated member is an
+            # ordinary superscript and rides the shipped span machinery;
+            # only a rise on an UPRIGHT VERTICAL member is inexpressible.
             p.editable = False
             p.reason = "vertical text with raised characters does not reflow"
         elif any(m.clipped for m in p.members) and not all(m.clipped for m in p.members):
@@ -824,6 +1010,81 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
             p.reason = "part of this paragraph is clipped away on the page"
         out.append(p)
     return out
+
+
+# 9.T13 § 4.4 — tate-chu-yoko (縦中横): a HORIZONTAL-font run drawn UPRIGHT
+# inside a vertical column, which is how a date, a page number or a
+# two-digit figure is set in vertical Japanese. Its transposed advance runs
+# along the BLOCK axis, so it cannot be a line member of the column, and its
+# typographic definition is that it occupies about one em of the column's
+# inline extent.
+TCY_EXTENT_EM = 1.5
+
+
+def _mark_tate_chu_yoko(paragraphs: list[_Paragraph], members: list[_Member]) -> None:
+    """Refuse — BY NAME — a column that contains a tate-chu-yoko block.
+
+    What happened before this existed was worse than a refusal and entirely
+    silent: the block's linear key differs from the column's, so the column
+    grouped WITHOUT it, and a reflow moved the CJK text over or past a date
+    that never moved. Text on text, no error, in a document class (vertical
+    Japanese with numbers in it) that is not rare.
+
+    Detection is deliberately conservative, because the false-positive
+    direction refuses an edit that works today: the block must sit INSIDE
+    the column's own box, its advance must run along the column's block
+    axis, and its inline extent must be within about one em of the column's
+    line size."""
+    columns = [
+        p for p in paragraphs
+        if p.editable and p.vertical and p.frame != _ORIENTATIONS[HORIZONTAL]
+    ]
+    if not columns:
+        return
+    for p in columns:
+        owned = {m.index for m in p.members}
+        bx0, by0, bx1, by1 = p.box
+        eff = max(line.eff for line in p.lines)
+        for m in members:
+            if m.index in owned or m.vertical or not m.ptext.strip():
+                continue
+            # Its advance, in the COLUMN's frame: along ±y′ is the block
+            # axis (a member advancing along +x′ would simply have joined
+            # the column, which is T13's whole point).
+            ax, ay = _t(p.frame, m.a, m.b)
+            if abs(ax) > MATRIX_TOL * max(abs(ay), 1e-9):
+                continue
+            r = m.rect
+            if not (
+                r[0] >= bx0 - 0.5 and r[2] <= bx1 + 0.5
+                and r[1] >= by0 - 0.5 and r[3] <= by1 + 0.5
+            ):
+                continue
+            if max(r[2] - r[0], r[3] - r[1]) > TCY_EXTENT_EM * eff:
+                continue
+            p.editable = False
+            p.reason = (
+                "a horizontal block inside this column (tate-chu-yoko) "
+                "does not reflow"
+            )
+            break
+
+
+def _reading_tiebreak(p: _Paragraph) -> float:
+    """The mixed-page reading-order tiebreak for paragraphs sharing a top
+    edge: whichever end of the box the frame's line stacking starts from.
+
+    Lines stack along −y′, so the FIRST line sits at the +y′ end; mapping
+    that back through the frame says which page edge reads first. Horizontal
+    (+y′ = page +y) has no horizontal component and keeps the shipped
+    leftmost-first; a vertical-rl / rotated-cw frame (+y′ = page +x) reads
+    RIGHTMOST first — the shipped CJK column convention."""
+    hx, _hy = _t_inv(p.frame, 0.0, 1.0)
+    if hx > MATRIX_TOL:
+        return -p.box[2]  # first line at the right edge
+    if hx < -MATRIX_TOL:
+        return p.box[0]  # first line at the left edge
+    return p.box[0]
 
 
 def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
@@ -858,16 +1119,21 @@ def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
             paragraphs.extend(_analyze([para_lines], lkey))
     # Whitespace-only clusters offer nothing to edit — no box at all.
     paragraphs = [p for p in paragraphs if p.text.strip()]
-    # Reading order on a MIXED page needs a mode-agnostic PRIMARY key:
-    # lines[0].y is real Y for horizontal but real X for vertical (round
+    # 9.T13 § 4.4: a column holding a tate-chu-yoko block refuses BY NAME
+    # rather than reflowing over it. Runs after grouping because the
+    # evidence is exactly the members that did NOT join the column.
+    _mark_tate_chu_yoko(paragraphs, members)
+    # Reading order on a MIXED page needs a frame-agnostic PRIMARY key:
+    # lines[0].y is real Y for horizontal but real X for a column (round
     # 28 MEDIUM — a mid-page vertical column outsorted the page-top
-    # header). The box is real-page space in both modes, so top-edge
-    # first; the TIEBREAK is per-mode (side-by-side blocks share a top):
+    # header). The box is real-page space in every frame, so top-edge
+    # first; the TIEBREAK is per-FRAME (side-by-side blocks share a top):
     # horizontal reads leftmost-first, vertical columns read
-    # rightmost-first (the RTL column convention).
-    paragraphs.sort(
-        key=lambda p: (p.stream, -p.box[3], -p.box[2] if p.vertical else p.box[0])
-    )
+    # rightmost-first (the RTL column convention) — `_reading_tiebreak`
+    # derives that from the frame's own line-stacking direction rather
+    # than from a writing-mode boolean, which after T13 no longer answers
+    # the geometric question.
+    paragraphs.sort(key=lambda p: (p.stream, -p.box[3], _reading_tiebreak(p)))
     return paragraphs
 
 
@@ -986,6 +1252,15 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
                 # both modes; alignment names are the TRANSPOSED ones for
                 # vertical ("left" ≡ top — the editor doesn't label them).
                 "vertical": p.vertical,
+                # 9.T13, additive: the paragraph's ORIENTATION — the frame
+                # its layout ran in, one of horizontal / vertical-rl /
+                # rotated-ccw / rotated-180. This is the GEOMETRY question
+                # `vertical` used to stand in for and no longer can: a
+                # standalone rotated block reads down (or up) the page with
+                # no vertical writing mode anywhere in it, and a column may
+                # hold sideways members. The renderer's resize grips and
+                # box-left origin read this, never `vertical`.
+                "orientation": p.orientation,
                 # 9.T3, additive: the paragraph's bidi base direction. The
                 # editor sets the textarea's `dir` from this, so the caret,
                 # selection and typing behave as the reading order the text
@@ -1526,8 +1801,9 @@ def _styled_chars(
                     raise ValueError(
                         "vertical text cannot be converted to the fallback font"
                     )
-                fb_by_face.setdefault(fk, set()).add(ch)
-                styled.append((ch, ref(member, fk, col, siz)))
+                key = _VERTICAL_KEY if member.vertical else fk
+                fb_by_face.setdefault(key, set()).add(ch)
+                styled.append((ch, ref(member, key, col, siz)))
                 i += 1
                 continue
             # 9.B5: an unambiguous ligature sequence becomes ONE atomic
@@ -1555,7 +1831,7 @@ def _styled_chars(
                 # member (the build step), style regular — byte-identical to
                 # the shipped single convert subset. 9.K2: no feature ⇒
                 # `((), 0)`, so the convert key is unchanged in effect.
-                ck = (None, False, False, (), 0)
+                ck = _VERTICAL_KEY if member.vertical else (None, False, False, (), 0)
                 # T27: a mark falling back drags its base with it, or the two
                 # end up in different fonts and the accent draws beside the
                 # letter instead of on it.
@@ -1683,7 +1959,7 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
             st.shaped.advance_1000 / 1000.0 * s["size"]
             + s["char_spacing"] * len(st.shaped.glyphs)
         )
-        return w * (s["h_scale"] * m.a)
+        return w * (s["h_scale"] * m.adv)
     if st.fallback is not None:
         fb = fallbacks.get(st.fallback)
         w1000 = fb.width_1000(ch) if fb is not None else 0.0
@@ -1707,10 +1983,11 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
     # the resync would disagree with what the TJ actually draws.
     if kerns is not None and prev_ch and prev_st is not None and prev_st.key == st.key:
         w += kerns.between(prev_ch, ch, st) / 1000.0 * s["size"]
-    # 9.B4b: a vertical member's advance lives on the transposed x′ axis,
-    # whose user scale is d — Tz never applies vertically (Tc does, and
-    # already rode in above). Horizontal is byte-identical.
-    return w * (m.d if m.vertical else s["h_scale"] * m.a)
+    # 9.B4b/T13: every member's advance lives on the transposed x′ axis,
+    # whose user scale is `adv` — Tz never applies to a vertical writing
+    # mode (Tc does, and already rode in above), and DOES apply to a rotated
+    # horizontal run. Both shipped modes are byte-identical.
+    return w * m.adv * (1.0 if m.vertical else s["h_scale"])
 
 
 # 9.T3: the face-key family that means "the bundled right-to-left face".
@@ -1723,6 +2000,18 @@ RTL_FAMILY = "rtl"
 # gate, never from user input (`_validated_family` refuses anything that is
 # not the bundled trio or an absolute path).
 INPLACE_FAMILY = "inplace"
+# 9.T4/T13: the face key meaning "the paragraph's resolved VERTICAL face".
+# Like RTL_FAMILY it is text-driven rather than user-selectable — a member
+# drawing in a vertical writing mode takes it, whatever family was asked
+# for, because a horizontal face in a column lays out on the wrong axis.
+# T13 is why it must be a distinct KEY rather than a paragraph-wide branch:
+# a column may now also hold sideways horizontal members, and those must
+# still substitute into an ordinary horizontal face. Style axes are
+# normalized away because ONE vertical face serves the paragraph (the
+# weight was resolved with it) — several keys would build the same subset
+# twice.
+VERTICAL_FAMILY = "vertical"
+_VERTICAL_KEY = (VERTICAL_FAMILY, False, False, (), 0)
 
 
 def _shape_styled_runs(styled: list, key: tuple, face: str) -> tuple[list, list]:
@@ -2237,7 +2526,14 @@ class _Emission:
         self.page_x1 = page_x1
         # 9.B4b: the paragraph's writing mode — the rewriter advances its
         # emitted-state machine on this axis after each emitted show.
+        # 9.T13: the ADVANCE AXIS is now per PIECE (`build` reports it with
+        # each show), because one paragraph can hold upright vertical
+        # members and sideways horizontal ones; this flag stays as the
+        # paragraph-level answer the listing and the callers still ask.
         self.vertical = para.vertical
+        # 9.T13: the frame the layout ran in — the emission untransposes
+        # its anchors through T⁻¹ of exactly this map.
+        self.frame = para.frame
         # A1: when the size is overridden, the paragraph leading scales by
         # the same factor so bigger text doesn't overlap (and smaller
         # text doesn't waste space) — the ratio to the paragraph's
@@ -2267,9 +2563,15 @@ class _Emission:
         self.last_build_bbox: list[float] | None = None
 
     def build(self, ctm, stream=None, used=None) -> list[tuple]:
-        """[(kind, instruction, raw_width|None)]; kind ∈ {'op','show'} —
-        the caller feeds ops into its emitted-state machine and advances
-        after shows.
+        """[(kind, instruction, raw_width|None[, vertical])]; kind ∈
+        {'op','show'} — the caller feeds ops into its emitted-state machine
+        and advances after shows.
+
+        9.T13: a SHOW tuple carries a FOURTH element, the piece's advance
+        axis (True = the member draws in a vertical writing mode). It is
+        per PIECE and not per paragraph because a column may hold sideways
+        horizontal members; `op` tuples stay three wide, since nothing ever
+        advances on them.
 
         T17: `stream` filters the emission to pieces whose style MEMBER
         lives in that stream (None = everything, the single-stream path —
@@ -2440,9 +2742,23 @@ class _Emission:
         para = self.para
         ctm_inv = _invert(ctm)
         base = _widest(para.lines[0].members)
-        lin_a, lin_d = base.a, base.d
+        base_key = _linear_key((base.a, base.b, base.c, base.d, 0.0, 0.0))
         out: list[tuple] = []
         bbox: list[float] | None = None
+
+        def linear_of(m) -> tuple:
+            """The PAGE-SPACE linear part this segment writes into its Tm.
+
+            9.T13: it comes from the segment's own MEMBER, because one
+            paragraph can now hold two of them — an upright column glyph
+            and a sideways Latin run share a transposed key but not a page
+            matrix. A member whose page key equals the dominant member's
+            takes the dominant's numbers verbatim, so every paragraph that
+            could group before T13 emits byte-identically (grouping only
+            ever compared keys ROUNDED to four places)."""
+            if _linear_key((m.a, m.b, m.c, m.d, 0.0, 0.0)) == base_key:
+                return (base.a, base.b, base.c, base.d)
+            return (m.a, m.b, m.c, m.d)
 
         def grow(x0: float, y0: float, x1: float, y1: float) -> None:
             nonlocal bbox
@@ -2459,38 +2775,68 @@ class _Emission:
                 st: _StyleRef = seg["style"]
                 if stream is not None and st.member.stream != stream:
                     continue
-                for dx, dy, encoded_items, raw in self._pieces(seg, lin_d):
+                mem = st.member
+                lin_a, lin_b, lin_c, lin_d = linear_of(mem)
+                for dx, dy, encoded_items, raw in self._pieces(seg, mem.perp):
                     # Rise renders via Ts (a state op), never the matrix —
                     # the line target is the BASELINE.
-                    if self.vertical:
-                        # 9.B4b: THE untranspose — layout ran wholly in
-                        # transposed space; only the anchor maps back through
-                        # T⁻¹(x′, y′) = (y′, −x′). The linear part stays
-                        # (a, 0, 0, d): glyphs upright — the advance
-                        # DIRECTION is the walker's vertical model
-                        # (advance_after_show), never the matrix.
-                        tx, ty = line.y, -(line.x + dx)
-                    else:
-                        tx, ty = line.x + dx, line.y + dy
-                    target = (lin_a, 0.0, 0.0, lin_d, tx, ty)
+                    #
+                    # 9.B4b/T13: THE untranspose — layout ran wholly in the
+                    # paragraph's FRAME; only the anchor maps back, through
+                    # that frame's T⁻¹. The linear part is the segment's own
+                    # member's (glyphs keep the rotation they were drawn
+                    # with; for an upright vertical member the advance
+                    # DIRECTION is the walker's vertical model, never the
+                    # matrix). For `horizontal` and `vertical-rl` the
+                    # arithmetic is exactly what B4b shipped.
+                    tx, ty = _t_inv(self.frame, line.x + dx, line.y + dy)
+                    target = (lin_a, lin_b, lin_c, lin_d, tx, ty)
                     # T17: a CONSERVATIVE user-space envelope of this piece
                     # (full em above the baseline, 0.35 em below, advance
                     # along the writing axis) — only ever used to EXPAND a
                     # target form's /BBox, where over-covering is harmless
                     # and under-covering clips text away.
-                    eff = st.style()["size"] * abs(lin_d)
-                    if self.vertical:
-                        em = st.style()["size"] * abs(lin_a)
-                        grow(tx - em, ty - raw * abs(lin_d), tx + em, ty)
+                    size = st.style()["size"]
+                    if mem.vertical:
+                        # An upright column glyph: one em either side of the
+                        # column, the advance sum downward — the shipped B4b
+                        # envelope, kept as-is.
+                        em = size * abs(mem.perp)
+                        grow(tx - em, ty - raw * abs(mem.adv), tx + em, ty)
                     else:
-                        adv = raw * st.style()["h_scale"] * abs(lin_a)
-                        grow(tx, ty - 0.35 * eff, tx + adv, ty + eff)
+                        # Horizontal in its OWN frame: build the envelope
+                        # there and map its corners back, which reduces to
+                        # the shipped rectangle when the frame is identity.
+                        eff = size * abs(mem.perp)
+                        adv = raw * st.style()["h_scale"] * abs(mem.adv)
+                        ax, ay = line.x + dx, line.y + dy
+                        for cx, cy in (
+                            (ax, ay - 0.35 * eff),
+                            (ax + adv, ay - 0.35 * eff),
+                            (ax, ay + eff),
+                            (ax + adv, ay + eff),
+                        ):
+                            px, py = _t_inv(self.frame, cx, cy)
+                            grow(px, py, px, py)
                     tm_op = mat_mult(target, ctm_inv)
                     out.append(("op", _instruction([_f(v) for v in tm_op], "Tm"), None))
                     out.extend(self._state_ops(st, used))
+                    # 9.T13: a SHOW tuple carries the piece's ADVANCE AXIS as
+                    # a fourth element — a rotated member's advance is
+                    # horizontal in the font's own terms (its downward travel
+                    # is the matrix's doing), so the caller's emitted-state
+                    # machine must advance on the MEMBER's mode, not the
+                    # paragraph's. Getting this wrong moves every kept show
+                    # after the divergence, which is what the dual-walk
+                    # harness exists to catch.
                     if len(encoded_items) == 1 and not isinstance(encoded_items[0], float):
                         out.append(
-                            ("show", _instruction([pikepdf.String(encoded_items[0])], "Tj"), raw)
+                            (
+                                "show",
+                                _instruction([pikepdf.String(encoded_items[0])], "Tj"),
+                                raw,
+                                mem.vertical,
+                            )
                         )
                     else:
                         arr = pikepdf.Array(
@@ -2499,11 +2845,11 @@ class _Emission:
                                 for el in encoded_items
                             ]
                         )
-                        out.append(("show", _instruction([arr], "TJ"), raw))
+                        out.append(("show", _instruction([arr], "TJ"), raw, mem.vertical))
         self.last_build_bbox = bbox
         return out
 
-    def _pieces(self, seg: dict, lin_d: float) -> list[tuple]:
+    def _pieces(self, seg: dict, perp: float) -> list[tuple]:
         """[(dx, dy, TJ items, raw advance)] for one segment.
 
         Every ordinary segment is exactly ONE piece at the segment's own dx
@@ -2521,7 +2867,7 @@ class _Emission:
         s = st.style()
         m = st.member
         fb = self.fallbacks[st.fallback]
-        axis = s["h_scale"] * m.a
+        axis = s["h_scale"] * m.adv
         size = s["size"]
         pieces: list[tuple] = []
         items: list = []
@@ -2541,7 +2887,7 @@ class _Emission:
             st.shaped.glyphs, st.shaped.clusters
         ):
             width = fb.glyph_width(name, spells)
-            dy = y_off / 1000.0 * size * lin_d
+            dy = y_off / 1000.0 * size * perp
             if items and abs(dy - piece_dy) > 1e-9:
                 flush()
             if not items:
@@ -2650,7 +2996,12 @@ class _Emission:
         ops.append(("op", _instruction([_f(s["char_spacing"])], "Tc"), None))
         ops.append(("op", _instruction([_f(s["word_spacing"])], "Tw"), None))
         ops.append(("op", _instruction([int(s["render_mode"])], "Tr"), None))
-        rise_ts = m.rise_user / m.d if m.d else 0.0
+        # 9.T13: the Ts is the user-space rise divided by the scale of the
+        # axis Ts DISPLACES ALONG — `rise_scale`, which is `d` in both
+        # shipped modes and is what a rotated member has instead (its page
+        # `d` is zero at a quarter turn, so dividing by it silently dropped
+        # the rise and flattened a rotated superscript onto the baseline).
+        rise_ts = m.rise_user / m.rise_scale if m.rise_scale else 0.0
         ops.append(("op", _instruction([_f(rise_ts)], "Ts"), None))
         for ins in _color_sync(s["fill_color"], object(), stroke=False):
             ops.append(("op", ins, None))
@@ -2690,11 +3041,12 @@ class _Emission:
             items.append(encoded)
             buf.clear()
 
-        # 9.B4b: kern numbers and the raw advance convert at the ADVANCE
-        # axis's user scale — d for vertical (Tz never applies), h_scale×a
-        # for horizontal (unchanged). The kern SIGN convention is the B4a
-        # mirror (negative pushes the pen along the advance) either way.
-        axis = m.d if m.vertical else s["h_scale"] * m.a
+        # 9.B4b/T13: kern numbers and the raw advance convert at the
+        # ADVANCE axis's user scale — the member's transposed `adv`, times
+        # h_scale unless the FONT is vertical (Tz never applies there). The
+        # kern SIGN convention is the B4a mirror (negative pushes the pen
+        # along the advance) in every orientation.
+        axis = m.adv * (1.0 if m.vertical else s["h_scale"])
         # 9.K1b: a pair kern splits the buffer and emits its own TJ number,
         # exactly like the synthetic-gap kerns below. The sign convention is
         # this loop's existing one — `items.append(-kern_1000)` — so a
@@ -3100,12 +3452,17 @@ def _rewrite_paragraph_stream(
                     # stream). `used_keys` collects the subsets this stream
                     # actually drew, for registration into ITS resources.
                     used_keys: set = set()
-                    for kind, ins, raw_w in edit.emission.build(
+                    for item in edit.emission.build(
                         orig.ctm, stream=path, used=used_keys
                     ):
+                        kind, ins = item[0], item[1]
                         kept.append(ins)
                         if kind == "show":
-                            emit.advance_after_show(raw_w, edit.emission.vertical)
+                            # 9.T13: the PIECE's axis (item[3]), not the
+                            # paragraph's — a rotated member advances
+                            # horizontally in its own text space and only
+                            # the Tm turns it down the page.
+                            emit.advance_after_show(item[2], item[3])
                         else:
                             emit_feed(ins)
                     for key in sorted(used_keys, key=_face_sort_key):
@@ -3643,11 +4000,13 @@ def _prepare_styled(
         for key in sorted(fb_by_face, key=_face_sort_key):
             fam, kbold, kitalic, kfeats, kalt = key
             chars = "".join(sorted(fb_by_face[key]))
-            if vertical_face is not None:
-                # 9.T4: ONE vertical face serves the whole paragraph —
-                # the weight was resolved with it, and a column cannot
-                # mix writing modes anyway (the writing mode rides in
-                # lkey, so a mixed-mode paragraph never groups).
+            if fam == VERTICAL_FAMILY and vertical_face is not None:
+                # 9.T4: ONE vertical face serves every VERTICAL-WRITING
+                # member of the paragraph — the weight was resolved with
+                # it. 9.T13 narrowed this from a paragraph-wide branch to
+                # a per-KEY one: a column may hold sideways horizontal
+                # members too, and they substitute into an ordinary
+                # horizontal face through the branches below.
                 from engine.font_fallback import build_vertical_font
 
                 font_dict, encode, width_1000 = build_vertical_font(
@@ -4045,17 +4404,9 @@ def replace_paragraph_text(
         ords_by_stream = _member_ordinals_by_stream(detail, member_set)
         try:
             box = [float(v) for v in p.mediabox]
-            if para.vertical:
-                # 9.B4b: the emission lays out in TRANSPOSED space, where
-                # the page's x′-extent is T of its y-extent (x′ = −y) —
-                # the single-column margin rule then mirrors the top inset
-                # to the bottom, exactly as the horizontal rule mirrors
-                # left to right.
-                page_x0, page_x1 = -max(box[1], box[3]), -min(box[1], box[3])
-            else:
-                page_x0, page_x1 = min(box[0], box[2]), max(box[0], box[2])
+            page_x0, page_x1 = _frame_page_span(para.frame, box)
         except (TypeError, ValueError):
-            page_x0, page_x1 = (-792.0, 0.0) if para.vertical else (0.0, 612.0)
+            page_x0, page_x1 = _frame_page_span(para.frame, (0.0, 0.0, 612.0, 792.0))
         counter = [0]
         reserved: set = set()
         _allocate_fallback_names(para.members, fallbacks, counter, reserved)
@@ -4278,14 +4629,9 @@ def merge_paragraph_with_previous(
         ords_by_stream = _member_ordinals_by_stream(detail, member_set)
         try:
             box = [float(v) for v in p.mediabox]
-            if prev.vertical:
-                # 9.B4b: transposed page bounds for a vertical emission
-                # (x′ = −y) — see replace_paragraph_text.
-                page_x0, page_x1 = -max(box[1], box[3]), -min(box[1], box[3])
-            else:
-                page_x0, page_x1 = min(box[0], box[2]), max(box[0], box[2])
+            page_x0, page_x1 = _frame_page_span(prev.frame, box)
         except (TypeError, ValueError):
-            page_x0, page_x1 = (-792.0, 0.0) if prev.vertical else (0.0, 612.0)
+            page_x0, page_x1 = _frame_page_span(prev.frame, (0.0, 0.0, 612.0, 792.0))
         counter = [0]
         reserved: set = set()
         _allocate_fallback_names(
