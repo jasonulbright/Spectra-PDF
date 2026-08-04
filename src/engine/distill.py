@@ -2,8 +2,9 @@
 Distiller job, done by the tool that is its documented work-alike).
 
 The compress.py invocation template: bundled gs, pdfwrite, -dSAFER (the
-input is an untrusted PROGRAM — PostScript is a full language), 300s
-timeout, stderr surfaced on failure. Input honesty is a HEADER check
+input is an untrusted PROGRAM — PostScript is a full language), a DERIVED
+time budget (engine/budget.py — a fixed one fails on exactly the big inputs
+the op exists for), stderr surfaced on failure. Input honesty is a HEADER check
 (`%!`), not an extension check: a PDF fed here would re-render (that's
 Repair Tier 2's job), and arbitrary bytes refuse with the reason named.
 The output is post-validated by opening it with pikepdf — a zero exit
@@ -11,12 +12,12 @@ from gs is not proof of a well-formed PDF.
 """
 
 import os
-import subprocess
 import tempfile
 from pathlib import Path
 
 import pikepdf
 
+from engine import budget
 from engine.acroform import adopt_orphan_widget_fields
 
 # Reuses compress.py's preset vocabulary; 'default' emits no
@@ -99,9 +100,9 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "gs"
     # request's bytes off the wire (review-PROVEN, exfiltrated via gs
     # stderr), which both leaks data and permanently hangs that request's
     # caller. EOF from DEVNULL closes the class.
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL
-    )
+    # § 5.5: the budget is DERIVED from the input (budget.run keeps the
+    # stdin isolation the paragraph above is about).
+    result = budget.gs(cmd, what="Ghostscript (distill)", path=input_path)
     if result.returncode != 0:
         raise RuntimeError(f"Ghostscript failed: {result.stderr.strip() or 'no diagnostics'}")
 

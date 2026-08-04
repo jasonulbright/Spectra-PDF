@@ -395,9 +395,18 @@ class _EditState:
         replace_fit=None,
     ):
         self.targets = dict(targets)
-        self.action = action  # 'delete' | 'replace' | 'transform' | 'crop' | 'opacity'
+        # 'delete' | 'replace' | 'layers' | 'transform' | 'crop' | 'opacity'
+        self.action = action
         self.replacement_name = replacement_name
         self.pending_image = pending_image
+        # 'layers' only (O8/MRC): SEVERAL images drawn in order at the target's
+        # own CTM, in place of the one Do. Same surgery as 'replace' — the page
+        # OBJECT survives, so /Annots, /AcroForm, the structure tree, page
+        # labels and bookmarks are untouched BY CONSTRUCTION rather than
+        # carried back afterwards. `layer_names` is draw order (background
+        # first); `layer_images` is what each name registers to.
+        self.layer_names: tuple[str, ...] = ()
+        self.layer_images: dict[str, object] = {}
         # 'replace' with fit="contain" (P7): a LOCAL aspect-correction matrix
         # [sx,0,0,sy,tx,ty] wrapped around the renamed draw as the RECOGNIZED
         # transform shape `q cm Do Q` — so the letterbox folds under a later
@@ -479,6 +488,14 @@ class _EditState:
         fit="contain" asked for one (the frame is `_WRAP_SHAPES`' transform
         shape, so listings and later folds treat it as an ordinary tool
         frame)."""
+        if self.action == "layers":
+            # One Do per layer, all under the CTM already in force at the
+            # replaced draw — every layer image is the unit square, so no
+            # matrix is emitted and the placement geometry is preserved
+            # exactly (the same argument the crop clip rides on).
+            for nm in self.layer_names:
+                kept.append(_do_instruction(nm))
+            return
         if self.replace_fit is not None:
             kept.append(_op([], "q"))
             kept.append(_op([round(float(v), 6) for v in self.replace_fit], "cm"))
@@ -957,6 +974,13 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     copy_res["/XObject"][Name(state.replacement_name)] = pdf.make_indirect(
                         state.pending_image
                     )
+                if state.action == "layers":
+                    # Same rule as replace, for each layer: the Do's the
+                    # emit just wrote resolve against the copy holding them.
+                    drawn = _names_drawn(inner_kept)
+                    for nm, obj in state.layer_images.items():
+                        if nm in drawn:
+                            copy_res["/XObject"][Name(nm)] = pdf.make_indirect(obj)
                 if state.action == "opacity" and state.gs_name and not state.registered_nested:
                     # The `gs` resolves against the copy holding the draw —
                     # the INNERMOST copy (first unwind) takes it; outer
@@ -1769,6 +1793,61 @@ def replace_page_image(
             pdf.close()
         except Exception:
             pass
+
+
+def replace_placement_with_layers(pdf, page, index: int, layers: list) -> list[str]:
+    """Replace ONE image placement's `Do` with SEVERAL draws at the same CTM.
+
+    The MRC assembly primitive (O8 § 3.4), and deliberately the ONLY thing in
+    this module that takes an already-open `Pdf`: an MRC run rewrites every
+    scanned page of a document in ONE open/save pair, so the file-in/file-out
+    shape every other op here has would force a re-open per page.
+
+    WHAT THIS BUYS, stated because it is the reason MRC is surgery and not a
+    rebuild: the page OBJECT survives. Only its content stream and its own
+    /Resources change, so /Annots (links, comments, widgets), /AcroForm and
+    its field tree, /StructTreeRoot and the marked-content ids the drawn
+    layers now sit inside, /PieceInfo, page labels and the outline all carry
+    through untouched — there is nothing to re-attach afterwards, which is
+    what `compress`'s gs branch has to do and cannot do for structure.
+
+    `layers` are image XObject STREAMS already made in `pdf`, in draw order
+    (background first). Each is drawn as the unit square under the CTM the
+    replaced placement had, so the geometry is preserved exactly. Returns the
+    names allocated, in the same order.
+    """
+    if not layers:
+        raise ValueError("a layered replacement needs at least one layer image")
+    resources = _copy_resources_for_write(pdf, _resolve_resources(page))
+    page.obj["/Resources"] = resources
+    placements = _walk_placements(
+        pdf, pikepdf.parse_content_stream(page), resources, IDENTITY, 0, None, [], False
+    )
+    count = len(placements)
+    if not (0 <= int(index) < count):
+        raise ValueError(f"image index {index} is out of range (page has {count})")
+    name_counter = [0]
+    reserved: set = set()
+    names = [_fresh_name(resources, name_counter, reserved) for _ in layers]
+    state = _EditState({int(index): {}}, "layers", None)
+    state.layer_names = tuple(names)
+    state.layer_images = dict(zip(names, layers))
+    kept, changed, new_forms = _rewrite(
+        pdf, pikepdf.parse_content_stream(page), resources, 0, None, state, name_counter, reserved
+    )
+    if not changed:
+        raise ValueError("edit did not apply (placement not found)")
+    for nm, st in new_forms.items():
+        _register_xobject(pdf, resources, nm, st)
+    page.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+    drawn = _names_drawn(kept)
+    for nm, obj in zip(names, layers):
+        if nm in drawn:
+            _register_xobject(pdf, resources, nm, obj)
+    # The superseded scan image must not stay embedded — the whole point of
+    # the pass is that its bytes are gone, not merely undrawn.
+    _finalize_page_rewrite(page, kept, state.superseded_forms)
+    return names
 
 
 def _resolve_placement_box(p, left, bottom, w, h, at, fit, natural_w, natural_h):
