@@ -2594,18 +2594,43 @@ class TestVerticalParagraphs:
         assert vert_name in drawn, f"the vertical comma is not drawn ({drawn})"
         assert horiz_name not in drawn, "the HORIZONTAL comma is on the page"
 
-    def test_vertical_refuses_a_font_with_no_vertical_forms(self, tmp_dir):
-        # An INSTALLED face (T6) is allowed on a column only if it actually
-        # has vertical machinery — a Latin face would draw sideways.
+    def test_vertical_refuses_a_font_with_no_vertical_metrics(self, tmp_dir):
+        # Brief 39 § 1.5b — THE DEFECT'S EPITAPH. An INSTALLED face (T6) is
+        # allowed on a column only if it actually has vertical machinery,
+        # and "has" now means `vmtx`, not "the shaper returned something":
+        # HarfBuzz synthesizes a y_advance from the face's extents when
+        # `vmtx` is absent, so the shipped shaping gate passed Liberation
+        # Sans and an /Identity-V embed of horizontal letterforms with an
+        # invented uniform /W2 was reachable through this very call.
         latin = os.path.join(FONTS_DIR, "LiberationSans-Regular.ttf")
         if not os.path.isfile(latin):
             pytest.skip("bundled fonts not provisioned")
         src = _vpage(tmp_dir, b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
         para = _paras(src)[0]
-        with pytest.raises(ValueError, match="no vertical forms"):
+        with pytest.raises(ValueError, match="no vertical metrics"):
             _apply(src, out, para, para["text"], font_path=FONTS_DIR, family=latin)
         assert not os.path.exists(out)
+
+    @pytest.mark.skipif(
+        not os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")),
+        reason="CJK faces not provisioned",
+    )
+    def test_vertical_installed_face_with_metrics_is_accepted(self, tmp_dir):
+        # The other side of the same gate: a face that DOES carry `vmtx`
+        # passes and embeds. (The remaining absence — metrics present, form
+        # missing for one character — is pinned at the function level in
+        # test_font_fallback's TestVerticalFaceGate, because the paragraph
+        # gate reads the paragraph's EXISTING text, which the fixture's own
+        # font already draws.)
+        cjk = os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")
+        src = _vpage(tmp_dir, b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, para["text"], font_path=FONTS_DIR, family=cjk)
+        after = _paras(out)[0]
+        assert after["vertical"] is True
+        assert after["text"] == para["text"]
 
     def test_transposition_round_trip_on_member_geometry(self, tmp_dir):
         # T(x, y) = (−y, x) / T⁻¹(x′, y′) = (y′, −x′): an inverse pair,

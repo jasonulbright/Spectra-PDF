@@ -57,6 +57,7 @@ font_fallback.fallbackFontCannotExpress	pattern	font_fallback	the fallback font 
 font_fallback.fallbackFontFound	pattern	font_fallback	no fallback font found in {{font_path}}
 font_fallback.fallbackFontLostGlyph	pattern	font_fallback	the fallback font lost glyph {{g}} while subsetting
 font_fallback.fontCannotCarryBoth	pattern	font_fallback	this font cannot carry both spellings of one glyph ({{prior}} and {{spells}})
+font_fallback.fontVerticalMetricsPick	exact	font_fallback,text_paragraphs	that font has no vertical metrics — pick one that does
 font_fallback.libertinusSerifFeatureFont	pattern	font_fallback	Libertinus Serif (feature font) not found in {{font_path}}
 font_fallback.textEmbed	exact	font_fallback	no text to embed
 font_fallback.verticalFallbackFontCannot	pattern	font_fallback	the vertical fallback font cannot express {{ch}}

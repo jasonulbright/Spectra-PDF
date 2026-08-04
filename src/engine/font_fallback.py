@@ -374,12 +374,45 @@ def resolve_vertical_font(font_path: str, text: str, style: str = "regular") -> 
     raise ValueError(f"no bundled vertical font can express {text!r}")
 
 
+def face_has_vertical_metrics(face_path: str) -> bool:
+    """Whether the face's own program STATES vertical advances — `vmtx`
+    with its `vhea` header (T12/T13 recon, brief 39 § 1.5b).
+
+    This is a METRICS test, not a shaping test, and the difference was a
+    live defect: HarfBuzz SYNTHESIZES a `y_advance` from the face's extents
+    when `vmtx` is absent, so a shaping probe answers "yes, vertically" for
+    any face whose cmap covers the text — Liberation Sans included. The
+    synthesized number is the same for every glyph (measured: −1117.2 for
+    Liberation Sans, −1063.5 for Mongolian Baiti against real per-letter
+    lengths of 237–570), so it is not a metric at all; embedding it as
+    `/W2` under `/Identity-V` marches horizontal letterforms down a column
+    with an invented pitch. Absence of the table is the CAUSE, so absence
+    of the table is what the gate reads."""
+    try:
+        tt = TTFont(face_path, fontNumber=0, lazy=True)
+    except Exception:
+        return False
+    try:
+        keys = set(tt.keys())
+    finally:
+        tt.close()
+    return "vmtx" in keys and "vhea" in keys
+
+
 def face_shapes_vertically(face_path: str, text: str) -> bool:
     """Whether `face_path` can draw every character of `text` vertically —
     the gate for an INSTALLED face (T6) used on vertical text. A font with
-    no vertical machinery answers False rather than drawing sideways."""
+    no vertical machinery answers False rather than drawing sideways.
+
+    Two independent absences, both refused: no vertical METRICS (no `vmtx`
+    — the face makes no vertical statement at all) and no vertical FORM for
+    some character (the face has the machinery but not that glyph). Callers
+    that report the refusal ask `face_has_vertical_metrics` first so the two
+    are distinguishable in a bug report."""
     from engine.shaping import shape_vertical
 
+    if not face_has_vertical_metrics(face_path):
+        return False
     try:
         return all(
             shape_vertical(face_path, ch) is not None
@@ -694,6 +727,13 @@ def build_vertical_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
 
     if not Path(font_path).is_file():
         raise ValueError(f"bundled fallback font not found: {font_path}")
+    # Defence in depth for the § 1.5b class (brief 39): NOTHING reaches an
+    # /Identity-V embed without the `vmtx` that fills /W2. The resolver and
+    # the T6 installed-face gate both check this, so a face arriving here
+    # without it means a new caller skipped the gate — refuse rather than
+    # write invented advances into a document.
+    if not face_has_vertical_metrics(font_path):
+        raise ValueError("that font has no vertical metrics — pick one that does")
     drawn = [ch for ch in dict.fromkeys(text) if ch not in ("\n", "\r", "\t")]
     if not drawn:
         raise ValueError("no text to embed")

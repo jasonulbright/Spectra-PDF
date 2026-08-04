@@ -385,8 +385,16 @@ export const CANVAS_STRINGS = {
   'canvas.editpara.bundled': 'Bundled',
   'canvas.editpara.installed': 'Installed',
   'canvas.editpara.installedRestricted': 'Installed ({{count}} not shown — licence)',
-  'canvas.editpara.verticalKeepsFont':
-    'Vertical text keeps its font — the bundled faces are horizontal',
+  // Vertical text CAN be restyled (9.T4): the weight axis is real and an
+  // installed vertical face is a first-class choice (9.T6). What stays
+  // unavailable is stated as the ABSENCE it is — no bundled vertical
+  // family, and no feature request on a vertical embed.
+  'canvas.editpara.verticalNoBundledFace':
+    'No bundled face draws vertical text except the CJK one — pick an installed face with vertical metrics',
+  'canvas.editpara.verticalSmallCaps':
+    'Small caps are not applied to vertical text — the column embeds the face’s upright forms',
+  'canvas.editpara.verticalAlternates':
+    'Stylistic alternates are not applied to vertical text — the column embeds the face’s upright forms',
   'canvas.editpara.familyTitle': "Replaces the paragraph's font with the chosen bundled face",
   // Single-letter style buttons: they are ABBREVIATED WORDS (bold, italic,
   // small caps, alternates), not symbols — Spanish writes N and K — so they
