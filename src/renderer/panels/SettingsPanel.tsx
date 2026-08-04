@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { app, batch, dialog, virtualPrinter, type GsInfo, type VirtualPrinterStatus } from '../lib/tauri-bridge';
-import { deriveAccentVars } from '../lib/accent';
+import { deriveAccentVars, type ThemeName } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
 import { useTranslation } from 'react-i18next';
@@ -76,48 +76,126 @@ export async function ensureGsPath(): Promise<string> {
 
 
 
-/** Apply the theme to the document root and window title bar. */
-export function applyTheme(theme?: string): void {
-  const resolved = theme ?? loadSettings().theme;
-  if (resolved === 'system') {
-    // Reset window theme to OS default, then read actual system preference after WebView2 updates
-    getCurrentWindow().setTheme(null).then(() => {
-      const effective = getSystemTheme();
-      document.documentElement.setAttribute('data-theme', effective);
-    }).catch(() => {
-      document.documentElement.setAttribute('data-theme', getSystemTheme());
-    });
-    applyAccentColor();
-  } else {
-    document.documentElement.setAttribute('data-theme', resolved);
-    getCurrentWindow().setTheme(resolved === 'light' ? 'light' : 'dark').catch(() => {});
-    // The accent is the product's ONE accent in every theme (owner direction
-    // 2026-08-02, after explicit themes fell back to a second, teal accent
-    // while active-state chips stayed system-blue — two accents on one
-    // screen). The CSS tables carry the Windows-default blue when the read
-    // fails, so nothing ever needs clearing.
-    applyAccentColor();
-  }
+/**
+ * Theme application is a GENERATION, not a sequence of independent writes.
+ *
+ * Three asynchronous things used to race here: the window `setTheme` IPC (the
+ * System branch stamped `data-theme` only inside its `.then()`, frames after
+ * the user asked), the accent read, and the focus-change re-read — none of
+ * them carrying which theme they were issued for. Whichever callback landed
+ * last won, so a live swap could leave the shell stamped for one theme and
+ * the accent derived for another, intermittently and only on some
+ * transitions. Every apply now takes a token; a callback that arrives after
+ * a newer apply is DROPPED rather than allowed to write stale state.
+ */
+let themeGeneration = 0;
+
+/** The last accent the OS gave us. Kept so a re-derivation on theme change
+ * needs no IPC (the shell must never lag the attribute), and so a read that
+ * fails or returns nothing leaves the previous palette intact instead of a
+ * half-set one — a partial set is how surfaces end up on different blues. */
+let lastAccentHex: string | null = null;
+
+/** The shell a stored setting resolves to. 'system' follows the OS; the three
+ * explicit themes are themselves. */
+function effectiveTheme(setting: string): ThemeName {
+  if (setting === 'light' || setting === 'dark' || setting === 'high-contrast') return setting;
+  return getSystemTheme() === 'light' ? 'light' : 'dark';
 }
 
-/** Apply Windows accent color as CSS custom properties. */
-function applyAccentColor(): void {
+/** The shell currently stamped — the attribute IS the mechanism, so it is
+ * also the authority on which theme a derivation must target. */
+function stampedTheme(): ThemeName {
+  const attr = document.documentElement.getAttribute('data-theme');
+  return attr === 'light' || attr === 'high-contrast' ? attr : 'dark';
+}
+
+/** Apply the theme to the document root and window title bar. */
+export function applyTheme(theme?: string): void {
+  const setting = theme ?? loadSettings().theme;
+  const generation = ++themeGeneration;
+  const effective = effectiveTheme(setting);
+
+  // Stamp SYNCHRONOUSLY, in every branch. The attribute is what the shell CSS
+  // keys on; making it wait on an IPC round-trip showed the outgoing theme
+  // until the round-trip finished.
+  stampTheme(effective, generation);
+
+  // The window/title-bar theme follows; System resets it to the OS default and
+  // re-reads matchMedia afterwards, because WebView2 can report the old value
+  // until tao's set_theme has landed.
+  getCurrentWindow()
+    .setTheme(setting === 'system' ? null : effective === 'light' ? 'light' : 'dark')
+    .then(() => {
+      if (setting === 'system') stampTheme(effectiveTheme('system'), generation);
+    })
+    .catch(() => {});
+
+  applyAccentColor(generation);
+}
+
+/** Stamp the shell and re-derive the accent for it, in that order — the
+ * variables are a function of the theme, so they can never be applied for a
+ * theme that is not the one on screen. No-op once superseded. */
+function stampTheme(effective: ThemeName, generation: number): void {
+  if (generation !== themeGeneration) return;
+  document.documentElement.setAttribute('data-theme', effective);
+  if (lastAccentHex) applyAccentVars(lastAccentHex, effective);
+}
+
+/**
+ * Read the Windows accent and apply it for whatever theme is stamped.
+ *
+ * The accent is the product's ONE accent in every theme (owner direction
+ * 2026-08-02, after explicit themes fell back to a second, teal accent while
+ * active-state chips stayed system-blue — two accents on one screen). What is
+ * theme-dependent is the DERIVATION, not the source: see lib/accent.ts. The
+ * CSS tables carry the Windows-default blue when the read fails, so nothing
+ * ever needs clearing.
+ */
+function applyAccentColor(generation: number): void {
   app.getSystemAccentColor().then((hex) => {
-    if (!hex) return;
-    const vars = deriveAccentVars(hex);
-    if (!vars) return;
-    const root = document.documentElement;
-    root.style.setProperty('--accent', vars.accent);
-    root.style.setProperty('--accent-hover', vars.hover);
-    root.style.setProperty('--accent-muted', vars.muted);
-    root.style.setProperty('--accent-subtle', vars.subtle);
-    root.style.setProperty('--accent-fg', vars.fg);
-    root.style.setProperty('--accent-text', vars.text);
+    if (generation !== themeGeneration) return; // a newer theme owns the shell
+    if (!hex) return; // keep the last good palette rather than a partial one
+    lastAccentHex = hex;
+    applyAccentVars(hex, stampedTheme());
   }).catch(() => {});
+}
+
+/** The theme the variables currently on :root were derived for. */
+let derivedForTheme: ThemeName | null = null;
+
+/** The ONE writer of the accent custom properties. */
+function applyAccentVars(hex: string, theme: ThemeName): void {
+  const vars = deriveAccentVars(hex, theme);
+  if (!vars) return;
+  const root = document.documentElement;
+  root.style.setProperty('--accent', vars.accent);
+  root.style.setProperty('--accent-hover', vars.hover);
+  root.style.setProperty('--accent-muted', vars.muted);
+  root.style.setProperty('--accent-subtle', vars.subtle);
+  root.style.setProperty('--accent-fg', vars.fg);
+  root.style.setProperty('--accent-text', vars.text);
+  derivedForTheme = theme;
 }
 
 // Apply theme immediately on module load
 applyTheme();
+
+/**
+ * `data-theme` IS the mechanism — so anything that writes it gets a matching
+ * accent, not just applyTheme. theme-boot stamps it before this module loads,
+ * and the e2e surface walk stamps it directly on purpose; without this, both
+ * would render a shell whose accent was derived for a different one. Keying
+ * the derivation off the attribute rather than off the call site is what makes
+ * "the variables are a function of the stamped theme" an invariant instead of
+ * a convention. Writing style properties never re-triggers this.
+ */
+new MutationObserver(() => {
+  const theme = stampedTheme();
+  if (theme === derivedForTheme || !lastAccentHex) return;
+  applyAccentVars(lastAccentHex, theme);
+}).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
 // Re-apply when system theme changes (only matters when theme === 'system')
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
@@ -125,9 +203,11 @@ window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', ()
 });
 
 // Re-read accent color when app regains focus (user may have changed it in
-// Windows Settings). Every theme consumes it — the one-accent rule.
+// Windows Settings). Every theme consumes it — the one-accent rule. It rides
+// the CURRENT generation, so a read still in flight when the theme changes is
+// dropped by the newer apply instead of landing on the wrong shell.
 getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-  if (focused) applyAccentColor();
+  if (focused) applyAccentColor(themeGeneration);
 });
 
 function GsInfoDisplay({ info, label }: { info: GsInfo | null; label: string }): React.ReactElement | null {
@@ -407,6 +487,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       <div>
         <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.settings.theme')}</label>
         <select
+          data-testid="prefs-theme"
           aria-label={tChrome('panel.settings.theme')}
           value={settings.theme}
           onChange={(e) => update('theme', e.target.value)}

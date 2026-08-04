@@ -3,10 +3,22 @@
  * light yellows, so every derived value has to be direction-aware: text
  * that stays white fails contrast on light accents, and a flat lighten
  * makes hover invisible on them. Pure math — unit-tested.
+ *
+ * The derivation is a function of (accent, THEME), not of the accent alone.
+ * One accent still serves every theme (owner direction 2026-08-02), but the
+ * shell it is drawn against is not the same in all three: an accent lifted
+ * for the dark shell is the WRONG direction on white, and the contrast theme
+ * needs a floor no arbitrary system accent is guaranteed to clear. Deriving
+ * per theme is what keeps "one accent" from meaning "one derivation" — the
+ * theme conditions the accent, the accent does not condition the theme.
  */
 
+/** The three explicit shells `data-theme` can carry. */
+export type ThemeName = 'light' | 'dark' | 'high-contrast';
+
 export interface AccentVars {
-  /** The accent itself, as given ("#RRGGBB"). */
+  /** The accent itself, as "#RRGGBB" — the given value in the ordinary
+   * themes, lifted to the contrast theme's floor under high contrast. */
   accent: string;
   /** Hover variant — shifted AWAY from the text color (darker under white
    * text, lighter under black), so the hover state never has LESS contrast
@@ -20,9 +32,11 @@ export interface AccentVars {
   subtle: string;
   /** Text color that keeps contrast on the accent surface. */
   fg: string;
-  /** The accent used AS text on the dark shell (#171717): lightened until
-   * it reaches AA there. Light accents pass as-is; dark ones (navy, maroon)
-   * are illegible unlifted. */
+  /** The accent drawn ON the shell — as text, and as the focus indicator.
+   * Moved toward whichever end of the range the shell is not: lightened on
+   * the dark shells (navy and maroon are illegible on #171717 unlifted),
+   * DARKENED on the light one (the dark-shell lift is the exact wrong
+   * direction on white — it shipped cyan at 2.47:1 there). */
   text: string;
 }
 
@@ -42,6 +56,16 @@ export function relativeLuminance(rgb: [number, number, number]): number {
   return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
 }
 
+/** WCAG contrast ratio between two sRGB colors. */
+export function contrastRatio(
+  a: [number, number, number],
+  b: [number, number, number],
+): number {
+  const [l1, l2] = [relativeLuminance(a), relativeLuminance(b)];
+  const [hi, lo] = l1 >= l2 ? [l1, l2] : [l2, l1];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
 /**
  * The text-color decision is pure WCAG arithmetic, not "when Windows flips":
  * white text holds 4.5:1 up to background luminance 0.1833, black text holds
@@ -56,15 +80,71 @@ export function relativeLuminance(rgb: [number, number, number]): number {
  */
 const CONTRAST_FG_LUMINANCE = 0.182;
 
-/** AA floor for accent-as-text on the dark shell (#171717, L 0.0144):
- * (L + 0.05) / 0.0644 >= 4.5 needs L >= 0.24. */
-const DARK_SHELL_TEXT_LUMINANCE = 0.24;
+/** What each theme paints behind accent-colored text and focus indicators:
+ * the dark shell (#171717), the light shell (#ffffff), the contrast theme's
+ * pure black. */
+const SHELL: Record<ThemeName, [number, number, number]> = {
+  dark: [0x17, 0x17, 0x17],
+  light: [0xff, 0xff, 0xff],
+  'high-contrast': [0x00, 0x00, 0x00],
+};
+
+/** Accent-as-text floor per theme: AA on the ordinary shells, AAA under high
+ * contrast — a contrast theme that only reached AA would not be one. */
+const TEXT_RATIO: Record<ThemeName, number> = {
+  dark: 4.5,
+  light: 4.5,
+  'high-contrast': 7,
+};
+
+/** The contrast theme's floor for the accent AS A SURFACE/LINE (WCAG 1.4.11
+ * non-text contrast) against its black shell. A user's system accent is
+ * arbitrary — navy at 1.6:1 on black simply disappears — so under high
+ * contrast the THEME's requirement wins over the raw system value. */
+const HIGH_CONTRAST_ACCENT_RATIO = 3;
 
 const clamp = (v: number) => Math.max(0, Math.min(255, v));
 
-export function deriveAccentVars(hex: string): AccentVars | null {
-  const rgb = parseHex(hex);
-  if (!rgb) return null;
+const toHex = (rgb: [number, number, number]) =>
+  `#${rgb.map((c) => c.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+
+/**
+ * Step a color toward white or black — away from `shell` — until it clears
+ * `ratio` against it. Bounded: 17 steps of 15 span black to white, and a
+ * clamped step ends the walk, so an unreachable target degrades to the
+ * highest-contrast value available instead of looping.
+ */
+function liftForShell(
+  rgb: [number, number, number],
+  shell: [number, number, number],
+  ratio: number,
+): [number, number, number] {
+  const step = relativeLuminance(shell) > 0.5 ? -15 : 15;
+  let out = rgb;
+  while (contrastRatio(out, shell) < ratio) {
+    const moved: [number, number, number] = [
+      clamp(out[0] + step),
+      clamp(out[1] + step),
+      clamp(out[2] + step),
+    ];
+    if (moved[0] === out[0] && moved[1] === out[1] && moved[2] === out[2]) break;
+    out = moved;
+  }
+  return out;
+}
+
+export function deriveAccentVars(hex: string, theme: ThemeName = 'dark'): AccentVars | null {
+  const parsed = parseHex(hex);
+  if (!parsed) return null;
+  const shell = SHELL[theme] ?? SHELL.dark;
+
+  // Under high contrast the accent itself is floored against the black shell
+  // BEFORE anything derives from it, so the washes, the hover and the
+  // foreground all describe the accent the user will actually see.
+  const rgb =
+    theme === 'high-contrast'
+      ? liftForShell(parsed, shell, HIGH_CONTRAST_ACCENT_RATIO)
+      : parsed;
   const [r, g, b] = rgb;
   const whiteFg = relativeLuminance(rgb) <= CONTRAST_FG_LUMINANCE;
 
@@ -77,21 +157,10 @@ export function deriveAccentVars(hex: string): AccentVars | null {
     hover = [clamp(r - away), clamp(g - away), clamp(b - away)];
   }
 
-  // Accent as TEXT on the dark shell: lift in steps until it clears AA
-  // there. Bounded — 17 steps of +15 reach white from black.
-  let text: [number, number, number] = [r, g, b];
-  while (relativeLuminance(text) < DARK_SHELL_TEXT_LUMINANCE) {
-    const lifted: [number, number, number] = [
-      clamp(text[0] + 15),
-      clamp(text[1] + 15),
-      clamp(text[2] + 15),
-    ];
-    if (lifted[0] === text[0] && lifted[1] === text[1] && lifted[2] === text[2]) break;
-    text = lifted;
-  }
+  const text = liftForShell(rgb, shell, TEXT_RATIO[theme] ?? TEXT_RATIO.dark);
 
   return {
-    accent: hex,
+    accent: toHex(rgb),
     hover: `rgb(${hover[0]}, ${hover[1]}, ${hover[2]})`,
     muted: `rgba(${r}, ${g}, ${b}, 0.3)`,
     subtle: `rgba(${r}, ${g}, ${b}, 0.2)`,

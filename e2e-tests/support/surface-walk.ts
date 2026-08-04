@@ -50,7 +50,12 @@ export const NAV_PANEL_IDS = [
 ] as const;
 
 /** Stamp a theme the way the product does (theme-boot.ts at boot,
- * SettingsPanel.applyTheme on change): the attribute IS the mechanism. */
+ * SettingsPanel.applyTheme on change): the attribute IS the mechanism, and
+ * the accent variables follow it — SettingsPanel observes `data-theme` and
+ * re-derives, so what this audits is the real per-theme palette, not one
+ * theme's accent painted onto three shells. (The live SWAP path — ordering,
+ * generations, the IPC-lagged System stamp — is spec 29's, driven through
+ * the real Preferences select.) */
 export async function stampTheme(theme: WalkTheme): Promise<void> {
   await browser.execute((t: string) => document.documentElement.setAttribute('data-theme', t), theme);
   await browser.pause(150);
