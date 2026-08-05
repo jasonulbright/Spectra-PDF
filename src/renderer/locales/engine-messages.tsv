@@ -87,6 +87,7 @@ font_fallback.textEmbed	exact	font_fallback	no text to embed
 font_fallback.verticalFallbackFontCannot	pattern	font_fallback	the vertical fallback font cannot express {{ch}}
 form_detect.cannotNameDetectedField	pattern	form_detect	cannot name the detected field {{base}}: too many fields already carry that name
 form_detect.maxCandidatesMustPositive	exact	form_detect	max_candidates must be a positive number
+form_detect.scanMustAutoNever	exact	form_detect	scan must be "auto", "never" or "always"
 forms.acroformFieldTreeNested	exact	forms	AcroForm field tree nested too deeply
 forms.couldnTRegenerateAppearance	pattern	forms	couldn't regenerate the appearance for {{v0}}: {{exc}}
 forms.valueContainsCharactersOutside	exact	forms	value contains characters outside the form font's encoding (WinAnsi)
