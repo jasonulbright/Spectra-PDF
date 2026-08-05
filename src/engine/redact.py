@@ -64,7 +64,7 @@ Remaining limitations (documented; over-redaction, never under-redaction):
 import shutil
 import tempfile
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import pikepdf
 from pikepdf import Name
