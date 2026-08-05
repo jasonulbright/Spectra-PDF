@@ -112,7 +112,7 @@ export const initialUiState: UiState = {
 };
 
 // Leaving doc-tab-land re-applies the board's parked-state semantics: the
-// tool disarms and the selection clears (pre-M2 this was the canvas
+// tool disarms and the selection clears (this used to be the canvas
 // component's unmount; the commit-on-leave effect stays in App). Doc→doc
 // switches keep both — same board, different active file.
 function focusTab(state: AppState, tab: FocusedTab): AppState {

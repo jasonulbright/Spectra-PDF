@@ -25,7 +25,7 @@ import { importSymbolSetFromPath } from './lib/symbol-set-io';
 import type { FocusedTab } from './state/types';
 
 export interface TestStateSnapshot {
-  // Legacy projection of the tab model — kept so pre-M2 specs'
+  // Legacy projection of the tab model — kept so legacy specs'
   // assertions hold: home→'welcome', tools→'operations', doc→'canvas'.
   view: 'welcome' | 'operations' | 'canvas';
   focusedTab: FocusedTab;
@@ -64,7 +64,7 @@ export interface TestAnnotationInput {
   note?: string;
   points?: number[];
   /** ink only: per-pen-lift paths. An ink given `points` instead is
-   *  normalized to one stroke, so pre-N2 specs keep working. */
+   *  normalized to one stroke, so legacy specs keep working. */
   strokes?: number[][];
   /** stamp only: a custom image stamp's data URL. */
   imageData?: string;

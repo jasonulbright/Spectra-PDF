@@ -758,7 +758,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Delete Selected Pages',
     when: (ctx) => hasSelection(ctx.state),
     run: ({ state, dispatch }) => {
-      // Same pair the keyboard path ran pre-M1: batched delete, then clear —
+      // Same pair the keyboard path has always run: batched delete, then clear —
       // unconditionally, so a reducer-rejected batch (stale id / would empty
       // a file) still drops the hazardous stale selection.
       dispatch({ type: 'DELETE_PAGE_REFS', pageIds: [...state.ui.selectedPageIds] });

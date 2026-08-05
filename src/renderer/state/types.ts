@@ -326,7 +326,7 @@ export type CanvasTool =
 // either the all-docs organize board with that file active, or the per-doc
 // Document view. The legacy ViewMode literals survive only as the harness
 // snapshot's derived view (home→'welcome', tools→'operations', doc→'canvas')
-// so pre-M2 e2e specs keep their assertions.
+// so legacy e2e specs keep their assertions.
 // 'tools' RETIRED — the Tools tab is gone; ops panels live
 // in the right dock (ToolDock) and the tile grid lives on Home. ViewMode
 // keeps the 'operations' literal ONLY as the harness setView() INPUT
