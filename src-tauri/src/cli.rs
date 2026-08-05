@@ -520,6 +520,22 @@ pub struct RedactArgs {
     /// display-normalized, not rotation-adjusted): "x0,y0,x1,y1"
     #[arg(long)]
     pub rect: String,
+    /// Box fill colour as #rrggbb (the /IC key). Default black.
+    #[arg(long, default_value = "#000000")]
+    pub fill: String,
+    /// Text drawn over the box (the /OverlayText key) — e.g. a FOIA exemption
+    /// code. Non-Latin-1 text embeds a font rather than being refused.
+    #[arg(long, default_value = "")]
+    pub overlay_text: String,
+    /// Tile the overlay text to fill the box (the /Repeat key)
+    #[arg(long, default_value_t = false)]
+    pub repeat_overlay: bool,
+    /// Overlay alignment (the /Q key): 0 left, 1 centred, 2 right
+    #[arg(long, default_value_t = 0)]
+    pub overlay_align: u8,
+    /// Overlay font size in points; 0 fits the box
+    #[arg(long, default_value_t = 0.0)]
+    pub overlay_size: f64,
 }
 
 #[derive(Args)]
@@ -1654,6 +1670,24 @@ fn abs(p: &Path) -> PathBuf {
 }
 
 /// Parse comma-separated page numbers into a JSON value.
+/// `#rrggbb` (or `rrggbb`) → [r, g, b] in 0..1 — the redaction fill and any
+/// other colour a CLI flag names. Strict: a malformed colour REFUSES rather
+/// than falling back to a default the caller did not ask for.
+fn parse_hex_rgb(value: &str) -> Result<Vec<f64>, String> {
+    let hex = value.trim().trim_start_matches('#');
+    if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("'{}' is not a colour — use #rrggbb", value));
+    }
+    let component = |i: usize| {
+        u8::from_str_radix(&hex[i..i + 2], 16).map(|v| f64::from(v) / 255.0)
+    };
+    Ok(vec![
+        component(0).map_err(|e| e.to_string())?,
+        component(2).map_err(|e| e.to_string())?,
+        component(4).map_err(|e| e.to_string())?,
+    ])
+}
+
 fn parse_pages(pages: &str) -> Value {
     if pages.eq_ignore_ascii_case("all") {
         json!("all")
@@ -2067,12 +2101,26 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             if rect.len() != 4 {
                 return Err("--rect requires exactly 4 comma-separated numbers: x0,y0,x1,y1".to_string());
             }
+            let fill = parse_hex_rgb(&args.fill)?;
             engine.call(
                 "redact",
                 json!({
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
-                    "regions": [{"page": args.page, "rect": rect}],
+                    "regions": [{
+                        "page": args.page,
+                        "rect": rect,
+                        "fill": fill,
+                        "overlay_text": args.overlay_text,
+                        "repeat_overlay": args.repeat_overlay,
+                        "align": args.overlay_align,
+                        "font_size": args.overlay_size,
+                    }],
+                    // F15 slice E: an overlay whose text is not Latin-1
+                    // EMBEDS through the bundled faces rather than drawing
+                    // '?' — a redaction code printed as question marks tells
+                    // the reader nothing (S4's precedent).
+                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             )
         }
