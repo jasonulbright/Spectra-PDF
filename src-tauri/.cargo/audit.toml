@@ -11,7 +11,7 @@
 # when `cargo audit` fails on a new ID, triage it — if it's a transitive,
 # unfixable-here advisory, add it below WITH a justification line; if it's in a
 # crate we control or an upstream fix is available, FIX it (bump the dep),
-# don't ignore it. See docs/PUNCHLIST.md § Dev environment notes.
+# don't ignore it.
 
 [advisories]
 ignore = [

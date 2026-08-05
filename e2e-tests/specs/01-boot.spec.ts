@@ -19,7 +19,7 @@ describe('boot', () => {
 
   it('boots onto the Home tab (pure doc tabs — no Tools pseudo-tab)', async () => {
     await expect($('[data-testid="tab-home"]')).toBeDisplayed();
-    // Slice C retired the Tools tab; its absence is part of the contract.
+    // The Tools tab is retired; its absence is part of the contract.
     await expect($('[data-testid="tab-tools"]')).not.toBeExisting();
     await expect($('[data-testid="home-tab"]')).toBeDisplayed();
     // The tile grid lives on Home now.

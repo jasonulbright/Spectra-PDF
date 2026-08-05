@@ -34,8 +34,8 @@ const SCANNED = resolve(__dirname, '..', 'fixtures', 'scanned.pdf');
 async function ensureFindOpen(): Promise<void> {
   const input = $('[data-testid="find-input"]');
   if (await input.isDisplayed().catch(() => false)) return;
-  // Slice A removed the floating Find toggle (duplicate of Ctrl+F / nav
-  // Search); the command is the canonical opener now.
+  // There is no floating Find toggle — it duplicated Ctrl+F / nav Search.
+  // The command is the canonical opener.
   await invokeAppCommand('edit.find');
   await input.waitForDisplayed({ timeout: 10_000 });
 }
