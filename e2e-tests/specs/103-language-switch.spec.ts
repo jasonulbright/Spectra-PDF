@@ -41,4 +41,39 @@ describe('language switch (N12)', () => {
     expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
     await $('[data-testid="prefs-close"]').click();
   });
+
+  // Wave-1 locales fr/de/it. One known menu label each is the cheap proof the
+  // catalog is BUNDLED and reachable from the Settings list — the parity,
+  // placeholder and plural gates are vitest's job, and repeating them here
+  // would buy nothing for the runtime cost. The anchor is View, not File:
+  // Italian's File is spelled exactly like English's, so asserting on it
+  // would pass against a locale that never loaded.
+  it('switches to each wave-1 locale and back to English', async () => {
+    await waitForHarness();
+    await browser.keys(['Control', 'k']);
+    await $('[data-testid="prefs-cat-appearance"]').waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="prefs-cat-appearance"]').click();
+    await $('[data-testid="prefs-language"]').waitForDisplayed({ timeout: 10_000 });
+
+    for (const [code, viewLabel] of [
+      ['fr', 'Affichage'],
+      ['de', 'Ansicht'],
+      ['it', 'Visualizza'],
+    ] as const) {
+      await $('[data-testid="prefs-language"]').selectByAttribute('value', code);
+      await browser.waitUntil(
+        async () => (await $('[data-testid="menu-view"]').getText()) === viewLabel,
+        { timeout: 10_000, timeoutMsg: `the menu bar never re-rendered in ${code}` },
+      );
+      expect(await browser.execute(() => document.documentElement.lang)).toBe(code);
+    }
+
+    await $('[data-testid="prefs-language"]').selectByAttribute('value', 'en');
+    await browser.waitUntil(
+      async () => (await $('[data-testid="menu-view"]').getText()) === 'View',
+      { timeout: 10_000, timeoutMsg: 'the menu bar never returned to English' },
+    );
+    expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
+    await $('[data-testid="prefs-close"]').click();
+  });
 });
