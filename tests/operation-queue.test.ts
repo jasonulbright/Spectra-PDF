@@ -11,7 +11,7 @@ describe('isTrackableMethod — internal-read exemptions', () => {
       'get_metadata',
       'get_pdf_version',
       'get_outline',
-      // 9.A2-tail-2: the fit indicator fires on every keystroke pause; if it
+      // The fit indicator fires on every keystroke pause; if it
       // gated, it would commit unrelated pending page edits mid-typing.
       'measure_text_box',
     ]) {

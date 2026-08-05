@@ -1,4 +1,4 @@
-"""Logical structure tree — the Tags + Reading Order panels (§ I.6).
+"""Logical structure tree — the Tags + Reading Order panels.
 
 A tagged PDF carries its logical structure in the catalog's /StructTreeRoot: a
 tree of structure elements (/S type, optional /T title, /Alt alternative text,
@@ -29,9 +29,9 @@ Mutations:
 
 Untagged documents (no /StructTreeRoot) list as tagged=False and every
 mutation refuses cleanly — creating a tree from nothing is autotagging's job
-(registered separately in §I), not a tree editor's.
+(a separate capability), not a tree editor's.
 
-NOTE (registered §I gap): the renderer's page-tier commit rebuilds documents
+NOTE (known gap): the renderer's page-tier commit rebuilds documents
 via pdf-lib into a fresh catalog, which does not carry /StructTreeRoot — page
 moves/deletes on a tagged file drop its tags today, tags edited here survive
 every ENGINE path (pikepdf edits the tree in place). Same family as the

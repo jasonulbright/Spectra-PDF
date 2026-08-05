@@ -1,4 +1,4 @@
-"""Optional content groups — the Layers panel (§ I.6).
+"""Optional content groups — the Layers panel.
 
 Layered PDFs (CAD exports, maps, multi-language artwork) carry Optional Content
 Groups in the catalog's /OCProperties. Each OCG is a named layer; the default

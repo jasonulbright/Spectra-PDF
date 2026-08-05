@@ -23,10 +23,10 @@ export interface CanvasHandle {
   fitWidth?(): void;
   clientToWorld(clientX: number, clientY: number): { x: number; y: number; k: number } | null;
   /** Pan/zoom the camera to center the given page (by its data-page-id
-   * cell). Built for Find navigation (2m); outline click-to-jump (2n)
+   * cell). Built for Find navigation; outline click-to-jump
    * reuses it. No-op when the page isn't in the DOM. */
   centerOn(pageId: string): void;
-  /** N3 marquee zoom (reading view only): zoom until the display-normalized
+  /** Marquee zoom (reading view only): zoom until the display-normalized
    * page rect fills the pane, scroll it centered, and return the APPLIED
    * zoom (null when the request names nothing) — the split layer syncs
    * sibling panes to that value, since quad zoom must stay equal. */

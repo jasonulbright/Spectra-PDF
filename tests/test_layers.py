@@ -1,4 +1,4 @@
-"""§ I.6 — optional content groups (layers)."""
+"""Optional content groups (layers)."""
 
 import os
 

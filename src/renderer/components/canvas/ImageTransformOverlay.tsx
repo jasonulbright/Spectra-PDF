@@ -18,7 +18,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../../i18n';
 
-// Phase 9.C1 — direct-manipulation transform of the selected image placement.
+// Direct-manipulation transform of the selected image placement.
 // The outline + move body are an SVG polygon (crisp via non-scaling-stroke,
 // correct for a rotated placement); the four corner handles + rotate handle are
 // HTML dots. Every gesture composes from the COMMITTED matrix and computes in
@@ -26,12 +26,12 @@ import { tChrome } from '../../i18n';
 // absolute matrix M' on release. Pointer drags use window listeners (the canvas
 // drag invariant — synthetic pointermove doesn't deliver in the WebView).
 //
-// Phase 9.C3 — crop mode: when armed (toolbar toggle), the body drag draws a
+// Crop mode: when armed (toolbar toggle), the body drag draws a
 // band in the image's own UNIT space instead of moving; on release the clamped
 // unit rect commits to the engine's clip-based crop. Handles hide while armed
 // (the quad is the crop canvas).
 //
-// Phase 9.C3-tail — crop re-edit: a placement whose LISTING carries a tool
+// Crop re-edit: a placement whose LISTING carries a tool
 // crop shows that rect as a dashed outline with four EDGE handles; dragging
 // one commits the new ABSOLUTE unit rect (the engine collapse-replaces its
 // own frames, so widening works). Author clips list null — no handles.
@@ -41,10 +41,10 @@ interface Props {
   /** Pending in-memory page rotation applied at render (like every overlay). */
   pendingRotate: number;
   onCommit: (matrix: number[]) => void;
-  /** 9.C3: crop mode armed — the body drag draws the crop band. */
+  /** Crop mode armed — the body drag draws the crop band. */
   cropArmed: boolean;
   onCommitCrop: (rect: [number, number, number, number]) => void;
-  /** P7 slice E: commit a gradient-mask change (a from/to dot released). */
+  /** Commit a gradient-mask change (a from/to dot released). */
   onCommitMask?: (mask: {
     kind: 'linear' | 'radial';
     from: [number, number];
@@ -70,9 +70,9 @@ export default function ImageTransformOverlay({
   const rootRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Mat | null>(null);
   const [cropBand, setCropBand] = useState<[number, number, number, number] | null>(null);
-  // C3-tail: live preview of an edge-handle drag (null = show ctx.crop).
+  // Live preview of an edge-handle drag (null = show ctx.crop).
   const [cropPreview, setCropPreview] = useState<[number, number, number, number] | null>(null);
-  // P7 slice E: live preview of a mask-dot drag (null = show ctx.mask).
+  // Live preview of a mask-dot drag (null = show ctx.mask).
   const [maskPreview, setMaskPreview] = useState<{
     from: [number, number];
     to: [number, number];
@@ -138,7 +138,7 @@ export default function ImageTransformOverlay({
     window.addEventListener('pointercancel', onCancel);
   };
 
-  // 9.C3 crop band: drag in the image's LOCAL unit space (pointer → user →
+  // Crop band: drag in the image's LOCAL unit space (pointer → user →
   // M⁻¹ → clamp), preview the band, commit the clamped rect on release.
   const startCrop = (e: React.PointerEvent): void => {
     if (ctx.busy || active.current) return;
@@ -184,7 +184,7 @@ export default function ImageTransformOverlay({
     window.addEventListener('pointercancel', onCancel);
   };
 
-  // C3-tail: drag one crop edge in the image's local unit space; commit the
+  // Drag one crop edge in the image's local unit space; commit the
   // absolute rect on release (same wire as the band — the engine replaces).
   const startCropEdge = (e: React.PointerEvent, edge: 0 | 1 | 2 | 3): void => {
     const seed = ctx.crop;
@@ -222,7 +222,7 @@ export default function ImageTransformOverlay({
     window.addEventListener('pointercancel', onCancel);
   };
 
-  // P7 slice E: drag one gradient-mask dot ('from' | 'to') in the image's
+  // Drag one gradient-mask dot ('from' | 'to') in the image's
   // local unit space; commit the FULL mask params on release (the engine
   // rebuilds the /SMask group from them).
   const startMaskDot = (e: React.PointerEvent, which: 'from' | 'to'): void => {
@@ -284,7 +284,7 @@ export default function ImageTransformOverlay({
     const [cx, cy] = userCenter(b);
     return applyRotate(b, Math.atan2(c[1] - cy, c[0] - cx) - Math.atan2(s[1] - cy, s[0] - cx));
   };
-  // P7 slice A: edge-mid handles shear parallel to their edge (opposite edge
+  // Edge-mid handles shear parallel to their edge (opposite edge
   // pinned) — the same start/preview/commit path as every other gesture.
   const skewGesture = (edge: 0 | 1 | 2 | 3): Compute => (s, c, b) =>
     applySkewEdge(b, edge, s[0], s[1], c[0], c[1]) ?? b;
@@ -294,7 +294,7 @@ export default function ImageTransformOverlay({
     left: `${p[0] * 100}%`,
     top: `${p[1] * 100}%`,
   });
-  // C3-tail: the listed crop (or its live drag preview) in display space.
+  // The listed crop (or its live drag preview) in display space.
   const cropRect = cropPreview ?? ctx.crop;
   const cropCorners =
     cropRect && !cropArmed
@@ -387,7 +387,7 @@ export default function ImageTransformOverlay({
           onPointerDown={(e) => start(e, rotateGesture)}
         />
       )}
-      {/* P7 slice A: skew handles at the quad edge midpoints (0=left 1=bottom
+      {/* Skew handles at the quad edge midpoints (0=left 1=bottom
           2=right 3=top — the applyCropEdge edge order). The top handle shares
           the rotate arm's anchor point but not its offset knob. */}
       {!cropArmed &&
@@ -418,7 +418,7 @@ export default function ImageTransformOverlay({
             onPointerDown={(e) => startCropEdge(e, i as 0 | 1 | 2 | 3)}
           />
         ))}
-      {/* P7 slice E: the gradient mask's from/to dots (unit space → display
+      {/* The gradient mask's from/to dots (unit space → display
           through the placement matrix), draggable; the axis line joins them. */}
       {ctx.mask &&
         !cropArmed &&

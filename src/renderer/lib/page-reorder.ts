@@ -1,11 +1,11 @@
-// Linear-list reorder math for the nav-pane Pages panel (Phase 4 M3.1b). The
+// Linear-list reorder math for the nav-pane Pages panel. The
 // panel shows one file's pages flattened across its documents; a drag drops at
 // a flat insertion index. This maps that to the (toDocId, toIndex) a
 // MOVE_PAGE/MOVE_PAGES dispatch expects — toIndex counted against the target
 // doc's pages AFTER the moving pages are removed (the reducer's frame), so a
 // cross-manifest-partition drag lands correctly. Pure + unit-tested; the panel
 // only wires pointer events to it. (usePageDrag's world-coordinate math stays
-// canvas-only — § 14.4.)
+// canvas-only.)
 
 export interface ReorderItem {
   docId: string;

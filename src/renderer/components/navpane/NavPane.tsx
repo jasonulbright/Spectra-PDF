@@ -6,7 +6,7 @@ import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tNavPanelTitle } from '../../i18n';
 
-// The left navigation pane (Phase 4 M3, § 5): a thin, always-docked icon strip
+// The left navigation pane: a thin, always-docked icon strip
 // (one button per AVAILABLE panel) + the active panel body at the persisted
 // width, shown while the pane is open. The strip is chrome (frame under Mica);
 // the body is content (opaque). F4 / the strip toggle open; clicking a strip
@@ -16,7 +16,7 @@ import { tChrome, tNavPanelTitle } from '../../i18n';
 type NavPaneProps = Omit<NavPanelComponentProps, 'activeFile'> & { activeFile: NavPanelComponentProps['activeFile'] };
 
 export function NavPane(props: NavPaneProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();

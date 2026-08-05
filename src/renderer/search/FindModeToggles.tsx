@@ -4,11 +4,11 @@ import type { SearchOptions } from './normalize';
 import { tChrome } from '../i18n';
 import type { UiKey } from '../i18n';
 
-// The three advanced Find modes (P4), in the industry-standard find-bar idiom:
+// The three advanced Find modes, in the industry-standard find-bar idiom:
 // Aa = match case, `\b` = whole word, `.*` = regular expression. Shared by the
 // canvas FindBar and the nav-pane SearchPanel so both surfaces offer identical
 // modes and the same look. `testIdPrefix` disambiguates the two mounts.
-// N12: the LABELS (Aa, \b, .*) are notation, not prose — they stay verbatim in
+// The LABELS (Aa, \b, .*) are notation, not prose — they stay verbatim in
 // every locale, exactly as the industry's find bars draw them; the tooltips
 // that explain them localize.
 const MODES: { key: keyof SearchOptions; label: string; title: UiKey; suffix: string }[] = [
@@ -26,7 +26,7 @@ export function FindModeToggles({
   onToggle: (key: keyof SearchOptions) => void;
   testIdPrefix: string;
 }): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   return (
     <div className="flex items-center gap-0.5">

@@ -1,5 +1,5 @@
 // Carries the tagged-PDF structure tree (/StructTreeRoot) through the
-// from-scratch rebuild in pdfx-build.ts — § I P19. The marked-content
+// from-scratch rebuild in pdfx-build.ts. The marked-content
 // operators (MCIDs) survive inside the copied page streams, so before this
 // module ANY committed page edit on a tagged file orphaned them all: the
 // tree, the ParentTree, and /MarkInfo were silently dropped, and every page

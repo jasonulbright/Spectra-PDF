@@ -1,7 +1,7 @@
 // Carries document-level catalog state through the from-scratch rebuild in
 // pdfx-build.ts: /Lang, /ViewerPreferences, /Outlines (bookmarks),
-// /PageLabels, /OCProperties (layers), and /AA (document-action scripts —
-// F11). Same loss class as the /AcroForm
+// /PageLabels, /OCProperties (layers), and /AA (document-action
+// scripts). Same loss class as the /AcroForm
 // and /Names /EmbeddedFiles drops (acroform-carry.ts, embedded-files-carry.ts):
 // pdf-lib's copyPages copies page subtrees only, so before this module ONE
 // Without this carry, a committed page edit would silently delete bookmarks,
@@ -537,7 +537,7 @@ function carryOcProperties(
   output.catalog.set(N('OCProperties'), rebuilt);
 }
 
-// ── document actions (/AA) — F11 ──────────────────────────────────────────
+// ── document actions (/AA) ──────────────────────────────────────────
 // Document-scoped scripts (will/did save, will/did print, will close).
 // Carried whole via a copier UNLESS the subtree reaches a page or page-tree
 // object — an action chain ending in a GoTo destination would make the

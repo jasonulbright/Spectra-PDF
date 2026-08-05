@@ -1,4 +1,4 @@
-// zoomGestureAllowed (M6.2): the d3 pan/zoom admission rule, extracted pure
+// zoomGestureAllowed: the d3 pan/zoom admission rule, extracted pure
 // so hand mode's page-pans-too exception is testable without a DOM gesture.
 import { describe, expect, it } from 'vitest';
 import { zoomGestureAllowed } from '../src/renderer/canvas/create-zoom-behavior';

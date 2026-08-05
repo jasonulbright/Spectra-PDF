@@ -2,10 +2,9 @@
 
 The GUI fill is renderer-side pdf-lib, chosen because filling is really an
 appearance-stream problem: a set /V with no regenerated /AP renders blank in
-most viewers (docs/architecture/08-phase2f-forms.md). This module is the
-engine-side implementation that gives the CLI the same behavior as the GUI
-(docs/architecture/14-phase2l-gui-cli-parity.md). The target is pdf-lib's
-behavior, not every form variation found in arbitrary PDFs:
+most viewers. This module is the engine-side implementation that gives the
+CLI the same behavior as the GUI. The target is pdf-lib's behavior, not
+every form variation found in arbitrary PDFs:
 
 - Checkboxes/radios need no appearance generation — their widgets already
   carry every state in /AP /N; filling sets /V to the on-state name and each
@@ -246,7 +245,7 @@ def _option_export_index(field: _Field, wanted: str) -> tuple[str, int] | None:
     """(export string, 0-based /Opt index) for `wanted` (display or export), or
     None if /Opt exists and nothing matches. A field without /Opt has no index
     (-1). Used for multi-select list boxes, whose /I holds the selected /Opt
-    indices (FC4)."""
+    indices."""
     opt = field.attr("/Opt")
     if opt is None:
         return (wanted, -1)
@@ -348,7 +347,7 @@ def _field_value(field: _Field, ftype: str):
         if v is None:
             return ""
         if isinstance(v, pikepdf.Array):
-            # FC4: a multi-select list box reports its FULL selection as a list
+            # A multi-select list box reports its FULL selection as a list
             # (was silently truncated to the first item).
             return [str(x) for x in v]
         return str(v)
@@ -398,10 +397,10 @@ def _widget_geometry(
     field, ftype: str, options: list[str], annot_map: dict, page_map: dict
 ) -> list:
     """Per-widget placement — `{page (0-based, or None if unplaced), rect
-    [x0,y0,x1,y1] normalized, hidden, option?}`. FC3/FC4 (§I.0 S6): the geometry
+    [x0,y0,x1,y1] normalized, hidden, option?}`. The geometry
     the on-canvas overlay needs to project each widget; `_Field.widgets` already
-    collects a typed terminal's nested widgets, so this surfaces S6 to the GUI
-    once the read routes through the engine.
+    collects a typed terminal's nested widgets, so nested widgets surface to
+    the GUI once the read routes through the engine.
 
     `hidden` mirrors the renderer's old pdf-lib read: a /F Hidden or NoView
     widget shows nothing on the raster, so the overlay must offer no input over
@@ -454,7 +453,7 @@ def _widget_geometry(
 
 
 def _button_action(field: _Field) -> dict | None:
-    """A pushbutton's /A action, classified for the fill overlay (F8).
+    """A pushbutton's /A action, classified for the fill overlay.
 
     The renderer acts only on what it can act on HONESTLY: reset runs for
     real (reset_form_fields), a URI is SHOWN (this app deliberately has no
@@ -524,9 +523,9 @@ def read_form_fields(file: str) -> dict:
                 "value": _field_value(field, ftype),
                 "read_only": bool(field.flags & FF_READ_ONLY),
                 "required": bool(field.flags & FF_REQUIRED),
-                # FC3/FC4: per-widget page+rect (+hidden, +radio option) so the
-                # engine read can drive the on-canvas overlay (the S1 re-route)
-                # and nested widgets (S6) list with geometry.
+                # Per-widget page+rect (+hidden, +radio option) so the
+                # engine read can drive the on-canvas overlay
+                # and nested widgets list with geometry.
                 "widgets": _widget_geometry(field, ftype, options, annot_map, page_map),
             }
             if ftype == "text":
@@ -618,7 +617,7 @@ def _escape_pdf_text(value: str) -> bytes:
 def _wrap_lines(text: str, size: float, max_width: float, width_em=text_width_em) -> list[str]:
     """Greedy word wrap; explicit newlines respected. `width_em(s)` is the em
     advance of `s` — Helvetica by default (byte-identical WinAnsi path), or an
-    embedded font's own metric on the Unicode path (FC1)."""
+    embedded font's own metric on the Unicode path."""
     lines: list[str] = []
     for para in text.split("\n"):
         if not para:
@@ -681,9 +680,9 @@ def _unicode_face(font_dir: str, da: str | None, value: str = "") -> str | None:
     from engine.font_fallback import resolve_fallback_font, synthetic_family_font
 
     try:
-        # T5: the VALUE drives the CJK step — a CJK form value lands on
+        # The VALUE drives the CJK step — a CJK form value lands on
         # the CJK-capable face instead of the coverage refusal.
-        # T25c: and the right-to-left step, opted into because the appearance
+        # And the right-to-left step, opted into because the appearance
         # builder below now reorders and shapes. Opting in without that would
         # turn an honest "cannot express" into a field drawn backwards.
         from engine import bidi
@@ -728,7 +727,7 @@ def _text_appearance(
     Returns True when the /DA-requested font was missing from /DR and
     Helvetica was substituted (honestly — named as itself, locally only).
 
-    FC1 (§I.0 S3): a value outside WinAnsi is drawn with an EMBEDDED subsetted
+    A value outside WinAnsi is drawn with an EMBEDDED subsetted
     Unicode font (Identity-H, via `build_fallback_font`) when `font_dir` is
     available — validation has already confirmed the face can render it. A
     pure-WinAnsi value keeps the byte-identical standard-14 path. The ONLY axes
@@ -767,7 +766,7 @@ def _text_appearance(
         # value can crash inside the fill. Normalize every layout control, not
         # only newline, carriage return, and tab.
         layout_value = flatten_control_chars(value, keep_newline=True)
-        # T25c: a right-to-left value shapes and reorders through the shared
+        # A right-to-left value shapes and reorders through the shared
         # builder; everything else keeps the shipped single-`Tj` emission
         # byte for byte. Built ONCE over the whole value so one subset
         # carries every glyph any wrapped line will draw.
@@ -876,7 +875,7 @@ def _field_da(field, acro) -> str | None:
 
 def _text_value_problem(name: str, text: str, da: str | None, font_dir: str) -> str | None:
     """None when `text` can be DRAWN into `name`'s appearance — WinAnsi
-    directly, or (FC1) via an embedded Unicode font when `font_dir` provides a
+    directly, or via an embedded Unicode font when `font_dir` provides a
     face that covers every glyph. Else the problem string. Doing the coverage
     check HERE keeps the fill's 'list ALL problems, then mutate nothing on
     failure' atomicity for the Unicode path too (the appearance writer never
@@ -909,7 +908,7 @@ def reset_form_fields(
     exclude: bool = False,
     font_dir: str = "",
 ) -> dict:
-    """ResetForm (F8): restore fields to their /DV defaults, else clear them.
+    """ResetForm: restore fields to their /DV defaults, else clear them.
 
     ``fields`` scopes the reset by fully-qualified name (a name also covers
     its children); ``exclude=True`` inverts it to everything-but — the two
@@ -918,8 +917,8 @@ def reset_form_fields(
 
     Implemented as a DELEGATED FILL with DV-derived values — one setter
     machinery, so reset inherits appearance regeneration, per-widget
-    checkbox on-states, choice clearing, Unicode handling, and the O5b
-    signature preservation without a second implementation to drift.
+    checkbox on-states, choice clearing, Unicode handling, and signature
+    preservation without a second implementation to drift.
     """
     named = [str(n) for n in fields] if fields else None
 
@@ -989,7 +988,7 @@ def fill_form_fields(
         edits: {fully-qualified field name: value} — str for text/choice,
             bool (or true/false/yes/no/on/off strings) for checkboxes.
         flatten: Bake appearances into page content and remove all fields.
-        font_dir: the bundled fallback-fonts directory (FC1, §I.0 S3). When
+        font_dir: the bundled fallback-fonts directory. When
             given, a value outside WinAnsi is drawn with an embedded subsetted
             Unicode font instead of being refused; empty keeps the WinAnsi-only
             behaviour. Callers pass the same dir as the text-editing ops
@@ -1044,7 +1043,7 @@ def fill_form_fields(
                     else:
                         plan.append((field, ftype, state))
             elif ftype == "optionlist" and isinstance(value, (list, tuple)):
-                # FC4: a multi-select list box — every element must be an option;
+                # A multi-select list box — every element must be an option;
                 # store /V as the export array + /I as the selected indices.
                 if len(value) == 0:
                     plan.append((field, ftype, _CLEAR))  # nothing selected
@@ -1147,7 +1146,7 @@ def fill_form_fields(
                     appearance_text = ""
                     multiline = False
                 elif isinstance(value, list):
-                    # FC4 multi-select list box: value = [(export, /Opt index)].
+                    # Multi-select list box: value = [(export, /Opt index)].
                     exports = [e for e, _i in value]
                     indices = sorted(i for _e, i in value if i >= 0)
                     # A multi-value /V requires the MultiSelect flag or the field
@@ -1197,7 +1196,7 @@ def fill_form_fields(
         else:
             pdf.save(output_path)
 
-    # O5b: filling a SIGNED document lands as an incremental append —
+    # Filling a SIGNED document lands as an incremental append —
     # original bytes verbatim + one revision carrying the value/appearance
     # updates, so existing signatures keep verifying. Flatten removes widgets,
     # which the

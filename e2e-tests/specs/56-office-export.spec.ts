@@ -13,7 +13,7 @@ import {
   invokeAppCommand,
 } from '../support/harness.js';
 
-// O1 — export the active document to editable Office / web formats via the
+// Export the active document to editable Office / web formats via the
 // bundled (or, on a dev machine, system) LibreOffice. Verifies REAL editable
 // output on disk, not a page image: the DOCX's text is present as <w:t> runs.
 //
@@ -41,7 +41,7 @@ function libreOfficeAvailable(): boolean {
   return existsSync(resolve(__dirname, '..', '..', 'resources', 'libreoffice', 'program', 'soffice.exe'));
 }
 
-describe('export to Office / web formats (O1)', () => {
+describe('export to Office / web formats', () => {
   let tmp: string;
   let source: string;
 

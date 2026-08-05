@@ -13,7 +13,7 @@ import { TEST_HARNESS_ENABLED, registerWatchedFolders } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tStepTitle } from '../i18n';
 
-// Tools ▸ Watched Folders (O7). Drop a PDF into an intake folder and a saved
+// Tools ▸ Watched Folders. Drop a PDF into an intake folder and a saved
 // guided action runs over it automatically: processed copies mirror into the
 // destination, originals file into the processed folder (In → Out → Done —
 // what keeps the intake holding only unprocessed work). Watching is in-app
@@ -31,7 +31,7 @@ export interface WatchedFoldersDialogProps {
 }
 
 export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const [folders, setFolders] = useState<WatchedFolder[] | null>(null);
   const [error, setError] = useState<string | null>(null);

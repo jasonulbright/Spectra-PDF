@@ -22,7 +22,7 @@ import {
   rgbToHex,
 } from '../src/renderer/lib/redaction-properties';
 
-// F15 slice E — the code catalogue and the property record. Both are pure
+// The code catalogue and the property record. Both are pure
 // (localStorage aside), which is what lets the rules that decide what gets
 // DRAWN in a black box be tested at all.
 

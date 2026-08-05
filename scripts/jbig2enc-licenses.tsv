@@ -1,4 +1,4 @@
-# Redistribution-notice manifest for the bundled JBIG2 encoder (O8 slice B).
+# Redistribution-notice manifest for the bundled JBIG2 encoder.
 #
 # bundle-jbig2enc.ps1 ships ONE binary — jbig2.exe from the official
 # jbig2enc 0.32 Windows x64 MSVC release asset. It is a STATIC build: leptonica,

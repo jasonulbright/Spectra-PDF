@@ -57,7 +57,7 @@ import type { FormFieldValue } from '../../lib/forms';
 import { PageView } from './PageView';
 import { PageTextLayer } from './PageTextLayer';
 
-// The tool union moved to the ui state slice (Phase 4 M1: commands and the
+// The tool union moved to the ui state slice (commands and the
 // keymap read it for enablement); re-exported here for the overlay consumers.
 export type { CanvasTool } from '../../state/types';
 import type { CanvasTool } from '../../state/types';
@@ -129,12 +129,12 @@ import i18next, { tChrome, tNumber, type UiKey } from '../../i18n';
 // annotation palette's blues/yellows, and distinct from ink's default.
 const MEASURE_COLOR = '#f59e0b';
 
-// N11 slice B: the closest two grid lines may be drawn, in CSS pixels. Below
+// The closest two grid lines may be drawn, in CSS pixels. Below
 // this the grid is a grey wash over the drawing rather than a reading aid, so
 // that axis is not drawn at all — snapping to it is unaffected.
 const GRID_MIN_PX = 4;
 
-// N11 slice A: the snap marker's per-type name key. A distinct GLYPH per type
+// The snap marker's per-type name key. A distinct GLYPH per type
 // (below) plus the name in a badge — a colour-only distinction would be
 // invisible to a reader who cannot tell them apart, and the badge is what
 // the aria-live announcement reads out.
@@ -189,18 +189,18 @@ export interface AnnotationRect {
 
 export interface StampPreset {
   /** Stable id for the BUILT-IN presets (absent on user-made stamps, which
-   * are identified by their own `id` in the library). N12 slice C: the label
+   * are identified by their own `id` in the library). The label
    * localizes — it is the text stamped INTO the document — so nothing may
    * derive identity, a test id, or a comparison from it. */
   id?: string;
   label: string;
   color: string;
-  /** Custom IMAGE stamps (parity map § 2): the raster as a data URL plus its
+  /** Custom IMAGE stamps: the raster as a data URL plus its
    * height/width ratio — placement sizes the box so the image lands
    * undistorted, and the commit embeds it as the /Stamp appearance. */
   imageData?: string;
   aspect?: number;
-  /** VECTOR SYMBOL stamps (N11 slice D): the registry id plus the geometry
+  /** VECTOR SYMBOL stamps: the registry id plus the geometry
    * itself. The parts travel with the placement so a symbol from an imported
    * set draws wherever the file goes; `label` is the display name and lands in
    * /Contents like any other stamp's. */
@@ -221,13 +221,13 @@ export const STAMP_PRESETS: StampPreset[] = [
 const STAMP_W = 0.32;
 const STAMP_H = 0.09;
 
-// N11 slice C: a count marker's on-PAPER size, in PDF points. A count mark is
+// A count marker's on-PAPER size, in PDF points. A count mark is
 // a marker, not a region — it is the same size on every page of a set,
 // whatever those pages measure, which is why this is a paper length converted
 // per page rather than a fraction of one.
 const COUNT_MARK_PT = 14;
 
-// N11 slice D: a placed SYMBOL's on-paper size, in PDF points. Bigger than a
+// A placed SYMBOL's on-paper size, in PDF points. Bigger than a
 // count marker because it is the drawing, not a tally dot — and, unlike a
 // count mark, a symbol stamp RESIZES (a receptacle and a north arrow are not
 // the same size on a sheet).
@@ -264,7 +264,7 @@ const HIGHLIGHT_COLOR = '#ffd54a';
 const FREETEXT_COLOR = '#16161a';
 const INK_COLOR = '#2f6fed';
 const FREETEXT_FONT_PT = 12;
-// N5: pen lifts within this window extend the previous ink annotation (a
+// Pen lifts within this window extend the previous ink annotation (a
 // signature is one annotation). Long enough for a deliberate lift-and-cross,
 // short enough that a new thought starts a new drawing.
 const INK_MERGE_WINDOW_MS = 2500;
@@ -276,7 +276,7 @@ function defaultColorFor(kind: PageAnnotation['kind']): string {
   return HIGHLIGHT_COLOR;
 }
 
-/** Draw native text-markup quads (N1) inside the annotation's bbox. `quads` and
+/** Draw native text-markup quads inside the annotation's bbox. `quads` and
  * `box` share the page-normalized 0..1 space; each quad is normalized into the
  * 0..1 SVG viewBox and drawn per style: highlight = translucent fill, underline
  * = line at the quad bottom, strikeout = mid-line, squiggly = a wave at the
@@ -351,7 +351,7 @@ function MaybeTurn({
   );
 }
 
-// One form widget on the page (2n.4b). Interactive only in forms mode; in
+// One form widget on the page. Interactive only in forms mode; in
 // any other tool a widget with a pending value renders as an inert badge so
 // pending state is never invisible (the redaction-mark precedent). Every
 // pointer event stops here — typing into an input must never select, drag,
@@ -407,7 +407,7 @@ function FormWidgetView({
     onContextMenu: stop,
   } as const;
   if (widget.type === 'signature') {
-    // An EMPTY, non-read-only signature field is clickable (2n.4d): the
+    // An EMPTY, non-read-only signature field is clickable: the
     // click opens the sign card targeting THIS field by name — the engine
     // fills it in place (the field's own widget rect is the stamp box).
     const signable = !widget.sigFilled && !widget.readOnly;
@@ -447,7 +447,7 @@ function FormWidgetView({
     );
   }
   if (widget.type === 'button') {
-    // F8: pushbuttons ACT — the page raster already draws the button's own
+    // Pushbuttons ACT — the page raster already draws the button's own
     // face, so the overlay is a transparent click surface. What the click
     // does is the classified /A action; App runs reset for real and stays
     // honest about the rest (no shell-open, no JS engine).
@@ -586,7 +586,7 @@ function FormWidgetView({
 interface PageCellProps {
   docId: string;
   page: PageRef;
-  /** Rotate View's render-only delta (M6.1). The `page` prop arrives with it
+  /** Rotate View's render-only delta. The `page` prop arrives with it
    * ALREADY composed into `page.rotation` (the reading view builds effective
    * pages), which is what makes marks/signature/field capture — whose
    * `rotationAtDraw` seam composes generally — and every re-projecting
@@ -602,7 +602,7 @@ interface PageCellProps {
   collapsed: boolean;
   visibleNumber: number;
   tool: CanvasTool;
-  /** Mount pdf.js's selectable text over the page (§ 6.3). Reading view only —
+  /** Mount pdf.js's selectable text over the page. Reading view only —
    * the board is an arrangement surface, where text at thumbnail size isn't
    * usefully selectable and the spans would fight the page-drag. */
   textLayer?: boolean;
@@ -612,20 +612,20 @@ interface PageCellProps {
   // Selected stamp preset — required for the Stamp tool to place anything;
   // clicks are ignored while none is picked.
   stampPreset?: StampPreset | null;
-  /** Measure modes (parity map § 2): the scale ratio, whether a finished
+  /** Measure modes: the scale ratio, whether a finished
    * measurement lands as an ink annotation, and where the value reports
    * (the secondary toolbar's readout). */
   measureScale?: MeasureScale;
   measureLeaveMarkup?: boolean;
   onMeasureResult?: (text: string) => void;
-  /** N11 slice A: this page's snap geometry (display-normalized at the page's
+  /** This page's snap geometry (display-normalized at the page's
    * BAKED orientation, like every other engine-derived overlay — the pending
    * rotation is applied here at query time) plus the live snap preferences.
    * Absent or disabled means every gesture behaves exactly as it did before
    * snapping existed, which is the guarantee the gesture specs assert. */
   snapGeometry?: PageSnapGeometry;
   snapSettings?: SnapSettings;
-  /** N11 slice B: this page's ruler guides, in the frame each was drawn in
+  /** This page's ruler guides, in the frame each was drawn in
    * (they project here, the `projectMarkRect` precedent). Pre-filtered by
    * page upstream, like every other per-page overlay. */
   guides?: readonly PageGuide[];
@@ -655,26 +655,26 @@ interface PageCellProps {
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
-  /** Edit-mode image placements (7.1), display-normalized at baked
+  /** Edit-mode image placements, display-normalized at baked
    * orientation — pending rotation is applied at render like marks. */
   editImages?: EditImagePlacement[];
-  /** P7 multi-select: every selected index on this page (single = one). */
+  /** Multi-select: every selected index on this page (single = one). */
   editSelectedIndexes?: number[] | null;
   onSelectEditImage?: (pageId: string, index: number, additive?: boolean) => void;
-  /** P7: the group transform context for THIS page (N>1, pre-filtered by
+  /** The group transform context for THIS page (N>1, pre-filtered by
    * pageId upstream) + its multi-target commit. */
   editImageGroup?: import('./ImageGroupOverlay').ImageGroupCtx | null;
   onCommitImageGroupTransform?: (
     pageId: string,
     targets: { index: number; matrix: number[] }[],
   ) => void;
-  /** 9.D1: this page's vector path objects + the selected index (pre-filtered
+  /** This page's vector path objects + the selected index (pre-filtered
    * by pageId upstream) + select/delete callbacks. */
   editVectors?: EditVectorObject[];
   selectedVectorIndex?: number | null;
   onSelectEditVector?: (pageId: string, index: number) => void;
   onDeleteVector?: () => void;
-  /** 9.D3: recolour / re-width the selected vector object. */
+  /** Recolour / re-width the selected vector object. */
   onRestyleVector?: (
     pageId: string,
     index: number,
@@ -684,26 +684,26 @@ interface PageCellProps {
       lineWidth?: number;
     },
   ) => void;
-  /** 9.D2: transform context for THIS page's selected vector (pre-filtered by
+  /** Transform context for THIS page's selected vector (pre-filtered by
    * pageId) — reuses the image transform overlay (crop null). */
   vectorTransform?: EditImageTransformCtx | null;
   onCommitVectorTransform?: (pageId: string, index: number, matrix: number[]) => void;
-  /** Transform context for THIS page's selected image (9.C1), pre-filtered by
+  /** Transform context for THIS page's selected image, pre-filtered by
    * pageId upstream — non-null only on the page whose image is selected. */
   editImageTransform?: EditImageTransformCtx | null;
   onCommitImageTransform?: (pageId: string, index: number, matrix: number[]) => void;
-  /** 9.C3: crop mode armed (toolbar toggle) — the overlay's body drag draws
+  /** Crop mode armed (toolbar toggle) — the overlay's body drag draws
    * the crop band instead of moving. */
   imageCropArmed?: boolean;
   onCommitImageCrop?: (pageId: string, index: number, rect: [number, number, number, number]) => void;
-  /** P7 slice E: the overlay's gradient-mask dot commit. */
+  /** The overlay's gradient-mask dot commit. */
   onCommitImageMask?: (
     pageId: string,
     index: number,
     mask: import('../../lib/edit-images').EditImageMaskParam,
   ) => void;
-  /** Edit-mode text runs (7.2+7.3), same projection rules as images.
-   * Since 7.5 these are only the runs NOT covered by an editable
+  /** Edit-mode text runs, same projection rules as images.
+   * These are only the runs NOT covered by an editable
    * paragraph (refused paragraphs decompose back to run boxes). */
   editTextRuns?: EditTextRun[];
   editTextSelectedIndex?: number | null;
@@ -718,14 +718,14 @@ interface PageCellProps {
     newText: string,
     opts?: { convert?: boolean },
   ) => void;
-  /** T14: run-scoped size/color restyle from the run editor. */
+  /** Run-scoped size/color restyle from the run editor. */
   onRestyleTextEdit?: (
     pageId: string,
     index: number,
     style: { size?: number; color?: [number, number, number] },
   ) => void;
   onCancelTextEdit?: () => void;
-  /** Edit-mode paragraph boxes (7.5) — the PRIMARY text surface. */
+  /** Edit-mode paragraph boxes — the PRIMARY text surface. */
   editParagraphs?: EditParagraph[];
   editParaSelectedIndex?: number | null;
   editingParaIndex?: number | null;
@@ -738,19 +738,19 @@ interface PageCellProps {
     opts?: ParagraphEditOpts,
   ) => void;
   onCancelParagraphEdit?: () => void;
-  /** A4: merge the paragraph being edited into the one above it (fires
+  /** Merge the paragraph being edited into the one above it (fires
    * only from an unchanged editor with the caret at position 0). */
   onMergeParagraphPrev?: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
   onMergeParagraphNext?: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
   // Pending visible-signature placement, when it sits on THIS page (transient
   // view state with mark lifecycle — see lib/signature-placement.ts).
   signaturePlacement?: SignaturePlacement | null;
-  // Find (2m): this page matches the active query. OCR'd pages additionally
+  // Find: this page matches the active query. OCR'd pages additionally
   // get per-word highlight boxes (display-normalized at the page's BAKED
   // orientation — projected by the current in-memory rotation like marks).
   findMatch?: boolean;
   findWords?: OcrWord[];
-  // Form widgets on this page (2n.4b) — display-normalized at the BAKED
+  // Form widgets on this page — display-normalized at the BAKED
   // orientation like findWords; interactive only in the 'forms' tool, but a
   // widget with a pending value stays visible in every tool (marks
   // precedent: pending state must never be invisible).
@@ -759,9 +759,9 @@ interface PageCellProps {
   formValues?: ReadonlyMap<string, FormFieldValue>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   // Clicking an empty signature widget in forms mode targets it for signing
-  // (2n.4d — the sign card opens in fill-this-field mode).
+  // (the sign card opens in fill-this-field mode).
   onSignFieldRequest: (path: string, fieldName: string) => void;
-  // F8: a pushbutton widget's click, with its classified /A action.
+  // A pushbutton widget's click, with its classified /A action.
   onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => void;
   // band instead of being inert on empty page area.
   // Pending new-field placement, when it sits on THIS page (transient view
@@ -774,7 +774,7 @@ interface PageCellProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearNewFieldPlacement: () => void;
-  // Pending Add-Text placement (9.A2), same lifecycle as newFieldPlacement:
+  // Pending Add-Text placement, same lifecycle as newFieldPlacement:
   // single, transient view state, dies on buffer-identity change.
   addTextPlacement?: SignaturePlacement | null;
   cropPlacement?: SignaturePlacement | null;
@@ -786,7 +786,7 @@ interface PageCellProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearAddTextPlacement: () => void;
-  // P5b: a crop band. Display-normalised like every other banded gesture,
+  // A crop band. Display-normalised like every other banded gesture,
   // with the rotation AT DRAW — the insets are computed against the page as
   // the user saw it, so a landscape scan trims the edges they pointed at.
   onSetCropRect?: (
@@ -795,7 +795,7 @@ interface PageCellProps {
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
-  // Add-Image band release (9.C2): converts + hands off to App's picker+embed.
+  // Add-Image band release: converts + hands off to App's picker+embed.
   onAddImageRect: (
     docId: string,
     pageId: string,
@@ -834,7 +834,7 @@ interface PageCellProps {
   onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   // Ctrl-marquee result — the view decides how it merges into the selection.
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
-  // N11 slice C: the count mode's Ctrl-marquee re-files the marks it covered
+  // The count mode's Ctrl-marquee re-files the marks it covered
   // into the armed group. A separate callback from `onMarqueeSelect` because
   // it is a different payload with a different meaning, not a mode flag on
   // the same one.
@@ -844,7 +844,7 @@ interface PageCellProps {
     annotationIds: string[],
     group: CountGroup,
   ) => void;
-  // N3 marquee zoom: band in DISPLAY page-normalized coords; the reading
+  // Marquee zoom: band in DISPLAY page-normalized coords; the reading
   // view zooms until it fills the pane. Optional — the board has no zoom.
   onZoomToRect?: (pageId: string, rect: { x: number; y: number; w: number; h: number }) => void;
   onAddRedactionMark: (
@@ -869,13 +869,13 @@ type VectorRestyleOpts = {
   lineWidth?: number;
 };
 
-// 9.D3 restyle toolbar for the selected vector object. Keyed by the object
+// Restyle toolbar for the selected vector object. Keyed by the object
 // index upstream, so it REMOUNTS (re-seeding local state) when the selection
 // switches — the fill/stroke swatches AND the width field never show a stale
-// prior object's value (round-38 HIGH #1). Every input previews LOCALLY and
+// prior object's value. Every input previews LOCALLY and
 // commits on a debounce that re-arms while a prior commit is in flight, so a
 // colour-picker drag or multi-digit width edit is ONE undoable engine op with
-// the FINAL value, not a stream of dropped intermediates (round-38 HIGH #2).
+// the FINAL value, not a stream of dropped intermediates.
 function VectorRestyleToolbar({
   obj,
   busy,
@@ -921,7 +921,7 @@ function VectorRestyleToolbar({
     [],
   );
   if (obj.kind === 'shading') {
-    // P8 slice D: a gradient fill has no flat colour or width to restyle —
+    // A gradient fill has no flat colour or width to restyle —
     // move/delete apply; the engine names the same refusal as belt.
     return (
       <div
@@ -1115,7 +1115,7 @@ function PageCellImpl({
   const displayWidth = textLayer
     ? displayWidthAt(page, pageHeight)
     : displayWidthOf(page) * (pageHeight / BASE_PAGE_HEIGHT);
-  // Hand is the OTHER non-annotating mode (M6.2): it must take the same
+  // Hand is the OTHER non-annotating mode: it must take the same
   // let-the-board-have-it branch as select, or a hand drag on the board
   // preventDefaults the pointerdown (suppressing the derived mouse events d3
   // pans with) and falls through to the band — painting a HIGHLIGHT instead
@@ -1133,7 +1133,7 @@ function PageCellImpl({
   const [editing, setEditing] = useState<string | null>(null);
   // In-progress ink stroke, flat [x0,y0,x1,y1,...] display-normalized points.
   const [inkPoints, setInkPoints] = useState<number[] | null>(null);
-  // In-progress measurement (parity map § 2): committed vertices + the live
+  // In-progress measurement: committed vertices + the live
   // cursor, display-normalized like ink. Distance is a drag; perimeter/area
   // accumulate click-vertices until a double-click finishes.
   const [measurePts, setMeasurePts] = useState<number[] | null>(null);
@@ -1149,14 +1149,14 @@ function PageCellImpl({
   // in the DISPLAYED (view-rotated) frame. These translate at the edges —
   // capture un-projects (here), render projects (displayAnnot below) — so the
   // stored frame, the reducer's eager re-projection on REAL rotations, and
-  // the builder's inversion all stay untouched by Rotate View (M6.1).
+  // the builder's inversion all stay untouched by Rotate View.
   const inverseView = (360 - viewRotation) % 360;
   const toStoredRect = (r: AnnotationRect): AnnotationRect =>
     viewRotation === 0 ? r : { ...r, ...rotateNormalizedRect(r, inverseView) };
   const toStoredPoints = (pts: number[]): number[] =>
     viewRotation === 0 ? pts : rotateNormalizedPoints(pts, inverseView);
 
-  // ── Snapping (N11 slice A) ────────────────────────────────────────────
+  // ── Snapping ──────────────────────────────────────────────────────────
   // Every gesture's client→page conversion goes through `pagePoint` below,
   // and snapping is a PARAMETER of that one function. Ten sites used to do
   // this arithmetic inline; that is the `ui.tool` situation verbatim — "fixed
@@ -1172,14 +1172,14 @@ function PageCellImpl({
   // pointer and every one of the ten sites work in.
   // The DISPLAYED page size in PDF points (axes swapped at 90/270; `page`
   // already carries the effective rotation). Defined up here rather than beside
-  // the measure tool because slice B's GRID needs the same pair — a grid
+  // the measure tool because the GRID needs the same pair — a grid
   // spacing is a length on paper, and this is what turns it into a fraction of
   // the page.
   const measDispW = page.rotation === 90 || page.rotation === 270 ? page.height : page.width;
   const measDispH = page.rotation === 90 || page.rotation === 270 ? page.width : page.height;
   const measScale = measureScale ?? DEFAULT_MEASURE_SCALE;
 
-  // N11 slice C — which group the next count click files under. Read straight
+  // Which group the next count click files under. Read straight
   // off the module store rather than threaded down as a prop: the store is the
   // one owner (the Takeoff panel and the secondary toolbar's picker read the
   // same value), and nothing between here and the canvas view derives anything
@@ -1372,7 +1372,7 @@ function PageCellImpl({
       prev && hit && prev.type === hit.type && prev.x === hit.x && prev.y === hit.y ? prev : hit,
     );
   };
-  // The angle-constrain ANCHOR (slice B): the point Shift measures from — a
+  // The angle-constrain ANCHOR: the point Shift measures from — a
   // drag's start, or a vertex sequence's last committed vertex. ONE owner, set
   // by whichever gesture is live and cleared with it, so a new gesture can
   // never inherit a stale anchor and a gesture with no anchor (the generic
@@ -1505,7 +1505,7 @@ function PageCellImpl({
     return out;
   };
 
-  // ── N11 slice D: a symbol DROPPED out of the palette ──────────────────
+  // ── a symbol DROPPED out of the palette ───────────────────────────────
   //
   // The drag runs on window-level listeners in `symbol-drag.ts` (the canvas
   // invariant — HTML5 DnD cannot complete in this webview); this is only where
@@ -1607,7 +1607,7 @@ function PageCellImpl({
     const startX = e.clientX;
     const startY = e.clientY;
     let activated = false;
-    // N11: this gesture snaps the OBJECT, not the pointer, so it needs the
+    // This gesture snaps the OBJECT, not the pointer, so it needs the
     // group's own candidate points and an index with those same objects
     // EXCLUDED (or a moved corner snaps to where it started). Both are built
     // LAZILY — a press that never becomes a drag must not pay for indexing a
@@ -1889,7 +1889,7 @@ function PageCellImpl({
   };
 
   /**
-   * N11 slice C — the Ctrl-marquee that RE-FILES count marks.
+   * The Ctrl-marquee that RE-FILES count marks.
    *
    * The same band mechanics as the selection marquee (and the same reason not
    * to snap it: a band that jumped to a vector endpoint would cover a
@@ -2142,10 +2142,10 @@ function PageCellImpl({
     appendShapeVertexRef.current?.(p, e.detail >= 2);
   };
 
-  // N5 stroke merging: the last ink annotation this cell created/extended.
+  // Stroke merging: the last ink annotation this cell created/extended.
   const lastInkRef = useRef<{ id: string; pageId: string; color: string; time: number } | null>(null);
 
-  // N5b eraser: swath samples (display frame) for the live feedback stroke.
+  // eraser: swath samples (display frame) for the live feedback stroke.
   const [eraseSwath, setEraseSwath] = useState<number[] | null>(null);
   const ERASER_PX = 10;
 
@@ -2249,7 +2249,7 @@ function PageCellImpl({
       const h = Math.max(...ys) - minY;
       if (commit && (w > 0.005 || h > 0.005)) {
         const color = annotationColor ?? INK_COLOR;
-        // N5: pen lifts within the merge window EXTEND the previous ink
+        // Pen lifts within the merge window EXTEND the previous ink
         // annotation instead of spawning a new one — a signature drawn in
         // four strokes is ONE annotation (one /InkList with four paths),
         // exactly how it would import. The window resets on every stroke;
@@ -2301,7 +2301,7 @@ function PageCellImpl({
     window.addEventListener('pointercancel', onCancel);
   };
 
-  // ── Measure (parity map § 2) ──────────────────────────────────────────
+  // ── Measure ───────────────────────────────────────────────────────────
   // Values are computed against the DISPLAYED page dims in PDF points
   // (`measDispW`/`measDispH`, defined up in the snapping block — the grid
   // needs the same pair). Lengths are rotation-invariant, so the VALUE needs
@@ -2347,7 +2347,7 @@ function PageCellImpl({
     });
   };
 
-  // N11: `normPoint` was the seed of the choke point and is now just
+  // `normPoint` was the seed of the choke point and is now just
   // `pagePoint` with snapping on — kept as a name only because four call
   // sites read better with it. Do NOT add a second conversion beside it.
   const normPoint = (
@@ -2489,7 +2489,7 @@ function PageCellImpl({
     // (with stopPropagation), and a press on empty page area must not start a
     // drag or a highlight band under an input. AUTHORING (formfields) is the
     // mode that bands, which is why the two are separate modes rather than one
-    // mode and a boolean (2n.4c). Edit (7.1) is click-to-select the same way
+    // mode and a boolean. Edit is click-to-select the same way
     // — without this, a drag on empty page area fell through to the generic
     // band and silently created a HIGHLIGHT annotation (regression, the
     // same class as the 'hand' fix above).
@@ -2524,7 +2524,7 @@ function PageCellImpl({
       // rect/ellipse fall through to the generic band below.
     }
     if (tool === 'note') {
-      // N3: click places a native /Text sticky note at the point (fixed icon
+      // Click places a native /Text sticky note at the point (fixed icon
       // size and opens its text editor immediately. An editor left empty
       // removes the note.
       const { x: cx, y: cy } = pagePoint(e.currentTarget, e.clientX, e.clientY, {
@@ -2550,7 +2550,7 @@ function PageCellImpl({
       return;
     }
     if (tool === 'count') {
-      // N11 slice C — the count gesture.
+      // The count gesture.
       //
       //   click on empty page   → place a mark of the armed group
       //   click ON a mark of that group → remove it ("click again to
@@ -2613,7 +2613,7 @@ function PageCellImpl({
       // Image stamps size from their own aspect (normalized height = width ×
       // aspect × the displayed page's width/height ratio, so the image is
       // undistorted on paper); text stamps keep the fixed footprint; a SYMBOL
-      // is a square PAPER length (N11 slice D), so it is the same size on
+      // is a square PAPER length, so it is the same size on
       // every sheet of a set exactly like a count marker.
       const symbol = stampPreset.symbolParts ?? registrySymbolParts(stampPreset.symbolId);
       const w = symbol ? Math.min(0.4, SYMBOL_STAMP_PT / measDispW) : STAMP_W;
@@ -2695,7 +2695,7 @@ function PageCellImpl({
       endSnapGesture();
       setBand(null);
       if (commit && tool === 'addimage' && (latest.w <= 0.01 || latest.h <= 0.01)) {
-        // P7 (slice C): a bare CLICK places at natural size — the rect
+        // A bare CLICK places at natural size — the rect
         // degenerates to the click point (w=h=0) and App routes it to the
         // engine's `at` placement instead of a drawn box.
         onAddImageRect(
@@ -2706,7 +2706,7 @@ function PageCellImpl({
         );
       } else if (commit && latest.w > 0.01 && latest.h > 0.01) {
         if (tool === 'zoommarquee') {
-          // N3: the band is a VIEW request, not an annotation — zoom the
+          // The band is a VIEW request, not an annotation — zoom the
           // reading view until this display-frame region fills it.
           onZoomToRect?.(page.id, latest);
         } else if (tool === 'redact') {
@@ -2715,17 +2715,17 @@ function PageCellImpl({
           // Single pending placement — drawing again (anywhere) replaces it.
           onSetSignaturePlacement(docId, page.id, latest, page.rotation);
         } else if (tool === 'formfields') {
-          // Add-field placement (2n.4c) — single, drawing again replaces it.
+          // Add-field placement — single, drawing again replaces it.
           onSetNewFieldRect(docId, page.id, latest, page.rotation);
         } else if (tool === 'cropdraw') {
-          // P5b: the band is the region to KEEP. Nothing commits here —
+          // The band is the region to KEEP. Nothing commits here —
           // the panel turns it into insets and the user applies.
           onSetCropRect?.(docId, page.id, latest, page.rotation);
         } else if (tool === 'addtext') {
-          // Add-text placement (9.A2) — single, drawing again replaces it.
+          // Add-text placement — single, drawing again replaces it.
           onSetAddTextRect(docId, page.id, latest, page.rotation);
         } else if (tool === 'addimage') {
-          // Add-image (9.C2) — the box; App picks the file + embeds.
+          // Add-image — the box; App picks the file + embeds.
           onAddImageRect(docId, page.id, latest, page.rotation);
         } else if (tool === 'shape') {
           // rect/ellipse: the band IS the box.
@@ -2810,7 +2810,7 @@ function PageCellImpl({
   return (
     <div
       data-page-id={page.id}
-      // P10: the page's natural DISPLAYED extents in PDF points (rotation-
+      // The page's natural DISPLAYED extents in PDF points (rotation-
       // swapped) — the board camera's Actual Size / Fit Width solve their
       // zoom from these against the cell's world-unit box.
       data-natural-w={page.rotation === 90 || page.rotation === 270 ? page.height : page.width}
@@ -2868,7 +2868,7 @@ function PageCellImpl({
       />
       {/* The grid draws UNDER the annotation layer and OVER the raster — it is
           a drafting aid on the paper, never part of it. `forced-color-adjust`
-          is inherited from the page rasters' rule (N14): a high-contrast theme
+          is inherited from the page rasters' rule: a high-contrast theme
           re-tints the shell, never the document surface. */}
       {gridOverlay && (
         <svg
@@ -2952,7 +2952,7 @@ function PageCellImpl({
           !a.geometryDiverged &&
           a.color === a.importedOriginal.color &&
           (a.note ?? '') === (a.importedOriginal.contents ?? '');
-        // Rotate View (M6.1): stored geometry lives in the page.rotation
+        // Rotate View: stored geometry lives in the page.rotation
         // frame; the cell displays the view-rotated frame. Project here —
         // the capture path un-projects, so the pair is identity when flat.
         const da =
@@ -3002,7 +3002,7 @@ function PageCellImpl({
             (a.kind === 'ink' || a.kind === 'measure' ? ' page-annot-ink' : '') +
             (a.kind === 'textmarkup' ? ' page-annot-ink' : '') + // SVG body, no default border
             (a.kind === 'shape' || a.kind === 'callout' ? ' page-annot-ink' : '') + // SVG bodies too
-            // N11 slice C: the count symbol and the legend table are their own
+            // The count symbol and the legend table are their own
             // bodies — no default box chrome around either.
             (a.kind === 'count' || a.kind === 'countlegend' ? ' page-annot-ink' : '') +
             (a.kind === 'stamp' ? ' page-annot-stamp' : '') +
@@ -3168,7 +3168,7 @@ function PageCellImpl({
               preserveAspectRatio="none"
               style={a.opacity !== undefined && a.opacity < 1 ? { opacity: a.opacity } : undefined}
             >
-              {/* N2: ink draws one polyline PER STROKE (da.strokes); measure
+              {/* Ink draws one polyline PER STROKE (da.strokes); measure
                   keeps its single vertex path (da.points). */}
               {(a.kind === 'ink' ? (da.strokes ?? []) : [da.points ?? []]).map((stroke, si) => (
                 <polyline
@@ -3354,7 +3354,7 @@ function PageCellImpl({
             )}
             {a.kind === 'stamp' && !pristineImport && (
               a.symbolParts ? (
-                // N11 slice D — a placed VECTOR SYMBOL, drawn from the same
+                // A placed VECTOR SYMBOL, drawn from the same
                 // unit-square parts the appearance stream emits as path
                 // operators. The annotation's own carried geometry is what is
                 // drawn (never a registry lookup), so a symbol from a set this
@@ -3612,7 +3612,7 @@ function PageCellImpl({
             />
           );
         })}
-      {/* 9.D1 vector objects — rendered FIRST (before paragraphs/text/images)
+      {/* Vector objects — rendered FIRST (before paragraphs/text/images)
           so those inner-content overlays paint on top and win a click where
           they overlap a vector's bbox (a coloured rect behind a heading, a
           table-cell fill under text — the text stays selectable). A thin
@@ -3661,7 +3661,7 @@ function PageCellImpl({
             </div>
           );
         })}
-      {/* 9.D2: the selected vector's transform overlay (move/resize/rotate —
+      {/* The selected vector's transform overlay (move/resize/rotate —
           the image overlay reused, crop disabled) + a delete affordance
           positioned at its bbox. */}
       {tool === 'edit' &&
@@ -3727,7 +3727,7 @@ function PageCellImpl({
           const selected = editParaSelectedIndex === para.index;
           if (editingParaIndex === para.index) {
             // Line thickness along the flow normal, rotation-proof: at a
-            // quarter-turn the box's w/h swap (the 7.2 sizing rule, per
+            // quarter-turn the box's w/h swap (the sizing rule, per
             // line here).
             const extent = page.rotation % 180 === 0 ? r.h : r.w;
             return (
@@ -3865,7 +3865,7 @@ function PageCellImpl({
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                // P7: Shift/Ctrl-click grows a same-page group.
+                // Shift/Ctrl-click grows a same-page group.
                 onSelectEditImage?.(
                   page.id,
                   img.index,
@@ -4109,7 +4109,7 @@ function PageCellImpl({
         </svg>
       )}
       {eraseSwath && (
-        // N5b feedback: the eraser's swath, wide and translucent — the cut
+        // feedback: the eraser's swath, wide and translucent — the cut
         // itself lands on release (one undo step).
         <svg className="page-annot-ink-svg page-annot-ink-live" viewBox="0 0 1 1" preserveAspectRatio="none">
           <polyline
@@ -4232,7 +4232,7 @@ function PageCellImpl({
   );
 }
 
-/** 9.A5-tails-b contentEditable plumbing. The rich surface renders one <span>
+/** contentEditable plumbing. The rich surface renders one <span>
  * per style segment, so a caret/selection lives at (text node, UTF-16 offset)
  * rather than a flat textarea index. These map that to and from the CODE-POINT
  * domain the engine's spans use (`Array.from` — an astral char is ONE unit).
@@ -4323,11 +4323,11 @@ function setEditorSelection(root: HTMLElement, start: number, end: number): void
   sel.addRange(range);
 }
 
-/** The paragraph editor (7.5, rich surface since 9.A5-tails-b): a
+/** The paragraph editor (a rich surface): a
  * contentEditable at the box rect seeded with the paragraph's logical text;
  * per keystroke it re-derives the span mapping (prefix/suffix diff, caret
  * inheritance) and validates each range against its style-source font — the
- * 7.2 live-refusal discipline at paragraph scale. Enter COMMITS (paragraphs
+ * live-refusal discipline at paragraph scale. Enter COMMITS (paragraphs
  * are one flowing block; splitting is a stated non-goal, pasted newlines
  * become spaces); Escape cancels; blur commits-if-valid-and-changed, else
  * cancels. The DOM is rendered FROM state every keystroke and is never the
@@ -4347,19 +4347,19 @@ function ParagraphEditor({
   lineHeightPx: number;
   onCommit: (value: string, opts?: ParagraphEditOpts) => void;
   onCancel: () => void;
-  /** A4/T18: merge into the previous paragraph — provided only when one
+  /** Merge into the previous paragraph — provided only when one
    * exists; fires from caret 0. An EDITED editor passes its text along
    * (the merge carries it as the selected side's override). */
   onMergePrev?: (editedText?: string, restyle?: MergeRestyle) => void;
-  /** T18: merge the NEXT paragraph into this one — Delete at the end. */
+  /** Merge the NEXT paragraph into this one — Delete at the end. */
   onMergeNext?: (editedText?: string, restyle?: MergeRestyle) => void;
-  /** T18: the page's view rotation — the resize grips map their screen
+  /** The page's view rotation — the resize grips map their screen
    * drag back onto the paragraph's inline axis through it. */
   rotation?: number;
 }): React.JSX.Element {
   useTranslation();
   const [value, setValue] = useState(para.text);
-  // T18: the split gap the NEXT Enter-inside split uses, in leading
+  // The split gap the NEXT Enter-inside split uses, in leading
   // multiples. 2 = the engine default (not sent); adjustable by typing or
   // by dragging the grip beside the field.
   const [gapField, setGapField] = useState('2');
@@ -4367,28 +4367,28 @@ function ParagraphEditor({
     const v = parseFloat(gapField);
     return Number.isFinite(v) ? Math.max(1.3, Math.min(10, v)) : 2;
   })();
-  // T18 resize: the live box width (points) while a grip drags, for the
+  // resize: the live box width (points) while a grip drags, for the
   // floating readout. null = no drag in flight.
   const [gripPreview, setGripPreview] = useState<number | null>(null);
-  // A1 restyle controls, seeded from the paragraph's own size/colour.
+  // Restyle controls, seeded from the paragraph's own size/colour.
   const [size, setSize] = useState(para.fontSize);
   const [color, setColor] = useState(para.color);
-  // A3a family swap — '' = keep the original fonts. The options name the
+  // Family swap — '' = keep the original fonts. The options name the
   // ACTUAL substitute faces (Liberation …): the swap is an honest
   // substitution, not a style toggle on the foundry font.
-  // 9.T6: '' keeps the original fonts, the three names are the bundled
+  // '' keeps the original fonts, the three names are the bundled
   // families, and anything else is an ABSOLUTE PATH to an installed face —
   // the engine's own selector grammar, so the picker sends exactly what the
   // op accepts with nothing in between to get out of step.
   const [family, setFamily] = useState<string>('');
   const [installed, setInstalled] = useState<SystemFontListing | null>(getSystemFonts);
   useEffect(() => subscribeSystemFonts(() => setInstalled(getSystemFonts())), []);
-  // A3b style toggles, seeded from the paragraph's own weight/slant.
+  // Style toggles, seeded from the paragraph's own weight/slant.
   // Toggling substitutes the whole paragraph into the styled Liberation
   // face (same honesty as the family swap).
   const [bold, setBold] = useState(para.bold);
   const [italic, setItalic] = useState(para.italic);
-  // 9.K2 whole-paragraph OpenType features (the caret / whole-text case).
+  // Whole-paragraph OpenType features (the caret / whole-text case).
   // No seed: the listing does not report a paragraph's existing features
   // (detecting them would need reverse glyph analysis), so these start OFF
   // and a press is always an explicit request to apply.
@@ -4396,12 +4396,12 @@ function ParagraphEditor({
   const [alternates, setAlternates] = useState(false);
   const [altIndex, setAltIndex] = useState(0);
   const areaRef = useRef<HTMLDivElement>(null);
-  // 9.A5-tails-b: a contentEditable DROPS its selection when it loses focus,
+  // A contentEditable DROPS its selection when it loses focus,
   // where a textarea kept selectionStart/End. The dual-role controls (swatch,
   // size stepper, B/I, family) all take focus when clicked, so without this
   // every per-span action would see an empty selection and fall through to the
-  // whole-paragraph branch — the exact silent-wrong-path failure the round-35
-  // repair was about. `liveSel` therefore prefers the LIVE DOM selection and
+  // whole-paragraph branch — the exact silent-wrong-path failure this
+  // guard exists for. `liveSel` therefore prefers the LIVE DOM selection and
   // falls back to the last one observed inside the editor.
   const lastSelRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
   // Caret to restore after the next render (the segment spans the browser
@@ -4415,7 +4415,7 @@ function ParagraphEditor({
   // render, and the spans are KEYED on it so they remount and the DOM is
   // exactly what React rendered from `value`.
   const [rev, setRev] = useState(0);
-  // IME composition (the CJK documents B2 exists for): the browser owns the
+  // IME composition (CJK documents): the browser owns the
   // DOM mid-compose, so remounting the spans under it would break the
   // composition. Skip syncing until it ends.
   const composingRef = useRef(false);
@@ -4423,23 +4423,23 @@ function ParagraphEditor({
   // DOM-rebuilding render (a text edit or a restyle) from an ordinary one.
   const lastHtmlRef = useRef<string>('');
   const wrapperRef = useRef<HTMLDivElement>(null);
-  // A5a per-span colour: the ranges (code points) painted a colour other
+  // Per-span colour: the ranges (code points) painted a colour other
   // than the paragraph default, seeded from the listing's per-span colours.
   const [spanColors, setSpanColors] = useState<SpanColor[]>(() =>
     seedSpanColors(para.spans, para.color),
   );
-  // A5b per-span faces: ranges the USER substituted into a bundled weight/
+  // Per-span faces: ranges the USER substituted into a bundled weight/
   // slant/family. These are the ONLY face ranges ever sent to the engine.
   const [spanFaces, setSpanFaces] = useState<SpanFace[]>([]);
-  // A5c per-span sizes the USER set — likewise the only ones sent.
+  // Per-span sizes the USER set — likewise the only ones sent.
   const [spanSizes, setSpanSizes] = useState<SpanSize[]>([]);
-  // 9.A5-tails-a DISPLAY seeds: what the paragraph's spans ALREADY are, from
+  // DISPLAY seeds: what the paragraph's spans ALREADY are, from
   // the listing, so a reopened mixed-face/mixed-size paragraph shows its
   // styling instead of starting blank. Deliberately SEPARATE from the user
   // overrides above and never sent: a face entry SUBSTITUTES its range into a
   // bundled Liberation face, so echoing a seed back would silently replace
   // the document's own foundry font just for opening the editor and pressing
-  // Enter. (That hazard is why A5b shipped with no seed at all.) They still
+  // Enter. (That hazard is why per-span faces shipped with no seed at all.) They still
   // ride the text diff so they stay attached to their characters.
   const [seedFaces, setSeedFaces] = useState<SpanFace[]>(() =>
     seedSpanFaces(para.spans, { bold: para.bold, italic: para.italic }),
@@ -4482,15 +4482,15 @@ function ParagraphEditor({
         }
       : { bold: false, italic: false, smallCaps: false, alternates: false };
   };
-  // A5c: the size field's displayed value (a string so a clear-and-retype
+  // The size field's displayed value (a string so a clear-and-retype
   // works), driven by typing and by the current selection's per-span size.
   const [sizeField, setSizeField] = useState<string>(() => String(Math.round(para.fontSize)));
-  // A5a: the colour swatch's displayed value, driven the same way as the
+  // The colour swatch's displayed value, driven the same way as the
   // size field — a per-span pick doesn't touch the whole-paragraph `color`,
   // so the native picker (a controlled input) needs its own state to hold
   // what was picked, and to reflect the current selection's per-span colour.
   const [colorField, setColorField] = useState<string>(() => para.color);
-  // 9.A5-tails-a/b: the B/I buttons' PRESSED look. A partial selection shows
+  // The B/I buttons' PRESSED look. A partial selection shows
   // that range's actual face (seeds included, so a paragraph opened on
   // already-bold text shows B pressed and the click un-bolds); a caret or
   // select-all shows the whole-paragraph override, which is what those target.
@@ -4504,7 +4504,7 @@ function ParagraphEditor({
   // The editor's LIVE selection in code points, read at the instant a
   // dual-role control fires — and, unlike an onSelect capture, it works when a
   // test drives the DOM selection directly (no synthetic `select` event
-  // needed; the round-35 repair's requirement). Falls back to the last
+  // needed; the repair's requirement). Falls back to the last
   // selection seen inside the editor for the blur case above.
   const liveSel = (): { start: number; end: number } => {
     const live = readEditorSelection(areaRef.current);
@@ -4518,7 +4518,7 @@ function ParagraphEditor({
   // caret OR a whole-text selection targets the whole paragraph. Returns the
   // range for the per-span case, else null. This is what keeps "open editor
   // (select-all) → click Bold" a clean whole-paragraph substitution (the
-  // shipped A3 path) rather than a per-span face over every character — and
+  // whole-paragraph path) rather than a per-span face over every character — and
   // an explicit select-all still styles everything, just via the whole-para
   // path (functionally identical). Code-point domain, matching liveSel.
   const spanTarget = (): { start: number; end: number } | null => {
@@ -4532,11 +4532,11 @@ function ParagraphEditor({
   // value (or the whole-paragraph value otherwise), so each control edits
   // what it will actually change — a display sync only (the apply re-reads
   // spanTarget). A collapsed OR whole-text selection shows the whole-para
-  // value, honestly matching what the control then targets (round-34 MED).
+  // value, honestly matching what the control then targets.
   const captureSelection = (): void => {
     const sel = spanTarget();
     if (sel) {
-      // 9.A5-tails-a: read the SHOWN sizes (seeds + overrides) so the field
+      // Read the SHOWN sizes (seeds + overrides) so the field
       // reports the size the selected text actually has, not just one the
       // user set this session.
       const sizeHit = shownSizes.find((r) => sel.start >= r.start && sel.start < r.end);
@@ -4563,18 +4563,18 @@ function ParagraphEditor({
       setFaceField(null);
     }
   };
-  // 9.A5-tails-b: the ONE path text changes take (typing, IME commit, paste).
+  // The ONE path text changes take (typing, IME commit, paste).
   // `next` is already sanitized; `caret` is a code-point offset in it.
   const applyText = (next: string, caret: number): void => {
     // Per-span overrides follow the text edit (same diff as the spans), then
     // flatten to disjoint — a retype whose window spans two different ranges
     // would otherwise leave them overlapping and the preview would show a
-    // different winner than the commit (round-32 HIGH). The merge resolves it
+    // different winner than the commit. The merge resolves it
     // the way the engine folds, so state stays canonical.
     setSpanColors((prev) => mergeSpanColors(remapRanges(value, next, prev)));
     setSpanFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
     setSpanSizes((prev) => mergeSpanSizes(remapRanges(value, next, prev)));
-    // 9.A5-tails-a: the DISPLAY seeds ride the same diff, so they stay
+    // The DISPLAY seeds ride the same diff, so they stay
     // attached to their characters as the text is edited (never sent).
     setSeedFaces((prev) => mergeSpanFaces(remapRanges(value, next, prev)));
     setSeedSizes((prev) => mergeSpanSizes(remapRanges(value, next, prev)));
@@ -4605,12 +4605,12 @@ function ParagraphEditor({
     lastSelRef.current = { start: 0, end: Array.from(para.text).length };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // 9.A5-tails-b: track the selection from the DOCUMENT's `selectionchange`.
+  // Track the selection from the DOCUMENT's `selectionchange`.
   // React's `onSelect` is reliable for <input>/<textarea> but NOT for a
   // contentEditable, and `selectionchange` is the signal browsers actually
   // fire for caret/selection movement here. Without it the dual-role controls
   // read a stale range and every per-span action falls through to the
-  // whole-paragraph branch — the round-35 failure in new clothing.
+  // whole-paragraph branch — the failure in new clothing.
   // `captureSelection` is held in a ref so the listener never closes over
   // stale state.
   const captureRef = useRef(captureSelection);
@@ -4625,7 +4625,7 @@ function ParagraphEditor({
     document.addEventListener('selectionchange', onSelectionChange);
     return () => document.removeEventListener('selectionchange', onSelectionChange);
   }, []);
-  // 9.A5-tails-b: restore the caret after a keystroke re-renders the segment
+  // Restore the caret after a keystroke re-renders the segment
   // spans (the nodes the browser selection pointed into no longer exist).
   // useLayoutEffect so it lands before paint — no visible caret jump.
   useLayoutEffect(() => {
@@ -4677,7 +4677,7 @@ function ParagraphEditor({
   // engine-side with a stated reason, surfaced as the standard edit
   // notice — the same honest boundary as convert.
   const substituting = familyChanged || styleChanged;
-  // 9.K2 whole-paragraph features (caret case). Applying one re-renders every
+  // Whole-paragraph features (caret case). Applying one re-renders every
   // character through the feature source — in place if the paragraph's own
   // font carries the feature, else the Libertinus switch — so, like a
   // substitution, the original run inventory no longer governs and the live
@@ -4685,7 +4685,7 @@ function ParagraphEditor({
   // the original subset lacked). The engine refuses a genuinely unencodable
   // char with a stated reason, the same honest boundary as convert.
   const featuresChanged = smallCaps || alternates;
-  // T21 position-aware relaxation: a char stranded in a span whose font
+  // Position-aware relaxation: a char stranded in a span whose font
   // can't encode it reassigns to the nearest span whose run CAN — the
   // commit route applies the identical relaxation (one implementation),
   // so validation and commit can never disagree about the mapping.
@@ -4697,7 +4697,7 @@ function ParagraphEditor({
   const valid = missing.length === 0;
   const sizeChanged = Math.abs(size - para.fontSize) > 0.01;
   const colorChanged = color.toLowerCase() !== para.color.toLowerCase();
-  // A5a: a per-span colour edit is a change even when nothing else moved.
+  // A per-span colour edit is a change even when nothing else moved.
   const seededSpanColors = seedSpanColors(para.spans, para.color);
   const spanColorsChanged =
     JSON.stringify(spanColors) !== JSON.stringify(seededSpanColors);
@@ -4727,7 +4727,7 @@ function ParagraphEditor({
       o.bold = bold;
       o.italic = italic;
     }
-    // 9.K2 whole-paragraph features ride their OWN param, NOT the substitution
+    // Whole-paragraph features ride their OWN param, NOT the substitution
     // path: the engine applies them in place when it can, so forcing a
     // bold/italic pair here would needlessly collapse the paragraph into a
     // Liberation weight. `alt_index` travels only with alternates.
@@ -4735,9 +4735,9 @@ function ParagraphEditor({
       o.features = [...(smallCaps ? ['small_caps'] : []), ...(alternates ? ['salt'] : [])];
       if (alternates) o.alt_index = altIndex;
     }
-    // A5a/A5b/A5c: send per-span colour, face, AND size entries (the engine
+    // Send per-span colour, face, AND size entries (the engine
     // folds each field independently, so they ride the one span_styles list
-    // with possibly-unaligned ranges). 9.K2 per-span features ride the face
+    // with possibly-unaligned ranges). Per-span features ride the face
     // entry (spanFacesToStyles emits small_caps/alternates on it).
     const perSpan = [
       ...spanColorsToStyles(spanColors),
@@ -4751,7 +4751,7 @@ function ParagraphEditor({
     if (valid && changed) settle(() => onCommit(value, restyleOpts()));
     else settle(onCancel);
   };
-  // T18: the whole-paragraph restyle deltas a MERGE carries along — the
+  // The whole-paragraph restyle deltas a MERGE carries along — the
   // same values a commit would send, minus everything a merge cannot
   // express (per-span ranges, split, features).
   const mergeRestyle = (): MergeRestyle | undefined => {
@@ -4764,12 +4764,12 @@ function ParagraphEditor({
     if (o.italic !== undefined) r.italic = o.italic;
     return Object.keys(r).length > 0 ? r : undefined;
   };
-  // T18 resize: the screen direction of the paragraph's +inline axis under
+  // resize: the screen direction of the paragraph's +inline axis under
   // the page's view rotation. Display space is top-left-origin and the card
   // rect is already rotated through rotateNormalizedRect — the quarter-turn
   // loop below mirrors that helper's clockwise turn exactly.
   //
-  // 9.T13: the base direction comes from the paragraph's ORIENTATION, not
+  // The base direction comes from the paragraph's ORIENTATION, not
   // from its writing mode — a rotated block reads down or up the page with
   // no vertical writing mode in it, and `vertical-rl`/`rotated-cw` share
   // one map. At 0° a horizontal paragraph advances screen +x, a column
@@ -4791,9 +4791,9 @@ function ParagraphEditor({
     for (let i = 0; i < turns; i += 1) [x, y] = [-y, x]; // one clockwise turn
     return [x, y];
   })();
-  // 9.T13: the paragraph's inline extent and the page-space origin of its
+  // The paragraph's inline extent and the page-space origin of its
   // START edge both live on the frame's inline axis. `vertical-rl`,
-  // `vertical-lr` (9.T12) and `rotated-cw` measure the box HEIGHT and take a
+  // `vertical-lr` and `rotated-cw` measure the box HEIGHT and take a
   // negated top edge (the transposed left is −y in all three — the column
   // DIRECTION changes where the next column goes, never where this one
   // starts); `rotated-ccw` measures the height too but its transposed left
@@ -4895,7 +4895,7 @@ function ParagraphEditor({
         // that Escape did nothing while a control had focus).
         if (e.key === 'Enter') {
           e.preventDefault(); // also stops a newline in the textarea
-          // A4 split: Enter with the caret strictly INSIDE the textarea's
+          // split: Enter with the caret strictly INSIDE the textarea's
           // text splits there (code-point domain — the Array.from rule).
           // Caret at the end (the committed shape every prior spec uses)
           // falls through to the shipped commit.
@@ -4916,7 +4916,7 @@ function ParagraphEditor({
                   value,
                   restyleOpts({
                     split_at: caret.start,
-                    // T18: only a non-default gap rides — 2.0 keeps the
+                    // Only a non-default gap rides — 2.0 keeps the
                     // engine's byte-identical default path.
                     ...(gapVal !== 2 ? { split_gap: gapVal } : {}),
                   }),
@@ -4937,7 +4937,7 @@ function ParagraphEditor({
             return c !== null && c.start === 0 && c.end === 0;
           })()
         ) {
-          // A4/T18 merge: backspace at the very start joins into the
+          // merge: backspace at the very start joins into the
           // previous paragraph. An EDITED editor's text rides along as the
           // merge's override (one op, one undo) — the old unchanged-only
           // refusal is gone; only an INVALID edit still blocks (the engine
@@ -4956,7 +4956,7 @@ function ParagraphEditor({
             return c !== null && c.start === cpLen && c.end === cpLen;
           })()
         ) {
-          // T18: Delete at the very end folds the NEXT paragraph into this
+          // Delete at the very end folds the NEXT paragraph into this
           // one — the mirror of Backspace-at-0, edits riding the same way.
           if (value !== para.text && !valid) return;
           e.preventDefault();
@@ -4969,7 +4969,7 @@ function ParagraphEditor({
       }}
       onBlur={(e) => {
         // Commit only when focus leaves the WHOLE editor — moving between
-        // the textarea and the restyle controls must not commit (A1).
+        // the textarea and the restyle controls must not commit.
         const next = e.relatedTarget as Node | null;
         if (next && wrapperRef.current?.contains(next)) return;
         finish();
@@ -5022,9 +5022,9 @@ function ParagraphEditor({
               const v = parseFloat(e.target.value);
               if (!Number.isFinite(v)) return; // empty/NaN: keep the field
               const clamped = Math.max(1, Math.min(1638, v));
-              // A5c dual role: a PARTIAL selection sizes just that range
+              // Dual role: a PARTIAL selection sizes just that range
               // (per-span); a caret or whole-text selection sizes the whole
-              // paragraph (the shipped A1 size).
+              // paragraph (the whole-paragraph size).
               const sel = spanTarget();
               if (sel) {
                 setSpanSizes((prev) => applySpanSize(prev, sel.start, sel.end, clamped));
@@ -5083,9 +5083,9 @@ function ParagraphEditor({
             value={/^#[0-9a-f]{6}$/i.test(colorField) ? colorField : '#000000'}
             title={tChrome('canvas.editpara.colourTitle')}
             onChange={(e) => {
-              // A5a dual role: a PARTIAL selection recolours just that range
+              // Dual role: a PARTIAL selection recolours just that range
               // (per-span); a caret or whole-text selection recolours the
-              // whole paragraph (the shipped A1 colour). spanTarget reads the
+              // whole paragraph (the whole-paragraph colour). spanTarget reads the
               // textarea's live selection, so it survives the picker's focus.
               const hex = e.target.value;
               setColorField(hex); // the swatch holds the pick either way
@@ -5105,13 +5105,13 @@ function ParagraphEditor({
             value={family}
             title={tChrome('canvas.editpara.familyTitle')}
             onChange={(e) => {
-              // A5b dual role: a real family + a PARTIAL selection → per-span
+              // Dual role: a real family + a PARTIAL selection → per-span
               // face on that range; otherwise the shipped whole-paragraph
               // family swap.
               const fam = e.target.value;
               const sel = spanTarget();
               if (fam !== '' && sel) {
-                // 9.A5-tails-a: PER SEGMENT, like the B/I toggles — each piece
+                // PER SEGMENT, like the B/I toggles — each piece
                 // of the selection keeps its own weight and slant and only the
                 // family changes. (This shared the toggles' collapse bug:
                 // it painted the selection-start's bold/italic over the lot.)
@@ -5169,12 +5169,12 @@ function ParagraphEditor({
           aria-pressed={faceField ? faceField.bold : bold}
           title={tChrome('canvas.editpara.boldTitle')}
           onClick={() => {
-            // A5b dual role: a PARTIAL selection toggles bold on that range
+            // Dual role: a PARTIAL selection toggles bold on that range
             // (keeping its other axes); a caret or whole-text selection
-            // toggles the whole paragraph (the shipped A3b).
+            // toggles the whole paragraph.
             const sel = spanTarget();
             if (sel) {
-              // 9.A5-tails-a: PER SEGMENT — each differently-faced piece of
+              // PER SEGMENT — each differently-faced piece of
               // the selection keeps its own family and slant and flips only
               // bold. (The shipped version read the START face and painted it
               // across everything, collapsing a mixed selection to one face.)
@@ -5208,9 +5208,9 @@ function ParagraphEditor({
           aria-pressed={faceField ? faceField.italic : italic}
           title={tChrome('canvas.editpara.italicTitle')}
           onClick={() => {
-            // A5b dual role: PARTIAL → per-span italic on that range; caret
+            // Dual role: PARTIAL → per-span italic on that range; caret
             // or whole-text → the shipped whole-paragraph toggle. Per SEGMENT
-            // (9.A5-tails-a) — the bold button's comment has the rationale.
+            // — the bold button's comment has the rationale.
             const sel = spanTarget();
             if (sel) {
               const target = !faceAt(sel.start).italic;
@@ -5338,7 +5338,7 @@ function ParagraphEditor({
           </label>
         )}
       </div>
-      {/* 9.A5-tails-b RICH SURFACE. One contentEditable: the styled text the
+      {/* RICH SURFACE. One contentEditable: the styled text the
           user sees IS the input, so the caret, the selection and the line
           wrapping are computed by the browser from these very glyphs and agree
           BY CONSTRUCTION. It replaces a mirror overlay (styled backdrop +
@@ -5363,7 +5363,7 @@ function ParagraphEditor({
           aria-multiline="true"
           aria-label={tChrome('canvas.editpara.textAria')}
           spellCheck={false}
-          /* 9.T3: the engine hands back LOGICAL (reading) order for a
+          /* The engine hands back LOGICAL (reading) order for a
              right-to-left paragraph, so the box has to read that way too —
              `dir` is what puts the caret, the selection, Home/End and the
              typing direction the right way round. Explicit "ltr" rather
@@ -5395,7 +5395,7 @@ function ParagraphEditor({
             e.preventDefault();
             const sel = liveSel();
             const chars = Array.from(value);
-            // T20 rich paste: clipboard HTML whose styling the engine can
+            // Rich paste: clipboard HTML whose styling the engine can
             // express lands as the SAME per-span overlays the toolbar
             // writes (colour/face/size ranges → span_styles on commit).
             // Plain payloads — and rich ones that sanitization would have
@@ -5468,7 +5468,7 @@ function ParagraphEditor({
              this DOM directly (merging text nodes, deleting spans), so a React
              child reconcile would removeChild nodes that no longer exist and
              throw. Family and size RENDER here — the Liberation faces were
-             chosen for metric compatibility with Arial/Times/Courier (B1), so
+             chosen for metric compatibility with Arial/Times/Courier, so
              the browser stand-ins preview the substituted face honestly; the
              committed page remains the fidelity authority. */
           dangerouslySetInnerHTML={{ __html: html }}
@@ -5496,7 +5496,7 @@ function ParagraphEditor({
   );
 }
 
-/** The inline text-run editor (7.2+7.3): an input at the run's display
+/** The inline text-run editor: an input at the run's display
  * rect, seeded with the decoded text, validated LIVE against the run's
  * finite encodable inventory — apply disables with the offending character
  * named, never a save-time surprise. Enter commits (when valid+changed);
@@ -5514,13 +5514,13 @@ function TextRunEditor({
   rect: { x: number; y: number; w: number; h: number };
   heightPx: number;
   onCommit: (value: string, opts?: { convert?: boolean }) => void;
-  /** T14: commit a size/color restyle instead of a text change. */
+  /** Commit a size/color restyle instead of a text change. */
   onRestyle?: (style: { size?: number; color?: [number, number, number] }) => void;
   onCancel: () => void;
 }): React.JSX.Element {
   useTranslation();
   const [value, setValue] = useState(run.text);
-  // T14 style row state: blank size = keep; null color = keep.
+  // Style row state: blank size = keep; null color = keep.
   const [styleSize, setStyleSize] = useState('');
   const [styleColor, setStyleColor] = useState<string | null>(null);
   const parsedSize = parseFloat(styleSize);
@@ -5602,7 +5602,7 @@ function TextRunEditor({
           {tChrome('canvas.editpara.missingGlyphs', {
             chars: missing.map((c) => `'${c}'`).join(' '),
           })}
-          {/* 7.4: the coverage-refusal escape hatch — re-render the run in
+          {/* The coverage-refusal escape hatch — re-render the run in
               the bundled fallback font. The wrapper's pointerdown
               preventDefault keeps the input focused; click still fires. */}
           <button
@@ -5616,7 +5616,7 @@ function TextRunEditor({
         </div>
       )}
       {onRestyle && !changed && (
-        // T14: the style row — size + colour for THIS run, text unchanged
+        // The style row — size + colour for THIS run, text unchanged
         // (it hides the moment the text differs: one commit, one meaning).
         // Family deliberately stays off this surface: run restyle is the
         // fallback for text the paragraph machinery can't take, and a font

@@ -559,7 +559,7 @@ describe('COMMIT_PAGE_EDITS', () => {
     });
     expect(next.files.get('a.pdf')).toMatchObject({ pageCount: 2, dirty: true, undoStack: ['snapA'] });
     expect(next.files.get('b.pdf')).toMatchObject({ pageCount: 3, dirty: true, undoStack: ['snapB'] });
-    // § F identity channel: the record lands keyed to THE committed buffer
+    // Identity channel: the record lands keyed to THE committed buffer
     // object (adoption checks identity, not equality).
     const recA = next.files.get('a.pdf')!.authoredIdentity!;
     expect(recA.pages).toEqual(['a#pA', 'a#pB']);
@@ -812,7 +812,7 @@ describe('annotation rects follow page rotation', () => {
     expect(rotated.points![1]).toBeCloseTo(0.1, 10);
     expect(rotated.points![2]).toBeCloseTo(0.7, 10);
     expect(rotated.points![3]).toBeCloseTo(0.4, 10);
-    // N2: strokes reproject per stroke, exactly like points.
+    // Strokes reproject per stroke, exactly like points.
     const multi = rotateAnnotationRect(
       { ...ink, points: undefined, strokes: [[0.1, 0.2, 0.4, 0.3], [0.2, 0.25, 0.3, 0.25]] },
       90,
@@ -1227,7 +1227,7 @@ describe('ROTATE_PAGE_REFS (batched rotate by delta)', () => {
   });
 });
 
-describe('REGISTER_IMPORT_SOURCE (byte-only import source, 2n.3)', () => {
+describe('REGISTER_IMPORT_SOURCE (byte-only import source)', () => {
   it('adds an importOnly file with no strip, active-file change, or page-tier change', () => {
     const a = makeFile('a.pdf', 3);
     const state = stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3))]);
@@ -1261,7 +1261,7 @@ describe('REGISTER_IMPORT_SOURCE (byte-only import source, 2n.3)', () => {
   });
 });
 
-describe('IMPORT_PAGES (import-into-doc, 2n.3)', () => {
+describe('IMPORT_PAGES (import-into-doc)', () => {
   it('splices foreign-sourced page refs into the target at the index, one undo step', () => {
     const a = makeFile('a.pdf', 2);
     const doc = makeDoc(a, 'a.pdf#0', makePages('a.pdf', 2));
@@ -1302,7 +1302,7 @@ describe('IMPORT_PAGES (import-into-doc, 2n.3)', () => {
   });
 });
 
-describe('import-source eviction on reindex (2n.3)', () => {
+describe('import-source eviction on reindex', () => {
   const importSource = (path: string, pages: number) => ({
     ...makeFile(path, pages),
     importOnly: true,

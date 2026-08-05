@@ -219,7 +219,7 @@ def recognize_image(
 ) -> dict:
     """Recognise an already-rasterised page image (PNG) -- ``{text, words}``.
 
-    O8 slice E. The MRC text-verification gate compares what the SOURCE page
+    The MRC text-verification gate compares what the SOURCE page
     says against what the RECONSTRUCTED page says, and both sides are rasters
     the pass already holds in memory -- there is no PDF to render, and writing
     one purely to be re-rendered would put a second (lossy, differently-scaled)

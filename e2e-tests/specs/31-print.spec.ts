@@ -11,7 +11,7 @@ import {
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 const BINARY = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
 
-// M-P (§ 3.4): File ▸ Print… (Ctrl+P) — printer picker, range, copies,
+// File ▸ Print… (Ctrl+P) — printer picker, range, copies,
 // fit/actual — plus the CLI arm. Nothing here SPOOLS a job (the only printers
 // on a dev box either print real paper or raise interactive dialogs); the
 // engine→Ghostscript→mswinpr2 path is proven through the CLI against a
@@ -26,7 +26,7 @@ async function printerOptions(): Promise<string[]> {
   return out;
 }
 
-describe('print (M-P)', () => {
+describe('print', () => {
   it('Ctrl+P is inert with no document to print', async () => {
     await waitForHarness();
     await closeAllFiles();
@@ -112,7 +112,7 @@ describe('print (M-P)', () => {
     });
   });
 
-  it('exposes the O2 option surface, capability-gated', async () => {
+  it('exposes the option surface, capability-gated', async () => {
     await browser.keys(['Control', 'p']);
     await $('[data-testid="print-dialog"]').waitForDisplayed();
 
@@ -160,7 +160,7 @@ describe('print (M-P)', () => {
     await $('[data-testid="print-dialog"]').waitForDisplayed({ reverse: true });
   });
 
-  it('renders a live preview of the prepared sheets (O3)', async () => {
+  it('renders a live preview of the prepared sheets', async () => {
     await browser.keys(['Control', 'p']);
     await $('[data-testid="print-dialog"]').waitForDisplayed();
 

@@ -89,7 +89,7 @@ describe('release gates (2p)', () => {
     await waitForHarness();
     await closeAllFiles();
     await openByPaths([BOOKMARKED]);
-    // M3.2b: the bookmarks editor is the nav-pane Bookmarks panel now (the Tools
+    // The bookmarks editor is the nav-pane Bookmarks panel now (the Tools
     // OutlinePanel retired). Open it on the doc board via the nav icon strip.
     await setView('canvas');
     const icon = $('[data-testid="navicon-bookmarks"]');
@@ -147,8 +147,8 @@ describe('release gates (2p)', () => {
     await closeAllFiles();
     await openByPaths([source]);
     await setView('canvas');
-    // This drives the BOARD's page cells; documents open in the reading view
-    // since M4.1g, so ask for the board explicitly.
+    // This drives the BOARD's page cells; documents open in the reading
+    // view, so ask for the board explicitly.
     await setDocViewMode('organize');
 
     let ids: string[] = [];

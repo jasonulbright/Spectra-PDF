@@ -7,7 +7,7 @@ import { TEST_HARNESS_ENABLED, registerExportImages } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
 
-// File ▸ Export ▸ Images… (O1, image half): render pages of the ACTIVE
+// File ▸ Export ▸ Images… (image half): render pages of the ACTIVE
 // document to PNG/JPEG (one file per page) or a multi-page TIFF, on the
 // bundled Ghostscript rasterizer. A dialog is required because the export has
 // format, DPI, range, and grayscale options.
@@ -39,7 +39,7 @@ export function ExportImagesDialog({
   file: { workingPath: string; name: string };
   onClose: () => void;
 }): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { call } = useEngine();
   const [format, setFormat] = useState('png');

@@ -37,7 +37,7 @@ export interface RawAnnotStyle {
   /** /RD [left top right bottom] insets (FreeText callouts). */
   rd?: [number, number, number, number];
   /** /Subj — the annotation's subject. pdf.js does not surface it, and it is
-   * where an N11 count mark carries its GROUP name. */
+   * where a count mark carries its GROUP name. */
   subj?: string;
   /** The private /SpectraSymbol name — which vector symbol a count mark's
    * marker draws (the /SpectraMask precedent). */
@@ -46,7 +46,7 @@ export interface RawAnnotStyle {
    * rows. Text, so it survives any producer that rewrites the dictionary. */
   spectraLegend?: string;
   /** The private /SpectraSymbolParts JSON — a placed symbol's own geometry
-   * (N11 slice D), carried so the drawing redraws where the SET it came from
+   * Carried so the drawing redraws where the SET it came from
    * was never imported. Sanitized at the importer, never trusted here. */
   spectraSymbolParts?: string;
 }

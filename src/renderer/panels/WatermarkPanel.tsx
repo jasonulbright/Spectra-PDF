@@ -12,7 +12,7 @@ import { tChrome, tChromeCount } from '../i18n';
 const WATERMARK_COLORS = ['#808080', '#e0393e', '#2f6fed', '#2fbf71'];
 
 export function WatermarkPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
@@ -57,9 +57,9 @@ export function WatermarkPanel(): React.ReactElement {
         angle,
         color,
         layer,
-        // S4: the bundled fonts dir lets the engine embed a Unicode font for
+        // The bundled fonts dir lets the engine embed a Unicode font for
         // non-Latin-1 stamps instead of rendering "?" (CJK still refuses — the
-        // B2 fallback-face boundary — with a surfaced error).
+        // fallback-face boundary — with a surfaced error).
         font_dir: await app.getEditFontPath(),
         ...(pages ? { pages } : {}),
       });

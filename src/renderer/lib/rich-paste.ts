@@ -1,4 +1,4 @@
-// T20 — rich paste: clipboard HTML → the paragraph editor's own per-span
+// Rich paste: clipboard HTML → the paragraph editor's own per-span
 // overlay vocabulary (colour / face / size), so pasted styling rides the
 // SAME span_styles machinery the toolbar writes and nothing new reaches the
 // engine. The walk is pure and fully pinned (there is no DOM test

@@ -61,7 +61,7 @@ type PanelView =
 type StepStatus = 'pending' | 'running' | 'done' | { error: string };
 
 export function GuidedActionsPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call, callRaw, saveFile } = useEngine();
@@ -172,7 +172,7 @@ export function GuidedActionsPanel(): React.ReactElement {
     [activeFile, running, executeRun],
   );
 
-  /** FOLDER mode (slice 3): run the sequence over every PDF under a folder,
+  /** FOLDER mode: run the sequence over every PDF under a folder,
    * mirroring into a destination — the batch-OCR shape, engine-side, so one
    * RPC covers the whole run and the CLI/scheduled arms share it. Works with
    * no document open. */
@@ -204,7 +204,7 @@ export function GuidedActionsPanel(): React.ReactElement {
           action_name: action.name,
           gs_path: await ensureGsPath(),
           tesseract_path: await app.getTesseractPath(),
-          // P22 slice E: a folder run may START with a create_pdf step, so
+          // A folder run may START with a create_pdf step, so
           // the LibreOffice arm has to be reachable from here too.
           soffice_path: await app.getSofficePath(),
           font_dir: await app.getEditFontPath(),
@@ -240,7 +240,7 @@ export function GuidedActionsPanel(): React.ReactElement {
     [running, executeFolderRun],
   );
 
-  // O7 in-place: run the sequence over a folder REPLACING the originals
+  // In-place: run the sequence over a folder REPLACING the originals
   // (engine-side staging + verify + atomic swap per file). The two-step
   // confirm lives on the list row — this only fires from its Replace button.
   const runActionInPlace = useCallback(

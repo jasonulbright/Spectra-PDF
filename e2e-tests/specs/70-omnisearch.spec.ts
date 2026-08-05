@@ -12,7 +12,7 @@ import {
   getState,
 } from '../support/harness.js';
 
-// U2 (Phase 11) — the universal search box in the toolbar row: ONE box that
+// The universal search box in the toolbar row: ONE box that
 // answers with both the TOOLS you can run and the TEXT in your documents.
 //
 // Driven through the real DOM because that pairing is the whole feature: the
@@ -34,7 +34,7 @@ async function clearQuery(): Promise<void> {
   await browser.keys(['Escape']);
 }
 
-describe('omnisearch (U2)', () => {
+describe('omnisearch', () => {
   let tmp: string;
 
   before(async () => {

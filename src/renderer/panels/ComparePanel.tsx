@@ -44,7 +44,7 @@ interface CompareResult {
 type CompareMode = 'text' | 'visual';
 
 export function ComparePanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, allFiles, openNewFiles } = useActiveFile();
   const { call } = useEngine();

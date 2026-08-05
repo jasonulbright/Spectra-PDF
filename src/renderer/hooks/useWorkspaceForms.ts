@@ -19,17 +19,17 @@ interface CacheEntry {
   info: FileFormInfo;
 }
 
-// Per-file AcroForm read + widget projection for the canvas overlay (2n.4b).
+// Per-file AcroForm read + widget projection for the canvas overlay.
 // Re-reads a file when its buffer identity changes — the same signal the
 // workspace indexer and FormsPanel key on — and keeps the PREVIOUS read
 // published while the new one is in flight (stale-while-revalidate), so the
 // pending-value pruning in WorkspaceCanvasView never sees a transient gap
 // and wipes values typed before an unrelated commit. Byte-only import
 // sources are excluded: their fields join the TARGET file's /AcroForm at
-// commit (2n.4a's multi-source carry) and become fillable there.
+// commit (the multi-source carry) and become fillable there.
 //
 // Geometry is resolved from pdfDocCache BY (path, buffer) — never from a
-// proxies map keyed by path alone (Phase 9). A map entry can belong to a
+// proxies map keyed by path alone. A map entry can belong to a
 // superseded buffer, and a getPage whose proxy is destroyed mid-flight can
 // PEND FOREVER (no rejection — instrumented live under CPU load: such reads
 // neither resolved nor rejected for 30s+), which silently disabled this
@@ -73,7 +73,7 @@ export function useWorkspaceForms(
           (async () => {
             let info: FileFormInfo;
             try {
-              // Read fields through the engine (FC4b) from the working copy on
+              // Read fields through the engine from the working copy on
               // disk — its bytes equal `buffer` (page-tier edits touch neither
               // until commit), so fields stay consistent with geometry resolved
               // from `buffer`'s proxy below. `read_form_fields` is INTERNAL, so
@@ -98,7 +98,7 @@ export function useWorkspaceForms(
                 // The shared canvas proxy for THESE bytes; form-less files
                 // never wait on (or fail with) the pdf.js load at all.
                 // requestDocumentProxy re-checks currency at the cache
-                // boundary (round 24 tail) — double protection with the
+                // boundary — double protection with the
                 // guard above, and the reusable shape for any future
                 // async-gap caller.
                 const proxy = await requestDocumentProxy(path, buffer, () => gen === genRef.current);

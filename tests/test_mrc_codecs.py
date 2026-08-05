@@ -228,7 +228,7 @@ class TestJbig2:
 
     @needs_jbig2
     def test_jbig2_beats_ccitt_on_the_same_mask(self):
-        # The reason the encoder is vendored at all (§ 2.3): generic-region
+        # The reason the encoder is vendored at all: generic-region
         # arithmetic coding against a 1980s run-length code.
         mask = make_mask()
         g4 = encode_mask_ccitt_g4(mask)
@@ -297,7 +297,7 @@ class TestContinuousToneLayers:
 
 
 class TestBudget:
-    """§ 5.5 — a fixed wall-clock budget fails on exactly the documents the
+    """A fixed wall-clock budget fails on exactly the documents the
     feature exists for. The budget scales, and names itself when it fires."""
 
     def test_scales_with_size_and_pages(self):
@@ -331,7 +331,7 @@ class TestBudget:
 
 
 class TestGhostscriptBudgetFamily:
-    """§ 5.5 — the defect fixed at the FAMILY, so it cannot be half-landed."""
+    """The defect fixed at the FAMILY, so it cannot be half-landed."""
 
     def test_the_floor_is_never_lower_than_the_constant_it_replaced(self, tmp_dir):
         # The bug was "too little time for a big file", never "too much for a
@@ -343,7 +343,7 @@ class TestGhostscriptBudgetFamily:
                              per_mb=12.0, per_page=1.5) >= 300.0
 
     def test_the_reported_case_now_gets_proportional_time(self):
-        # Issue #5: a 50 MB scan died at the fixed 300 s.
+        # A 50 MB scan died at the fixed 300 s.
         allowed = budget.derive(
             base=300.0, size_bytes=50 << 20, pages=60, per_mb=12.0, per_page=1.5
         )

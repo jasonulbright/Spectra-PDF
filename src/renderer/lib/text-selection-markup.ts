@@ -1,5 +1,5 @@
 // Authoring native text markup from a real text selection (N-cluster, the
-// CREATE half — N1 shipped import + edit).
+// CREATE half; import and edit already exist).
 //
 // The reading view already lays pdf.js's TextLayer over the raster, so the
 // browser gives us a genuine DOM Range for whatever the user selected — with

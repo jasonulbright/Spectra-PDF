@@ -8,7 +8,7 @@ interface StatusBarProps {
 }
 
 export function StatusBar({ message, busy }: StatusBarProps): React.ReactElement | null {
-  // N12: re-render on language change. The error TONE used to be picked by
+  // Re-render on language change. The error TONE used to be picked by
   // sniffing this bar's own English text (`message.startsWith('Error')`) —
   // the RepairPanel landmine class — so a translated status silently lost
   // its red styling. `isPanelErrorText` asks the catalog's own

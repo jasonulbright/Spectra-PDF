@@ -1,4 +1,4 @@
-"""§ I.5 P4 part 2 — cross-file text search over PDFs on disk."""
+"""Cross-file text search over PDFs on disk."""
 
 import os
 

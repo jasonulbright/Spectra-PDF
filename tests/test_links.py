@@ -1,4 +1,4 @@
-"""§ I.2 N1 — link-region management."""
+"""Link-region management."""
 
 import os
 

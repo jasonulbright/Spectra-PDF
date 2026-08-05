@@ -1,6 +1,6 @@
 """The JSON-RPC channel must be UTF-8 end to end.
 
-regression (2l): on Windows an embedded/console Python defaults piped
+regression: on Windows an embedded/console Python defaults piped
 stdio to the ANSI codepage (cp1252), silently decoding the spawner's UTF-8
 request bytes as cp1252 — mojibake for every non-ASCII value on every
 text-carrying op, in the GUI and CLI alike, corrupting VALID values ("José

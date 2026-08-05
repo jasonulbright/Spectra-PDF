@@ -48,8 +48,7 @@ Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEM
 # different transitive version. Top-level pins live in python-requirements.in;
 # the full locked tree in python-requirements.txt is regenerated deliberately
 # with lock-python-deps.ps1 (never floated automatically). pyHanko (for
-# signature verification) pulls cryptography/asn1crypto/certvalidator -- see
-# docs/architecture/10-phase2h-signatures.md.
+# signature verification) pulls cryptography/asn1crypto/certvalidator.
 $LockFile = "$PSScriptRoot\python-requirements.txt"
 Write-Host "Installing hash-pinned dependencies from python-requirements.txt..."
 & $DestDir\python.exe -m pip install --require-hashes -r $LockFile --no-warn-script-location 2>&1 | Out-Null

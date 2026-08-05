@@ -1,4 +1,4 @@
-"""O1 — export a PDF to editable Office / web formats via LibreOffice."""
+"""Export a PDF to editable Office / web formats via LibreOffice."""
 
 import os
 import re
@@ -113,7 +113,7 @@ def test_timeout_kills_the_process_tree_and_frees_the_profile(tmp_dir, monkeypat
     # remove the profile directory (rmtree can't succeed while a child holds it
     # open, so this also proves the tree-kill ran).
     #
-    # P22 slice B: the runner moved to engine/soffice.py — one invocation for
+    # The runner moved to engine/soffice.py — one invocation for
     # both directions — and its flat 240 s became a DERIVED budget, so the
     # timeout is forced by shrinking the floor rather than by a constant.
     import engine.soffice as oe

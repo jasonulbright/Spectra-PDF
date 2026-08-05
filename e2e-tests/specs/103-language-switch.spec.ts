@@ -1,12 +1,12 @@
 import { expect } from '@wdio/globals';
 import { waitForHarness } from '../support/harness.js';
 
-// N12 slice A (brief 37): the UI language switches LIVE from Preferences ▸
+// The UI language switches LIVE from Preferences ▸
 // Appearance, persists in the settings blob, and returns to English the
 // same way. VITE_E2E forces the DEFAULT to en, so the suite's other specs
 // keep their English asserts; this spec is the explicit switch coverage.
 
-describe('language switch (N12)', () => {
+describe('language switch', () => {
   it('switching to Español re-renders the chrome, and back', async () => {
     await waitForHarness();
     await browser.keys(['Control', 'k']);
@@ -26,7 +26,7 @@ describe('language switch (N12)', () => {
     );
     expect(stored).toBe('es');
 
-    // N12 slice E: `<html lang>` follows the switch. It shipped hardcoded to
+    // `<html lang>` follows the switch. It shipped hardcoded to
     // "en", so a screen reader read Spanish text with English pronunciation
     // rules — the UI language and the language the DOCUMENT claims to be in
     // are the same fact and must not be able to disagree.

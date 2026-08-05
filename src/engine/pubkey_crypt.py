@@ -1,4 +1,4 @@
-"""Certificate-based (public-key) PDF encryption — F9's second half.
+"""Certificate-based (public-key) PDF encryption — the second half.
 
 The standard security handler (encrypt.py) locks a document with passwords;
 this module locks it to RECIPIENT CERTIFICATES (Adobe.PubSec, AES-256): any
@@ -20,8 +20,7 @@ directions run on pyHanko, which is already bundled for signing:
   Adobe.PubSec file is readable without credentials).
 
 Permissions map from the same ``{print, copy, modify, annotate}`` contract
-the standard encrypt exposes; assistive-technology access is never blocked
-(the F9 rule).
+the standard encrypt exposes; assistive-technology access is never blocked.
 """
 
 import os

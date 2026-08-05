@@ -9,13 +9,13 @@ import {
   type PageBox,
 } from '../../lib/image-transform';
 
-// P7 — group transform of a multi-selected set of image placements. Every
+// Group transform of a multi-selected set of image placements. Every
 // gesture builds ONE user-space transform D and previews/commits per-member
 // M'_i = M_i·D through the multi engine op (one undo entry):
 //   member/frame drag → translate
 //   corners           → UNIFORM scale about the opposite corner of the group
 //                       box (axis scale would shear rotated members — stated
-//                       P7 boundary)
+//                       stated boundary)
 //   knob              → rotate about the group box center
 // Same mechanics as ImageTransformOverlay: window-level listeners (the canvas
 // drag invariant), commit only on a real numeric change, unmount cancels.

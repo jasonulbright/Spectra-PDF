@@ -27,7 +27,7 @@ const ICON: Record<Check['status'], { glyph: string; color: string }> = {
 };
 
 export function AccessibilityPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();

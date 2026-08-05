@@ -6,7 +6,7 @@
 // no matter how /Rotate changes later (rotation never moves user space).
 // Page numbers are committed-order workspace numbers — the engine gate
 // flushes pending page edits before the engine reads the file, so they line
-// up with what lands on disk. Design: 15-phase2m-ocr-find.md.
+// up with what lands on disk.
 import { displayRectToPdf } from './pdfx-build';
 import { workspacePageNumber } from './workspace-commit';
 import type { PageGeometry } from './redaction';

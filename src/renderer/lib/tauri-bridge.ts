@@ -57,7 +57,7 @@ export const dialog = {
   },
   /** Pick a PKCS#12 (.pfx/.p12) signer file. Returns null if cancelled. */
   pickCertificate: () => invoke<string | null>('pick_certificate_file'),
-  /** Pick one or more Create PDF sources (P22 — images, Office, text, web,
+  /** Pick one or more Create PDF sources (images, Office, text, web,
    * PostScript and PDFs). Serialized like openFiles/saveFile — modality lands
    * a beat after the click, so a rapid second click must join the open dialog,
    * not stack another (regression: the single-file version this replaces
@@ -80,7 +80,7 @@ export const dialog = {
   /** Pick a folder (Batch OCR source/destination). Returns null if cancelled. */
   pickFolder: (title?: string) => invoke<string | null>('pick_folder_dialog', { title }),
   /** Pick a replacement image (Edit ▸ Replace Image). Null if cancelled.
-   * P7: `includeSvg` widens the filter for Add Image (SVG places as real
+   * `includeSvg` widens the filter for Add Image (SVG places as real
    * vector content); Replace stays raster-only. */
   pickImageFile: (includeSvg?: boolean) =>
     invoke<string | null>('pick_image_file', { includeSvg: includeSvg ?? false }),
@@ -90,7 +90,7 @@ export const dialog = {
     invoke<string | null>('save_image_file_dialog', { defaultName }),
 };
 
-// ── Batch OCR (Phase 6) ───────────────────────────────────────────────────
+// ── Batch OCR ─────────────────────────────────────────────────────────────
 //
 // Batch operates on paths OUTSIDE the workspace (never OPEN_FILE'd, never in
 // $TEMP), so its file IO goes through plain Rust commands, not the
@@ -115,7 +115,7 @@ export const batch = {
   /** Pre-create a mirror output's parents (apply_ocr_layer saves to the exact
    * path it is given and does not create directories). */
   ensureParentDirs: (path: string) => invoke<void>('ensure_parent_dirs', { path }),
-  /** Move a SOURCE file into a moved/error tree (Phase 12 requests 2/3) —
+  /** Move a SOURCE file into a moved/error tree —
    * the only batch call that mutates the user's own folders. Resolves to the
    * path actually written: a collision is suffixed, never overwritten. */
   moveFile: (src: string, dest: string) => invoke<string>('move_file_creating_dirs', { src, dest }),
@@ -151,7 +151,7 @@ export const batch = {
     invoke<void>('open_batch_log_folder', { dir: dir || null }),
 };
 
-// ── Scheduled batch runs (Phase 12 request 5) ─────────────────────────────
+// ── Scheduled batch runs ──────────────────────────────────────────────────
 //
 // Windows Task Scheduler runs them; this app owns the whole lifecycle so the
 // user never opens taskschd.msc. Every call is scoped Rust-side to our own
@@ -209,7 +209,7 @@ export interface ScheduledRun {
   actionMissing: boolean;
 }
 
-// ── Watched folders (O7) ──────────────────────────────────────────────────
+// ── Watched folders ───────────────────────────────────────────────────────
 //
 // Drop a PDF into an intake folder and a saved guided action runs over it
 // (In → Out → Done). Watchers poll IN-APP (tray-residency counts) and each
@@ -230,7 +230,7 @@ export interface WatchedFolder {
   enabled: boolean;
 }
 
-// ── Virtual printer (O7) ──────────────────────────────────────────────────
+// ── Virtual printer ───────────────────────────────────────────────────────
 
 export interface VirtualPrinterStatus {
   installed: boolean;
@@ -346,10 +346,10 @@ export const app = {
   sendByEmail: (stagedPath: string) => invoke<void>('send_by_email', { stagedPath }),
   /** The vendored native Tesseract. One recognizer for every surface. */
   getTesseractPath: () => invoke<string>('get_tesseract_path'),
-  /** The bundled (or system-fallback) LibreOffice soffice path for O1 export.
+  /** The bundled (or system-fallback) LibreOffice soffice path for Office export.
    *  '' when none is found — the engine then refuses with a clear message. */
   getSofficePath: () => invoke<string>('get_soffice_path'),
-  /** The bundled Edit-tool fallback font (7.4; resources/fonts). */
+  /** The bundled Edit-tool fallback font (resources/fonts). */
   getEditFontPath: () => invoke<string>('get_edit_font_path'),
   /** Installed Windows printers + the default (the Print dialog's picker). */
   listPrinters: () => invoke<PrinterList>('list_printers'),
@@ -357,7 +357,7 @@ export const app = {
    *  surface and resolves sheet sizes for the layout modes. */
   printerCapabilities: (name: string) =>
     invoke<PrinterCapabilities>('printer_capabilities', { name }),
-  /** The path-identity gate (M7): file identity is the raw path string
+  /** The path-identity gate: file identity is the raw path string
    * app-wide, so every path entering the open/import funnels resolves to ONE
    * canonical spelling first. Rust producers (dialogs, argv, second
    * instance) canonicalize at the source; this covers paths that arrive

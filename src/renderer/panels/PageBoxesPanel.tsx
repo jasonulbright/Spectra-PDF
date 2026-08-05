@@ -17,7 +17,7 @@ const BOXES: { value: string; label: PanelKey }[] = [
 ];
 
 export function PageBoxesPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
@@ -30,7 +30,7 @@ export function PageBoxesPanel(): React.ReactElement {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // P5b: a crop dragged on the page lands in these fields. The panel still
+  // A crop dragged on the page lands in these fields. The panel still
   // owns the commit — drawing fills the form, Apply is what changes the file,
   // so a drawn crop and a typed one go through the identical call and a
   // mis-drag costs a redraw rather than an undo.

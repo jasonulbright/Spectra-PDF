@@ -9,13 +9,13 @@ import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
 
-// Phase 9.S5 — ICC-managed CMYK conversion for prepress (Ghostscript). Like
+// ICC-managed CMYK conversion for prepress (Ghostscript). Like
 // grayscale/pdfa it writes a new file (the "Optimize" tool group's pattern);
 // the render intent maps to Ghostscript's ICC transform.
 // Only intents that produce a DISTINCT result with the bundled default CMYK
 // profile are offered — that profile carries no Saturation table, so
 // "saturation" would render identically to "perceptual" (a control that does
-// nothing, the § I.0 silent-degradation class). It returns to the picker when
+// nothing, the silent-degradation class). It returns to the picker when
 // a user-picked destination profile is in play only if that profile defines
 // it — which we cannot know cheaply, so it stays withheld (recorded).
 const RENDER_INTENTS: { value: string; label: PanelKey }[] = [
@@ -24,7 +24,7 @@ const RENDER_INTENTS: { value: string; label: PanelKey }[] = [
   { value: 'absolute', label: 'panel.prepress.intentAbsolute' },
 ];
 
-// O6 tail: PDF/X print masters. X-3 is the colour-managed default; X-1a the
+// tail: PDF/X print masters. X-3 is the colour-managed default; X-1a the
 // CMYK-only legacy exchange; X-4 allows live transparency.
 const PDFX_VERSIONS: { value: number; label: PanelKey }[] = [
   { value: 3, label: 'panel.prepress.x3' },
@@ -41,7 +41,7 @@ const profileParam = (p: ProfileChoice): string =>
   p.kind === 'default' ? '' : p.kind === 'bundled' ? 'default_cmyk.icc' : p.path;
 
 export function PrepressPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call, saveFile } = useEngine();

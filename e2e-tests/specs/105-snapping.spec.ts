@@ -1,4 +1,4 @@
-// N11 slice A — SNAPPING against the built binary.
+// SNAPPING against the built binary.
 //
 // The fixture draws two crossing rules at coordinates chosen so every target
 // type is unambiguous, and the assertions are on the COMMITTED measurement's
@@ -156,7 +156,7 @@ async function clearMeasurements(): Promise<void> {
   for (const a of all) await removeAnnotation(first.docId, first.pageId, a.id);
 }
 
-describe('snapping (N11 slice A)', () => {
+describe('snapping', () => {
   before(async () => {
     await waitForHarness();
     const tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-snap-'));

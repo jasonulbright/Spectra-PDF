@@ -10,7 +10,7 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// M6.5: the dialog keyboard model + the keys the webview must never steal.
+// The dialog keyboard model + the keys the webview must never steal.
 
 async function activeTestId(): Promise<string | null> {
   return (await browser.execute(() =>
@@ -18,7 +18,7 @@ async function activeTestId(): Promise<string | null> {
   )) as string | null;
 }
 
-describe('dialog keyboard model (M6.5)', () => {
+describe('dialog keyboard model', () => {
   before(async () => {
     await waitForHarness();
     await closeAllFiles();
@@ -118,7 +118,7 @@ describe('dialog keyboard model (M6.5)', () => {
     expect((await getState()).fileCount).toBe(1);
   });
 
-  it('Shift+F4 toggles the tool dock (slice C: the Tools tab is gone)', async () => {
+  it('Shift+F4 toggles the tool dock (the Tools tab is gone)', async () => {
     expect((await getState()).view).toBe('canvas');
     await browser.keys(['Shift', 'F4']);
     await $('[data-testid="tool-dock"]').waitForDisplayed({

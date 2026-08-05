@@ -1,4 +1,4 @@
-// N11 slice D — the symbol registry: the part-list SANITIZER, the built-in
+// The symbol registry: the part-list SANITIZER, the built-in
 // artwork, the JSON interchange and its refusals, and the search.
 //
 // The sanitizer is the load-bearing one. A part list becomes PDF path

@@ -1,4 +1,4 @@
-// N12 (brief 37) — the en catalog is GENERATED from the data tables that
+// The en catalog is GENERATED from the data tables that
 // already name every chrome surface (command ids, menu/submenu ids), and
 // this test is BOTH the parity gate and the generator: run normally it
 // fails when `locales/en/chrome.json` is stale against the tables; run
@@ -123,7 +123,7 @@ function expectedCatalog(): Record<string, string> {
       }
     }
   }
-  // N12 slice D — the ENGINE refusals. English lives in the engine (and in
+  // The ENGINE refusals. English lives in the engine (and in
   // the checked-in table that mirrors it, gated by tests/test_engine_messages
   // .py), so the en catalog derives from the table exactly like the other
   // data tables: never hand-authored, never allowed to drift from the source.
@@ -146,7 +146,7 @@ function expectedCatalog(): Record<string, string> {
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => a.localeCompare(b)));
 }
 
-describe('i18n catalogs (N12)', () => {
+describe('i18n catalogs', () => {
   it('en/chrome.json matches the data tables (I18N_WRITE=1 regenerates)', () => {
     const expected = expectedCatalog();
     if (process.env.I18N_WRITE === '1') {
@@ -167,7 +167,7 @@ describe('i18n catalogs (N12)', () => {
     }
   });
 
-  // N12 slice E — the locale-QA gates. The catalog review ran both of these
+  // The locale-QA gates. The catalog review ran both of these
   // over the es catalog by hand; they are tests so a future locale (or a new
   // key) cannot regress them silently. A dropped `{{name}}` is the worst
   // class of translation bug: the sentence still reads, and the value it was

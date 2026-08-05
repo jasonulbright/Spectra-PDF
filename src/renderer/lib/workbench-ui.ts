@@ -1,7 +1,7 @@
 // Persistence for workbench chrome state under the NEW `workbench-ui`
-// localStorage key (Phase 4 § 4.3 — new keys do NOT extend the legacy
-// `spectra-` prefix). M3 persists the nav-pane state (open/panel/width);
-// Phase 10 slice B1 adds the right tool dock (open/width). App mirrors
+// localStorage key (new keys do NOT extend the legacy
+// `spectra-` prefix). It persists the nav-pane state (open/panel/width)
+// and the right tool dock (open/width). App mirrors
 // ui.navPane + ui.toolDock → here in one debounced effect; boot hydration
 // reads them back through the validated parse so a corrupt entry can't
 // propagate a bad shape into state (the recent-files precedent).

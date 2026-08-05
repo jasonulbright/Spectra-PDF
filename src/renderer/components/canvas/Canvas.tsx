@@ -9,7 +9,7 @@ interface CanvasProps {
   contentHeight: number;
   slotHeight: number;
   dragging?: boolean;
-  /** Hand mode (M6.2): pages become pannable surface (see the zoom filter). */
+  /** Hand mode: pages become pannable surface (see the zoom filter). */
   handMode?: boolean;
   onScaleChange?: (scale: number) => void;
   onSettle?: () => void;

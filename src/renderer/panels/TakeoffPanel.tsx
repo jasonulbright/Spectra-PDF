@@ -35,7 +35,7 @@ import {
 } from '../lib/takeoff-settings';
 import type { PageAnnotation } from '../state/types';
 
-// N11 slice C — the Count & Takeoff dock panel.
+// The Count & Takeoff dock panel.
 //
 // It targets the VISIBLE document through `useActiveFile` (the selectors, never
 // `activeFileId` — the ghost rule), and everything it shows is DERIVED: the
@@ -49,7 +49,7 @@ import type { PageAnnotation } from '../state/types';
 export function TakeoffPanel(): React.ReactElement {
   const state = useAppState();
   const dispatch = useAppDispatch();
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
@@ -293,7 +293,7 @@ export function TakeoffPanel(): React.ReactElement {
                       />
                     ))}
                   </div>
-                  {/* N11 slice D: the marker comes from the whole symbol
+                  {/* The marker comes from the whole symbol
                       REGISTRY — the built-in markers, the built-in AEC set and
                       every imported one — through the same palette the stamp
                       picker places from. One registry, two consumers. */}
@@ -374,7 +374,7 @@ export function TakeoffPanel(): React.ReactElement {
           {tChrome('panel.takeoff.exportCsv')}
         </button>
       </div>
-      {/* N11 slice D — the symbol library. It lives here because the dock has
+      {/* The symbol library. It lives here because the dock has
           the room for set management (import / export / remove), and the same
           palette is what the stamp picker places from: one registry, two
           consumers. Dragging a symbol onto the page places it; clicking one

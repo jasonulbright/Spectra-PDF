@@ -1,14 +1,14 @@
-"""Exact cubic-Bézier extents + flattening (P8 slice A / N11 slice A — shared math).
+"""Exact cubic-Bézier extents + flattening (shared math).
 
 An affine map of a Bézier is the Bézier of the mapped control points, so a
 TIGHT device-space bbox comes from transforming the four control points
 first and finding the axis extrema there — never from transforming a
 user-space bbox (wrong under rotation) and never from raw control points
-(over-boxes every bulge). Shared by `page_vectors` (listing bboxes and the N11 geometry probe) and
+(over-boxes every bulge). Shared by `page_vectors` (listing bboxes and the geometry probe) and
 `svg_pdf` (objectBoundingBox gradients); one implementation, one behavior.
 """
 
-# N11 slice A: recursion cap for `flatten_cubic`. Flatness improves roughly
+# Recursion cap for `flatten_cubic`. Flatness improves roughly
 # fourfold per subdivision, so a curve needing more than this is degenerate
 # (a cusp, or control points at astronomical coordinates) — bail with the
 # chord rather than spending 2^n segments on it. A listing never aborts on
@@ -101,7 +101,7 @@ def _split_cubic(P0, P1, P2, P3):
 
 def flatten_cubic(P0, P1, P2, P3, tol: float = 0.25, _depth: int = 0) -> list:
     """The cubic as a polyline, EXCLUDING P0 and INCLUDING P3, every point on
-    the true curve and never more than `tol` away from it (N11 slice A).
+    the true curve and never more than `tol` away from it.
 
     Recursive subdivision against `_chord_deviation`'s bound. The default
     0.25 pt is below a hairline — a snapped endpoint is exact to the eye —

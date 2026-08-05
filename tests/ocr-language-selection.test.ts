@@ -7,7 +7,7 @@ import {
 } from '../src/renderer/ocr/language-selection';
 import { DEFAULT_OCR_LANGUAGE } from '../src/renderer/ocr/languages';
 
-// Multi-language OCR selection (Phase 12 / issue #1). No DOM test env, so the
+// Multi-language OCR selection. No DOM test env, so the
 // orderings and refusals live in a pure module and are pinned here.
 
 describe('normalizeLanguages', () => {

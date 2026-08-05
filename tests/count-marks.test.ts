@@ -1,4 +1,4 @@
-// N11 slice C — the pure count/takeoff math. Everything breakable about
+// The pure count/takeoff math. Everything breakable about
 // counting lives in `lib/count-marks.ts` so it can be tested without a DOM
 // (this repo has none); the gestures in PageCell are covered by e2e spec 107.
 import { describe, it, expect } from 'vitest';

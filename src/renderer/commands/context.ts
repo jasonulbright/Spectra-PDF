@@ -2,7 +2,7 @@
 // (the testHarness registerCanvas* idiom): App registers its handler bundle
 // and the live state source; the canvas view registers its camera + find
 // services while mounted. invokeCommand() is the ONE entry point every
-// caller shares — keymap, UI buttons, menus (M2), and the e2e harness.
+// caller shares — keymap, UI buttons, menus, and the e2e harness.
 import { COMMANDS, type CommandId } from './registry';
 import { drainPendingFind } from './find-intent';
 import type { AppCommandHandlers, CanvasServices, CommandContext } from './types';
@@ -76,8 +76,8 @@ export function invokeCommand(id: CommandId): boolean {
 // menu) own Escape while they are active. They register here instead of
 // adding their own window keydown listeners; the keymap dispatcher runs the
 // stack LIFO (most recent surface wins) before the rest of the Escape chain
-// (exit tool → clear selection — § 4.4). A handler returns true to consume
-// the key. The surfaces themselves stay component-local (§ 4.3 — ephemeral
+// (exit tool → clear selection). A handler returns true to consume
+// the key. The surfaces themselves stay component-local (ephemeral
 // interaction state has no command consumers); only the *key routing* is
 // centralized.
 export type EscapeInterceptor = () => boolean;
@@ -106,14 +106,14 @@ export function escapeInterceptorCount(): number {
   return escapeInterceptors.length;
 }
 
-// --- App-modal stack (M6.5 — the dialog keyboard model) --------------------
+// --- App-modal stack (the dialog keyboard model) ---------------------------
 //
 // The plain-div dialog shells (Preferences, About, Properties, Print)
 // register their close handler while mounted. The keymap dispatcher owns the
 // routing: while any modal is up, Escape closes the TOP of this stack — one
-// rule for every dialog instead of a per-dialog handler (M5.5b's recorded
+// rule for every dialog instead of a per-dialog handler (the recorded
 // gap), and the always-preventDefault chords keep suppressing the webview's
-// own UI (Ctrl+P/S/O — M-P's recorded gap) without running. Radix surfaces
+// own UI (Ctrl+P/S/O — the recorded gap) without running. Radix surfaces
 // (menus, Confirm/Password dialogs) keep owning their own keys; this stack
 // is only for the shells that have none.
 

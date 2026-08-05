@@ -9,7 +9,7 @@ import { tChrome } from '../i18n';
 const VERSIONS = ['1.4', '1.5', '1.6', '1.7', '2.0'];
 
 export function PdfVersionPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call, saveFile } = useEngine();

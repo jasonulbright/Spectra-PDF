@@ -22,7 +22,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
   require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
 ).href;
 
-// M6.3: menu completeness (§ 9.1) + Insert Blank Page (§ 9.3) + the new
+// Menu completeness + Insert Blank Page + the new
 // chords, driven through the real menu DOM and the real keys.
 
 async function clickMenuPath(menu: string, ...items: string[]): Promise<void> {
@@ -46,7 +46,7 @@ async function pageTexts(path: string): Promise<string[]> {
   return out;
 }
 
-describe('document menu (M6.3)', () => {
+describe('document menu', () => {
   let tmp: string;
   let threePager: string;
 
@@ -81,7 +81,7 @@ describe('document menu (M6.3)', () => {
     );
 
     // Read page 2 first (the 300x600 one), through the real go-to-page UI —
-    // Ctrl+Shift+N focuses the box (§ 9.2), Enter navigates.
+    // Ctrl+Shift+N focuses the box, Enter navigates.
     await browser.keys(['Control', 'Shift', 'n']);
     await browser.waitUntil(
       async () =>

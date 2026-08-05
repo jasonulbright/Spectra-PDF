@@ -265,7 +265,7 @@ describe('wrapPages', () => {
   });
 });
 
-describe('docSize reserves the add-page ghost row (2n.3)', () => {
+describe('docSize reserves the add-page ghost row', () => {
   it('wraps the trailing ghost to a reserved extra row when the last row is nearly full', () => {
     // A single page whose display width leaves LESS than (PAGE_GAP +
     // ADD_GHOST_WIDTH) slack — so the trailing "+" ghost can't share the row

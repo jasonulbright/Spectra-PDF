@@ -1,7 +1,7 @@
-// N11 slice A — persisted SNAP preferences.
+// Persisted SNAP preferences.
 //
 // A snap preference is how you WORK, not a property of a file, so it lives in
-// app settings and not in the document (the brief's § 2.5 rule). It gets its
+// app settings and not in the document. It gets its
 // own `snap-ui` key rather than a field inside `spectra-settings` because the
 // settings loader merges one level deep — a stored partial `snap` object
 // would REPLACE the defaults wholesale and silently drop a type added later.
@@ -33,7 +33,7 @@ export interface SnapSettings {
   enabled: boolean;
   radiusPx: number;
   types: SnapTypeFlags;
-  // ── slice B ──────────────────────────────────────────────────────────
+  // ── Angle constrain ──────────────────────────────────────────────────────────
   /** Shift's angle increment, in degrees. */
   angleDeg: number;
   /** Draw the grid. It remains a snap source whenever `types.grid` is on and a

@@ -42,7 +42,7 @@ interface PdfOutlineItem {
 
 const titles = (items: PdfOutlineItem[]): string[] => items.map((i) => i.title);
 
-// M3.2b: the outline surface is now the nav-pane Bookmarks panel (the
+// The outline surface is now the nav-pane Bookmarks panel (the
 // right-rail OutlineSidebar retired). It registers the same harness hooks
 // (getOutlineOrder / reorderOutline) on mount, so only the "open it" step
 // changed — from the toggle-outline pill to the nav icon strip.
@@ -64,7 +64,7 @@ async function showOutline(): Promise<void> {
   });
 }
 
-describe('outline sidebar (2n.2)', () => {
+describe('outline sidebar', () => {
   let tmp: string;
   let bookA: string;
   let bookB: string;
@@ -124,7 +124,7 @@ describe('outline sidebar (2n.2)', () => {
     ]);
 
     // Independently verify the SAVED file: reordered top level + the URI action
-    // survived the get→reorder→set round trip (2l action preservation).
+    // survived the get→reorder→set round trip (action preservation).
     const dest = resolve(tmp, 'reordered.pdf');
     await saveActiveAs(dest);
     const pdf = await loadPdf(dest);

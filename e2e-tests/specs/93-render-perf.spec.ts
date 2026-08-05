@@ -1,9 +1,9 @@
-// N13 — the rendering-performance harness. The raster layer records every
+// The rendering-performance harness. The raster layer records every
 // completed pdf.js render (base + detail); this spec drives a real document
 // through the reading view and reports the distribution. Assertions are
 // SANITY bounds only (timings exist; nothing pathological) — absolute
 // thresholds flake across machines, so the BASELINE is the reported median,
-// recorded in docs/PUNCHLIST.md's dev notes per milestone and compared by
+// recorded per milestone and compared by
 // humans (or a future trend job), never by a hard CI gate.
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
@@ -23,7 +23,7 @@ async function renderTimings(): Promise<Timing[]> {
   });
 }
 
-describe('render-performance harness (N13)', () => {
+describe('render-performance harness', () => {
   it('records base-raster timings for a document read and reports the baseline', async () => {
     await waitForHarness();
     await closeAllFiles();
@@ -51,7 +51,7 @@ describe('render-performance harness (N13)', () => {
     const max = sorted[sorted.length - 1];
 
     // The REPORT — this line is the harness's product; the number lands in
-    // the punchlist dev notes as the current baseline.
+    // the recorded dev notes as the current baseline.
     console.log(
       `[render-perf] base rasters: n=${base.length} median=${median.toFixed(1)}ms ` +
         `max=${max.toFixed(1)}ms (blank 5-page fixture, near pages only)`,

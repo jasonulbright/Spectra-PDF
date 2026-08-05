@@ -1,4 +1,4 @@
-# Vendors a LibreOffice runtime into resources/libreoffice/ for the O1 export
+# Vendors a LibreOffice runtime into resources/libreoffice/ for the export
 # feature (PDF -> Word/RTF/ODT/HTML). LibreOffice is invoked as a separate
 # headless process (soffice --headless); it is unmodified upstream, redistributed
 # under MPL-2.0 (see THIRD-PARTY-LICENSES.md section LibreOffice).

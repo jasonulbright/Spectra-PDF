@@ -1,4 +1,4 @@
-"""Phase 9.K2 — OpenType feature control (small caps, alternates)."""
+"""OpenType feature control (small caps, alternates)."""
 
 import os
 
@@ -209,7 +209,7 @@ class TestFeatureEmbedding:
 
 
 class TestExistingTextFeatures:
-    """K2 on EXISTING text: switch to Libertinus when the font lacks the
+    """On EXISTING text: switch to Libertinus when the font lacks the
     feature, apply IN PLACE when the document's own font carries it."""
 
     def _para_pdf(self, tmp_dir, embed_otf=None, text="Hamburg Fonts"):
@@ -527,7 +527,7 @@ class TestExistingTextFeatures:
         assert any(b.endswith("+LibertinusSerif") for b in faces), faces
 
     def test_in_place_feature_keeps_kerning(self, tmp_dir):
-        """An IN-PLACE feature edit must still kern (K1b) — the in-place temp
+        """An IN-PLACE feature edit must still kern — the in-place temp
         program is unlinked before the emission pass, so its kerning is
         captured at build time. 'AVATAR' has strong pairs (A|V, V|A, A|T,
         T|A), so a kerned run emits a `TJ` array. Mutation: drop the

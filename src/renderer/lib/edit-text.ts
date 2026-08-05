@@ -1,4 +1,4 @@
-// Edit-mode text runs (Phase 7.2+7.3): the engine's per-page run listing
+// Edit-mode text runs: the engine's per-page run listing
 // projected into display space, plus the LOCAL keystroke validation the
 // inline edit box runs against each run's finite encodable inventory —
 // live refusal ("this document's font does not contain 'X'"), never a
@@ -14,7 +14,7 @@ import type { PageGeometry } from './redaction';
 export const EDIT_DECLINED = 'edit-declined' as const;
 
 export interface EditTextRun {
-  /** Engine id — DFS show-op order on the page (the 7.1 discipline). */
+  /** Engine id — DFS show-op order on the page. */
   index: number;
   text: string;
   rect: { x: number; y: number; w: number; h: number };
@@ -24,13 +24,13 @@ export interface EditTextRun {
   reason: string | null;
   /** The finite character inventory the run's font can encode. */
   encodable: string;
-  /** 9.B5: ligature sequences the font round-trips (unambiguous
+  /** Ligature sequences the font round-trips (unambiguous
    * multi-char inverses) — validation matches them longest-first. */
   sequences: string[];
-  /** 9.B4a: the run's advances/rect were computed in vertical-writing
-   * mode (Identity-V / Uni*-UCS2-V). B4b's surfaces consume this. */
+  /** The run's advances/rect were computed in vertical-writing
+   * mode (Identity-V / Uni*-UCS2-V). the surfaces consume this. */
   vertical: boolean;
-  /** 9.A5c: the run's font size (points) — an e2e observes a per-span
+  /** The run's font size (points) — an e2e observes a per-span
    * size bump as a run listing back at the larger size. */
   fontSize: number;
 }
@@ -47,7 +47,7 @@ interface EngineRunListing {
     sequences?: string[];
     vertical?: boolean;
     font_size?: number;
-    /** 9-§I.0-S8: the run is wholly outside the active clip (invisible).
+    /** The run is wholly outside the active clip (invisible).
      * Filtered out below so clipped-away text is never offered as editable;
      * surviving runs keep their engine `index` (mutator targets unaffected). */
     clipped?: boolean;
@@ -64,7 +64,7 @@ export async function fetchTextRuns(
     file: workingPath,
     page: pageNumber,
   })) as unknown as EngineRunListing;
-  // 9-§I.0-S8: drop clipped-away (invisible) runs — never offered as editable.
+  // Drop clipped-away (invisible) runs — never offered as editable.
   const visible = (listing.runs ?? []).filter((run) => !run.clipped);
   return visible.map((run) => ({
     index: run.index,
@@ -82,7 +82,7 @@ export async function fetchTextRuns(
 
 /** Characters of `value` the font cannot encode, deduplicated in order —
  * empty means the value is fully expressible. */
-/** The longest-match walk shared by run and paragraph validation (9.B5).
+/** The longest-match walk shared by run and paragraph validation.
  * MIRRORS the engine's encode order exactly — sequences (longest first)
  * BEFORE the single map — because a char can be unreachable singly yet
  * encodable inside a ligature sequence; a singles-first walk would

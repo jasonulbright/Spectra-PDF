@@ -1,7 +1,7 @@
-// N12 slice E (brief 37) — the RENDERER's own refusal messages, sixth typed
+// The RENDERER's own refusal messages, sixth typed
 // record after chrome / panels / dialogs / workbench / canvas.
 //
-// The boundary this record names, and why it is separate from slice D's
+// The boundary this record names, and why it is separate from the
 // `engine.*` keys: an ENGINE refusal is English at the engine (the CLI, the
 // operation log and the fingerprint text stay byte-stable) and is recognized
 // at the bridge through the checked-in message table. These are the OTHER
@@ -92,7 +92,7 @@ export const REFUSAL_STRINGS = {
   'refusal.file.noActiveDocument': 'No active document.',
   'refusal.file.noActiveToSign': 'No active file to sign.',
 
-  // ── Symbol sets: importing a set FILE (N11 slice D) ──────────────────
+  // ── Symbol sets: importing a set FILE ────────────────────────────────
   // The guided-actions import shape exactly: one interpolated key per
   // problem, naming the offending SYMBOL ID (the file's own vocabulary, so it
   // stays verbatim — a translated id would name something the file being

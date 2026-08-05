@@ -1,4 +1,4 @@
-"""Phase 9.K2 — OpenType feature control (small caps, alternates).
+"""OpenType feature control (small caps, alternates).
 
 Applies GSUB features to text WE lay out, at the glyph level. Because our
 embedding is Type0/Identity (CID == GID, controlled by us), we can draw any
@@ -15,7 +15,7 @@ A single substitution (LookupType 1) and an alternate substitution
 plain table read is CORRECT here — no HarfBuzz needed. Ligatures (`liga`) and
 contextual features are deliberately NOT applied: they need a shaping engine,
 and a partial hand-rolled shaper would style some sequences and silently miss
-others (the § I.0 silent-partial class).
+others (the silent-partial class).
 
 SOURCE — a feature applies from whichever font already carries it: a document
 set in a font with `smcp` gets real small

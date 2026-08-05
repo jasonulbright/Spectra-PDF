@@ -1,4 +1,4 @@
-"""Query → GLYPH-ACCURATE page regions (F15 slice C).
+"""Query → GLYPH-ACCURATE page regions.
 
 `search_in_files` answers "which pages match"; the in-app index answers the
 same question faster. Neither returns a RECTANGLE, and a redaction tool that
@@ -18,7 +18,7 @@ item with no per-character breakdown, so interpolating inside it is wrong for
 every proportional font. "Approximately right" is not a thing a redaction rect
 may be, so neither of those is the authority.
 
-Five rules, each earned in recon (brief § 3):
+Five rules:
 
 1. **The match runs on THIS walk's own concatenation of the page's runs**, so
    a match offset maps back to (run, code index) by construction. Matching in
@@ -27,7 +27,7 @@ Five rules, each earned in recon (brief § 3):
    order, pdf.js's item order and the stream's own order all differ.
 2. **The rect is the per-code slice, adjusted to the font's INK extent** —
    `text_metrics.ink_extent_em`, the same descent/ascent redaction's own bbox
-   uses since slice A. A run rect drawn baseline → baseline + size leaves the
+   uses. A run rect drawn baseline → baseline + size leaves the
    descenders of `p g y j q` visible under the black box.
 3. **A hit spanning several runs yields ONE RECT PER RUN**, never a bounding
    box across them: a phrase broken over a line wrap would otherwise cover the
@@ -36,12 +36,12 @@ Five rules, each earned in recon (brief § 3):
    `tm ∘ ctm` and recurses into form XObjects with the form matrix, so the
    rect is already in page space. A run clipped entirely away is invisible and
    is not offered as a hit.
-5. **Vertical runs (9.B4a) are honoured, not excluded** — the lister emits a
+5. **Vertical runs are honoured, not excluded** — the lister emits a
    vertical run's column rect and the per-code slice is a vertical slice.
    Refusing CJK vertical text would be a whole document class that cannot be
    redacted.
 
-A run whose font cannot MEASURE (slice A's `measurable()`) still produces a
+A run whose font cannot MEASURE (the `measurable()`) still produces a
 hit: its FULL rect, flagged `imprecise`, over-covering rather than guessing a
 slice — never a dropped hit, because a hit the tool does not report is content
 the user does not redact.
@@ -288,7 +288,7 @@ def _page_text(runs: list[_Run]) -> tuple[str, list[Optional[_Unit]]]:
     Whitespace is synthesized where the geometry says a word ended: between
     runs on a line whose gap exceeds `WORD_GAP_FRACTION` of the space advance,
     at every line break, and inside a run at a forward TJ jump big enough to
-    be a gap. T25 rules 3 and 4 hold here as they do in the reflow — a jump
+    be a gap. Two rules hold here as they do in the reflow — a jump
     onto a glyph that SPELLS NOTHING is mark positioning, and a run that draws
     no text cannot be one side of a word gap.
 

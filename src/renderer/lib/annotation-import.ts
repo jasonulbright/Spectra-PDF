@@ -4,8 +4,7 @@
 // entirely: not imported, not editable, and — critically — never touched by
 // the commit-time strip in pdfx-build.ts's stripImportedOriginals, which only
 // ever removes an original it can positively fingerprint-match against
-// something in this list. See docs/architecture/05-phase2c-annotations.md,
-// "importing existing annotations safely".
+// something in this list.
 //
 // Rung 2 widens the list to the drawing shapes (/Circle /Line /Polygon
 // /PolyLine) and callouts (/FreeText + /IT /FreeTextCallout) — but ONLY when
@@ -32,9 +31,9 @@ type ImportedSubtype = ImportedAnnotationFingerprint['subtype'];
 
 const RECOGNIZED_SUBTYPES = new Set([
   'Square', 'FreeText', 'Ink', 'Stamp',
-  // N1 — native quad-based text markup, imported as `kind: 'textmarkup'`.
+  // Native quad-based text markup, imported as `kind: 'textmarkup'`.
   'Highlight', 'Underline', 'StrikeOut', 'Squiggly',
-  // N1 — native /Text sticky note, imported as `kind: 'note'`.
+  // Native /Text sticky note, imported as `kind: 'note'`.
   'Text',
   // Rung 2 — drawing shapes (sidecar-gated; see the header).
   'Circle', 'Line', 'Polygon', 'PolyLine',
@@ -197,7 +196,7 @@ export async function importPageAnnotations(
       continue;
     }
 
-    // ── N11 slice C: takeoff count marks + placed legends ────────────
+    // ── takeoff count marks + placed legends ─────────────────────────
     // Both are sidecar-gated exactly like the callout above: /IT, /Subj and
     // the private keys only exist raw. Groups therefore reconstitute from the
     // FILE rather than from app state — a drawing counted on another machine
@@ -207,7 +206,7 @@ export async function importPageAnnotations(
       if (mark) imported.push(mark);
       continue;
     }
-    // N11 slice D: a placed vector SYMBOL — a /Stamp with no /IT that carries
+    // A placed vector SYMBOL — a /Stamp with no /IT that carries
     // its own geometry. Without this branch a moved symbol would re-commit as
     // a TEXT stamp (the generic stamp import's shape), turning the drawing
     // into its own label.
@@ -232,7 +231,7 @@ export async function importPageAnnotations(
 
     const markupType = MARKUP_TYPE[a.subtype];
     if (markupType) {
-      // N1 native text markup: each /QuadPoints quad becomes a normalized rect
+      // Native text markup: each /QuadPoints quad becomes a normalized rect
       // (same 0..1 space as ink's `points`); x/y/w/h is their bounding box.
       const rects = quadRects(a.quadPoints);
       const quads: number[] = [];
@@ -269,7 +268,7 @@ export async function importPageAnnotations(
     }
 
     if (kind === 'ink') {
-      // N2: every /InkList sub-path imports as one stroke — a signature
+      // Every /InkList sub-path imports as one stroke — a signature
       // made of several pen lifts arrives WHOLE. (This gate used to refuse
       // multi-stroke inks outright because the model held a single stroke;
       // `strokes` is the model now, so the no-degradation rule is
@@ -454,7 +453,7 @@ function importShape(
 }
 
 /**
- * /Stamp + /IT /Count → kind 'count' (N11 slice C).
+ * /Stamp + /IT /Count → kind 'count'.
  *
  * The group is `/Subj` and the marker is `/SpectraSymbol`; the sequence is
  * read off the end of `/Contents` ("<group> <seq>"), because the numbering is
@@ -475,7 +474,7 @@ function importCountMark(
   if (d.w <= 0 || d.h <= 0) return null;
   const group = (sidecar?.subj ?? '').trim() || UNGROUPED;
   const symbolId = sidecar?.spectraSymbol ?? DEFAULT_COUNT_SYMBOL;
-  // N11 slice D: a marker from an imported SET carries its geometry beside the
+  // A marker from an imported SET carries its geometry beside the
   // id. Sanitized (bytes from a file are untrusted exactly like an imported
   // set file's), and an unreadable snapshot falls back to the id's built-in
   // rather than dropping the mark.
@@ -499,8 +498,7 @@ function importCountMark(
 }
 
 /**
- * /Stamp + /SpectraSymbolParts (and no /IT) → a vector symbol stamp
- * (N11 slice D).
+ * /Stamp + /SpectraSymbolParts (and no /IT) → a vector symbol stamp.
  *
  * The GEOMETRY is the annotation: the id only re-identifies it against the
  * registry, and a set the reader never imported makes the id meaningless
@@ -533,7 +531,7 @@ function importSymbolStamp(
 }
 
 /**
- * /FreeText + /IT /CountLegend → kind 'countlegend' (N11 slice C).
+ * /FreeText + /IT /CountLegend → kind 'countlegend'.
  *
  * The rows are a SNAPSHOT and live in the private /SpectraLegend; without a
  * readable one there is nothing to re-emit faithfully, so the original is left

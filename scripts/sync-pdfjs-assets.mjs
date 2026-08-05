@@ -2,7 +2,7 @@
 // package into `public/pdfjs/`, where Vite copies them verbatim into
 // `dist/renderer/pdfjs/` and the renderer points pdf.js at them.
 //
-// WHY THIS EXISTS (O8 slice A — a live silent-degradation defect, not new
+// WHY THIS EXISTS (a live silent-degradation defect, not new
 // feature scaffolding). pdf.js 6 does not inline these; it FETCHES them from
 // the four `getDocument` URL options, each of which defaults to `null`:
 //

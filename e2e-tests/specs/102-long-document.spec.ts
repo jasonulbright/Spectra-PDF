@@ -12,7 +12,7 @@ import {
   invokeAppCommand,
 } from '../support/harness.js';
 
-// P12 (brief 36): a long document past the browser element-height ceiling.
+// A long document past the browser element-height ceiling.
 // The reading view's spacer caps at SAFE_ELEMENT_EXTENT (30M px) and rows
 // translate under it — so zoom is no longer bounded by page count (the old
 // mitigation rendered long docs SMALL), and the tail stays reachable: the
@@ -26,7 +26,7 @@ import {
 
 const PAGE_COUNT = 600;
 
-describe('long documents past the element ceiling (P12)', () => {
+describe('long documents past the element ceiling', () => {
   let tmp: string;
   let pdfPath: string;
 

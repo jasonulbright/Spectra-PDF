@@ -1,5 +1,4 @@
-// Durable page/document identity (Phase 5, roadmap § F — design in
-// architecture/22-phase5-durable-identity.md).
+// Durable page/document identity.
 //
 // Two halves, both pure so they test without pdf.js:
 //
@@ -16,7 +15,7 @@
 //    file FROM the pre-commit PageRefs, so it knows the old→new mapping;
 //    `planCommit` publishes it and the post-commit reindex adopts the
 //    old ids onto the FRESHLY-READ pages (ids only — dims/rotation/
-//    annotations come from reading the baked bytes; the § F rotation
+//    annotations come from reading the baked bytes; the rotation
 //    width/height swap is automatic that way). Validity is keyed on
 //    BUFFER IDENTITY: the record names the exact committed buffer, so
 //    any later buffer change makes it inert with no cleanup required.

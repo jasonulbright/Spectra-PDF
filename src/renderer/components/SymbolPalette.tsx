@@ -15,7 +15,7 @@ import {
 import { exportSymbolSetToPath, importSymbolSetFromPath } from '../lib/symbol-set-io';
 import { startSymbolDrag } from '../lib/symbol-drag';
 
-// N11 slice D — the searchable symbol palette.
+// The searchable symbol palette.
 //
 // ONE component, two surfaces (the brief's "one symbol registry, two
 // consumers"): the Comment tool's stamp picker places symbols from it, and the

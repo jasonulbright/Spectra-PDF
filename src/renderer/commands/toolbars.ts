@@ -1,4 +1,4 @@
-// The main toolbar as DATA (19-phase4 § 3.1), now a CATALOG (I.6 toolbar
+// The main toolbar as DATA, now a CATALOG (toolbar
 // customization). Groups of registered command ids (each with its glyph and a
 // default-visibility flag); the user's show/hide overrides select which render
 // (`visibleToolbarNodes`), with a separator between groups that kept at least
@@ -47,7 +47,7 @@ export const TOOLBAR_CATALOG: readonly ToolbarCatalogGroup[] = [
   {
     id: 'modes',
     label: 'Hand & select',
-    // Hand / Select (M6.2): how you hold vs. touch the page — § 3.1's pair.
+    // Hand / Select: how you hold vs. touch the page — the pair.
     items: [item('tools.hand', 'hand'), item('tools.select', 'cursor')],
   },
   {

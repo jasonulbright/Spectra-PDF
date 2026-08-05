@@ -13,7 +13,7 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// N12 (brief 37): the qps pseudo-locale — every en string bracketed and
+// The qps pseudo-locale — every en string bracketed and
 // vowel-stretched, generated at init, dev/e2e-only. A covered surface
 // renders [Ẽẽ...]; a BARE ENGLISH string on a swept surface is a leak this
 // spec exists to catch.
@@ -44,7 +44,7 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 //     (pt, KB, MB), COLOUR VALUES (#ffd54a — a swatch names itself by its
 //     hex) and the keyboard NOTATION a chord is written in (Ctrl, Esc, Tab
 //     and single letters — the letters engraved on the reader's own
-//     keyboard; only the modifier and named keys localize, slice C).
+//     keyboard; only the modifier and named keys localize).
 //   • The PRODUCT NAME.
 //   • The LANGUAGE PICKER's own options. Every locale is listed in ITS OWN
 //     language (English · Español · Français · Deutsch · Italiano — i18n.ts
@@ -86,7 +86,7 @@ const notCatalog = (text: string): boolean => {
     'Português (Brasil)', '日本語', '简体中文',
   ]);
   if (exact.has(text)) return true;
-  // A REDACTION CODE row (F15 slice E): the statutory citation, an em dash,
+  // A REDACTION CODE row: the statutory citation, an em dash,
   // then the description. The citation — `(b)(6)`, `(k)(2)` — is the
   // statute's own text AND the exact string drawn into the redaction box, so
   // translating it would misname the exemption a release is checked against;
@@ -163,7 +163,7 @@ async function sweep(selector: string, leaks: string[]): Promise<void> {
   }
 }
 
-describe('qps pseudo-locale leak sweep (N12)', () => {
+describe('qps pseudo-locale leak sweep', () => {
   it('the docless chrome renders no bare English under qps', async () => {
     await waitForHarness();
     await qps('qps');
@@ -244,7 +244,7 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       // their tooltips are catalog strings, which the sweep above read.
       check('search placeholder', await $('[data-testid="search-input"]').getAttribute('placeholder'));
 
-      // ── STATUS BAR: the DOCKED one under the canvas (Phase 10 slice A) —
+      // ── STATUS BAR: the DOCKED one under the canvas —
       // page nav, zoom, the organize/read toggle. (`status-bar` is the
       // transient message strip and only exists while something is running.)
       await sweep('[data-testid="canvas-status-bar"]', leaks);
@@ -261,7 +261,7 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       check('dock op switcher', await $('[data-testid="dock-op-rotate"]').getText());
       await sweep('[data-testid="tool-dock"]', leaks);
 
-      // N11 slice C: the Takeoff panel is a container of its own — its empty
+      // The Takeoff panel is a container of its own — its empty
       // state, its column headings and its two actions are all catalog
       // strings, and its group NAMES are user data that must stay bare (the
       // sweep reads the chrome around them, not them).
@@ -273,7 +273,7 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       expect(await invokeAppCommand('tools.panel.rotate')).toBe(true);
       await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
 
-      // O8: the Compress panel's MRC branch is a surface that only exists
+      // The Compress panel's MRC branch is a surface that only exists
       // once the quality select is on it — the preset radios, their hints and
       // the two checkboxes are hidden behind a choice, which is exactly the
       // kind of surface a sweep of the DEFAULT state never reaches.
@@ -293,7 +293,7 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       });
       await sweep('[data-testid="tool-dock"]', leaks);
 
-      // F15 slice D/E: Search & Redact is the widest new dock surface — scope,
+      // Search & Redact is the widest new dock surface — scope,
       // the eight pattern names, the three `expand` choices WITH their
       // consequence hints, and two COLLAPSED groups (the word list and the
       // redaction properties, whose colour/alignment/code controls only exist
@@ -346,7 +346,7 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       await sweep('[data-testid="properties-dialog"]', leaks);
       await $('[data-testid="props-close"]').click();
 
-      // ── DIALOG 3: Create PDF (P22). 33 new strings in one dialog, and two
+      // ── DIALOG 3: Create PDF. 33 new strings in one dialog, and two
       // of its surfaces only exist once the LIST does — the per-row kind
       // badge and the unsupported-row message. So the empty state is swept
       // first, then rows are injected through the harness (a refused source,
@@ -379,7 +379,7 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       await sweep('[data-testid="create-pdf-dialog"]', leaks);
       await $('[data-testid="create-pdf-close"]').click();
 
-      // ── DIALOG 4: Combine Files (P22 slice D). 36 more strings, and the
+      // ── DIALOG 4: Combine Files. 36 more strings, and the
       // same shape of problem — the per-row converter line, the page-range
       // field's placeholder and the blocked message only exist once the LIST
       // does. Empty state first, then a refused row injected through the
@@ -457,7 +457,7 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
 
       // ── A MODE OPTION: the stamp presets. Their WORDS localize (a stamp's
       // label is written into the document) while their test ids do not — the
-      // whole point of giving STAMP_PRESETS a stable id in slice C.
+      // whole point of giving STAMP_PRESETS a stable id.
       await $('[data-testid="tool-stamp"]').click();
       await $('[data-testid="stamp-preset-approved"]').waitForDisplayed({
         timeout: 10_000,

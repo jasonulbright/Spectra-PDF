@@ -12,7 +12,7 @@ per-field /DA rewrites on resource collisions, materializes inherited
 AcroForm-level /DA down onto fields, and carries /NeedAppearances. merge and
 split now build on that (hand-rolling what upstream maintains would be the
 same mistake class as hand-rolling ByteRange handling — see the pyHanko
-precedent in 10-phase2h-signatures.md); this module covers exactly what
+precedent); this module covers exactly what
 upstream does NOT:
 
 - ``prune_form_to_pages`` — prune field trees to kept pages, in place. Used
@@ -57,8 +57,6 @@ Document-level form behavior:
 
 Field-level keys (incl. per-field /AA) travel with the field objects
 untouched, as always.
-
-Design: docs/architecture/16-phase2n-canvas-completeness.md § 2n.4(a).
 """
 
 from pathlib import Path
@@ -385,7 +383,7 @@ def _reconcile_co_in_place(pdf: pikepdf.Pdf) -> None:
 
 
 def adopt_orphan_widget_fields(pdf: pikepdf.Pdf) -> int:
-    """Register orphan field-keyed widgets in /AcroForm (O8: distill forms).
+    """Register orphan field-keyed widgets in /AcroForm (distill forms).
 
     gs pdfwrite honours /ANN pdfmarks — Distiller's form syntax — well enough
     to land Widget annotations with their /T //FT //V intact on the page, but
@@ -578,7 +576,7 @@ def reattach_acroform(original: pikepdf.Pdf, regenerated: pikepdf.Pdf) -> bool:
 
     acro_src = original.Root["/AcroForm"]
     acro_new = Dictionary(Fields=Array(copied_roots))
-    # /CO and /XFA ride the 1:1 path verbatim (F11): copy_foreign caches per
+    # /CO and /XFA ride the 1:1 path verbatim: copy_foreign caches per
     # source, so /CO's field refs resolve to the SAME copied field objects the
     # roots walk produced, and page identity is preserved so the XFA packet
     # still agrees with the pages (page SURGERY refuses XFA instead — module
@@ -594,7 +592,7 @@ def reattach_acroform(original: pikepdf.Pdf, regenerated: pikepdf.Pdf) -> bool:
             acro_new[key] = v  # scalars (String/int/bool) copy by value
     regenerated.Root["/AcroForm"] = regenerated.make_indirect(acro_new)
     # The catalog's /AA (document-action scripts) is document-scoped and gs
-    # drops it with everything else — carry it whole (F11).
+    # drops it with everything else — carry it whole.
     src_aa = original.Root.get("/AA")
     if src_aa is not None and isinstance(src_aa, Dictionary) and regenerated.Root.get("/AA") is None:
         handle = src_aa if src_aa.is_indirect else original.make_indirect(src_aa)

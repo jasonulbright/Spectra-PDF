@@ -1,7 +1,7 @@
-"""Tests for PostScript/EPS → PDF distilling (Phase 8). gs-gated like
+"""Tests for PostScript/EPS → PDF distilling. gs-gated like
 every Ghostscript-backed op (the conftest `gs_path` fixture skips when
 `resources/ghostscript` is unprovisioned — a recorded gate count must
-come from a run WITHOUT skips, per the punchlist dev-notes rule)."""
+come from a run WITHOUT skips)."""
 
 import os
 
@@ -107,7 +107,7 @@ class TestDistill:
         with pytest.raises(ValueError, match="not found"):
             distill(os.path.join(tmp_dir, "ghost.ps"), os.path.join(tmp_dir, "o.pdf"), gs_path=gs_path)
 
-    # ── review round 12 pins ─────────────────────────────────────────────
+    # ── Additional pins ─────────────────────────────────────────────
 
     def test_percent_in_output_name_is_literal(self, tmp_dir, gs_path):
         # '%d' in -sOutputFile is a per-page TEMPLATE: unescaped, gs wrote
@@ -160,7 +160,7 @@ class TestDistill:
             distill(src, out, gs_path=gs_path)
 
 
-# O8: Distiller-style form-field pdfmarks. gs lands the /ANN Widget
+# Distiller-style form-field pdfmarks. gs lands the /ANN Widget
 # annotations with field keys intact but never writes /AcroForm — the
 # distill op ADOPTS them (engine/acroform.adopt_orphan_widget_fields).
 FORMS_PS_FIXTURE = b"""%!PS-Adobe-3.0

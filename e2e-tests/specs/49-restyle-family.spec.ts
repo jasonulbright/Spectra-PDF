@@ -13,7 +13,7 @@ import {
   openParagraphEditor,
 } from '../support/harness.js';
 
-// Phase 9.A3a — family swap on the paragraph editor, end to end: the
+// Family swap on the paragraph editor, end to end: the
 // family dropdown substitutes the WHOLE paragraph into the chosen
 // bundled Liberation face. Asserted at three layers: the re-listing
 // round-trips the text (the swapped output stays one editable
@@ -98,7 +98,7 @@ async function waitForReindexedListing(
   );
 }
 
-describe('restyle family (Phase 9.A3a)', () => {
+describe('restyle family', () => {
   let tmp: string;
   let pdfPath: string;
 

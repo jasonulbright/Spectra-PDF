@@ -29,11 +29,11 @@ import {
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
 
-// File ▸ Print… (Ctrl+P) — M-P § 3.4, widened to the O2 option surface:
+// File ▸ Print… (Ctrl+P).4, widened to the option surface:
 // subsets/reverse/collate, duplex, paper, orientation, color, comments
 // modes, print-as-image, and the layout modes (multiple, booklet, poster,
-// custom scale). Complete without a preview — O3 remains its own register
-// row; the dialog is a finished feature without one, as many shipping PDF
+// custom scale). Complete without a preview — the preview is its own
+// capability; the dialog is a finished feature without one, as many shipping PDF
 // tools' are.
 //
 // The job itself is the engine's `print` (bundled Ghostscript mswinpr2,
@@ -46,7 +46,7 @@ import { tChrome, tChromeCount, tNumber } from '../i18n';
 // cannot honor are not offered (duplex on a simplex printer), and the
 // layout modes resolve their sheet geometry from the same report. Paper
 // TRAY selection is deliberately absent: gs's mswinpr2 hard-forces
-// automatic source selection (§ I O2's recorded residual).
+// automatic source selection (the recorded residual).
 
 export interface PrintDialogProps {
   onClose: () => void;
@@ -63,7 +63,7 @@ const labelCls = 'block text-sm text-neutral-400 mb-1';
 const PREVIEW_MAX = 8;
 
 export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile } = useActiveFile();
   const { call, callRaw } = useEngine();
@@ -87,7 +87,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   // edits are about to rewrite — hold validation until the number is true.
   const [gated, setGated] = useState(false);
 
-  // O3 preview: blob URLs of the PREPARED sheets (the engine runs the real
+  // preview: blob URLs of the PREPARED sheets (the engine runs the real
   // prepass — what shows is what spools). previewDirRef chains engine-side
   // cleanup of the previous render.
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
@@ -161,7 +161,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   const workingPath = activeFile?.workingPath ?? null;
   const docPageCount = activeFile?.pageCount ?? 0;
 
-  // O3: re-render the preview (debounced) whenever anything that changes a
+  // Re-render the preview (debounced) whenever anything that changes a
   // SHEET changes. The engine runs the real prepass and renders the
   // prepared sheets — preview and job share one pipeline, so they cannot
   // disagree. `callRaw`, deliberately: a read-only render of the working

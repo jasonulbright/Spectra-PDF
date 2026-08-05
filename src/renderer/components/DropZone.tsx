@@ -4,14 +4,14 @@ import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 
 interface DropZoneProps {
-  // position is the Tauri physical drop point (2n.3) — undefined on platforms
+  // position is the Tauri physical drop point — undefined on platforms
   // that don't report one; the handler falls back to appending when absent.
   onFilesDropped: (paths: string[], position?: { x: number; y: number }) => void;
   children: React.ReactNode;
 }
 
 export function DropZone({ onFilesDropped, children }: DropZoneProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const [dragging, setDragging] = useState(false);
   const callbackRef = useRef(onFilesDropped);
@@ -30,7 +30,7 @@ export function DropZone({ onFilesDropped, children }: DropZoneProps): React.Rea
           /\.pdfx?$/i.test(p)
         );
         // Tauri reports the physical drop position; forward it so a drop onto a
-        // canvas document imports there (2n.3). Absent → append fallback.
+        // canvas document imports there. Absent → append fallback.
         const position = event.payload.position as { x: number; y: number } | undefined;
         if (paths.length > 0) callbackRef.current(paths, position);
       }

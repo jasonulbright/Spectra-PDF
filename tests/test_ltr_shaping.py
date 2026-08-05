@@ -1,6 +1,6 @@
-"""9.T22/T23 — shaping on the LEFT-TO-RIGHT path.
+"""Shaping on the LEFT-TO-RIGHT path.
 
-The joining scripts got a shaper in T3 because they have no correct
+The joining scripts have a shaper because they have no correct
 per-character rendering at all. Latin does — right up until a combining mark
 or a ligature is involved, at which point the per-character emission draws a
 diacritic as a spacing glyph beside its letter, and never forms a ligature the
@@ -68,7 +68,7 @@ def _edit(tmp_path, text, family=None):
 
 
 class TestCombiningMarks:
-    """T22 — a combining mark must not draw as a spacing glyph."""
+    """A combining mark must not draw as a spacing glyph."""
 
     def test_combining_acute_composes_and_round_trips(self, tmp_path):
         shaped, text = _edit(tmp_path, COMBINING)
@@ -102,7 +102,7 @@ class TestCombiningMarks:
 
 
 class TestLigatureSynthesis:
-    """T23 — a face carrying `liga` forms its ligatures on an edit."""
+    """A face carrying `liga` forms its ligatures on an edit."""
 
     @pytest.mark.skipif(
         not os.path.isfile(LIGA_FACE), reason="Libertinus not provisioned"
@@ -140,7 +140,7 @@ class TestTheLineBetweenThem:
         # `AVATAR` kerns hard in Liberation Sans — a ~297/1000 em GPOS
         # adjustment. It is still one glyph per character with no offsets,
         # and the character path already applies pair kerning from the same
-        # font (9.K1b), so shaping it would change the emission for nothing.
+        # font, so shaping it would change the emission for nothing.
         run = shaping.shape(SANS_FACE, "AVATAR", rtl=False)
         assert len(run.glyphs) == 6
         assert not _shaping_changed_it(run, "AVATAR")
@@ -162,7 +162,7 @@ class TestTheLineBetweenThem:
 
 
 class TestShapedMeasureMatchesTheDraw:
-    """The 9.T22 measure fix, at the level it went wrong.
+    """The shaped-measure fix, at the level it went wrong.
 
     `_pieces` writes each shaped glyph as [-x_off, glyph, x_off + width -
     advance], so the pen's NET movement is the shaper's advance. The width
@@ -192,11 +192,11 @@ class TestShapedMeasureMatchesTheDraw:
             vertical = False
             a = 1.0
             d = 1.0
-            # 9.T13: the transposed-frame scalars the width model reads —
+            # The transposed-frame scalars the width model reads —
             # for a horizontal member they ARE a and d.
             adv = 1.0
             perp = 1.0
-            # 9.T12D: only a tate-chu-yoko block is atomic; an ordinary
+            # Only a tate-chu-yoko block is atomic; an ordinary
             # member measures its characters.
             atomic = False
             style = {
@@ -212,7 +212,7 @@ class TestShapedMeasureMatchesTheDraw:
 
 
 class TestAuthoredTextShapes:
-    """9.T27 — the AUTHORING surfaces shape left-to-right too.
+    """The AUTHORING surfaces shape left-to-right too.
 
     Add Text, watermarks and form-field appearances used to gate all shaping
     on `bidi.has_strong_rtl`, so an accent typed into any of them drew as a
@@ -330,7 +330,7 @@ def _is_shaped(path) -> bool:
 
 
 class TestByteEmittersShape:
-    """9.T27 — the two surfaces that write appearance-stream BYTES by hand.
+    """The two surfaces that write appearance-stream BYTES by hand.
 
     Watermarks and form-field appearances share `engine/rtl_text.py`, which
     used to return None for anything left-to-right. Both are claimed in the
@@ -397,14 +397,14 @@ class TestByteEmittersShape:
         assert not _is_shaped(out)
 
 
-# ── 9.T12 — the one joining script that is not right-to-left ─────────────
+# ── the one joining script that is not right-to-left ─────────────────────
 
 MONGOLIAN_FACE = os.path.join(FONTS, "NotoSansMongolian-Regular.ttf")
 MONGOL_WORD = "ᠮᠣᠩᠭᠣᠯ"
 
 
 class TestMongolianShaping:
-    """9.T12 — direction is a property of the TEXT, and a COLUMN gets the
+    """Direction is a property of the TEXT, and a COLUMN gets the
     face's own upright punctuation.
 
     Before this, every shaping site derived direction as `joins or
@@ -431,8 +431,8 @@ class TestMongolianShaping:
     def test_the_vert_map_is_read_from_gsub_and_covers_punctuation(self):
         # Measured, not assumed (`vert-harvest.local.py`): neither Mongolian
         # face's `vert` touches a single LETTER — both cover only punctuation
-        # and brackets. Brief 39 § 5.4 proposed harvesting the map from a
-        # second `ttb` SHAPING pass on a recon observation that a letter
+        # and brackets. Harvesting the map from a second `ttb` SHAPING pass was
+        # proposed on an observation that a letter
         # changed under `ttb`; that difference is the cursive shaper picking
         # other positional forms, not `vert`, and in this face the two passes
         # do not even have the same glyph COUNT (a ligature forms under `ltr`
@@ -465,11 +465,11 @@ class TestMongolianShaping:
         reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
     )
     def test_the_face_measurement_that_accepted_it(self):
-        # The T25 conditions, as a pin rather than a memory (brief 39 § 5.3):
+        # The round-trip conditions, as a pin rather than a memory:
         # one ADVANCING glyph per cluster, no `.notdef`, and real per-glyph
         # advances. A face that decomposed a letter into two advancing glyphs
         # could not be spelled back by a per-code /ToUnicode, which is exactly
-        # why Noto Sans Arabic lost the T3 comparison.
+        # why Noto Sans Arabic lost the comparison.
         for word in (MONGOL_WORD, "ᠨᠠᠷᠠᠨ", "2026", "Latin"):
             run = shaping.shape(MONGOLIAN_FACE, word, rtl=False)
             assert run.glyphs, word
@@ -491,7 +491,7 @@ class TestMongolianShaping:
     ):
         # The harvest's one refusal: `vert` names a glyph the face has no
         # `hmtx` entry for. The column's LENGTH is measured from that number,
-        # and inventing it is the § 1.5b defect wearing a different hat.
+        # and inventing it is the defect wearing a different hat.
         monkeypatch.setattr(
             shaping, "vertical_forms", lambda _p: {
                 n: "nosuchglyph"

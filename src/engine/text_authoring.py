@@ -1,9 +1,9 @@
-"""Add Text — author a NEW text object on a page (Phase 9.A2).
+"""Add Text — author a NEW text object on a page.
 
 The counterpart to the editing path: instead of rewriting existing runs,
-this APPENDS a fresh text object. It reuses 7.4's subset-embed
+this APPENDS a fresh text object. It reuses the subset-embed
 (`build_fallback_font` → Type0/Identity-H + ToUnicode), so the authored
-text is searchable AND re-editable by the shipped 7.2/7.5 editors with no
+text is searchable AND re-editable by the run and paragraph editors with no
 special case — the next `list_text_runs`/`list_text_paragraphs` sees it as
 an ordinary editable run.
 
@@ -11,10 +11,10 @@ Pure authoring: no content-stream surgery of existing content. The new
 drawing is wrapped in `q … Q` so it can't inherit or leak graphics state,
 and positioned in USER space at the page's top level (identity ctm — no
 inversion needed, unlike the paragraph emitter's in-context rewrite).
-A2-tail: `rotate` wraps that same block in one 90°-step rotation frame
+`rotate` wraps that same block in one 90°-step rotation frame
 (`cm`) mapping the local layout onto the drawn box; rotate=0 emits the
 frame-less shipped bytes.
-A2-tail-2: `bold`/`italic` compose the A3b style into the same fallback
+`bold`/`italic` compose the style into the same fallback
 ladder (both face seats), and `measure_text_box` reports the identical
 layout without writing — ONE shared `_layout_box` pass for both ops (the
 walker-agreement discipline), so the card's fit indicator can never
@@ -43,7 +43,7 @@ from engine.page_images import _save
 _LEADING_EM = 1.2
 _MAX_SIZE = 1638.0
 
-# 9.K2: the OpenType features we can honestly apply (small caps + stylistic
+# The OpenType features we can honestly apply (small caps + stylistic
 # alternates). "small_caps" expands to smcp+c2sc so mixed-case text becomes
 # uniform small caps. Anything else is ignored (never a silent wrong result).
 _SMALL_CAPS = ("smcp", "c2sc")
@@ -73,7 +73,7 @@ def _normalize_features(features) -> list:
 
 
 def _explicit_face(family, style_key_name: str):
-    """9.T6 — an ABSOLUTE PATH family selector resolves to that installed
+    """An ABSOLUTE PATH family selector resolves to that installed
     face, bypassing the bundled ladder entirely: the ladder exists to pick a
     stand-in, and there is nothing to stand in for once the user has named
     the face. None for the three bundled family names (and for no family at
@@ -109,7 +109,7 @@ def _wrap(words, width_1000, size: float, max_width: float) -> list[str]:
     """Greedy fill at `max_width` (user units). A single over-wide word
     still gets its own line (never dropped).
 
-    9.K1: the candidate line is measured AS A WHOLE STRING rather than as a
+    The candidate line is measured AS A WHOLE STRING rather than as a
     sum of word widths plus spaces. With kerning on, a per-word sum would
     miss the pairs that straddle the spaces, so the wrap could disagree with
     what is actually drawn — and measurement agreeing with drawing is the
@@ -129,7 +129,7 @@ def _wrap(words, width_1000, size: float, max_width: float) -> list[str]:
 
 
 class _Bidi:
-    """T25 — the right-to-left half of authoring, in one object.
+    """The right-to-left half of authoring, in one object.
 
     Authoring has the same two problems the paragraph reflow had, and takes
     the same two answers: text is TYPED in reading (logical) order but a PDF
@@ -207,7 +207,7 @@ class _Bidi:
 
 
 def _span_units(segments, styles) -> list:
-    """T25a — one line's `(text, style)` segments as UNITS in logical order:
+    """One line's `(text, style)` segments as UNITS in logical order:
     `("glyphs", word, style)` for a shaped word, `("text", ch, style)` per
     character otherwise. Same rule as the whole-box path, carrying the style
     index through the reorder so a recoloured word stays recoloured."""
@@ -300,7 +300,7 @@ def _prepare_bidi(face: str, body: str, pdf, unique: str, glyph_for):
     from engine import shaping
 
     rtl = bidi.has_strong_rtl(body)
-    # 9.T27: shaping is no longer an RTL-only question. A left-to-right box
+    # Shaping is no longer an RTL-only question. A left-to-right box
     # needs it exactly when the shaper produces something the character path
     # cannot — a composed accent, a ligature — which is what
     # `shape_if_it_changes` answers; ordinary Latin returns None for every
@@ -400,7 +400,7 @@ def _bidi_show(pieces, encode, bd: "_Bidi", sz: float, csi, Array) -> list:
 
 def _show_instruction(line: str, encode, pairs, csi, Array) -> object:
     """The show op for one line: a plain `Tj`, or a `TJ` array carrying the
-    face's pair kerning (9.K1).
+    face's pair kerning.
 
     Sign discipline, stated where it is emitted: a number in a `TJ` array
     moves the next glyph LEFT by `n/1000 x size`, and kern values are
@@ -451,11 +451,11 @@ class _BoxLayout(NamedTuple):
     font_dict: object
     encode: object
     width_1000: object
-    # 9.K1: the face's pair kerning ({} when kern=False, or when the face has
+    # The face's pair kerning ({} when kern=False, or when the face has
     # none — Liberation Mono genuinely has none, so a monospace box simply
     # never kerns with no special case).
     kern_pairs: dict
-    # T15 per-span styling. None = the whole-box path (byte-identical to the
+    # Per-span styling. None = the whole-box path (byte-identical to the
     # shipped output). Otherwise: `styled_lines` is a list of lines, each a
     # list of (text, style_index) segments; `styles` is one resolved entry
     # per distinct style combo: {size, rgb, font_dict, encode, width_1000,
@@ -464,10 +464,10 @@ class _BoxLayout(NamedTuple):
     styled_lines: list | None = None
     styles: list | None = None
     line_leadings: list | None = None
-    # T25: the right-to-left half. None for every left-to-right box, which is
+    # The right-to-left half. None for every left-to-right box, which is
     # what keeps the shipped emission byte-identical.
     bidi: object | None = None
-    # T19: a FREE rotation angle in degrees (None on the shipped step path).
+    # A FREE rotation angle in degrees (None on the shipped step path).
     # The frame already encodes it; `angle` exists so the shift-up band can
     # compute the page box's preimage under the free rotation.
     angle: float | None = None
@@ -478,7 +478,7 @@ def _layout_box_spans(
     alt_index, rot, l_left, l_right, l_top, l_w, l_h, frame,
     left, right, top, bottom, angle=None,
 ) -> "_BoxLayout":
-    """T15: the per-span layout — one resolved style per distinct combo,
+    """The per-span layout — one resolved style per distinct combo,
     per-char widths, greedy wrap over mixed-width words, per-line leading
     from the largest size on the line (the paragraph engine's rule), and
     lines as (text, style_index) segments for the emitter."""
@@ -503,12 +503,12 @@ def _layout_box_spans(
             char_style[pos] = idx
 
     feats = _normalize_features(features)
-    # T25a: right-to-left per-span styling. A style boundary INSIDE a
+    # Right-to-left per-span styling. A style boundary INSIDE a
     # cursively joining word is refused rather than drawn: the two halves
     # would embed in two different subsets and each would take its own
     # initial/final joining forms, so the word would visibly break at the
     # seam. Styling whole words — what the card's selection actually
-    # produces — works. (The T15 cross-style KERN gap is a hairline; this
+    # produces — works. (The cross-style KERN gap is a hairline; this
     # one would be a hole in the middle of a word.)
     rtl = bidi.has_strong_rtl(body)
     if rtl:
@@ -576,12 +576,12 @@ def _layout_box_spans(
             finally:
                 _ff.close()
             glyph_for = {ch: nm for ch, nm in zip(chars, names) if nm is not None}
-        # T25a: the joining words drawn WHOLLY in this style (guaranteed
+        # The joining words drawn WHOLLY in this style (guaranteed
         # whole by the boundary refusal above), shaped against THIS style's
         # face so its glyphs land in THIS style's subset.
         runs: dict = {}
         glyph_encode = glyph_width = None
-        # 9.T27: left-to-right words shape here too, on the same selective
+        # Left-to-right words shape here too, on the same selective
         # gate the box path uses — so an accent typed into a styled span
         # composes instead of standing beside its letter. `feats` opts out
         # (two glyph selections for one run are not defined; the refusal
@@ -649,7 +649,7 @@ def _layout_box_spans(
         """Points width of body[a:b) under its styles (cross-style kern
         deliberately not attempted — an honest hairline).
 
-        T25a: a SHAPED word measures by the shaper's positioned advance,
+        A SHAPED word measures by the shaper's positioned advance,
         which is exactly what the emitted glyph widths plus their TJ
         corrections sum to — the wrap and the drawing stay one number."""
         w = 0.0
@@ -739,7 +739,7 @@ def _layout_box_spans(
         frame=frame, left=left, right=right, top=top, bottom=bottom,
         font_dict=None, encode=None, width_1000=None, kern_pairs={},
         styled_lines=styled_lines, styles=styles, line_leadings=line_leadings,
-        # T27: the reorder is the identity for a left-to-right box, but the
+        # The reorder is the identity for a left-to-right box, but the
         # SHAPED emission lives on the same branch — so a box that shaped
         # anything takes it too, at base level 0.
         bidi=(
@@ -751,7 +751,7 @@ def _layout_box_spans(
 
 
 def _validated_spans(spans, body_len: int) -> list[dict]:
-    """T15: normalize the caller's span list. Each span is
+    """Normalize the caller's span list. Each span is
     {start, end, size?, color?, bold?, italic?} over the TEXT's character
     positions; spans must be in-range, non-overlapping and ascending (the
     paragraph editor's own contract). Missing style keys inherit the box-
@@ -791,8 +791,8 @@ def _validated_spans(spans, body_len: int) -> list[dict]:
 def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern=True,
                 features=None, alt_index=0, spans=None) -> _BoxLayout:
     """The ONE layout pass shared by `add_text_box` and `measure_text_box`
-    — validation, box geometry (incl. the A2-tail rotation transposition),
-    face resolution (family + A3b bold/italic style), subset-font build,
+    — validation, box geometry (incl. the rotation transposition),
+    face resolution (family + bold/italic style), subset-font build,
     and the greedy wrap. Single-sourced on purpose: the card's live fit
     indicator runs the SAME code the commit runs, so they can never
     disagree (the walker-agreement discipline applied to authoring)."""
@@ -806,9 +806,9 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         raise ValueError("rect must be [x0, y0, x1, y1]") from None
     # Strict on purpose (size/rect coerce; this refuses "90"/True): rotate
     # is the one parameter where a silently-coerced wrong value flips the
-    # whole geometry. T19 widened the DOMAIN (any finite degree value), not
-    # the strictness: booleans and strings still refuse. The four step
-    # angles keep the A2-tail contract byte-for-byte; anything else takes
+    # whole geometry. The DOMAIN is any finite degree value; the strictness
+    # is unchanged: booleans and strings still refuse. The four step
+    # angles keep the contract byte-for-byte; anything else takes
     # the free-rotation frame below.
     if (
         isinstance(rotate, bool)
@@ -816,14 +816,14 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         or not math.isfinite(float(rotate))
     ):
         raise ValueError(f"rotate must be a number of degrees (got {rotate!r})")
-    # Strict booleans (A2-tail-2): checked as bool, NOT truthiness — bool is
+    # Strict booleans: checked as bool, NOT truthiness — bool is
     # an int subclass, so a real True/False passes while bold=1 / italic="y"
     # refuse (a coerced style would silently pick the wrong face).
     if not isinstance(bold, bool):
         raise ValueError(f"bold must be true or false (got {bold!r})")
     if not isinstance(italic, bool):
         raise ValueError(f"italic must be true or false (got {italic!r})")
-    # 9.K1 (round-41 LOW): validated HERE with its siblings, not later beside
+    # Validated HERE with its siblings, not later beside
     # the face work — input-shape checks run FIRST, so a bad `kern` reports
     # itself rather than surfacing whatever the font machinery hits on the way.
     if not isinstance(kern, bool):
@@ -837,7 +837,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     top, bottom = max(y0, y1), min(y0, y1)
     box_w = max(right - left, 1.0)
 
-    # A2-tail: the block lays out LOCALLY exactly like rotate=0 in a
+    # The block lays out LOCALLY exactly like rotate=0 in a
     # [0, 0, l_w, l_h] box whose l_w is the drawn dimension ALONG the
     # reading direction (90/270 read along the drawn HEIGHT), then ONE
     # rotation frame `q <cos sin -sin cos tx ty> cm … Q` maps local onto
@@ -881,7 +881,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     leading = sz * _LEADING_EM
 
     if spans:
-        # T15: the per-span path builds its own styles/segments; the
+        # The per-span path builds its own styles/segments; the
         # whole-box path below stays byte-identical when spans is absent.
         return _layout_box_spans(
             pdf, body, _validated_spans(spans, len(body)), sz, font_path, family,
@@ -918,7 +918,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # breaks handled just below), never a glyph, so it stays out of the
     # embedded subset.
     unique = "".join(sorted(set(body) - {"\n", "\r", "\t"}))
-    # 9.K2: resolve each char to its FEATURE-substituted glyph so the small
+    # Resolve each char to its FEATURE-substituted glyph so the small
     # cap / alternate is what embeds and draws; ToUnicode keeps the plain
     # letter, so it stays searchable and re-editable.
     glyph_for = None
@@ -935,7 +935,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         glyph_for = {ch: nm for ch, nm in zip(unique, names) if nm is not None}
     bd, font_dict, encode, width_1000 = _prepare_bidi(face, body, pdf, unique, glyph_for)
     if bd is not None:
-        # T25: measure through the SAME units the emission draws — shaped
+        # Measure through the SAME units the emission draws — shaped
         # words by the shaper's positioned advance, everything else by the
         # subset's widths. Pair kerning is off in this direction: a shaped
         # run carries its own GPOS, and a pair straddling a shaped word and a
@@ -943,7 +943,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         width_1000 = bd.line_width_1000
         kern = False
 
-    # 9.K1: pair kerning from the resolved face. Wrapping, centring and
+    # Pair kerning from the resolved face. Wrapping, centring and
     # justification all read `width_1000`, so folding the kern INTO it is what
     # keeps measurement and drawing in agreement — the same property
     # `measure_text_box` depends on by sharing this pass.
@@ -983,7 +983,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
 
 
 def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, page) -> dict:
-    """T15 emitter: per-style fonts registered once, per-line baselines from
+    """emitter: per-style fonts registered once, per-line baselines from
     each line's OWN leading, per-segment Tf/rg (only on change), the same
     shift-up-to-visible rule, the same q/Q + rotation-frame envelope."""
     styles, styled_lines, leadings = lay.styles, lay.styled_lines, lay.line_leadings
@@ -1046,7 +1046,7 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
     elif rot == 270:
         page_lly, page_ury = vbox[0] - left, vbox[2] - left
     elif rot is None:
-        # T19 free rotation: the band is the page box's PREIMAGE under the
+        # Free rotation: the band is the page box's PREIMAGE under the
         # frame — invert the (pure rotation + translate) affine, map the
         # four device corners, take the local y-extent.
         a_f, b_f, c_f, d_f, e_f, f_f = (float(v) for v in frame)
@@ -1075,7 +1075,7 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
     for i, segments in enumerate(styled_lines):
         if not segments:
             continue
-        # T25a: the line permutes into visual order HERE, after the wrap —
+        # The line permutes into visual order HERE, after the wrap —
         # line breaks are a logical-order decision. Pieces carry their style
         # through the reorder, so a recoloured or resized word stays so.
         pieces = _span_pieces(segments, styles, lay.bidi) if lay.bidi is not None else None
@@ -1149,7 +1149,7 @@ def add_text_box(
     width; explicit newlines are honoured as hard breaks. `size` (points,
     clamped), `color` an [r,g,b] 0-1 (default black), `font_path` the
     bundled fonts dir (or a face), `family` serif/sans/mono (default sans),
-    `bold`/`italic` (A2-tail-2) pick the styled face from the same bundle.
+    `bold`/`italic` pick the styled face from the same bundle.
     `rotate` (0/90/180/270, CCW) turns the WHOLE block within the box —
     at 90/270 it lays out along the box's HEIGHT (reading bottom-to-top /
     top-to-bottom), at 180 upside-down. Text that would overflow the page
@@ -1241,7 +1241,7 @@ def add_text_box(
         elif rot == 270:
             page_lly, page_ury = vbox[0] - left, vbox[2] - left
         elif rot is None:
-            # T19 free rotation: the band is the page box's PREIMAGE under the
+            # Free rotation: the band is the page box's PREIMAGE under the
             # frame — invert the (pure rotation + translate) affine, map the
             # four device corners, take the local y-extent.
             a_f, b_f, c_f, d_f, e_f, f_f = (float(v) for v in frame)
@@ -1274,7 +1274,7 @@ def add_text_box(
             ly = y_top - i * leading
             instrs.append(csi([1, 0, 0, 1, round(lx, 4), round(ly, 4)], "Tm"))
             if lay.bidi is not None:
-                # T25: the line permutes into visual order HERE, after the
+                # The line permutes into visual order HERE, after the
                 # wrap — line breaks are a logical-order decision, and rule
                 # L1's line-end handling is meaningless before the lines
                 # exist. Same two boundaries as the paragraph reflow.
@@ -1282,7 +1282,7 @@ def add_text_box(
                     _bidi_show(lay.bidi.pieces(line), encode, lay.bidi, sz, csi, pikepdf.Array)
                 )
                 continue
-            # 9.K1: a TJ array carrying the face's pair kerning; falls back to
+            # A TJ array carrying the face's pair kerning; falls back to
             # the shipped Tj when nothing kerns (kern=False, or a face like
             # Liberation Mono that has no pairs at all).
             instrs.append(_show_instruction(line, encode, lay.kern_pairs, csi, pikepdf.Array))
@@ -1333,10 +1333,10 @@ def measure_text_box(
     alt_index: int = 0,
     spans: list | None = None,
 ) -> dict:
-    """A2-tail-2: report how `text` would lay out in the box WITHOUT
+    """Report how `text` would lay out in the box WITHOUT
     writing — the card's live fit indicator. Runs the exact `_layout_box`
     pass `add_text_box` runs (same wrap width, size clamp, family/style/
-    rotate transposition, and 9.K1 kerning), so `fits` can never disagree
+    rotate transposition, and kerning), so `fits` can never disagree
     with the commit.
 
     `text_height` = one leading per wrapped line (the block's extent down
@@ -1356,7 +1356,7 @@ def measure_text_box(
         # Round BEFORE comparing so the verdict matches the reported numbers
         # and float noise can't flip an exact boundary (14*1.2 and a box's
         # subtracted height land on different last-bit values otherwise).
-        # T15: per-span lines carry their OWN leadings; the whole-box
+        # Per-span lines carry their OWN leadings; the whole-box
         # path keeps the shipped uniform product.
         if lay.line_leadings is not None:
             text_height = round(sum(lay.line_leadings), 4)

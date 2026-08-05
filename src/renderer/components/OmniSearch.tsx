@@ -10,7 +10,7 @@ import { TILE_GLYPH } from './ToolsCenter';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tToolDescription, tToolTitle } from '../i18n';
 
-// U2 — the universal search box in the toolbar row (Phase 11, § U2).
+// The universal search box in the toolbar row.
 //
 // ONE box, TWO kinds of answer: the tools you can run and the text in the
 // document you are reading. That pairing is the point — a user who types
@@ -45,7 +45,7 @@ const MAX_TOOL_HITS = 5;
 const MAX_TEXT_HITS = 8;
 
 export function OmniSearch(): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   const { i18n } = useTranslation();
   const language = i18n.language;
   const state = useAppState();
@@ -64,7 +64,7 @@ export function OmniSearch(): React.JSX.Element {
     return () => clearTimeout(id);
   }, [query]);
 
-  // N12: rank over the LOCALIZED names, not TOOL_DEFS' English. A search box
+  // Rank over the LOCALIZED names, not TOOL_DEFS' English. A search box
   // that scores what the user cannot see is a search box that returns nothing
   // for every query typed in the UI language — the ranking's own tie-break
   // (`localeCompare`) already assumes the strings are the displayed ones.

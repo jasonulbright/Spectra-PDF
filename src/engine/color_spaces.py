@@ -1,15 +1,13 @@
-"""Resolve a PDF colour to approximate sRGB [r, g, b] for the vector swatch
-(§ I.0 S5).
+"""Resolve a PDF colour to approximate sRGB [r, g, b] for the vector swatch.
 
 `page_vectors` resolves device colours (`g`/`rg`/`k`) inline; THIS module
 resolves the named/complex spaces a `cs`/`scn` selects — ICCBased, Indexed,
 Separation, DeviceN, CalGray/CalRGB, Lab — by threading the page/form
 `/Resources /ColorSpace` and evaluating any tint-transform FUNCTION (types
-0/2/3/4). Before S5 those vectors returned None ("unknown") and could not show
+0/2/3/4). Such vectors used to return None ("unknown") and could not show
 a swatch; now they resolve to a display colour.
 
-Honest-unknown discipline (unchanged from before S5): anything we cannot
-resolve — a Pattern fill, an unparseable/unsupported function, a malformed
+Honest-unknown discipline: anything that cannot resolve — a Pattern fill, an unparseable/unsupported function, a malformed
 space — returns None. The swatch shows "unknown", never a WRONG colour.
 
 NOT colour-managed. ICCBased is interpreted by its `/N` component count (the

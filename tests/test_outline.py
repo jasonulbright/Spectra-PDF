@@ -69,7 +69,7 @@ def test_untitled_fallback(sample_pdf, tmp_dir):
     assert get_outline(out)["outline"][0]["title"] == "Untitled"
 
 
-# ── Phase 2l: action preservation on get→set round trips ────────────────────
+# ── action preservation on get→set round trips ──────────────────────────────
 
 
 def _make_action_outline(path: str) -> None:

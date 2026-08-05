@@ -1,4 +1,4 @@
-"""Comment/markup annotation overview and bulk delete (§ I.2 / I.6).
+"""Comment/markup annotation overview and bulk delete.
 
 The canvas edits the four annotation kinds it authors (Square/FreeText/Ink/
 Stamp). This module works at the whole-document level over EVERY markup
@@ -110,7 +110,7 @@ def delete_all_annotations(file: str, output: str) -> dict:
         else:
             pdf.save(output_path)
 
-    # O5b: on a signed input the landed bytes become an incremental append
+    # On a signed input the landed bytes become an incremental append
     # (original verbatim + one revision), so sweeping comments never breaks
     # the signature. The staged/landed rewrite stands when not applicable.
     from engine.incremental import finalize_preserving_signatures

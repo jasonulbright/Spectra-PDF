@@ -1,4 +1,4 @@
-"""9.T6 — the machine's installed fonts as an editing choice."""
+"""The machine's installed fonts as an editing choice."""
 
 import os
 
@@ -188,7 +188,7 @@ class TestEditingWithAnInstalledFont:
                          font_path=FONTS_DIR, family="comic-sans-please")
 
     def test_the_three_bundled_families_are_untouched(self, tmp_dir):
-        # The T6 branch is gated on an ABSOLUTE PATH, so the shipped
+        # The installed-font branch is gated on an ABSOLUTE PATH, so the shipped
         # selectors take exactly the shipped ladder.
         src = _blank(tmp_dir)
         out = os.path.join(tmp_dir, "o.pdf")

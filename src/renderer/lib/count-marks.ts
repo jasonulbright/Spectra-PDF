@@ -1,4 +1,4 @@
-// Count & takeoff math (N11 slice C): the symbol registry, group merging,
+// Count & takeoff math: the symbol registry, group merging,
 // sequence allocation, the derived tallies, and the legend table's layout.
 //
 // PURE — no DOM, no React, no storage (the `measure.ts` / `snap.ts`
@@ -123,7 +123,7 @@ function round4(v: number): number {
 
 export const DEFAULT_COUNT_SYMBOL = COUNT_SYMBOLS[0].id;
 
-// ── The part-list schema (N11 slice D) ───────────────────────────────────
+// ── The part-list schema ─────────────────────────────────────────────────
 //
 // A part list becomes PDF PATH OPERATORS (`pdfx-build`'s `symbolOps`) and SVG
 // geometry, so every number that reaches either renderer must be proven a

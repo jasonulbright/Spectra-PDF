@@ -1,10 +1,10 @@
-"""Incremental-append editing for SIGNED documents (O5b).
+"""Incremental-append editing for SIGNED documents.
 
 pikepdf/qpdf cannot write incremental updates — every save is a full
 rewrite that coalesces the file and breaks any signature's /ByteRange.
 pyHanko's IncrementalPdfFileWriter appends ONE revision containing exactly
 the changed objects; that is already how signing and counter-signing
-preserve prior signatures (F5). This module generalizes the mechanism to
+preserve prior signatures. This module generalizes the mechanism to
 the ANNOTATE / FORM-FILL / ADD-PAGE tier without re-implementing any of
 the app's emission machinery:
 

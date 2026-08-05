@@ -1,4 +1,4 @@
-// O8 slice A — the staged pdf.js runtime assets.
+// The staged pdf.js runtime assets.
 //
 // pdf.js 6 fetches its image decoders (jbig2.wasm for /JBIG2Decode AND
 // /CCITTFaxDecode, openjpeg.wasm for /JPXDecode, qcms_bg.wasm for ICC colour

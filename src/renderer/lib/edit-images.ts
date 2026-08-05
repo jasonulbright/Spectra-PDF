@@ -1,4 +1,4 @@
-// Edit-mode image placements (Phase 7.1): fetch the engine's per-page
+// Edit-mode image placements: fetch the engine's per-page
 // listing and project the PDF user-space rects into the display-normalized
 // space PageCell overlays draw in — the same {box: page.view, bakedRotate:
 // page.rotate} geometry every other overlay uses (one conversion idiom
@@ -7,7 +7,7 @@
 import { pdfRectToDisplay } from './pdfx-build';
 import type { PageGeometry } from './redaction';
 
-/** The mask WIRE shape `set_image_opacity` takes (P7 slice E): the full
+/** The mask WIRE shape `set_image_opacity` takes: the full
  * gradient params, or {kind:"none"} to clear a carried mask. */
 export type EditImageMaskParam =
   | { kind: 'none' }
@@ -27,13 +27,13 @@ export interface EditImagePlacement {
   /** Drawn inside a Form XObject (edits copy the form for that draw). */
   nested: boolean;
   /** The placement's FULL device matrix [a,b,c,d,e,f] in page user space —
-   * what C1's transform gesture manipulates (rect is just its bbox). */
+   * what the transform gesture manipulates (rect is just its bbox). */
   matrix: [number, number, number, number, number, number];
-  /** Effective fill alpha at the draw (9.C3) — the opacity slider's seed. */
+  /** Effective fill alpha at the draw — the opacity slider's seed. */
   opacity: number;
-  /** Effective blend mode at the draw (P7) — the blend select's seed. */
+  /** Effective blend mode at the draw — the blend select's seed. */
   blend: string;
-  /** The tool gradient mask in scope (P7 slice E), unit space — seeds the
+  /** The tool gradient mask in scope, unit space — seeds the
    * mask controls + the on-canvas from/to dots. Author soft masks are
    * never reported (there is no tool mask to re-edit). */
   mask: {
@@ -43,27 +43,27 @@ export interface EditImagePlacement {
     startAlpha: number;
     endAlpha: number;
   } | null;
-  /** C4: an inline (BI/ID/EI) draw vs a regular XObject placement.
-   * P7 slice F adds 'vector' — a placed SVG graphic; the whole transform
+  /** An inline (BI/ID/EI) draw vs a regular XObject placement.
+   * 'vector' is a placed SVG graphic; the whole transform
    * family applies, replace/extract refuse (toolbar disables). */
   kind: 'inline' | 'xobject' | 'vector';
-  /** C3-tail: the tool-authored crop in the image's unit space, or null.
+  /** The tool-authored crop in the image's unit space, or null.
    * Only RECOGNIZED tool frames are reported (author clips stay null —
    * no handles, band-crop as before); the crop op replaces the whole
    * recognized stack, so this is also what the handles seed from. */
   crop: [number, number, number, number] | null;
 }
 
-/** The selected image's transform context (9.C1) — its user-space matrix plus
+/** The selected image's transform context — its user-space matrix plus
  * the page geometry the canvas gesture needs. One at a time (single selection);
  * PageCell renders the handles on the page whose id matches. */
 export interface EditImageTransformCtx {
   pageId: string;
   index: number;
   matrix: [number, number, number, number, number, number];
-  /** C3-tail: the listed tool crop (unit space) — seeds the edge handles. */
+  /** The listed tool crop (unit space) — seeds the edge handles. */
   crop: [number, number, number, number] | null;
-  /** P7 slice E: the listed tool gradient mask — the overlay renders its
+  /** The listed tool gradient mask — the overlay renders its
    * from/to dots for direct manipulation (null = no dots). The vector
    * reuse path passes null (vectors don't mask). */
   mask: EditImagePlacement['mask'];
@@ -91,7 +91,7 @@ interface EngineListing {
     } | null;
     kind: 'inline' | 'xobject' | 'vector';
     crop?: [number, number, number, number] | null;
-    /** 9-§I.0-S8: the placement is wholly outside the active clip (invisible).
+    /** The placement is wholly outside the active clip (invisible).
      * Filtered out below so clipped-away images are never offered as editable.
      * Each surviving item keeps its ENGINE index, so filtering never desyncs a
      * mutator target. */
@@ -109,7 +109,7 @@ export async function fetchEditPlacements(
     file: workingPath,
     page: pageNumber,
   })) as unknown as EngineListing;
-  // 9-§I.0-S8: drop clipped-away (invisible) placements — never offered as
+  // Drop clipped-away (invisible) placements — never offered as
   // editable. Surviving items keep their engine `index`, so a mutator target
   // is never desynced by the filter.
   const visible = (listing.images ?? []).filter((image) => !image.clipped);

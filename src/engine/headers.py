@@ -1,4 +1,4 @@
-"""Headers, footers, and Bates numbering (§ I.5 P5).
+"""Headers, footers, and Bates numbering.
 
 Stamps short text at up to six page positions (top/bottom × left/center/right)
 across a page range, with token substitution — `{page}` (1-based page number),
@@ -10,13 +10,13 @@ Placement is rotation-aware: the text reads UPRIGHT at the requested VISUAL
 corner regardless of the page's `/Rotate`, using `_display_to_user` to map a
 displayed-space anchor back to the form's user space and the same rotate-
 composed text matrix the watermark stamp uses. Non-Latin-1 text embeds a
-subsetted Unicode font (the S4 machinery); a pure-Latin-1 stamp uses standard-14
+subsetted Unicode font; a pure-Latin-1 stamp uses standard-14
 Helvetica/WinAnsi. Reuses watermark's colour/box/rotate/escaping helpers so the
 two stampers can't drift.
 
-T28: the face is resolved from the TEXT (`_unicode_watermark_face(font_dir,
-probe)`), which is what admits CJK (the T5 step is gated on `text is not
-None`) and right-to-left scripts (the T25 step is opt-in on `rtl_ok`) — and
+The face is resolved from the TEXT (`_unicode_watermark_face(font_dir,
+probe)`), which is what admits CJK (the step is gated on `text is not
+None`) and right-to-left scripts (the step is opt-in on `rtl_ok`) — and
 right-to-left text is emitted through `rtl_text.build`, the same builder the
 watermark and the form-field appearance use, because a covering face without
 the reorder-and-shape emission would draw a joining script disconnected and
@@ -115,7 +115,7 @@ def _anchor(position: str, text_w: float, size: float, dw: float, dh: float, mar
     top and the margin at the bottom (baseline).
 
     `glyph_h` is the EMBEDDED face's own ascent+descent extent where one is
-    embedded (T28; the watermark's `_face_glyph_height_em`) — Helvetica's
+    embedded (the watermark's `_face_glyph_height_em`) — Helvetica's
     0.925 em under-reserves for a taller face, which pushed a CJK top header's
     ascenders up into the margin. Defaults to the Helvetica value, so the
     standard-14 path is unchanged."""
@@ -158,7 +158,7 @@ def add_header_footer(
         color: #rrggbb.
         bates_start/bates_digits: the {bates} counter's first value and zero-pad
             width; the counter increments once per STAMPED page.
-        font_dir: bundled fallback-fonts dir for non-Latin-1 text (S4). Empty →
+        font_dir: bundled fallback-fonts dir for non-Latin-1 text. Empty →
             Latin-1 only ('?' for anything past it, matching watermark).
     """
     if not placements:
@@ -184,7 +184,7 @@ def add_header_footer(
         hi = total if last_page is None else min(total, int(last_page))
 
         # Resolve a Unicode face PER PLACEMENT, from that placement's own
-        # drawable character set (T28) — a Japanese header and an Arabic
+        # drawable character set — a Japanese header and an Arabic
         # footer in one call need two different faces, and each face is
         # chosen on the text it will draw. A pure-Latin-1 placement keeps the
         # standard-14 WinAnsi path byte for byte.
@@ -270,7 +270,7 @@ def add_header_footer(
 def _embed(pdf, face: str, text: str, size: float) -> tuple:
     """(font object, em width, show bytes) for one drawn string on `face`.
 
-    T28: right-to-left (and any word shaping changes) goes through the shared
+    Right-to-left (and any word shaping changes) goes through the shared
     `rtl_text` builder — the same one the watermark stamp and the form-field
     appearance use — so a joining script is shaped and the line is permuted
     into visual order. `size` scales a combining mark's vertical offset into

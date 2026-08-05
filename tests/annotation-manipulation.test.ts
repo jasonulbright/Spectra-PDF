@@ -88,7 +88,7 @@ describe('translated / translatedBy', () => {
     expect(t.points![3]).toBeCloseTo(0.35);
   });
 
-  it('translates every ink stroke together (N2)', () => {
+  it('translates every ink stroke together', () => {
     const a = annot('i', {
       kind: 'ink',
       strokes: [
@@ -155,7 +155,7 @@ describe('resized', () => {
     expect(pts[1]).toBeCloseTo(0.6);
   });
 
-  it('resize scales every ink stroke with the one box (N2)', () => {
+  it('resize scales every ink stroke with the one box', () => {
     const ink = annot('i', {
       kind: 'ink',
       x: 0.2, y: 0.2, w: 0.2, h: 0.2,
@@ -173,7 +173,7 @@ describe('resized', () => {
   });
 });
 
-describe('rotateFlipEdits (N7 residual)', () => {
+describe('rotateFlipEdits (residual)', () => {
   const dims = new Map([
     ['a.pdf#p0', { width: 600, height: 800, rotation: 0 }],
   ]);
@@ -264,7 +264,7 @@ describe('rotateFlipEdits (N7 residual)', () => {
   });
 });
 
-describe('eraseFromStrokes (N5b)', () => {
+describe('eraseFromStrokes', () => {
   const R = { x: 0.02, y: 0.02 };
 
   it('a mid-stroke cut SPLITS the stroke into two AT the eraser edge', () => {

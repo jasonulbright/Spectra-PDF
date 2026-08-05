@@ -16,7 +16,7 @@ import type { OpenDocument, OpenFile, PageAnnotation, PageRef } from '../state/t
 // covering all pages. Runs off the open/update critical path — see
 // useWorkspaceIndexer.
 //
-// Identity (Phase 5, § F — architecture/22): positional ids are minted
+// Identity: positional ids are minted
 // under a fresh per-path GENERATION each index, so an id from before any
 // rebuild can never re-bind to the wrong physical page; when the buffer
 // is the one the page-tier commit just authored, the commit's published

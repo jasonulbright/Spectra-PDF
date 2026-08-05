@@ -1,4 +1,4 @@
-// The keymap layer (Phase 4 M1): table integrity, the pure resolver, the
+// The keymap layer: table integrity, the pure resolver, the
 // dispatcher's scope order (interceptors → editable guard → bindings), and
 // the Escape chain.
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -60,7 +60,7 @@ describe('table integrity', () => {
     // is compatible (undefined = don't care, so it overlaps everything).
     // requiresPref does NOT exempt a pair: resolveBinding returns the FIRST
     // match regardless, and a pref-gated hit that the dispatcher refuses
-    // would SWALLOW a later live binding on the same event (M6.4).
+    // would SWALLOW a later live binding on the same event.
     const compatible = (a: boolean | undefined, b: boolean | undefined): boolean =>
       a === undefined || b === undefined || a === b;
     const conflicts: string[] = [];
@@ -98,7 +98,7 @@ describe('resolveBinding', () => {
     expect(resolveBinding(fakeEvent({ key: 'y', ctrl: true, shift: true }))?.command).toBe('edit.redo');
   });
 
-  it('the shift split — Ctrl+F is Find, Ctrl+Shift+F is Search (M3.3)', () => {
+  it('the shift split — Ctrl+F is Find, Ctrl+Shift+F is Search', () => {
     expect(resolveBinding(fakeEvent({ key: 'f', ctrl: true }))?.command).toBe('edit.find');
     expect(resolveBinding(fakeEvent({ key: 'f', ctrl: true, shift: true }))?.command).toBe('view.navPanel.search');
   });
@@ -110,7 +110,7 @@ describe('resolveBinding', () => {
     expect(resolveBinding(fakeEvent({ key: '[' }))?.command).toBe('document.rotateSelectionCCW');
   });
 
-  it('zoom keeps the shiftless keys; the SHIFTED pair rotates the view (M6.1)', () => {
+  it('zoom keeps the shiftless keys; the SHIFTED pair rotates the view', () => {
     // Shiftless plus/minus zoom; Ctrl+Shift+plus/minus rotate the view.
     expect(resolveBinding(fakeEvent({ key: '=', ctrl: true }))?.command).toBe('view.zoomIn');
     expect(resolveBinding(fakeEvent({ key: '+', ctrl: true }))?.command).toBe('view.zoomIn'); // numpad plus
@@ -122,19 +122,19 @@ describe('resolveBinding', () => {
   });
 
   it('Ctrl+P prints; Ctrl+Shift+P stays reserved (Page Setup, unshipped)', () => {
-    // Bound at M-P. 'always' preventDefault: WebView2 has its own Ctrl+P UI.
+    // 'always' preventDefault: WebView2 has its own Ctrl+P UI.
     expect(resolveBinding(fakeEvent({ key: 'p', ctrl: true }))?.command).toBe('file.print');
     expect(resolveBinding(fakeEvent({ key: 'p', ctrl: true, shift: true }))).toBeNull();
   });
 
-  it('Ctrl+D properties vs Ctrl+Shift+D delete pages (M6.3 shift split)', () => {
+  it('Ctrl+D properties vs Ctrl+Shift+D delete pages (shift split)', () => {
     // The properties binding was shift-lax and sits earlier in the table —
     // without its shift:false, Ctrl+Shift+D would open Properties instead.
     expect(resolveBinding(fakeEvent({ key: 'd', ctrl: true }))?.command).toBe('file.properties');
     expect(resolveBinding(fakeEvent({ key: 'd', ctrl: true, shift: true }))?.command).toBe('tools.panel.delete');
   });
 
-  it('document-op chords land on their panes (§ 9.2 ✓ rows)', () => {
+  it('document-op chords land on their panes', () => {
     expect(resolveBinding(fakeEvent({ key: 'r', ctrl: true, shift: true }))?.command).toBe('tools.panel.rotate');
     expect(resolveBinding(fakeEvent({ key: 'i', ctrl: true, shift: true }))?.command).toBe('document.insertFromFile');
     expect(resolveBinding(fakeEvent({ key: 'n', ctrl: true, shift: true }))?.command).toBe('view.goToPage');
@@ -149,7 +149,7 @@ describe('resolveBinding', () => {
     expect(resolveBinding(fakeEvent({ key: 'g', ctrl: true, shift: true }))?.command).toBe('edit.findPrev');
   });
 
-  it('the M6.5 freeze bound the last verified rows', () => {
+  it('the freeze bound the last verified rows', () => {
     // Ctrl+Shift+T inserts blank pages. Shift+F4 toggles the tool pane, while
     // F4 alone toggles the navigation pane.
     expect(resolveBinding(fakeEvent({ key: 't', ctrl: true, shift: true }))?.command).toBe('document.insertBlankPage');
@@ -158,7 +158,7 @@ describe('resolveBinding', () => {
   });
 
   it('returns null for unbound keys', () => {
-    // bare 'z' RESOLVES since N3 (marquee zoom) — pref-gated, so the
+    // bare 'z' RESOLVES (marquee zoom) — pref-gated, so the
     // dispatcher still refuses it until the accelerators switch is on; a
     // genuinely unbound letter proves the null path instead.
     expect(resolveBinding(fakeEvent({ key: 'q' }))).toBeNull();
@@ -269,7 +269,7 @@ describe('dispatchKeyEvent', () => {
   });
 
   it('Ctrl+Shift+F opens the Search nav panel (split from Find)', () => {
-    // The shift split (M3.3): plain Ctrl+F is Find; Ctrl+Shift+F is Search.
+    // The shift split: plain Ctrl+F is Find; Ctrl+Shift+F is Search.
     const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
     const open = vi.fn();
     registerCanvasServices({
@@ -402,7 +402,7 @@ describe('the Escape chain', () => {
   });
 });
 
-describe('single-key accelerators (M6.4 — pref-gated, default OFF)', () => {
+describe('single-key accelerators (pref-gated, default OFF)', () => {
   it('the letters resolve to their tools at the table level', () => {
     expect(resolveBinding(fakeEvent({ key: 'h' }))?.command).toBe('tools.hand');
     expect(resolveBinding(fakeEvent({ key: 'v' }))?.command).toBe('tools.select');
@@ -410,7 +410,7 @@ describe('single-key accelerators (M6.4 — pref-gated, default OFF)', () => {
     expect(resolveBinding(fakeEvent({ key: 'x' }))?.command).toBe('tools.freetext');
     expect(resolveBinding(fakeEvent({ key: 'd' }))?.command).toBe('tools.ink');
     expect(resolveBinding(fakeEvent({ key: 'k' }))?.command).toBe('tools.stamp');
-    // N3/N6: the reserve-don't-remap trio binds now that its features exist.
+    // The reserve-don't-remap trio binds now that its features exist.
     expect(resolveBinding(fakeEvent({ key: 's' }))?.command).toBe('tools.note');
     expect(resolveBinding(fakeEvent({ key: 'z' }))?.command).toBe('tools.zoommarquee');
     expect(resolveBinding(fakeEvent({ key: 'e' }))?.command).toBe('tools.open.edit');
@@ -427,7 +427,7 @@ describe('single-key accelerators (M6.4 — pref-gated, default OFF)', () => {
     expect(resolveBinding(fakeEvent({ key: 'H', shift: true }))).toBeNull();
   });
 
-  it('N3/N6 INVERSION — Z/S/E bind (their features shipped); modified forms stay dead', () => {
+  it('INVERSION — Z/S/E bind (their features shipped); modified forms stay dead', () => {
     // This test used to pin the trio as RESERVED (no zoom device, no note
     // kind, no content editing). All three exist now, so reserve-don't-
     // remap resolves to BINDING them — while the modifier discipline that

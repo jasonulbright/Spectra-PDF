@@ -16,11 +16,11 @@ import {
   editImageAct,
 } from '../support/harness.js';
 
-// P7 slice F — SVG placed as REAL vector content against the built binary.
+// SVG placed as REAL vector content against the built binary.
 // The harness injects an {svg_path} source (the native picker is undrivable);
 // the engine compiles it into a unit-square form, and the placement then
 // rides the ENTIRE image machinery: listed kind "vector", group-movable
-// beside a raster through the ONE multi op (slice B), deletable, undoable.
+// beside a raster through the ONE multi op, deletable, undoable.
 //
 // Page ids regenerate on every whole-file commit — re-fetch after each.
 
@@ -46,7 +46,7 @@ async function placements(): Promise<
   return editImagePlacements(ids[0]);
 }
 
-describe('SVG vector placement (P7)', () => {
+describe('SVG vector placement', () => {
   let tmp: string;
   let pdfPath: string;
   let svgPath: string;
@@ -98,7 +98,7 @@ describe('SVG vector placement (P7)', () => {
       { timeout: 30_000, timeoutMsg: 'the SVG never listed as a vector placement' },
     );
 
-    // GROUP-MOVE raster + vector together via the ONE multi op (slice B).
+    // GROUP-MOVE raster + vector together via the ONE multi op.
     let pageId = (await editImagePageIds())[0];
     await editImageSelect(pageId, 0);
     await editImageSelect(pageId, 1, true);

@@ -97,7 +97,7 @@ pub fn run() {
                     .iter()
                     .skip(1)
                     .filter(|a| !a.starts_with('-') && a.to_lowercase().ends_with(".pdf"))
-                    // The path-identity gate (M7): argv is the wild-west
+                    // The path-identity gate: argv is the wild-west
                     // producer — Explorer, scripts and shells spell the same
                     // file every way there is.
                     .map(|a| commands::canonical_path(a))
@@ -231,13 +231,13 @@ pub fn run() {
             };
             app.manage(BackdropState(backdrop));
 
-            // Watched folders (O7): resume every enabled watcher. Deliberately
+            // Watched folders: resume every enabled watcher. Deliberately
             // BEFORE the e2e early-return — the watchers are part of the
             // product under test.
             app.manage(watchers::WatcherState::new());
             watchers::start_all(app.handle());
 
-            // The virtual printer's loopback listener (O7) — also part of the
+            // The virtual printer's loopback listener — also part of the
             // product under test (e2e streams a job straight at the port).
             app.manage(print_to_pdf::PrinterState::new());
             print_to_pdf::start_listener(app.handle());
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn canonical_path_unifies_windows_spellings() {
-        // The path-identity gate (M7): case, slash direction and 8.3 short
+        // The path-identity gate: case, slash direction and 8.3 short
         // names must all resolve to ONE string, and the result must not wear
         // std::fs::canonicalize's \\?\ verbatim prefix.
         let dir = std::env::temp_dir().join("opstudio-canon-test");

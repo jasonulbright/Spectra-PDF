@@ -1,4 +1,4 @@
-"""Tests for paragraph grouping + reflow (Phase 7.5).
+"""Tests for paragraph grouping + reflow.
 
 Fixtures are hand-built content streams (the test_text_runs discipline);
 every heuristic threshold in text_paragraphs.py is pinned by a case here —
@@ -182,7 +182,7 @@ def _hebrew3(pdf) -> pikepdf.Object:
 
 
 def _identity_v(pdf, mapping: dict[int, str], w2: list) -> pikepdf.Object:
-    """Identity-V + ToUnicode + /W2 — the 9.B4a vertical-run producer."""
+    """Identity-V + ToUnicode + /W2 — the vertical-run producer."""
     from tests.test_pdf_fonts import _tounicode_stream
 
     desc = pdf.make_indirect(
@@ -347,7 +347,7 @@ class TestGrouping:
         assert p["text"].startswith("Hello1")
 
     def test_clipped_away_paragraph_flagged(self, tmp_dir):
-        # 9-§I.0-S8: a paragraph whose EVERY member is clipped away lists with
+        # A paragraph whose EVERY member is clipped away lists with
         # clipped=True; a visible paragraph with clipped=False. The runs channel
         # carries the per-run flag too. Order-robust: map by text.
         src = _build(
@@ -380,7 +380,7 @@ class TestGrouping:
         assert listing["paragraphs"][0]["clipped"] is False
 
     def test_mixed_visibility_paragraph_refused(self, tmp_dir):
-        # 9-§I.0-S8 (regression): a clip cutting THROUGH a paragraph — some
+        # (regression): a clip cutting THROUGH a paragraph — some
         # members visible, one clipped away — must NOT list as a single
         # editable paragraph (its whole-para `clipped` flag is all-members, so
         # False here, but reflow would re-lay text INTO the clipped region).
@@ -407,7 +407,7 @@ class TestGrouping:
         assert p["clipped"] is False
 
     def test_rotated_text_groups_in_its_own_frame(self, tmp_dir):
-        # 9.T13 INVERSION. This pinned "rotated text never groups" — which
+        # INVERSION. This pinned "rotated text never groups" — which
         # was never a capability claim, only the consequence of one
         # page-space axis-alignment test. Admission now runs in the
         # member's OWN transposed frame, so a quarter-turned run is an
@@ -427,9 +427,9 @@ class TestGrouping:
         assert len(listing["runs"]) == 1
 
     def test_skewed_text_still_never_groups(self, tmp_dir):
-        # The boundary T13 KEPT, and deliberately: `a′ > 0 ∧ d′ > 0` is
+        # The boundary KEPT, and deliberately: `a′ > 0 ∧ d′ > 0` is
         # retained in the transposed frame, so skew and mirroring stay on
-        # the 7.2 run-box surface. (Second run: a mirrored matrix, negative
+        # the run-box surface. (Second run: a mirrored matrix, negative
         # determinant.)
         src = _build(
             tmp_dir,
@@ -441,7 +441,7 @@ class TestGrouping:
         assert len(listing["runs"]) == 2
 
     def test_vertical_runs_group_with_column_gap_paragraph_break(self, tmp_dir):
-        # 9.B4b lifted the B4a never-groups boundary: vertical runs now
+        # Lifted the never-groups boundary: vertical runs now
         # group under the transposition — a column IS a line, and a large
         # gap DOWN the column (transposed: a large x-gap) is a paragraph
         # break, exactly the horizontal column-split rule. This fixture's
@@ -584,7 +584,7 @@ class TestReplaceParagraphText:
 
     def test_same_line_other_column_does_not_move(self, tmp_dir):
         # The box semantic: a column sibling at the same baseline stays
-        # EXACTLY put (7.2's Δ-shift applies to single-run edits only).
+        # EXACTLY put (the Δ-shift applies to single-run edits only).
         src = _build(
             tmp_dir,
             b"BT /F1 12 Tf 72 700 Td (Left words) Tj 200 0 Td (Rightcol) Tj ET",
@@ -612,7 +612,7 @@ class TestReplaceParagraphText:
         _assert_non_members_unmoved(src, out, first["runs"])
 
     def test_kept_vertical_column_survives_a_paragraph_edit(self, tmp_dir):
-        # 9.B4a: the resync's REPOSITIONING is direction-agnostic (kept
+        # The resync's REPOSITIONING is direction-agnostic (kept
         # shows are re-anchored at the parallel walk's ABSOLUTE tm), but
         # the walk's model must advance a kept vertical show DOWNWARD.
         # The column here FLOWS from the member with no Td between, so
@@ -641,7 +641,7 @@ class TestReplaceParagraphText:
         assert before[2]["rect"] == pytest.approx(v2, abs=0.05)
 
         paras = _paras(src)
-        # 9.B4b: the vertical column now groups as its OWN paragraph —
+        # The vertical column now groups as its OWN paragraph —
         # still never a member of the horizontal one (the mode key), so
         # it stays a KEPT run for this edit.
         assert len(paras) == 2
@@ -657,7 +657,7 @@ class TestReplaceParagraphText:
         assert after[2]["rect"] == pytest.approx(v2, abs=0.05)
 
     def test_flowing_vertical_run_between_members_keeps_the_tail_unmoved(self, tmp_dir):
-        # 9.B4a round-27 coverage gap: the KEPT-ALREADY-RESYNCED advance
+        # The KEPT-ALREADY-RESYNCED advance
         # site (the else branch after divergence closes) was mutation-
         # invisible — dropping its `vert` flag failed NOTHING while a
         # trailing run silently jumped sideways. The exposing shape: a
@@ -806,7 +806,7 @@ class TestReplaceParagraphText:
         pdf.close()
         out = os.path.join(tmp_dir, "o.pdf")
         para = _paras(src)[0]
-        # 9.T3 INVERTED: the RTL refusal is gone, so this reflows. What still
+        # INVERTED: the RTL refusal is gone, so this reflows. What still
         # refuses — with a reason, which is what this test is for — is an
         # explicit directional-formatting code. It never reaches the layout's
         # own X9 guard, because no font can encode one: the character
@@ -1190,7 +1190,7 @@ class TestReplaceParagraphText:
         not os.path.isfile(FALLBACK_FONT), reason="bundled fallback font not provisioned"
     )
     def test_convert_of_nested_form_paragraph_uses_form_scoped_family(self, tmp_dir):
-        # 9.B1 regression: the paragraph living in a nested form must
+        # regression: the paragraph living in a nested form must
         # classify its family from the FORM'S resources, not the page's —
         # a form's `F1` (serif Times here) differs from the page's `F1`
         # (Helvetica). Converting must embed the SERIF fallback face.
@@ -1242,7 +1242,7 @@ class TestReplaceParagraphText:
 
 
 class TestStyleControls:
-    """Phase 9.A1 — uniform size + colour restyle of a paragraph."""
+    """Uniform size + colour restyle of a paragraph."""
 
     def test_color_override_emits_fill_op_and_recolors(self, tmp_dir):
         src = _build(
@@ -1341,8 +1341,8 @@ class TestStyleControls:
 
     def test_no_override_is_byte_identical_to_plain_edit(self, tmp_dir):
         # size=None/color=None/family=None/bold=None/italic=None must not
-        # perturb the shipped 7.5 path (family joined the guard at 9.A3a,
-        # the style axis at 9.A3b).
+        # perturb the unstyled path (family and the style axis joined the
+        # guard later).
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Grow this paragraph text) Tj ET")
         out_a = os.path.join(tmp_dir, "a.pdf")
         out_b = os.path.join(tmp_dir, "b.pdf")
@@ -1377,8 +1377,8 @@ def _page_base_fonts(path: str) -> list[str]:
 
 def _fallback_font_names(path: str) -> list[str]:
     """The page-level /EditFb* subset font names — one per embedded fallback
-    subset. len() == the count of distinct faces the edit substituted (9.A5b:
-    zero for a colour-only or plain edit, one for a whole-para A3 swap)."""
+    subset. len() == the count of distinct faces the edit substituted:
+    zero for a colour-only or plain edit, one for a whole-paragraph swap."""
     with pikepdf.open(path) as pdf:
         fonts = pdf.pages[0].obj.get("/Resources", {}).get("/Font", {}) or {}
         return [str(k) for k in fonts.keys() if str(k).startswith("/EditFb")]
@@ -1403,12 +1403,12 @@ _needs_faces = pytest.mark.skipif(
 
 
 class TestFamilySwap:
-    """Phase 9.A3a — whole-paragraph family substitution (sans/serif/mono).
+    """Whole-paragraph family substitution (sans/serif/mono).
 
     The swap forces EVERY character through the fallback machinery in the
     chosen Liberation face — an honest substitution of the original
-    foundry font. The no-family path must stay byte-identical to shipped
-    7.5/A1 (guarded above in test_no_override_is_byte_identical…)."""
+    foundry font. The no-family path must stay byte-identical to the
+    unstyled one (guarded above in test_no_override_is_byte_identical…)."""
 
     @_needs_faces
     def test_swap_to_serif_embeds_liberation_serif_and_round_trips(self, tmp_dir):
@@ -1479,7 +1479,7 @@ class TestFamilySwap:
 
     @_needs_faces
     def test_family_swap_keeps_other_paragraphs_unmoved(self, tmp_dir):
-        # THE delicate-rewriter guard at A3a scope: swapping one
+        # THE delicate-rewriter guard at family-swap scope: swapping one
         # paragraph's family must leave every other show op at an
         # identical matrix with identical state (the resync property).
         src = _build(
@@ -1497,7 +1497,7 @@ class TestFamilySwap:
 
     @_needs_faces
     def test_family_swap_with_cjk_lands_on_the_cjk_face(self, tmp_dir):
-        # T5 INVERSION (was: refusal). The text-driven CJK step serves the
+        # INVERSION (was: refusal). The text-driven CJK step serves the
         # char Liberation lacks; without the Noto faces the refusal stands.
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello world) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
@@ -1547,7 +1547,7 @@ def _helv_bold(pdf) -> pikepdf.Object:
 
 
 class TestStyleAxis:
-    """Phase 9.A3b — bold/italic substitution (the vendored variant faces).
+    """Bold/italic substitution (the vendored variant faces).
 
     A present bold/italic is ABSOLUTE: the substituted face is
     styles[bold][italic]; family still classifies from the paragraph's own
@@ -1584,7 +1584,7 @@ class TestStyleAxis:
 
     @_needs_faces
     def test_bold_on_serif_paragraph_classifies_serif(self, tmp_dir):
-        # Style-only: family comes from the member's own font (B1), so a
+        # Style-only: family comes from the member's own font, so a
         # serif paragraph's bold lands on LiberationSerif-Bold.
         srcpdf = pikepdf.new()
         _page(
@@ -1693,7 +1693,7 @@ def _merge(src, out, paragraphs, idx, **kw):
 
 
 class TestSplitMerge:
-    """Phase 9.A4 — split (split_at on replace) and merge (new op)."""
+    """Split (split_at on replace) and merge (new op)."""
 
     def test_split_relists_as_two_paragraphs(self, tmp_dir):
         src = _build(
@@ -1934,7 +1934,7 @@ class TestSplitMerge:
 
 
 class TestT18Geometry:
-    """T18 — box resize, draggable split gap, widened merge."""
+    """Box resize, draggable split gap, widened merge."""
 
     TWO_LINES = (
         b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj "
@@ -2207,10 +2207,10 @@ def _vpage(tmp_dir, content: bytes, name="v.pdf", with_helv=False) -> str:
 
 
 class TestVerticalParagraphs:
-    """Phase 9.B4b — vertical paragraph reflow: one 90° transposition
+    """Vertical paragraph reflow: one 90° transposition
     T(x, y) = (−y, x) at member admission and T⁻¹ at the emission's Tm
     anchors; every grouping heuristic reused unchanged. Positions are
-    HAND-COMPUTED (the round-27 discipline) — a self-consistent
+    HAND-COMPUTED — a self-consistent
     wrong-axis model passes any walker-vs-walker comparison, so the
     dual-walk harness alone cannot pin the axis."""
 
@@ -2376,7 +2376,7 @@ class TestVerticalParagraphs:
         assert after[1]["rect"] == pytest.approx([281, 680, 291, 700], abs=0.05)
 
     def test_flowing_horizontal_tail_after_vertical_members_keeps_spec_positions(self, tmp_dir):
-        # The B4a flowing-tail template, axis-swapped: horizontal runs
+        # The flowing-tail template, axis-swapped: horizontal runs
         # FLOW (no Td) straight off the vertical members' pen. Editing
         # the vertical paragraph must leave the tail at hand-computed
         # spec positions — the resync's model of the emitted vertical
@@ -2440,7 +2440,7 @@ class TestVerticalParagraphs:
         assert [p["text"] for p in relisted] == ["あいう", "あい"]
         assert all(p["vertical"] for p in relisted)
         after = list_text_runs(out, 1)["runs"]
-        # The A4 split gap TRANSPOSES: block B's column starts one
+        # The split gap TRANSPOSES: block B's column starts one
         # split gap (max(2×leading, 2×eff) = 28) LEFT of block A's —
         # a gap the re-listing grouping can never join across.
         assert after[0]["rect"] == pytest.approx([295, 670, 305, 700], abs=0.05)
@@ -2493,11 +2493,11 @@ class TestVerticalParagraphs:
         reason="CJK faces not provisioned",
     )
     def test_vertical_restyles_into_a_vertical_face(self, tmp_dir):
-        # 9.T4 INVERSION. This pinned "vertical text cannot substitute a
+        # INVERSION. This pinned "vertical text cannot substitute a
         # horizontal face" — true while the only bundled faces WERE
-        # horizontal, and false since T5 bundled Noto Sans CJK (which
-        # carries `vert`/`vrt2` and `vmtx`) and T3 brought the shaper that
-        # can reach those features.
+        # horizontal, and false once Noto Sans CJK was bundled (it carries
+        # `vert`/`vrt2` and `vmtx`) and the shaper could reach those
+        # features.
         src = _vpage(tmp_dir, b"BT /FV 10 Tf 300 700 Td <00030004> Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
         para = _paras(src)[0]
@@ -2552,7 +2552,7 @@ class TestVerticalParagraphs:
         reason="CJK faces not provisioned",
     )
     def test_the_VERTICAL_glyph_forms_are_what_get_drawn(self, tmp_dir):
-        """The pin the other T4 checks cannot be.
+        """The pin the other vertical checks cannot be.
 
         /Identity-V, /W2, /DW2 and the BaseFont weight are all real and all
         structural — and every one of them would still pass if the embed
@@ -2693,8 +2693,8 @@ class TestVerticalParagraphs:
             for m, d in zip(members, det):
                 a, _b, _c, dd, e, f = d["combined"]
                 assert m.vertical is True
-                # 9.T13: the FRAME rides in lkey (it was the mode boolean
-                # through B4b) — a column's map is T(x, y) = (-y, x).
+                # The FRAME rides in lkey (it was the mode boolean
+                # once) — a column's map is T(x, y) = (-y, x).
                 assert m.lkey[-1] == (0.0, -1.0, 1.0, 0.0)
                 assert m.orientation == "vertical-rl"
                 # T maps the real pen (e, f) to the transposed anchor…
@@ -2770,7 +2770,7 @@ class TestVerticalParagraphs:
         # (a real-Y displacement for vertical text) structurally cannot
         # express, so an edit silently restacked the small run INTO the
         # column. Fail closed: the paragraph refuses with a stated
-        # reason; the runs stay on the 7.2 surface.
+        # reason; the runs stay on the surface.
         # Attach math (ctm 2/4): main eff 10·2=20, small at real x 304 vs
         # 300 → transposed-y offset 4 ≤ 0.5·20 and 6 ≤ 0.8·20 → attaches;
         # rise 4 ≥ 0.05·20 → nonzero.
@@ -2832,7 +2832,7 @@ class TestVerticalParagraphs:
 
 
 class TestLigatureParagraphs:
-    """9.B5 paragraph path: atomic ligature entries — the commit accepts
+    """Paragraph path: atomic ligature entries — the commit accepts
     what the run editor and the live validation accept, at agreeing
     widths (the sub-flagged accept/refuse mismatch + width drift)."""
 
@@ -2900,7 +2900,7 @@ class TestLigatureParagraphs:
         _assert_non_members_unmoved(src, out, target["runs"])
 
     def test_noncoalesced_same_run_spans_never_form_a_cross_entry_ligature(self, tmp_dir):
-        # regression (round 26): the joined-buffer re-encode could
+        # regression: the joined-buffer re-encode could
         # ligature-match ACROSS styled-entry boundaries — 'f','i' arriving
         # as separate single entries (adjacent same-run spans, widths
         # summed as singles) emitted as the LIG code (4.2pt drift repro,
@@ -2965,12 +2965,11 @@ class TestLigatureParagraphs:
 
 
 class TestOrientations:
-    """9.T13 (brief 39 § 4) — rotated-glyph vertical forms join the column.
+    """Rotated-glyph vertical forms join the column.
 
     The writing mode became an ORIENTATION whose whole content is a signed
     axis permutation, so admission is the shipped axis-alignment test asked
-    one frame later. Positions here are HAND-COMPUTED, the round-27
-    discipline: a self-consistent wrong-axis model agrees with any
+    one frame later. Positions here are HAND-COMPUTED: a self-consistent wrong-axis model agrees with any
     walker-vs-walker comparison, so the dual-walk harness alone cannot pin
     an axis.
     """
@@ -3031,10 +3030,10 @@ class TestOrientations:
             assert _transposed_linear(m, False, _ORIENTATIONS[name]) is None
 
     def test_sideways_latin_joins_the_column_as_one_paragraph(self, tmp_dir):
-        # THE T13 case. The Latin run is a 90-degree-CW-rotated run of a
+        # THE case. The Latin run is a 90-degree-CW-rotated run of a
         # HORIZONTAL font drawn inside a CJK column; both transpose to the
         # same frame at the same scale, so they group as the one paragraph
-        # they visually are. Before T13 the column grouped WITHOUT it.
+        # they visually are. The column used to group WITHOUT it.
         src = _vpage(
             tmp_dir,
             b"BT /FV 10 Tf 300 700 Td <000300040005> Tj ET"
@@ -3174,11 +3173,11 @@ class TestOrientations:
     def test_tate_chu_yoko_that_cannot_be_admitted_still_refuses_by_name(
         self, tmp_dir
     ):
-        # 9.T12D INVERTED the ordinary case (see `TestTateChuYoko`); what is
+        # The ordinary case is INVERTED here (see `TestTateChuYoko`); what is
         # left here is the residue the absorption cannot admit — this block
         # carries a RISE, whose Ts displaces along the column's INLINE axis
         # and is the same inexpressible shift an upright vertical member's
-        # rise is. Loud, where before slice B it was silent: the block's key
+        # rise is. Loud, where it used to be silent: the block's key
         # differed from the column's, so the column grouped WITHOUT it and a
         # reflow moved the CJK text over a date that never moved.
         src = _vpage(
@@ -3210,8 +3209,8 @@ class TestOrientations:
 
     def test_mixed_page_reading_order_is_frame_derived(self, tmp_dir):
         # The tiebreak comes from the FRAME's own line-stacking direction,
-        # not from a writing-mode boolean (which after T13 no longer answers
-        # the geometric question). Top edge first; columns sharing a top
+        # not from a writing-mode boolean (which does not answer the
+        # geometric question). Top edge first; columns sharing a top
         # read rightmost-first.
         src = _vpage(
             tmp_dir,
@@ -3295,8 +3294,8 @@ def _color_ops(path):
 
 
 class TestPerSpanColor:
-    """Phase 9.A5a — per-span colour: recolour a character RANGE inside a
-    paragraph, distinct from the whole-paragraph A1 colour. The emission is
+    """Per-span colour: recolour a character RANGE inside a
+    paragraph, distinct from the whole-paragraph colour. The emission is
     already per-segment; the override just becomes per-code-point."""
 
     def test_recolours_a_middle_range_and_resets_after(self, tmp_dir):
@@ -3387,7 +3386,7 @@ class TestPerSpanColor:
         assert any(op == "rg" and a == ["0", "0.5", "0"] for op, a in ops)
 
     def test_composes_with_a1_size(self, tmp_dir):
-        # Per-span colour AND an A1 whole-paragraph size change together:
+        # Per-span colour AND a whole-paragraph size change together:
         # size applies uniformly, colour to the range.
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello colored world) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
@@ -3422,7 +3421,7 @@ class TestPerSpanColor:
 
 
 class TestPerSpanDisplaySeeds:
-    """Phase 9.A5-tails-a — the listing's per-span DISPLAY seeds (weight,
+    """The listing's per-span DISPLAY seeds (weight,
     slant, family, size), so a reopened editor can SHOW genuinely mixed
     per-span styling instead of starting blank.
 
@@ -3430,7 +3429,7 @@ class TestPerSpanDisplaySeeds:
     user overrides and never sends them back. A face entry SUBSTITUTES its
     range into a bundled face, so re-sending a seed would silently replace
     the document's own foundry font on any commit — which is exactly why
-    the A5b round shipped with no seed at all."""
+    the round shipped with no seed at all."""
 
     def test_mixed_face_paragraph_seeds_each_span(self, tmp_dir):
         pdf = pikepdf.new()
@@ -3455,7 +3454,7 @@ class TestPerSpanDisplaySeeds:
         para = _paras(src)[0]
         assert {sp.get("bold") for sp in para["spans"]} == {False}
         assert {sp.get("italic") for sp in para["spans"]} == {False}
-        # One size across the paragraph: the seed agrees with the A1 seed.
+        # One size across the paragraph: the seed agrees with the seed.
         assert {sp.get("size") for sp in para["spans"]} == {para["font_size"]}
 
     def test_mixed_size_paragraph_seeds_per_span_size(self, tmp_dir):
@@ -3493,10 +3492,10 @@ class TestPerSpanDisplaySeeds:
 
 
 class TestPerSpanFace:
-    """Phase 9.A5b — per-span bold/italic/family: substitute just a
+    """Per-span bold/italic/family: substitute just a
     character RANGE into a bundled Liberation face. Generalizes the single
-    fallback subset (A5a/A3) to one subset per distinct requested face; the
-    whole-paragraph A3 path is the single-face special case (proven
+    fallback subset to one subset per distinct requested face; the
+    whole-paragraph path is the single-face special case (proven
     byte-identical vs HEAD out-of-suite; the ONE-subset shape is pinned by
     test_a3_only_path_embeds_exactly_one_subset here)."""
 
@@ -3570,7 +3569,7 @@ class TestPerSpanFace:
 
     @_needs_faces
     def test_per_span_face_composes_with_colour_and_size(self, tmp_dir):
-        # One range bold AND red, PLUS an A1 whole-paragraph size bump: the
+        # One range bold AND red, PLUS a whole-paragraph size bump: the
         # bold subset embeds, the range emits red, every Tf carries the new
         # size (member and subset alike).
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello colored world) Tj ET")
@@ -3588,7 +3587,7 @@ class TestPerSpanFace:
 
     @_needs_faces
     def test_a3_only_path_embeds_exactly_one_subset(self, tmp_dir):
-        # The in-suite proxy for the byte-identity gate: a whole-paragraph A3
+        # The in-suite proxy for the byte-identity gate: a whole-paragraph
         # swap (NO per-span faces) resolves to EXACTLY ONE subset with the
         # expected BaseFont — the shipped single-face shape, unchanged.
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Whole paragraph swap) Tj ET")
@@ -3601,7 +3600,7 @@ class TestPerSpanFace:
     @_needs_faces
     def test_colour_only_span_styles_embeds_no_subset(self, tmp_dir):
         # The no-face path: colour-only span_styles substitute NOTHING, so
-        # the fallback subset count stays zero (A5a's world, unchanged).
+        # the fallback subset count stays zero (the world, unchanged).
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello colored world) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
         p = _paras(src)[0]
@@ -3612,7 +3611,7 @@ class TestPerSpanFace:
 
     @_needs_faces
     def test_per_span_cjk_lands_on_the_cjk_face(self, tmp_dir):
-        # T5 INVERSION (was: refusal). The per-span fallback path takes the
+        # INVERSION (was: refusal). The per-span fallback path takes the
         # same text-driven CJK step; absent Noto, the refusal stands.
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello world) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
@@ -3631,7 +3630,7 @@ class TestPerSpanFace:
 
     @_needs_faces
     def test_per_span_face_keeps_other_paragraphs_unmoved(self, tmp_dir):
-        # The resync property at A5b scope: a per-span substitution (which
+        # The resync property at per-span scope: a per-span substitution (which
         # interleaves subset + member Tf switches) must leave every other
         # show op at an identical matrix + state (the dual-walk harness).
         src = _build(
@@ -3650,8 +3649,8 @@ class TestPerSpanFace:
         assert any("This one stays untouched" in p["text"] for p in _paras(out))
 
     def test_span_style_needs_a_colour_or_a_face(self, tmp_dir):
-        # A span_styles entry that sets none of colour, face, or size (9.A5c
-        # widened the axis set) is malformed — refuse loudly, not silent
+        # A span_styles entry that sets none of colour, face, or size is
+        # malformed — refuse loudly, not silent
         # no-op.
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Whatever text here) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
@@ -3705,7 +3704,7 @@ def _tm_ys(path):
     return seen
 
 
-# The A5c per-line-leading fixture: four ONE-word lines at 12pt, baselines
+# The per-line-leading fixture: four ONE-word lines at 12pt, baselines
 # 700/686/672/658 (14pt leading), each word alone on its line (the box is one
 # word wide, so a re-emit keeps one per line). Bumping a middle word's size
 # makes THAT line taller by the adjacent-max rule.
@@ -3716,8 +3715,8 @@ _FOURLINE = (
 
 
 class TestPerSpanSize:
-    """Phase 9.A5c — per-span SIZE: resize a character RANGE inside a
-    paragraph, overriding the A1 whole-paragraph size. The range's Tf grows,
+    """Per-span SIZE: resize a character RANGE inside a
+    paragraph, overriding the whole-paragraph size. The range's Tf grows,
     its width/wrap follow, and the LINE it lands on gets tallest-glyph
     leading via the adjacent-max rule while other lines keep theirs. No
     per-span size ⇒ byte-identical to the shipped (uniform-leading) path."""
@@ -3805,7 +3804,7 @@ class TestPerSpanSize:
 
     def test_no_span_size_is_byte_identical(self, tmp_dir):
         # The self-contained pin: an edit carrying NO span size is byte-for-
-        # byte the shipped path — the A5c size machinery is inert until a
+        # byte the shipped path — the size machinery is inert until a
         # size is present (the uniform-leading + per-code-point-None cases).
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Plain reword here) Tj ET")
         a = os.path.join(tmp_dir, "a.pdf")
@@ -3816,7 +3815,7 @@ class TestPerSpanSize:
         assert _content_bytes(a) == _content_bytes(b)
 
     def test_size_is_clamped_to_the_edit_maximum(self, tmp_dir):
-        # A fat-fingered 5000pt clamps to the A1 viewer max (1638) — never a
+        # A fat-fingered 5000pt clamps to the viewer max (1638) — never a
         # size that flies the range off the page.
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Clamp) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
@@ -3854,7 +3853,7 @@ class TestPerSpanSize:
         assert len(_tm_ys(big)) == 3
 
     def test_split_with_enlarged_boundary_word_clears_descender(self, tmp_dir):
-        # Round-35 finding 1 (HIGH): an A4 split whose block-A boundary word is
+        # A split whose block-A boundary word is
         # enlarged per-span must widen the INTER-BLOCK gap so the big glyph's
         # descender can't bleed into block B. Split "bravo delta" after
         # "bravo" with "bravo" at 150pt: the shipped fixed 2×leading gap
@@ -3900,11 +3899,11 @@ class TestPerSpanSize:
 
 
 class TestDocumentFontKerning:
-    """Phase 9.K1b — kerning the DOCUMENT'S OWN font.
+    """Kerning the DOCUMENT'S OWN font.
 
-    K1 shipped bundled-faces-only; that left a live regression, because
+    Kerning first shipped bundled-faces-only; that left a live regression, because
     re-emitting a paragraph DISCARDS the kerning its original `TJ` carried.
-    A no-op re-type visibly un-kerned the text (DECISIONS #37).
+    A no-op re-type visibly un-kerned the text.
 
     These pins deliberately pass `font_path`, because the app always does.
     The older byte-identity pins call the engine WITHOUT it, so they exercise
@@ -3942,7 +3941,7 @@ class TestDocumentFontKerning:
 
     @_needs_faces
     def test_a_retype_KEEPS_the_text_kerned(self, tmp_dir):
-        # The regression, inverted: before K1b this came back a plain `Tj`.
+        # The regression, inverted: this used to come back a plain `Tj`.
         src = self._kerned_source(tmp_dir)
         out = os.path.join(tmp_dir, "kern_out.pdf")
         para = _paras(src)[0]
@@ -3954,7 +3953,7 @@ class TestDocumentFontKerning:
     @_needs_faces
     def test_the_kerns_match_the_metric_twins_own_table(self, tmp_dir):
         # Helvetica ships no program and our Core14 metrics carry no pairs, so
-        # the kerning comes from Liberation Sans — the face B1 vendored for
+        # the kerning comes from Liberation Sans — the face vendored for
         # exactly that metric compatibility.
         from engine.font_kerning import kern_pairs
 
@@ -4005,7 +4004,7 @@ class TestDocumentFontKerning:
 
 
 class TestKinsokuDepth:
-    """T16 — kinsoku beyond the lite line-start pull-back: opening brackets
+    """Kinsoku beyond the lite line-start pull-back: opening brackets
     glue FORWARD (行末禁則), small kana / prolonged-sound marks join the
     line-start prohibition set (行頭禁則). The break-opportunity suppression
     lives in `_tokenize`; these pins drive the FULL pipeline and assert the
@@ -4133,7 +4132,7 @@ class TestKinsokuDepth:
 
 
 class TestCrossStreamParagraphs:
-    """T17 — a paragraph's lines may continue across a stream boundary
+    """A paragraph's lines may continue across a stream boundary
     (page → form, form → form) under strict evidence, and an edit lands
     each member's replacement text back in ITS OWN stream. The
     false-positive direction is the dangerous one: fragments that merely
@@ -4366,7 +4365,7 @@ class TestCrossStreamParagraphs:
 
     def test_direction_disagreement_refuses(self, tmp_dir):
         # Page half resolves RTL from its own text, form half LTR - the
-        # stated T17 refusal (each half would reorder against a different
+        # stated cross-stream refusal (each half would reorder against a different
         # base on the way back out).
         src = os.path.join(tmp_dir, "dir.pdf")
         pdf = pikepdf.new()
@@ -4389,7 +4388,7 @@ class TestCrossStreamParagraphs:
         assert "direction" in cross[0]["reason"]
 
 
-# ── 9.T12 — Mongolian left-to-right columns ──────────────────────────────
+# ── Mongolian left-to-right columns ──────────────────────────────────────
 
 MONG_FONTS = os.path.join(os.path.dirname(__file__), "..", "resources", "fonts")
 MONG_FACE = os.path.join(MONG_FONTS, "NotoSansMongolian-Regular.ttf")
@@ -4413,7 +4412,7 @@ def _mong_program():
 def _mong_font(pdf, mapping, program=None, base="/AAAAAA+Mong"):
     """A Type0/Identity-H font over `mapping` (code → character).
 
-    `program` embeds a real font file, which is what makes the T26 in-place
+    `program` embeds a real font file, which is what makes the in-place
     route reachable; without it the edit must substitute the bundled face.
     """
     entries = "\n".join(f"<{c:04x}> <{ord(ch):04x}>" for c, ch in mapping.items())
@@ -4453,7 +4452,7 @@ def _mong_font(pdf, mapping, program=None, base="/AAAAAA+Mong"):
 def _mong_page(tmp_dir, words, xs, program=None, name="mong.pdf", size=10):
     """Columns of `words` at page x positions `xs`, each a 90°-CW-rotated
     run of a HORIZONTAL font — which is what a real Mongolian producer
-    emits and what the T12 recon proved (the face has no `vmtx` that would
+    emits (the face has no `vmtx` that would
     make an /Identity-V embed honest)."""
     src = os.path.join(tmp_dir, name)
     pdf = pikepdf.new()
@@ -4474,17 +4473,17 @@ def _mong_page(tmp_dir, words, xs, program=None, name="mong.pdf", size=10):
 
 
 class TestMongolianColumns:
-    """9.T12 (brief 39 § 5) — left-to-right columns.
+    """Left-to-right columns.
 
     The direction is decided by SCRIPT EVIDENCE, tie-broken by draw order,
     and defaults to the shipped right-to-left assumption so that every CJK
     document alive lands exactly where it lands now. It rides inside `lkey`,
-    so a cross-direction merge is refused by the A4 guard for free.
+    so a cross-direction merge is refused by the guard for free.
     """
 
     def test_a_two_column_mongolian_page_reads_leftmost_first(self, tmp_dir):
         # Columns at x=300 and x=314: the LEFT one reads first, which is the
-        # whole of T12 and the exact opposite of the CJK convention pinned
+        # whole point and the exact opposite of the CJK convention pinned
         # by `test_two_column_vertical_paragraph_groups_as_one`.
         src = _mong_page(tmp_dir, [MONGOL, NARAN], [300, 314])
         paras = _paras(src)
@@ -4644,7 +4643,7 @@ class TestMongolianColumns:
         reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
     )
     def test_an_edit_keeps_the_documents_own_font_when_it_can(self, tmp_dir):
-        # 9.T26 is the PREFERRED route and the common case: a real Mongolian
+        # In-place shaping is the PREFERRED route and the common case: a real Mongolian
         # PDF embeds a Mongolian program, so the edit shapes with it and
         # emits its own glyph ids. Nothing new embeds.
         src = _mong_page(tmp_dir, [MONGOL, NARAN], [300, 314], program=_mong_program())
@@ -4667,7 +4666,7 @@ class TestMongolianColumns:
         # face, embedded HORIZONTALLY through `build_shaped_font`. The
         # re-listing proves the shaped subset spells itself back — the round
         # trip is the feature, and a shaped edit that cannot be read back is
-        # a one-way trip (the T25 lesson).
+        # a one-way trip.
         src = _mong_page(tmp_dir, [MONGOL, NARAN], [300, 314])
         p = _paras(src)[0]
         out = os.path.join(tmp_dir, "subst.pdf")
@@ -4700,13 +4699,13 @@ class TestMongolianColumns:
 
 
 class TestTateChuYoko:
-    """9.T12D (brief 39 § 6) — tate-chu-yoko becomes an atomic editable unit.
+    """Tate-chu-yoko becomes an atomic editable unit.
 
     Slice B made the silent case LOUD (the column grouped without the block,
     so a reflow moved the CJK text over a date that never moved). This is
     the step that makes it work: the block joins its column as ONE member,
     the paragraph's text carries the year where the year is, and the block
-    moves as a unit. Positions are HAND-COMPUTED, the round-27 discipline.
+    moves as a unit. Positions are HAND-COMPUTED, the discipline.
 
     The fixture's column advances 10pt per glyph from y=700 — あ at 700, い
     at 690, the block occupying 680→670 (baseline 0.8 em down, i.e. 672),

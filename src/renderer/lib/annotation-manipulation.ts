@@ -35,7 +35,7 @@ export function isTransformable(a: PageAnnotation): boolean {
 }
 
 /** Kinds that resize. Sticky notes are a fixed icon (their /Rect is
- * viewer-managed) and a count mark is a fixed MARKER (N11 slice C — a resized
+ * viewer-managed) and a count mark is a fixed MARKER (a resized
  * count symbol would read as a different-weight count); everything else
  * transformable scales. */
 export function isResizable(a: PageAnnotation): boolean {
@@ -474,14 +474,14 @@ export function sizeMatchEdits(
   return out;
 }
 
-// ── Rotate / flip (the N7 residual) ────────────────────────────────────
+// ── Rotate / flip ──────────────────────────────────────────────────────
 // Only the VERTEX-carrying kinds rotate: their geometry IS the point list,
 // so a quarter-turn or mirror is exactly representable in the file
 // (/L//Vertices//InkList move with the points). Box kinds (rect/ellipse,
 // stamps, text) do NOT rotate — /Square//Circle are axis-aligned by
 // definition, so a "rotation" could only live in the appearance stream and
 // would silently shed itself in any tool that regenerates APs from the
-// rect. Absent, not faked (§ 3.3).
+// rect. Absent, not faked.
 
 export type RotateDirection = 'cw' | 'ccw';
 export type FlipAxis = 'h' | 'v';
@@ -627,12 +627,12 @@ export function rotateFlipEdits(
   return out;
 }
 
-// ── Ink stroke eraser (N5b) ────────────────────────────────────────────
+// ── Ink stroke eraser ──────────────────────────────────────────────────
 
 /** Cut everything within the eraser's swath out of an ink annotation's
  * strokes. A stroke crossed in
  * its middle SPLITS into two strokes (which `strokes: number[][]` holds
- * exactly; the model change that shipped N2 is what makes N5b clean).
+ * exactly; the per-stroke model is what makes the eraser clean).
  *
  * Geometry runs in an aspect-corrected frame: coordinates scale by the
  * per-axis normalized radius, turning the elliptical eraser (a CIRCLE on

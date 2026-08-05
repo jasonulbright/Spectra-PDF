@@ -20,7 +20,7 @@ interface ConfirmDialogProps {
 }
 
 export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title }: ConfirmDialogProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   return (
     <Dialog.Root open={open} onOpenChange={(isOpen) => { if (!isOpen) onResult('cancel'); }}>

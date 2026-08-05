@@ -1,4 +1,4 @@
-// N11 slice C — the REMEMBERED count groups and which one is armed.
+// The REMEMBERED count groups and which one is armed.
 //
 // A module store, not reducer state, for the `snap-settings` reason: the
 // Takeoff dock panel, the secondary toolbar's group picker and the page cell

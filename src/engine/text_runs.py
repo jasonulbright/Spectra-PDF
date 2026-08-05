@@ -1,4 +1,4 @@
-"""Text-run listing and in-place replacement (Phase 7.2+7.3 — Edit Text).
+"""Text-run listing and in-place replacement (Edit Text).
 
 A "run" is one text-showing operator (Tj / ' / " / TJ), the unit the user
 clicks. Ids are the DFS show-op encounter order (page stream first, forms
@@ -9,7 +9,7 @@ Listing decodes each run through its font's capability (pdf_fonts.py) and
 computes REAL geometry: glyph advances from the font's widths (+ TJ kern,
 Tc char spacing, Tw word spacing on the single-byte space code, Tz), so
 run rects are accurate and the Δwidth math is honest. That measurement now
-lives in `text_metrics.py` and REDACTION calls it too (F15 slice A) — the
+lives in `text_metrics.py` and REDACTION calls it too — the
 flat-estimate era, when the two walkers disagreed about a run's width, ended
 with a measured false negative; see that module's docstring.
 
@@ -31,8 +31,8 @@ Replacement (`replace_text_run`) rewrites exactly one show op:
     against the line matrix and are shifted by Δ explicitly — the
     word-per-Td generator pattern would overlap a grown word otherwise.
     Any line change (T*, ', ", Td/TD with ty ≠ 0, Tm, BT, ET) stops the
-    adjustment. Cross-line reflow is 7.5, deliberately.
-  - vertical runs (9.B4a — Identity-V/UCS2-V capabilities) list with
+    adjustment. Cross-line reflow belongs to the paragraph layer, deliberately.
+  - vertical runs (Identity-V/UCS2-V capabilities) list with
     `vertical: true`, an em-wide column rect spanning the /W2 advance sum
     DOWNWARD, and the anchor rule TRANSPOSED: same-COLUMN Td/TD followers
     (tx == 0) shift by Δadvance in ty (unscaled — Tz never applies
@@ -68,7 +68,7 @@ from engine.redact import (
     _resolve_resources,
 )
 
-# F15 slice A: the measurement half of this module MOVED to text_metrics.py so
+# The measurement half of this module MOVED to text_metrics.py so
 # redaction reads the same advances the lister does — one geometry authority,
 # not two (redact.py's flat 0.5-em-per-byte estimate was a false negative; the
 # module docstring there carries the measurements). Re-exported here because
@@ -90,7 +90,7 @@ SHOW_OPS = ("Tj", "'", '"', "TJ")
 
 
 def _style_of(state: GraphicsTextState) -> dict:
-    """The re-emittable text state at a show op (7.5's span style)."""
+    """The re-emittable text state at a show op (the span style)."""
     return {
         "font_name": state.font_name,
         "size": state.font_size,
@@ -105,8 +105,8 @@ def _style_of(state: GraphicsTextState) -> dict:
 
 
 def _plain_segments(operator: str, operands: list) -> list:
-    """_show_segments detached from pikepdf (bytes/float only) so 7.5's
-    analysis can outlive the walk."""
+    """_show_segments detached from pikepdf (bytes/float only) so the
+    paragraph analysis can outlive the walk."""
     out: list = []
     for seg in _show_segments(operator, operands):
         out.append(seg if isinstance(seg, float) else bytes(seg))
@@ -115,12 +115,12 @@ def _plain_segments(operator: str, operands: list) -> list:
 
 def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None, detail=None, stream_path=(), base_clip=None):
     state = _child_state(base_ctm, parent_state)
-    # 9-§I.0-S8: clip tracking rides ADDITIVELY beside the state machine so a
+    # Clip tracking rides ADDITIVELY beside the state machine so a
     # run wholly outside the active clip lists as `clipped` (invisible) and the
     # renderer stops offering it as editable. `base_clip` is the parent stream's
     # device-space clip a nested form inherits (§8.10.2).
     clips = ClipTracker(base_clip)
-    # Stream identity for 7.5: the path of LOCAL form ordinals (the nth
+    # Stream identity for the paragraph layer: the path of LOCAL form ordinals (the nth
     # qualifying Do within its parent stream) from the page down. Local —
     # not a global DFS id — so a rewriter can NAVIGATE to one stream and
     # leave every other form untouched and unvisited.
@@ -147,7 +147,7 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
             combined = _mat_mult(state.tm, state.ctm)
             vertical = bool(cap is not None and cap.vertical)
             if vertical:
-                # 9.B4a v1 rect: a vertical run occupies one em-wide column
+                # v1 rect: a vertical run occupies one em-wide column
                 # centered on the pen (the vx = w/2 default) and spans the
                 # advance sum DOWNWARD from the start point.
                 half = max(state.font_size, 0.01) / 2.0
@@ -177,16 +177,16 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     "editable": editable,
                     "reason": reason,
                     "encodable": cap.encodable() if (cap and cap.editable) else "",
-                    # 9.B5, additive: the ligature sequences encode() will
+                    # Additive: the ligature sequences encode() will
                     # round-trip — the renderer's longest-match validation
                     # reads these next to `encodable`. [] when none/refused.
                     "sequences": cap.encodable_sequences() if (cap and cap.editable) else [],
-                    # 9.B4a, additive: True when this run's advances/rect
-                    # were computed in vertical-writing mode (B4b's surface
+                    # Additive: True when this run's advances/rect
+                    # were computed in vertical-writing mode (the surface
                     # reads it). A refused vertical font reports False —
                     # the field describes the geometry actually computed.
                     "vertical": vertical,
-                    # 9-§I.0-S8, additive: True when the run's bbox is fully
+                    # Additive: True when the run's bbox is fully
                     # outside the active clip (invisible). The renderer filters
                     # these out so clipped-away text is never offered as
                     # editable; the index space is UNCHANGED (the mutators'
@@ -195,7 +195,7 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                 }
             )
             if detail is not None:
-                # 7.5's rich channel — SAME walk, so run index agreement
+                # the rich channel — SAME walk, so run index agreement
                 # is by construction, not by parallel implementation.
                 detail.append(
                     {
@@ -212,7 +212,7 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                         # The STREAM-scoped resources this run's font resolves
                         # against (form-scoped when nested), + the invoker's
                         # resources as the fallback — the exact pair the
-                        # FontCache used above. 9.B1's paragraph family
+                        # FontCache used above. the paragraph family
                         # classification needs form scope because a form's `F1`
                         # can differ from the page's `F1`.
                         "resources": resources,
@@ -276,11 +276,11 @@ class _TextEditState:
     def __init__(self, target: int, new_text: str, builder=None):
         self.target = target
         self.new_text = new_text
-        # Optional replacement renderer (7.4): (pdf, resources, gts, text)
+        # Optional replacement renderer: (pdf, resources, gts, text)
         # -> (instructions, new_raw_width). None = re-encode in the run's
-        # own font (7.2's path).
+        # own font.
         self.builder = builder
-        # T14 run restyle: an optional size (pt) and/or fill color
+        # Run restyle: an optional size (pt) and/or fill color
         # ([r,g,b] 0..1) applied to THIS run only. The emission wraps the
         # show op in q…Q — font/size/fill are graphics state and revert at
         # Q, while the text matrix (NOT graphics state per spec) keeps the
@@ -291,11 +291,11 @@ class _TextEditState:
         self.done = False
         # Set at the edit site; consumed by the same-line anchor pass.
         self.delta_scaled = 0.0  # Δ advance in text-space units incl. Tz
-        # 9.B4a: True when the edited run's font is vertical — the anchor
+        # True when the edited run's font is vertical — the anchor
         # pass transposes (same-COLUMN followers shift in ty; Tz does not
         # scale delta_scaled).
         self.vertical = False
-        # (name, font_dict) a 7.4 builder produced — registered by the
+        # (name, font_dict) the fallback builder produced — registered by the
         # rewriter into the CORRECT resources (page, or the form COPY).
         self.pending_font: tuple[str, object] | None = None
         # Original form names superseded by edit copies — _finalize_page_
@@ -358,7 +358,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     adjusting = False
                 else:
                     if edit.vertical:
-                        # 9.B4a: the same-line rule TRANSPOSED — a
+                        # The same-line rule TRANSPOSED — a
                         # same-COLUMN follower (tx == 0) shifts DOWN by
                         # Δadvance (ty − Δ; a shrink pulls it back up);
                         # any tx change is a column boundary and stops.
@@ -418,7 +418,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     raise ValueError(cap.reason or "this text is not editable")
                 edit.vertical = bool(cap.vertical)
                 if edit.vertical and edit.builder is not None:
-                    # 9.B4a: the 7.4 fallback builder embeds a HORIZONTAL
+                    # The fallback builder embeds a HORIZONTAL
                     # Identity-H face — dropped into a vertical column it
                     # would render on the wrong axis. Fail closed (the
                     # builder-path guard discipline above).
@@ -427,7 +427,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     )
                 _old_text, old_raw = _run_metrics(operator, operands, cap, gts)
                 if edit.builder is not None:
-                    # 7.4 fallback path: the builder renders the replacement
+                    # Fallback path: the builder renders the replacement
                     # its own way (new embedded font + restore Tf); it owns
                     # registration against THIS stream's resources.
                     new_instructions, new_raw = edit.builder(
@@ -462,7 +462,7 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                     kept.append(_instruction([pikepdf.String(encoded)], "Tj"))
                     if styled:
                         kept.append(_instruction([], "Q"))
-                # 9.B4a: Tz never scales vertical advances, so the vertical
+                # Tz never scales vertical advances, so the vertical
                 # Δ is unscaled.
                 edit.delta_scaled = (new_raw - old_raw) * (
                     1.0 if edit.vertical else gts.h_scale
@@ -645,7 +645,7 @@ def restyle_text_run(
     size: float | None = None,
     color: list | None = None,
 ) -> dict:
-    """T14: restyle ONE run — size (pt) and/or fill color — text unchanged.
+    """Restyle ONE run — size (pt) and/or fill color — text unchanged.
 
     Rides the replace machinery end to end (same targeting, Δ math for the
     size-driven advance change, same-line anchors, form copy-on-edit); the
@@ -724,7 +724,7 @@ def restyle_text_run(
 def convert_text_run(
     file: str, output: str, page: int, index: int, new_text: str, font_path: str
 ) -> dict:
-    """Replace one run's text RENDERED IN THE BUNDLED FALLBACK FONT (7.4) —
+    """Replace one run's text RENDERED IN THE BUNDLED FALLBACK FONT —
     the path the UI offers when the run's own font cannot express the typed
     characters. Same targeting, Δ math, anchors, and form copy-on-edit as
     `replace_text_run`; only the replacement renderer differs (a subsetted
@@ -753,7 +753,7 @@ def convert_text_run(
         holder: dict = {}
 
         def builder(pdf_, stream_resources, gts, text):
-            # Phase 9.B1: pick the fallback FACE matching the run's own
+            # Pick the fallback FACE matching the run's own
             # font (serif/sans/mono) so a serif document's converted text
             # stays serif. `font_path` is the vendored fonts DIR from the
             # app; a concrete .ttf (tests) passes through untouched. The

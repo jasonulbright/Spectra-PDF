@@ -43,7 +43,7 @@ def grayscale(
         str(input_path),
     ]
 
-    # § 5.5: derived budget, not a fixed 300 s (budget.run isolates stdin —
+    # Derived budget, not a fixed 300 s (budget.run isolates stdin —
     # gs must never inherit the RPC pipe, the distill review's finding).
     result = budget.gs(
         cmd, what="Ghostscript (grayscale)", path=input_path, pages=info["pages"]

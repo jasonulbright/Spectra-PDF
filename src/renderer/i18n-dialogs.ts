@@ -1,5 +1,5 @@
-// N12 slice B (brief 37) — the CHROME DIALOGS' strings, third typed record
-// after i18n-chrome.ts (slice A chrome) and i18n-panels.ts (the dock
+// The CHROME DIALOGS' strings, third typed record
+// after i18n-chrome.ts (chrome) and i18n-panels.ts (the dock
 // panels). Same contract: the record carries the English, the en catalog is
 // GENERATED from it by tests/i18n-catalog.test.ts (hand-editing
 // locales/en/chrome.json stays impossible), every shipped locale's key set
@@ -227,7 +227,7 @@ export const DIALOG_STRINGS = {
   'dialog.createPdf.converting': 'Converting…',
   'dialog.createPdf.convert': 'Convert…',
 
-  // Combine Files (P22 slice D). It shares Create PDF's row vocabulary
+  // Combine Files. It shares Create PDF's row vocabulary
   // deliberately — `kind*`, `moveUp`, `moveDown`, `remove`, `blankPage` are
   // the SAME keys, because they are the same list in the same product and a
   // second translation of "Move up" is a second chance to disagree.

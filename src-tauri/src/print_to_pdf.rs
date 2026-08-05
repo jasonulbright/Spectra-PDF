@@ -1,12 +1,12 @@
-//! The virtual printer (O7): "Spectra PDF" appears in every
+//! The virtual printer: "Spectra PDF" appears in every
 //! application's print dialog; printing to it lands the pages in this app
 //! as a fresh PDF.
 //!
 //! Shape: a Windows printer using the IN-BOX "Microsoft PS Class Driver" on
 //! a standard TCP/IP RAW port aimed at 127.0.0.1:9100, where THIS APP
 //! listens (loopback only). The spooler streams PostScript; the listener
-//! hands it to the bundled Ghostscript through the same CLI `distill` arm
-//! Phase 8 ships, and the finished PDF opens through the normal open funnel
+//! hands it to the bundled Ghostscript through the CLI `distill` arm,
+//! and the finished PDF opens through the normal open funnel
 //! (the second-instance `app:openFile` event). No driver is shipped, no
 //! service is installed — the OS driver does the rendering contract and the
 //! listener lives only while the app runs (tray-residency counts), the same
@@ -470,7 +470,7 @@ mod tests {
         assert!(install.is_ascii());
     }
 
-    /// R2's acceptance, against real sockets: one client that connects and
+    /// the acceptance, against real sockets: one client that connects and
     /// never writes must not block later jobs. This is the exact wedge shape
     /// the fix exists for — pre-R2, the accept loop read each connection to
     /// EOF, so the silent client held every later print until app restart.
@@ -513,7 +513,7 @@ mod tests {
         drop(stalled);
     }
 
-    /// The other half of R2: a client that stalls MID-JOB is dropped, never
+    /// The other half: a client that stalls MID-JOB is dropped, never
     /// delivered. `read_to_end` leaves the partial bytes in the buffer on
     /// timeout, and distilling a truncated PostScript stream yields a
     /// plausible-looking WRONG document — the silent-degradation class.

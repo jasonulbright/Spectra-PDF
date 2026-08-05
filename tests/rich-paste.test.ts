@@ -1,4 +1,4 @@
-// T20 rich paste — the pure walk (there is no DOM test environment; the
+// Rich paste — the pure walk (there is no DOM test environment; the
 // DOMParser shim is browser-only by design, so everything decidable is
 // pinned here on the serializable tree).
 import { describe, expect, it } from 'vitest';

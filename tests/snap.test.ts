@@ -1,4 +1,4 @@
-// N11 slice A — the pure snapping math. Everything breakable about snapping
+// The pure snapping math. Everything breakable about snapping
 // lives in `lib/snap.ts` precisely so it can be tested without a DOM (this
 // repo has none); the ten call sites in PageCell are covered by the existing
 // gesture specs continuing to pass with snapping OFF.
@@ -457,8 +457,8 @@ describe('the DELTA variant snaps the object, not the pointer', () => {
   });
 });
 
-// ── N11 slice B: angle constrain ────────────────────────────────────────
-describe('constrainAngle (N11 slice B)', () => {
+// ── angle constrain ─────────────────────────────────────────────────────
+describe('constrainAngle', () => {
   // A square view, so normalized units and pixels agree and the expected
   // angles are readable. The anisotropic case gets its own test below.
   const W = 1000;
