@@ -21,7 +21,11 @@ import { tChrome, tStepParam, tStepTitle } from '../i18n';
 // several steps), and ENCRYPT as a TERMINAL step that writes a NEW picked
 // file (an in-place encrypt would make the open working copy unreadable,
 // which is why slice 1 excluded it; EncryptPanel has the same shape).
+// P22 slice E added the one step that PRODUCES a document rather than
+// transforming one: `create_pdf`. It is why `StepDef` grew `sourceStep` —
+// see that field, and `openDocumentBlocker` / `inPlaceBlocker` below.
 export type GuidedStepOp =
+  | 'create_pdf'
   | 'compress'
   | 'grayscale'
   | 'convert_pdfa'
@@ -75,6 +79,18 @@ export interface StepDef {
   /** The step writes a NEW file picked at run time instead of the working
    * copy (encrypt); must be the LAST step and never mutates the open doc. */
   terminalOutput?: boolean;
+  /**
+   * The step PRODUCES the document the rest of the action works on
+   * (`create_pdf`) rather than transforming one.
+   *
+   * Three consequences, all enforced rather than documented — and all
+   * mirrored by `engine/guided_actions.py`, which is the half a CLI or a
+   * scheduled run reaches without passing through this editor at all:
+   * it must be the FIRST step, the action cannot run against the open
+   * document (there is nothing for it to create FROM), and it cannot run
+   * in place (the converted document is a new file, not a replacement).
+   */
+  sourceStep?: boolean;
   /** Reshape the flat form params into the engine call's shape (e.g. the
    * header/footer position+text pair into its `placements` list). */
   mapParams?: (params: Record<string, string | number>) => Record<string, unknown>;
@@ -197,6 +213,68 @@ export const STEP_CATALOG: readonly StepDef[] = [
       { key: 'owner_password', label: 'Owner password', kind: 'password', defaultValue: '', secret: true },
     ],
   },
+  {
+    // P22 slice E. LAST in the catalog even though it is always FIRST in an
+    // action: `AddStepPicker` defaults to `STEP_CATALOG[0]`, and making the
+    // rarest step the default "Add step" would be a regression for every
+    // ordinary action. Position here is a picker default, not an order.
+    op: 'create_pdf',
+    title: 'Create PDF from any file',
+    sourceStep: true,
+    needsGs: true,
+    params: [
+      {
+        key: 'page_size',
+        label: 'Page size',
+        kind: 'select',
+        options: [
+          { value: 'auto', label: 'Keep each source’s own size' },
+          { value: 'first', label: 'Match the first source' },
+          { value: 'letter', label: 'Letter' },
+          { value: 'legal', label: 'Legal' },
+          { value: 'tabloid', label: 'Tabloid' },
+          { value: 'a3', label: 'A3' },
+          { value: 'a4', label: 'A4' },
+          { value: 'a5', label: 'A5' },
+        ],
+        defaultValue: 'auto',
+      },
+      {
+        key: 'orientation',
+        label: 'Orientation',
+        kind: 'select',
+        options: [
+          { value: 'auto', label: 'Follow the content' },
+          { value: 'portrait', label: 'Portrait' },
+          { value: 'landscape', label: 'Landscape' },
+        ],
+        defaultValue: 'auto',
+      },
+      { key: 'margin_pt', label: 'Margin (pt)', kind: 'number', defaultValue: 0, min: 0, max: 288, step: 1 },
+      {
+        key: 'image_dpi_default',
+        label: 'Image resolution (dpi)',
+        kind: 'number',
+        defaultValue: 200,
+        min: 1,
+        max: 2400,
+        step: 1,
+      },
+      {
+        key: 'distill_preset',
+        label: 'PostScript quality',
+        kind: 'select',
+        options: [
+          { value: 'screen', label: 'Smallest Size (72 dpi)' },
+          { value: 'ebook', label: 'eBook (150 dpi)' },
+          { value: 'printer', label: 'Print Quality (300 dpi)' },
+          { value: 'prepress', label: 'Press Quality' },
+          { value: 'default', label: 'Standard (Ghostscript defaults)' },
+        ],
+        defaultValue: 'printer',
+      },
+    ],
+  },
 ];
 
 export function stepDefFor(op: GuidedStepOp): StepDef {
@@ -281,8 +359,52 @@ export function validateAction(action: GuidedAction): string | null {
         step: tStepTitle(def.op, def.title),
       });
     }
+    // A source step PRODUCES the document the rest of the action works on,
+    // so anywhere but first it would convert a file the earlier steps had
+    // already rewritten. `engine/guided_actions.py`'s `validate_steps`
+    // refuses the same thing — this is the editor's half, by name, so the
+    // action cannot be SAVED into a shape the runner will reject.
+    if (def.sourceStep && i > 0) {
+      return tChrome('refusal.action.sourceNotFirst', {
+        step: tStepTitle(def.op, def.title),
+      });
+    }
   }
   return null;
+}
+
+/** Does this action START by creating its own document? */
+export function createsItsOwnSource(action: GuidedAction): boolean {
+  const first = action.steps[0];
+  return first !== undefined && Boolean(stepDefFor(first.op).sourceStep);
+}
+
+/**
+ * Why this action cannot run against the OPEN document, or null.
+ *
+ * An action that begins by creating a document has nothing to create FROM
+ * when it is pointed at a document that already exists — it is a folder run
+ * by construction, and saying so is better than running it and producing a
+ * confusing result.
+ */
+export function openDocumentBlocker(action: GuidedAction): string | null {
+  if (!createsItsOwnSource(action)) return null;
+  const def = stepDefFor(action.steps[0].op);
+  return tChrome('refusal.action.sourceNeedsFolder', {
+    step: tStepTitle(def.op, def.title),
+  });
+}
+
+/** Why this action cannot REPLACE the originals, or null. Mirrors the
+ * engine's own in-place refusal: the converted document is a new file, so
+ * "replace `report.docx` with a PDF still called `report.docx`" is a
+ * destroyed source with a misleading name, not an in-place edit. */
+export function inPlaceBlocker(action: GuidedAction): string | null {
+  if (!createsItsOwnSource(action)) return null;
+  const def = stepDefFor(action.steps[0].op);
+  return tChrome('refusal.action.sourceNotInPlace', {
+    step: tStepTitle(def.op, def.title),
+  });
 }
 
 /** Pre-run check of the collected ask-at-run values for one step. */

@@ -37,8 +37,11 @@ pub enum CliCommand {
     Rotate(RotateArgs),
     /// Split a PDF into parts by page ranges
     Split(SplitArgs),
-    /// Merge multiple PDFs into one
+    /// Merge multiple files into one PDF (non-PDF inputs are converted first)
     Merge(MergeArgs),
+    /// Create a PDF from any accepted source: images, Office/text/HTML
+    /// documents, PostScript, PDFs and blank pages
+    CreatePdf(CreatePdfArgs),
     /// Encrypt a PDF with AES-256
     Encrypt(EncryptArgs),
     /// Decrypt a password-protected PDF
@@ -350,11 +353,45 @@ pub struct SplitArgs {
 
 #[derive(Args)]
 pub struct MergeArgs {
-    /// Input PDF files (two or more)
+    /// Input files (two or more). Anything Create PDF accepts — images,
+    /// Word/Excel/PowerPoint, text, HTML, PostScript — is converted on the
+    /// way in; a list of PDFs merges exactly as it always did.
     pub inputs: Vec<PathBuf>,
     /// Output PDF file
     #[arg(short, long)]
     pub output: PathBuf,
+}
+
+#[derive(Args)]
+pub struct CreatePdfArgs {
+    /// Source files, in the order their pages will appear
+    pub sources: Vec<PathBuf>,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Page size: auto (keep each source's own) | first | letter | legal |
+    /// tabloid | a3 | a4 | a5
+    #[arg(long, default_value = "auto")]
+    pub page_size: String,
+    /// Orientation: auto (follow the content) | portrait | landscape
+    #[arg(long, default_value = "auto")]
+    pub orientation: String,
+    /// Margin in points kept around placed content when a page size is named
+    #[arg(long, default_value_t = 0.0)]
+    pub margin: f64,
+    /// Resolution assumed for an image that stores none
+    #[arg(long, default_value_t = 200.0)]
+    pub image_dpi: f64,
+    /// Append a blank page after the sources
+    #[arg(long)]
+    pub blank: bool,
+    /// Ghostscript quality preset for PostScript sources:
+    /// screen | ebook | printer | prepress | default
+    #[arg(long, default_value = "printer")]
+    pub quality: String,
+    /// Report and skip a source nothing can convert instead of failing the run
+    #[arg(long)]
+    pub skip_unsupported: bool,
 }
 
 #[derive(Args)]
@@ -1473,6 +1510,26 @@ pub enum BatchOperation {
     Rebuild,
     /// Recover pages from all PDFs (Tier 3)
     Recover,
+    /// Convert every accepted source in the folder into a PDF (P22): images,
+    /// Word/Excel/PowerPoint, text, HTML, PostScript. This is the ONE batch
+    /// operation whose input set is wider than "*.pdf".
+    CreatePdf {
+        /// Page size: auto | first | letter | legal | tabloid | a3 | a4 | a5
+        #[arg(long, default_value = "auto")]
+        page_size: String,
+        /// Orientation: auto | portrait | landscape
+        #[arg(long, default_value = "auto")]
+        orientation: String,
+        /// Margin in points when a page size is named
+        #[arg(long, default_value_t = 0.0)]
+        margin: f64,
+        /// Resolution assumed for an image that stores none
+        #[arg(long, default_value_t = 200.0)]
+        image_dpi: f64,
+        /// Ghostscript quality preset for PostScript sources
+        #[arg(long, default_value = "printer")]
+        quality: String,
+    },
 }
 
 // ── Path resolution (exe-relative, no Tauri runtime) ────────────────────────
@@ -1702,21 +1759,34 @@ fn parse_pages(pages: &str) -> Value {
 
 /// Collect all .pdf files in a directory.
 fn collect_pdfs(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    collect_batch_inputs(dir, |p| {
+        p.extension()
+            .map(|ext| ext.eq_ignore_ascii_case("pdf"))
+            .unwrap_or(false)
+    })
+}
+
+/// Collect every file in a directory an arm of Create PDF converts (P22).
+/// The one batch operation whose input set is wider than `*.pdf`.
+fn collect_create_pdf_sources(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    collect_batch_inputs(dir, |p| crate::create_pdf_sources::accepts(p))
+}
+
+fn collect_batch_inputs(
+    dir: &Path,
+    wanted: impl Fn(&Path) -> bool,
+) -> Result<Vec<PathBuf>, String> {
     if !dir.is_dir() {
         return Err(format!("Not a directory: {}", dir.display()));
     }
-    let mut pdfs: Vec<PathBuf> = std::fs::read_dir(dir)
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(|e| format!("Cannot read directory: {}", e))?
         .filter_map(|entry| entry.ok())
         .map(|e| e.path())
-        .filter(|p| {
-            p.extension()
-                .map(|ext| ext.eq_ignore_ascii_case("pdf"))
-                .unwrap_or(false)
-        })
+        .filter(|p| p.is_file() && wanted(p))
         .collect();
-    pdfs.sort();
-    Ok(pdfs)
+    found.sort();
+    Ok(found)
 }
 
 /// Sheet size in points for the print layout modes: an explicit "WxH"
@@ -1931,11 +2001,65 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             if files.len() < 2 {
                 return Err("Merge requires at least 2 input files".to_string());
             }
+            // P22 slice E: a non-PDF input routes the whole list through the
+            // ONE `create_pdf` door, whose assembly IS this same merge — so
+            // convert-then-merge comes for free and the AcroForm / outline /
+            // struct carries cannot be forgotten on the way.
+            //
+            // An all-PDF list still calls `merge` DIRECTLY. Not laziness: the
+            // standing rule is that a widening must not change existing
+            // default output, and the merge is what that path has always run.
+            let needs_conversion = args
+                .inputs
+                .iter()
+                .any(|p| !matches!(p.extension().and_then(|e| e.to_str()),
+                                   Some(e) if e.eq_ignore_ascii_case("pdf")));
+            if needs_conversion {
+                let sources: Vec<Value> = files.iter().map(|f| json!({ "path": f })).collect();
+                return engine.call(
+                    "create_pdf",
+                    json!({
+                        "sources": sources,
+                        "output": abs(&args.output).to_string_lossy(),
+                        "gs_path": resolve_gs().to_string_lossy(),
+                        "soffice_path": resolve_soffice(),
+                    }),
+                );
+            }
             engine.call(
                 "merge",
                 json!({
                     "files": files,
                     "output": abs(&args.output).to_string_lossy(),
+                }),
+            )
+        }
+
+        CliCommand::CreatePdf(args) => {
+            if args.sources.is_empty() && !args.blank {
+                return Err("Create PDF needs at least one source (or --blank)".to_string());
+            }
+            let mut sources: Vec<Value> = args
+                .sources
+                .iter()
+                .map(|p| json!({ "path": abs(p).to_string_lossy() }))
+                .collect();
+            if args.blank {
+                sources.push(json!({ "kind": "blank" }));
+            }
+            engine.call(
+                "create_pdf",
+                json!({
+                    "sources": sources,
+                    "output": abs(&args.output).to_string_lossy(),
+                    "page_size": args.page_size,
+                    "orientation": args.orientation,
+                    "margin_pt": args.margin,
+                    "image_dpi_default": args.image_dpi,
+                    "distill_preset": args.quality,
+                    "on_unsupported": if args.skip_unsupported { "skip" } else { "refuse" },
+                    "gs_path": resolve_gs().to_string_lossy(),
+                    "soffice_path": resolve_soffice(),
                 }),
             )
         }
@@ -2372,6 +2496,10 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "action_name": name,
                 "gs_path": resolve_gs().to_string_lossy(),
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
+                // P22 slice E: an action may START with a create_pdf step, so
+                // the LibreOffice arm has to be reachable from a scheduled run
+                // and a watched folder too — both invoke this same subcommand.
+                "soffice_path": resolve_soffice(),
                 "font_dir": resolve_fonts().to_string_lossy(),
                 "write_log": args.log_dir.is_some(),
                 "progress": true,
@@ -3080,9 +3208,20 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
     std::fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Cannot create output dir: {}", e))?;
 
-    let pdfs = collect_pdfs(&input_dir)?;
+    // Create PDF is the one operation whose inputs are not PDFs — a folder of
+    // Word files is the whole point of it.
+    let creating = matches!(args.operation, BatchOperation::CreatePdf { .. });
+    let pdfs = if creating {
+        collect_create_pdf_sources(&input_dir)?
+    } else {
+        collect_pdfs(&input_dir)?
+    };
     if pdfs.is_empty() {
-        return Err(format!("No PDF files found in {}", input_dir.display()));
+        return Err(if creating {
+            format!("No convertible files found in {}", input_dir.display())
+        } else {
+            format!("No PDF files found in {}", input_dir.display())
+        });
     }
 
     let gs = resolve_gs();
@@ -3093,7 +3232,15 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
 
     for (i, pdf) in pdfs.iter().enumerate() {
         let filename = pdf.file_name().unwrap().to_string_lossy().to_string();
-        let out_path = output_dir.join(&filename);
+        // A converted source's output name GAINS `.pdf` rather than replacing
+        // the extension: `invoice.docx` and `invoice.pdf` in one folder must
+        // not collide, and the original name stays legible (the P3 rule).
+        let out_name = if creating && !filename.to_ascii_lowercase().ends_with(".pdf") {
+            format!("{filename}.pdf")
+        } else {
+            filename.clone()
+        };
+        let out_path = output_dir.join(&out_name);
 
         eprintln!("[{}/{}] {}", i + 1, total, filename);
 
@@ -3181,6 +3328,26 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                     "output": out_path.to_string_lossy(),
                 }),
             ),
+            BatchOperation::CreatePdf {
+                page_size,
+                orientation,
+                margin,
+                image_dpi,
+                quality,
+            } => engine.call(
+                "create_pdf",
+                json!({
+                    "sources": [{ "path": pdf.to_string_lossy() }],
+                    "output": out_path.to_string_lossy(),
+                    "page_size": page_size,
+                    "orientation": orientation,
+                    "margin_pt": margin,
+                    "image_dpi_default": image_dpi,
+                    "distill_preset": quality,
+                    "gs_path": gs.to_string_lossy(),
+                    "soffice_path": resolve_soffice(),
+                }),
+            ),
         };
 
         match result {
@@ -3207,4 +3374,135 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
         "failed": failed,
         "results": results,
     }))
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+//
+// P22 slice E. The CLI's own half of Create PDF is ARGUMENT PARSING and a
+// folder walk — the conversion itself is the engine's, and pytest covers it.
+// What can go wrong here is a subcommand that does not parse the way its help
+// text claims, and a batch walk that picks up the wrong files.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(args).expect("should parse")
+    }
+
+    #[test]
+    fn create_pdf_takes_an_ordered_source_list_and_the_documented_flags() {
+        let cli = parse(&[
+            "spectrapdf",
+            "create-pdf",
+            "cover.png",
+            "body.docx",
+            "-o",
+            "out.pdf",
+            "--page-size",
+            "a4",
+            "--orientation",
+            "landscape",
+            "--margin",
+            "18",
+            "--image-dpi",
+            "150",
+            "--blank",
+            "--quality",
+            "prepress",
+        ]);
+        match cli.command {
+            Some(CliCommand::CreatePdf(args)) => {
+                assert_eq!(
+                    args.sources,
+                    vec![PathBuf::from("cover.png"), PathBuf::from("body.docx")]
+                );
+                assert_eq!(args.output, PathBuf::from("out.pdf"));
+                assert_eq!(args.page_size, "a4");
+                assert_eq!(args.orientation, "landscape");
+                assert_eq!(args.margin, 18.0);
+                assert_eq!(args.image_dpi, 150.0);
+                assert!(args.blank);
+                assert_eq!(args.quality, "prepress");
+                assert!(!args.skip_unsupported);
+            }
+            _ => panic!("not the create-pdf arm"),
+        }
+    }
+
+    #[test]
+    fn create_pdf_defaults_change_nothing_about_the_sources() {
+        let cli = parse(&["spectrapdf", "create-pdf", "a.png", "-o", "out.pdf"]);
+        match cli.command {
+            Some(CliCommand::CreatePdf(args)) => {
+                // `auto` on both is "keep every source's own geometry" — the
+                // default must never silently reformat what it was given.
+                assert_eq!(args.page_size, "auto");
+                assert_eq!(args.orientation, "auto");
+                assert_eq!(args.margin, 0.0);
+                assert_eq!(args.image_dpi, 200.0);
+                assert!(!args.blank);
+            }
+            _ => panic!("not the create-pdf arm"),
+        }
+    }
+
+    #[test]
+    fn merge_still_takes_a_plain_input_list() {
+        let cli = parse(&["spectrapdf", "merge", "a.pdf", "b.docx", "-o", "out.pdf"]);
+        match cli.command {
+            Some(CliCommand::Merge(args)) => {
+                assert_eq!(args.inputs.len(), 2);
+                assert_eq!(args.output, PathBuf::from("out.pdf"));
+            }
+            _ => panic!("not the merge arm"),
+        }
+    }
+
+    #[test]
+    fn batch_create_pdf_parses_with_its_own_flags() {
+        let cli = parse(&[
+            "spectrapdf",
+            "batch",
+            "in",
+            "-o",
+            "out",
+            "create-pdf",
+            "--page-size",
+            "letter",
+        ]);
+        match cli.command {
+            Some(CliCommand::Batch(args)) => match args.operation {
+                BatchOperation::CreatePdf { page_size, .. } => assert_eq!(page_size, "letter"),
+                _ => panic!("not the create-pdf batch operation"),
+            },
+            _ => panic!("not the batch arm"),
+        }
+    }
+
+    #[test]
+    fn the_create_pdf_batch_walk_takes_more_than_pdfs_and_the_others_do_not() {
+        let dir = std::env::temp_dir().join(format!("spectra-cli-walk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["a.pdf", "b.docx", "c.PNG", "d.zip"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let names = |paths: Vec<PathBuf>| {
+            let mut out: Vec<String> = paths
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+                .collect();
+            out.sort();
+            out
+        };
+        assert_eq!(names(collect_pdfs(&dir).unwrap()), vec!["a.pdf"]);
+        // Case-insensitive, and `.zip` is not in any arm's set.
+        assert_eq!(
+            names(collect_create_pdf_sources(&dir).unwrap()),
+            vec!["a.pdf", "b.docx", "c.PNG"]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

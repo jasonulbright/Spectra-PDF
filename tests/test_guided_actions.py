@@ -337,3 +337,138 @@ class TestRunActionMoved:
                 in_place=True,
                 move_processed_root=str(tmp_path / "done"),
             )
+
+
+def _png(path, dpi=300, size=(600, 900)) -> None:
+    """A source the IMAGE arm converts — no external binary, so these pins
+    run everywhere (the Office arm needs the vendored LibreOffice and is
+    covered by tests/test_create_pdf.py's skip-if-absent suite)."""
+    from PIL import Image
+
+    Image.new("L", size, 220).save(path, dpi=(dpi, dpi))
+
+
+class TestCreatePdfStep:
+    """P22 slice E — the one step that PRODUCES the document.
+
+    It is why `run_action` grew a branch: every other step is
+    `fn(file=p, output=p)` on a COPY of the source, and `create_pdf` refuses
+    to write over its own source (the identity guard). Its presence also
+    widens what the run WALKS — a folder of Word files is the whole point.
+    """
+
+    def test_it_must_be_the_first_step(self):
+        with pytest.raises(ValueError, match="create_pdf must be the first step"):
+            validate_steps([{"op": "strip_metadata"}, {"op": "create_pdf"}])
+        # First is fine, with or without anything after it.
+        assert [s["op"] for s in validate_steps([{"op": "create_pdf"}])] == ["create_pdf"]
+        assert [
+            s["op"]
+            for s in validate_steps([{"op": "create_pdf"}, {"op": "strip_metadata"}])
+        ] == ["create_pdf", "strip_metadata"]
+
+    def test_its_parameters_are_allow_listed_like_every_other_step(self):
+        clean = validate_steps(
+            [{"op": "create_pdf", "params": {"page_size": "letter", "margin_pt": 12}}]
+        )
+        assert clean[0]["params"] == {"page_size": "letter", "margin_pt": 12}
+        with pytest.raises(ValueError, match="unknown parameter"):
+            validate_steps([{"op": "create_pdf", "params": {"soffice_path": "evil.exe"}}])
+
+    def test_a_creating_run_walks_more_than_pdfs(self, tree, tmp_path):
+        # The tree's decoy `notes.txt` is a real SOURCE for this run — plain
+        # text is one of the accepted kinds — and so is an image. A
+        # transforming run over the same tree finds two files; this one finds
+        # four. (Whether the .txt converts depends on the vendored
+        # LibreOffice; being LISTED does not.)
+        _png(tree / "scan.png")
+        report = run_action(
+            source=str(tree),
+            dest=str(tmp_path / "out"),
+            steps=[{"op": "create_pdf"}],
+            write_log=False,
+        )
+        assert report["total"] == 4
+        listed = [r["rel"] for r in report["results"]]
+        assert "notes.txt" in listed and "scan.png" in listed
+
+    def test_a_converted_source_name_GAINS_pdf_rather_than_replacing_it(
+        self, tree, tmp_path
+    ):
+        # `scan.png` and `scan.pdf` in one folder must not collide, and the
+        # original name stays legible (the P3 image-source rule).
+        _png(tree / "scan.png")
+        dest = tmp_path / "out"
+        run_action(
+            source=str(tree),
+            dest=str(dest),
+            steps=[{"op": "create_pdf"}],
+            write_log=False,
+        )
+        assert (dest / "scan.png.pdf").is_file()
+        # A PDF source keeps its own name — no `a.pdf.pdf`.
+        assert (dest / "a.pdf").is_file()
+        assert not (dest / "a.pdf.pdf").exists()
+
+    def test_the_step_parameters_reach_the_conversion(self, tree, tmp_path):
+        _png(tree / "scan.png", dpi=600, size=(600, 900))
+        dest = tmp_path / "out"
+        run_action(
+            source=str(tree),
+            dest=str(dest),
+            steps=[{"op": "create_pdf", "params": {"page_size": "letter"}}],
+            write_log=False,
+        )
+        with pikepdf.open(dest / "scan.png.pdf") as pdf:
+            assert [float(v) for v in pdf.pages[0].mediabox] == [0.0, 0.0, 612.0, 792.0]
+
+    def test_later_steps_run_on_what_it_produced(self, tree, tmp_path):
+        _png(tree / "scan.png")
+        dest = tmp_path / "out"
+        report = run_action(
+            source=str(tree),
+            dest=str(dest),
+            steps=[{"op": "create_pdf"}, {"op": "strip_metadata"}],
+            write_log=False,
+        )
+        row = next(r for r in report["results"] if r["rel"] == "scan.png")
+        assert row["status"] == "ok"
+        # BOTH steps counted — the creation is a step, not a preamble.
+        assert row["steps_applied"] == 2
+
+    def test_it_refuses_in_place_mode_by_name(self, tree):
+        # Replacing `notes.txt` with a PDF that is still called `notes.txt` is
+        # not an in-place edit — it is a destroyed source with a misleading
+        # name.
+        with pytest.raises(ValueError, match="cannot start with create_pdf"):
+            run_action(
+                source=str(tree),
+                dest="",
+                steps=[{"op": "create_pdf"}],
+                in_place=True,
+                write_log=False,
+            )
+
+    def test_a_source_no_arm_converts_is_never_even_listed(self, tree, tmp_path):
+        (tree / "thing.zip").write_bytes(b"PKnot a document")
+        report = run_action(
+            source=str(tree),
+            dest=str(tmp_path / "out"),
+            steps=[{"op": "create_pdf"}],
+            write_log=False,
+        )
+        assert "thing.zip" not in [r["rel"] for r in report["results"]]
+
+    def test_a_source_that_cannot_be_read_fails_only_its_own_file(self, tree, tmp_path):
+        _png(tree / "scan.png")
+        (tree / "broken.png").write_bytes(b"not a png at all")
+        report = run_action(
+            source=str(tree),
+            dest=str(tmp_path / "out"),
+            steps=[{"op": "create_pdf"}],
+            write_log=False,
+        )
+        broken = next(r for r in report["results"] if r["rel"] == "broken.png")
+        good = next(r for r in report["results"] if r["rel"] == "scan.png")
+        assert broken["status"] == "error" and "unreadable image" in broken["error"]
+        assert good["status"] == "ok"

@@ -133,6 +133,42 @@
   Office file used to convert "successfully" into a meaningless one-page
   document. Every conversion is now checked by reading what was produced.
 
+### Combining files
+- **Combine Files takes everything Create PDF takes.** Until now it accepted
+  PDFs and nothing else. Document ▸ Combine Files opens a list you build from
+  PDFs, images, Word, Excel and PowerPoint documents, OpenDocument files, RTF,
+  plain text, CSV, HTML, PostScript and blank pages — anything that is not
+  already a PDF is converted as it goes in. Reorder by dragging or with the
+  arrow buttons, and every row shows what it is, how it will be converted and
+  how many pages it will contribute before you start. A file nothing can
+  convert is marked as such instead of being quietly dropped, and dropping
+  files onto the window while the list is open adds them to it.
+- **Take only the pages you want from a PDF.** Each PDF in the list has a page
+  box: leave it empty for the whole document, or write pages and ranges like
+  `1-3,5`. Form fields, links and bookmarks on the pages you keep survive.
+- **Combine into a new PDF, or into a document you already have open.** Adding
+  to an open document puts the pages at its end as ordinary edits — you can
+  move them, undo them, and save when you are ready — exactly as inserting
+  pages has always worked.
+- **Combine is now available with nothing open.** It used to be greyed out
+  until a document was on screen, which is the one moment you are most likely
+  to reach for it.
+
+### Automating conversion
+- **Convert a whole folder from the command line.** `spectrapdf create-pdf`
+  takes any list of sources and writes one PDF, with the same page size,
+  orientation, margin and image-resolution choices the dialog offers.
+  `spectrapdf merge` now accepts non-PDF inputs too, converting them on the
+  way in, and `spectrapdf batch <folder> -o <folder> create-pdf` converts every
+  convertible file in a folder.
+- **A saved action can start by creating the document.** "Create PDF from any
+  file" is a step you can put at the start of an action — so a watched folder
+  or a scheduled run can convert every Word file that lands in it and then
+  compress, stamp or make the result searchable, all in one pass. Because it
+  produces the document the rest of the action works on, it is only valid as
+  the first step, and the buttons that would point such an action at an
+  existing document say why they cannot.
+
 ## 1.0.19 — Vertical writing, scans that shrink, and seven languages
 
 Text set in columns finishes the job it started. Mongolian — and the Todo,

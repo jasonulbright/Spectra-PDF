@@ -1,11 +1,16 @@
 // Guided actions (lib/guided-actions.ts): catalog integrity, validation,
 // param coercion, and the localStorage round trip (stubbed — no DOM env).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   STEP_CATALOG,
   actionFileJson,
   askedParamKeys,
   buildStepParams,
+  createsItsOwnSource,
+  inPlaceBlocker,
+  openDocumentBlocker,
   isGuidedAction,
   loadGuidedActions,
   newStep,
@@ -327,5 +332,96 @@ describe('action files (slice 4 — export/import)', () => {
     expect(store.get('guided-actions')!).not.toContain('leaked');
     // …and export strips it the same way.
     expect(actionFileJson(a)).not.toContain('leaked');
+  });
+});
+
+// ── P22 slice E — the create_pdf source step ──────────────────────────────
+//
+// It is the one step that PRODUCES the document rather than transforming one,
+// which is why it carries three rules the other eight do not. Every one of
+// them is mirrored in `engine/guided_actions.py`, because a CLI run and a
+// scheduled run never pass through this editor at all.
+describe('the create_pdf source step (P22)', () => {
+  const catalogDef = STEP_CATALOG.find((d) => d.op === 'create_pdf')!;
+
+  it('is in the catalog, flagged as a source step', () => {
+    expect(catalogDef).toBeTruthy();
+    expect(catalogDef.sourceStep).toBe(true);
+  });
+
+  it('is NOT the picker default — that would change what "Add step" adds', () => {
+    // `AddStepPicker` defaults to STEP_CATALOG[0]; making the rarest step the
+    // default would be a regression for every ordinary action.
+    expect(STEP_CATALOG[0].op).not.toBe('create_pdf');
+  });
+
+  it('offers exactly the parameters the engine allow-lists', () => {
+    // The engine refuses an unknown parameter by name, so a key this editor
+    // can produce and the engine cannot take would be an action that saves
+    // and then fails at the runner.
+    const engine = readFileSync(
+      resolve(__dirname, '../src/engine/guided_actions.py'),
+      'utf-8',
+    );
+    const block = engine.slice(engine.indexOf('"create_pdf": ('));
+    for (const p of catalogDef.params) {
+      expect(block.slice(0, 600), p.key).toContain(`"${p.key}"`);
+    }
+  });
+
+  it('must be the FIRST step, and says so by name', () => {
+    const ok: GuidedAction = {
+      id: '1',
+      name: 'Convert',
+      steps: [newStep('create_pdf'), newStep('strip_metadata')],
+    };
+    expect(validateAction(ok)).toBe(null);
+    const bad: GuidedAction = {
+      id: '1',
+      name: 'Convert',
+      steps: [newStep('strip_metadata'), newStep('create_pdf')],
+    };
+    expect(validateAction(bad)).toContain('first step');
+  });
+
+  it('refuses the open-document run and the in-place run, and only for itself', () => {
+    const creating: GuidedAction = {
+      id: '1',
+      name: 'Convert',
+      steps: [newStep('create_pdf')],
+    };
+    const ordinary: GuidedAction = {
+      id: '2',
+      name: 'Clean',
+      steps: [newStep('strip_metadata')],
+    };
+    expect(createsItsOwnSource(creating)).toBe(true);
+    expect(createsItsOwnSource(ordinary)).toBe(false);
+    expect(openDocumentBlocker(creating)).toContain('folder');
+    expect(inPlaceBlocker(creating)).toBeTruthy();
+    expect(openDocumentBlocker(ordinary)).toBe(null);
+    expect(inPlaceBlocker(ordinary)).toBe(null);
+    expect(createsItsOwnSource({ id: '3', name: 'Empty', steps: [] })).toBe(false);
+  });
+
+  it('an imported action file is held to the same ordering rule', () => {
+    const file = JSON.stringify({
+      name: 'Convert',
+      steps: [{ op: 'strip_metadata', params: {} }, { op: 'create_pdf', params: {} }],
+    });
+    expect(() => parseActionFile(file)).toThrow(/first step/);
+  });
+
+  it('an action starting with it imports cleanly', () => {
+    const file = JSON.stringify({
+      name: 'Convert',
+      steps: [
+        { op: 'create_pdf', params: { page_size: 'a4', margin_pt: 12 } },
+        { op: 'strip_metadata', params: {} },
+      ],
+    });
+    const action = parseActionFile(file);
+    expect(action.steps.map((s) => s.op)).toEqual(['create_pdf', 'strip_metadata']);
+    expect(buildStepParams(action.steps[0]).page_size).toBe('a4');
   });
 });

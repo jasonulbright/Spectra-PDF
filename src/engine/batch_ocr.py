@@ -195,16 +195,20 @@ def dest_conflicts_with_source(source_root: str, dest_root: str) -> bool:
 # the wrap itself are re-exported from `engine.create_pdf` (see the import).
 
 
-def _list_sources(root: Path, images: bool) -> tuple[list[tuple[Path, str]], list[str]]:
+def _list_sources(
+    root: Path, images: bool, extra: tuple[str, ...] = ()
+) -> tuple[list[tuple[Path, str]], list[str]]:
     """Every source under root, with its path RELATIVE to root, plus
-    unreadable dirs. PDFs always; image files when `images` is on (P3).
+    unreadable dirs. PDFs always; image files when `images` is on (P3);
+    `extra` for a caller that accepts more (a guided action whose FIRST step
+    is `create_pdf` walks Office sources too — P22 slice E).
 
-    An image's mirrored name gains `.pdf` rather than replacing the
+    A non-PDF's mirrored name gains `.pdf` rather than replacing the
     extension: `invoice.tif` and `invoice.pdf` in one folder must not
     collide, and the original name stays legible in the output."""
     files: list[tuple[Path, str]] = []
     skipped: list[str] = []
-    wanted = (".pdf",) + (IMAGE_SUFFIXES if images else ())
+    wanted = (".pdf",) + (IMAGE_SUFFIXES if images else ()) + tuple(extra)
     for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: skipped.append(str(e))):
         dirnames.sort()
         for name in sorted(filenames):
