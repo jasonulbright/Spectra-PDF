@@ -8,6 +8,7 @@ import {
   getState,
   closeAllFiles,
   invokeAppCommand,
+  setReactInputValue,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -80,6 +81,16 @@ const notCatalog = (text: string): boolean => {
     'Português (Brasil)', '日本語', '简体中文',
   ]);
   if (exact.has(text)) return true;
+  // A REDACTION CODE row (F15 slice E): the statutory citation, an em dash,
+  // then the description. The citation — `(b)(6)`, `(k)(2)` — is the
+  // statute's own text AND the exact string drawn into the redaction box, so
+  // translating it would misname the exemption a release is checked against;
+  // it never passes through the catalog by design. The DESCRIPTION after the
+  // dash is our prose and must, so this returns "not a leak" only when that
+  // half is bracketed, and lets a bare-English description through to be
+  // reported like any other.
+  const codeRow = /^\([^)]*\)[^—]*—\s*(.+)$/.exec(text);
+  if (codeRow) return codeRow[1].startsWith('[');
   // A single character is notation (a keyboard letter, a maths sign).
   if (text.length === 1) return true;
   return false;
@@ -276,6 +287,28 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
         timeoutMsg: 'choosing MRC did not reveal its options',
       });
       await sweep('[data-testid="tool-dock"]', leaks);
+
+      // F15 slice D/E: Search & Redact is the widest new dock surface — scope,
+      // the eight pattern names, the three `expand` choices WITH their
+      // consequence hints, and two COLLAPSED groups (the word list and the
+      // redaction properties, whose colour/alignment/code controls only exist
+      // once opened). The Compress-MRC lesson generalized: a sweep of the
+      // default state never reaches a surface hidden behind a disclosure.
+      expect(await invokeAppCommand('tools.panel.search_redact')).toBe(true);
+      await $('[data-testid="search-redact-panel"]').waitForDisplayed({ timeout: 10_000 });
+      await $('[data-testid="search-redact-wordlist-toggle"]').click();
+      await $('[data-testid="search-redact-wordlist"]').waitForDisplayed({ timeout: 10_000 });
+      await $('[data-testid="search-redact-properties-toggle"]').click();
+      await $('[data-testid="redaction-properties"]').waitForDisplayed({ timeout: 10_000 });
+      // The overlay half of the properties (alignment, size, colour, repeat)
+      // only renders once there IS an overlay — another disclosure.
+      await setReactInputValue('[data-testid="redact-props-overlay"]', 'CODE');
+      await $('[data-testid="redact-props-align"]').waitForDisplayed({ timeout: 10_000 });
+      await browser.pause(200);
+      await sweep('[data-testid="tool-dock"]', leaks);
+      await setReactInputValue('[data-testid="redact-props-overlay"]', '');
+      await $('[data-testid="redact-props-reset"]').click();
+
       expect(await invokeAppCommand('tools.panel.rotate')).toBe(true);
       await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
 
