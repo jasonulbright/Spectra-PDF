@@ -81,9 +81,8 @@ CLAUDE.md
 docs/PUNCHLIST.md
 docs/architecture/
 docs/reviews/
-# Hygiene-pass additions (2026-07-24): the doc map, archived punchlist
-# history, and external-baseline reference material (names competitors —
-# must never reach the public repo).
+# The doc map, archived tracker history, and external-baseline reference
+# material: internal-only, must never reach the public repo.
 docs/README.md
 docs/archive/
 docs/reference/
@@ -94,7 +93,7 @@ docs/reference/
 # Owner's scratch input file (instructions dropped in for a session).
 userinput.md
 
-# LibreOffice runtime for O1 export (assembled by scripts/bundle-libreoffice.ps1;
+# LibreOffice runtime for Office export (assembled by scripts/bundle-libreoffice.ps1;
 # large, gitignored like resources/python & resources/ghostscript).
 resources/libreoffice/
 tests/softhsm2/

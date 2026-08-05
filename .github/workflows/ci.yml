@@ -161,7 +161,7 @@ jobs:
     # runtime tests what nobody runs and rots (see CLAUDE.md's never-pin
     # rule, written after the last stale-pin e2e breakage).
     # The full 101-spec suite remains the release gate, run locally on the
-    # rebuilt binary; its green is recorded per milestone in the punchlist.
+    # rebuilt binary; its green is recorded per milestone.
     #
     # EXPERIMENT RUN AND FAILED, 2026-07-30. Correcting the note above first:
     # #5640 is CLOSED AS BY DESIGN, so there is NO upstream fix to wait for and
@@ -225,9 +225,9 @@ jobs:
         shell: pwsh
 
       - name: Create resource stubs for the Tauri build script
-        # `--no-bundle` does NOT skip resource validation — the punchlist said it
-        # did, and that claim was wrong (proven 2026-07-29: this job failed with
-        # did, and that claim was wrong (proven 2026-07-29: this job failed with a missing-resource error for resources/libreoffice). Every path in
+        # `--no-bundle` does NOT skip resource validation: without the stubs this
+        # job fails with a missing-resource error for resources/libreoffice. Every
+        # path in tauri.conf.json must EXIST at build time; an empty dir satisfies it.
         # tauri.conf.json must EXIST at build time; an empty dir satisfies it.
         # fonts and libreoffice are stubbed rather than vendored because this job
         # is currently a WebView2 experiment — the specs that genuinely need them
