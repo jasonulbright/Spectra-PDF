@@ -21,16 +21,20 @@ describe('resolveLanguage (N12)', () => {
   });
 
   it('takes a base language to a REGIONAL catalog when that is the only one', () => {
-    // Portuguese ships as pt-BR only. Every other spelling of the language
-    // must reach it rather than fall back to English.
+    // Portuguese and Chinese ship as pt-BR / zh-CN only. Every other spelling
+    // of those languages must reach them rather than fall back to English.
     expect(resolveLanguage('pt')).toBe('pt-BR');
     expect(resolveLanguage('pt-PT')).toBe('pt-BR');
+    expect(resolveLanguage('zh')).toBe('zh-CN');
+    expect(resolveLanguage('zh-Hans')).toBe('zh-CN');
+    expect(resolveLanguage('zh-TW')).toBe('zh-CN');
   });
 
   it('is case-insensitive about the tag', () => {
     expect(resolveLanguage('PT-br')).toBe('pt-BR');
     expect(resolveLanguage('ES')).toBe('es');
     expect(resolveLanguage('JA')).toBe('ja');
+    expect(resolveLanguage('ZH-cn')).toBe('zh-CN');
   });
 
   it('takes a regional tag to its bare catalog', () => {
