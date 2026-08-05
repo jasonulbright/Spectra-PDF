@@ -6,6 +6,7 @@
 import { loadDocument } from './pdfRenderer';
 import { extractPageText } from '../search/extract';
 import { batch } from './tauri-bridge';
+import { mrcBatchNote, type MrcReport } from './mrc-presets';
 import type { BatchIo, BatchPdfDoc } from './batch-ocr';
 import type { OcrApplyPage } from './ocr-apply';
 import type { OcrResult } from '../ocr/types';
@@ -50,6 +51,10 @@ export function createBatchIo(
     repair: (source: string, output: string) => Promise<void>;
     /** Recognise one page of `path` (0-based index). */
     recognize: (path: string, pageIndex: number) => Promise<OcrResult>;
+    /** O8: `compress` with `quality="mrc"` over `path`, in place. Resolves to
+     * the engine's own report so the note can be shaped here rather than in
+     * the pure driver. */
+    compressMrc: (path: string, preset: string, verifyText: boolean) => Promise<MrcReport>;
   },
 ): BatchIo {
   return {
@@ -79,6 +84,9 @@ export function createBatchIo(
       } finally {
         if (proxy) await proxy.loadingTask.destroy().catch(() => {});
       }
+    },
+    async compressMrc(path, preset, verifyText) {
+      return mrcBatchNote(await engine.compressMrc(path, preset, verifyText));
     },
     async repairToScratch(src) {
       const scratch = await batch.createScratch('repair');

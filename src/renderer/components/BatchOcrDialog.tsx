@@ -16,6 +16,11 @@ import {
 import { createBatchIo } from '../lib/batch-ocr-io';
 import { formatBatchLog, batchLogFileName } from '../lib/batch-log';
 import { getSettings } from '../lib/app-settings';
+import {
+  normalizeMrcPreset,
+  type MrcPreset,
+  type MrcReport,
+} from '../lib/mrc-presets';
 import { TEST_HARNESS_ENABLED, registerBatchOcr } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber, tOcrLanguage } from '../i18n';
@@ -65,6 +70,14 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // driver stays mirror-only, and there is no mid-run stop.
   const [inPlace, setInPlace] = useState(false);
   const [confirmInPlace, setConfirmInPlace] = useState(false);
+  // O8 (issue #5): MRC-compress each processed file after recognition. Off by
+  // default like every other option here — it rewrites the page images, which
+  // is more than "make this searchable" promises on its own.
+  const [mrc, setMrc] = useState(false);
+  const [mrcPreset, setMrcPreset] = useState<MrcPreset>(() =>
+    normalizeMrcPreset(getSettings().mrcPreset),
+  );
+  const [mrcVerify, setMrcVerify] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [report, setReport] = useState<BatchReport | null>(null);
@@ -283,6 +296,9 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         replace_repaired_originals: repairDamaged && replaceRepaired,
         log_dir: logDir,
         in_place: true,
+        mrc,
+        mrc_preset: mrcPreset,
+        mrc_verify_text: mrcVerify,
       })) as unknown as BatchReport & { logPath?: string };
       setReport(rep);
       setLogPath(rep.logPath ?? null);
@@ -319,10 +335,26 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           await callRaw('repair', { file: src, output: out });
         },
         recognize: (path, pageIndex) => recognizePage(callRaw, path, pageIndex, lang),
+        // O8 — the mirror OUTPUT is the input here, which is what makes the
+        // recognize-then-MRC order structural. `callRaw` for the same reason
+        // every other engine call in this dialog uses it: batch lives outside
+        // the workspace, so the commit gate must not run.
+        compressMrc: async (path, preset, verifyText) =>
+          (await callRaw('compress', {
+            file: path,
+            output: path,
+            quality: 'mrc',
+            mrc_preset: preset,
+            mrc_verify_text: verifyText,
+            mrc_lang: lang,
+            gs_path: await ghostscriptPath(),
+            tesseract_path: await tesseractPath(),
+          })) as unknown as MrcReport,
       });
       const rep = await runBatchOcr(entries, dest, skippedDirs, io, {
         onProgress: setProgress,
         isCancelled: () => cancelledRef.current,
+        ...(mrc ? { mrc: { preset: mrcPreset, verifyText: mrcVerify } } : {}),
         // All four default to off. Batch OCR's standing guarantee is that it
         // does not modify the source tree; these are the opt-ins that invert
         // it, and nothing turns them on but the user.
@@ -428,6 +460,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // 'ocr' rows carry a reason too when SOME scanned pages had no
   // recognizable text — the mixed-file honesty note (review-caught).
   const notedOcr = report?.results.filter((r) => r.status === 'ocr' && r.reason) ?? [];
+  const notedMrc = report?.results.filter((r) => r.mrc) ?? [];
 
   return (
     <Shell onClose={guardedClose}>
@@ -531,6 +564,53 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           <p className="text-xs text-neutral-500">
             {tChrome('dialog.batch.blurb')}
           </p>
+
+          {/* O8 (issue #5, second comment): "a batch option that could just
+              compress automatically". The user with a folder of smartphone
+              scans is standing in THIS dialog, so the option lives here — and
+              it runs AFTER recognition, which is structural rather than
+              documented: the file MRC reads is the recognised output. */}
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="batch-mrc"
+                checked={mrc}
+                onChange={() => setMrc(!mrc)}
+                className="rounded bg-neutral-900 border-neutral-600"
+              />
+              <span className="text-sm text-neutral-300">{tChrome('dialog.batch.mrc')}</span>
+            </label>
+            {mrc && (
+              <div className="flex flex-col gap-2 pl-6">
+                <label className="flex items-center gap-2 text-sm">
+                  <span className="text-neutral-400">{tChrome('dialog.batch.mrcPreset')}</span>
+                  <select
+                    data-testid="batch-mrc-preset"
+                    aria-label={tChrome('dialog.batch.mrcPreset')}
+                    value={mrcPreset}
+                    onChange={(e) => setMrcPreset(normalizeMrcPreset(e.target.value))}
+                    className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm"
+                  >
+                    <option value="archival">{tChrome('panel.compress.mrcPresetArchival')}</option>
+                    <option value="balanced">{tChrome('panel.compress.mrcPresetBalanced')}</option>
+                    <option value="smallest">{tChrome('panel.compress.mrcPresetSmallest')}</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    data-testid="batch-mrc-verify"
+                    checked={mrcVerify}
+                    onChange={() => setMrcVerify(!mrcVerify)}
+                    className="rounded bg-neutral-900 border-neutral-600"
+                  />
+                  <span className="text-sm text-neutral-300">{tChrome('dialog.batch.mrcVerify')}</span>
+                </label>
+                <p className="text-xs text-neutral-500">{tChrome('dialog.batch.mrcNote')}</p>
+              </div>
+            )}
+          </div>
 
           {/* Requests 2 and 3. Presented as one clearly-fenced section because
               everything in it BREAKS the promise stated directly above it —
@@ -766,6 +846,22 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               ))}
             </div>
           )}
+          {/* O8: what MRC did to each file, or why it did nothing. A run the
+              user asked to compress must say what it compressed — a silent
+              no-op on a folder of non-scans would read as a saving that never
+              happened. */}
+          {notedMrc.length > 0 && (
+            <div
+              className="max-h-24 overflow-y-auto border border-neutral-800 rounded p-2"
+              data-testid="batch-ocr-mrc-notes"
+            >
+              {notedMrc.map((r) => (
+                <p key={r.rel} className="text-xs text-neutral-400">
+                  {tChrome('dialog.batch.rowMrc', { rel: r.rel, note: r.mrc ?? '' })}
+                </p>
+              ))}
+            </div>
+          )}
           {report.skippedDirs.length > 0 && (
             <p className="text-xs text-amber-400">
               {tChrome('dialog.batch.unreadableDirs', { dirs: report.skippedDirs.join('; ') })}
@@ -846,9 +942,11 @@ function ProgressLine({
         ? tChrome('dialog.batch.verbCopying')
         : phase === 'writing'
           ? tChrome('dialog.batch.verbWriting')
-          : phase === 'scanning'
-            ? tChrome('dialog.batch.verbScanning')
-            : tChrome('dialog.batch.verbLoading');
+          : phase === 'compressing'
+            ? tChrome('dialog.batch.verbCompressing')
+            : phase === 'scanning'
+              ? tChrome('dialog.batch.verbScanning')
+              : tChrome('dialog.batch.verbLoading');
   return (
     <p className="text-sm text-neutral-300" data-testid="batch-ocr-progress" aria-live="polite">
       {/* One whole narration — the file name and the verb used to sit in

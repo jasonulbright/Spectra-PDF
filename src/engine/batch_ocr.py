@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pikepdf
 
+from engine.compress import compress
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
 from engine.repair import repair
@@ -37,6 +38,53 @@ from engine.repair import repair
 # Mirrors search/extract.ts MIN_TEXT_CHARS -- the GUI and the CLI must not
 # disagree about whether a page is a scan.
 MIN_TEXT_CHARS = 16
+
+
+def _mrc_step(
+    source: Path,
+    dest: Path,
+    preset: str,
+    verify_text: bool,
+    lang: str,
+    gs_path: str,
+    tesseract_path: str,
+) -> tuple[bool, str]:
+    """MRC-compress one already-recognised file. Returns (applied, note).
+
+    O8 slice D. ORDER is the whole reason this is a separate step rather than
+    a flag on the recognition call: recognition rasterises from the PAGE, so
+    MRC first would hand Tesseract the reconstruction instead of the scan
+    (§ 5.4). Here the recognised output IS the input, which makes the order
+    structural rather than documented.
+
+    A failure NEVER fails the file. The searchable copy is the deliverable the
+    user asked for and it already exists; MRC is an additional saving on top.
+    A file with no scanned page refuses by name from the engine and that
+    refusal is the ordinary case for a mixed folder -- it is reported as a
+    note, not as an error, and the file keeps the bytes it already had.
+    """
+    try:
+        report = compress(
+            str(source),
+            str(dest),
+            quality="mrc",
+            mrc_preset=preset,
+            mrc_verify_text=verify_text,
+            mrc_lang=lang,
+            gs_path=gs_path,
+            tesseract_path=tesseract_path,
+        )
+    except Exception as exc:  # noqa: BLE001 - per-file isolation, as above
+        return False, f"MRC compression did not apply: {exc}"
+    note = (
+        f"MRC compressed {report['pages_mrc']} page(s), "
+        f"{report['original_size']} -> {report['compressed_size']} bytes"
+    )
+    if report.get("pages_reverted"):
+        note = (
+            f"{note}; {report['pages_reverted']} page(s) reverted by text verification"
+        )
+    return True, note
 
 
 def _pages_needing_ocr(path: str, pdf: pikepdf.Pdf) -> list[int]:
@@ -261,6 +309,9 @@ def ocr_file(
     language: str = "eng",
     tesseract_path: str = "",
     gs_path: str = "gs",
+    mrc: bool = False,
+    mrc_preset: str = "balanced",
+    mrc_verify_text: bool = False,
 ) -> dict:
     """Make ONE file searchable — the single-file arm of the batch pipeline.
 
@@ -273,6 +324,9 @@ def ocr_file(
 
     A file with nothing that looks like a scan is reported, not rewritten:
     in-place → no write at all; to a distinct output → a byte copy.
+
+    `mrc` (O8) MRC-compresses the recognised result afterwards — recognition
+    first, always (§ 5.4). It never fails the file; the note rides the result.
     """
     input_path = Path(file)
     output_path = Path(output)
@@ -281,6 +335,23 @@ def ocr_file(
     except OSError:
         same = False
 
+    def _mrc_tail(result: dict) -> dict:
+        if not mrc:
+            return result
+        # Every branch above has already put the deliverable at `output_path`
+        # (recognised, or copied, or — in place — it was always there), so MRC
+        # reads and rewrites that one file. `mrc_compress` handles the
+        # same-file case with a staged temp and a rename.
+        applied, note = _mrc_step(
+            output_path, output_path, mrc_preset, mrc_verify_text, language, gs_path,
+            tesseract_path,
+        )
+        result["mrc"] = note
+        if applied:
+            result["mrcApplied"] = True
+            result["output"] = str(output_path)
+        return result
+
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
         needing = _pages_needing_ocr(file, pdf)
@@ -288,12 +359,12 @@ def ocr_file(
     if not needing:
         if not same:
             _copy_file(input_path, output_path)
-        return {
+        return _mrc_tail({
             "output": str(output_path),
             "pages_total": total,
             "pages_ocrd": 0,
             "skipped": "no scanned pages",
-        }
+        })
 
     pages: list[dict] = []
     for i in needing:
@@ -305,19 +376,19 @@ def ocr_file(
     if not pages:
         if not same:
             _copy_file(input_path, output_path)
-        return {
+        return _mrc_tail({
             "output": str(output_path),
             "pages_total": total,
             "pages_ocrd": 0,
             "skipped": "no text recognized",
-        }
+        })
 
     apply_ocr_layer(file, str(output_path), pages)
-    return {
+    return _mrc_tail({
         "output": str(output_path),
         "pages_total": total,
         "pages_ocrd": len(pages),
-    }
+    })
 
 
 def batch_ocr(
@@ -335,6 +406,9 @@ def batch_ocr(
     in_place: bool = False,
     passwords: dict | None = None,
     include_images: bool = False,
+    mrc: bool = False,
+    mrc_preset: str = "balanced",
+    mrc_verify_text: bool = False,
 ) -> dict:
     """Mirror a folder of PDFs into searchable copies — or, with `in_place`,
     REPLACE each original with its searchable version (O7 in-place batch
@@ -354,7 +428,15 @@ def batch_ocr(
     sweep. Each is wrapped into a one-page PDF at its own natural size and
     then travels the identical path; the mirrored name gains `.pdf` rather
     than replacing the extension, so `invoice.tif` and `invoice.pdf` in one
-    folder cannot collide."""
+    folder cannot collide.
+
+    O8 — `mrc` MRC-compresses each processed file AFTER recognition (§ 5.4:
+    recognition rasterises from the page, so the reverse order would hand
+    Tesseract the reconstruction). It is the answer to issue #5's "a batch
+    option that could just compress automatically": the user with a folder of
+    smartphone scans is standing in this run. A file MRC declines — anything
+    that is not a scan — keeps the bytes it already had and says so; MRC
+    never fails a file whose searchable copy already succeeded."""
     source_path = Path(source).resolve()
     if not source_path.is_dir():
         raise ValueError(f"Source folder not found: {source}")
@@ -514,10 +596,32 @@ def batch_ocr(
                                 "pages had no recognizable text"
                             )
 
+            # ── MRC, after recognition and before the tail ──────────────
+            #
+            # After, because § 5.4's order is structural here: the file this
+            # reads is the RECOGNISED one. Before the tail, because the tail
+            # verifies the output and may move originals on the strength of
+            # it — verifying bytes that are about to be replaced would verify
+            # the wrong file.
+            if mrc and result is not None and result["status"] != "skipped":
+                if in_place and result["status"] != "ocr":
+                    # Nothing was staged (the file needed no OCR), so MRC
+                    # produces the staging itself, from the original.
+                    mrc_source = scratch if scratch is not None else abs_path
+                else:
+                    mrc_source = out_path
+                applied_mrc, note = _mrc_step(
+                    mrc_source, out_path, mrc_preset, mrc_verify_text, lang, gs_path,
+                    tesseract_path,
+                )
+                result["mrc"] = note
+                if applied_mrc:
+                    result["mrcApplied"] = True
+
             # ── tail: verify, heal, move ────────────────────────────────
             if result is not None:
                 if result["status"] != "skipped" and (
-                    (in_place and result["status"] == "ocr")
+                    (in_place and (result["status"] == "ocr" or result.get("mrcApplied")))
                     or moved_root
                     or (scratch is not None and replace_repaired_originals)
                 ):
@@ -533,7 +637,7 @@ def batch_ocr(
                 # In place: the verified staging REPLACES the original
                 # atomically (same directory, os.replace). A skipped result
                 # leaves the original untouched; the finally unlinks staging.
-                if in_place and result["status"] == "ocr":
+                if in_place and (result["status"] == "ocr" or result.get("mrcApplied")):
                     try:
                         os.replace(out_path, abs_path)
                         result["inPlace"] = True
@@ -685,6 +789,10 @@ def _file_line(r: dict) -> str:
             line += f" ({r['reason']})"
     else:
         line = f"{tag}{r['rel']} — {r['reason']}" if r.get("reason") else f"{tag}{r['rel']}"
+    if r.get("mrc"):
+        # O8: the size saving — or the reason there was none — is the whole
+        # point of having asked for MRC, so it is never left to inference.
+        line += f" [{r['mrc']}]"
     if r.get("repaired"):
         line += (
             " [repaired; original replaced]"

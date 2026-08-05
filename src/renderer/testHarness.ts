@@ -249,6 +249,31 @@ export function registerCreatePdf(handlers: CreatePdfHandlers | null): void {
 }
 
 /**
+ * Compress panel (O8): the save dialog is native and undrivable, so e2e sets
+ * the panel's REAL controls and runs the REAL engine call with an injected
+ * output path — the createPdfRun precedent. `setQuality` goes through the
+ * panel's own change handler, so the DPI/MRC branch it drives is the branch a
+ * click drives.
+ */
+export interface CompressHandlers {
+  run: (output: string) => Promise<string>;
+  setQuality: (quality: string) => void;
+  setMrcPreset: (preset: string) => void;
+  setVerifyText: (on: boolean) => void;
+  /** What the panel currently HAS. The run reads panel state, so the harness
+   * waits on this rather than on a timer — a fixed sleep between the setters
+   * and the run is a race that fails on a slow machine and passes on a fast
+   * one, which is the worst kind of flake. */
+  snapshot: () => { quality: string; mrcPreset: string; verifyText: boolean };
+}
+
+let compress: CompressHandlers | null = null;
+
+export function registerCompress(handlers: CompressHandlers | null): void {
+  compress = handlers;
+}
+
+/**
  * Export Pages as Images (O1): the save dialog is native — e2e injects the
  * destination and runs the REAL gated export path the Export button runs.
  */
@@ -954,6 +979,12 @@ export interface TestHarness {
   editParagraphOpen: (pageId: string, index: number) => void;
   /** Create PDF from PostScript (Phase 8; dialog must be open). */
   createPdfRun: (source: string, output: string, preset?: string) => Promise<boolean>;
+  /** Compress panel (O8; panel must be mounted). Sets the panel's own
+   * controls, then runs the real engine call with an injected output path. */
+  compressRun: (
+    output: string,
+    opts?: { quality?: string; mrcPreset?: string; verifyText?: boolean },
+  ) => Promise<string>;
   /** Export pages as images (O1; dialog must be open). Null result = failed
    *  (the dialog shows the error); non-null = the engine result. */
   exportImagesRun: (
@@ -1744,6 +1775,33 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return createPdf.run(source, output, preset);
+    },
+    compressRun: async (output, opts) => {
+      if (!compress) {
+        const msg = 'compressRun: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      // Set the panel's own state, WAIT for the render that applies it, then
+      // run — the run reads panel state, and a fixed sleep here would be a
+      // machine-speed race.
+      if (opts?.quality !== undefined) compress.setQuality(opts.quality);
+      if (opts?.mrcPreset !== undefined) compress.setMrcPreset(opts.mrcPreset);
+      if (opts?.verifyText !== undefined) compress.setVerifyText(opts.verifyText);
+      for (let i = 0; i < 200; i++) {
+        const now = compress?.snapshot();
+        if (
+          now &&
+          (opts?.quality === undefined || now.quality === opts.quality) &&
+          (opts?.mrcPreset === undefined || now.mrcPreset === opts.mrcPreset) &&
+          (opts?.verifyText === undefined || now.verifyText === opts.verifyText)
+        ) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      if (!compress) throw new Error('compressRun: panel unmounted mid-run');
+      return compress.run(output);
     },
     exportImagesRun: async (out, opts) => {
       if (!exportImages) {

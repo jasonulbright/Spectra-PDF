@@ -94,6 +94,10 @@ function fileLine(r: BatchFileResult): string {
   } else {
     line = r.reason ? `${tag}${r.rel} — ${r.reason}` : `${tag}${r.rel}`;
   }
+  // O8: the size saving — or the reason there was none — is the whole point
+  // of having asked for MRC, so it is never left to inference. Byte-identical
+  // to engine/batch_ocr.py's `_file_line`, like every other field here.
+  if (r.mrc) line += ` [${r.mrc}]`;
   if (r.repaired) {
     line += r.repairedOriginalReplaced
       ? ' [repaired; original replaced]'

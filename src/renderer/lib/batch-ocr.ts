@@ -45,6 +45,10 @@ export interface BatchFileResult {
    * never silent either: the user asked for their tree to be reorganised and
    * has to be told which files were left behind. */
   moveError?: string;
+  /** O8: what the MRC pass did to this file, or why it did nothing. Present
+   * only when the run asked for MRC. Never a failure of its own — the
+   * searchable copy is the deliverable and it already exists. */
+  mrc?: string;
   /** The source failed to load and tier-1 repair made it readable. */
   repaired?: boolean;
   /** The repaired bytes were written back over the damaged original. */
@@ -63,7 +67,15 @@ export interface BatchProgress {
   fileIndex: number; // 0-based index of the file being worked
   fileCount: number;
   rel: string;
-  phase: 'loading' | 'scanning' | 'recognizing' | 'writing' | 'copying' | 'repairing' | 'moving';
+  phase:
+    | 'loading'
+    | 'scanning'
+    | 'recognizing'
+    | 'writing'
+    | 'copying'
+    | 'repairing'
+    | 'moving'
+    | 'compressing';
   /** 1-based page being recognized and the count of pages to recognize —
    * only meaningful in the 'recognizing' phase. */
   page?: number;
@@ -98,6 +110,11 @@ export interface BatchIo {
   /** Is the mirror output at `path` a readable PDF of `expectedPages` pages?
    * Called only before a source is about to move — see the run loop. */
   verifyOutput(path: string, expectedPages: number): Promise<boolean>;
+  /** O8: MRC-compress the mirror output IN PLACE. Resolves to the note that
+   * goes on the result and into the log, or rejects — a rejection is a note,
+   * never a file failure (the searchable copy is already written). Called
+   * only when the run asked for MRC. */
+  compressMrc(path: string, preset: string, verifyText: boolean): Promise<string>;
   /** Tier-1 engine repair of a damaged source into a scratch file; resolves to
    * the scratch path. Called only when `repairDamaged` is on. */
   repairToScratch(src: string): Promise<string>;
@@ -125,6 +142,10 @@ export interface BatchRunOptions {
    * `repairDamaged`; the repaired copy is the pre-OCR one, deliberately — the
    * user asked for their file fixed, not for a searchable derivative of it. */
   replaceRepairedOriginals?: boolean;
+  /** OPT-IN (O8, issue #5). MRC-compress each mirrored file AFTER recognition
+   * — the order is § 5.4's and it is structural here, since the file MRC
+   * reads is the recognised output. */
+  mrc?: { preset: string; verifyText: boolean };
 }
 
 // ── Path helpers (vitest-covered) ─────────────────────────────────────────
@@ -180,7 +201,7 @@ export async function runBatchOcr(
 ): Promise<BatchReport> {
   const onProgress = options.onProgress ?? (() => {});
   const isCancelled = options.isCancelled ?? (() => false);
-  const { movedRoot, errorRoot, repairDamaged, replaceRepairedOriginals } = options;
+  const { movedRoot, errorRoot, repairDamaged, replaceRepairedOriginals, mrc } = options;
   const results: BatchFileResult[] = [];
   let cancelled = false;
 
@@ -322,6 +343,22 @@ export async function runBatchOcr(
       // Everything that touches the user's SOURCE tree happens here, once,
       // after the file's outcome is known — never inside a success branch.
       if (result) {
+        // O8 — MRC, after recognition (the file it reads IS the recognised
+        // output, which makes § 5.4's order structural rather than
+        // documented) and before the verification below (which may let an
+        // original move on the strength of the output; verifying bytes about
+        // to be replaced would verify the wrong file). A failure here is a
+        // note, never a status change: the searchable copy is the deliverable
+        // the user asked for and it is already written.
+        if (mrc && result.status !== 'skipped') {
+          onProgress({ ...base, phase: 'compressing' });
+          try {
+            result.mrc = await io.compressMrc(dest, mrc.preset, mrc.verifyText);
+          } catch (err) {
+            result.mrc = `MRC compression did not apply: ${messageOf(err)}`;
+          }
+        }
+
         // Verification runs only when a source is about to move, which is the
         // constraint as written: "verify the output is a valid PDF BEFORE the
         // source moves". Verifying on every ordinary run would double the IO

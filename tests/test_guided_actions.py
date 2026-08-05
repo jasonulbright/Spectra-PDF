@@ -85,10 +85,23 @@ class TestValidateSteps:
                     "mrc_pdfa_safe": True,
                     "mrc_bg_div": 3,
                     "mrc_fg_div": 5,
+                    # Slice E — the quality gate is a real switch on every
+                    # surface `compress` reaches, watched folders and
+                    # scheduled runs included.
+                    "mrc_verify_text": True,
+                    "mrc_lang": "deu",
                 },
             }
         ])
         assert steps[0]["params"]["mrc_preset"] == "smallest"
+        assert steps[0]["params"]["mrc_verify_text"] is True
+
+    def test_the_verification_step_gets_a_recognizer_path(self):
+        from engine.guided_actions import _STEPS
+
+        # A verification that could not find Tesseract would refuse the whole
+        # run by name; the step declares the tool path so it does not.
+        assert "tesseract_path" in _STEPS["compress"][2]
 
     def test_encrypt_rules(self):
         with pytest.raises(ValueError, match="last step"):

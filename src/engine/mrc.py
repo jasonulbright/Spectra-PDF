@@ -71,6 +71,7 @@ from PIL import Image
 from pikepdf import Dictionary, Name
 
 from . import budget
+from . import mrc_verify
 from .mrc_codecs import (
     CCITT_G4,
     JBIG2_GENERIC,
@@ -94,15 +95,34 @@ from .validate import validate_pdf
 #: a LARGER k lowers the threshold and finds LESS ink. Archival therefore runs
 #: the smallest k — it keeps thin strokes, at the cost of keeping some paper
 #: texture with them.
+#:
+#: `verify_threshold` (slice E) is the floor `mrc_verify_text` reverts below,
+#: and it is set to catch a SEGMENTATION FAILURE, not an OCR wobble. Measured
+#: over the matrix (`mrc-matrix.local.py`, six sources × three presets × three
+#: codecs): the WORST good page any preset produced scored 0.9781 (the
+#: greyscale scan under archival), while the failure this gate exists for — a
+#: page thresholded for type that is not there — returns near-nothing, which
+#: is why recon scored a misjudged page in the low hundredths. The floors sit
+#: between those two populations with room to spare. **0.98 was the first
+#: value here and the matrix caught it**: it would have REVERTED that
+#: greyscale page, handing the user back the original they asked to shrink —
+#: a false revert is its own silent degradation, and setting the floor at the
+#: measured best case is how you build one.
 PRESETS: dict[str, dict] = {
     "archival": {
         "mask_codec": JBIG2_GENERIC,  # no symbol may stand in for another
-        "symbol_threshold": 0.98,
+        # Archival's own codec ignores this — generic mode has no symbol
+        # matching — but a caller may ask for symbol mode BY NAME on top of
+        # this preset, and then it is used. 0.97 is the strictest value
+        # jbig2enc accepts; the 0.98 that stood here reached the encoder as
+        # "Invalid value for threshold" (matrix-caught).
+        "symbol_threshold": 0.97,
         "bg_div": 2,
         "bg_rate": 40,
         "fg_div": 3,
         "fg_quality": 65,
         "sauvola_k": 0.10,
+        "verify_threshold": 0.97,
     },
     "balanced": {
         "mask_codec": JBIG2_SYMBOL,
@@ -112,6 +132,7 @@ PRESETS: dict[str, dict] = {
         "fg_div": 4,
         "fg_quality": 45,
         "sauvola_k": 0.20,
+        "verify_threshold": 0.95,
     },
     "smallest": {
         "mask_codec": JBIG2_SYMBOL,
@@ -121,6 +142,7 @@ PRESETS: dict[str, dict] = {
         "fg_div": 6,
         "fg_quality": 35,
         "sauvola_k": 0.30,
+        "verify_threshold": 0.90,
     },
 }
 DEFAULT_PRESET = "balanced"
@@ -159,6 +181,11 @@ FLAT_INK_CHROMA_VARIANCE = 8.0
 # its scanned pages and byte-identical output on the rest.
 DECISION_MRC = "mrc"
 DECISION_UNTOUCHED = "untouched"
+#: Slice E. The page WAS a scan, its layers WERE built, and the text check
+#: rejected them — a distinct decision from "untouched" because the two mean
+#: different things to whoever reads the report: one page had nothing to
+#: separate, the other had its separation refused.
+DECISION_REVERTED = "reverted"
 
 
 @dataclass
@@ -910,6 +937,9 @@ def mrc_compress(
     bg_div: int | None = None,
     fg_div: int | None = None,
     pdfa_safe: bool = False,
+    verify_text: bool = False,
+    lang: str = "eng",
+    tesseract_path: str = "",
     gs_path: str = "gs",
     jbig2_path: str = "",
 ) -> dict:
@@ -924,6 +954,12 @@ def mrc_compress(
     is no append path and none is invented. The panel writes to a NEW file
     (Compress's shipped semantics); the in-place CLI and guided-action arms
     carry the same warning `compress` already carries.
+
+    `verify_text` (slice E) recognises the SOURCE page and the reconstructed
+    MRC page and REFUSES any page whose text similarity falls below the
+    preset's threshold — that page keeps its original scan and the report says
+    why. `engine/mrc_verify.py` records why the check is made against the
+    encoded layers and why it runs before the surgery rather than after it.
     """
     settings = resolve_preset(preset)
     if mask_codec:
@@ -962,6 +998,16 @@ def mrc_compress(
         raise RuntimeError(
             f"Ghostscript is not available at {gs_path or '(no path given)'} — MRC cannot "
             "verify the stencils it writes, and an unverified stencil is not shippable."
+        )
+    verify_threshold = float(settings["verify_threshold"])
+    if verify_text and (not tesseract_path or not os.path.isfile(tesseract_path)):
+        # Asked for and not available REFUSES. Running the compression with
+        # the check quietly skipped would hand back exactly the output the
+        # switch exists to prevent, under a setting that says otherwise.
+        raise RuntimeError(
+            f"The OCR engine is not available at {tesseract_path or '(no path given)'}, so "
+            "the text of an MRC page cannot be verified. Turn off text verification or "
+            "run scripts/bundle-tesseract.ps1."
         )
 
     info = validate_pdf(file)
@@ -1020,6 +1066,8 @@ def mrc_compress(
         )
 
         applied = 0
+        reverted = 0
+        lowest: float | None = None
         for (candidate, mask, stats, page_bg_div), stream in zip(prepared, streams):
             page = pdf.pages[candidate.page_number - 1]
             try:
@@ -1084,6 +1132,41 @@ def mrc_compress(
                 foreground = Image.new("RGB", (1, 1), (0, 0, 0))
             fg_bytes = encode_layer_jpeg(foreground, quality=int(settings["fg_quality"]))
 
+            similarity: float | None = None
+            if verify_text:
+                # Slice E. Reconstruct what a viewer will draw from the bytes
+                # about to be embedded, recognise both rasters, and REFUSE the
+                # page if the words did not survive. This runs BEFORE any
+                # object is created or any content stream is touched, so a
+                # refusal leaves the page exactly as it arrived — there is no
+                # undo path that could get it wrong.
+                recon = mrc_verify.reconstruct_page(
+                    bg_bytes, fg_bytes, ink, (source.width, source.height)
+                )
+                similarity, divergence = mrc_verify.compare_page(
+                    source, recon, lang, tesseract_path
+                )
+                del recon
+                if similarity < verify_threshold:
+                    reverted += 1
+                    reason = (
+                        f"text verification failed: {similarity:.4f} of the source page's "
+                        f"words survived, below this preset's {verify_threshold:.2f} floor"
+                    )
+                    if divergence:
+                        reason = f"{reason} (first difference — {divergence})"
+                    pages.append(
+                        {
+                            "page": candidate.page_number,
+                            "decision": DECISION_REVERTED,
+                            "reason": reason,
+                            "text_similarity": round(similarity, 4),
+                            "verify_threshold": verify_threshold,
+                        }
+                    )
+                    continue
+                lowest = similarity if lowest is None else min(lowest, similarity)
+
             stencil = _stencil_xobject(pdf, stream)
             bg_obj = _image_xobject(
                 pdf, bg_bytes, background.width, background.height, bg_filter,
@@ -1114,10 +1197,22 @@ def mrc_compress(
                     "picture_components": stats["picture_components"],
                     "picture_blocks": stats["picture_blocks"],
                     "halftone_blocks": stats["halftone_blocks"],
+                    **(
+                        {"text_similarity": round(similarity, 4)}
+                        if similarity is not None
+                        else {}
+                    ),
                 }
             )
 
         if applied == 0:
+            if reverted:
+                raise RuntimeError(
+                    "every scanned page failed text verification — no MRC output was "
+                    "written, because a page whose words did not survive is not an "
+                    "output worth having. Try the archival preset, which keeps thin "
+                    "strokes."
+                )
             raise RuntimeError(
                 "every scanned page failed mask verification — no MRC output was written"
             )
@@ -1134,8 +1229,12 @@ def mrc_compress(
         "mask_codec": used_codec,
         "requested_mask_codec": codec,
         "pdfa_safe": bool(pdfa_safe),
+        "verify_text": bool(verify_text),
+        "verify_threshold": verify_threshold if verify_text else None,
+        "min_text_similarity": round(lowest, 4) if lowest is not None else None,
         "pages": pages,
         "pages_mrc": applied,
+        "pages_reverted": reverted,
         "pages_untouched": info["pages"] - applied,
     }
 
