@@ -33,12 +33,12 @@ jobs:
       - name: Lint (ESLint — errors gate; advisory warnings are not CI noise)
         run: npm run lint -- --quiet
 
-      # CI ran lint, build, cargo check and pytest -- but never the RENDERER
-      # unit tests, so nothing here exercised application logic. That gap let a
-      # pdfjs-dist 6.0->6.1 bump through on 2026-07-25 that returned an empty
-      # attachment set and silently broke `.pdfx` manifest reading (the whole
-      # multi-document format); only a local vitest run caught it. A green
-      # build proves it compiles, not that it works.
+      # The renderer unit tests are a required gate here: lint, build,
+      # cargo check and pytest together exercise no application logic.
+      # Without this step a pdfjs-dist minor bump can land an empty
+      # attachment set and silently break `.pdfx` manifest reading (the
+      # whole multi-document format), with only a vitest run catching it.
+      # A green build proves the code compiles, not that it works.
       - name: Unit tests (vitest)
         run: npm test
 
@@ -149,43 +149,36 @@ jobs:
 
   e2e:
     name: E2E (WebdriverIO + tauri-driver)
-    # DISABLED (owner call, 2026-07-16) until the WebView2 v150 elevated-
-    # DevTools regression (MicrosoftEdge/WebView2Feedback#5640) is fixed and
-    # reaches the runner image. Hosted runners execute jobs elevated and the
-    # image runs UAC-disabled — a -RunLevel Limited scheduled task AND a
-    # SAFER restricted token BOTH still ran at High IL (proven by in-child
-    # TOKEN-IL banners), so no de-elevation primitive exists there and every
-    # WebDriver session fails at creation. Do NOT pin a Fixed Version 149
-    # runtime instead: users are evergreen on 150 (where the app works —
-    # the regression only gates elevated debugger attach), so a pinned CI
-    # runtime tests what nobody runs and rots (see CLAUDE.md's never-pin
-    # rule, written after the last stale-pin e2e breakage).
-    # The full 101-spec suite remains the release gate, run locally on the
-    # rebuilt binary; its green is recorded per milestone.
+    # DISABLED: no WebDriver session can be created on a hosted runner.
+    # Hosted runners execute jobs elevated and the image runs UAC-disabled;
+    # a -RunLevel Limited scheduled task and a SAFER restricted token both
+    # still run at High IL (in-child TOKEN-IL banners show it), so no
+    # de-elevation primitive exists there and every session fails at
+    # creation. WebView2 v150 deliberately drops the user-writable config
+    # channels (WEBVIEW2_* environment variables, HKCU policy) for an
+    # elevated host, and MicrosoftEdge/WebView2Feedback#5640 is CLOSED AS
+    # BY DESIGN, so there is no upstream fix to wait for.
     #
-    # EXPERIMENT RUN AND FAILED, 2026-07-30. Correcting the note above first:
-    # #5640 is CLOSED AS BY DESIGN, so there is NO upstream fix to wait for and
-    # the old "re-enable once the fix ships" plan was waiting on nothing. v150
-    # deliberately drops the user-writable config channels (WEBVIEW2_* env vars
-    # and HKCU policy) for an elevated host, and Microsoft named HKLM policy as
-    # a surviving channel.
+    # HKLM policy is the surviving channel Microsoft names, and it is not
+    # sufficient for this chain: the policy applies (the step below echoes
+    # AdditionalBrowserArguments = --remote-debugging-port=9222 back) and
+    # the session still fails `DevToolsActivePort file doesn't exist`. The
+    # likely cause, reasoned rather than verified: msedgedriver also passes
+    # the profile location via WEBVIEW2_USER_DATA_FOLDER, the same dropped
+    # channel class, so the webview writes DevToolsActivePort into its
+    # default profile while the driver watches the folder it intended.
+    # Setting the arguments from app code does not fix that half.
     #
-    # We tried it. The policy applied correctly (the step below echoed
-    # AdditionalBrowserArguments = --remote-debugging-port=9222 back), and the
-    # session STILL failed `DevToolsActivePort file doesn't exist`. So HKLM
-    # alone is not sufficient for THIS chain.
+    # Do NOT pin a Fixed Version 149 runtime: users are evergreen on 150,
+    # where the app works (the regression only gates elevated debugger
+    # attach), so a pinned CI runtime tests what nobody runs and rots (see
+    # CLAUDE.md's never-pin rule).
     #
-    # Likely why, and why the remaining channel probably cannot close it either
-    # (reasoning, NOT verified): msedgedriver also passes the profile location
-    # via WEBVIEW2_USER_DATA_FOLDER — the same channel class that gets dropped —
-    # so even with debugging enabled by policy, the webview writes
-    # DevToolsActivePort into its default profile while the driver watches the
-    # folder it intended. Setting args from app code would not fix that half.
-    #
-    # Realistic options if this is ever revisited: a SELF-HOSTED runner running
-    # as a normal user (our local suite proves the stack is fine non-elevated),
-    # or leave the local 101-spec suite as the release gate, which is the
-    # status quo. Do NOT pin a Fixed Version 149 runtime (never-pin rule).
+    # The open options are a SELF-HOSTED runner running as a normal user
+    # (the local suite proves the stack is fine non-elevated), or leaving
+    # the local 101-spec suite as the release gate, which is the status
+    # quo. That suite runs on the rebuilt binary and its green is recorded
+    # per milestone.
     if: false
     runs-on: windows-latest
     # The job cap is a backstop, not the failure detector — the pre-flight
@@ -295,16 +288,17 @@ jobs:
       # channels that survive elevation, and HKLM policy is the one available to
       # a CI runner (runners are elevated, so we can write it).
       #
-      # De-elevation, the previous approach, is DEAD and proven so: both a
-      # -RunLevel Limited scheduled task and `runas /trustlevel` executed at
-      # High integrity on this image (in-child TOKEN-IL banners), because the
-      # image runs UAC-disabled and grants no path down.
+      # De-elevation is not available on this image: a -RunLevel Limited
+      # scheduled task and `runas /trustlevel` both execute at High
+      # integrity (in-child TOKEN-IL banners), because the image runs
+      # UAC-disabled and grants no path down.
       #
-      # This is an EXPERIMENT. The unknown is the port handshake: msedgedriver
-      # chooses a port itself and then reads the actual one back out of the
-      # DevToolsActivePort file, so a fixed policy port may or may not satisfy
-      # it. The pre-flight below is deliberately one spec, so a failure costs
-      # minutes and names itself instead of grinding the whole suite.
+      # The open unknown is the port handshake: msedgedriver chooses a port
+      # itself and then reads the actual one back out of the
+      # DevToolsActivePort file, so a fixed policy port may or may not
+      # satisfy it. The pre-flight below is deliberately one spec, so a
+      # failure costs minutes and names itself instead of grinding the
+      # whole suite.
       - name: Enable DevTools via HKLM policy (survives elevation)
         shell: pwsh
         run: |
@@ -320,11 +314,12 @@ jobs:
         working-directory: e2e-tests
         run: npx wdio run wdio.conf.ts --spec specs/01-boot.spec.ts
 
-      # DISABLED FOR THE EXPERIMENT. The question being answered is narrow — does
-      # the HKLM policy channel restore the DevTools endpoint for an elevated
-      # host? The pre-flight above answers it in minutes. Running the full suite
-      # now would also fail on the stubbed fonts/libreoffice above and muddy the
-      # result. Re-enable once the pre-flight is green AND those are vendored.
+      # DISABLED. The question this job answers is narrow: does the HKLM
+      # policy channel restore the DevTools endpoint for an elevated host?
+      # The pre-flight above answers it in minutes. Running the full suite
+      # would also fail on the stubbed fonts/libreoffice above and muddy
+      # the result. Re-enable once the pre-flight is green AND those are
+      # vendored.
       - name: Run WebdriverIO suite
         if: false
         timeout-minutes: 40

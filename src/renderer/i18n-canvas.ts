@@ -547,7 +547,7 @@ export const CANVAS_STRINGS = {
   'canvas.addtext.rotateTitle':
     'Rotation — cycle the quarter turns (the field beside takes any angle)',
   'canvas.addtext.rotateDegTitle':
-    'Rotation in degrees — any angle (T19); quarter turns keep the reading-direction layout',
+    'Rotation in degrees — any angle; quarter turns keep the reading-direction layout',
   'canvas.addtext.bold': 'B',
   'canvas.addtext.boldTitle': 'Bold — authors in the bundled bold face',
   'canvas.addtext.kern': 'AV',

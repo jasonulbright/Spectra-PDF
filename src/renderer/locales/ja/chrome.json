@@ -43,7 +43,7 @@
   "canvas.addtext.pageGone": "このテキストを置いたページはもう存在しません。",
   "canvas.addtext.pickAStyleFirst": "先に範囲のサイズ、色、またはスタイルを選んでください。",
   "canvas.addtext.placeholder": "追加するテキストを入力…",
-  "canvas.addtext.rotateDegTitle": "角度による回転 — 任意の角度（T19）。90 度単位の回転では読み方向のレイアウトを保ちます",
+  "canvas.addtext.rotateDegTitle": "角度による回転 — 任意の角度。90 度単位の回転では読み方向のレイアウトを保ちます",
   "canvas.addtext.rotateTitle": "回転 — 90 度単位で切り替えます（隣のフィールドは任意の角度を受け付けます）",
   "canvas.addtext.selectTextFirst": "先に上のテキストを選択してから、範囲スタイルを適用してください。",
   "canvas.addtext.size": "サイズ",
