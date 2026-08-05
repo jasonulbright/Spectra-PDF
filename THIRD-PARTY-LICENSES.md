@@ -111,6 +111,7 @@ below were read from those wheels' METADATA):
 | pdfminer.six | MIT | <https://github.com/pdfminer/pdfminer.six> |
 | pikepdf | MPL-2.0 (source at the link) | <https://github.com/pikepdf/pikepdf> |
 | pillow | MIT-CMU | <https://github.com/python-pillow/Pillow> |
+| pillow-heif | BSD-3-Clause (the wheel's bundled libraries are listed below) | <https://github.com/bigcat88/pillow_heif> |
 | pycparser | BSD-3-Clause | <https://github.com/eliben/pycparser> |
 | pyHanko | MIT | <https://github.com/MatthiasValvekens/pyHanko> |
 | pyhanko-certvalidator | MIT | <https://github.com/MatthiasValvekens/pyHanko/tree/master/pkgs/pyhanko-certvalidator> |
@@ -126,6 +127,25 @@ pikepdf's binary wheel embeds the **qpdf** library (Apache-2.0,
 <https://github.com/qpdf/qpdf>) and the MSVC runtime DLL it needs; the wheel's
 `licenses-for-wheels.txt` (shipped in pikepdf's dist-info) carries the
 corresponding notices.
+
+pillow-heif's binary wheel ships prebuilt decoder libraries beside the Python
+package (`resources/python/Lib/site-packages/pillow_heif-*.data/platlib/`).
+Upstream's own `LICENSES_bundled.txt` — shipped in the wheel's dist-info
+alongside its `LICENSE.txt` — is the authority for these; reproduced here so
+the manifest is complete without opening the runtime:
+
+| Bundled library | License | Source |
+|---|---|---|
+| libheif | LGPL-3.0 | <https://github.com/strukturag/libheif> |
+| libde265 | LGPL-3.0 | <https://github.com/strukturag/libde265> |
+| x265 | GPL-2.0 | <https://bitbucket.org/multicoreware/x265_git> |
+| libgcc / libstdc++ / libwinpthread (MinGW-w64 runtime) | GPL-3.0 with the GCC Runtime Library Exception | <https://gcc.gnu.org/> |
+
+Upstream states the combined binary wheel is effectively **GPL-2.0** because of
+x265. This project is MIT-licensed with a public repository, so the obligation
+these copyleft components carry — say where the source is — is met by naming
+the upstreams above, exactly as the bundled OCR runtime's `libjbig-0.dll`
+(GPL-2.0) is handled.
 
 ## Fonts
 
