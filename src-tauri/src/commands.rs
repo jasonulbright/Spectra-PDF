@@ -176,25 +176,59 @@ fn allow_picked_path(app: &AppHandle, path: &str) {
     }
 }
 
-/// Pick a PostScript/EPS source for distilling (Phase 8). Separate from
-/// the PDF picker (different filter); window-parented for modality.
+/// Pick one or more Create PDF sources (P22). Separate from the PDF picker
+/// (much wider filter, and MULTI-select); window-parented for modality.
 #[tauri::command]
-pub async fn pick_postscript_file(
+pub async fn pick_create_pdf_sources(
     app: AppHandle,
     window: tauri::WebviewWindow,
-) -> Result<Option<String>, String> {
+) -> Result<Vec<String>, String> {
+    // P22: Create PDF used to accept PostScript and nothing else. The filter
+    // is now every kind the engine's four arms convert, and the pick is
+    // MULTIPLE — the dialog builds an ordered list, not a single source.
+    // Keep these lists in step with `engine/create_pdf.py`'s accepted set and
+    // `src/renderer/lib/create-pdf.ts` (the vitest totality pin covers the
+    // two halves that can be tested in one process; this one is the picker).
+    const IMAGES: &[&str] = &[
+        "png", "jpg", "jpeg", "jpe", "tif", "tiff", "bmp", "dib", "gif", "webp", "jp2", "j2k",
+        "j2c", "jpc", "jpf", "jpx", "avif", "heic", "heif",
+    ];
+    const OFFICE: &[&str] = &[
+        "doc", "docx", "docm", "dot", "dotx", "odt", "ott", "fodt", "rtf", "txt", "xls", "xlsx",
+        "xlsm", "xlt", "xltx", "ods", "ots", "fods", "csv", "ppt", "pptx", "pptm", "pot", "potx",
+        "odp", "otp", "fodp", "odg", "otg", "html", "htm", "xhtml",
+    ];
+    const POSTSCRIPT: &[&str] = &["ps", "eps"];
+
+    let mut all: Vec<&str> = vec!["pdf"];
+    all.extend_from_slice(IMAGES);
+    all.extend_from_slice(OFFICE);
+    all.extend_from_slice(POSTSCRIPT);
+
     let result = app
         .dialog()
         .file()
         .set_parent(&window)
-        .add_filter("PostScript Files", &["ps", "eps"])
-        .blocking_pick_file();
+        // The combined filter is FIRST so the default view shows everything
+        // Create PDF takes; the per-kind filters below are for narrowing.
+        .add_filter("All Supported Files", &all)
+        .add_filter("PDF Files", &["pdf"])
+        .add_filter("Images", IMAGES)
+        .add_filter("Documents", OFFICE)
+        .add_filter("PostScript Files", POSTSCRIPT)
+        .blocking_pick_files();
     match result {
-        Some(path) => match path.into_path() {
-            Ok(pb) => Ok(Some(canonical_path(&pb.to_string_lossy()))),
-            Err(e) => Err(format!("Path error: {}", e)),
-        },
-        None => Ok(None),
+        Some(paths) => {
+            let mut out = Vec::with_capacity(paths.len());
+            for path in paths {
+                match path.into_path() {
+                    Ok(pb) => out.push(canonical_path(&pb.to_string_lossy())),
+                    Err(e) => return Err(format!("Path error: {}", e)),
+                }
+            }
+            Ok(out)
+        }
+        None => Ok(Vec::new()),
     }
 }
 

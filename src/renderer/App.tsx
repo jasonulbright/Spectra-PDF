@@ -88,6 +88,7 @@ import { BatchOcrDialog } from './components/BatchOcrDialog';
 import { ScheduledRunsDialog } from './components/ScheduledRunsDialog';
 import { WatchedFoldersDialog } from './components/WatchedFoldersDialog';
 import { CreatePdfDialog } from './components/CreatePdfDialog';
+import { classify as classifySource } from './lib/create-pdf';
 import { ExportImagesDialog } from './components/ExportImagesDialog';
 import { buildBlankPagePdf } from './lib/blank-page';
 import { insertAnchor } from './state/selectors';
@@ -198,6 +199,9 @@ function AppContent(): React.ReactElement {
   const [showSchedules, setShowSchedules] = useState(false);
   const [showWatchers, setShowWatchers] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
+  // Sources a drop pre-populates Create PDF with (P22). Cleared on close so
+  // the next menu-opened dialog starts empty rather than replaying a drop.
+  const [createPdfSeed, setCreatePdfSeed] = useState<string[]>([]);
   const [showExportImages, setShowExportImages] = useState(false);
   const [showCustomizeToolbar, setShowCustomizeToolbar] = useState(false);
   // Full-screen presentation mode (I.6): a transient overlay; `startIndex`
@@ -633,7 +637,17 @@ function AppContent(): React.ReactElement {
           return;
         }
       }
-      await openByPaths(paths);
+      // P22: a drop carrying files the open funnel cannot take (a .docx, a
+      // .png, a .ps) used to do NOTHING. It now offers to convert them,
+      // through the same dialog, pre-populated — and the funnel rule holds,
+      // because everything still lands in openByPaths once a PDF exists.
+      const convertible = paths.filter((p) => classifySource(p) !== '' && classifySource(p) !== 'pdf');
+      const pdfs = paths.filter((p) => classifySource(p) === 'pdf');
+      if (convertible.length > 0) {
+        setCreatePdfSeed(convertible);
+        setShowCreatePdf(true);
+      }
+      if (pdfs.length > 0) await openByPaths(pdfs);
     },
     [openByPaths, importFilesIntoDoc, inDocTab],
   );
@@ -1702,7 +1716,10 @@ function AppContent(): React.ReactElement {
     openBatchOcr: () => setShowBatchOcr(true),
     openScheduledRuns: () => setShowSchedules(true),
     openWatchedFolders: () => setShowWatchers(true),
-    openCreatePdf: () => setShowCreatePdf(true),
+    openCreatePdf: () => {
+      setCreatePdfSeed([]);
+      setShowCreatePdf(true);
+    },
     openExportImages: () => setShowExportImages(true),
     openPresentation: () => {
       const doc = stateRef.current.workspace.documents.find(
@@ -2152,7 +2169,11 @@ function AppContent(): React.ReactElement {
       {showWatchers && <WatchedFoldersDialog onClose={() => setShowWatchers(false)} />}
       {showCreatePdf && (
         <CreatePdfDialog
-          onClose={() => setShowCreatePdf(false)}
+          initialPaths={createPdfSeed}
+          onClose={() => {
+            setShowCreatePdf(false);
+            setCreatePdfSeed([]);
+          }}
           onOpenResult={(path) => openByPaths([path])}
         />
       )}
