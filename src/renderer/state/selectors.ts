@@ -70,9 +70,8 @@ export function showableDocuments(state: AppState): OpenDocument[] {
  *
  * Answered here, not in App: it is a state question ("where is the user?"),
  * and the reading-view current page (`ui.currentPageId`, M4.1e) is the only
- * honest anchor — the ORGANIZE view acts on selections, but insertion is a
- * position, not a selection, and Acrobat's own dialog defaults to "after
- * current page".
+ * honest anchor. The organize view acts on selections, but insertion is a
+ * position rather than a selection, so the default is after the current page.
  */
 export function insertAnchor(
   state: AppState,

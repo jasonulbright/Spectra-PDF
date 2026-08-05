@@ -8,9 +8,8 @@ from .inplace import finish_staged, is_same_file, staging_target
 
 
 # User-facing permission categories → pikepdf.Permissions flags. Accessibility
-# (assistive-tech text extraction) is NEVER blocked — a document a screen reader
-# can't read isn't a permission choice, it's an accessibility failure the king
-# also refuses to make by default.
+# (assistive-tech text extraction) is never blocked: preventing a screen reader
+# from reading the document is an accessibility failure, not a permission choice.
 def _build_permissions(perms: dict | None):
     if perms is None:
         return None  # omit → pikepdf default (everything allowed)

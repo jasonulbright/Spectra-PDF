@@ -1740,7 +1740,7 @@ class TestWatermark:
             )
 
     def test_watermark_long_uppercase_text_stays_inside_the_box(self, tmp_dir):
-        # Regression for the e2e-caught overflow: auto-sized long uppercase
+        # Regression for the e2e regression overflow: auto-sized long uppercase
         # text on a Letter page at 45° must keep the whole baseline inside
         # the crop box (the form BBox clips whatever crosses it).
         from engine.watermark import _text_width_em
@@ -1795,7 +1795,7 @@ class TestWatermark:
         assert "X" not in extract_text(out)["text"]
 
     def test_watermark_explicit_empty_pages_means_zero_pages_not_all(self, tmp_dir):
-        # Review-caught: `if pages:` treated [] like None, so an empty
+        # regression: `if pages:` treated [] like None, so an empty
         # selection (e.g. from a caller whose page parse dropped every bad
         # token) silently widened to the WHOLE document. [] must match
         # rotate.py's convention: operate on zero pages.
@@ -1819,7 +1819,7 @@ class TestWatermark:
         assert _GLYPH_HEIGHT_EM == pytest.approx(expected)
 
     def test_watermark_auto_size_respects_the_perpendicular_axis(self, tmp_dir):
-        # Review-caught: the baseline crossing degenerates to a single term
+        # regression: the baseline crossing degenerates to a single term
         # at axis-aligned angles, so a banner-shaped box got a size that
         # ignored its height entirely and clipped vertically. The glyph box
         # must fit the box's thickness too, and the size must actually
@@ -1948,7 +1948,7 @@ class TestWatermark:
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
     def test_watermark_unicode_with_control_char_fills(self, tmp_dir):
         # A tab in a non-Latin-1 stamp flattens to a space (single-line) rather
-        # than crashing build_fallback_font (the FC1 gauntlet lesson).
+        # than crashing build_fallback_font (the FC1 regression lesson).
         src = os.path.join(tmp_dir, "wt_in.pdf")
         out = os.path.join(tmp_dir, "wt_out.pdf")
         _make_watermark_fixture(src, page_count=1)
@@ -1957,7 +1957,7 @@ class TestWatermark:
 
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
     def test_watermark_broad_control_chars_fill(self, tmp_dir):
-        # Gauntlet MEDIUM: control/separator chars beyond \n\r\t (VT, form-feed,
+        # regression: control/separator chars beyond \n\r\t (VT, form-feed,
         # Unicode LINE/PARAGRAPH separators) must ALSO flatten to space, not
         # crash build_fallback_font with a non-printable "cannot express" error.
         src = os.path.join(tmp_dir, "wb_in.pdf")
@@ -1969,7 +1969,7 @@ class TestWatermark:
 
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
     def test_watermark_zero_pages_with_uncoverable_text_is_noop(self, tmp_dir):
-        # Gauntlet LOW: pages=[] (documented "zero pages") must be a true no-op —
+        # regression: pages=[] (documented "zero pages") must be a true no-op —
         # it must NOT fail on the font coverage of text it will never draw (the
         # embed is built lazily, only on a page that is actually stamped).
         src = os.path.join(tmp_dir, "wz_in.pdf")
@@ -1980,7 +1980,7 @@ class TestWatermark:
 
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
     def test_watermark_unicode_auto_size_respects_real_font_height(self, tmp_dir):
-        # Gauntlet MEDIUM/HIGH: the auto-size must use the EMBEDDED face's real
+        # regression: the auto-size must use the EMBEDDED face's real
         # ascent+descent (Liberation Sans ~1.117 em), not Helvetica's 0.925 —
         # else a height-axis-bound (banner) Cyrillic stamp overshoots the design
         # margin. On a 1500×200 page at angle 0 the height axis binds; the drawn
@@ -2801,7 +2801,7 @@ class TestSignPdf:
         assert verify_signatures(src)["summary"]["all_valid"] is True
 
     def test_in_place_requires_the_opt_in(self, tmp_dir):
-        # Round-42 gauntlet (LOW): without allow_in_place the same-path refusal
+        # regression: without allow_in_place the same-path refusal
         # stands, so Save-a-copy / canvas flows can't silently overwrite the
         # working copy outside the snapshot/undo flow.
         pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
@@ -2823,7 +2823,7 @@ class TestSignPdf:
         assert open(src, "rb").read() == orig
 
     def test_in_place_verify_failure_leaves_the_original_intact(self, tmp_dir, monkeypatch):
-        # Round-42 gauntlet (HIGH): the self-verify runs BEFORE the replace, so
+        # regression: the self-verify runs BEFORE the replace, so
         # a transient verify failure (an AV lock, say) must NOT leave the working
         # copy signed-on-disk-but-reported-failed. Force verify to raise and
         # assert the original is untouched and the error propagates.
@@ -2842,7 +2842,7 @@ class TestSignPdf:
         assert open(src, "rb").read() == orig
 
     def test_counter_sign_in_place_auto_rotates_the_field_name(self, tmp_dir):
-        # Round-42 gauntlet (HIGH): the default field name is "Signature1"; the
+        # regression: the default field name is "Signature1"; the
         # in-place flow passes NO explicit name, so a second sign must not
         # collide. The engine rotates to the next free name — two valid,
         # distinctly-named signatures, first still intact.

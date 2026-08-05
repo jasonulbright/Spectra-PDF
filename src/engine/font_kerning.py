@@ -62,12 +62,8 @@ def _legacy_kern(font, cmap_rev: dict[str, str]) -> dict[tuple[str, str], int]:
         #     summing it would be meaningless.
         #   - cross-stream    -> perpendicular movement (accent placement);
         #     again the wrong axis.
-        # (Round-41 review: this previously tested 0x2 while CALLING it
-        # cross-stream and never checked horizontal at all, so a genuine
-        # cross-stream or vertical-only subtable passed straight through.
-        # Inert for every shipped Liberation face — all are coverage 0x01 —
-        # but a font resync or an added family would have activated it
-        # silently, which is exactly the class of latent bug worth closing.)
+        # Check the horizontal bit directly; testing only the minimum bit lets
+        # cross-stream and vertical-only subtables pass through.
         coverage = getattr(sub, "coverage", 0x1)
         if not (coverage & 0x1):
             continue  # vertical

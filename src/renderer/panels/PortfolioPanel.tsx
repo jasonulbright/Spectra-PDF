@@ -195,7 +195,7 @@ export function PortfolioPanel(): React.ReactElement {
     [activeFile, call],
   );
 
-  // Non-PDF members open with the OS DEFAULT app (the king's behavior):
+  // Non-PDF members open with the OS default app:
   // extract to the same managed dir the in-app open uses, then a Rust
   // command scoped to THAT dir shell-opens it — never an arbitrary path.
   const handleOpenMemberExternal = useCallback(

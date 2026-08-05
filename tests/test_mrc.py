@@ -2,7 +2,7 @@
 
 The fixtures are built by the checked-in `tests/fixtures/make_scans.py` and
 committed beside it, so every number below is measured against bytes a
-reviewer can regenerate and diff rather than against "whatever was there".
+fixtures can be regenerated and diffed reproducibly.
 
 What is pinned, and why each pin exists rather than being obvious:
 
@@ -450,10 +450,8 @@ class TestSegmentation:
         assert (int(comp.left[0]), int(comp.right[0])) == (10, 19)
 
     def test_text_height_is_weighted_by_ink_area(self):
-        # The live bug this pin freezes: a halftone patch contributes tens of
-        # thousands of five-pixel dots, so an unweighted median returned the
-        # DOT height (measured: 5 px where the page's type was 26 px) and the
-        # threshold window then collapsed to its floor.
+        # A halftone patch contributes many small dots, so the height statistic
+        # must be weighted by ink area rather than component count.
         ink = np.zeros((400, 400), dtype=bool)
         for i in range(12):  # twelve 24-px letters
             ink[40 : 40 + 24, 20 + i * 30 : 20 + i * 30 + 14] = True
@@ -942,7 +940,7 @@ class TestCompressDoor:
     def test_the_verification_switch_reaches_the_pass_through_compress(
         self, text_scan, tmp_dir, gs_path
     ):
-        # Slice E travels the SAME one door. The switch is proven live by its
+        # Every surface travels through the same door. The switch is exercised by its
         # own refusal — a parameter that silently went nowhere would let the
         # panel show a checkbox that does nothing.
         with pytest.raises(RuntimeError, match="cannot be verified"):

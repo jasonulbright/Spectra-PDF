@@ -147,7 +147,7 @@ describe('pageIdAtSourceIndex', () => {
     expect(pageIdAtSourceIndex(docs, 'missing.pdf', 1)).toBeNull();
   });
 
-  it('a PENDING reorder does not retarget a bookmark (review-caught HIGH)', () => {
+  it('a PENDING reorder does not retarget a bookmark (regression)', () => {
     // Bookmark says "page 2" = on-disk index 1. The array is reordered
     // in memory (uncommitted): array-order counting would hand back the
     // page now SITTING second (p-a) — the wrong physical page.

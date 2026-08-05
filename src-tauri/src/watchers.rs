@@ -477,9 +477,8 @@ mod tests {
         let src = tmp.join("Watch");
         std::fs::create_dir_all(&src).unwrap();
 
-        // The live bug: `starts_with` is case-SENSITIVE, so this passed
-        // validation, processed output landed back in the intake, and the
-        // watcher reprocessed its own output every tick.
+        // `starts_with` is case-sensitive, so path containment must account
+        // for Windows' case-insensitive filesystem semantics.
         let differing_case = tmp.join("watch").join("out");
         assert!(
             inside(&src, &differing_case),

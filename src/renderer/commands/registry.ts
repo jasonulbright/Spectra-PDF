@@ -232,8 +232,8 @@ function toolCommand(tool: CanvasTool): Command {
       // otherwise leave the strip absent with the canvas live.
       //
       // Only when ARMING. Disarming (toggle-off, Escape) leaves the tool open:
-      // Escape means "stop drawing", not "close Comment" — Acrobat keeps the
-      // toolbar up, and closing it would make Escape unrecoverable now that the
+      // Escape means "stop drawing", not "close Comment". Closing the toolbar
+      // would make Escape unrecoverable now that the
       // pill isn't there to re-arm from. `tools.close` is the way out.
       if (next !== 'select') {
         const owner = toolForCanvasTool(next);
@@ -248,11 +248,9 @@ function panelCommand(op: Operation): Command {
   return {
     title: OPERATION_TITLES[op],
     run: (ctx) => {
-      // Phase 10 B1/C: with a document to show, the panel opens in the RIGHT
-      // DOCK on that doc tab — the document stays visible while the form is
-      // filled in. With NO document, the king's flow: picker first, then the
-      // tool opens docked on whatever was picked (slice C — the Tools tab is
-      // gone).
+      // With a visible document, the panel opens in the right dock on that tab
+      // so the document remains visible while the form is filled in. With no
+      // document, the picker runs first and the tool opens on the selected file.
       //
       // UI_SET_ACTIVE_OP opens the TOOL that hosts this operation too, so a menu
       // item and a Tools Center tile land in the same place. That re-homing
@@ -363,8 +361,8 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.openPrint(),
   },
-  // File ▸ Send To ▸ Email — attach the current document to a compose window
-  // in the default desktop mail client (owner-ruled in scope 2026-07-31).
+  // File ▸ Send To ▸ Email attaches the current document to a compose window
+  // in the default desktop mail client.
   'file.sendToEmail': {
     title: 'Email…',
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
@@ -378,7 +376,7 @@ export const COMMANDS: Record<CommandId, Command> = {
       isDocTab(ctx.state.ui.focusedTab) &&
       (toolById(ctx.state.ui.activeToolId ?? '')?.canvasTools?.length ?? 0) > 0,
     // openTool(null) clears activeToolId AND disarms, in the one place that owns
-    // that pairing (CLAUDE.md § Design invariants).
+    // that pairing.
     run: ({ dispatch }) => dispatch({ type: 'UI_OPEN_TOOL', toolId: null }),
   },
   'file.save': {
@@ -447,16 +445,13 @@ export const COMMANDS: Record<CommandId, Command> = {
   },
   'edit.selectAll': {
     title: 'Select All Pages',
-    // Selects PAGES in BOTH views, deliberately — see § 9.2's amendment.
-    //
-    // § 9.2 originally had Ctrl+A select TEXT in the reading view (Acrobat's
-    // behaviour), and that was tried: disable here, let the browser's native
-    // select-all run over the text layer. It was REVERTED because the reading
+    // Ctrl+A selects pages in both views. Browser-native select-all over the
+    // text layer is unsafe because the reading
     // view is VIRTUALIZED — only the pages within the scroll window have text
     // spans in the DOM at all — so native select-all can physically only reach
     // the handful of mounted pages. Ctrl+A then Ctrl+C would put a few pages of
     // text on the clipboard while the user believed they had copied the
-    // document, silently and with no way to notice (review-caught). A
+    // document, silently and with no way to notice (regression). A
     // well-defined "select all pages" (which the reading view's own context menu
     // can act on) beats a select-all that quietly lies about its scope; drag-,
     // double-click- and triple-click-selection all still work on the text.
@@ -495,8 +490,8 @@ export const COMMANDS: Record<CommandId, Command> = {
       });
     },
   },
-  // F3 / Shift+F3 (+ Ctrl+G aliases): step the Find cursor; when the bar
-  // isn't up, F3 OPENS it (Acrobat's own behavior) instead of doing nothing.
+  // F3 / Shift+F3 (+ Ctrl+G aliases) step the Find cursor. If the bar is
+  // closed, F3 opens it instead of doing nothing.
   'edit.findNext': {
     title: 'Find Next',
     when: (ctx) => ctx.canvas !== null,
@@ -621,7 +616,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: inCanvas,
     run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_READING_MODE' }),
   },
-  // Properties bar (I.6, Acrobat's Ctrl+E): the selected annotation's
+  // Properties bar: the selected annotation's
   // properties, under the secondary toolbar. Doc tabs only, like the strip.
   'view.propertiesBar': {
     title: 'Properties Bar',
@@ -641,7 +636,7 @@ export const COMMANDS: Record<CommandId, Command> = {
   // Rulers / Grid / Guides (N11 slice B) — the same preference store for the
   // same reason. Show Grid and Snap to Grid stay SEPARATE (the grid type's
   // checkbox is in the Snap popover): drafting with a grid you snap to but
-  // cannot see is an ordinary way to work, and the king splits them too.
+  // cannot see is an ordinary workflow, so the settings remain independent.
   'view.rulers': {
     title: 'Rulers',
     when: inCanvas,
@@ -695,9 +690,8 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: inCanvas,
     run: ({ dispatch }) => dispatch({ type: 'UI_SET_DOC_VIEW_MODE', mode: 'organize' }),
   },
-  // Rotate View (M6.1, § 9.1) — render-only quarter-turns of the READING
-  // display, per file; never the page tier (that's Document ▸ Rotate Pages…,
-  // and the two menu labels carry Acrobat's own distinction). Reading-view
+  // Rotate View applies render-only quarter-turns to the reading display per
+  // file; it never changes the page tier. Reading-view
   // only: the board is where real rotation lives.
   'view.rotateCW': {
     title: 'Rotate View Clockwise',
@@ -713,8 +707,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     run: ({ state, dispatch }) =>
       dispatch({ type: 'UI_ROTATE_VIEW', path: showableDoc(state)!, delta: 270 }),
   },
-  // Shift+F4 (§ 9.2, verified at the M6.5 freeze): Acrobat's "open or close
-  // the Task pane". Ours is the Tools tab — toggle to it, and back to the
+  // Shift+F4 toggles the Tools tab and returns to the
   // document you were on (or Home when none).
   'view.toolsPane': {
     title: 'Tools Pane',
@@ -797,7 +790,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     run: ({ state, dispatch }) =>
       dispatch({ type: 'UI_FOCUS_TAB', tab: cycledTab(state, -1) }),
   },
-  // Split (I.6, the king's Window ▸ Split): two stacked panes over the same
+  // Split view uses two stacked panes over the same
   // document, independent scroll/zoom. Document mode only — the organize
   // board is one d3 world with no honest second scroll position (§ 3.3:
   // absent, not faked).
@@ -807,7 +800,7 @@ export const COMMANDS: Record<CommandId, Command> = {
       inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && hasActiveFile(ctx.state),
     run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_SPLIT_VIEW' }),
   },
-  // The king's Spreadsheet Split: a 2×2 grid with frozen-pane scroll linking.
+  // Spreadsheet Split uses a 2×2 grid with frozen-pane scroll linking.
   'window.spreadsheetSplit': {
     title: 'Spreadsheet Split',
     when: (ctx) =>

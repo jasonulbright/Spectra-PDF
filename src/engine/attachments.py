@@ -1,7 +1,7 @@
-"""Embedded file attachments — the /EmbeddedFiles name tree (§ I.6).
+"""Embedded file attachments — the /EmbeddedFiles name tree.
 
-The king lets a document carry attached files (a spreadsheet beside its report,
-a source file beside its export). They live in the catalog's /Names
+PDF documents can carry attached files, such as a spreadsheet beside its report
+or a source file beside its export. They live in the catalog's /Names
 /EmbeddedFiles name tree; pikepdf exposes them as `pdf.attachments`. This module
 lists, adds, extracts, and removes them — a name-tree editor, like the AcroJS
 and page-labels editors.

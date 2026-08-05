@@ -126,8 +126,8 @@ def _auto_font_size(
     Glyph-height axis: the SAME bound rotated 90° — near axis-aligned angles
     the baseline crossing degenerates to inf on one term and stops seeing the
     box dimension PERPENDICULAR to the text run entirely, so a banner-shaped
-    box (say 1500×10 at angle 0) would get a size independent of its height
-    and clip vertically (review-caught). The perpendicular crossing is
+    box such as 1500×10 at angle 0 would get a size independent of its height
+    and clip vertically. The perpendicular crossing is
     min(W/|sin|, H/|cos|); the text's vertical extent (ascender+descender)
     must fit the same fraction of it.
 
@@ -150,8 +150,8 @@ def _auto_font_size(
     # S4: on the embedded-Unicode path the caller passes the run's own em
     # advance AND its real ascent+descent extent; WinAnsi keeps the Helvetica
     # metrics (byte-identical auto-size). Using Helvetica's 0.925-em height for
-    # a taller embedded face (Liberation Sans is ~1.117 em) silently shrank the
-    # perpendicular-axis margin from 35% to ~21.5% (gauntlet).
+    # a taller embedded face such as Liberation Sans silently shrinks the
+    # perpendicular-axis margin.
     advance = max(em_width if em_width is not None else _text_width_em(text), 0.1)
     gh = glyph_height_em if glyph_height_em is not None else _GLYPH_HEIGHT_EM
     fit = min(
@@ -340,8 +340,8 @@ def watermark(
         # (uni=None, byte-identical). Resolve the FACE upfront (cheap, no
         # mutation) so a bad font_dir refuses before touching pages; the embed
         # itself is built LAZILY on the first stamped page, so pages=[] / an
-        # all-out-of-range selection is a true no-op that never fails on
-        # coverage (gauntlet LOW). The build's uncoverable-char raise still
+        # An all-out-of-range selection is a true no-op that never fails on
+        # coverage. The build's uncoverable-character raise still
         # happens before any add_overlay/save = atomic.
         needs_unicode = False
         face = ""
@@ -357,8 +357,8 @@ def watermark(
                     "watermark text contains characters outside Latin-1 and no "
                     "fallback font is available"
                 )
-            # A stamp is single-line: EVERY layout control/separator char (not
-            # just \n/\r/\t — gauntlet: \x0b/\x0c/U+2028/… crashed the subset)
+            # A stamp is single-line: every layout control or separator,
+            # including \x0b, \x0c, and U+2028,
             # flattens to space so the drawn glyph set matches the embed.
             draw_text = _flatten_control_chars(text, keep_newline=False)
             glyph_height = _face_glyph_height_em(face)

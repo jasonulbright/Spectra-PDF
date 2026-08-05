@@ -5,7 +5,7 @@ a subprocess (Phase 12 retired the renderer-side tesseract.js worker) — and
 the caller converts the word boxes to PDF user-space rects (the GUI via the
 same displayRectToPdf recipe as redaction/signature placement); this handler
 writes them into the file as an invisible-text overlay so the document
-becomes genuinely searchable ON DISK — pdfminer/pdf.js/Acrobat all extract
+becomes genuinely searchable on disk — pdfminer, pdf.js, and other readers extract
 it. The GUI, the CLI arms and scheduled runs all feed the same shape here.
 
 Construction — the standard "OCR under" text layer:

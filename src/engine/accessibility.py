@@ -1,13 +1,13 @@
-"""Accessibility checker (§ I.6).
+"""Accessibility checker.
 
-Reports how well a PDF meets the baseline accessibility requirements the king's
-checker enforces (PDF/UA-adjacent): is it tagged, does it declare a language,
+Reports how well a PDF meets baseline accessibility requirements
+(PDF/UA-adjacent): is it tagged, does it declare a language,
 does it have a title shown in the window bar, is its text actually extractable
 (not an un-OCR'd scan), and does it offer navigation. Read-only — it REPORTS;
 fixing is the metadata/OCR tools' job.
 
-Each check returns pass / warn / fail with a human explanation, so the panel
-can show a checklist the way Acrobat's Accessibility Checker does.
+Each check returns pass / warn / fail with a human explanation so the panel can
+present an actionable checklist.
 """
 
 import pikepdf

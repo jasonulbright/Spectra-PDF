@@ -19,13 +19,12 @@ Mutations:
   /Alt on a Figure is THE accessibility fix this panel exists for.
 - move_struct_node — up/down swap the element with its adjacent sibling
   element; indent nests it under its previous sibling; outdent makes it the
-  next sibling of its parent. The four compose to reach any tree shape, which
-  is what lets New Tag + moves express the king's drag-drop tag editing.
+  next sibling of its parent. The four compose to reach any tree shape.
 - delete_struct_node — removes the element AND its descendant tags; the page
-  content stays and merely becomes untagged (the king's Delete Tag semantics).
+  content stays and merely becomes untagged.
   References to every removed element are nulled out of the /ParentTree so the
   reverse mapping never dangles.
-- add_struct_node — creates an EMPTY element (the king's New Tag): a container
+- add_struct_node — creates an empty container element
   to retag/populate by moving existing elements into it.
 
 Untagged documents (no /StructTreeRoot) list as tagged=False and every
@@ -410,7 +409,7 @@ def delete_struct_node(file: str, output: str, path: list) -> dict:
 
 
 def add_struct_node(file: str, output: str, parent_path: list, stype: str, index=None) -> dict:
-    """Create an empty element (the king's New Tag) under `parent_path`
+    """Create an empty element under `parent_path`
     ([] = the tree root) at child position `index` (default: last)."""
     new_type = str(stype).strip().lstrip("/")
     if not new_type:

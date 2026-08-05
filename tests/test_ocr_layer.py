@@ -174,7 +174,7 @@ class TestApplyOcrLayer:
     def test_verbatim_prefixed_long_path_output(self, tmp_dir):
         r"""A \\?\-prefixed, >260-char output path — what dunce emits when a
         resolved path exceeds legacy limits — must reach pikepdf intact (the
-        batch walk's deep-tree regime). Probes the reviewer-flagged unknown;
+        batch walk's deep-tree regime). Probes an unknown color space;
         a red here means the ENGINE needs long-path handling, not that the
         test is wrong."""
         prefix = "\\\\?\\"

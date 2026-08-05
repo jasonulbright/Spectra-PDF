@@ -31,8 +31,7 @@ upstream does NOT:
   dropped — its precondition, an unbroken signature, cannot survive page
   surgery.
 
-Document-level form behavior (F11, 2026-08-01 — the old "deliberate
-boundary" that dropped these is closed):
+Document-level form behavior:
 
 - ``carry_doc_form_extras`` — /CO (calculation order) is RECONCILED, not
   blind-carried: each entry resolves to its fully-qualified field name
@@ -50,10 +49,9 @@ boundary" that dropped these is closed):
   commit rebuild) REFUSES XFA documents outright: the XFA template lays
   out its own pages, so a restructured PDF page tree and a carried-verbatim
   XFA packet describe two different documents (a reader that honors XFA
-  shows the un-edited layout — silent cross-reader divergence, the worst
-  class). The industry-standard editor refuses page operations on XFA
-  forms for the same reason; a stated refusal beats both silent /XFA loss
-  (the old behavior) and a carried lie. Fill's pure-AcroForm posture
+  shows an unedited layout, causing silent cross-reader divergence). A stated
+  refusal avoids both silent /XFA loss and a carried lie. Fill's pure-AcroForm
+  posture
   (/XFA stripped by pdf-lib, detected and stated) is a separate,
   unchanged boundary.
 

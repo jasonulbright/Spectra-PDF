@@ -2289,7 +2289,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 // Strict parse (like --rect): silently dropping bad tokens
                 // would send an empty list — and an empty page selection must
                 // never widen to "all pages", nor should a typo quietly
-                // shrink the selection. Review-caught.
+                // shrink the selection.
                 let parsed: Vec<i64> = pages
                     .split(',')
                     .map(|s| s.trim().parse::<i64>())

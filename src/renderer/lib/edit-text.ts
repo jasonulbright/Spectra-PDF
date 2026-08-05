@@ -10,7 +10,7 @@ import type { PageGeometry } from './redaction';
  * signed-document warning — distinct from success (void) and from failure
  * (throw), so the canvas can restore its listing and say so; a silent
  * return was visually indistinguishable from a successful edit
- * (review-caught, both edit kinds). */
+ * (regression, both edit kinds). */
 export const EDIT_DECLINED = 'edit-declined' as const;
 
 export interface EditTextRun {

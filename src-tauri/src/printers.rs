@@ -41,8 +41,8 @@ pub fn enumerate() -> Result<PrinterList, String> {
         // u64-backed so the buffer start is 8-byte aligned: it is read back
         // as PRINTER_INFO_4W (two pointers on x64), and a Vec<u8> only
         // guarantees 1-byte alignment — a cast from that is UB per the Rust
-        // abstract machine even where the Windows heap happens to over-align
-        // (review-caught, confirmed by clippy::cast_ptr_alignment).
+        // abstract machine even where the Windows heap happens to over-align;
+        // clippy::cast_ptr_alignment confirms the requirement.
         let mut buf = vec![0u64; (needed as usize).div_ceil(8)];
         let byte_view = unsafe {
             std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, needed as usize)

@@ -216,7 +216,7 @@ class TestReadFormFields:
         assert not os.path.exists(out)
 
     def test_fc4_multiselect_promotes_ff_flag(self, tmp_dir):
-        # Gauntlet HIGH: writing 2+ selections onto a NON-multiselect list box
+        # regression: writing 2+ selections onto a NON-multiselect list box
         # sets the /Ff MultiSelect bit (else the array /V is spec-non-conformant,
         # which pdf-lib never produces — it auto-promotes).
         src = os.path.join(tmp_dir, "nf.pdf")
@@ -240,7 +240,7 @@ class TestReadFormFields:
             assert int(p.Root["/AcroForm"]["/Fields"][0].get("/Ff", 0)) & FF_MULTISELECT
 
     def test_fc4_empty_value_clears_choice_selection(self, tmp_dir):
-        # Gauntlet CRITICAL follow-on: an EMPTY value CLEARS a choice selection
+        # regression follow-on: an EMPTY value CLEARS a choice selection
         # (pdf-lib's field.clear()) instead of erroring "no option ''". A GUI
         # that lets the user deselect a radio/dropdown depends on this.
         out1 = os.path.join(tmp_dir, "c1.pdf")
@@ -254,7 +254,7 @@ class TestReadFormFields:
         assert b2["size"] == ""  # dropdown de-selected → /V dropped
 
     def test_fc3_widget_in_two_pages_annots_not_misattributed(self, tmp_dir):
-        # Gauntlet MEDIUM: the SAME widget object listed in TWO pages' /Annots
+        # regression: the SAME widget object listed in TWO pages' /Annots
         # (malformed third-party input) must NOT be silently pinned to one page.
         # With no /P it reports page None (unplaced) — the scan never guesses.
         out = os.path.join(tmp_dir, "dup.pdf")
@@ -555,11 +555,11 @@ class TestFillFormFields:
 
     @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
     def test_fc1_unicode_with_control_chars_fills(self, tmp_dir):
-        # Gauntlet HIGH regression: a non-WinAnsi value containing layout-only
+        # regression regression: a non-WinAnsi value containing layout-only
         # control chars (\n, \r\n, \t) is validated OK (they're excluded from
         # coverage) and must FILL — not crash inside build_fallback_font, whose
         # own coverage gate would reject the control chars. All variants the
-        # reviewer reproduced:
+        # Reproduction:
         cases = {
             "notes": "Привет\nмир",        # multiline field + LF
             "applicant.name": "Привет\tмир",  # single-line field + TAB
@@ -582,7 +582,7 @@ class TestFillFormFields:
 
     @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
     def test_fc1_broad_control_chars_render(self, tmp_dir):
-        # S4-gauntlet analog for forms: a Unicode value with a control char
+        # S4-regression analog for forms: a Unicode value with a control char
         # beyond \n\r\t (VT, Unicode LINE SEPARATOR) now FILLS (flattened to
         # space) instead of being refused in validation.
         out = os.path.join(tmp_dir, "ctlbroad.pdf")

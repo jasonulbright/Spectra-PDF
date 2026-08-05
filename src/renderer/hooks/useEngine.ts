@@ -66,7 +66,7 @@ export interface EngineResult {
 // still running it — the engine is strictly serial FIFO) could complete
 // and satisfy a LATER mount's pending entry that reused the same id —
 // resolving conversion B's promise with conversion A's result
-// (review-caught CRITICAL via the Create PDF dialog, but the class was
+// (regression via the Create PDF dialog, but the class was
 // app-wide). Globally-unique ids make a stale response land on no map
 // and drop, which is the correct fate for an abandoned call's result.
 let nextEngineRequestId = 1;

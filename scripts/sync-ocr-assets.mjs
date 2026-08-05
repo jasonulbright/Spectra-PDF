@@ -1,24 +1,15 @@
-// Stages the OCR language models into resources/tesseract/tessdata, where the
-// VENDORED NATIVE TESSERACT reads them (Phase 12 step 3).
-//
-// This script used to stage tesseract.js's worker + WASM cores + gzipped models
-// into public/ocr for the WebView recognizer. tesseract.js is retired: there is
-// ONE recognizer now, native tesseract.exe driven by the engine, because two
-// recognizers can disagree about the same page and a scheduled/CLI run has no
+// Stage OCR language models into resources/tesseract/tessdata for the vendored
+// native Tesseract runtime. There is one recognizer driven by the engine; two
+// recognizers could disagree, and a scheduled or CLI run has no
 // WebView to host a WASM one in.
 //
-// What did NOT change, deliberately:
-//   - the SOURCE of the models is still the pinned, hash-locked
-//     `@tesseract.js-data/*` npm packages. They are plain Apache-2.0
-//     .traineddata (the same files upstream ships); sourcing them from the
-//     lockfile keeps the build reproducible and offline, which downloading
-//     from a tessdata release at build time would not.
-//   - the offered-language list is still parsed out of the app's own
-//     languages.ts, so adding a language stays a one-line edit and a language
-//     the picker offers but has no data for still FAILS THE BUILD.
+// Model sources are pinned, hash-locked `@tesseract.js-data/*` packages. They
+// contain the upstream Apache-2.0 .traineddata files, keeping builds reproducible
+// and offline. The offered-language list is parsed from languages.ts so any
+// picker language without model data fails the build.
 //
-// What did change: the models are DECOMPRESSED on the way in. tesseract.js
-// consumed `.traineddata.gz`; native tesseract wants `.traineddata`.
+// Models are decompressed on the way in because native Tesseract requires
+// `.traineddata` rather than `.traineddata.gz`.
 import { mkdirSync, readdirSync, rmSync, existsSync, statSync, readFileSync, writeFileSync } from 'node:fs'
 import { gunzipSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'

@@ -136,7 +136,7 @@ class TestReplaceTextRun:
     def test_delta_applies_once_and_propagates_through_the_td_chain(self, tmp_dir):
         """Td anchors are RELATIVE: one Δ on the first same-line anchor
         carries through the whole chain. Adjusting every Td compounded the
-        shift (End moved 2Δ) — proven live pre-fix; pinned here."""
+        shift, making End move by 2Δ; this test pins the correction."""
         src = os.path.join(tmp_dir, "t.pdf")
         out = os.path.join(tmp_dir, "o.pdf")
         pdf = pikepdf.new()
@@ -301,7 +301,7 @@ class TestReplaceTextRun:
     def test_subset_widths_range_gates_encoding(self, tmp_dir):
         """A subset-embedded simple font (narrow /Widths range) must REFUSE
         characters outside the declared range — encode() succeeding for a
-        never-subsetted glyph writes .notdef boxes silently (review-caught;
+        never-subsetted glyph writes .notdef boxes silently (regression;
         the phase doc's own glyph-availability promise)."""
         from engine.pdf_fonts import font_capability
 

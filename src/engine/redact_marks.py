@@ -2,8 +2,8 @@
 
 The canvas's pending marks are TRANSIENT view state by invariant (positional
 ids + a destructive tool — see lib/redaction.ts). Persistence therefore
-lives in the FILE, in the format's own vocabulary: the /Redact annotation
-subtype, the mark-then-apply object Acrobat writes. Save replaces the file's
+lives in the file, in the format's own vocabulary: the /Redact annotation
+subtype used by mark-then-apply workflows. Save replaces the file's
 /Redact set with the current marks (idempotent — saving twice is saving
 once); on open or reload the renderer lists them and re-seeds its transient
 marks; APPLYING redactions consumes them naturally, because the redaction

@@ -9,7 +9,7 @@
 // learns one dialog has learned the other.
 //
 // A leaf data + pure-function module with no React and no engine calls, for
-// the reason `CLAUDE.md` gives: there is no DOM test environment here, so a
+// There is no DOM test environment here, so a
 // rule living inside the component is a rule with no test.
 
 import type { SourceKind, SourceRow } from './create-pdf';

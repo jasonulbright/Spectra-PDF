@@ -43,7 +43,7 @@ describe('preferences dialog', () => {
     await $('[data-testid="prefs-close"]').click();
   });
 
-  // Updates are NOTIFY-ONLY (owner ruling): the app never installs anything
+  // Updates are notify-only: the app never installs anything
   // itself. The launch check is the only part that runs unprompted, so it gets
   // a switch — and that switch shipping ON is what makes the feature exist at
   // all for people who never open Preferences.

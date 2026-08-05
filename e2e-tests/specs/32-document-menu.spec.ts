@@ -55,7 +55,7 @@ describe('document menu (M6.3)', () => {
     // Three DISTINCT page sizes with per-page text: the size sequence pins the
     // neighbor rule and the text sequence pins the insertion POSITION — a
     // same-size fixture passed identically under prepend/append bugs
-    // (review-caught).
+    // (regression).
     threePager = resolve(tmp, 'three.pdf');
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -212,7 +212,7 @@ describe('document menu (M6.3)', () => {
     expect(await copy.getAttribute('data-disabled')).toBeNull();
     // A REAL mouse click: its pointerdown used to collapse the selection
     // before onSelect ran, so Copy copied nothing, ever, by mouse
-    // (review-caught) — this click is the discriminator.
+    // (regression) — this click is the discriminator.
     await copy.click();
 
     // Round-trip through a real paste — no clipboard-read permission needed.

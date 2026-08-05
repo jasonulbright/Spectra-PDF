@@ -314,8 +314,7 @@ describe('rulers and guides (N11 slice B)', () => {
       timeoutMsg: 'the ruler drag never placed a guide',
     });
     const [g] = await guides();
-    // The top ruler makes a HORIZONTAL guide — the drafting convention, and
-    // the king's.
+    // The top ruler creates a horizontal guide, following drafting convention.
     expect(g.axis).toBe('y');
     expect(Math.abs(g.pos - 0.25)).toBeLessThan(0.01);
     expect(await (await browser.$('[data-testid="page-guide"]')).isExisting()).toBe(true);
@@ -358,8 +357,7 @@ describe('rulers and guides (N11 slice B)', () => {
       { timeout: 5_000, timeoutMsg: 'the guide never moved' },
     );
 
-    // Now drag it clear off the TOP of the page — the king's "drag it back to
-    // the ruler", in its general form.
+    // Drag it clear of the page to remove it.
     const [g1] = await guides();
     const held = { x: grab.x, y: Math.round(cell.y + cell.h * g1.pos) };
     await browser

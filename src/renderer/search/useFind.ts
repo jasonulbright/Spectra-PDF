@@ -1,4 +1,4 @@
-// Ported from PDFx src/renderer/src/app/useFind.ts (same owner), extended
+// Ported from PDFx src/renderer/src/app/useFind.ts and extended
 // with ordered match-page navigation (next/prev + centerOn jumps) — PDFx
 // filters its grid; this canvas navigates the camera instead.
 import { useCallback, useEffect, useMemo, useState } from 'react';

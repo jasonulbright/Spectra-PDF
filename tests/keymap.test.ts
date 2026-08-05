@@ -111,8 +111,7 @@ describe('resolveBinding', () => {
   });
 
   it('zoom keeps the shiftless keys; the SHIFTED pair rotates the view (M6.1)', () => {
-    // The legacy '=' OR '+' any-shift matching ended when the Acrobat preset
-    // claimed Ctrl+Shift+Plus/Minus for Rotate View (§ 9.2).
+    // Shiftless plus/minus zoom; Ctrl+Shift+plus/minus rotate the view.
     expect(resolveBinding(fakeEvent({ key: '=', ctrl: true }))?.command).toBe('view.zoomIn');
     expect(resolveBinding(fakeEvent({ key: '+', ctrl: true }))?.command).toBe('view.zoomIn'); // numpad plus
     expect(resolveBinding(fakeEvent({ key: '-', ctrl: true }))?.command).toBe('view.zoomOut');
@@ -151,9 +150,8 @@ describe('resolveBinding', () => {
   });
 
   it('the M6.5 freeze bound the last verified rows', () => {
-    // Ctrl+Shift+T — VERIFIED as current Acrobat's Insert Blank Pages at the
-    // freeze (the version-variant worry was classic's Crop). Shift+F4 — the
-    // task-pane toggle, verified; F4 alone stays the nav pane.
+    // Ctrl+Shift+T inserts blank pages. Shift+F4 toggles the tool pane, while
+    // F4 alone toggles the navigation pane.
     expect(resolveBinding(fakeEvent({ key: 't', ctrl: true, shift: true }))?.command).toBe('document.insertBlankPage');
     expect(resolveBinding(fakeEvent({ key: 'F4' }))?.command).toBe('view.navPane');
     expect(resolveBinding(fakeEvent({ key: 'F4', shift: true }))?.command).toBe('view.toolsPane');
@@ -291,7 +289,7 @@ describe('dispatchKeyEvent', () => {
   it('Ctrl+Shift+F is edit-guarded — a re-press from inside the search box is a no-op', () => {
     // Unlike Find, the Search command toggles; guarding it means a reflex
     // re-press while the (autofocused) search input has focus can't close the
-    // panel and discard the query (review-caught MED).
+    // panel and discard the query (regression).
     const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
     const e = fakeEvent({ key: 'f', ctrl: true, shift: true, target: INPUT });
     dispatchKeyEvent(e);
@@ -406,8 +404,7 @@ describe('single-key accelerators (M6.4 — pref-gated, default OFF)', () => {
   });
 
   it('Alt+letter and Shift+letter are NOT tool picks', () => {
-    // Alt+letter reads as a mnemonic; Shift+letter is reserved surface
-    // (Acrobat cycles variants with Shift — none shipped).
+    // Alt+letter is a mnemonic, and Shift+letter is reserved.
     expect(resolveBinding(fakeEvent({ key: 'h', alt: true }))).toBeNull();
     expect(resolveBinding(fakeEvent({ key: 'H', shift: true }))).toBeNull();
   });

@@ -12,9 +12,8 @@ import sys
 # Rust side's UTF-8 request bytes as cp1252 — mojibake for EVERY non-ASCII
 # value on every text-carrying op (metadata titles, watermark text, form
 # values, bookmark titles, signer names), in the GUI and the CLI alike, and it
-# corrupts VALID values, not just ones validation should reject
-# (review-caught live: "José García" stored as mojibake; "日本語" sailed past
-# the forms WinAnsi check as cp1252 gibberish that happened to encode).
+# corrupts valid values, such as "José García", and can turn non-WinAnsi text
+# into cp1252 gibberish that passes later encoding checks.
 # Reconfigure both directions before the server reads anything. The spawners
 # also set PYTHONUTF8=1 (engine.rs / cli.rs) as belt-and-suspenders — this
 # line is the authoritative fix that holds no matter how the engine is run.

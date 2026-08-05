@@ -10,7 +10,7 @@
 
 export type MeasureUnit = 'pt' | 'in' | 'mm' | 'cm' | 'ft' | 'm';
 
-/** "from fromUnit = to toUnit" — the king's scale ratio (1 in = 1 ft). */
+/** Scale ratio expressed as "from fromUnit = to toUnit" (1 in = 1 ft). */
 export interface MeasureScale {
   from: number;
   fromUnit: MeasureUnit;
@@ -94,7 +94,7 @@ export function measureUnitsPerPoint(scale: MeasureScale): number {
   return reportedPerPt(scale);
 }
 
-/** The /Measure /R ratio string, in the king's own phrasing ("1 in = 2 ft"). */
+/** The /Measure /R ratio string, such as "1 in = 2 ft". */
 export function measureRatioLabel(scale: MeasureScale): string {
   return `${trim(scale.from)} ${scale.fromUnit} = ${trim(scale.to)} ${scale.toUnit}`;
 }

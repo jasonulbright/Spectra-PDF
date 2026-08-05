@@ -24,9 +24,8 @@
  * NOT with a bare `cargo build`: tauri-build re-runs whenever dist changes,
  * and outside the tauri CLI it bakes a DEV context into the binary — the
  * webview then points at http://localhost:5173 (no dev server = blank page)
- * and every spec fails with "Test harness never appeared on window", which
- * reads like a catastrophic regression. Proven live 2026-08-02 by CDP
- * (/json listed the page URL as localhost:5173).
+ * and every spec fails with "Test harness never appeared on window". CDP's
+ * /json endpoint exposes the incorrect localhost URL for diagnosis.
  *
  * Then: npm test
  */

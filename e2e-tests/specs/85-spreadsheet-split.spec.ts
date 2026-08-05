@@ -2,8 +2,8 @@ import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
 import { waitForHarness, openByPaths, getState, invokeAppCommand } from '../support/harness.js';
 
-// The king's SPREADSHEET SPLIT (the resolved 2026-07-30 deferral): a 2×2
-// grid over ONE document with frozen-pane semantics — panes in a row share
+// Spreadsheet Split uses a 2×2 grid over one document with frozen-pane
+// semantics: panes in a row share
 // vertical scroll, panes in a column share horizontal scroll, zoom
 // broadcasts. Driven through the real command + real DOM scrollers.
 

@@ -28,9 +28,8 @@ export interface AnnotationTransform {
   calloutBox?: [number, number, number, number];
 }
 
-/** Kinds whose geometry the user may change at all. Text markup is anchored
- * to the text it covers — Acrobat refuses to move it too, and a moved quad
- * set would lie about what it marks. */
+/** Kinds whose geometry the user may change. Text markup remains anchored to
+ * the text it covers because a moved quad set would misrepresent its target. */
 export function isTransformable(a: PageAnnotation): boolean {
   return a.kind !== 'textmarkup';
 }
@@ -335,7 +334,7 @@ interface Placed {
   pageId: string;
 }
 
-/** Align a same-page selection to the group's bounding box (Acrobat's model).
+/** Align a same-page selection to the group's bounding box.
  * Returns only the members that actually move. */
 export function alignEdits(members: Placed[], mode: AlignMode): AnnotationTransform[] {
   const movable = members.filter((m) => isTransformable(m.annotation));
@@ -391,8 +390,8 @@ export function alignEdits(members: Placed[], mode: AlignMode): AnnotationTransf
   return out;
 }
 
-/** Even gaps between boxes along one axis, first and last pinned (Acrobat's
- * distribute). Needs three or more movable members. */
+/** Create even gaps along one axis with the first and last boxes pinned.
+ * Requires three or more movable members. */
 export function distributeEdits(members: Placed[], mode: DistributeMode): AnnotationTransform[] {
   const movable = members.filter((m) => isTransformable(m.annotation));
   if (movable.length < 3) return [];
@@ -631,7 +630,7 @@ export function rotateFlipEdits(
 // ── Ink stroke eraser (N5b) ────────────────────────────────────────────
 
 /** Cut everything within the eraser's swath out of an ink annotation's
- * strokes — the king's pencil eraser, PARTIAL like his: a stroke crossed in
+ * strokes. A stroke crossed in
  * its middle SPLITS into two strokes (which `strokes: number[][]` holds
  * exactly; the model change that shipped N2 is what makes N5b clean).
  *

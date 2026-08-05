@@ -79,7 +79,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   // and-apply over one — its own `set_outline`/`file.snapshot` fires the commit
   // gate, which can swap the buffer and trigger a reload mid-write that would
   // otherwise land a stale tree and desync `nodes` from `loadedBuffer` (a later
-  // edit then silently clobbers the saved change — review-caught HIGH). `revalidate`
+  // edit then silently clobbers the saved change — regression). `revalidate`
   // re-runs the reload effect once a path's chain drains (so a lone failed save's
   // revert, or an external change that arrived during a save, still reloads).
   const savesInFlight = useRef<Map<string, number>>(new Map());
@@ -103,7 +103,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   // current file (its buffer === loadedBuffer) — otherwise it would write the
   // empty initial `[]` (or, mid-switch, the previous file's tree) over the
   // target's real bookmarks, and `set_outline` is a full REPLACE, not a merge
-  // (review-caught HIGH). Reads via refs so the event-handler callbacks see live
+  // (regression). Reads via refs so the event-handler callbacks see live
   // values. `mutableTarget()` returns the file to write to, or null while its
   // outline is still loading.
   const loadedBufferRef = useRef(loadedBuffer);
@@ -115,7 +115,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
     // already in flight for it: during a save the buffer churns (commit gate →
     // UPDATE_FILE) while `nodes` stays the authoritative working tree (the
     // reload is suppressed), so a concurrent edit is fine and queues after —
-    // without this it would be silently dropped in that window (review-caught).
+    // without this it would be silently dropped in that window (regression).
     if (target.buffer === loadedBufferRef.current) return target;
     return (savesInFlight.current.get(target.path) ?? 0) > 0 ? target : null;
   }, []);
@@ -168,7 +168,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   // (both stage the same working file). The `target` is captured by the caller
   // at mutation time and threaded through — NOT re-read from a ref here — so a
   // tab switch between the mutation and this deferred run can't redirect the
-  // write to a different file (review-caught HIGH). On success we advance
+  // write to a different file (regression). On success we advance
   // loadedBuffer to the EXACT buffer we dispatched, so the reload effect sees
   // `nodes` as already-current and doesn't self-reload (no key prediction, so no
   // chained-save / failed-save / ping-pong race). A failure resets loadedBuffer
@@ -230,8 +230,8 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   }, []);
 
   // ── Editing (from OutlinePanel) ──────────────────────────────────────────
-  // Local edits update `nodes`; commit on blur/Enter if the value changed, so
-  // each finished field is one undoable save (Acrobat's immediate model).
+  // Local edits update `nodes`; commit on blur/Enter if the value changed so
+  // each finished field becomes one undoable save.
   const editBaseline = useRef<OutlineNode[] | null>(null);
   const beginEdit = useCallback(() => {
     if (!editBaseline.current) editBaseline.current = nodesRef.current;
@@ -258,7 +258,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   // Structural mutators: capture the target file, and — if an inline edit is
   // still open — advance its baseline to the tree WE persist, so the eventual
   // blur-commit doesn't re-detect this same structural change and fire a
-  // redundant second save (a stray extra undo step) (review-caught MED).
+  // redundant second save (a stray extra undo step) (regression).
   const rebaseIfEditing = useCallback((next: OutlineNode[]) => {
     if (editBaseline.current) editBaseline.current = next;
   }, []);
@@ -311,7 +311,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       // jumpToFilePage, not canvas().centerOn: a bookmark addresses a page
       // of the FILE, which may sit in a `.pdfx` partition the reading view
       // isn't showing — centring there was a silent, zero-feedback no-op
-      // (review-caught). The service resolves page number → id from live
+      // (regression). The service resolves page number → id from live
       // workspace state (§ F: ids are opaque — generation-tagged or
       // adopted — so string-building `path#p{n}` is no longer valid).
       getCanvasServices()?.jumpToFilePage(activeFile.path, page);
@@ -468,7 +468,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   // a save is in flight for it — during a save the buffer churns but `nodes` is
   // the authoritative working tree, so keeping rows mounted avoids a spurious
   // "Loading…" flash and, more importantly, avoids a forced unmount-blur that
-  // would silently drop a concurrent edit in another field (review-caught).
+  // would silently drop a concurrent edit in another field (regression).
   const loaded =
     activeFile?.buffer != null &&
     (activeFile.buffer === loadedBuffer || (savesInFlight.current.get(activeFile.path) ?? 0) > 0);
