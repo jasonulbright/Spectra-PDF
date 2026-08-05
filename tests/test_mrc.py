@@ -952,8 +952,26 @@ class TestCompressDoor:
             )
 
     def test_the_ghostscript_branch_is_untouched_by_the_mrc_arguments(
-        self, sample_pdf, tmp_dir, gs_path
+        self, sample_pdf, tmp_dir, gs_path, monkeypatch
     ):
+        # The claim is that the mrc_* keywords never reach the Ghostscript
+        # branch, so the thing to compare is the COMMAND, not the output.
+        # Comparing output SIZE flaked: two runs of gs on one input differ by
+        # a few bytes now and then (measured — 3788 vs 3780 with byte-identical
+        # arguments and no other code in the process), so the pin failed on its
+        # own nondeterminism roughly one run in ten and said nothing about the
+        # arguments when it did.
+        import engine.compress as compress_module
+
+        seen: list[list[str]] = []
+        real_gs = compress_module.budget.gs
+
+        def record(cmd, **kwargs):
+            seen.append([str(part) for part in cmd])
+            return real_gs(cmd, **kwargs)
+
+        monkeypatch.setattr(compress_module.budget, "gs", record)
+
         plain = os.path.join(tmp_dir, "plain.pdf")
         withargs = os.path.join(tmp_dir, "withargs.pdf")
         compress(sample_pdf, plain, quality="ebook", gs_path=gs_path)
@@ -962,7 +980,13 @@ class TestCompressDoor:
             mrc_preset="smallest", mrc_pdfa_safe=True, mrc_bg_div=8,
             mrc_verify_text=True, tesseract_path="",
         )
-        assert os.path.getsize(plain) == os.path.getsize(withargs)
+        assert len(seen) == 2
+        # Only the output path may differ between the two invocations.
+        assert [a for a in seen[0] if not a.startswith("-sOutputFile=")] == [
+            a for a in seen[1] if not a.startswith("-sOutputFile=")
+        ]
+        assert not any("mrc" in a.lower() for a in seen[1])
+        assert os.path.getsize(plain) > 0 and os.path.getsize(withargs) > 0
 
 
 # --------------------------------------------------------------------------

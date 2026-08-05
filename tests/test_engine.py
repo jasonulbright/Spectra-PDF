@@ -895,6 +895,326 @@ class TestRedact:
         assert "SECRETTAG" not in extract_text(out)["text"]
 
 
+# ── Redact: the F15-A false negative ──────────────────────────────────────
+#
+# Every test below is MUTATION-VERIFIED BY CONSTRUCTION: each computes the old
+# flat estimate (`OLD_ESTIMATE_EM` per BYTE) from the fixture's own text and
+# places its mark strictly beyond it, so restoring the estimate cannot pass.
+
+OLD_ESTIMATE_EM = 0.5  # redact.py's deleted AVG_CHAR_ADVANCE_EM
+
+
+def _simple_font(doc, base: str) -> pikepdf.Object:
+    return doc.make_indirect(
+        Dictionary(
+            Type=Name.Font,
+            Subtype=Name.Type1,
+            BaseFont=Name(f"/{base}"),
+            Encoding=Name.WinAnsiEncoding,
+        )
+    )
+
+
+def _text_page(doc, content: bytes, fonts: dict, size=(612, 792)) -> None:
+    page = doc.add_blank_page(page_size=size)
+    page.Resources = Dictionary(Font=Dictionary(**fonts))
+    page.Contents = doc.make_stream(content)
+
+
+def _identity_h_font(doc, widths: dict[int, int], default: int = 1000):
+    """An Identity-H CID font whose /W declares `widths` (CID → 1000/em) and
+    whose /ToUnicode names every one of them, so the run MEASURES."""
+    from tests.test_pdf_fonts import _tounicode_stream
+
+    w_array = []
+    for cid, width in sorted(widths.items()):
+        w_array.append(cid)
+        w_array.append(pikepdf.Array([width]))
+    desc = doc.make_indirect(
+        Dictionary(
+            Type=Name.Font,
+            Subtype=Name("/CIDFontType2"),
+            BaseFont=Name("/Narrow"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+            DW=default,
+            W=pikepdf.Array(w_array),
+        )
+    )
+    return doc.make_indirect(
+        Dictionary(
+            Type=Name.Font,
+            Subtype=Name("/Type0"),
+            BaseFont=Name("/Narrow"),
+            Encoding=Name("/Identity-H"),
+            DescendantFonts=pikepdf.Array([desc]),
+            ToUnicode=_tounicode_stream(doc, {cid: chr(64 + cid) for cid in widths}),
+        )
+    )
+
+
+class TestRedactMeasuresWithTheFont:
+    """F15 slice A. `redact.py` sized every show operator at a flat 0.5 em per
+    BYTE while `text_runs.py` computed the real advance in the same walk. The
+    guess ran NARROW on any face averaging more than half an em — every
+    monospace document, bold sans, and plain Helvetica by ~1.5 characters — so
+    text that a mark visibly covered fell outside the box the region was tested
+    against and SURVIVED, with `regions_applied: 1` reported as success. On a
+    2-byte CID font it ran 2× WIDE and deleted runs a mark never touched."""
+
+    # face → (advance in 1000/em of the repeated glyph, the glyph)
+    PIN_TABLE = {
+        "Courier": (600, "M"),
+        "Courier-Bold": (600, "M"),
+        "Helvetica-Bold": (944, "M"),
+        "Helvetica": (833, "M"),
+        "Times-Roman": (889, "M"),
+    }
+
+    @pytest.mark.parametrize("face", sorted(PIN_TABLE))
+    def test_the_tail_of_a_line_is_inside_the_bbox(self, tmp_dir, face):
+        """The pin table, one face per case: a band over the last stretch of
+        REAL ink — past where the flat estimate said the run ended — removes
+        the run. Courier is the worst of them (0.83× estimate/real, the last
+        sixth of every line), Helvetica the mildest (0.97×), and all five are
+        leaks."""
+        advance, glyph = self.PIN_TABLE[face]
+        size, x, y, count = 12.0, 72.0, 700.0, 30
+        text = glyph * count
+        real_x1 = x + count * advance / 1000.0 * size
+        est_x1 = x + len(text) * size * OLD_ESTIMATE_EM
+        assert est_x1 < real_x1, f"{face} is not a narrow-estimate face"
+
+        src = os.path.join(tmp_dir, f"tail_{face}.pdf")
+        out = os.path.join(tmp_dir, f"tail_{face}_out.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            f"BT /F1 {size:g} Tf {x:g} {y:g} Td ({text}) Tj ET".encode("ascii"),
+            {"F1": _simple_font(doc, face)},
+        )
+        doc.save(src)
+        doc.close()
+
+        # Strictly inside the real ink, strictly outside the old estimate.
+        band = [est_x1 + 2.0, y - 1.0, real_x1 - 2.0, y + size]
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": band}])
+        assert result["text_runs_removed"] == 1
+        assert text not in extract_text(out)["text"]
+
+    def test_the_line_is_kept_when_the_band_clears_its_real_ink(self, tmp_dir):
+        """The other half of the same measurement: a band BEYOND the real right
+        edge must remove nothing. Without this the first test would pass on a
+        redactor that removed everything."""
+        size, x, y, text = 12.0, 72.0, 700.0, "M" * 30
+        real_x1 = x + 30 * 600 / 1000.0 * size  # Courier, 0.6 em flat
+        src = os.path.join(tmp_dir, "tail_clear.pdf")
+        out = os.path.join(tmp_dir, "tail_clear_out.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            f"BT /F1 {size:g} Tf {x:g} {y:g} Td ({text}) Tj ET".encode("ascii"),
+            {"F1": _simple_font(doc, "Courier")},
+        )
+        doc.save(src)
+        doc.close()
+
+        band = [real_x1 + 2.0, y - 1.0, real_x1 + 40.0, y + size]
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": band}])
+        assert result["text_runs_removed"] == 0
+        assert text in extract_text(out)["text"]
+
+    def test_a_mark_clear_of_a_cid_run_removes_nothing(self, tmp_dir):
+        """The mirror. A 2-byte CID font was counted by BYTES, so its estimate
+        reached 2× the real advance and a mark in the empty space to the RIGHT
+        of the run deleted it — over-removal of content nobody marked, which is
+        how redacting one column of a bilingual table takes its neighbour."""
+        size, x, y = 12.0, 72.0, 700.0
+        cids = [1, 2, 3, 4, 5]
+        widths = {cid: 500 for cid in cids}  # narrow glyphs, the common subset
+        payload = "".join(f"{cid:04X}" for cid in cids)
+        real_x1 = x + len(cids) * 500 / 1000.0 * size  # 30 pt
+        est_x1 = x + len(cids) * 2 * size * OLD_ESTIMATE_EM  # 60 pt — 2× wide
+        assert est_x1 > real_x1
+
+        src = os.path.join(tmp_dir, "cid_clear.pdf")
+        out = os.path.join(tmp_dir, "cid_clear_out.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            f"BT /F1 {size:g} Tf {x:g} {y:g} Td <{payload}> Tj ET".encode("ascii"),
+            {"F1": _identity_h_font(doc, widths)},
+        )
+        doc.save(src)
+        doc.close()
+
+        # 10 pt clear of the real run, well inside the old estimate's reach.
+        band = [real_x1 + 10.0, y, real_x1 + 20.0, y + size]
+        assert band[0] < est_x1
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": band}])
+        assert result["text_runs_removed"] == 0
+
+        # …and the run is still removable where it actually is.
+        out2 = os.path.join(tmp_dir, "cid_hit_out.pdf")
+        hit = redact(
+            file=src, output=out2,
+            regions=[{"page": 1, "rect": [real_x1 - 6.0, y, real_x1 - 1.0, y + size]}],
+        )
+        assert hit["text_runs_removed"] == 1
+
+    def test_a_refused_cid_font_still_measures_by_its_declared_widths(self, tmp_dir):
+        """A CID font with no /ToUnicode cannot be DECODED, but /W and /DW
+        still state its advances. Discarding them (the old `_refused`) left
+        every such run measured at the 0.5 em placeholder — the same narrow
+        guess in a different costume."""
+        size, x, y = 12.0, 72.0, 700.0
+        cids = [1, 2, 3, 4, 5]
+        payload = "".join(f"{cid:04X}" for cid in cids)
+        src = os.path.join(tmp_dir, "cid_refused.pdf")
+        doc = pikepdf.new()
+        font = _identity_h_font(doc, {cid: 300 for cid in cids}, default=300)
+        del font["/ToUnicode"]  # now undecodable — but still measurable
+        _text_page(
+            doc,
+            f"BT /F1 {size:g} Tf {x:g} {y:g} Td <{payload}> Tj ET".encode("ascii"),
+            {"F1": font},
+        )
+        doc.save(src)
+        doc.close()
+
+        # Three candidate right edges, all different on purpose: the declared
+        # width (18 pt) is the truth, the discarded-widths placeholder (0.5 em
+        # per code, 30 pt) and the unmeasurable fall-wide (1 em per code,
+        # 60 pt) are both wrong, and only one band distinguishes them.
+        real_x1 = x + len(cids) * 300 / 1000.0 * size
+        placeholder_x1 = x + len(cids) * 500 / 1000.0 * size
+        wide_x1 = x + len(cids) * 1000 / 1000.0 * size
+        assert real_x1 < placeholder_x1 < wide_x1
+
+        clear = [real_x1 + 2.0, y, placeholder_x1 - 2.0, y + size]
+        result = redact(
+            file=src, output=os.path.join(tmp_dir, "cid_refused_out.pdf"),
+            regions=[{"page": 1, "rect": clear}],
+        )
+        assert result["text_runs_removed"] == 0
+
+        hit = redact(
+            file=src, output=os.path.join(tmp_dir, "cid_refused_hit.pdf"),
+            regions=[{"page": 1, "rect": [real_x1 - 4.0, y, real_x1 - 1.0, y + size]}],
+        )
+        assert hit["text_runs_removed"] == 1
+
+    def test_an_unmeasurable_run_falls_wide(self, tmp_dir):
+        """No /Font entry for the active name: nothing can be measured, so the
+        box covers 1 em per byte — over-removal, the only tolerable error for a
+        redaction tool (R2's fail-closed direction). The old estimate covered
+        HALF that and let the second half of such a run escape."""
+        size, x, y, text = 12.0, 72.0, 700.0, "SECRET"
+        src = os.path.join(tmp_dir, "nofont.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(612, 792))
+        page.Resources = Dictionary()  # deliberately no /Font
+        page.Contents = doc.make_stream(
+            f"BT /F9 {size:g} Tf {x:g} {y:g} Td ({text}) Tj ET".encode("ascii")
+        )
+        doc.save(src)
+        doc.close()
+
+        est_x1 = x + len(text) * size * OLD_ESTIMATE_EM  # 36 pt
+        wide_x1 = x + len(text) * size  # 72 pt
+        band = [est_x1 + 4.0, y, wide_x1 - 4.0, y + size]
+        result = redact(
+            file=src, output=os.path.join(tmp_dir, "nofont_out.pdf"),
+            regions=[{"page": 1, "rect": band}],
+        )
+        assert result["text_runs_removed"] == 1
+
+    def test_a_band_over_the_descenders_removes_the_line(self, tmp_dir):
+        """The vertical half of the same defect. The bbox ran from the BASELINE
+        to baseline + font size, but glyph ink reaches BELOW the baseline —
+        2.48 pt at 12 pt Helvetica, measured. A band across the descenders of
+        `p g y j q` covered real ink and intersected nothing."""
+        size, x, y, text = 12.0, 72.0, 700.0, "page typography"
+        src = os.path.join(tmp_dir, "descend.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            f"BT /F1 {size:g} Tf {x:g} {y:g} Td ({text}) Tj ET".encode("ascii"),
+            {"F1": _simple_font(doc, "Helvetica")},
+        )
+        doc.save(src)
+        doc.close()
+
+        # Entirely below the baseline: outside the old box, inside real ink.
+        band = [x, y - 2.2, x + 60.0, y - 0.4]
+        result = redact(
+            file=src, output=os.path.join(tmp_dir, "descend_out.pdf"),
+            regions=[{"page": 1, "rect": band}],
+        )
+        assert result["text_runs_removed"] == 1
+
+    def test_word_and_char_spacing_widen_the_bbox(self, tmp_dir):
+        """Tc/Tw were not modelled at all — the old comment claimed they "only
+        ever make real advances SMALLER", which is true only for NEGATIVE
+        values. A positive Tc pushes the tail of the line well past the flat
+        estimate."""
+        size, x, y, text = 12.0, 72.0, 700.0, "SECRETLINE"
+        tc = 6.0
+        src = os.path.join(tmp_dir, "spacing.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            f"BT /F1 {size:g} Tf {tc:g} Tc {x:g} {y:g} Td ({text}) Tj ET".encode("ascii"),
+            {"F1": _simple_font(doc, "Helvetica")},
+        )
+        doc.save(src)
+        doc.close()
+
+        est_x1 = x + len(text) * size * OLD_ESTIMATE_EM
+        band = [est_x1 + 8.0, y, est_x1 + 20.0, y + size]
+        result = redact(
+            file=src, output=os.path.join(tmp_dir, "spacing_out.pdf"),
+            regions=[{"page": 1, "rect": band}],
+        )
+        assert result["text_runs_removed"] == 1
+
+    def test_one_geometry_authority(self, tmp_dir):
+        """The listing walk and the redaction walk must agree about a run's
+        advance — the whole point of the shared measurement. Compared here on
+        a kerned TJ with Tc/Tw/Tz live, the composition most likely to drift."""
+        from engine.text_metrics import _FontCache, _run_metrics
+        from engine.content_walk import IDENTITY, GraphicsTextState
+        from engine.text_runs import list_text_runs
+
+        src = os.path.join(tmp_dir, "authority.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            b"BT /F1 11 Tf 1.5 Tc 3 Tw 120 Tz 40 700 Td "
+            b"[(Mixed )-250(spacing )180(here)] TJ ET",
+            {"F1": _simple_font(doc, "Helvetica")},
+        )
+        doc.save(src)
+        doc.close()
+
+        run = list_text_runs(src, 1)["runs"][0]
+        with pikepdf.open(src) as pdf:
+            resources = pdf.pages[0].obj.get("/Resources")
+            state = GraphicsTextState(IDENTITY, 11.0, 0.0, 1.2)
+            state.char_spacing, state.word_spacing = 1.5, 3.0
+            cap = _FontCache().capability(resources, None, "/F1")
+            _text, raw = _run_metrics(
+                "TJ",
+                [pikepdf.Array([
+                    pikepdf.String(b"Mixed "), -250,
+                    pikepdf.String(b"spacing "), 180,
+                    pikepdf.String(b"here"),
+                ])],
+                cap,
+                state,
+            )
+        assert run["rect"][2] - run["rect"][0] == pytest.approx(raw * 1.2, abs=1e-6)
+
+
 # ── Watermark ─────────────────────────────────────────────────────────────
 
 
