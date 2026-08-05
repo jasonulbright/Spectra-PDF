@@ -6,7 +6,14 @@ import shutil
 import pikepdf
 import pytest
 
-from engine.batch_ocr import IMAGE_SUFFIXES, _image_to_pdf, _is_image, _list_sources, batch_ocr
+from engine.batch_ocr import (
+    IMAGE_SUFFIXES,
+    _image_to_pdf,
+    _is_image,
+    _list_sources,
+    batch_ocr,
+    ocr_file,
+)
 from engine.encrypt import encrypt
 from engine.extract_text import extract_text
 from engine.image_export import export_images
@@ -183,3 +190,83 @@ class TestSuppliedPasswords:
                            passwords={"locked.pdf": "s3cret"})
         entry = report["results"][0]
         assert entry["status"] != "skipped", entry
+
+
+class TestBatchMrc:
+    """O8 — issue #5's "a batch option that could just compress automatically".
+
+    The order is the claim: recognition rasterises from the PAGE, so MRC must
+    read the RECOGNISED output, never the other way round. Everything else
+    here is about a batch's standing promise — one file's outcome never
+    changes another's, and MRC declining is a note rather than a failure.
+    """
+
+    def _scan_pdf(self, tmp_dir, dest):
+        """A one-page PDF whose only content is a 300-dpi raster of text."""
+        from pathlib import Path
+
+        from PIL import Image
+
+        png = _scan_png(tmp_dir, os.path.join(tmp_dir, "scan-src.png"))
+        image = Image.open(png).convert("RGB")
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        _image_to_pdf(Path(png), Path(dest))
+        image.close()
+        return dest
+
+    def test_a_scan_is_recognised_then_compressed(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in")
+        dst = os.path.join(tmp_dir, "out")
+        os.makedirs(src)
+        self._scan_pdf(tmp_dir, os.path.join(src, "scan.pdf"))
+        before = os.path.getsize(os.path.join(src, "scan.pdf"))
+        report = batch_ocr(source=src, dest=dst, gs_path=GS, tesseract_path=TESS,
+                           mrc=True, mrc_preset="balanced")
+        entry = report["results"][0]
+        assert entry["status"] == "ocr"
+        assert entry["mrcApplied"] is True
+        assert "MRC compressed" in entry["mrc"]
+        out = os.path.join(dst, "scan.pdf")
+        assert os.path.getsize(out) < before
+        # The searchable layer is still there AFTER the compression: the
+        # surgery keeps the page object, so the invisible text survives.
+        assert PHRASE.split()[0].lower() in extract_text(out)["text"].lower()
+
+    def test_a_file_with_no_scan_keeps_its_bytes_and_says_so(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in")
+        dst = os.path.join(tmp_dir, "out")
+        os.makedirs(src)
+        shutil.copy(_typed_pdf(tmp_dir), os.path.join(src, "typed.pdf"))
+        report = batch_ocr(source=src, dest=dst, gs_path=GS, tesseract_path=TESS,
+                           mrc=True)
+        entry = report["results"][0]
+        # Not a failure: MRC on a page that is not a scan is worse than the
+        # original, and the file the user asked for is already mirrored.
+        assert entry["status"] == "copied"
+        assert "mrcApplied" not in entry
+        assert "nothing to separate" in entry["mrc"]
+        assert os.path.getsize(os.path.join(dst, "typed.pdf")) == os.path.getsize(
+            os.path.join(src, "typed.pdf")
+        )
+
+    def test_without_the_option_nothing_is_compressed(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in")
+        dst = os.path.join(tmp_dir, "out")
+        os.makedirs(src)
+        self._scan_pdf(tmp_dir, os.path.join(src, "scan.pdf"))
+        report = batch_ocr(source=src, dest=dst, gs_path=GS, tesseract_path=TESS)
+        assert "mrc" not in report["results"][0]
+
+    def test_the_note_reaches_the_log(self, tmp_dir):
+        from engine.batch_ocr import _file_line
+
+        line = _file_line({"status": "ocr", "rel": "a.pdf", "pagesOcrd": 1,
+                           "mrc": "MRC compressed 1 page(s), 900 -> 100 bytes"})
+        assert "[MRC compressed 1 page(s), 900 -> 100 bytes]" in line
+
+    def test_ocr_file_carries_the_same_option(self, tmp_dir):
+        out = os.path.join(tmp_dir, "one-mrc.pdf")
+        result = ocr_file(self._scan_pdf(tmp_dir, os.path.join(tmp_dir, "one.pdf")),
+                          out, tesseract_path=TESS, gs_path=GS, mrc=True)
+        assert result["mrcApplied"] is True
+        assert "MRC compressed" in result["mrc"]

@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.18 — Vertical writing, all the way
+## 1.0.18 — Vertical writing, and scans that shrink
 
 Text set in columns finishes the job it started. Mongolian — and the Todo,
 Sibe and Manchu that share its alphabet — reads and edits the way it is
@@ -8,6 +8,17 @@ written: down the page, with the columns running left to right. And the
 small horizontal blocks that live inside vertical text, the years and page
 numbers and two-digit figures, are now part of the column they sit in
 rather than something the column has to work around.
+
+Scanned paper gets its own kind of compression. Instead of shrinking the
+whole page photograph — which blurs the words along with everything else —
+a scan is separated into the text, the ink colour and the paper behind it,
+and each is stored the way it should be. The text keeps every bit of its
+original resolution while the paper compresses hard. A 900 KB scan of a
+typed page comes out at 55 KB, sharper than it went in.
+
+Scanned files also simply display better: images written by fax machines,
+scanners and archival tools used to come up blank in the viewer, and now
+they draw.
 
 ### Vertical text
 - **Left-to-right columns.** Mongolian text sets in vertical columns that
@@ -32,6 +43,48 @@ rather than something the column has to work around.
 - **Upright punctuation.** Commas, brackets and quotation marks in a
   column take the upright forms the typeface provides for vertical
   setting, rather than the sideways ones.
+
+### Scanned documents
+- **A compression setting made for scans.** Compress now offers "Scanned
+  document (MRC)". It finds the pages that are scans, separates each into
+  a full-resolution stencil of the text, the colour of the ink and the
+  paper behind it, and stores the three separately. The words stay at the
+  scan's own resolution; the paper, which carries no detail worth keeping,
+  compresses hard. On a typed page the result is roughly a sixteenth of the
+  original size — smaller than the existing 150 dpi setting while keeping
+  the text at 300 dpi.
+- **Three promises, not three numbers.** Archival guarantees that no
+  character can be substituted for another. Balanced is the everyday
+  choice. Smallest goes furthest and says plainly that glyph shapes may
+  change. There is also a PDF/A-safe option for anyone whose destination is
+  an archival format.
+- **Only scans are touched.** Every page is classified first: a page that
+  is not a scanned image is left byte-for-byte alone, and a document with
+  no scan in it says so instead of writing a pointless copy. Form fields,
+  comments, links, bookmarks and an existing searchable text layer all
+  come through untouched, because the page itself is edited rather than
+  rebuilt.
+- **A check that the words survived.** Optionally, each page is read
+  before and after and compared. Any page whose text did not survive keeps
+  its original scan, and the result says which pages and why. A compression
+  setting is allowed to be lossy; it is not allowed to quietly destroy the
+  text you came for.
+- **Available wherever compression already was.** The Compress panel, a
+  default in Preferences, a checkbox in Batch OCR that compresses a whole
+  folder of scans after making them searchable, the command line, guided
+  actions, watched folders and scheduled runs. In every batch form it runs
+  after recognition, so the text layer is always read from the original
+  scan.
+- **Fax and scanner images display again.** Pages whose images use CCITT
+  Group 4, JBIG2 or JPEG 2000 — what fax machines, document scanners and
+  archival optimizers produce — rendered blank in the viewer. They now
+  draw. The same fix restores CJK character encodings, the standard PDF
+  typefaces and CMYK colour profiles, which were failing quietly for the
+  same reason.
+- **Large files no longer time out.** Compressing, converting or repairing
+  a big document used a fixed five-minute limit regardless of its size, so
+  a large scan could fail for no reason but its length. The limit now
+  scales with the document, and the message says what it was.
 
 ## 1.0.17 — Drafting tools, long documents, and an interface that speaks Spanish
 

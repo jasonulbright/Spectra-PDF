@@ -159,6 +159,27 @@ export async function saveActiveAs(destPath: string): Promise<void> {
   );
 }
 
+/** O8 Compress panel run with an injected output path (panel must be open).
+ *
+ * The save dialog is native and undrivable, so the harness supplies the
+ * destination and the panel's OWN state drives everything else — the quality
+ * select's change handler, the MRC branch, the parameter assembly and the real
+ * engine call are all the ones a click reaches. */
+export async function compressRun(
+  out: string,
+  opts?: { quality?: string; mrcPreset?: string; verifyText?: boolean },
+): Promise<string> {
+  return browser.executeAsync<string, [string, unknown]>(
+    function (dest, options, done) {
+      (window as any).__SPECTRA_TEST__.compressRun(dest, options)
+        .then((r: string) => done(r))
+        .catch((err: unknown) => done(`error: ${String(err)}`));
+    },
+    out,
+    opts ?? {},
+  );
+}
+
 /** O1 image export via the dialog's harness bridge (dialog must be open). */
 export async function exportImagesRun(
   out: string,

@@ -145,6 +145,108 @@ def _parse_tsv(tsv_text: str, width: int, height: int) -> tuple[str, list[dict]]
     return " ".join(word["text"] for word in words), words
 
 
+def _validated_lang(lang: str) -> str:
+    lang = (lang or "eng").strip()
+    if not _LANG_RE.match(lang):
+        raise ValueError(f"Invalid recognition language: {lang!r}")
+    return lang
+
+
+def _tessdata_for(exe: Path) -> Path:
+    """tessdata sits beside the executable in the vendored tree.
+
+    Passing it explicitly means recognition does not depend on TESSDATA_PREFIX
+    being set in whatever environment the run happens in -- which for a
+    SCHEDULED run under a service account is an environment nobody configured.
+    """
+    tessdata = exe.parent / "tessdata"
+    if not tessdata.is_dir():
+        raise RuntimeError(f"No tessdata beside {exe}; run scripts/bundle-tesseract.ps1.")
+    return tessdata
+
+
+class _TesseractFailure(Exception):
+    """The recognizer failed; the caller owns the WORDING.
+
+    Deliberately not a formatted RuntimeError raised here: the refusal table
+    (`locales/engine-messages.tsv`) matches a message by SHAPE, and folding
+    "page 3" or "the page image" into one `{{what}}` placeholder would leave
+    an English fragment sitting inside every translated sentence. Two call
+    sites, two literal messages, two translatable rows.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _run_tesseract(png: Path, lang: str, exe: Path, tessdata: Path) -> tuple[str, list[dict]]:
+    """One tesseract invocation over one PNG -> (text, normalised word boxes).
+
+    The ONE place the recognizer is spawned. `recognize` (page of a PDF) and
+    `recognize_image` (a raster somebody else produced -- the MRC text-
+    verification gate) differ only in how the PNG arrives; two invocations
+    that could drift apart in flags or parsing would be two recognizers, which
+    is the silent-degradation class this module exists to have exactly one of.
+    """
+    width, height = _png_size(png)
+    cmd = [
+        str(exe),
+        str(png),
+        "stdout",
+        "-l",
+        lang,
+        "--tessdata-dir",
+        str(tessdata),
+        "tsv",
+    ]
+    env = dict(os.environ)
+    env["TESSDATA_PREFIX"] = str(tessdata)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=env)
+    if proc.returncode != 0:
+        raise _TesseractFailure((proc.stderr or "").strip()[:400])
+    # A missing configs/tsv makes tesseract print PLAIN TEXT, exit 0, and
+    # only mention it on stderr. That would parse as zero words and read as
+    # "this page has no text" -- the exact silent degradation this program
+    # refuses. Fail loudly instead.
+    if "Can't open tsv" in (proc.stderr or ""):
+        raise RuntimeError(
+            "OCR produced no word boxes: tessdata/configs/tsv is missing from the "
+            "vendored Tesseract. Re-run scripts/bundle-tesseract.ps1."
+        )
+    return _parse_tsv(proc.stdout or "", width, height)
+
+
+def recognize_image(
+    image: str,
+    lang: str = "eng",
+    tesseract_path: str = "",
+) -> dict:
+    """Recognise an already-rasterised page image (PNG) -- ``{text, words}``.
+
+    O8 slice E. The MRC text-verification gate compares what the SOURCE page
+    says against what the RECONSTRUCTED page says, and both sides are rasters
+    the pass already holds in memory -- there is no PDF to render, and writing
+    one purely to be re-rendered would put a second (lossy, differently-scaled)
+    step between the thing measured and the measurement. Coordinates are
+    normalised exactly as `recognize` normalises them.
+    """
+    exe = _tesseract_exe(tesseract_path)
+    png = Path(image)
+    if not png.is_file():
+        raise FileNotFoundError(f"File not found: {image}")
+    try:
+        text, words = _run_tesseract(png, _validated_lang(lang), exe, _tessdata_for(exe))
+    except _TesseractFailure as exc:
+        # Bound to a local named `detail` deliberately: the refusal table names
+        # its placeholder after the expression it interpolates, so raising
+        # `exc.detail` inline would rewrite `{{detail}}` to `{{v0}}` and orphan
+        # every translation of the row.
+        detail = exc.detail
+        raise RuntimeError(f"OCR failed on the page image: {detail}") from exc
+    return {"text": text, "words": words}
+
+
 def recognize(
     file: str,
     page: int,
@@ -171,53 +273,22 @@ def recognize(
     """
     if page < 1:
         raise ValueError("page must be 1-based")
-    lang = (lang or "eng").strip()
-    if not _LANG_RE.match(lang):
-        raise ValueError(f"Invalid recognition language: {lang!r}")
+    lang = _validated_lang(lang)
 
     exe = _tesseract_exe(tesseract_path)
     input_path = Path(file)
     if not input_path.is_file():
         raise FileNotFoundError(f"File not found: {file}")
 
-    # tessdata sits beside the executable in the vendored tree. Passing it
-    # explicitly means recognition does not depend on TESSDATA_PREFIX being set
-    # in whatever environment the run happens in -- which for a SCHEDULED run
-    # under a service account is an environment nobody configured.
-    tessdata = exe.parent / "tessdata"
-    if not tessdata.is_dir():
-        raise RuntimeError(f"No tessdata beside {exe}; run scripts/bundle-tesseract.ps1.")
+    tessdata = _tessdata_for(exe)
 
     with tempfile.TemporaryDirectory(prefix="opdfs-ocr-") as tmp:
         png = Path(tmp) / "page.png"
         _render_page_png(str(input_path), page, gs_path, png)
-        width, height = _png_size(png)
-
-        cmd = [
-            str(exe),
-            str(png),
-            "stdout",
-            "-l",
-            lang,
-            "--tessdata-dir",
-            str(tessdata),
-            "tsv",
-        ]
-        env = dict(os.environ)
-        env["TESSDATA_PREFIX"] = str(tessdata)
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=env)
-        if proc.returncode != 0:
-            detail = (proc.stderr or "").strip()[:400]
-            raise RuntimeError(f"OCR failed on page {page}: {detail}")
-        # A missing configs/tsv makes tesseract print PLAIN TEXT, exit 0, and
-        # only mention it on stderr. That would parse as zero words and read as
-        # "this page has no text" -- the exact silent degradation this program
-        # refuses. Fail loudly instead.
-        if "Can't open tsv" in (proc.stderr or ""):
-            raise RuntimeError(
-                "OCR produced no word boxes: tessdata/configs/tsv is missing from the "
-                "vendored Tesseract. Re-run scripts/bundle-tesseract.ps1."
-            )
-        text, words = _parse_tsv(proc.stdout or "", width, height)
+        try:
+            text, words = _run_tesseract(png, lang, exe, tessdata)
+        except _TesseractFailure as exc:
+            detail = exc.detail  # see recognize_image — the placeholder's name
+            raise RuntimeError(f"OCR failed on page {page}: {detail}") from exc
 
     return {"text": text, "words": words}

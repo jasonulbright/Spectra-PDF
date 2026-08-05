@@ -186,6 +186,17 @@ class TestJbig2:
         with pytest.raises(ValueError, match="unknown JBIG2 mode"):
             encode_masks_jbig2([make_mask()], mode="refined")
 
+    def test_an_out_of_range_symbol_threshold_is_refused_in_our_words(self):
+        # Matrix-caught: an archival preset asked for symbol mode BY NAME sent
+        # 0.98, and jbig2enc answered "Invalid value for threshold" — about a
+        # flag the caller never wrote. The range is restated so the refusal
+        # names OUR parameter, and it is checked before the encoder is spawned
+        # (so a machine without the encoder still gets the right refusal).
+        with pytest.raises(ValueError, match="JBIG2 symbol threshold must be"):
+            encode_masks_jbig2([make_mask()], mode="jbig2_symbol", symbol_threshold=0.98)
+        with pytest.raises(ValueError, match="JBIG2 symbol threshold must be"):
+            encode_masks_jbig2([make_mask()], mode="jbig2_symbol", symbol_threshold=0.1)
+
     def test_no_masks_is_not_an_error(self):
         assert encode_masks_jbig2([]) == []
 
