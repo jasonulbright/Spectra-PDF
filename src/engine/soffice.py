@@ -1,0 +1,571 @@
+"""ONE invocation of the bundled LibreOffice — both directions (P22 slice B).
+
+`office_export.py` (PDF → docx/rtf/odt/html) had the only soffice runner in the
+tree. P22 points LibreOffice the other way (Office → PDF), so the runner is
+extracted here and BOTH directions share it. That is not tidiness: three of the
+four things this module adds are defects the export direction has today and
+would otherwise keep.
+
+**1. The conversion is OFFLINE, and that is seeded, not assumed.** Headless
+soffice FETCHES a remote resource referenced by a converted document — a live
+local listener recorded the GET, user-agent `LibreOffice 26.2.1.2 …  Schannel`
+(brief 41 § 1.6). Feeding it arbitrary user-supplied Office and HTML — which is
+exactly what Create PDF does — makes an untrusted document able to make an
+outbound request from the user's machine, on open: a tracking-pixel / SSRF
+shape, unacceptable in an app whose whole posture is offline. The measured fix
+is a throwaway profile seeded with `BlockUntrustedRefererLinks = true`: **0
+hits, no added latency**. `LinkUpdateMode = 0` alone does NOT block (measured,
+and it is the setting one would reach for by name) — it is seeded anyway
+because it stops the link *refresh* path. A dead proxy also blocks but costs
+~2 s of connect timeout on its own; together with the block it costs nothing,
+so it rides along as belt-and-braces.
+
+**2. A zero exit code is not a success signal.** Measured: a ZERO-BYTE `.docx`
+converts with rc=0 into a plausible 1-page 6 459 B PDF. So the source is
+validated before the call and the output is READ after it.
+
+**3. The budget is derived, not fixed.** The old flat 240 s is the § 5.5 defect
+the Ghostscript family already fixed: a fixed wall clock fails on exactly the
+documents the feature exists for. The floor stays 240 s — the defect was never
+"too much time for a small file" — and large inputs get more.
+
+**4. Profiles are per-run and never shared.** A headless soffice refuses to
+start against a profile another soffice already holds and would silently hang;
+per-run throwaway profiles are also what makes concurrency work (three
+concurrent conversions measured at 1.8 s wall).
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import zipfile
+from pathlib import Path
+
+import pikepdf
+
+from engine import budget
+from engine.system_fonts import installed_families
+
+# The floor is the family's OWN old constant, deliberately: LibreOffice's cold
+# first-run profile build plus a bridged second launch fits inside it, and
+# lowering it would turn a slow-but-passing job into a new failure.
+_BASE_SECONDS = 240.0
+_PER_MB_SECONDS = 12.0
+
+
+def _xcu_item(path: str, prop: str, typ: str, value: str) -> str:
+    return (
+        f'<item oor:path="{path}"><prop oor:name="{prop}" oor:op="fuse">'
+        f'<value xsi:type="xs:{typ}">{value}</value></prop></item>\n'
+    )
+
+
+_SCRIPTING = "/org.openoffice.Office.Common/Security/Scripting"
+_INET = "/org.openoffice.Inet/Settings"
+
+# Every line here was measured against a live HTTP listener (probe 4).
+PROFILE_SETTINGS = (
+    # THE fix: 0 hits, no latency cost.
+    _xcu_item(_SCRIPTING, "BlockUntrustedRefererLinks", "boolean", "true")
+    # Does not block on its own — kept for the link-refresh path it does own.
+    + _xcu_item(_SCRIPTING, "LinkUpdateMode", "int", "0")
+    # 3 = Very High: unsigned macros never run. The vendored registry defaults
+    # to 2 (High), which already refuses them, but a default a future vendoring
+    # could move is not a guarantee — pin it.
+    + _xcu_item(_SCRIPTING, "MacroSecurityLevel", "int", "3")
+    # Belt-and-braces: a proxy that cannot answer. Free when the block is also
+    # on; ~2 s of connect timeout when it is the only thing standing.
+    + _xcu_item(_INET, "ooInetProxyType", "int", "1")
+    + _xcu_item(_INET, "ooInetHTTPProxyName", "string", "127.0.0.1")
+    + _xcu_item(_INET, "ooInetHTTPProxyPort", "int", "9")
+    + _xcu_item(_INET, "ooInetHTTPSProxyName", "string", "127.0.0.1")
+    + _xcu_item(_INET, "ooInetHTTPSProxyPort", "int", "9")
+    + _xcu_item(_INET, "ooInetNoProxy", "string", "")
+)
+
+_XCU = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<oor:items xmlns:oor="http://openoffice.org/2001/registry" '
+    'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+    'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
+    f"{PROFILE_SETTINGS}"
+    "</oor:items>\n"
+)
+
+
+def seed_profile(profile: Path) -> Path:
+    """Write the offline/macro settings into a fresh user profile directory."""
+    user = Path(profile) / "user"
+    user.mkdir(parents=True, exist_ok=True)
+    (user / "registrymodifications.xcu").write_text(_XCU, encoding="utf-8")
+    return profile
+
+
+def _kill_tree(pid: int) -> None:
+    """Kill a process and its children. soffice.exe launches soffice.bin as a
+    child, so a bare kill of the tracked pid leaves the worker running and its
+    profile dir locked — taskkill /T terminates the whole tree (Windows-only,
+    which this app is). Best-effort: a race where it already exited is fine."""
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def run_convert(
+    soffice_path: str,
+    convert_to: str,
+    src: Path,
+    out_dir: Path,
+    want_ext: str,
+) -> Path:
+    """One `soffice --headless --convert-to` pass. Returns the produced file.
+
+    LibreOffice names the output after the INPUT's stem with the filter's
+    extension, into ``out_dir`` — it ignores any name we might want, so the
+    caller renames the result to the user's chosen path.
+
+    ``want_ext`` (".pdf", ".rtf", …) disambiguates the bridge case: an HTML
+    intermediate and the new file share a stem in the same directory, so a
+    stem-only match could grab the intermediate. Match on the expected
+    extension and exclude the source file.
+    """
+    src = Path(src)
+    out_dir = Path(out_dir)
+    size = 0
+    try:
+        size = src.stat().st_size
+    except OSError:
+        pass
+    allowed = budget.derive(base=_BASE_SECONDS, size_bytes=size, per_mb=_PER_MB_SECONDS)
+
+    profile = Path(tempfile.mkdtemp(prefix="lo-profile-"))
+    try:
+        seed_profile(profile)
+        cmd = [
+            soffice_path,
+            # Isolate the user profile so a running GUI instance can't block us,
+            # so concurrent conversions don't collide, and so the offline seed
+            # above is the one this run reads.
+            f"-env:UserInstallation={profile.as_uri()}",
+            "--headless",
+            "--norestore",
+            "--convert-to",
+            convert_to,
+            "--outdir",
+            str(out_dir),
+            str(src),
+        ]
+        # NOT subprocess.run(timeout=): on Windows soffice.exe is a launcher
+        # stub that spawns the real soffice.bin as a CHILD, and run()'s timeout
+        # kills only the parent handle — a hung import (a pathological or
+        # crafted document) would orphan soffice.bin holding the profile dir
+        # open, so the finally's rmtree silently fails and both leak. Track the
+        # pid and kill the whole TREE on timeout (taskkill /T).
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            # soffice must never inherit the engine's JSON-RPC stdin (the
+            # distill review's lesson — a subprocess reading the RPC pipe).
+            stdin=subprocess.DEVNULL,
+            text=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=allowed)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc.pid)
+            proc.communicate()  # reap, and release the pipes
+            raise budget.timed_out(
+                "LibreOffice conversion", allowed, size_bytes=size
+            ) from None
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"LibreOffice conversion failed (exit {proc.returncode}): "
+                f"{(stderr or '').strip() or (stdout or '').strip()}"
+            )
+        stem = src.stem
+        src_resolved = src.resolve()
+        produced = [
+            p
+            for p in out_dir.iterdir()
+            if p.is_file()
+            and p.stem == stem
+            and p.suffix.lower() == want_ext.lower()
+            and p.resolve() != src_resolved
+        ]
+        if not produced:
+            raise RuntimeError(
+                "LibreOffice reported success but wrote no output "
+                f"(stderr: {(stderr or '').strip() or (stdout or '').strip() or 'none'})"
+            )
+        out = produced[0]
+        # rc=0 is NOT a success signal (a zero-byte source measured rc=0 with a
+        # real-looking output). Prove success by reading what was written.
+        if out.stat().st_size == 0:
+            raise RuntimeError(
+                f"LibreOffice reported success but the file it wrote is empty ({out.name})"
+            )
+        return out
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------
+# The IMPORT direction: an Office / text / web source becomes a PDF.
+# --------------------------------------------------------------------------
+
+# Measured working with a straight `--convert-to pdf` against the vendored
+# 26.2.1.2 tree (brief 41 § 1.2): docx, xlsx, pptx, odt, ods, rtf, txt, csv,
+# html. The macro/template siblings listed beside each go through the SAME
+# import filter as their measured base format — a `.docm` is a `.docx` with a
+# macro part, and macros never run (MacroSecurityLevel 3).
+#
+# Deliberately ABSENT: images. LibreOffice's image import is not DPI-honest
+# (a 200-dpi PNG, a 150-dpi JPEG and a 300-dpi TIFF all landed on one Letter
+# page — measured), so images go through engine/create_pdf.py's own wrap.
+OFFICE_SUFFIXES = (
+    # Writer
+    ".doc",
+    ".docx",
+    ".docm",
+    ".dot",
+    ".dotx",
+    ".odt",
+    ".ott",
+    ".fodt",
+    ".rtf",
+    ".txt",
+    # Calc
+    ".xls",
+    ".xlsx",
+    ".xlsm",
+    ".xlt",
+    ".xltx",
+    ".ods",
+    ".ots",
+    ".fods",
+    ".csv",
+    # Impress
+    ".ppt",
+    ".pptx",
+    ".pptm",
+    ".pot",
+    ".potx",
+    ".odp",
+    ".otp",
+    ".fodp",
+    # Draw / web
+    ".odg",
+    ".otg",
+    ".html",
+    ".htm",
+    ".xhtml",
+)
+
+_OOXML_SUFFIXES = (".docx", ".docm", ".dotx", ".xlsx", ".xlsm", ".xltx", ".pptx", ".pptm", ".potx")
+_ODF_SUFFIXES = (".odt", ".ott", ".ods", ".ots", ".odp", ".otp", ".odg", ".otg")
+
+# An OOXML package that is password-protected is not a ZIP at all — it is an
+# OLE2 compound file wrapping an EncryptedPackage stream.
+_OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+def is_office_source(path: str | Path) -> bool:
+    return Path(path).suffix.lower() in OFFICE_SUFFIXES
+
+
+def accepted_office_suffixes() -> tuple[str, ...]:
+    return OFFICE_SUFFIXES
+
+
+def _is_encrypted(path: Path) -> bool:
+    """Is this source password-protected? Headless soffice cannot prompt."""
+    suffix = path.suffix.lower()
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(8)
+    except OSError:
+        return False
+    if suffix in _OOXML_SUFFIXES and head == _OLE2_MAGIC:
+        return True
+    if suffix in (*_OOXML_SUFFIXES, *_ODF_SUFFIXES) and head[:2] == b"PK":
+        try:
+            with zipfile.ZipFile(path) as zf:
+                if "META-INF/manifest.xml" in zf.namelist():
+                    manifest = zf.read("META-INF/manifest.xml")
+                    return b"encryption-data" in manifest
+        except (OSError, zipfile.BadZipFile, KeyError):
+            return False
+    # A legacy .doc/.xls/.ppt is ALWAYS OLE2, so the magic says nothing there;
+    # soffice's own refusal (exit 1) is the honest signal for those.
+    return False
+
+
+def validate_source(path: str | Path) -> Path:
+    """Every per-source refusal that can be decided WITHOUT running soffice."""
+    src = Path(path)
+    if not src.is_file():
+        raise ValueError(f"input file not found: {src}")
+    if src.stat().st_size == 0:
+        # Measured: soffice returns 0 and writes a 1-page PDF from nothing.
+        raise ValueError(f"the input file is empty: {src}")
+    if not is_office_source(src):
+        raise ValueError(
+            f"LibreOffice cannot convert {src.suffix or 'a file with no extension'} "
+            f"(accepted: {', '.join(OFFICE_SUFFIXES)})"
+        )
+    if _is_encrypted(src):
+        raise ValueError(
+            f"the document is password-protected and cannot be converted "
+            f"without its password: {src}"
+        )
+    return src
+
+
+_SUBSET_TAG = re.compile(r"^[A-Z]{6}\+")
+# PostScript naming decorations a family name picks up on its way into a PDF:
+# "Arial" is embedded as `ArialMT`, "Times New Roman" as `TimesNewRomanPSMT`.
+# Stripped from BOTH sides of every comparison, so the rule cannot skew.
+_PS_SUFFIXES = ("psmt", "ps", "mt")
+
+
+def _normalise_face(name: str) -> str:
+    """A face name reduced to what a comparison can honestly use.
+
+    Subset tag off, style suffix off, PostScript decoration off, punctuation
+    and case out — so a source that declares "Arial" matches an output that
+    embeds `/BAAAAA+ArialMT` and does NOT match `/CAAAAA+DejaVuSans`.
+    """
+    name = _SUBSET_TAG.sub("", str(name).lstrip("/"))
+    name = re.split(r"[-,]", name, maxsplit=1)[0]
+    key = re.sub(r"[^a-z0-9]", "", name.lower())
+    for suffix in _PS_SUFFIXES:
+        if key.endswith(suffix) and len(key) > len(suffix) + 2:
+            return key[: -len(suffix)]
+    return key
+
+
+def embedded_faces(pdf_path: str | Path) -> set[str]:
+    """The normalised face names a produced PDF actually draws with."""
+    faces: set[str] = set()
+    with pikepdf.open(str(pdf_path)) as pdf:
+        for page in pdf.pages:
+            resources = page.get("/Resources") or {}
+            for _key, font in (resources.get("/Font") or {}).items():
+                base = font.get("/BaseFont")
+                if base is not None:
+                    faces.add(_normalise_face(str(base)))
+                for descendant in font.get("/DescendantFonts") or []:
+                    base = descendant.get("/BaseFont")
+                    if base is not None:
+                        faces.add(_normalise_face(str(base)))
+    faces.discard("")
+    return faces
+
+
+# What each format's DRAWN text asks for. The distinction that makes this
+# usable instead of noisy: a package's font TABLE (`word/fontTable.xml`, a
+# pptx THEME, ODF's `<style:font-face>` declarations) lists faces the document
+# may never put a glyph in — LibreOffice writes Arial, Symbol and Times New
+# Roman into every `.docx` it exports — so reading those tables reported four
+# substitutions on a clean conversion. These patterns read the RUN properties
+# instead, which is where a face actually gets used.
+_DOCX_DRAWN = re.compile(rb'w:(?:ascii|hAnsi|cs)="([^"]+)"')
+_XLSX_DRAWN = re.compile(rb'<name val="([^"]+)"')
+_PPTX_DRAWN = re.compile(rb'typeface="([^"]+)"')
+_ODF_DRAWN = re.compile(rb'style:font-name(?:-asian|-complex)?="([^"]+)"')
+# An RTF font table entry is `{\f0\froman Liberation Serif;}` —
+# the name is what survives after the control words, so they are consumed
+# explicitly. Capturing lazily straight after the `\f0` grabbed the control
+# word itself ("froman Liberation Serif").
+_RTF_DRAWN = re.compile(rb"\\f\d+(?:\\[a-zA-Z]+-?\d*[ ]?)*([^\\;{}]+);")
+
+# The document's own runs, plus the ONE default the rest of it inherits.
+# The WHOLE of `word/styles.xml` would drag in the CJK/CTL defaults
+# LibreOffice writes into every export (Lucida Sans, Microsoft YaHei) —
+# declared, never drawn.
+_DOCX_DEFAULTS = re.compile(rb"<w:docDefaults>.*?</w:docDefaults>", re.S)
+_XLSX_PARTS = ("xl/styles.xml",)
+
+# ODF's `style:font-name` is a REFERENCE to a `<style:font-face>` declaration,
+# not a family name — LibreOffice mints disambiguated style names like
+# "Lucida Sans1", which as a family name is a face nobody has, so an unresolved
+# reference reported a substitution that never happened. Resolve through the
+# declaration to its `svg:font-family`.
+_ODF_FACE_DECL = re.compile(rb"<style:font-face\b[^>]*/?>")
+_ODF_DECL_NAME = re.compile(rb'style:name="([^"]+)"')
+_ODF_DECL_FAMILY = re.compile(rb'svg:font-family="([^"]+)"')
+
+
+def _odf_faces(blobs: list[bytes]) -> set[str]:
+    """Drawn ODF faces, resolved through the document's font-face declarations."""
+    declared: dict[str, str] = {}
+    for blob in blobs:
+        for tag in _ODF_FACE_DECL.findall(blob):
+            name = _ODF_DECL_NAME.search(tag)
+            family = _ODF_DECL_FAMILY.search(tag)
+            if name is not None and family is not None:
+                declared[name.group(1).decode("utf-8", "replace")] = family.group(1).decode(
+                    "utf-8", "replace"
+                )
+    used: set[str] = set()
+    for blob in blobs:
+        for ref in _ODF_DRAWN.findall(blob):
+            key = ref.decode("utf-8", "replace")
+            used.add(declared.get(key, key))
+    return used
+
+
+def _unescape(value: str) -> str:
+    for entity, char in (("&apos;", "'"), ("&quot;", '"'), ("&lt;", "<"),
+                         ("&gt;", ">"), ("&amp;", "&")):
+        value = value.replace(entity, char)
+    return value.strip().strip("'\"")
+
+
+def declared_faces(path: str | Path) -> set[str]:
+    """The face names the SOURCE's drawn text asks for.
+
+    LibreOffice reports nothing about substitution, so § 6's
+    `fonts_substituted` is DERIVED. A format this cannot read returns an empty
+    set — reporting NO substitutions rather than false ones. Silence beats a
+    wrong accusation, and a wrong accusation is what teaches a user to stop
+    reading the notice.
+    """
+    src = Path(path)
+    suffix = src.suffix.lower()
+    names: set[str] = set()
+    try:
+        if suffix in _OOXML_SUFFIXES:
+            with zipfile.ZipFile(src) as zf:
+                members = zf.namelist()
+                if suffix.startswith((".doc", ".dot")):
+                    parts, pattern = ("word/document.xml",), _DOCX_DRAWN
+                    if "word/styles.xml" in members:
+                        block = _DOCX_DEFAULTS.search(zf.read("word/styles.xml"))
+                        if block is not None:
+                            names.update(
+                                m.decode("utf-8", "replace")
+                                for m in _DOCX_DRAWN.findall(block.group())
+                            )
+                elif suffix.startswith((".xls", ".xlt")):
+                    parts, pattern = _XLSX_PARTS, _XLSX_DRAWN
+                else:
+                    # Slides only. The THEME declares a minor font a deck may
+                    # never draw with (measured: DejaVu Sans on a deck whose
+                    # every run is Arial).
+                    parts = tuple(
+                        m for m in members
+                        if m.startswith("ppt/slides/slide") and m.endswith(".xml")
+                    )
+                    pattern = _PPTX_DRAWN
+                for member in parts:
+                    if member in members:
+                        names.update(
+                            m.decode("utf-8", "replace") for m in pattern.findall(zf.read(member))
+                        )
+        elif suffix in _ODF_SUFFIXES:
+            with zipfile.ZipFile(src) as zf:
+                members = zf.namelist()
+                names.update(
+                    _odf_faces(
+                        [zf.read(m) for m in ("content.xml", "styles.xml") if m in members]
+                    )
+                )
+        elif suffix in (".fodt", ".fods", ".fodp"):
+            names.update(_odf_faces([src.read_bytes()]))
+        elif suffix == ".rtf":
+            names.update(
+                m.decode("utf-8", "replace") for m in _RTF_DRAWN.findall(src.read_bytes())
+            )
+    except (OSError, zipfile.BadZipFile, KeyError, UnicodeDecodeError):
+        return set()
+    return {n for n in (_unescape(name) for name in names) if n}
+
+
+def substituted_faces(source: str | Path, produced_pdf: str | Path) -> list[str]:
+    """Faces the source asked for that the converter did not have.
+
+    A contract that reflows because Calibri became DejaVu is the classic
+    Office-conversion complaint; the king's converter reports substitutions and
+    so does this. TWO independent acquittals, because each one can only REMOVE
+    an accusation and never add one: the face is in the produced PDF (so it was
+    found, whatever else is true), or it is installed on this machine (so
+    LibreOffice had it available, whether or not this document drew with it).
+    """
+    declared = declared_faces(source)
+    if not declared:
+        return []
+    present = embedded_faces(produced_pdf)
+    installed = {_normalise_face(family) for family in installed_families()}
+    missing = []
+    for name in sorted(declared):
+        key = _normalise_face(name)
+        if key and key not in present and key not in installed:
+            missing.append(name)
+    return missing
+
+
+def to_pdf(source: str | Path, output: str | Path, soffice_path: str) -> dict:
+    """Convert ONE Office / text / web source to a PDF at ``output``.
+
+    Success is proven by opening the result and counting its pages — never by
+    the exit code.
+    """
+    src = validate_source(source)
+    out_path = Path(output)
+    if out_path.is_dir():
+        raise ValueError(f"output path is a directory, not a file: {output}")
+    if out_path.exists() and os.path.samefile(src, out_path):
+        raise ValueError("output path is the same file as the input")
+    if not str(soffice_path).strip():
+        raise RuntimeError("LibreOffice is not available (no soffice path)")
+    if not Path(soffice_path).is_file():
+        raise RuntimeError(f"LibreOffice is not available at {soffice_path}")
+
+    work = Path(tempfile.mkdtemp(prefix="lo-topdf-"))
+    try:
+        produced = run_convert(soffice_path, "pdf", src, work, ".pdf")
+        try:
+            with pikepdf.open(str(produced)) as pdf:
+                pages = len(pdf.pages)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"LibreOffice produced a PDF that cannot be read: {exc}"
+            ) from None
+        if pages == 0:
+            raise RuntimeError(
+                "LibreOffice reported success but the PDF it wrote has no pages"
+            )
+        fonts = substituted_faces(src, produced)
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        if out_path.exists():
+            # A read-only existing target must not break the move (the
+            # mirror-output lesson).
+            try:
+                os.chmod(out_path, 0o666)
+            except OSError:
+                pass
+        shutil.move(str(produced), str(out_path))
+        result = {
+            "output": str(out_path),
+            "pages": pages,
+            "converter": "libreoffice",
+            "size_bytes": out_path.stat().st_size,
+        }
+        if fonts:
+            result["fonts_substituted"] = fonts
+        return result
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
