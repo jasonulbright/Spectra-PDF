@@ -15,6 +15,9 @@ single and multi cases cannot drift.
 
 **Page sizing happens at ASSEMBLY**, once, on the merged document — not per
 converter — so a mixed set of sources behaves the same however it arrived.
+**A per-member page range is applied once too**, right after that member's
+conversion, which is why "pages 2-3 of that spreadsheet" works and no arm has
+to know ranges exist.
 
 The IMAGE arm was promoted out of `batch_ocr` and fixed here; batch OCR is now
 a consumer of it, which is how the multi-frame data loss below reached the
@@ -54,6 +57,7 @@ from __future__ import annotations
 import io
 import math
 import os
+import re
 import shutil
 import tempfile
 from contextlib import ExitStack
@@ -64,6 +68,13 @@ import pikepdf
 from engine import distill as distill_mod
 from engine import merge as merge_mod
 from engine import soffice as soffice_mod
+from engine.acroform import (
+    carry_doc_form_extras,
+    carry_pure_data_fields,
+    prune_form_to_pages,
+    refresh_sig_flags,
+)
+from engine.split import parse_ranges
 
 # The accepted raster set. Widened past batch OCR's original png/jpg/tif/bmp:
 # WEBP, JPEG 2000 and AVIF are decodable by the BUNDLED Pillow already (a
@@ -477,6 +488,48 @@ def _apply_page_size(path: Path, page_size: str, orientation: str, margin: float
         pdf.save(str(path))
 
 
+# A member's page range, as the Combine dialog and the CLI spell it: "1-3,5".
+# Validated BEFORE `parse_ranges` sees it, because that helper's `int()` on a
+# malformed part raises a bare ValueError naming a literal the user never
+# typed — a refusal has to name what was actually asked for.
+_RANGE_PART = re.compile(r"^\s*\d+\s*(?:-\s*\d+\s*)?$")
+
+
+def _subset(src: Path, dest: Path, spec: str, label: str) -> int:
+    """Keep only ``spec``'s pages of ``src``, into ``dest``. Returns the count.
+
+    Form-aware by the same construction `split` uses — prune the field tree to
+    the kept pages, then `add_pages_from`, then the pure-data and /CO carries.
+    A range applied to a member of a Combine is exactly a split of that member,
+    so it must not be a second, weaker implementation: a bare `pages.append`
+    here would leave every widget on a kept page orphaned (the
+    structural-page-ops invariant).
+    """
+    parts = [p for p in str(spec).split(",") if p.strip()]
+    if not parts or any(not _RANGE_PART.match(p) for p in parts):
+        raise ValueError(
+            f"the page range {spec!r} for {label} is not a list of pages or "
+            f"ranges like '1-3,5'"
+        )
+    with pikepdf.open(str(src)) as pdf:
+        indices = parse_ranges(str(spec), len(pdf.pages))
+        if not indices:
+            raise ValueError(
+                f"the page range {spec!r} selects no pages of {label} "
+                f"(it has {len(pdf.pages)})"
+            )
+        prune_form_to_pages(pdf, indices)
+        out = pikepdf.Pdf.new()
+        copied = out.add_pages_from(pdf, pages=indices)
+        pure = carry_pure_data_fields(out, pdf)
+        refresh_sig_flags(out)
+        renames = dict(copied.renamed_fields)
+        renames.update({r["from"]: r["to"] for r in pure})
+        carry_doc_form_extras(out, pdf, renames)
+        out.save(str(dest))
+    return len(indices)
+
+
 def _convert_one(
     source: dict,
     index: int,
@@ -489,7 +542,12 @@ def _convert_one(
 ) -> dict:
     """One source -> one scratch PDF, plus the report row § 6 describes."""
     kind = str(source.get("kind") or "").lower()
+    page_range = str(source.get("pages") or "").strip()
     if kind == _KIND_BLANK:
+        if page_range:
+            # Refused rather than ignored: a range that silently does nothing
+            # is a user believing they selected something.
+            raise ValueError("a blank page has no pages to select a range from")
         dest = scratch / f"{index:04d}-blank.pdf"
         pages = _blank_pdf(
             dest,
@@ -521,8 +579,7 @@ def _convert_one(
             row["pages"] = len(pdf.pages)
         row["converter"] = "passthrough"
         row["_file"] = str(path)
-        return row
-    if detected == _KIND_IMAGE:
+    elif detected == _KIND_IMAGE:
         dest = scratch / f"{index:04d}-image.pdf"
         report = image_to_pdf(path, dest, dpi_default=image_dpi_default)
         row.update(
@@ -532,23 +589,30 @@ def _convert_one(
             page_size=report["page_size"],
             _file=str(dest),
         )
-        return row
-    if detected == _KIND_OFFICE:
+    elif detected == _KIND_OFFICE:
         dest = scratch / f"{index:04d}-office.pdf"
         report = soffice_mod.to_pdf(path, dest, soffice_path)
         row.update(converter="libreoffice", pages=report["pages"], _file=str(dest))
         if report.get("fonts_substituted"):
             row["fonts_substituted"] = report["fonts_substituted"]
-        return row
+    else:
+        dest = scratch / f"{index:04d}-distilled.pdf"
+        report = distill_mod.distill(str(path), str(dest), preset=distill_preset, gs_path=gs_path)
+        row.update(
+            converter="ghostscript",
+            pages=report["pages"],
+            eps=bool(report.get("eps", False)),
+            _file=str(dest),
+        )
 
-    dest = scratch / f"{index:04d}-distilled.pdf"
-    report = distill_mod.distill(str(path), str(dest), preset=distill_preset, gs_path=gs_path)
-    row.update(
-        converter="ghostscript",
-        pages=report["pages"],
-        eps=bool(report.get("eps", False)),
-        _file=str(dest),
-    )
+    # The range is applied AFTER conversion, once, to whatever the arm
+    # produced — so "pages 2-3 of that .docx" works exactly as "pages 2-3 of
+    # that PDF" does, and no arm needs to learn about ranges.
+    if page_range:
+        ranged = scratch / f"{index:04d}-range.pdf"
+        row["pages"] = _subset(Path(row["_file"]), ranged, page_range, path.name)
+        row["_file"] = str(ranged)
+        row["page_range"] = page_range
     return row
 
 
@@ -568,7 +632,10 @@ def create_pdf(
 
     Args:
         sources: ordered ``{"path": …}`` entries, plus ``{"kind": "blank",
-            "width": …, "height": …}`` for a blank member.
+            "width": …, "height": …}`` for a blank member. Any path entry may
+            carry ``"pages": "1-3,5"`` to contribute only those pages — applied
+            after that source's conversion, so it reads the same on a `.docx`
+            as on a PDF (this is what Combine Files' per-member range sends).
         output: the PDF to write.
         page_size: ``auto`` (each source keeps its own geometry), ``first``
             (the first source's first page size), or a named paper size.

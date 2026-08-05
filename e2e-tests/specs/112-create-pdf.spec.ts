@@ -7,7 +7,12 @@ import { expect } from '@wdio/globals';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — no type declarations for the deep legacy import
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { waitForHarness, getState, invokeAppCommand } from '../support/harness.js';
+import {
+  waitForHarness,
+  getState,
+  getWorkspacePageIds,
+  invokeAppCommand,
+} from '../support/harness.js';
 
 // P22 (brief 41) — Create PDF, through the REAL dialog and the REAL engine.
 //
@@ -31,6 +36,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 
 const DOCX_FIXTURE = resolve(__dirname, '..', '..', 'tests', 'fixtures', 'sources', 'report.docx');
 const XLSX_FIXTURE = resolve(__dirname, '..', '..', 'tests', 'fixtures', 'sources', 'sheet.xlsx');
+const FORM_FIXTURE = resolve(__dirname, '..', '..', 'tests', 'fixtures', 'form-pdflib.pdf');
 const TOKEN = 'ZQXJ-2026';
 
 interface CreatePdfRunResult {
@@ -55,7 +61,26 @@ async function createPdfRun(
   );
 }
 
-async function readPdf(path: string): Promise<{ pages: number; boxes: number[][]; text: string }> {
+async function combineRun(
+  sources: string[],
+  output: string,
+  options?: Record<string, unknown>,
+): Promise<CreatePdfRunResult | null> {
+  return browser.executeAsync<CreatePdfRunResult | null, [string[], string, unknown]>(
+    function (srcs, out, opts, done) {
+      (window as any).__SPECTRA_TEST__.combineRun(srcs, out, opts ?? undefined)
+        .then((r: CreatePdfRunResult | null) => done(r))
+        .catch(() => done(null));
+    },
+    sources,
+    output,
+    options ?? null,
+  );
+}
+
+async function readPdf(
+  path: string,
+): Promise<{ pages: number; boxes: number[][]; text: string; fields: string[] }> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
     isEvalSupported: false,
@@ -70,8 +95,10 @@ async function readPdf(path: string): Promise<{ pages: number; boxes: number[][]
     text += (content.items as { str?: string }[]).map((item) => item.str ?? '').join(' ');
   }
   const pages = pdf.numPages;
+  const fieldObjects = (await pdf.getFieldObjects()) as Record<string, unknown> | null;
+  const fields = fieldObjects ? Object.keys(fieldObjects).sort() : [];
   await pdf.loadingTask.destroy();
-  return { pages, boxes, text };
+  return { pages, boxes, text, fields };
 }
 
 /** A deterministic 300-dpi Letter-sized grayscale PNG, written by hand.
@@ -227,6 +254,109 @@ describe('Create PDF from any file (P22)', () => {
 
     await $('[data-testid="create-pdf-close"]').click();
     await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({
+      reverse: true,
+      timeout: 10_000,
+    });
+  });
+
+  // ── Combine Files, widened (P22 slice D, brief 41 § 4) ──────────────────
+  //
+  // Combine took PDFs only, because a .docx cannot enter the page tier. The
+  // journey proved here is the whole widening: a mixed list — a form-bearing
+  // PDF, a page RANGE of another PDF, and a spreadsheet — becomes one
+  // document with the form's fields intact, and then a further source is
+  // added into a document that is already open.
+
+  it('combines a mixed list into one new document, keeping form fields', async function () {
+    this.timeout(240_000);
+    expect(await invokeAppCommand('document.combineFiles')).toBe(true);
+    await $('[data-testid="combine-dialog"]').waitForDisplayed({ timeout: 10_000 });
+
+    const outPath = resolve(tmp, 'combined.pdf');
+    // mixed.pdf (3 pages, built above) contributes only pages 2-3.
+    const result = await combineRun(
+      [FORM_FIXTURE, resolve(tmp, 'mixed.pdf'), XLSX_FIXTURE],
+      outPath,
+      { target: 'new', ranges: [null, '2-3', null] },
+    );
+    expect(result).not.toBe(null);
+    await $('[data-testid="combine-done"]').waitForDisplayed({ timeout: 60_000 });
+
+    // Every row is badged by kind and by the converter it will use.
+    const kinds = await $$('[data-testid="combine-row"]').map((row) =>
+      row.getAttribute('data-kind'),
+    );
+    expect(kinds).toEqual(['pdf', 'pdf', 'office']);
+    const states = await $$('[data-testid="combine-row"]').map((row) =>
+      row.getAttribute('data-state'),
+    );
+    expect(states).toEqual(['ready', 'ready', 'ready']);
+
+    const form = await readPdf(FORM_FIXTURE);
+    const pdf = await readPdf(outPath);
+    expect(pdf.pages).toBe(form.pages + 2 + 1);
+    // The spreadsheet really converted — its sentinel token comes back out.
+    expect(pdf.text).toContain(TOKEN);
+    // The standing risk the brief names: assembly goes through the SHIPPED
+    // merge, so the form member's fields are still registered and fillable.
+    expect(form.fields.length).toBeGreaterThan(0);
+    expect(pdf.fields).toEqual(form.fields);
+
+    await $('[data-testid="combine-close"]').click();
+    await $('[data-testid="combine-dialog"]').waitForDisplayed({
+      reverse: true,
+      timeout: 10_000,
+    });
+  });
+
+  it('adds converted pages into a document that is already open', async function () {
+    this.timeout(240_000);
+    // mixed.pdf was opened through the funnel by the first test.
+    expect((await getState()).activeFile?.path ?? '').toContain('mixed.pdf');
+    const before = await getWorkspacePageIds();
+    expect(before.length).toBe(3);
+
+    expect(await invokeAppCommand('document.combineFiles')).toBe(true);
+    await $('[data-testid="combine-dialog"]').waitForDisplayed({ timeout: 10_000 });
+    // The open document is offered as a destination and preselected.
+    expect(await $('[data-testid="combine-destination"]').isDisplayed()).toBe(true);
+
+    const result = await combineRun([XLSX_FIXTURE], '', { target: 'append' });
+    expect(result).not.toBe(null);
+    expect(result!.pages).toBe(1);
+    await $('[data-testid="combine-appended"]').waitForDisplayed({ timeout: 60_000 });
+
+    // The pages entered the PAGE TIER — undoable page-tier work, the same
+    // machinery Insert Pages uses, with no new commit path.
+    await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 4, {
+      timeout: 30_000,
+      timeoutMsg: 'the converted spreadsheet never reached the open document',
+    });
+
+    await $('[data-testid="combine-close"]').click();
+    await $('[data-testid="combine-dialog"]').waitForDisplayed({
+      reverse: true,
+      timeout: 10_000,
+    });
+  });
+
+  it('refuses a bad page range in the dialog, before any conversion', async function () {
+    this.timeout(120_000);
+    expect(await invokeAppCommand('document.combineFiles')).toBe(true);
+    await $('[data-testid="combine-dialog"]').waitForDisplayed({ timeout: 10_000 });
+
+    const outPath = resolve(tmp, 'never-combined.pdf');
+    const result = await combineRun([resolve(tmp, 'mixed.pdf')], outPath, {
+      target: 'new',
+      ranges: ['1-'],
+    });
+    expect(result).toBe(null);
+    await $('[data-testid="combine-blocked"]').waitForDisplayed({ timeout: 10_000 });
+    expect(await $('[data-testid="combine-run"]').isEnabled()).toBe(false);
+    expect(existsSync(outPath)).toBe(false);
+
+    await $('[data-testid="combine-close"]').click();
+    await $('[data-testid="combine-dialog"]').waitForDisplayed({
       reverse: true,
       timeout: 10_000,
     });
