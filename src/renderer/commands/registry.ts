@@ -301,7 +301,10 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   comment: ['tools.close'],
   edit: ['tools.close'],
   fillsign: ['tools.close'],
-  prepareform: ['tools.close'],
+  // The detection surface is reachable from the page, not only from the dock:
+  // the tool arms its canvas mode, so its panel is otherwise a click away in a
+  // place the user is not looking.
+  prepareform: ['tools.panel.prepareform', 'tools.close'],
   redact: ['tools.close'],
   measure: ['tools.close'],
   takeoff: ['tools.close'],

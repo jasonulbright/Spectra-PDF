@@ -31,6 +31,15 @@ import {
 } from '../../lib/redaction-properties';
 import { buildLinkPayloads, type LinkSpec, type PageQuads } from '../../lib/text-selection-markup';
 import type { PageGeometry, RedactionMark, RedactionRegion } from '../../lib/redaction';
+import {
+  buildFieldSpecs,
+  candidatesFromDetection,
+  moveCandidate,
+  prunedCandidates,
+  removeCandidate,
+  type DetectionResult,
+  type FieldCandidate,
+} from '../../lib/form-candidates';
 import type { PageRef } from '../../state/types';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
@@ -293,6 +302,8 @@ interface WorkspaceCanvasViewProps {
   onFillFormValues: (path: string, values: Record<string, FormFieldValue>) => Promise<void>;
   // Author a new form field into one file (2n.4c) — same whole-file-op shape.
   onAddFormField: (path: string, spec: NewFieldSpec) => Promise<void>;
+  /** Author N fields as ONE undoable act — what an accepted candidate set uses. */
+  onAddFormFields: (path: string, specs: readonly NewFieldSpec[]) => Promise<void>;
   // Per-position external drop (2n.3): the canvas publishes a resolver here so
   // App's drop handler can map a drop point to the document + index under it
   // (returns null for a between/empty drop → App falls back to appending).
@@ -316,6 +327,8 @@ export type CanvasDropResolver = (clientX: number, clientY: number) => CanvasDro
 const HAND_SUPPRESSES_PICKUP = (): void => {};
 const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
+const NO_CANDIDATES: FieldCandidate[] = [];
+const NO_CANDIDATES_BY_PAGE: ReadonlyMap<string, FieldCandidate[]> = new Map();
 const NO_ANNOTATIONS: readonly PageAnnotation[] = [];
 const NO_ANNOTATION_IDS: readonly string[] = [];
 
@@ -452,6 +465,7 @@ export function WorkspaceCanvasView({
   onAddPages,
   onFillFormValues,
   onAddFormField,
+  onAddFormFields,
   dropResolverRef,
 }: WorkspaceCanvasViewProps): React.ReactElement {
   useTranslation();
@@ -718,6 +732,11 @@ export function WorkspaceCanvasView({
   // switches and in-memory page edits, and die when their file's buffer
   // changes underneath them or the canvas unmounts.
   const [marks, setMarks] = useState<RedactionMark[]>([]);
+  // Detected field candidates — the redaction-mark lifetime exactly: transient,
+  // never the page tier, and invalidated on buffer identity. Nothing here has
+  // touched the document; accepting a candidate is what does.
+  const [fieldCandidates, setFieldCandidates] = useState<FieldCandidate[]>([]);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [confirmRedact, setConfirmRedact] = useState(false);
   const [redacting, setRedacting] = useState(false);
   const [redactError, setRedactError] = useState<string | null>(null);
@@ -1506,6 +1525,25 @@ export function WorkspaceCanvasView({
         searchOcrPage: async (path, page, query, options) =>
           redactionServiceRef.current?.searchOcrPage(path, page, query, options) ?? [],
       },
+      formCandidates: {
+        publish: async (path, result) =>
+          candidateServiceRef.current?.publish(path, result) ?? {
+            shown: 0,
+            skipped: result.candidates.length,
+          },
+        list: () => [...liveCandidatesRef.current],
+        accept: async (ids) =>
+          candidateServiceRef.current?.accept(ids) ?? { created: 0, skipped: ids.length },
+        update: (next) => candidateServiceRef.current?.update(next),
+        clear: () => candidateServiceRef.current?.clear(),
+        focus: (candidateId) => candidateServiceRef.current?.focus(candidateId),
+        subscribe: (listener) => {
+          candidateSubscribersRef.current.add(listener);
+          return () => {
+            candidateSubscribersRef.current.delete(listener);
+          };
+        },
+      },
     });
     return () => registerCanvasServices(null);
   }, [activeCanvasHandle]);
@@ -1966,6 +2004,51 @@ export function WorkspaceCanvasView({
     ) => Promise<{ text: string; rect: [number, number, number, number] }[]>;
   } | null>(null);
 
+  // Pruned against the CURRENT page set before anything reads it: a dead
+  // generation-tagged id must never reach a gesture or an accept payload.
+  const liveCandidates = useMemo(() => {
+    if (fieldCandidates.length === 0) return NO_CANDIDATES;
+    const live = new Set<string>();
+    for (const d of docs) for (const p of d.pages) live.add(p.id);
+    const kept = prunedCandidates(fieldCandidates, live);
+    return kept.length === fieldCandidates.length ? fieldCandidates : kept;
+  }, [fieldCandidates, docs]);
+  const liveCandidatesRef = useRef<FieldCandidate[]>(NO_CANDIDATES);
+  liveCandidatesRef.current = liveCandidates;
+  const candidateSubscribersRef = useRef(new Set<() => void>());
+  const candidateServiceRef = useRef<{
+    publish: (path: string, result: DetectionResult) => Promise<{ shown: number; skipped: number }>;
+    accept: (ids: readonly string[]) => Promise<{ created: number; skipped: number }>;
+    update: (next: readonly FieldCandidate[]) => void;
+    clear: () => void;
+    focus: (candidateId: string) => void;
+  } | null>(null);
+
+  const fieldCandidatesByPage = useMemo(() => {
+    if (liveCandidates.length === 0) return NO_CANDIDATES_BY_PAGE;
+    const map = new Map<string, FieldCandidate[]>();
+    for (const c of liveCandidates) {
+      const arr = map.get(c.pageId);
+      if (arr) arr.push(c);
+      else map.set(c.pageId, [c]);
+    }
+    return map;
+  }, [liveCandidates]);
+
+  const onRemoveCandidate = useCallback((candidateId: string) => {
+    setFieldCandidates((prev) => removeCandidate(prev, candidateId));
+    setSelectedCandidateId((prev) => (prev === candidateId ? null : prev));
+  }, []);
+
+  const onMoveCandidate = useCallback(
+    (
+      candidateId: string,
+      rect: { x: number; y: number; w: number; h: number },
+      _rotationAtDraw: 0 | 90 | 180 | 270,
+    ) => setFieldCandidates((prev) => moveCandidate(prev, candidateId, rect)),
+    [],
+  );
+
   const redactionMarksByPage = useMemo(() => {
     if (liveMarks.length === 0) return NO_MARKS_BY_PAGE;
     const map = new Map<string, RedactionMark[]>();
@@ -2262,6 +2345,10 @@ export function WorkspaceCanvasView({
     }
     if (invalidated.size > 0) {
       setMarks((prevMarks) => prevMarks.filter((m) => !invalidated.has(m.path)));
+      // A candidate names a region of bytes that no longer exist. After a
+      // create the whole list is stale by construction, so it goes rather than
+      // pointing at a document that no longer matches it.
+      setFieldCandidates((prev) => prev.filter((c) => !invalidated.has(c.path)));
       // Guides share the mark's lifetime exactly — same invalidation, same
       // reason (a rebuilt file's pages are new objects; a guide bound to a
       // dead page id is a guide pointing at nothing).
@@ -4591,6 +4678,112 @@ export function WorkspaceCanvasView({
 
   redactionServiceRef.current = { addMarksFromRects, markedRects, searchOcrPage };
 
+  // ── Detected field candidates ─────────────────────────────────────────
+  // The panel owns the review; the canvas owns the geometry. What crosses the
+  // seam is the detection payload in and page-space specs out — the same
+  // division the redaction seam draws, and for the same reason: converting a
+  // page-space rect into a cell rect needs the pdf.js proxies and the PageRef
+  // rotations, and there is exactly one place that has both.
+  const publishCandidates = useCallback(
+    async (path: string, result: DetectionResult): Promise<{ shown: number; skipped: number }> => {
+      const doc = docsRef.current.find((d) => d.path === path);
+      if (!doc) return { shown: 0, skipped: result.candidates.length };
+      const geometry = new Map<number, PageGeometry>();
+      for (const page of new Set(result.candidates.map((c) => c.page))) {
+        const pageRef = doc.pages[page - 1];
+        if (!pageRef) continue;
+        geometry.set(page, await geometryForPage(pageRef));
+      }
+      const { candidates, skipped } = candidatesFromDetection(
+        result,
+        path,
+        (row) => {
+          const pageRef = doc.pages[row.page - 1];
+          const geo = geometry.get(row.page);
+          if (!pageRef || !geo) return null;
+          return {
+            pageId: pageRef.id,
+            // Detection reasons in unrotated user space; the projection is
+            // where the page's baked /Rotate and its pending delta apply.
+            rect: pdfRectToDisplay(
+              row.rect,
+              geo.box,
+              geo.bakedRotate + (pageRef.rotation ?? 0),
+            ),
+            rotationAtDraw: ((((pageRef.rotation ?? 0) % 360) + 360) % 360) as 0 | 90 | 180 | 270,
+          };
+        },
+        () => crypto.randomUUID(),
+      );
+      setFieldCandidates(candidates);
+      setSelectedCandidateId(null);
+      return { shown: candidates.length, skipped };
+    },
+    [geometryForPage],
+  );
+
+  const acceptCandidates = useCallback(
+    async (ids: readonly string[]): Promise<{ created: number; skipped: number }> => {
+      const wanted = new Set(ids);
+      const chosen = liveCandidatesRef.current.filter((c) => wanted.has(c.id));
+      if (chosen.length === 0) return { created: 0, skipped: 0 };
+      const path = chosen[0].path;
+      const doc = docsRef.current.find((d) => d.path === path);
+      if (!doc) return { created: 0, skipped: chosen.length };
+      const resolved = [];
+      let skipped = 0;
+      for (const candidate of chosen) {
+        const pageIndex = doc.pages.findIndex((p) => p.id === candidate.pageId);
+        if (pageIndex < 0) {
+          skipped += 1;
+          continue;
+        }
+        const geo = await geometryForPage(doc.pages[pageIndex]);
+        resolved.push({
+          candidate,
+          pageIndex,
+          // The rect is converted at the orientation it was DETECTED in: a
+          // later in-memory rotation moves the projection, never user space.
+          rect: displayRectToPdf(
+            candidate.rect,
+            geo.box,
+            geo.bakedRotate + candidate.rotationAtDraw,
+          ),
+        });
+      }
+      if (resolved.length === 0) return { created: 0, skipped };
+      // Top-level names only: a detected name collides with a field ROOT, and
+      // a hierarchy child's leaf name is not a top-level sibling.
+      const existing = new Set(
+        (workspaceForms.get(path)?.fields ?? []).map((f) => f.name.split('.')[0]),
+      );
+      const specs = buildFieldSpecs(resolved, existing);
+      await onAddFormFields(path, specs);
+      return { created: specs.length, skipped };
+    },
+    [geometryForPage, workspaceForms, onAddFormFields],
+  );
+
+  candidateServiceRef.current = {
+    publish: publishCandidates,
+    accept: acceptCandidates,
+    update: (next) => setFieldCandidates([...next]),
+    clear: () => {
+      setFieldCandidates(NO_CANDIDATES);
+      setSelectedCandidateId(null);
+    },
+    focus: (candidateId) => {
+      const target = liveCandidatesRef.current.find((c) => c.id === candidateId);
+      if (!target) return;
+      setSelectedCandidateId(candidateId);
+      jumpToPageRef.current(target.pageId);
+    },
+  };
+
+  useEffect(() => {
+    for (const listener of [...candidateSubscribersRef.current]) listener();
+  }, [fieldCandidates]);
+
   // Sign the placement's file (visible stamp at the drawn box) or fill the
   // targeted existing empty signature field (2n.4d — the field's own widget
   // rect is the stamp box). Geometry for a placement is read from the
@@ -5204,6 +5397,11 @@ export function WorkspaceCanvasView({
             onMeasureResult: setMeasureResult,
             onMarqueeZoomApplied: syncMarqueeZoom,
             redactionMarksByPage,
+            fieldCandidatesByPage,
+            selectedCandidateId,
+            onSelectCandidate: setSelectedCandidateId,
+            onRemoveCandidate,
+            onMoveCandidate,
             editImagesByPage,
             editVectorsByPage,
             snapGeomByPage,
@@ -5476,6 +5674,11 @@ export function WorkspaceCanvasView({
           measureLeaveMarkup={measureLeaveMarkup}
           onMeasureResult={setMeasureResult}
           redactionMarksByPage={redactionMarksByPage}
+          fieldCandidatesByPage={fieldCandidatesByPage}
+          selectedCandidateId={selectedCandidateId}
+          onSelectCandidate={setSelectedCandidateId}
+          onRemoveCandidate={onRemoveCandidate}
+          onMoveCandidate={onMoveCandidate}
           editImagesByPage={editImagesByPage}
           editVectorsByPage={editVectorsByPage}
           snapGeomByPage={snapGeomByPage}

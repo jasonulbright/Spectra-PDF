@@ -353,6 +353,7 @@ export const CANVAS_STRINGS = {
   'canvas.mark.signatureRemove': 'Remove signature placement',
   'canvas.mark.newField': 'NEW FIELD',
   'canvas.mark.newFieldRemove': 'Remove field placement',
+  'canvas.candidate.remove': 'Discard this suggested field',
   'canvas.mark.newText': 'NEW TEXT',
   'canvas.mark.newTextRemove': 'Remove text placement',
   'canvas.mark.keep': 'KEEP',

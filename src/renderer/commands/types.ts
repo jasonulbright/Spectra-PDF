@@ -210,6 +210,36 @@ export interface CanvasServices {
       options: import('../search/normalize').SearchOptions,
     ): Promise<{ text: string; rect: [number, number, number, number] }[]>;
   };
+  /**
+   * The Prepare Form panel's seam onto the canvas's provisional field
+   * candidates.
+   *
+   * The same division the redaction seam draws: the panel owns the review, the
+   * canvas owns the geometry. A candidate's page-space rectangle becomes a cell
+   * rectangle through the pdf.js proxies and the PageRef rotations, which live
+   * here and nowhere else.
+   *
+   * NOTHING here writes to the document except `accept`, which routes through
+   * the ONE field-authoring operation the hand-drawn placement already uses.
+   */
+  formCandidates: {
+    /** Replace the candidate set from a detection result. */
+    publish(
+      path: string,
+      result: import('../lib/form-candidates').DetectionResult,
+    ): Promise<{ shown: number; skipped: number }>;
+    /** The live set, pruned to pages that still exist. */
+    list(): import('../lib/form-candidates').FieldCandidate[];
+    /** Turn the named candidates into fields — one snapshot, one undo entry. */
+    accept(ids: readonly string[]): Promise<{ created: number; skipped: number }>;
+    update(next: readonly import('../lib/form-candidates').FieldCandidate[]): void;
+    clear(): void;
+    /** Bring a candidate's page into view and select its overlay. */
+    focus(candidateId: string): void;
+    /** Fires whenever the candidate set changes, so the panel stays live while
+     * the user also edits overlays on the page. Returns its own unsubscribe. */
+    subscribe(listener: () => void): () => void;
+  };
 }
 
 export interface CommandContext {

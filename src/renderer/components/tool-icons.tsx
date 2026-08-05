@@ -246,7 +246,14 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M18 5v14M21 5v14" />
     </>
   ),
-  // A magnifier over a blacked-out line — search, then redact (F15).
+  // A form line with a dashed box hovering over it — a suggested field.
+  prepareform: (
+    <>
+      <path d="M4 8h16M4 16h16" />
+      <rect x="7" y="4.5" width="10" height="6" rx="1" strokeDasharray="2 2" />
+    </>
+  ),
+  // A magnifier over a blacked-out line — search, then redact.
   search_redact: (
     <>
       <circle cx="10" cy="9.5" r="5.5" />

@@ -3893,3 +3893,61 @@
   color: inherit;
 }
 .canvas-status-snap-select:disabled { opacity: 0.55; }
+
+/* Detected field candidates. A dashed amber frame, deliberately unlike the
+   solid widget outline: a candidate has written nothing to the document, and a
+   user who cannot tell the two apart has no review step. */
+.page-candidate {
+  position: absolute;
+  background: rgba(217, 160, 40, 0.1);
+  border: 1.5px dashed rgba(230, 175, 60, 0.85);
+  border-radius: 2px;
+  cursor: move;
+}
+.page-candidate.is-selected {
+  border-style: solid;
+  border-color: var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.14);
+}
+.page-candidate-label {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 3px;
+  font-size: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: rgba(240, 195, 100, 0.95);
+  pointer-events: none;
+}
+.page-candidate.is-selected .page-candidate-label {
+  color: var(--accent, #3b82f6);
+}
+.page-candidate-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: var(--accent, #3b82f6);
+  border: 1px solid #fff;
+  border-radius: 2px;
+}
+.page-candidate-handle.is-nw {
+  left: -4px;
+  top: -4px;
+  cursor: nwse-resize;
+}
+.page-candidate-handle.is-ne {
+  right: -4px;
+  top: -4px;
+  cursor: nesw-resize;
+}
+.page-candidate-handle.is-sw {
+  left: -4px;
+  bottom: -4px;
+  cursor: nesw-resize;
+}
+.page-candidate-handle.is-se {
+  right: -4px;
+  bottom: -4px;
+  cursor: nwse-resize;
+}
