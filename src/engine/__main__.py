@@ -70,6 +70,7 @@ from engine.check import check
 from engine.outline import get_outline, set_outline
 from engine.document_js import list_document_js, set_document_js
 from engine.redact import redact
+from engine.sanitize import audit_hidden_information
 from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
 from engine.form_detect import detect_form_fields
@@ -198,6 +199,7 @@ def main() -> None:
     server.register("list_document_js", list_document_js)
     server.register("set_document_js", set_document_js)
     server.register("redact", redact)
+    server.register("audit_hidden_information", audit_hidden_information)
     server.register("watermark", watermark)
     server.register("compare_text", compare_text)
     server.register("compare_visual", compare_visual)

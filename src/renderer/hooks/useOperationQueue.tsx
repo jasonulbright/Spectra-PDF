@@ -149,6 +149,12 @@ const INTERNAL_METHODS = new Set([
   // pdf.js rasterizes, so a pending reorder cannot mis-address it and a
   // pending rotation is applied by the same projection the raster gets.
   'list_page_geometry',
+  // The hidden-information inventory. A pure read, and one that refetches
+  // whenever its panel is open — an ANNOTATION is a pending page edit, so
+  // gating it would flush the user's just-drawn markup to disk the instant
+  // they drew it (the list_page_geometry hazard). `sanitize_pdf` replaces the
+  // file's bytes and stays gated.
+  'audit_hidden_information',
 ]);
 
 export function isTrackableMethod(method: string): boolean {
