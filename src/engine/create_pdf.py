@@ -1,9 +1,24 @@
 """Create a PDF from a source that is not one (P22, brief 41).
 
-Slice A: the IMAGE arm, promoted out of `batch_ocr` and fixed. The other arms
-(LibreOffice, Ghostscript's distill, blank) join it here in later slices; this
-module is already the single place an image becomes a page, so batch OCR and
-the user-facing Create PDF cannot drift apart.
+**ONE door, not four.** Create PDF, Combine Files, the CLI and guided actions
+all call `create_pdf`; `distill`, the image wrap and the blank builder are its
+ARMS. This repo's own "fixed four times at four dispatchers" lesson says a
+second create path is how a surface gets left behind, so there is not one.
+
+**Convert-then-merge, never merge-then-convert.** Each non-PDF source becomes a
+PDF in a scratch directory and the assembly is the SHIPPED merge
+(`engine/merge.py` on pikepdf's form-aware `add_pages_from`, plus
+`engine/acroform.py`'s carries), so `/AcroForm` carry, outline carry and the
+rest come for free and cannot be forgotten — the structural-page-ops invariant.
+A single source with no others still goes through a one-member merge, so the
+single and multi cases cannot drift.
+
+**Page sizing happens at ASSEMBLY**, once, on the merged document — not per
+converter — so a mixed set of sources behaves the same however it arrived.
+
+The IMAGE arm was promoted out of `batch_ocr` and fixed here; batch OCR is now
+a consumer of it, which is how the multi-frame data loss below reached the
+shipped feature it was hiding in.
 
 Why the image route is OURS and not LibreOffice's: measured (brief 41 § 1.2),
 LibreOffice puts a 200-dpi PNG, a 150-dpi JPEG and a 300-dpi TIFF all on one
@@ -38,10 +53,17 @@ from __future__ import annotations
 
 import io
 import math
+import os
+import shutil
+import tempfile
 from contextlib import ExitStack
 from pathlib import Path
 
 import pikepdf
+
+from engine import distill as distill_mod
+from engine import merge as merge_mod
+from engine import soffice as soffice_mod
 
 # The accepted raster set. Widened past batch OCR's original png/jpg/tif/bmp:
 # WEBP, JPEG 2000 and AVIF are decodable by the BUNDLED Pillow already (a
@@ -245,3 +267,412 @@ def image_to_pdf(src: str | Path, dest: str | Path, *, dpi_default: float = 200.
         "dpi": [round(r, 2) for r in resolutions],
         "page_size": [round(sizes[0][0], 2), round(sizes[0][1], 2)],
     }
+
+
+# --------------------------------------------------------------------------
+# The door: four arms, convert-then-merge, sizing at assembly.
+# --------------------------------------------------------------------------
+
+# Paper sizes in points, portrait. `auto` keeps each source's own geometry — an
+# image its DPI-derived size, a .pptx its 16:9 slide, a spreadsheet
+# LibreOffice's own paper choice — and is the default because normalising by
+# default would silently reformat every deck the product touched.
+PAGE_SIZES: dict[str, tuple[float, float]] = {
+    "letter": (612.0, 792.0),
+    "legal": (612.0, 1008.0),
+    "tabloid": (792.0, 1224.0),
+    "a3": (841.89, 1190.55),
+    "a4": (595.28, 841.89),
+    "a5": (419.53, 595.28),
+}
+PAGE_SIZE_CHOICES = ("auto", "first", *sorted(PAGE_SIZES))
+ORIENTATIONS = ("auto", "portrait", "landscape")
+
+POSTSCRIPT_SUFFIXES = (".ps", ".eps")
+
+# What a blank member is when the caller names no size.
+DEFAULT_BLANK_SIZE = PAGE_SIZES["letter"]
+
+_KIND_PDF = "pdf"
+_KIND_IMAGE = "image"
+_KIND_OFFICE = "office"
+_KIND_POSTSCRIPT = "postscript"
+_KIND_BLANK = "blank"
+
+
+def classify(path: str | Path) -> str:
+    """Which arm converts this source. An unknown extension returns ``""``.
+
+    The renderer carries the same table (`lib/create-pdf.ts`) so a picker can
+    badge a row before any engine call; this is the authority they agree on.
+    """
+    suffix = Path(path).suffix.lower()
+    if suffix == ".pdf":
+        return _KIND_PDF
+    if suffix in IMAGE_SUFFIXES:
+        return _KIND_IMAGE
+    if suffix in POSTSCRIPT_SUFFIXES:
+        return _KIND_POSTSCRIPT
+    if soffice_mod.is_office_source(path):
+        return _KIND_OFFICE
+    return ""
+
+
+def accepted_suffixes() -> tuple[str, ...]:
+    """Every extension Create PDF takes — for pickers, CLI help and refusals."""
+    return (
+        ".pdf",
+        *IMAGE_SUFFIXES,
+        *POSTSCRIPT_SUFFIXES,
+        *soffice_mod.OFFICE_SUFFIXES,
+    )
+
+
+def _blank_pdf(dest: Path, width, height) -> int:
+    try:
+        w = float(width)
+        h = float(height)
+    except (TypeError, ValueError):
+        raise ValueError("a blank page needs a positive width and height") from None
+    if not (math.isfinite(w) and math.isfinite(h)) or w <= 0 or h <= 0:
+        raise ValueError("a blank page needs a positive width and height")
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page(page_size=(w, h))
+    pdf.save(str(dest))
+    return 1
+
+
+def _page_box(page) -> tuple[float, float, float, float]:
+    box = page.get("/MediaBox") or [0, 0, 612, 792]
+    x0, y0, x1, y1 = (float(v) for v in box)
+    return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
+
+def _displayed(page) -> tuple[float, float]:
+    """The page as a READER sees it — /Rotate applied."""
+    x0, y0, x1, y1 = _page_box(page)
+    width, height = (x1 - x0), (y1 - y0)
+    if int(page.get("/Rotate", 0) or 0) % 360 in (90, 270):
+        return (height, width)
+    return (width, height)
+
+
+def _target_box(
+    page_size: str,
+    orientation: str,
+    first_displayed: tuple[float, float],
+    displayed: tuple[float, float],
+) -> tuple[float, float]:
+    """The size this page is placed on, in DISPLAYED (post-/Rotate) points."""
+    base = first_displayed if page_size == "first" else PAGE_SIZES[page_size]
+    short, long_ = min(base), max(base)
+    if orientation == "portrait":
+        return (short, long_)
+    if orientation == "landscape":
+        return (long_, short)
+    # auto: follow the CONTENT's own aspect, per page.
+    return (long_, short) if displayed[0] > displayed[1] else (short, long_)
+
+
+def _page_content_bytes(page) -> bytes:
+    """The page's drawing operators, however many streams they arrived in."""
+    contents = page.get("/Contents")
+    if contents is None:
+        return b""
+    if isinstance(contents, pikepdf.Array):
+        return b"\n".join(bytes(stream.read_bytes()) for stream in contents)
+    return bytes(contents.read_bytes())
+
+
+def _transform_rect(rect, scale: float, tx: float, ty: float) -> list[float]:
+    out: list[float] = []
+    for index, value in enumerate(float(v) for v in rect):
+        out.append(value * scale + (tx if index % 2 == 0 else ty))
+    return out
+
+
+def _place_page(pdf, page, target: tuple[float, float], margin: float) -> None:
+    """Put one page's content, unstretched and centred, on a `target` page.
+
+    The content is wrapped as a Form XObject and drawn through a single `cm`,
+    so nothing is re-rendered and nothing is rasterised. **Annotations travel
+    through the SAME affine** and stay the same objects, so a widget keeps its
+    /AcroForm registration and a link keeps working; building a fresh page
+    dictionary instead would have silently dropped every field on every sized
+    page — the structural-page-ops rule, met at a new surface.
+
+    /Rotate is left alone and the target box is un-rotated to match, so "make
+    this A4 landscape" means what the reader SEES, not what the box says.
+    """
+    rotate = int(page.get("/Rotate", 0) or 0) % 360
+    x0, y0, x1, y1 = _page_box(page)
+    width, height = (x1 - x0), (y1 - y0)
+    if width <= 0 or height <= 0:
+        return
+    box_w, box_h = (target[1], target[0]) if rotate in (90, 270) else target
+    avail_w = max(box_w - 2 * margin, 1.0)
+    avail_h = max(box_h - 2 * margin, 1.0)
+    scale = min(avail_w / width, avail_h / height)
+    tx = (box_w - scale * width) / 2.0 - scale * x0
+    ty = (box_h - scale * height) / 2.0 - scale * y0
+
+    # Built by hand rather than through `Page.as_form_xobject()`: that helper
+    # hands back the page's OWN content stream object, so replacing
+    # `page.Contents` a line later rewrote the form too and the page drew
+    # itself invoking itself — one recursive `Do` and not a glyph of the
+    # document's text left extractable (reproduced).
+    raw = _page_content_bytes(page)
+    resources = page.get("/Resources")
+    form_ref = pdf.make_indirect(
+        pikepdf.Stream(
+            pdf,
+            b"q\n" + raw + b"\nQ",
+            Type=pikepdf.Name.XObject,
+            Subtype=pikepdf.Name.Form,
+            BBox=pikepdf.Array([x0, y0, x1, y1]),
+            Resources=resources if resources is not None else pikepdf.Dictionary(),
+        )
+    )
+    page.Contents = pdf.make_stream(
+        f"q {scale:.6f} 0 0 {scale:.6f} {tx:.4f} {ty:.4f} cm /SpectraPlaced Do Q".encode("ascii")
+    )
+    page.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(SpectraPlaced=form_ref))
+    page.MediaBox = pikepdf.Array([0, 0, box_w, box_h])
+    for key in ("/CropBox", "/BleedBox", "/TrimBox", "/ArtBox"):
+        if key in page:
+            del page[key]
+    for annot in page.get("/Annots") or []:
+        if "/Rect" in annot:
+            annot.Rect = pikepdf.Array(_transform_rect(annot.Rect, scale, tx, ty))
+        if "/QuadPoints" in annot:
+            annot.QuadPoints = pikepdf.Array(_transform_rect(annot.QuadPoints, scale, tx, ty))
+
+
+def _apply_page_size(path: Path, page_size: str, orientation: str, margin: float) -> None:
+    """Sizing, applied ONCE to the assembled document (brief 41 § 3.1)."""
+    if page_size == "auto" and orientation == "auto":
+        return
+    with pikepdf.open(str(path), allow_overwriting_input=True) as pdf:
+        if len(pdf.pages) == 0:
+            return
+        first_displayed = _displayed(pdf.pages[0])
+        for index, page in enumerate(pdf.pages):
+            displayed = _displayed(page)
+            if page_size == "auto":
+                # Orientation alone: keep this page's own paper, turn it.
+                short, long_ = min(displayed), max(displayed)
+                target = (short, long_) if orientation == "portrait" else (long_, short)
+            else:
+                if page_size == "first" and index == 0 and orientation == "auto":
+                    continue
+                target = _target_box(page_size, orientation, first_displayed, displayed)
+            if (
+                margin == 0
+                and abs(target[0] - displayed[0]) < 0.01
+                and abs(target[1] - displayed[1]) < 0.01
+            ):
+                # Already the right size: never rewrite a page for nothing.
+                continue
+            _place_page(pdf, page, target, margin)
+        pdf.save(str(path))
+
+
+def _convert_one(
+    source: dict,
+    index: int,
+    scratch: Path,
+    *,
+    image_dpi_default: float,
+    soffice_path: str,
+    gs_path: str,
+    distill_preset: str,
+) -> dict:
+    """One source -> one scratch PDF, plus the report row § 6 describes."""
+    kind = str(source.get("kind") or "").lower()
+    if kind == _KIND_BLANK:
+        dest = scratch / f"{index:04d}-blank.pdf"
+        pages = _blank_pdf(
+            dest,
+            source.get("width", DEFAULT_BLANK_SIZE[0]),
+            source.get("height", DEFAULT_BLANK_SIZE[1]),
+        )
+        return {"kind": _KIND_BLANK, "converter": "blank", "pages": pages, "_file": str(dest)}
+
+    raw_path = source.get("path")
+    if not raw_path:
+        raise ValueError("every source needs a path (or the kind 'blank')")
+    path = Path(str(raw_path))
+    detected = classify(path)
+    if not detected:
+        raise ValueError(
+            f"Create PDF cannot convert {path.name} "
+            f"(accepted: {', '.join(accepted_suffixes())})"
+        )
+    if not path.is_file():
+        raise ValueError(f"input file not found: {path}")
+    # Every arm validates its source BEFORE a converter runs — soffice returns
+    # 0 on a zero-byte input, so an exit code cannot be the gate.
+    if path.stat().st_size == 0:
+        raise ValueError(f"the input file is empty: {path}")
+
+    row: dict = {"path": str(path), "kind": detected}
+    if detected == _KIND_PDF:
+        with pikepdf.open(str(path)) as pdf:
+            row["pages"] = len(pdf.pages)
+        row["converter"] = "passthrough"
+        row["_file"] = str(path)
+        return row
+    if detected == _KIND_IMAGE:
+        dest = scratch / f"{index:04d}-image.pdf"
+        report = image_to_pdf(path, dest, dpi_default=image_dpi_default)
+        row.update(
+            converter="image",
+            pages=report["pages"],
+            dpi=report["dpi"],
+            page_size=report["page_size"],
+            _file=str(dest),
+        )
+        return row
+    if detected == _KIND_OFFICE:
+        dest = scratch / f"{index:04d}-office.pdf"
+        report = soffice_mod.to_pdf(path, dest, soffice_path)
+        row.update(converter="libreoffice", pages=report["pages"], _file=str(dest))
+        if report.get("fonts_substituted"):
+            row["fonts_substituted"] = report["fonts_substituted"]
+        return row
+
+    dest = scratch / f"{index:04d}-distilled.pdf"
+    report = distill_mod.distill(str(path), str(dest), preset=distill_preset, gs_path=gs_path)
+    row.update(
+        converter="ghostscript",
+        pages=report["pages"],
+        eps=bool(report.get("eps", False)),
+        _file=str(dest),
+    )
+    return row
+
+
+def create_pdf(
+    sources: list,
+    output: str,
+    page_size: str = "auto",
+    orientation: str = "auto",
+    margin_pt: float = 0.0,
+    image_dpi_default: float = 200.0,
+    soffice_path: str = "",
+    gs_path: str = "gs",
+    distill_preset: str = "printer",
+    on_unsupported: str = "refuse",
+) -> dict:
+    """Build ONE PDF from an ordered list of sources of any accepted kind.
+
+    Args:
+        sources: ordered ``{"path": …}`` entries, plus ``{"kind": "blank",
+            "width": …, "height": …}`` for a blank member.
+        output: the PDF to write.
+        page_size: ``auto`` (each source keeps its own geometry), ``first``
+            (the first source's first page size), or a named paper size.
+        orientation: ``auto`` (per page, from the content's aspect),
+            ``portrait`` or ``landscape``.
+        margin_pt: white space kept around placed content when a page size is
+            named. ``auto``/``auto`` moves nothing, so it ignores this.
+        image_dpi_default: the resolution assumed for an image storing none.
+        soffice_path / gs_path: the bundled converters.
+        distill_preset: the Ghostscript quality preset for PostScript sources.
+        on_unsupported: ``refuse`` (default — one bad source fails the run) or
+            ``skip`` (report the row and carry on). A skipped row is NEVER
+            silent: it is a `warnings` entry AND a `sources` row with `error`.
+    """
+    if not isinstance(sources, list) or not sources:
+        raise ValueError("Create PDF needs at least one source")
+    if page_size not in PAGE_SIZE_CHOICES:
+        raise ValueError(f"unknown page size {page_size!r} ({', '.join(PAGE_SIZE_CHOICES)})")
+    if orientation not in ORIENTATIONS:
+        raise ValueError(f"unknown orientation {orientation!r} ({', '.join(ORIENTATIONS)})")
+    if on_unsupported not in ("refuse", "skip"):
+        raise ValueError(f"unknown on_unsupported {on_unsupported!r} (refuse, skip)")
+    try:
+        margin = float(margin_pt)
+    except (TypeError, ValueError):
+        raise ValueError("the margin must be a number of points") from None
+    if not math.isfinite(margin) or margin < 0:
+        raise ValueError("the margin must be a number of points")
+
+    output_path = Path(output)
+    if output_path.is_dir():
+        raise ValueError(f"output path is a directory, not a file: {output}")
+    # Identity, never string comparison: a canonical string cannot see a UNC
+    # vs mapped-letter or a hardlink alias of one physical file, and writing
+    # the output over a source destroys it.
+    if output_path.exists():
+        for source in sources:
+            candidate = source.get("path") if isinstance(source, dict) else None
+            if candidate and Path(str(candidate)).exists() and os.path.samefile(
+                str(candidate), str(output_path)
+            ):
+                raise ValueError("the output is one of the sources — choose another name")
+
+    scratch = Path(tempfile.mkdtemp(prefix="create-pdf-"))
+    rows: list[dict] = []
+    warnings: list[str] = []
+    parts: list[str] = []
+    try:
+        for index, source in enumerate(sources):
+            if not isinstance(source, dict):
+                raise ValueError("every source must be an object with a path or a kind")
+            try:
+                row = _convert_one(
+                    source,
+                    index,
+                    scratch,
+                    image_dpi_default=image_dpi_default,
+                    soffice_path=soffice_path,
+                    gs_path=gs_path,
+                    distill_preset=distill_preset,
+                )
+            except Exception as exc:
+                if on_unsupported == "refuse":
+                    raise
+                name = str(source.get("path") or source.get("kind") or "source")
+                rows.append({"path": name, "kind": "", "pages": 0, "error": str(exc)})
+                warnings.append(f"{Path(name).name}: {exc}")
+                continue
+            parts.append(row.pop("_file"))
+            rows.append(row)
+
+        if not parts:
+            raise RuntimeError("nothing could be converted, so there is no PDF to write")
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # ALWAYS through the shipped merge, even for one member — that is what
+        # makes the /AcroForm, outline and struct carries impossible to forget,
+        # and what stops the single-source case drifting from the multi.
+        merged = merge_mod.merge(parts, str(output_path))
+        _apply_page_size(output_path, page_size, orientation, margin)
+
+        with pikepdf.open(str(output_path)) as pdf:
+            pages = len(pdf.pages)
+        if pages == 0:
+            # The zero-page invariant holds at the builder as well as at the
+            # reducer and the planner.
+            output_path.unlink(missing_ok=True)
+            raise RuntimeError("the sources produced no pages, so no PDF was written")
+
+        for row in rows:
+            for face in row.get("fonts_substituted", []):
+                warnings.append(
+                    f"{Path(row['path']).name}: {face} was not available and was substituted"
+                )
+        result = {
+            "output": str(output_path),
+            "pages": pages,
+            "sources": rows,
+            "size_bytes": output_path.stat().st_size,
+        }
+        if merged.get("fields_renamed"):
+            result["fields_renamed"] = merged["fields_renamed"]
+        if warnings:
+            result["warnings"] = warnings
+        return result
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)

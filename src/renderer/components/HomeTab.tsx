@@ -36,7 +36,7 @@ function folderOf(path: string): string {
 // same ids the menus run, so enablement can never disagree.
 const QUICK_ACTIONS: ReadonlyArray<{ command: CommandId; label: ChromeKey; icon: Parameters<typeof ChromeIcon>[0]['icon'] }> = [
   { command: 'document.combineFiles', label: 'chrome.home.combineFiles', icon: 'pages' },
-  { command: 'file.createPdfFromPostScript', label: 'chrome.home.createPdf', icon: 'document' },
+  { command: 'file.createPdf', label: 'chrome.home.createPdf', icon: 'document' },
   { command: 'tools.batchOcr', label: 'chrome.home.batchOcr', icon: 'find' },
 ];
 

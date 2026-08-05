@@ -30,14 +30,15 @@ showpage
 %%EOF
 `;
 
-async function createPdfRun(source: string, output: string): Promise<boolean> {
-  return browser.executeAsync<boolean, [string, string]>(
-    function (src, out, done) {
-      (window as any).__SPECTRA_TEST__.createPdfRun(src, out)
-        .then((ok: boolean) => done(ok))
+// P22: the harness bridge now takes a source LIST (the dialog builds one).
+async function createPdfRun(sources: string[], output: string): Promise<boolean> {
+  return browser.executeAsync<boolean, [string[], string]>(
+    function (srcs, out, done) {
+      (window as any).__SPECTRA_TEST__.createPdfRun(srcs, out)
+        .then((r: unknown) => done(r !== null))
         .catch(() => done(false));
     },
-    source,
+    sources,
     output,
   );
 }
@@ -65,11 +66,11 @@ describe('create PDF from PostScript (Phase 8)', () => {
     // Open the dialog via its real command (menu path integrity is
     // covered by the menus vitest; this exercises the command→dialog
     // wiring).
-    expect(await invokeAppCommand('file.createPdfFromPostScript')).toBe(true);
+    expect(await invokeAppCommand('file.createPdf')).toBe(true);
     await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ timeout: 10_000 });
 
     // REAL conversion, injected paths.
-    expect(await createPdfRun(psPath, outPath)).toBe(true);
+    expect(await createPdfRun([psPath], outPath)).toBe(true);
     await $('[data-testid="create-pdf-done"]').waitForDisplayed({ timeout: 15_000 });
 
     // Node-side independent validation: the output is a real 1-page PDF.

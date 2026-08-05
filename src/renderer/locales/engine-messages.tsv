@@ -42,16 +42,28 @@ compare.toleranceMustBetween	exact	compare	tolerance must be between 0 and 255.
 compare.unsupportedPpmMaxvalExpected	pattern	compare	Unsupported PPM maxval {{maxval}} (expected 255)
 compress.ghostscriptFailed	pattern	compress,distill,image_export	Ghostscript failed: {{v0}}
 compress.mrcCompressionDpiSetting	exact	compress	MRC compression has no DPI setting — the text stays at the scan's own resolution, which is the point of it. Choose a preset instead.
+create_pdf.blankPageNeedsPositive	exact	create_pdf	a blank page needs a positive width and height
+create_pdf.createPdfCannotConvert	pattern	create_pdf	Create PDF cannot convert {{v0}} (accepted: {{v1}})
+create_pdf.createPdfNeedsLeast	exact	create_pdf	Create PDF needs at least one source
+create_pdf.everySourceMustObject	exact	create_pdf	every source must be an object with a path or a kind
+create_pdf.everySourceNeedsPath	exact	create_pdf	every source needs a path (or the kind 'blank')
 create_pdf.heicHeifImagesNeed	pattern	create_pdf	HEIC/HEIF images need the pillow-heif plugin, which this runtime does not have: {{src_path}}
 create_pdf.imageContainsFrames	pattern	create_pdf	the image contains no frames: {{src_path}}
 create_pdf.imageDpiDefaultMust	exact	create_pdf	the image DPI default must be a positive number
 create_pdf.imageFileEmpty	pattern	create_pdf	the image file is empty: {{src_path}}
 create_pdf.imageFileFound	pattern	create_pdf	image file not found: {{src_path}}
+create_pdf.marginMustNumberPoints	exact	create_pdf	the margin must be a number of points
+create_pdf.nothingCouldConvertedThere	exact	create_pdf	nothing could be converted, so there is no PDF to write
+create_pdf.outputOneSourcesChoose	exact	create_pdf	the output is one of the sources — choose another name
+create_pdf.sourcesProducedPagesPdf	exact	create_pdf	the sources produced no pages, so no PDF was written
+create_pdf.unknownOrientation	pattern	create_pdf	unknown orientation {{orientation}} ({{v1}})
+create_pdf.unknownPageSize	pattern	create_pdf	unknown page size {{page_size}} ({{v1}})
+create_pdf.unknownUnsupportedRefuseSkip	pattern	create_pdf	unknown on_unsupported {{on_unsupported}} (refuse, skip)
 create_pdf.unreadableImage	pattern	create_pdf	unreadable image: {{src_path}} ({{exc}})
 distill.alreadyPdfDistillingConverts	exact	distill	this is already a PDF — distilling converts PostScript; use Repair (Tier 2 rebuild) to re-render a PDF
 distill.ghostscriptProducedPdfPages	exact	distill	Ghostscript produced a PDF with no pages
 distill.ghostscriptProducedUnreadablePdf	pattern	distill	Ghostscript produced an unreadable PDF: {{exc}}
-distill.inputFileFound	pattern	distill,office_export,soffice	input file not found: {{file}}
+distill.inputFileFound	pattern	create_pdf,distill,office_export,soffice	input file not found: {{file}}
 distill.outputMustDifferentFile	exact	distill	output must be a different file from the input
 distill.postscriptFileMissingHeader	exact	distill	not a PostScript file (missing the '%!' header)
 distill.unknownPresetScreenEbook	pattern	distill	unknown preset {{preset}} (screen, ebook, printer, prepress, default)
@@ -94,7 +106,7 @@ headers.textContainsCharactersOutside	exact	headers	text contains characters out
 image_export.dpiMustGot	pattern	image_export	dpi must be {{_MIN_DPI}}-{{_MAX_DPI}}, got {{dpi}}
 image_export.dpiMustNumberGot	pattern	image_export	dpi must be a number, got {{dpi}}
 image_export.ghostscriptReportedSuccessExpected	pattern	image_export	Ghostscript reported success but {{v0}} expected output file(s) are missing (first: {{v1}})
-image_export.outputPathDirectoryFile	pattern	image_export,office_export,soffice	output path is a directory, not a file: {{output}}
+image_export.outputPathDirectoryFile	pattern	create_pdf,image_export,office_export,soffice	output path is a directory, not a file: {{output}}
 image_export.unsupportedImageFormat	pattern	image_export	unsupported image format {{fmt}} (have {{v1}})
 incremental.incrementalTransplantFailed	pattern	incremental	Incremental transplant failed: {{e}}
 incremental.incrementalWriteDidPreserve	exact	incremental	Incremental write did not preserve the original bytes verbatim — refusing to emit a signature-breaking file
@@ -136,7 +148,7 @@ mrc_codecs.maskVerificationFailedEmbedded	pattern	mrc_codecs	mask verification f
 mrc_codecs.unknownJbigMode	pattern	mrc_codecs	unknown JBIG2 mode: {{mode}}
 mrc_codecs.unknownMaskCodecExpected	pattern	mrc_codecs	unknown mask codec: {{codec}} (expected one of {{v1}})
 ocr_layer.ocrWordsApply	exact	ocr_layer	No OCR words to apply.
-office_export.inputFileEmpty	pattern	office_export,soffice	the input file is empty: {{file}}
+office_export.inputFileEmpty	pattern	create_pdf,office_export,soffice	the input file is empty: {{file}}
 office_export.libreofficeAvailableSofficePath	exact	office_export,soffice	LibreOffice is not available (no soffice path)
 office_export.libreofficeConversionFailedExit	pattern	soffice	LibreOffice conversion failed (exit {{v0}}): {{v1}}
 office_export.libreofficeReportedSuccessFile	pattern	soffice	LibreOffice reported success but the file it wrote is empty ({{v0}})

@@ -203,7 +203,7 @@ export const COMMAND_IDS = [
   'tools.batchOcr',
   'tools.scheduledRuns',
   'tools.watchedFolders',
-  'file.createPdfFromPostScript',
+  'file.createPdf',
   ...CANVAS_TOOLS.map((t) => `tools.${t}` as const),
   ...OPERATIONS.map((op) => `tools.panel.${op}` as const),
   ...TOOL_IDS.map((id) => `tools.open.${id}` as const),
@@ -540,9 +540,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openWatchedFolders(),
   },
-  // Phase 8 — same no-document shape: distills a PICKED PostScript file.
-  'file.createPdfFromPostScript': {
-    title: 'Create PDF from PostScript…',
+  // P22 — same no-document shape: builds a PDF from PICKED sources of any
+  // accepted kind (images, Office/text/web, PostScript, blank pages). The old
+  // `file.createPdfFromPostScript` id is REMOVED, not aliased: a stale id in a
+  // registry that drives the menus, the Home tab and the command palette is a
+  // fossil that outlives its own feature (the rebrand's clean-break precedent).
+  'file.createPdf': {
+    title: 'Create PDF…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openCreatePdf(),
   },
