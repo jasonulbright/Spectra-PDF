@@ -45,14 +45,39 @@ async function editParagraphOpen(pageId: string, index: number): Promise<void> {
   );
 }
 
+/** The listing this returns is the SAME read that was validated — never a
+ * fresh one taken afterwards. A caller that waits for a non-empty listing and
+ * then re-reads it has a check-then-read race: opening the tool (or any
+ * reindex the previous test left in flight) drops and repopulates the page's
+ * listing, so the second read can land on the empty window between the two.
+ * That is a real full-suite failure, not a hypothetical — the A1 restyle test
+ * got `paragraphs.length === 0` immediately after its own 30s wait proved the
+ * listing non-empty. Fixed here, at the helper, so both callers are covered
+ * rather than the one that happened to flake. */
 async function firstParagraph(): Promise<{
   pageId: string;
   para: { index: number; text: string; lineCount: number; alignment: string };
 }> {
-  const pageId = (await editTextPageIds())[0];
-  const paras = await editParagraphs(pageId);
-  expect(paras.length).toBeGreaterThan(0);
-  return { pageId, para: paras[0] };
+  let seen: {
+    pageId: string;
+    paras: { index: number; text: string; lineCount: number; alignment: string }[];
+  } | null = null;
+  await browser.waitUntil(
+    async () => {
+      const ids = await editTextPageIds();
+      if (ids.length === 0) return false;
+      const paras = await editParagraphs(ids[0]);
+      if (paras.length === 0) return false;
+      seen = { pageId: ids[0], paras };
+      return true;
+    },
+    { timeout: 30_000, timeoutMsg: 'no non-empty paragraph listing became available' },
+  );
+  const got = seen as unknown as {
+    pageId: string;
+    paras: { index: number; text: string; lineCount: number; alignment: string }[];
+  };
+  return { pageId: got.pageId, para: got.paras[0] };
 }
 
 describe('edit paragraph (Phase 7.5)', () => {
