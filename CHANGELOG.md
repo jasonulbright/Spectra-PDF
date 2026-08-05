@@ -20,6 +20,10 @@ Scanned files also simply display better: images written by fax machines,
 scanners and archival tools used to come up blank in the viewer, and now
 they draw.
 
+And the interface now speaks Spanish, French, German, Italian, Portuguese,
+Japanese and Chinese. Seven languages beside English, each one complete
+before it was offered.
+
 ### Vertical text
 - **Left-to-right columns.** Mongolian text sets in vertical columns that
   advance from left to right, the opposite of the East Asian convention.
@@ -86,7 +90,26 @@ they draw.
   a large scan could fail for no reason but its length. The limit now
   scales with the document, and the message says what it was.
 
-## 1.0.17 — Drafting tools, long documents, and an interface that speaks Spanish
+### Language
+- **Six more languages.** French, German, Italian, Brazilian Portuguese,
+  Japanese and Simplified Chinese join Spanish. Each covers the whole
+  interface — menus, toolbars, the tool dock and every panel in it,
+  dialogs, the navigation pane, the on-page editing chrome, and the
+  messages the app shows when it cannot do something. Nothing is
+  half-translated: a language is offered only once its wording is
+  complete, so the list in Settings ▸ Language is exactly the set that is
+  finished.
+- **The words are the ones the trade already uses.** Each language uses
+  the terms its own design, print and PDF software uses — blending modes,
+  redaction, prepress and page-box vocabulary included — rather than a
+  literal rendering of the English.
+- **Written the way each language is written.** Counts inflect where the
+  language inflects them and stay put where it does not; Japanese and
+  Chinese use full-width punctuation and their own counters; French keeps
+  its non-breaking spaces before the punctuation that needs them.
+- **Regional systems find their language.** A PC set to Portuguese or
+  Chinese in any regional spelling opens in Portuguese or Chinese rather
+  than falling back to English.
 
 Markup lands where you aim it: snapping to the drawing's own geometry,
 rulers, a grid in real-world units, and guides you drag off the rulers.
