@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { addFormField } from '../src/renderer/lib/form-authoring';
+import { addFormField, addFormFields } from '../src/renderer/lib/form-authoring';
 import { readFormFields, fillFormFields } from './helpers/pdflib-forms';
 import { buildPdf } from '../src/renderer/lib/pdfx-build';
 
@@ -205,5 +205,151 @@ describe('addFormField', () => {
     await expect(
       addFormField(bytes, { name: 'indirect-named', type: 'signature', pageIndex: 0, rect: [10, 10, 110, 50] }),
     ).rejects.toThrow(/A field named "indirect-named" already exists/);
+  });
+});
+
+describe('addFormFields', () => {
+  it('writes N fields through one load and one save', async () => {
+    const bytes = await addFormFields(await blankPdf(2), [
+      { name: 'first', type: 'text', pageIndex: 0, rect: [50, 700, 250, 724] },
+      { name: 'last', type: 'text', pageIndex: 0, rect: [50, 660, 250, 684] },
+      { name: 'agree', type: 'checkbox', pageIndex: 1, rect: [50, 600, 62, 612] },
+    ]);
+    const m = await fieldMap(bytes);
+    expect([...m.keys()].sort()).toEqual(['agree', 'first', 'last']);
+    expect(m.get('agree')).toMatchObject({ type: 'checkbox' });
+    expect(m.get('agree')!.widgets[0]).toMatchObject({ pageIndex: 1 });
+  });
+
+  it('reports every problem in the batch at once, each naming its field', async () => {
+    const base = await blankPdf();
+    try {
+      await addFormFields(base, [
+        { name: 'ok', type: 'text', pageIndex: 0, rect: [10, 10, 110, 40] },
+        { name: 'bad-rect', type: 'text', pageIndex: 0, rect: [10, 10, 10, 10] },
+        { name: 'bad-page', type: 'text', pageIndex: 9, rect: [10, 10, 110, 40] },
+      ]);
+      throw new Error('expected a refusal');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain('bad-rect');
+      expect(msg).toContain('rectangle is empty');
+      expect(msg).toContain('bad-page');
+      expect(msg).toContain('out of range');
+      expect(msg).not.toContain('ok:');
+    }
+  });
+
+  it('refuses two specs in one batch that would share a name, writing nothing', async () => {
+    const base = await blankPdf();
+    await expect(
+      addFormFields(base, [
+        { name: 'dup', type: 'text', pageIndex: 0, rect: [10, 10, 110, 40] },
+        { name: 'dup', type: 'text', pageIndex: 0, rect: [10, 50, 110, 80] },
+      ]),
+    ).rejects.toThrow(/already exists/);
+  });
+
+  it('places each radio option at its own rectangle when the spec gives them', async () => {
+    const bytes = await addFormFields(await blankPdf(), [
+      {
+        name: 'contact',
+        type: 'radio',
+        pageIndex: 0,
+        rect: [50, 300, 460, 320],
+        options: [
+          { label: 'Email', rect: [50, 300, 60, 310] },
+          { label: 'Phone', rect: [160, 300, 170, 310] },
+          { label: 'Mail', rect: [270, 300, 280, 310] },
+        ],
+      },
+    ]);
+    const m = await fieldMap(bytes);
+    const widgets = m.get('contact')!.widgets;
+    expect(widgets).toHaveLength(3);
+    expect(widgets.map((w) => Math.round(w.rect[0]))).toEqual([50, 160, 270]);
+    expect(m.get('contact')).toMatchObject({ options: ['Email', 'Phone', 'Mail'] });
+  });
+
+  it('keeps the equal-cell layout when options carry no rectangles', async () => {
+    const bytes = await addFormFields(await blankPdf(), [
+      {
+        name: 'pick',
+        type: 'radio',
+        pageIndex: 0,
+        rect: [100, 300, 400, 320],
+        options: ['a', 'b'],
+      },
+    ]);
+    const widgets = (await fieldMap(bytes)).get('pick')!.widgets;
+    expect(widgets).toHaveLength(2);
+    expect(widgets[0].rect[0]).toBeGreaterThanOrEqual(100);
+    expect(widgets[1].rect[0]).toBeGreaterThan(widgets[0].rect[0]);
+  });
+
+  it('refuses a partial set of option rectangles', async () => {
+    await expect(
+      addFormFields(await blankPdf(), [
+        {
+          name: 'half',
+          type: 'radio',
+          pageIndex: 0,
+          rect: [50, 300, 460, 320],
+          options: [{ label: 'a', rect: [50, 300, 60, 310] }, { label: 'b' }],
+        },
+      ]),
+    ).rejects.toThrow(/every option carries its own rectangle/);
+  });
+
+  it('creates a comb text field with its character count', async () => {
+    const bytes = await addFormFields(await blankPdf(), [
+      {
+        name: 'postcode',
+        type: 'text',
+        pageIndex: 0,
+        rect: [180, 590, 300, 610],
+        comb: true,
+        maxLength: 6,
+      },
+    ]);
+    const reread = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const field = reread.getForm().getTextField('postcode');
+    expect(field.getMaxLength()).toBe(6);
+    expect(field.isCombed()).toBe(true);
+  });
+
+  it('refuses a comb field with no character count, and a combed multiline field', async () => {
+    const base = await blankPdf();
+    await expect(
+      addFormFields(base, [
+        { name: 'a', type: 'text', pageIndex: 0, rect: [10, 10, 110, 40], comb: true },
+      ]),
+    ).rejects.toThrow(/character count/);
+    await expect(
+      addFormFields(base, [
+        {
+          name: 'b',
+          type: 'text',
+          pageIndex: 0,
+          rect: [10, 10, 110, 40],
+          comb: true,
+          maxLength: 4,
+          multiline: true,
+        },
+      ]),
+    ).rejects.toThrow(/one line/);
+  });
+
+  it('is what the single-field entry point calls', async () => {
+    const one = await addFormField(await blankPdf(), {
+      name: 'solo',
+      type: 'text',
+      pageIndex: 0,
+      rect: [10, 10, 110, 40],
+    });
+    const batch = await addFormFields(await blankPdf(), [
+      { name: 'solo', type: 'text', pageIndex: 0, rect: [10, 10, 110, 40] },
+    ]);
+    expect((await fieldMap(one)).get('solo')).toEqual((await fieldMap(batch)).get('solo'));
   });
 });

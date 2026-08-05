@@ -27,22 +27,48 @@ export type NewFieldType =
   | 'optionlist'
   | 'signature';
 
+/**
+ * One choice of a radio group, dropdown or list.
+ *
+ * The object form carries the option's OWN rectangle. Detection produces four
+ * separately drawn circles, and equal cells of one enclosing rectangle cannot
+ * express that; a hand-drawn group still passes bare strings and still gets the
+ * equal-cell layout.
+ */
+export type NewFieldOption = string | { label: string; rect?: [number, number, number, number] };
+
 export interface NewFieldSpec {
   name: string;
   type: NewFieldType;
   pageIndex: number; // 0-based, in the file's COMMITTED page order
   rect: [number, number, number, number]; // PDF user-space points, bottom-up
-  options?: string[]; // radio / dropdown / optionlist
+  options?: NewFieldOption[]; // radio / dropdown / optionlist
   multiline?: boolean; // text only
+  comb?: boolean; // text only; requires maxLength and excludes multiline
+  maxLength?: number; // text only
 }
 
 const CHOICE_TYPES: ReadonlySet<NewFieldType> = new Set(['radio', 'dropdown', 'optionlist']);
 
+interface ResolvedOption {
+  label: string;
+  rect?: [number, number, number, number];
+}
+
+function resolveOptions(options: readonly NewFieldOption[] | undefined): ResolvedOption[] {
+  return (options ?? [])
+    .map((o) => (typeof o === 'string' ? { label: o.trim() } : { label: o.label.trim(), rect: o.rect }))
+    .filter((o) => o.label.length > 0);
+}
+
 /** One validation problem, held as its KEY plus its values rather than as a
- * rendered sentence — see FieldSpecError. */
+ * rendered sentence — see FieldSpecError. `field` names the spec it belongs to,
+ * because a batch reports every problem at once and a bare sentence would not
+ * say which of forty fields it is about. */
 interface FieldProblem {
   key: UiKey;
   vars?: Record<string, string | number>;
+  field?: string;
 }
 
 /**
@@ -68,7 +94,13 @@ export class FieldSpecError extends Error {
     this.problems = problems;
     this.name = 'FieldSpecError';
     Object.defineProperty(this, 'message', {
-      get: () => problems.map((p) => tChrome(p.key, p.vars)).join('\n'),
+      get: () =>
+        problems
+          .map((p) => {
+            const problem = tChrome(p.key, p.vars);
+            return p.field ? tChrome('refusal.field.inField', { field: p.field, problem }) : problem;
+          })
+          .join('\n'),
       configurable: true,
       enumerable: false,
     });
@@ -104,42 +136,68 @@ function topLevelFieldNames(doc: PDFDocument): Set<string> {
   return names;
 }
 
-// Validate a spec against the document BEFORE any mutation (fail-closed,
-// everything reported at once — the engine ops' posture).
-function validateSpec(doc: PDFDocument, spec: NewFieldSpec): void {
+// Validate the whole batch against the document BEFORE any mutation
+// (fail-closed, everything reported at once — the engine ops' posture). The
+// name set grows as the batch is checked, so two specs that would collide with
+// each other are caught here rather than half-way through the writing, where
+// the document would already carry the fields created before the throw.
+function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
   const problems: FieldProblem[] = [];
-  const name = spec.name.trim();
-  if (!name) problems.push({ key: 'refusal.field.nameRequired' });
-  // pdf-lib rejects dots itself (hierarchy separator), but with an internal
-  // message — say it plainly here.
-  if (name.includes('.')) problems.push({ key: 'refusal.field.nameDot' });
-  if (spec.pageIndex < 0 || spec.pageIndex >= doc.getPageCount()) {
-    problems.push({
-      key: 'refusal.field.pageOutOfRange',
-      vars: { page: spec.pageIndex + 1, count: doc.getPageCount() },
-    });
-  }
-  const [x0, y0, x1, y1] = spec.rect;
-  if (!(x1 > x0) || !(y1 > y0)) problems.push({ key: 'refusal.field.rectEmpty' });
-  if (CHOICE_TYPES.has(spec.type)) {
-    const options = (spec.options ?? []).map((o) => o.trim()).filter(Boolean);
-    if (options.length === 0) {
-      problems.push({ key: 'refusal.field.needsOption' });
-    } else if (new Set(options).size !== options.length) {
-      problems.push({ key: 'refusal.field.optionsUnique' });
+  const taken = topLevelFieldNames(doc);
+  const batch = specs.length > 1;
+  specs.forEach((spec, index) => {
+    const name = spec.name.trim();
+    const field = batch ? name || `#${index + 1}` : undefined;
+    const push = (key: UiKey, vars?: Record<string, string | number>): void => {
+      problems.push({ key, vars, field });
+    };
+    if (!name) push('refusal.field.nameRequired');
+    // pdf-lib rejects dots itself (hierarchy separator), but with an internal
+    // message — say it plainly here.
+    if (name.includes('.')) push('refusal.field.nameDot');
+    if (spec.pageIndex < 0 || spec.pageIndex >= doc.getPageCount()) {
+      push('refusal.field.pageOutOfRange', {
+        page: spec.pageIndex + 1,
+        count: doc.getPageCount(),
+      });
     }
-  }
-  if (name) {
-    // Duplicate names would make readers treat two fields as one logical
-    // field (or violate sibling /T uniqueness outright). Checked against the
-    // RAW top-level /Fields — not getFields(), whose terminal-only view
-    // misses non-terminal hierarchy parents (regression: the hand-rolled
-    // signature path has no pdf-lib backstop and would have created a
-    // same-/T sibling next to such a parent).
-    if (topLevelFieldNames(doc).has(name)) {
-      problems.push({ key: 'refusal.field.nameExists', vars: { name } });
+    const [x0, y0, x1, y1] = spec.rect;
+    if (!(x1 > x0) || !(y1 > y0)) push('refusal.field.rectEmpty');
+    if (CHOICE_TYPES.has(spec.type)) {
+      const options = resolveOptions(spec.options);
+      if (options.length === 0) {
+        push('refusal.field.needsOption');
+      } else if (new Set(options.map((o) => o.label)).size !== options.length) {
+        push('refusal.field.optionsUnique');
+      }
+      const placed = options.filter((o) => o.rect).length;
+      if (placed > 0 && placed !== options.length) {
+        push('refusal.field.optionRectsPartial');
+      }
     }
-  }
+    if (spec.type === 'text') {
+      if (spec.comb) {
+        if (!spec.maxLength || spec.maxLength <= 0) push('refusal.field.combNeedsMaxLength');
+        if (spec.multiline) push('refusal.field.combNotMultiline');
+      }
+      if (spec.maxLength !== undefined && spec.maxLength <= 0) {
+        push('refusal.field.maxLengthPositive');
+      }
+    }
+    if (name) {
+      // Duplicate names would make readers treat two fields as one logical
+      // field (or violate sibling /T uniqueness outright). Checked against the
+      // RAW top-level /Fields — not getFields(), whose terminal-only view
+      // misses non-terminal hierarchy parents (regression: the hand-rolled
+      // signature path has no pdf-lib backstop and would have created a
+      // same-/T sibling next to such a parent).
+      if (taken.has(name)) {
+        push('refusal.field.nameExists', { name });
+      } else {
+        taken.add(name);
+      }
+    }
+  });
   // Ensure /AcroForm exists (getForm() lazily creates it, and strips /XFA —
   // the standing pure-AcroForm posture); addSignatureField relies on it.
   doc.getForm();
@@ -177,36 +235,31 @@ function addSignatureField(doc: PDFDocument, spec: NewFieldSpec): void {
   acro.set(PDFName.of('SigFlags'), doc.context.obj(1));
 }
 
-/**
- * Author one new AcroForm field into the document. Returns the new bytes;
- * throws (with every problem at once) before any mutation on invalid input.
- * A drawn radio group lays its options out left-to-right in equal cells of
- * the placed rectangle.
- */
-export async function addFormField(
-  buffer: PdfBuffer | Uint8Array | ArrayBuffer,
-  spec: NewFieldSpec,
-): Promise<Uint8Array> {
-  const bytes =
-    buffer instanceof Uint8Array
-      ? buffer.slice()
-      : buffer instanceof ArrayBuffer
-        ? new Uint8Array(buffer.slice(0))
-        : new Uint8Array(buffer as number[]);
-  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
-  validateSpec(doc, spec);
+function toBox(rect: readonly [number, number, number, number]): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} {
+  const [x0, y0, x1, y1] = rect;
+  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+}
 
+function createField(doc: PDFDocument, spec: NewFieldSpec): void {
   const name = spec.name.trim();
-  const [x0, y0, x1, y1] = spec.rect;
-  const box = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+  const box = toBox(spec.rect);
   const page = doc.getPage(spec.pageIndex);
   const form = doc.getForm();
-  const options = (spec.options ?? []).map((o) => o.trim()).filter(Boolean);
+  const options = resolveOptions(spec.options);
 
   switch (spec.type) {
     case 'text': {
       const field = form.createTextField(name);
       if (spec.multiline) field.enableMultiline();
+      // Order matters: combing requires a max length to divide the box into,
+      // and pdf-lib refuses `enableCombing` while none is set.
+      if (spec.maxLength) field.setMaxLength(spec.maxLength);
+      if (spec.comb) field.enableCombing();
       field.addToPage(page, box);
       break;
     }
@@ -215,14 +268,23 @@ export async function addFormField(
       break;
     }
     case 'radio': {
+      const group = form.createRadioGroup(name);
+      const placed = options.every((o) => o.rect);
+      if (placed) {
+        // Each option was drawn where it is; the enclosing rectangle is only
+        // the group's extent.
+        for (const option of options) {
+          group.addOptionToPage(option.label, page, toBox(option.rect!));
+        }
+        break;
+      }
       // One drawn box, N options: equal horizontal cells, square buttons
       // centered in each cell (a radio option is a small toggle, not a
       // stretch-to-fill band).
-      const group = form.createRadioGroup(name);
       const cellW = box.width / options.length;
       const side = Math.min(cellW * 0.8, box.height * 0.8);
       options.forEach((option, i) => {
-        group.addOptionToPage(option, page, {
+        group.addOptionToPage(option.label, page, {
           x: box.x + i * cellW + (cellW - side) / 2,
           y: box.y + (box.height - side) / 2,
           width: side,
@@ -233,13 +295,13 @@ export async function addFormField(
     }
     case 'dropdown': {
       const field = form.createDropdown(name);
-      field.addOptions(options);
+      field.addOptions(options.map((o) => o.label));
       field.addToPage(page, box);
       break;
     }
     case 'optionlist': {
       const field = form.createOptionList(name);
-      field.setOptions(options);
+      field.setOptions(options.map((o) => o.label));
       field.enableMultiselect();
       field.addToPage(page, box);
       break;
@@ -249,5 +311,42 @@ export async function addFormField(
       break;
     }
   }
+}
+
+/**
+ * Author N new AcroForm fields into the document in ONE pass. Returns the new
+ * bytes; throws (with every problem in the batch at once) before any mutation
+ * on invalid input.
+ *
+ * One load and one save for the whole batch is what makes an accepted set of
+ * detected fields a single undoable act: per-field loading would put forty
+ * entries on the undo stack for one gesture, and each save would re-serialize
+ * the document.
+ */
+export async function addFormFields(
+  buffer: PdfBuffer | Uint8Array | ArrayBuffer,
+  specs: readonly NewFieldSpec[],
+): Promise<Uint8Array> {
+  const bytes =
+    buffer instanceof Uint8Array
+      ? buffer.slice()
+      : buffer instanceof ArrayBuffer
+        ? new Uint8Array(buffer.slice(0))
+        : new Uint8Array(buffer as number[]);
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  validateSpecs(doc, specs);
+  for (const spec of specs) createField(doc, spec);
   return doc.save();
+}
+
+/**
+ * Author one new AcroForm field. The single-field entry point IS the batch with
+ * one spec, so the hand-drawn path and the accepted-candidate path cannot drift
+ * apart.
+ */
+export async function addFormField(
+  buffer: PdfBuffer | Uint8Array | ArrayBuffer,
+  spec: NewFieldSpec,
+): Promise<Uint8Array> {
+  return addFormFields(buffer, [spec]);
 }
