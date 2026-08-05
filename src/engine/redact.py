@@ -20,9 +20,17 @@ Approach (per page, per requested region):
      only a placeholder) the bbox falls WIDE — 1 em per code — because
      over-removal is the tolerable error for a redaction tool and a narrow
      guess is not.
-  2. Any instruction whose bbox intersects ANY requested region on that page
+  2. An image or vector instruction whose bbox intersects ANY requested region
      is dropped entirely from the rebuilt stream (not blanked, not made
      invisible — removed from the instruction list that gets re-serialized).
+     A TEXT instruction is SPLIT (F15 slice B): the codes whose own boxes meet
+     a region go, the rest are re-emitted from the original bytes, and each
+     removed stretch becomes a TJ jump carrying exactly the advance it had, so
+     every surviving character stays where it was. Removing whole operators
+     instead meant marking one name inside a line a generator emitted as a
+     single `Tj` deleted the entire line — over-removal the user can see, and
+     the dominant shape once marks are word-sized. A run that cannot be
+     measured (see 1) still goes whole, and says so in `runs_removed_whole`.
   3. Form XObjects (`Do` on a /Subtype /Form) whose PLACED /BBox intersects a
      region are descended into recursively: a redacted COPY of the form is
      built (intersecting text/images removed, orphaned image resources pruned
@@ -78,8 +86,11 @@ from engine.text_metrics import (
     _child_state,
     _FontCache,
     _run_metrics,
+    cluster_span,
     measurable,
     show_bytes,
+    show_clusters,
+    show_items,
     wide_width,
 )
 
@@ -141,6 +152,43 @@ def _resolve_resources(page: "pikepdf.Page"):
     return resources if resources is not None else {}
 
 
+def _span_bbox(
+    combined: Matrix,
+    x0: float,
+    x1: float,
+    vertical: bool,
+    state: GraphicsTextState,
+    ink: tuple[float, float],
+) -> Rect:
+    """The device-space box of a stretch of one show operator's INK (F15-A).
+
+    Horizontal: the stretch runs from `x0` to `x1` along the pen's sweep
+    (pre-Tz text space, scaled here), and the ink reaches `below` under the
+    baseline and `above` over it — the font's own descent/ascent, not the em
+    box. `Ts` (rise) lifts it.
+
+    Vertical (9.B4a): the run occupies one em-wide column centred on the pen
+    and spans its advance sum DOWNWARD, the lister's convention; Tz never
+    applies vertically.
+    """
+    below, above = ink
+    size = max(state.font_size, 0.01)
+    if vertical:
+        half = size / 2.0
+        lo, hi = min(x0, x1), max(x0, x1)
+        if hi - lo < 0.01:
+            hi = lo + 0.01
+        return _bbox_of_corners_under_matrix(combined, -half, -hi, half, -lo)
+    lo, hi = sorted((x0 * state.h_scale, x1 * state.h_scale))
+    if hi - lo < 0.01:
+        hi = lo + 0.01
+    y0 = state.rise - below * size
+    y1 = state.rise + above * size
+    if y1 - y0 < 0.01:
+        y1 = y0 + 0.01
+    return _bbox_of_corners_under_matrix(combined, lo, y0, hi, y1)
+
+
 def _run_bbox(
     combined: Matrix,
     raw_width: float,
@@ -149,36 +197,109 @@ def _run_bbox(
     state: GraphicsTextState,
     ink: tuple[float, float],
 ) -> Rect:
-    """The device-space box of one show operator's INK (F15-A).
-
-    Horizontal: the pen sweeps `raw_width × Tz` forward from the origin, and
-    the ink reaches `below` under the baseline and `above` over it — the
-    font's own descent/ascent, not the em box. `Ts` (rise) lifts the whole
-    run. `slack` grows the box BACKWARD by however far an earlier unmeasurable
-    run on this line may have over-advanced.
-
-    Vertical (9.B4a): the run occupies one em-wide column centred on the pen
-    and spans its advance sum DOWNWARD, the lister's convention; Tz never
-    applies vertically, and the slack grows the column UPWARD.
-    """
-    below, above = ink
-    size = max(state.font_size, 0.01)
+    """The whole run's box. `slack` grows it BACKWARD by however far an earlier
+    unmeasurable run on this line may have over-advanced (upward, vertically)."""
     if vertical:
-        half = size / 2.0
-        return _bbox_of_corners_under_matrix(
-            combined, -half, -max(raw_width, 0.01), half, slack
-        )
-    x1 = max(raw_width * state.h_scale, 0.01)
-    y0 = state.rise - below * size
-    y1 = state.rise + above * size
-    if y1 - y0 < 0.01:
-        y1 = y0 + 0.01
-    return _bbox_of_corners_under_matrix(combined, -slack, y0, x1, y1)
+        return _span_bbox(combined, -slack, max(raw_width, 0.01), True, state, ink)
+    return _span_bbox(
+        combined, -slack / max(state.h_scale, 1e-9), raw_width, False, state, ink
+    )
+
+
+def _merge_tj_parts(parts: list) -> list:
+    """Collapse a TJ operand list: adjacent strings concatenate, adjacent
+    numbers add, and a zero number drops. Byte-for-byte equivalent to the
+    unmerged form and much easier to read in a dumped stream."""
+    out: list = []
+    for part in parts:
+        if isinstance(part, bytes):
+            if out and isinstance(out[-1], bytes):
+                out[-1] = out[-1] + part
+            else:
+                out.append(part)
+            continue
+        if out and isinstance(out[-1], float):
+            out[-1] = out[-1] + part
+        else:
+            out.append(float(part))
+    return [p for p in out if not (isinstance(p, float) and abs(p) < 1e-9)]
+
+
+def _state_only_instructions(operator: str, operands: list) -> list:
+    """The state side effects of a show operator that is being removed WHOLE.
+    `'` is `T* Tj` and `"` is `aw Tw ac Tc T* Tj`, so dropping either outright
+    swallowed a line advance and moved every following line up the page."""
+    out: list = []
+    if operator == '"' and len(operands) >= 3:
+        out.append(pikepdf.ContentStreamInstruction([operands[0]], pikepdf.Operator("Tw")))
+        out.append(pikepdf.ContentStreamInstruction([operands[1]], pikepdf.Operator("Tc")))
+    if operator in ("'", '"'):
+        out.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("T*")))
+    return out
+
+
+def _split_instructions(
+    operator: str,
+    operands: list,
+    items: list,
+    clusters: list,
+    removed: set,
+    state: GraphicsTextState,
+) -> list:
+    """Re-emit a show operator with the marked clusters GONE and every
+    surviving glyph still where it was (F15 slice B).
+
+    Each removed cluster becomes ONE TJ number carrying exactly the advance it
+    contributed, so the pen arrives at the next surviving glyph at the same
+    place it always did — `-N/1000 × Tfs` is the displacement a TJ number
+    makes, and Tz multiplies that and the glyph advances alike, so it cancels.
+    Tc and Tw ride INSIDE the removed advance and are absorbed by the number;
+    surviving glyphs keep their own because their own bytes are re-shown.
+
+    The surviving bytes are SLICED from the original operands, never
+    re-encoded: a round trip through decode/encode could substitute a
+    different code for the same character (the 9.B5 ligature table is filtered
+    to unambiguous inverses, so it cannot be relied on to give a byte back),
+    and there is nothing to gain from asking.
+
+    `'` and `"` are expanded to their spec equivalences first (T*, and the
+    `aw Tw ac Tc` prefix) so their state side effects outlive the rewrite —
+    dropping a `'` outright, as the whole-run path did, silently swallowed the
+    line advance and shifted every following line up the page.
+    """
+    out: list = []
+    if operator == '"' and len(operands) >= 3:
+        out.append(pikepdf.ContentStreamInstruction([operands[0]], pikepdf.Operator("Tw")))
+        out.append(pikepdf.ContentStreamInstruction([operands[1]], pikepdf.Operator("Tc")))
+    if operator in ("'", '"'):
+        out.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("T*")))
+
+    parts: list = []
+    for index, cluster in enumerate(clusters):
+        if index in removed:
+            total = sum(items[i].advance for i in cluster)
+            parts.append(-total * 1000.0 / state.font_size)
+            continue
+        for i in cluster:
+            item = items[i]
+            parts.append(item.number if item.kern else item.data)
+
+    merged = _merge_tj_parts(parts)
+    array = pikepdf.Array(
+        [
+            pikepdf.String(p) if isinstance(p, bytes) else round(p, 6)
+            for p in merged
+        ]
+    )
+    out.append(pikepdf.ContentStreamInstruction([array], pikepdf.Operator("TJ")))
+    return out
 
 
 class WalkResult(NamedTuple):
     kept: list
     text_runs_removed: int
+    text_runs_split: int  # runs that lost SOME codes and kept the rest (F15-B)
+    runs_removed_whole: int  # runs removed entire because they could not be split
     images_removed: int
     dropped_image_names: set
     surviving_image_names: set
@@ -263,6 +384,8 @@ def _walk(
 
     kept: list = []
     text_runs_removed = 0
+    text_runs_split = 0
+    runs_removed_whole = 0
     images_removed = 0
     dropped_image_names: set = set()
     surviving_image_names: set = set()
@@ -317,14 +440,55 @@ def _walk(
             # horizontal axis would leave that column unprotected.
             vertical = bool(cap is not None and cap.writes_vertical)
             combined = _mat_mult(state.tm, state.ctm)
-            bbox = _run_bbox(
-                combined, raw_width, slack, vertical, state,
-                fonts.ink_extent(resources, fallback_resources, state.font_name),
-            )
-            if _intersects_any(bbox, regions):
-                text_runs_removed += 1
-            else:
+            ink = fonts.ink_extent(resources, fallback_resources, state.font_name)
+            bbox = _run_bbox(combined, raw_width, slack, vertical, state, ink)
+            if not _intersects_any(bbox, regions):
                 kept.append(instruction)
+            else:
+                # F15-B: keep the codes OUTSIDE the region and drop the ones
+                # inside. Whole-operator removal turned a mark on one name into
+                # the loss of the whole line a generator happened to emit as one
+                # Tj — over-removal the user can see, and the dominant shape once
+                # marks come from a search rather than a hand-drawn band.
+                emitted = None
+                if measured and state.font_size > 0 and slack == 0.0:
+                    items = show_items(operator, operands, cap, state)
+                    clusters = show_clusters(items)
+                    removed_clusters = {
+                        index
+                        for index, cluster in enumerate(clusters)
+                        if _intersects_any(
+                            _span_bbox(
+                                combined, *cluster_span(items, cluster),
+                                vertical, state, ink,
+                            ),
+                            regions,
+                        )
+                    }
+                    if removed_clusters:
+                        emitted = _split_instructions(
+                            operator, operands, items, clusters,
+                            removed_clusters, state,
+                        )
+                        if len(removed_clusters) < len(clusters):
+                            text_runs_split += 1
+                    else:
+                        # The run's box meets a region but no GLYPH does — the
+                        # mark sits in a kerning gap. Nothing to remove.
+                        kept.append(instruction)
+                        emitted = []
+                if emitted is None:
+                    # Unmeasurable (or the slack has already blurred where this
+                    # run sits): the whole operator goes, the over-removing
+                    # direction, counted so the result says it happened. The
+                    # ADVANCE cannot be preserved — we do not know it — but the
+                    # line-advance side effect of ' and " can be, and must be.
+                    runs_removed_whole += 1
+                    text_runs_removed += 1
+                    kept.extend(_state_only_instructions(operator, operands))
+                elif emitted:
+                    kept.extend(emitted)
+                    text_runs_removed += 1
             # Advance the text matrix so subsequent same-line Tj/TJ calls
             # (common when a generator emits one call per word/run) don't
             # all collapse onto the same origin point.
@@ -403,7 +567,9 @@ def _walk(
                             replaced_form_names.add(name)
                         kept.append(_do_instruction(new_name))
                         text_runs_removed += sub[0]
-                        images_removed += sub[1]
+                        text_runs_split += sub[1]
+                        runs_removed_whole += sub[2]
+                        images_removed += sub[3]
                     else:
                         kept.append(instruction)
             else:
@@ -415,6 +581,8 @@ def _walk(
     return WalkResult(
         kept,
         text_runs_removed,
+        text_runs_split,
+        runs_removed_whole,
         images_removed,
         dropped_image_names,
         surviving_image_names,
@@ -467,7 +635,8 @@ def _redact_form(pdf, form, parent_resources, regions, form_ctm, depth, name_cou
     """Build a redacted COPY of a Form XObject, or return (None, None) if
     nothing inside it intersects a region (caller then keeps the original Do).
     `parent_state` is the text state active at the invoking Do (forms inherit
-    it). Returns (copy_stream, (text_removed, images_removed))."""
+    it). Returns (copy_stream, (text_removed, text_split, removed_whole,
+    images_removed))."""
     form_res = form.get("/Resources")
     read_res = form_res if form_res is not None else parent_resources
     result = _walk(
@@ -516,7 +685,12 @@ def _redact_form(pdf, form, parent_resources, regions, form_ctm, depth, name_cou
         xo[Name(nm)] = st
     copy["/Resources"] = copy_res
 
-    return copy, (result.text_runs_removed, result.images_removed)
+    return copy, (
+        result.text_runs_removed,
+        result.text_runs_split,
+        result.runs_removed_whole,
+        result.images_removed,
+    )
 
 
 def _annot_key(obj):
@@ -678,6 +852,8 @@ def _redact_page(pdf: "pikepdf.Pdf", page: "pikepdf.Page", regions: list[Rect]) 
 
     return {
         "text_runs_removed": result.text_runs_removed,
+        "text_runs_split": result.text_runs_split,
+        "runs_removed_whole": result.runs_removed_whole,
         "images_removed": result.images_removed,
         "annotations_removed": annotations_removed,
     }
@@ -703,7 +879,13 @@ def redact(file: str, output: str, regions: list[dict]) -> dict:
         page_num = int(region["page"])
         by_page.setdefault(page_num, []).append(_normalize_rect(region["rect"]))
 
-    stats = {"text_runs_removed": 0, "images_removed": 0, "annotations_removed": 0}
+    stats = {
+        "text_runs_removed": 0,
+        "text_runs_split": 0,
+        "runs_removed_whole": 0,
+        "images_removed": 0,
+        "annotations_removed": 0,
+    }
     pages_redacted = 0
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
