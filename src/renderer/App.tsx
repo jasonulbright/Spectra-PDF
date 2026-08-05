@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { AppStateProvider, useAppState, useAppDispatch } from './state/AppStateProvider';
 import { file, app, dialog, batch } from './lib/tauri-bridge';
 import {
@@ -56,7 +56,7 @@ import { useWorkspaceIndexer } from './hooks/useWorkspaceIndexer';
 import { indexOpenFile } from './lib/workspace';
 import type { PageRef, PdfBuffer } from './state/types';
 import { isDocTab, viewOf } from './state/types';
-import { showableDoc, tabFiles } from './state/selectors';
+import { showableDoc, showableDocuments, tabFiles } from './state/selectors';
 import type { CanvasTool } from './state/types';
 import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
 import { PresentationView } from './components/canvas/PresentationView';
@@ -88,7 +88,9 @@ import { BatchOcrDialog } from './components/BatchOcrDialog';
 import { ScheduledRunsDialog } from './components/ScheduledRunsDialog';
 import { WatchedFoldersDialog } from './components/WatchedFoldersDialog';
 import { CreatePdfDialog } from './components/CreatePdfDialog';
+import { CombineDialog } from './components/CombineDialog';
 import { classify as classifySource } from './lib/create-pdf';
+import type { CombineDestination } from './lib/combine';
 import { ExportImagesDialog } from './components/ExportImagesDialog';
 import { buildBlankPagePdf } from './lib/blank-page';
 import { insertAnchor } from './state/selectors';
@@ -202,6 +204,14 @@ function AppContent(): React.ReactElement {
   // Sources a drop pre-populates Create PDF with (P22). Cleared on close so
   // the next menu-opened dialog starts empty rather than replaying a drop.
   const [createPdfSeed, setCreatePdfSeed] = useState<string[]>([]);
+  // Combine Files (P22 slice D) is a dialog now, not a bare picker: it has to
+  // show per-row conversion state, page ranges and a target, none of which a
+  // native file picker can carry.
+  const [showCombine, setShowCombine] = useState(false);
+  const [combineSeed, setCombineSeed] = useState<string[]>([]);
+  // Read by the drop handler, which must not re-bind on every open/close.
+  const showCombineRef = useRef(false);
+  showCombineRef.current = showCombine;
   const [showExportImages, setShowExportImages] = useState(false);
   const [showCustomizeToolbar, setShowCustomizeToolbar] = useState(false);
   // Full-screen presentation mode (I.6): a transient overlay; `startIndex`
@@ -637,6 +647,16 @@ function AppContent(): React.ReactElement {
           return;
         }
       }
+      // Drop-to-combine (P22 slice D): while the Combine dialog is open a
+      // drop is an ADD, whatever the kinds are — including PDFs, which the
+      // funnel would otherwise open in their own tabs behind the dialog the
+      // user is building a list in. Read through a ref so the drop handler
+      // does not re-bind every time the dialog opens or closes.
+      if (showCombineRef.current) {
+        const accepted = paths.filter((p) => classifySource(p) !== '');
+        if (accepted.length > 0) setCombineSeed(accepted);
+        return;
+      }
       // P22: a drop carrying files the open funnel cannot take (a .docx, a
       // .png, a .ps) used to do NOTHING. It now offers to convert them,
       // through the same dialog, pre-populated — and the funnel rule holds,
@@ -679,17 +699,53 @@ function AppContent(): React.ReactElement {
     await handleAddPages(anchor.docId, anchor.index);
   }, [handleAddPages]);
 
-  // Combine Files (discoverability, 2026-07-18): same import machinery as
-  // Insert Pages, targeted at the END of the active document's last
-  // partition — "merge these PDFs into this one" as a named menu action.
+  // Combine Files (P22 slice D). Was a bare `openFiles()` into the page-tier
+  // import, which is why it took PDFs only — a .docx cannot enter the page
+  // tier. It opens the Combine dialog now: the conversion happens through the
+  // one `create_pdf` door and only the RESULT reaches the import machinery,
+  // so combining into an open document stays undoable page-tier work.
+  //
+  // Available with NO document open, deliberately: "combine into a new PDF"
+  // is a create, and gating the command on an insert anchor made the Home
+  // tab's own Combine action dead on a cold start.
   const combineFiles = useCallback(async () => {
+    setCombineSeed([]);
+    setShowCombine(true);
+  }, []);
+
+  // The documents Combine may add pages to. Ghost-backed ones are excluded by
+  // the selector, not here — importing into a ghost would put pages in a
+  // document with no tab and no dirty marker (the showableDoc hazard).
+  const combineDestinations = useMemo<CombineDestination[]>(
+    () =>
+      showableDocuments(state).map((d) => ({
+        docId: d.id,
+        name: d.name,
+        pages: d.pages.length,
+      })),
+    [state],
+  );
+
+  // Where a converted member is staged for an append: beside the destination's
+  // working copy. That directory exists by construction (create_working_copy
+  // made it) and is inside the fs capability's $TEMP/spectrapdf scope, so no
+  // new grants and no mkdir — the insertBlankPage precedent.
+  const combineWorkingDirFor = useCallback((docId: string): string | null => {
     const s = stateRef.current;
-    if (!s.activeFileId) return;
-    const docs = s.workspace.documents.filter((d) => d.path === s.activeFileId);
-    const last = docs[docs.length - 1];
-    if (!last) return;
-    await handleAddPages(last.id, last.pages.length);
-  }, [handleAddPages]);
+    const doc = s.workspace.documents.find((d) => d.id === docId);
+    const destFile = doc ? s.files.get(doc.path) : null;
+    if (!destFile) return null;
+    return destFile.workingPath.replace(/[\\/][^\\/]+$/, '');
+  }, []);
+
+  const appendCombined = useCallback(
+    async (docId: string, paths: string[]) => {
+      const doc = stateRef.current.workspace.documents.find((d) => d.id === docId);
+      if (!doc) return;
+      await importFilesIntoDoc(paths, docId, doc.pages.length);
+    },
+    [importFilesIntoDoc],
+  );
 
   const insertBlankPage = useCallback(async () => {
     const s = stateRef.current;
@@ -2173,6 +2229,19 @@ function AppContent(): React.ReactElement {
           onClose={() => {
             setShowCreatePdf(false);
             setCreatePdfSeed([]);
+          }}
+          onOpenResult={(path) => openByPaths([path])}
+        />
+      )}
+      {showCombine && (
+        <CombineDialog
+          initialPaths={combineSeed}
+          destinations={combineDestinations}
+          workingDirFor={combineWorkingDirFor}
+          onAppend={appendCombined}
+          onClose={() => {
+            setShowCombine(false);
+            setCombineSeed([]);
           }}
           onOpenResult={(path) => openByPaths([path])}
         />

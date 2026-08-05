@@ -744,14 +744,18 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null && insertAnchor(ctx.state) !== null,
     run: (ctx) => void ctx.app!.insertPagesFromFile(),
   },
-  // Discoverability alias for the launch-thread's "merge pages" ask
-  // (2026-07-18): the SAME byte-only import machinery as Insert Pages,
-  // targeted at the END of the active document — the name users actually
-  // search the menus for. Direct-manipulation merging on the board is
-  // unchanged; this is the menu path to the same outcome.
+  // Combine Files (P22 slice D): opens the Combine dialog — a source list
+  // that accepts everything Create PDF accepts, converts the non-PDF members
+  // through the one `create_pdf` door, and lands the result either in a NEW
+  // document or in one that is already open (the old behaviour, which is
+  // still the byte-only import machinery Insert Pages uses).
+  //
+  // No longer gated on an insert anchor: "combine into a new PDF" needs no
+  // open document, and gating it left the Home tab's own Combine action dead
+  // on a cold start — the one moment a user is most likely to reach for it.
   'document.combineFiles': {
     title: 'Combine Files…',
-    when: (ctx) => ctx.app !== null && insertAnchor(ctx.state) !== null,
+    when: (ctx) => ctx.app !== null,
     run: (ctx) => void ctx.app!.combineFiles(),
   },
   'document.deleteSelection': {

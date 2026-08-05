@@ -81,6 +81,19 @@ export interface SourceRow {
   kind: SourceKind;
   /** Absent for a blank member. */
   path?: string;
+  /** Page range to contribute ("1-3,5"); empty/absent means every page.
+   * Combine Files offers it per member; Create PDF does not show it. */
+  pages?: string;
+  /** How many pages this source HAS, probed before any run. Distinct from
+   * `contributed` on purpose: a range makes them different numbers, and
+   * folding a run's result back into this one would make the next preview
+   * apply the range to an already-ranged count. */
+  pageCount?: number;
+  /** How many pages this source CONTRIBUTED, as the engine reported it. */
+  contributed?: number;
+  /** Why this row could not be used — set from the engine's own per-row
+   * report, so a skipped member is a visible state and never a silent drop. */
+  error?: string;
 }
 
 let nextRowId = 0;
@@ -155,11 +168,19 @@ export function hasUnsupported(rows: readonly SourceRow[]): boolean {
   return rows.some((r) => r.kind === '');
 }
 
-/** The engine's `sources` argument: order preserved, blanks carried by kind. */
+/**
+ * The engine's `sources` argument: order preserved, blanks carried by kind.
+ *
+ * A page range rides only when the row actually has one — the engine REFUSES
+ * a range on a blank member, and an empty string would be a range the user
+ * never typed.
+ */
 export function toEngineSources(rows: readonly SourceRow[]): Record<string, unknown>[] {
-  return rows.map((row) =>
-    row.kind === 'blank' ? { kind: 'blank' } : { path: row.path as string },
-  );
+  return rows.map((row) => {
+    if (row.kind === 'blank') return { kind: 'blank' };
+    const spec = (row.pages ?? '').trim();
+    return spec ? { path: row.path as string, pages: spec } : { path: row.path as string };
+  });
 }
 
 /**

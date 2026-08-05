@@ -43,6 +43,7 @@ compare.unsupportedPpmMaxvalExpected	pattern	compare	Unsupported PPM maxval {{ma
 compress.ghostscriptFailed	pattern	compress,distill,image_export	Ghostscript failed: {{v0}}
 compress.mrcCompressionDpiSetting	exact	compress	MRC compression has no DPI setting — the text stays at the scan's own resolution, which is the point of it. Choose a preset instead.
 create_pdf.blankPageNeedsPositive	exact	create_pdf	a blank page needs a positive width and height
+create_pdf.blankPagePagesSelect	exact	create_pdf	a blank page has no pages to select a range from
 create_pdf.createPdfCannotConvert	pattern	create_pdf	Create PDF cannot convert {{v0}} (accepted: {{v1}})
 create_pdf.createPdfNeedsLeast	exact	create_pdf	Create PDF needs at least one source
 create_pdf.everySourceMustObject	exact	create_pdf	every source must be an object with a path or a kind
@@ -55,6 +56,8 @@ create_pdf.imageFileFound	pattern	create_pdf	image file not found: {{src_path}}
 create_pdf.marginMustNumberPoints	exact	create_pdf	the margin must be a number of points
 create_pdf.nothingCouldConvertedThere	exact	create_pdf	nothing could be converted, so there is no PDF to write
 create_pdf.outputOneSourcesChoose	exact	create_pdf	the output is one of the sources — choose another name
+create_pdf.pageRangeListPages	pattern	create_pdf	the page range {{spec}} for {{label}} is not a list of pages or ranges like '1-3,5'
+create_pdf.pageRangeSelectsPages	pattern	create_pdf	the page range {{spec}} selects no pages of {{label}} (it has {{v2}})
 create_pdf.sourcesProducedPagesPdf	exact	create_pdf	the sources produced no pages, so no PDF was written
 create_pdf.unknownOrientation	pattern	create_pdf	unknown orientation {{orientation}} ({{v1}})
 create_pdf.unknownPageSize	pattern	create_pdf	unknown page size {{page_size}} ({{v1}})
