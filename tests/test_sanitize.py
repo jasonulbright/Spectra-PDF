@@ -17,7 +17,7 @@ import pikepdf
 import pytest
 from pikepdf import Array, Dictionary, Name, String
 
-from engine.sanitize import audit_hidden_information
+from engine.sanitize import audit_hidden_information, sanitize_pdf
 
 CONTENT = """
 BT /F1 12 Tf 72 720 Td (Visible paragraph one.) Tj ET
@@ -479,3 +479,166 @@ class TestPageScope:
         result = audit_hidden_information(hidden_pdf, pages=[1])
         assert result["pages_analyzed"] == 1
         assert result["pages"] == 1
+
+
+def sanitized(src: str, tmp_dir: str, categories, name="out.pdf", **kwargs) -> tuple:
+    out = os.path.join(tmp_dir, name)
+    result = sanitize_pdf(src, out, categories=list(categories), **kwargs)
+    return out, result
+
+
+def removed_counts(result) -> dict:
+    return {row["id"]: row["removed"] for row in result["categories"]}
+
+
+class TestSanitizeRefusals:
+    def test_an_empty_selection_refuses_by_name(self, hidden_pdf, tmp_dir):
+        with pytest.raises(ValueError, match="at least one category"):
+            sanitized(hidden_pdf, tmp_dir, [])
+
+    def test_an_unknown_category_lists_the_ids(self, hidden_pdf, tmp_dir):
+        with pytest.raises(ValueError, match="Unknown category"):
+            sanitized(hidden_pdf, tmp_dir, ["metdata"])
+
+    def test_signatures_cannot_be_selected(self, hidden_pdf, tmp_dir):
+        with pytest.raises(ValueError, match="never removed"):
+            sanitized(hidden_pdf, tmp_dir, ["signatures"])
+
+    def test_an_unreadable_category_refuses_the_whole_pass(self, hidden_pdf, tmp_dir, monkeypatch):
+        import engine.sanitize as module
+
+        def broken(*_args, **_kwargs):
+            raise ValueError("the stream did not parse")
+
+        monkeypatch.setattr(module, "analyze_page", broken)
+        with pytest.raises(ValueError, match="could not read hidden_text"):
+            sanitized(hidden_pdf, tmp_dir, ["metadata"])
+
+    def test_an_xml_form_refuses_field_removal(self, hidden_pdf, tmp_dir):
+        with pikepdf.open(hidden_pdf, allow_overwriting_input=True) as pdf:
+            pdf.Root[Name.AcroForm][Name("/XFA")] = Array([String("x"), String("<xdp/>")])
+            pdf.save(hidden_pdf)
+        with pytest.raises(ValueError, match="XML form"):
+            sanitized(hidden_pdf, tmp_dir, ["form_fields"])
+        # Every other category is still available on the same document.
+        _out, result = sanitized(hidden_pdf, tmp_dir, ["metadata"])
+        assert removed_counts(result)["metadata"] > 0
+
+    def test_an_unknown_field_mode_refuses(self, hidden_pdf, tmp_dir):
+        with pytest.raises(ValueError, match="form_fields_mode"):
+            sanitized(hidden_pdf, tmp_dir, ["form_fields"], form_fields_mode="bake")
+
+
+def _trailer_id(path: str):
+    with pikepdf.open(path) as pdf:
+        ids = pdf.trailer.get("/ID")
+        return [bytes(v) for v in ids] if ids is not None else None
+
+
+def _page_content(path: str) -> bytes:
+    with pikepdf.open(path) as pdf:
+        contents = pdf.pages[0].obj["/Contents"]
+        if isinstance(contents, pikepdf.Array):
+            return b"".join(bytes(s.read_bytes()) for s in contents)
+        return bytes(contents.read_bytes())
+
+
+class TestMetadataRemoval:
+    def test_every_surface_goes(self, hidden_pdf, tmp_dir):
+        before_id = _trailer_id(hidden_pdf)
+        out, result = sanitized(hidden_pdf, tmp_dir, ["metadata"])
+        assert removed_counts(result)["metadata"] == 5
+        after = audit_hidden_information(out)
+        assert counts(after)["metadata"] == 0
+        with pikepdf.open(out) as pdf:
+            assert "/Metadata" not in pdf.Root
+            assert "/PieceInfo" not in pdf.Root
+            assert "/Metadata" not in pdf.pages[0].obj
+            assert "/PieceInfo" not in pdf.pages[0].obj
+            assert "/Info" not in pdf.trailer
+        # A writer always emits a document identifier, so the pin is that the
+        # one the file arrived with is no longer in it.
+        assert _trailer_id(out) != before_id
+
+
+class TestEmbeddedFileRemoval:
+    def test_both_routes_in_one_pass(self, hidden_pdf, tmp_dir):
+        out, result = sanitized(hidden_pdf, tmp_dir, ["embedded_files"])
+        assert removed_counts(result)["embedded_files"] == 2
+        assert counts(audit_hidden_information(out))["embedded_files"] == 0
+        with pikepdf.open(out) as pdf:
+            streams = sum(
+                1
+                for obj in pdf.objects
+                if isinstance(obj, pikepdf.Stream)
+                and str(obj.get("/Type", "")) == "/EmbeddedFile"
+            )
+        assert streams == 0
+
+
+class TestCategoryIndependence:
+    def test_comments_leave_the_field_and_its_value(self, hidden_pdf, tmp_dir):
+        out, result = sanitized(hidden_pdf, tmp_dir, ["comments"])
+        after = counts(audit_hidden_information(out))
+        assert after["comments"] == 0
+        assert after["form_fields"] == 1
+        assert after["bookmarks"] == 1
+        assert removed_counts(result)["form_fields"] == 0
+
+    def test_fields_leave_the_comments(self, hidden_pdf, tmp_dir):
+        out, _result = sanitized(hidden_pdf, tmp_dir, ["form_fields"])
+        after = counts(audit_hidden_information(out))
+        assert after["form_fields"] == 0
+        assert after["comments"] == 3
+
+    def test_unselected_categories_report_zero_rather_than_vanishing(self, hidden_pdf, tmp_dir):
+        _out, result = sanitized(hidden_pdf, tmp_dir, ["thumbnails"])
+        rows = {r["id"]: r for r in result["categories"]}
+        assert set(rows) == set(counts(audit_hidden_information(hidden_pdf)))
+        assert rows["thumbnails"]["selected"] is True
+        assert rows["bookmarks"]["selected"] is False
+        assert rows["bookmarks"]["removed"] == 0
+
+
+class TestFormFieldModes:
+    def test_flatten_keeps_the_look_and_drops_the_interactivity(self, hidden_pdf, tmp_dir):
+        out, _result = sanitized(
+            hidden_pdf, tmp_dir, ["form_fields"], form_fields_mode="flatten"
+        )
+        with pikepdf.open(out) as pdf:
+            assert "/AcroForm" not in pdf.Root
+        assert counts(audit_hidden_information(out))["form_fields"] == 0
+
+
+class TestPriorRevisionRemoval:
+    def test_the_collapse_is_a_full_save(self, incremental_pdf, tmp_dir):
+        out, result = sanitized(incremental_pdf, tmp_dir, ["prior_revisions"])
+        assert removed_counts(result)["prior_revisions"] == 1
+        with open(out, "rb") as handle:
+            data = handle.read()
+        assert data.count(b"%%EOF") == 1
+        assert counts(audit_hidden_information(out))["prior_revisions"] == 0
+
+    def test_the_deleted_paragraph_is_gone_from_the_decompressed_stream(
+        self, incremental_pdf, tmp_dir
+    ):
+        out, _result = sanitized(incremental_pdf, tmp_dir, ["prior_revisions"])
+        # A raw byte search over the file would false-negative: streams are
+        # compressed on save, so the text is not searchable in the bytes.
+        assert b"Visible paragraph two" not in _page_content(out)
+
+
+class TestOrphanSweep:
+    def test_a_full_save_drops_what_the_trailer_cannot_reach(self, orphan_pdf, tmp_dir):
+        before = counts(audit_hidden_information(orphan_pdf))["unreferenced_objects"]
+        assert before > 0
+        out, result = sanitized(orphan_pdf, tmp_dir, ["unreferenced_objects"])
+        assert removed_counts(result)["unreferenced_objects"] == before
+        assert counts(audit_hidden_information(out))["unreferenced_objects"] == 0
+
+
+class TestInPlaceOutput:
+    def test_output_may_be_the_input(self, hidden_pdf):
+        result = sanitize_pdf(hidden_pdf, hidden_pdf, categories=["thumbnails"])
+        assert result["output"] == hidden_pdf
+        assert counts(audit_hidden_information(hidden_pdf))["thumbnails"] == 0

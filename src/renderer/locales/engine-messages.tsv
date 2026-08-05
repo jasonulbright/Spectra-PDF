@@ -293,6 +293,13 @@ redact_marks.redactionMarkSDocument	pattern	redact_marks	{{count}} redaction mar
 repair.pdfEncryptedDecryptBefore	exact	repair	PDF is encrypted -- decrypt before repairing
 repair.pdfTooDamagedTier	pattern	repair	PDF is too damaged for Tier 1 repair: {{e2}}. Try 'rebuild' (Tier 2) or 'recover' (Tier 3).
 rtl_text.textContainsDirectionalFormatting	exact	rtl_text	text contains directional formatting characters that cannot be laid out
+sanitize.auditCouldReadDocument	pattern	sanitize	The audit could not read {{v0}}, so this document cannot be sanitized: {{v1}}
+sanitize.auditCouldReadPage	pattern	sanitize	The audit could not read {{v0}} on page {{v1}}, so this document cannot be sanitized: {{v2}}
+sanitize.chooseLeastOneCategory	exact	sanitize	Choose at least one category to remove — sanitize never removes everything by default.
+sanitize.documentContainsXmlForm	exact	sanitize	This document contains an XML form (XFA). Removing its fields would leave the XFA packet describing a form the document no longer has, so form_fields cannot be sanitized here. Flatten the form with another tool first.
+sanitize.formFieldsModeMust	exact	sanitize	form_fields_mode must be 'remove' or 'flatten'.
+sanitize.reportedNeverRemovedTake	pattern	sanitize	{{name}} is reported and never removed — take it out of the selection.
+sanitize.unknownCategoryCategories	pattern	sanitize	Unknown category {{name}}. The categories are: {{v1}}.
 search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", "word" or "line"
 search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
 search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number
