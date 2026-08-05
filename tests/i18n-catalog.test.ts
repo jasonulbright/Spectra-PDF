@@ -29,7 +29,29 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
 // would drag i18next's init (and its DOM expectations) into this node
 // test, so the list is pinned here and a drift fails the parity loop.
-const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de'];
+const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it'];
+
+/**
+ * Plural bases whose two forms are legitimately IDENTICAL in a locale because
+ * the noun the message counts has no plural form in that language.
+ *
+ * Italian: `file`, `byte` and `tag` are invariant loanwords — "3 file" is the
+ * correct plural, and inventing "3 files"/"3 tags" to make the forms differ
+ * would be writing Italian wrong to satisfy a test. Every other Italian count
+ * inflects and is still gated; where an inflecting synonym was genuinely the
+ * right word it was used instead (search results count `documento/documenti`,
+ * links count `collegamento/collegamenti`), so this list is the residue, not a
+ * shortcut. Adding a row here is a translation decision — it must be a noun
+ * with no plural, never a shortcut around a hard string.
+ */
+const INVARIANT_PLURALS: Record<string, readonly string[]> = {
+  it: [
+    'dialog.exportImages.fileCount',
+    'dialog.props.bytes',
+    'panel.portfolio.count',
+    'panel.tags.summary',
+  ],
+};
 
 function expectedCatalog(): Record<string, string> {
   const out: Record<string, string> = {
@@ -160,8 +182,15 @@ describe('i18n catalogs (N12)', () => {
         // either ("{{count}} selected" reads the same at 1 and at 3, while
         // Spanish still inflects it). What is never legitimate is a locale
         // collapsing a distinction the source makes — that is one form
-        // pasted over the other.
-        if (en[`${base}_one`] !== en[`${base}_other`]) {
+        // pasted over the other. The one honest exception is a target-language
+        // noun that HAS no plural form (INVARIANT_PLURALS below): forcing a
+        // difference there would mean writing the language wrong to satisfy a
+        // test, so the collapse is declared per locale and per key instead of
+        // being hidden.
+        if (
+          en[`${base}_one`] !== en[`${base}_other`] &&
+          !(INVARIANT_PLURALS[locale] ?? []).includes(base)
+        ) {
           expect(
             cat[`${base}_one`] === cat[`${base}_other`],
             `${locale}:${base} collapses a plural distinction en makes`,

@@ -16,6 +16,7 @@ import enChrome from './locales/en/chrome.json';
 import esChrome from './locales/es/chrome.json';
 import frChrome from './locales/fr/chrome.json';
 import deChrome from './locales/de/chrome.json';
+import itChrome from './locales/it/chrome.json';
 import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chrome';
 import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
@@ -25,7 +26,7 @@ import { REFUSAL_STRINGS, type RefusalKey } from './i18n-refusals';
 import { loadSettings } from './lib/app-settings';
 import { OCR_LANGUAGES } from './ocr/languages';
 
-export const SHIPPED_LOCALES: readonly string[] = ['en', 'es', 'fr', 'de'];
+export const SHIPPED_LOCALES: readonly string[] = ['en', 'es', 'fr', 'de', 'it'];
 
 /** Each locale's display name in ITS OWN language (the language-picker
  * convention — a reader hunting for their language finds it by its native
@@ -35,6 +36,7 @@ export const LOCALE_NATIVE_NAMES: Record<string, string> = {
   es: 'Español',
   fr: 'Français',
   de: 'Deutsch',
+  it: 'Italiano',
 };
 
 /** Resolve a stored language preference ('system' | code) to a shipped
@@ -88,6 +90,7 @@ void i18next.use(initReactI18next).init({
     es: { chrome: esChrome },
     fr: { chrome: frChrome },
     de: { chrome: deChrome },
+    it: { chrome: itChrome },
     ...(import.meta.env.DEV || import.meta.env.VITE_E2E
       ? { qps: { chrome: pseudo(enChrome as Record<string, string>) } }
       : {}),
