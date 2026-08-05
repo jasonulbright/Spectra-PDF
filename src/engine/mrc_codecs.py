@@ -65,6 +65,10 @@ MASK_CODECS = (JBIG2_SYMBOL, JBIG2_GENERIC, CCITT_G4)
 # jbig2enc's own default classification threshold. Exposed because Archival
 # never uses symbol mode at all and Smallest wants it looser.
 DEFAULT_SYMBOL_THRESHOLD = 0.92
+#: jbig2enc's own accepted range for `-t`. A value outside it is refused by
+#: the encoder with a message about a flag our callers never wrote, so the
+#: range is restated here and refused in OUR words.
+MIN_SYMBOL_THRESHOLD, MAX_SYMBOL_THRESHOLD = 0.40, 0.97
 
 # How far a decoded stencil's ink coverage may sit from the mask it came from.
 # Both G4 and JBIG2 generic are LOSSLESS with respect to the bitmap, so the
@@ -233,6 +237,16 @@ def encode_masks_jbig2(
     """
     if mode not in (JBIG2_SYMBOL, JBIG2_GENERIC):
         raise ValueError(f"unknown JBIG2 mode: {mode}")
+    if mode == JBIG2_SYMBOL and not MIN_SYMBOL_THRESHOLD <= symbol_threshold <= MAX_SYMBOL_THRESHOLD:
+        # Upstream's own range, restated here so the refusal names OUR
+        # parameter. Reaching the encoder with an out-of-range value produces
+        # "Invalid value for threshold" against a flag the caller never saw —
+        # a matrix run caught exactly that combination (an archival preset
+        # asked for symbol mode by name).
+        raise ValueError(
+            f"the JBIG2 symbol threshold must be {MIN_SYMBOL_THRESHOLD}-"
+            f"{MAX_SYMBOL_THRESHOLD}, got {symbol_threshold}"
+        )
     if not masks:
         return []
     exe = _require_jbig2(jbig2_path)

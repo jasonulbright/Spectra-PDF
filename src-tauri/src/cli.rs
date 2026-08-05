@@ -310,6 +310,13 @@ pub struct CompressArgs {
     /// Keep every MRC filter inside PDF/A-1's set
     #[arg(long)]
     pub mrc_pdfa_safe: bool,
+    /// Recognise every MRC page and REVERT any whose text did not survive
+    /// (--quality mrc only)
+    #[arg(long)]
+    pub mrc_verify_text: bool,
+    /// Recognition language for --mrc-verify-text
+    #[arg(long, default_value = "eng")]
+    pub mrc_lang: String,
 }
 
 #[derive(Args)]
@@ -578,6 +585,16 @@ pub struct OcrFileArgs {
     /// Tesseract language code (e.g. eng, deu, jpn)
     #[arg(long, default_value = "eng")]
     pub language: String,
+    /// OPT-IN: MRC-compress the result AFTER recognition (scanned pages only)
+    #[arg(long)]
+    pub mrc: bool,
+    /// MRC preset (--mrc only): archival, balanced, smallest
+    #[arg(long, default_value = "balanced")]
+    pub mrc_preset: String,
+    /// OPT-IN (--mrc only): recognise each MRC page and revert any whose text
+    /// did not survive
+    #[arg(long)]
+    pub mrc_verify_text: bool,
 }
 
 #[derive(Args)]
@@ -1294,6 +1311,17 @@ pub struct BatchOcrArgs {
     /// the default app-data folder belongs to whoever ran the batch.
     #[arg(long)]
     pub log_dir: Option<PathBuf>,
+    /// OPT-IN: MRC-compress each processed file AFTER recognition (scans only;
+    /// a file with no scanned page keeps its bytes and says so)
+    #[arg(long)]
+    pub mrc: bool,
+    /// MRC preset (--mrc only): archival, balanced, smallest
+    #[arg(long, default_value = "balanced")]
+    pub mrc_preset: String,
+    /// OPT-IN (--mrc only): recognise each MRC page and revert any whose text
+    /// did not survive
+    #[arg(long)]
+    pub mrc_verify_text: bool,
     /// Print per-file progress
     #[arg(short, long)]
     pub verbose: bool,
@@ -1361,6 +1389,12 @@ pub enum BatchOperation {
         /// Keep every MRC filter inside PDF/A-1's set
         #[arg(long)]
         mrc_pdfa_safe: bool,
+        /// Recognise every MRC page and REVERT any whose text did not survive
+        #[arg(long)]
+        mrc_verify_text: bool,
+        /// Recognition language for --mrc-verify-text
+        #[arg(long, default_value = "eng")]
+        mrc_lang: String,
     },
     /// Rotate all PDFs
     Rotate {
@@ -1713,6 +1747,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "mrc_preset": args.mrc_preset,
                 "mrc_mask_codec": args.mrc_mask_codec.clone().unwrap_or_default(),
                 "mrc_pdfa_safe": args.mrc_pdfa_safe,
+                "mrc_verify_text": args.mrc_verify_text,
+                "mrc_lang": args.mrc_lang,
+                "tesseract_path": resolve_tesseract().to_string_lossy(),
             });
             if let Some(dpi) = args.dpi {
                 params["dpi"] = json!(dpi);
@@ -2202,6 +2239,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "language": args.language,
                     "tesseract_path": tesseract.to_string_lossy(),
                     "gs_path": gs.to_string_lossy(),
+                    "mrc": args.mrc,
+                    "mrc_preset": args.mrc_preset,
+                    "mrc_verify_text": args.mrc_verify_text,
                 }),
             )
         }
@@ -2874,6 +2914,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "progress": args.verbose,
                     "in_place": args.in_place,
                     "include_images": args.images,
+                    "mrc": args.mrc,
+                    "mrc_preset": args.mrc_preset,
+                    "mrc_verify_text": args.mrc_verify_text,
                     "passwords": args
                         .passwords
                         .iter()
@@ -2954,6 +2997,8 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                 mrc_preset,
                 mrc_mask_codec,
                 mrc_pdfa_safe,
+                mrc_verify_text,
+                mrc_lang,
             } => engine.call(
                 "compress",
                 json!({
@@ -2964,6 +3009,9 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                     "mrc_preset": mrc_preset,
                     "mrc_mask_codec": mrc_mask_codec.clone().unwrap_or_default(),
                     "mrc_pdfa_safe": mrc_pdfa_safe,
+                    "mrc_verify_text": mrc_verify_text,
+                    "mrc_lang": mrc_lang,
+                    "tesseract_path": resolve_tesseract().to_string_lossy(),
                 }),
             ),
             BatchOperation::Rotate { angle, pages } => engine.call(

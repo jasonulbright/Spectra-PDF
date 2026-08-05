@@ -57,9 +57,15 @@ _STEPS: dict = {
                 "mrc_bg_div",
                 "mrc_fg_div",
                 "mrc_pdfa_safe",
+                # Slice E: the quality gate is a real switch on every surface
+                # `compress` reaches, watched folders and scheduled runs
+                # included — an unattended run is exactly where a silently
+                # degraded page would go unnoticed.
+                "mrc_verify_text",
+                "mrc_lang",
             }
         ),
-        frozenset({"gs_path", "jbig2_path"}),
+        frozenset({"gs_path", "jbig2_path", "tesseract_path"}),
     ),
     "grayscale": (grayscale, frozenset(), frozenset({"gs_path"})),
     "convert_pdfa": (convert_pdfa, frozenset({"level"}), frozenset({"gs_path"})),

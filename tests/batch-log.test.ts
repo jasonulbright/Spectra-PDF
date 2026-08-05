@@ -256,6 +256,33 @@ describe('formatBatchLog', () => {
     expect(text).toContain('2 repaired');
   });
 
+  it('carries the MRC note, saving or refusal alike (O8)', () => {
+    // A run the user asked to compress must say what it compressed — a silent
+    // no-op on a folder of non-scans would read as a saving that never
+    // happened. Same bracket, same position as engine/batch_ocr.py's.
+    const text = formatBatchLog(
+      run({
+        cancelled: false,
+        skippedDirs: [],
+        results: [
+          {
+            rel: 'scan.pdf',
+            status: 'ocr',
+            pagesOcrd: 2,
+            mrc: 'MRC compressed 2 page(s), 900000 -> 55000 bytes',
+          },
+          {
+            rel: 'typed.pdf',
+            status: 'copied',
+            mrc: 'MRC compression did not apply: no page in this document is a scanned image',
+          },
+        ],
+      }),
+    );
+    expect(text).toContain('[MRC compressed 2 page(s), 900000 -> 55000 bytes]');
+    expect(text).toContain('[MRC compression did not apply: no page in this document is a scanned image]');
+  });
+
   it('omits the originals line entirely when nothing moved or was repaired', () => {
     const text = formatBatchLog(
       run({ cancelled: false, skippedDirs: [], results: [{ rel: 'a.pdf', status: 'copied' }] }),

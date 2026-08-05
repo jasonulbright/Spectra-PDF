@@ -105,11 +105,13 @@ links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive w
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
 mrc.everyScannedPageFailed	exact	mrc	every scanned page failed mask verification — no MRC output was written
+mrc.everyScannedPageFailedText	exact	mrc	every scanned page failed text verification — no MRC output was written, because a page whose words did not survive is not an output worth having. Try the archival preset, which keeps thin strokes.
 mrc.ghostscriptAvailableMrcCannot	pattern	mrc	Ghostscript is not available at {{v0}} — MRC cannot verify the stencils it writes, and an unverified stencil is not shippable.
 mrc.ghostscriptAvailablePageImage	pattern	mrc	Ghostscript is not available at {{v0}} — the page image cannot be decoded, and MRC has no other way to read it.
 mrc.ghostscriptCouldRenderPage	pattern	mrc	Ghostscript could not render the page image: {{detail}}
 mrc.mrcBackgroundDivisorMust	pattern	mrc	the MRC background divisor must be 1-12, got {{bg_divisor}}
 mrc.mrcForegroundDivisorMust	pattern	mrc	the MRC foreground divisor must be 1-12, got {{fg_divisor}}
+mrc.ocrEngineAvailableText	pattern	mrc	The OCR engine is not available at {{v0}}, so the text of an MRC page cannot be verified. Turn off text verification or run scripts/bundle-tesseract.ps1.
 mrc.pageDocumentScannedImage	exact	mrc	no page in this document is a scanned image — MRC compression has nothing to separate
 mrc.pdfJbigFilterMask	pattern	mrc	PDF/A-1 has no JBIG2 filter, so the mask codec {{mask_codec}} and the PDF/A-safe option cannot both apply — choose one.
 mrc.unknownMrcMaskCodec	pattern	mrc	unknown MRC mask codec: {{name}} (expected one of {{v1}})
@@ -119,6 +121,7 @@ mrc_codecs.ghostscriptAvailableMaskStream	pattern	mrc_codecs	Ghostscript is not 
 mrc_codecs.jbigEncoderAvailableJbig	pattern	mrc_codecs	The JBIG2 encoder is not available: no jbig2.exe at {{v0}}. Run scripts/bundle-jbig2enc.ps1.
 mrc_codecs.jbigEncoderProducedOutput	pattern	mrc_codecs	The JBIG2 encoder produced no output for page {{v0}}.
 mrc_codecs.jbigEncoderProducedSymbol	exact	mrc_codecs	The JBIG2 encoder produced no symbol dictionary — the shared /JBIG2Globals stream every page refers to is missing.
+mrc_codecs.jbigSymbolThresholdMust	pattern	mrc_codecs	the JBIG2 symbol threshold must be {{MIN_SYMBOL_THRESHOLD}}-{{MAX_SYMBOL_THRESHOLD}}, got {{symbol_threshold}}
 mrc_codecs.jpegQualityMustGot	pattern	mrc_codecs	JPEG quality must be 1-100, got {{quality}}
 mrc_codecs.jpegRateMustGot	pattern	mrc_codecs	a JPEG2000 rate must be >= 1, got {{rate}}
 mrc_codecs.maskMustBitImage	pattern	mrc_codecs	a mask must be a 1-bit image (Pillow mode '1'), got mode {{v0}}
@@ -247,6 +250,7 @@ recognize.ghostscriptAvailableRequiredRasterise	pattern	recognize	Ghostscript is
 recognize.invalidRecognitionLanguage	pattern	recognize	Invalid recognition language: {{lang}}
 recognize.ocrEngineAvailableTesseract	pattern	recognize	The OCR engine is not available: no tesseract.exe at {{v0}}. Run scripts/bundle-tesseract.ps1.
 recognize.ocrFailedPage	pattern	recognize	OCR failed on page {{page}}: {{detail}}
+recognize.ocrFailedPageImage	pattern	recognize	OCR failed on the page image: {{detail}}
 recognize.ocrProducedWordBoxes	exact	recognize	OCR produced no word boxes: tessdata/configs/tsv is missing from the vendored Tesseract. Re-run scripts/bundle-tesseract.ps1.
 recognize.ocrRasteriserDidProduce	exact	recognize	OCR rasteriser did not produce a PNG
 recognize.ocrRasteriserProducedZero	exact	recognize	OCR rasteriser produced a zero-sized page image

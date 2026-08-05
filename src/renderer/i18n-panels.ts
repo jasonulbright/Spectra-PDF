@@ -31,6 +31,28 @@ export const PANEL_STRINGS = {
   'panel.compress.ebook': 'Ebook (150 dpi)',
   'panel.compress.printer': 'Printer (300 dpi)',
   'panel.compress.prepress': 'Prepress (300 dpi, highest)',
+  'panel.compress.mrc': 'Scanned document (MRC)',
+  'panel.compress.mrcHint':
+    'Separates a scan into a text stencil, an ink colour and a paper background. The text stays at the scan’s own resolution while the background compresses hard.',
+  'panel.compress.mrcPreset': 'Scan preset',
+  'panel.compress.mrcPresetArchival': 'Archival',
+  'panel.compress.mrcPresetBalanced': 'Balanced',
+  'panel.compress.mrcPresetSmallest': 'Smallest',
+  'panel.compress.mrcPresetHintArchival':
+    'No character may be substituted for another. The largest of the three.',
+  'panel.compress.mrcPresetHintBalanced': 'The everyday choice for scanned paper.',
+  'panel.compress.mrcPresetHintSmallest': 'The smallest file. Glyph shapes may be altered.',
+  'panel.compress.mrcPdfaSafe': 'Use only PDF/A-1 compatible filters',
+  'panel.compress.mrcVerify': 'Verify the text after compressing',
+  'panel.compress.mrcVerifyHint':
+    'Reads the page before and after and keeps the original scan for any page whose words did not survive. Slower, because every page is recognised twice.',
+  'panel.compress.mrcVerifyLanguages': 'Language of the scan ({{summary}})',
+  'panel.compress.mrcResult': '{{pages}} scanned page(s) layered, {{untouched}} left as they were.',
+  'panel.compress.mrcFallbackNotice':
+    'The JBIG2 encoder was not available, so the stencil uses CCITT G4 and the file is larger than the preset promises.',
+  'panel.compress.mrcVerifyResult': 'Text verified: {{similarity}}% of the words survived on the worst page.',
+  'panel.compress.mrcVerifyBelowThreshold':
+    '{{pages}} page(s) kept their original scan because the text did not survive.',
   'panel.compress.custom': 'Custom DPI',
   'panel.compress.dpiLabel': 'DPI: {{dpi}}',
   'panel.compress.dpiAria': 'Image resolution in DPI',
@@ -655,6 +677,7 @@ export const PANEL_STRINGS = {
   'panel.settings.identityPlaceholder': 'Used by dynamic stamps’ {name} token',
   'panel.settings.identityHint': 'Shown where a stamp label uses {name} — e.g. “Reviewed by {name} {date}”.',
   'panel.settings.compressionQuality': 'Default Compression Quality',
+  'panel.settings.mrcPreset': 'Default Scan (MRC) Preset',
   'panel.settings.singleKey': 'Use single-key accelerators to access tools',
   'panel.settings.singleKeyHint': 'H Hand · V Select · U Highlight · X Text · D Draw · K Stamp — off by default',
   'panel.settings.batchLogs': 'Batch OCR logs',
