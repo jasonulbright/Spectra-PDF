@@ -1,4 +1,4 @@
-"""F15 slice E — redaction properties: `/IC`, `/OverlayText`, `/Repeat`, `/Q`
+"""Redaction properties: `/IC`, `/OverlayText`, `/Repeat`, `/Q`
 and the size/colour half of `/DA`, on BOTH the mark writer and the applier.
 
 Until this slice the fill was hard-coded `0 0 0 rg` in `redact.py` and
@@ -145,7 +145,7 @@ class TestApplyDrawsTheProperties:
     def test_non_latin1_overlay_without_a_font_dir_refuses_rather_than_drawing_question_marks(
         self, tmp_dir
     ):
-        """S4's precedent: a code printed as '?' tells the reader nothing, so
+        """the precedent: a code printed as '?' tells the reader nothing, so
         the honest answer is the refusal (and with a font directory it
         embeds)."""
         src = _text_pdf(os.path.join(tmp_dir, "f.pdf"))

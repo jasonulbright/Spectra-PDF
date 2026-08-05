@@ -8,7 +8,7 @@ interface NoFileOpenProps {
 }
 
 export function NoFileOpen({ onOpen, message }: NoFileOpenProps): React.ReactElement {
-  // N12: re-render on language change; the default message resolves here so
+  // Re-render on language change; the default message resolves here so
   // the DEFAULT localizes while an explicit caller message passes through.
   useTranslation();
   return (

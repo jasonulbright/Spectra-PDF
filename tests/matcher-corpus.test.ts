@@ -3,10 +3,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compileMatcher } from '../src/renderer/search/normalize';
 
-// F15 slice C — the renderer half of the shared matcher pin. The SAME JSON
+// The renderer half of the shared matcher pin. The SAME JSON
 // file drives tests/test_text_match.py; if the two matchers ever disagree
 // about a query, one of the two suites goes red before a user finds out that
-// the find bar and Search & Redact see different documents (the S1 lesson —
+// the find bar and Search & Redact see different documents (the lesson —
 // the GUI and the CLI ran different forms implementations, and a user found
 // that one).
 interface Case {

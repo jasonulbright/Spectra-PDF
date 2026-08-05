@@ -1,4 +1,4 @@
-"""Tests for the font round-trip capability layer (Phase 7.2)."""
+"""Tests for the font round-trip capability layer."""
 
 from io import BytesIO
 
@@ -32,7 +32,7 @@ def _tounicode_stream(pdf, mapping: dict[int, str]) -> pikepdf.Object:
 
 
 def _program_ttf(cmap_subtables, advances, upem=1000):
-    """A minimal in-test TrueType (9.B3 zoo): each subtable is
+    """A minimal in-test TrueType (zoo): each subtable is
     (platformID, platEncID, {code: glyphname}); post carries the glyph
     names; hmtx carries `advances` (font units, default 500)."""
     names = sorted({g for _, _, m in cmap_subtables for g in m.values()})
@@ -70,7 +70,7 @@ def _program_ttf(cmap_subtables, advances, upem=1000):
 
 def _symbolic_program_font(pdf, ttf_bytes, widths=None, first_char=None, tounicode=None):
     """A symbolic TrueType dict (no /Encoding) carrying `ttf_bytes` as its
-    embedded FontFile2 — the exact shape the 9.B3 derivation targets."""
+    embedded FontFile2 — the exact shape the derivation targets."""
     desc = Dictionary(
         Type=Name("/FontDescriptor"),
         FontName=Name("/ZooSym"),
@@ -239,7 +239,7 @@ class TestType0Fonts:
         assert cap.decoded_width(b"\x00\x63") == 750
 
     def test_ligature_values_keep_single_char_floor_but_round_trip(self):
-        # Pre-9.B5 this pinned an encode REFUSAL for "fi"; B5 lifts exactly
+        # This used to pin an encode REFUSAL for "fi"; the ligature table lifts exactly
         # that (the unambiguous inverse rides the ligature table) while the
         # single-char floor stays byte-identical.
         pdf = pikepdf.new()
@@ -250,7 +250,7 @@ class TestType0Fonts:
         assert "i" not in cap.encodable()
         with pytest.raises(ValueError):
             cap.encode("i")
-        # ...but the pair round-trips through the ligature code (9.B5).
+        # ...but the pair round-trips through the ligature code.
         assert cap.encode("fi") == b"\x00\x07"
         assert cap.encodable_sequences() == ["fi"]
 
@@ -276,7 +276,7 @@ class TestType0Fonts:
 
 
 class TestPredefinedCjkCMaps:
-    """Phase 9.B2 — Type0 fonts with a named Unicode horizontal CMap."""
+    """Type0 fonts with a named Unicode horizontal CMap."""
 
     def _cjk_font(self, pdf, chars, encoding, cid_widths=None, dw=500, with_tou=True):
         w_array = None
@@ -327,7 +327,7 @@ class TestPredefinedCjkCMaps:
         assert set(cap.encodable()) == {"中", "文"}  # noqa: RUF001
 
     def test_vertical_ucs2_without_tounicode_RECOVERS_via_registry(self):
-        # T8 INVERSION (was: refusal). This fixture names Adobe-GB1, whose
+        # INVERSION (was: refusal). This fixture names Adobe-GB1, whose
         # published CID→Unicode table pdfminer bundles — the exact mapping a
         # /ToUnicode would have carried. Recovery makes the font editable;
         # the refusal now only covers fonts with NO recoverable route
@@ -340,7 +340,7 @@ class TestPredefinedCjkCMaps:
         assert cap.decode(bytes.fromhex("3050")) is not None  # some code decodes
 
     def test_identity_without_tounicode_or_program_still_refuses(self):
-        # The honest floor under T8: Adobe-Identity-0 says nothing and with
+        # The honest floor: Adobe-Identity-0 says nothing and with
         # no embedded program there is nothing to reverse — refusal stands,
         # its reason naming BOTH the missing map and the failed recovery.
         pdf = pikepdf.new()
@@ -363,7 +363,7 @@ class TestPredefinedCjkCMaps:
         assert "no recoverable mapping" in (cap.reason or "")
 
     def test_legacy_vertical_cmap_edits(self):
-        # 9.T10 INVERSION (was: "non-Unicode legacy encodings refuse
+        # INVERSION (was: "non-Unicode legacy encodings refuse
         # regardless of writing mode"). Both refusals were about CODE WIDTH,
         # not about the encoding family: GBK-EUC mixes 1- and 2-byte codes,
         # which the fixed-2-byte walk could not read. The pipeline now takes
@@ -375,7 +375,7 @@ class TestPredefinedCjkCMaps:
         assert cap.decode(b"A") == "A"
 
     def test_legacy_cmap_edits_with_mixed_code_widths(self):
-        # 9.T10 INVERSION. Shift-JIS is the shape the fixed walk could never
+        # INVERSION. Shift-JIS is the shape the fixed walk could never
         # read: ASCII is ONE byte and kana/kanji are TWO, in the same string.
         pdf = pikepdf.new()
         cap = font_capability(
@@ -408,7 +408,7 @@ class TestPredefinedCjkCMaps:
         assert simple.single_byte_codes() is True
 
     def test_unicode_cmap_without_tounicode_RECOVERS_via_registry(self):
-        # T8 INVERSION (was: refusal) — Adobe-GB1's registry table stands in
+        # INVERSION (was: refusal) — Adobe-GB1's registry table stands in
         # for the absent /ToUnicode; the code→CID comes from the predefined
         # CMap as before. '中' is CID 2085 in Adobe-GB1; the UniGB-UCS2
         # code for it must round-trip through the recovered mapping.
@@ -426,10 +426,10 @@ class TestPredefinedCjkCMaps:
 
     @pytest.mark.parametrize("enc", ["UniGB-UTF8-H", "UniGB-UTF16-H", "UniGB-UTF32-H"])
     def test_non_2byte_unicode_cmaps_now_edit(self, enc):
-        # 9.T11 INVERSION. These are Uni*-H but NOT fixed-2-byte (UTF-8 is
+        # INVERSION. These are Uni*-H but NOT fixed-2-byte (UTF-8 is
         # 3 bytes for CJK, UTF-32 is 4, UTF-16 uses surrogate pairs), and
         # the fixed-2-byte pipeline SILENTLY CORRUPTED them — which is why
-        # B2 refused them rather than accept the corruption. The pipeline
+        # They were refused rather than accept the corruption. The pipeline
         # reads the CMap's own trie now, so the width is no longer
         # something the gate has to promise.
         # The CODE is the character in the CMap's OWN scheme — which is the
@@ -455,7 +455,7 @@ class TestPredefinedCjkCMaps:
 
 
 class TestVerticalWriting:
-    """Phase 9.B4a — Identity-V / Uni*-UCS2-V vertical twins: the same
+    """Identity-V / Uni*-UCS2-V vertical twins: the same
     ToUnicode round-trip as their -H counterparts, with /W2//DW2 VERTICAL
     advances (|w1y|, 1000/em) served by the width methods and vertical=True
     on the capability; horizontal fonts stay byte-identical."""
@@ -525,7 +525,7 @@ class TestVerticalWriting:
         chars = {0x4E2D: "中", 0x6587: "文"}  # noqa: RUF001
         # The -V CMap carries its own code->CID (incl. vertical-variant
         # CIDs), so /W2 is keyed by ITS cids — the same remap discipline
-        # as the B2 horizontal test.
+        # as the horizontal test.
         cm = CMapDB.get_cmap("UniGB-UCS2-V")
         assert cm.is_vertical()
         cid = {code: list(cm.decode(code.to_bytes(2, "big")))[0] for code in chars}
@@ -564,7 +564,7 @@ class TestVerticalWriting:
 
     def test_horizontal_font_is_byte_identical_and_ignores_w2(self):
         # The vertical=False guard: an Identity-H capability is untouched
-        # by B4a even when the descendant carries /W2//DW2 — widths stay
+        # by the vertical path even when the descendant carries /W2//DW2 — widths stay
         # the /W table's, the flag stays False.
         pdf = pikepdf.new()
         desc = Dictionary(
@@ -614,7 +614,7 @@ class TestVerticalWriting:
 
 
 class TestSymbolicProgramDerivedEncoding:
-    """Phase 9.B3 — a symbolic simple font with no usable /Encoding and no
+    """A symbolic simple font with no usable /Encoding and no
     ToUnicode derives its code map from the embedded program instead of
     refusing; the refusal survives only when nothing derives."""
 
@@ -715,7 +715,7 @@ class TestSymbolicProgramDerivedEncoding:
         assert cap.reason == "no resolvable encoding (symbolic font without ToUnicode)"
 
 class TestWidthsGuardHardening:
-    """9.B3 review round: the /Widths subset guard vs degenerate arrays."""
+    """Review round: the /Widths subset guard vs degenerate arrays."""
 
     def test_empty_widths_array_does_not_collapse_encodability(self):
         # regression: /Widths [] inverted the guard range and
@@ -766,7 +766,7 @@ class TestWidthsGuardHardening:
 
 
 class TestLigatureRoundTrip:
-    """Phase 9.B5 — multi-char ligature mappings round-trip through encode
+    """Multi-char ligature mappings round-trip through encode
     where the inverse is unambiguous; ambiguity and the /Widths subset
     guard keep the refusal; the single-char floor never widens."""
 
@@ -889,10 +889,10 @@ class TestLigatureRoundTrip:
         assert cap.text_width("ffx") == 550 + 500
 
     def test_program_derived_agl_ligature_feeds_the_table(self):
-        # 9.B3 × 9.B5: the program-derived decode map feeds the SAME
+        # The program-derived decode map feeds the SAME
         # construction site, so an AGL component name (f_i → "fi") lands in
         # the ligature table like any ToUnicode multi-char string. Pinned:
-        # the B5 table DOES apply to the B3 path.
+        # the table DOES apply to the path.
         pdf = pikepdf.new()
         data = _program_ttf(
             [(3, 0, {0xF041: "f", 0xF042: "i", 0xF043: "f_i"})],
@@ -912,7 +912,7 @@ class TestLigatureRoundTrip:
 
 
 class TestT8ProgramCmapRecovery:
-    """T8 route 2: an Adobe-Identity-0 subset with NO /ToUnicode recovers
+    """Route 2: an Adobe-Identity-0 subset with NO /ToUnicode recovers
     through the embedded program's own cmap table reversed via /CIDToGIDMap
     — the modern subset majority the registry route cannot serve."""
 
@@ -962,10 +962,10 @@ class TestT8ProgramCmapRecovery:
 
 
 class TestT9BareProgramFonts:
-    """T9: bare-CFF FontFile3 (Type1C) and Type1 /FontFile — both former
+    """Bare-CFF FontFile3 (Type1C) and Type1 /FontFile — both former
     refusals lift via the program's OWN encoding + charstring widths
     (cffLib / t1Lib). The symbolic-no-encoding shape is the exact slot the
-    9.B3 derivation targets."""
+    program derivation targets."""
 
     def _font_with_program(self, pdf, key, raw, subtype_name):
         desc = Dictionary(
@@ -1036,7 +1036,7 @@ class TestT9BareProgramFonts:
 
 
 class TestT7Type3Fonts:
-    """T7: Type3 glyph-procedure fonts — the text model is a simple font's;
+    """Type3 glyph-procedure fonts — the text model is a simple font's;
     widths scale through /FontMatrix (glyph space, not per-mille)."""
 
     def _type3(self, pdf, *, matrix=(0.01, 0, 0, 0.01, 0, 0), base=None,

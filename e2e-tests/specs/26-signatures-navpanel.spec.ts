@@ -6,7 +6,7 @@ import { waitForHarness, openByPaths, getState, closeAllFiles, setView } from '.
 // uses; crypto verification is clock-independent).
 const SIGNED_PDF = resolve(__dirname, '..', 'fixtures', 'signed.pdf');
 
-// Phase 4 M3.3b: the nav-pane Signatures panel — a compact READ view over the
+// The nav-pane Signatures panel — a compact READ view over the
 // same verify_signatures data as Tools ▸ Signatures. Distinct testids from the
 // Tools panel (this drives the nav strip, not the operations view).
 

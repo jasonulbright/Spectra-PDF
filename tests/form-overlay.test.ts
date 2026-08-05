@@ -1,4 +1,4 @@
-// Pure on-canvas form-overlay helpers (2n.4b): widget projection into
+// Pure on-canvas form-overlay helpers: widget projection into
 // display-normalized space and name-keyed pending-value pruning.
 import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
@@ -73,8 +73,8 @@ describe('projectFieldWidgets', () => {
     expect(byPage.size).toBe(0);
   });
 
-  it('F8 INVERSION — buttons PROJECT as click surfaces carrying their action', () => {
-    // This pinned the exclusion ("never an overlay surface") before F8;
+  it('INVERSION — buttons PROJECT as click surfaces carrying their action', () => {
+    // This pinned the exclusion ("never an overlay surface");
     // pushbuttons act now, so they project like everything else, with the
     // classified /A action riding the entry.
     const button = textField({

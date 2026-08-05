@@ -1,4 +1,4 @@
-// The command system (Phase 4 M1): registry totality, enablement
+// The command system: registry totality, enablement
 // predicates, invokeCommand gating, and the escape-interceptor stack.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -204,14 +204,14 @@ describe('showableDoc / showableFile / tabFiles (state/selectors)', () => {
   });
 });
 
-describe('the ghost import-source hazard (2n.3)', () => {
+describe('the ghost import-source hazard', () => {
   // A byte-only import source is an entry in `files` with no tab, no strip, and
   // no way to become a real document on its own — nothing ever flips the flag.
   // Every consumer that means "a document the user can see" must exclude it;
   // several meant `activeFileId !== null`, which is a different question.
   it('CLOSE_FILE lands on neither a ghost tab nor a ghost active file', () => {
     // Both fallbacks, checked together. The tab fallback was ghost-aware from
-    // the start; the ACTIVE-ID fallback wasn't, and M5.2's review showed why
+    // the start; the ACTIVE-ID fallback wasn't, and the review showed why
     // that mattered — see the two cases below. Now that the active id can't be
     // a ghost either, the tab guard is belt-and-braces rather than the thing
     // holding the invariant up, and both must stay true.
@@ -452,7 +452,7 @@ describe('invokeCommand', () => {
     });
 
   it('tools.panel.* opens the op in the DOCK on the doc tab, inside its owning tool', () => {
-    // Phase 10 slice C: the Tools tab is gone — the panel opens beside the
+    // The Tools tab is gone — the panel opens beside the
     // visible document.
     const { dispatched, finalState } = wire(dockedState());
     expect(invokeCommand('tools.panel.compress')).toBe(true);
@@ -461,7 +461,7 @@ describe('invokeCommand', () => {
       { type: 'UI_SET_ACTIVE_OP', op: 'compress' },
       { type: 'UI_SET_TOOL_DOCK_OPEN', open: true },
     ]);
-    // Compress lives under Optimize (M5 § 7), and arming the op must OPEN that
+    // Compress lives under Optimize, and arming the op must OPEN that
     // tool — otherwise the dock shows the op with no owning pane context.
     expect(finalState().ui.activeToolId).toBe('optimize');
     expect(finalState().ui.toolDock.open).toBe(true);
@@ -475,7 +475,7 @@ describe('invokeCommand', () => {
     expect(finalState().ui.activeToolId).toBe('protect');
   });
 
-  it('a DOCLESS ops-tool invocation runs the picker-first flow (slice C)', async () => {
+  it('a DOCLESS ops-tool invocation runs the picker-first flow', async () => {
     // No document: the command opens the picker (app.openFiles focuses the
     // new doc tab itself); the op seats and the dock opens only on success.
     const { dispatched, handlers } = wire(initialState);
@@ -754,7 +754,7 @@ describe('invokeCommand', () => {
   });
 
   it('tools.open.* arms the canvas mode for a tool that has BOTH a pane and a mode', () => {
-    // Prepare Form hosts the `forms` panel AND wants widget mode live (§ 7:
+    // Prepare Form hosts the `forms` panel AND wants widget mode live:
     // activating a tool arms its interaction mode — for every tool that names
     // one, not only the ops-less ones).
     const { finalState } = wire(stateWith({
@@ -833,7 +833,7 @@ describe('invokeCommand', () => {
         ui: { ...initialState.ui, focusedTab: { doc: 'a.pdf' } },
       }),
     );
-    // Phase 10 slice C: Shift+F4's command drives the RIGHT DOCK (the Tools
+    // Shift+F4's command drives the RIGHT DOCK (the Tools
     // tab is gone) and gates on a doc tab — so toggle BEFORE leaving for Home
     // (the wire dispatch applies the reducer, and Home would gate it off).
     expect(invokeCommand('view.toolsPane')).toBe(true);
@@ -1039,7 +1039,7 @@ describe('edit.selectAll selects pages in BOTH views (virtualization)', () => {
   });
 });
 
-describe('Space temporary hand (M6.2)', () => {
+describe('Space temporary hand', () => {
   function docTabState(tool: CanvasTool = 'highlight'): AppState {
     const f = { path: 'x.pdf', workingPath: 'x.pdf.w', name: 'x.pdf', pageCount: 1, buffer: [1] as unknown as PdfBuffer, dirty: false, undoStack: [], redoStack: [] };
     return stateWith({
@@ -1119,7 +1119,7 @@ describe('Space temporary hand (M6.2)', () => {
   });
 });
 
-describe('single-key accelerators at the DISPATCHER (M6.4)', () => {
+describe('single-key accelerators at the DISPATCHER', () => {
   // resolveBinding is pure and never consults settings; THIS is the gate the
   // milestone is about, and deleting it passed the whole suite before these
   // (regression). localStorage stub = the workbench-ui.test idiom.
@@ -1186,7 +1186,7 @@ describe('single-key accelerators at the DISPATCHER (M6.4)', () => {
   });
 });
 
-describe('the app-modal keyboard model (M6.5)', () => {
+describe('the app-modal keyboard model', () => {
   function docTabWithFile(): AppState {
     const f = { path: 'x.pdf', workingPath: 'x.pdf.w', name: 'x.pdf', pageCount: 1, buffer: [1] as unknown as PdfBuffer, dirty: false, undoStack: [], redoStack: [] };
     return stateWith({
@@ -1240,7 +1240,7 @@ describe('the app-modal keyboard model (M6.5)', () => {
     const pop = pushAppModal(() => {});
 
     // Ctrl+P is 'always' — the webview's own print UI must stay suppressed
-    // over a modal (the M-P recorded gap)…
+    // over a modal (the recorded gap)…
     const p = evt({ key: 'p', ctrlKey: true });
     dispatchKeyEvent(p);
     expect(p.defaultPrevented).toBe(true);
@@ -1254,7 +1254,7 @@ describe('the app-modal keyboard model (M6.5)', () => {
   });
 });
 
-describe('browser-default suppression (M6.5)', () => {
+describe('browser-default suppression', () => {
   function homeTab(): AppState {
     return stateWith({ ui: { ...initialState.ui, focusedTab: 'home' } });
   }
@@ -1303,7 +1303,7 @@ describe('browser-default suppression (M6.5)', () => {
   });
 });
 
-describe('browser-default suppression from FIELDS (M6.5)', () => {
+describe('browser-default suppression from FIELDS', () => {
   it('Ctrl+= in a text input cannot zoom the webview; Ctrl+Z stays native', () => {
     let current = stateWith({ ui: { ...initialState.ui, focusedTab: { doc: 'x.pdf' } } });
     setCommandStateSource(() => ({

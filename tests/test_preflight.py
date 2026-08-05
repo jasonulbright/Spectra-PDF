@@ -1,4 +1,4 @@
-"""§ I.6/I.3 — preflight print-production checks."""
+"""Preflight print-production checks."""
 
 import os
 

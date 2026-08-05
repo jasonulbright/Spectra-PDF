@@ -1,8 +1,6 @@
-"""The ONE graphics/text-state machine for content-stream walkers (7.2).
+"""The ONE graphics/text-state machine for content-stream walkers.
 
-Promised at Phase 7.1 ("one interpreter, two clients, no drift") and
-delivered here at 7.2, exactly when text editing needed the text-state
-half: redaction (`redact.py`), image editing (`page_images.py`), and text
+One interpreter, two clients, no drift: redaction (`redact.py`), image editing (`page_images.py`), and text
 editing all walk content streams tracking the same PDF graphics state —
 CTM (q/Q/cm), text matrices (BT, Tm/Td/TD/T*), and text parameters
 (Tf size + RESOURCE NAME, TL leading, Tz horizontal scale). Before this
@@ -159,16 +157,16 @@ class GraphicsTextState:
         self.h_scale = h_scale
         self.font_name = font_name
         # Tc/Tw (char/word spacing) — tracked for the text-editing walkers'
-        # REAL width math (7.2); redaction's estimate never needed them.
+        # REAL width math; redaction's estimate never needed them.
         self.char_spacing = 0.0
         self.word_spacing = 0.0
-        # 7.5 additions, all q/Q-stacked like the rest: render mode (Tr —
+        # Paragraph-layer additions, all q/Q-stacked like the rest: render mode (Tr —
         # OCR's invisible text is Tr 3 and MUST survive re-emission), rise
         # (Ts — superscripts), and fill/stroke color as OPAQUE captures of
         # the most recent color-setting instruction(s). Colors are replayed,
         # never interpreted — link-blue spans survive without a color-space
         # model. sc/scn keep their cs/CS prefix; g/rg/k stand alone.
-        # 9.D4: fill/stroke seed the INVOKING state when a Form XObject inherits
+        # Fill/stroke seed the INVOKING state when a Form XObject inherits
         # the caller's colour (a form runs in the caller's graphics state, ISO
         # 32000 §8.10.2); default DEFAULT_COLOR keeps every existing caller
         # (redact/page_images/text) byte-identical.
@@ -188,7 +186,7 @@ class GraphicsTextState:
     def advance_after_show(self, raw_width: float, vertical: bool = False) -> None:
         """Advance tm by a show's estimated width (the actual h-scale is
         applied here so subsequent same-line runs stay positioned).
-        9.B4a: a vertical show advances tm F DOWNWARD instead — Tz never
+        A vertical show advances tm F DOWNWARD instead — Tz never
         scales vertical advances (spec 9.4.4: Th applies to tx only);
         Tc/Tw ride inside `raw_width`, composed by the caller either way.
         Callers pass the active font capability's `vertical`; the default
@@ -337,8 +335,8 @@ class ClipTracker:
     alongside `GraphicsTextState` (never inside its `feed()` — the state machine
     5 walkers depend on stays byte-for-byte untouched).
 
-    Extracted at 9-§I.0-S8 from the local tracker `redact.py` grew for its `sh`
-    leak fix (§ I.-1 R3): every content walker that lists or strips content
+    Extracted from the tracker `redact.py` grew for its `sh`
+    leak fix: every content walker that lists or strips content
     needs to know whether a bbox is CLIPPED AWAY (invisible), not just where it
     sits. Before this, clipped-invisible text/images/vectors still listed as
     editable everywhere the shared walk is used.

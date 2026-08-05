@@ -296,7 +296,7 @@ function stateWithAnnots(annots: PageAnnotation[]): AppState {
 const annotsOf = (s: AppState): PageAnnotation[] => s.workspace.documents[0].pages[0].annotations ?? [];
 
 describe('RESTYLE_ANNOTATIONS', () => {
-  it('applies lineEndings/cloudIntensity only to the kinds that carry them (N7 sheets)', () => {
+  it('applies lineEndings/cloudIntensity only to the kinds that carry them (sheets)', () => {
     const s0 = stateWithAnnots([
       shape({ id: 'ar', shapeType: 'arrow', points: [0.2, 0.2, 0.4, 0.4] }),
       shape({ id: 'cl', shapeType: 'cloud', x: 0.5, y: 0.5, w: 0.2, h: 0.2 }),

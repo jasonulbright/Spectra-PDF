@@ -1,4 +1,4 @@
-// Boot theme resolution (3b review round 1): the shell CSS keys on
+// Boot theme resolution: the shell CSS keys on
 // [data-theme], and under the default System theme SettingsPanel stamps it
 // only after an IPC round-trip — frames after the first paint. index.tsx
 // now stamps synchronously via this resolver; these tests lock its logic.
@@ -27,7 +27,7 @@ describe('resolveInitialTheme', () => {
   });
 });
 
-describe('N14 — high-contrast is a stored explicit theme', () => {
+describe('High-contrast is a stored explicit theme', () => {
   it('stamps high-contrast before first render like the other explicit themes', () => {
     expect(
       resolveInitialTheme(JSON.stringify({ theme: 'high-contrast' }), false),

@@ -1368,7 +1368,7 @@ pub struct PdfVersionArgs {
     /// Output PDF file
     #[arg(short, long)]
     pub output: PathBuf,
-    /// Target PDF version (1.4, 1.5, 1.6, 1.7, 2.0)
+    /// Target PDF version (1.4, 1.5, 1.6, 1.7)
     #[arg(short, long, default_value = "1.7")]
     pub version: String,
 }
@@ -1531,7 +1531,7 @@ pub enum BatchOperation {
     Rebuild,
     /// Recover pages from all PDFs (Tier 3)
     Recover,
-    /// Convert every accepted source in the folder into a PDF (P22): images,
+    /// Convert every accepted source in the folder into a PDF: images,
     /// Word/Excel/PowerPoint, text, HTML, PostScript. This is the ONE batch
     /// operation whose input set is wider than "*.pdf".
     CreatePdf {
@@ -1575,7 +1575,7 @@ fn resolve_gs() -> PathBuf {
     exe_dir().join("ghostscript").join("gswin64c.exe")
 }
 
-/// The vendored native Tesseract (Phase 12 step 3). Mirrors `resolve_gs`:
+/// The vendored native Tesseract. Mirrors `resolve_gs`:
 /// beside the executable in the shipped resource tree. Recognition is a
 /// subprocess, which is precisely what lets a scheduled run under a service
 /// account work -- a WASM recognizer would need a WebView, and a service
@@ -1585,7 +1585,7 @@ fn resolve_tesseract() -> PathBuf {
 }
 
 /// The vendored fallback-fonts DIRECTORY (mirrors `engine::get_edit_font_path`
-/// for the GUI). FC1: passed to `fill_form_fields` so the CLI can render form
+/// for the GUI). Passed to `fill_form_fields` so the CLI can render form
 /// values outside WinAnsi with an embedded Unicode font. Missing (e.g. a dev
 /// build without provisioned resources) is handled engine-side — the value is
 /// then refused, never crashed.
@@ -1593,7 +1593,7 @@ fn resolve_fonts() -> PathBuf {
     exe_dir().join("fonts")
 }
 
-/// LibreOffice's `soffice` for O1 export. Prefers the vendored copy
+/// LibreOffice's `soffice` for Office export. Prefers the vendored copy
 /// (resources/libreoffice) and falls back to a standard system install — the
 /// runtime is large and assembled by a setup script (gitignored like the gs /
 /// python runtimes), so a dev machine without the bundle still exports against
@@ -1787,7 +1787,7 @@ fn collect_pdfs(dir: &Path) -> Result<Vec<PathBuf>, String> {
     })
 }
 
-/// Collect every file in a directory an arm of Create PDF converts (P22).
+/// Collect every file in a directory an arm of Create PDF converts.
 /// The one batch operation whose input set is wider than `*.pdf`.
 fn collect_create_pdf_sources(dir: &Path) -> Result<Vec<PathBuf>, String> {
     collect_batch_inputs(dir, |p| crate::create_pdf_sources::accepts(p))
@@ -1902,7 +1902,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "output": abs(&args.output).to_string_lossy(),
                 "quality": args.quality,
                 "gs_path": gs.to_string_lossy(),
-                // O8: ignored by the Ghostscript branch, read by the MRC one.
+                // Ignored by the Ghostscript branch, read by the MRC one.
                 // One op, one dispatch — a second subcommand is how a surface
                 // gets left behind.
                 "mrc_preset": args.mrc_preset,
@@ -2022,7 +2022,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             if files.len() < 2 {
                 return Err("Merge requires at least 2 input files".to_string());
             }
-            // P22 slice E: a non-PDF input routes the whole list through the
+            // A non-PDF input routes the whole list through the
             // ONE `create_pdf` door, whose assembly IS this same merge — so
             // convert-then-merge comes for free and the AcroForm / outline /
             // struct carries cannot be forgotten on the way.
@@ -2261,10 +2261,10 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                         "align": args.overlay_align,
                         "font_size": args.overlay_size,
                     }],
-                    // F15 slice E: an overlay whose text is not Latin-1
+                    // An overlay whose text is not Latin-1
                     // EMBEDS through the bundled faces rather than drawing
                     // '?' — a redaction code printed as question marks tells
-                    // the reader nothing (S4's precedent).
+                    // the reader nothing.
                     "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             )
@@ -2302,7 +2302,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "color": args.color,
                 "font_size": args.font_size,
                 "layer": args.layer,
-                // S4: the vendored fonts dir lets the engine embed a Unicode
+                // The vendored fonts dir lets the engine embed a Unicode
                 // font for non-Latin-1 stamps (else refused, never "?"-mapped).
                 "font_dir": resolve_fonts().to_string_lossy().to_string(),
             });
@@ -2349,7 +2349,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "color": args.color,
                 "bates_start": args.bates_start,
                 "bates_digits": args.bates_digits,
-                // Embed a Unicode font for non-Latin-1 text (S4), as watermark does.
+                // Embed a Unicode font for non-Latin-1 text, as watermark does.
                 "font_dir": resolve_fonts().to_string_lossy().to_string(),
             });
             if let Some(last) = args.last_page {
@@ -2517,7 +2517,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "action_name": name,
                 "gs_path": resolve_gs().to_string_lossy(),
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
-                // P22 slice E: an action may START with a create_pdf step, so
+                // An action may START with a create_pdf step, so
                 // the LibreOffice arm has to be reachable from a scheduled run
                 // and a watched folder too — both invoke this same subcommand.
                 "soffice_path": resolve_soffice(),
@@ -2794,7 +2794,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "file": abs(&args.input).to_string_lossy(),
                 "output": abs(&args.output).to_string_lossy(),
             });
-            // A PKCS#11 source takes the password as its PIN (F3); the
+            // A PKCS#11 source takes the password as its PIN; the
             // file-based sources take it as the passphrase.
             if args.pkcs11_module.is_some() {
                 params["pkcs11_pin"] = json!(password);
@@ -2843,7 +2843,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 }
                 params["appearance"] = json!({ "page": page, "rect": nums });
             }
-            // Fill an existing empty signature field (2n.4d) — clap already
+            // Fill an existing empty signature field — clap already
             // forbids combining this with the visible-stamp flags.
             if let Some(field) = &args.existing_field {
                 params["existing_field"] = json!(field);
@@ -3273,7 +3273,7 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
         let filename = pdf.file_name().unwrap().to_string_lossy().to_string();
         // A converted source's output name GAINS `.pdf` rather than replacing
         // the extension: `invoice.docx` and `invoice.pdf` in one folder must
-        // not collide, and the original name stays legible (the P3 rule).
+        // not collide, and the original name stays legible.
         let out_name = if creating && !filename.to_ascii_lowercase().ends_with(".pdf") {
             format!("{filename}.pdf")
         } else {
@@ -3417,7 +3417,7 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 //
-// P22 slice E. The CLI's own half of Create PDF is ARGUMENT PARSING and a
+// The CLI's own half of Create PDF is ARGUMENT PARSING and a
 // folder walk — the conversion itself is the engine's, and pytest covers it.
 // What can go wrong here is a subcommand that does not parse the way its help
 // text claims, and a batch walk that picks up the wrong files.

@@ -1,4 +1,4 @@
-// buildBlankPagePdf (M6.3, § 9.3): the bytes handed to the import machinery.
+// buildBlankPagePdf: the bytes handed to the import machinery.
 import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 import { buildBlankPagePdf, DEFAULT_PAGE_SIZE } from '../src/renderer/lib/blank-page';

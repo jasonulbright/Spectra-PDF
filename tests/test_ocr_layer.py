@@ -1,4 +1,4 @@
-"""Tests for the invisible OCR text layer (Phase 2m persistence half)."""
+"""Tests for the invisible OCR text layer (persistence half)."""
 
 import os
 

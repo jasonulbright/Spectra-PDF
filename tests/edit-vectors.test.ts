@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { fetchEditVectors, rgb01ToHex, hex01ToRgb } from '../src/renderer/lib/edit-vectors';
 import type { PageGeometry } from '../src/renderer/lib/redaction';
 
-describe('D3 colour helpers', () => {
+describe('vector colour helpers', () => {
   it('rgb01ToHex round-trips and clamps', () => {
     expect(rgb01ToHex([1, 0, 0])).toBe('#ff0000');
     expect(rgb01ToHex([0, 1, 0])).toBe('#00ff00');
@@ -26,7 +26,7 @@ function mockCall(vectors: unknown[]): (m: string, p: Record<string, unknown>) =
   return async () => ({ vectors });
 }
 
-describe('fetchEditVectors (9.D1)', () => {
+describe('fetchEditVectors', () => {
   it('maps kind, clamps colours, and projects the rect', async () => {
     const out = await fetchEditVectors(
       mockCall([
@@ -40,7 +40,7 @@ describe('fetchEditVectors (9.D1)', () => {
     );
     expect(out.map((v) => v.kind)).toEqual(['fill', 'stroke', 'fillstroke']);
     expect(out[0].fill).toEqual([1, 0, 0]);
-    // P8 slice D: 'shading' survives the mapping (it used to coerce to
+    // 'shading' survives the mapping (it used to coerce to
     // 'fill', which would have offered colour controls a shading refuses).
     const shading = await fetchEditVectors(
       mockCall([
@@ -80,7 +80,7 @@ describe('fetchEditVectors (9.D1)', () => {
     expect(out).toEqual([]);
   });
 
-  it('9-§I.0-S8: filters out clipped-away vectors, preserving engine index', async () => {
+  it('Filters out clipped-away vectors, preserving engine index', async () => {
     const out = await fetchEditVectors(
       mockCall([
         { index: 0, rect: [40, 40, 140, 100], kind: 'fill', fill: [1, 0, 0], stroke: null },

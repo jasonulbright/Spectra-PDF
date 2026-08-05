@@ -4,7 +4,7 @@ import { waitForHarness, getState, openByPaths } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// Phase 4 M2: the menu bar is a real Radix Menubar rendered from the command
+// The menu bar is a real Radix Menubar rendered from the command
 // registry. This smoke drives it through the actual DOM: open a menu, invoke
 // a (non-dialog) item, and confirm the observable state change, plus that
 // Escape closes an open menu.

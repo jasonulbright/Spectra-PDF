@@ -1,4 +1,4 @@
-"""Link-region management (§ I.2 N1 — Links).
+"""Link-region management (Links).
 
 Links are navigation regions (a /Link annotation with a URI action or an
 internal destination), NOT comments — so they get their own manager rather than
@@ -196,7 +196,7 @@ def delete_link(file: str, output: str, page: int, index: int) -> dict:
 
 def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> bool:
     """Land the rewrite; on a SIGNED input the landed bytes become an
-    incremental append instead (O5b), so link edits never break the
+    incremental append instead, so link edits never break the
     signature they ride beside. Returns whether that preservation ran."""
     from engine.incremental import finalize_preserving_signatures
 

@@ -57,7 +57,7 @@ export function isCustomStamp(v: unknown): v is CustomStamp {
  * An empty name collapses cleanly ("SIGNED {name} {date}" without a name
  * must read "SIGNED 7/30/2026", not "SIGNED  7/30/2026").
  *
- * N12 slice C: `locale` is the APP's language, not the machine's. A stamp is
+ * `locale` is the APP's language, not the machine's. A stamp is
  * authored in the language the user is working in, and the placement writes
  * the resolved text into the document — so a Spanish UI on an English
  * Windows must stamp a Spanish date. Omitting it keeps the platform default

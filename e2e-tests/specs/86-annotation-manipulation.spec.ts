@@ -266,7 +266,7 @@ describe('annotation manipulation', () => {
 
   it('keyboard: Delete removes the whole selection in one step', async () => {
     // After the commit the originals were baked into the file AND re-imported
-    // into the tier as editable imports (the N1 machinery) — so the page is
+    // into the tier as editable imports — so the page is
     // not empty. Add two fresh ones and assert on THEIR ids, not the count.
     const f1 = await addAnnotation({ kind: 'highlight', x: 0.1, y: 0.1, w: 0.1, h: 0.1, color: '#ffd54f' });
     const f2 = await addAnnotation({ kind: 'highlight', x: 0.4, y: 0.4, w: 0.1, h: 0.1, color: '#4fc3f7' });

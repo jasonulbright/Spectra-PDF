@@ -21,7 +21,7 @@ function valueEquals(a: FormFieldValue | undefined, b: FormFieldValue | undefine
 }
 
 export function FormsPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
@@ -68,7 +68,7 @@ export function FormsPanel(): React.ReactElement {
       return;
     }
     setReading(true);
-    // Read through the engine (FC4b). Keyed on `buffer` identity — the same
+    // Read through the engine. Keyed on `buffer` identity — the same
     // content-change signal as before — but read from the working copy on
     // disk, whose bytes equal `buffer` (page-tier edits touch neither until
     // commit). `call` never gates `read_form_fields` (it is INTERNAL).
@@ -126,7 +126,7 @@ export function FormsPanel(): React.ReactElement {
     setBusy(true);
     setStatus(flatten ? tChrome('panel.forms.fillingFlattening') : tChrome('panel.forms.filling'));
     try {
-      // FC4 (§I.0 S1/S3): snapshot (runs the commit gate) → fill through the
+      // Snapshot (runs the commit gate) → fill through the
       // ENGINE (Unicode-capable + multi-select optionlist) → reload → UPDATE_
       // FILE (undoable via the snapshot). `call` is commit-gated (never
       // callRaw). Page count is unchanged by a fill/flatten.

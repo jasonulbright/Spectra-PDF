@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 
 export function GrayscalePanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call, saveFile } = useEngine();

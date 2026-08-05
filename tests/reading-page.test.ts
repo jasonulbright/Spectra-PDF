@@ -125,11 +125,11 @@ describe('currentPageFor — reading view current page', () => {
     // page-tier delete shrinks pageCount/contentHeight SYNCHRONOUSLY, so for one
     // render the offset points past the end of the shorter content.
     //
-    // This case is chosen to DISCRIMINATE: round 6's first attempt at a test used
+    // This case is chosen to DISCRIMINATE: the first attempt at a test used
     // a tail-delete that still overflowed the pane, where the old code's
     // `Math.min(pageCount, vFirst+1)` cap happened to give the right answer
     // anyway — it passed against the unclamped code and proved nothing (caught by
-    // round 7, which reverted the fix and re-ran the suite). The divergence is
+    // Which reverted the fix and re-ran the suite). The divergence is
     // real only when the SHRUNKEN doc now fits the pane: unclamped, the stale
     // nonzero offset skips the at-top branch and names the LAST page, while the
     // pane is (once the browser clamps) showing page 1 at the top.
@@ -291,7 +291,7 @@ describe('anchorHolds — a jump wins until the user scrolls away', () => {
     expect(anchorHolds(a, m, pagesAt(reordered, a))).toBe(false);
   });
 
-  // Documented, intended degradation (round-5 review). A commit rebuilds the
+  // Documented, intended degradation (review). A commit rebuilds the
   // file and the async reindex reassigns every id positionally from the new
   // buffer (lib/workspace.ts), so an anchor taken while an earlier in-memory
   // delete had "gapped" the ids can't match afterwards — and NO field survives a
@@ -347,14 +347,14 @@ describe('anchorHolds — a jump wins until the user scrolls away', () => {
   });
 });
 
-// Zoom presets (M4.1d). `zoom` is relative to the reading view's base page
+// Zoom presets. `zoom` is relative to the reading view's base page
 // height (960), NOT to the PDF's natural size — so 100% is not zoom 1.
 describe('zoom presets — Actual Size / Fit Width', () => {
   const READING_BASE_HEIGHT = 960;
   const LETTER = { id: 'p', width: 612, height: 792, rotation: 0 as const }; // 72dpi points
   const A4 = { id: 'p', width: 595, height: 842, rotation: 0 as const };
 
-  // M4.2 regression. The board's `displayWidthOf` rounds the width to a
+  // regression. The board's `displayWidthOf` rounds the width to a
   // whole pixel AT BASE_PAGE_HEIGHT (280) — right for thumbnail packing, wrong
   // for the reading view, which SCALES that already-rounded number, amplifying
   // the aspect error linearly with zoom. The pdf.js text layer derives its own
@@ -422,7 +422,7 @@ describe('zoom presets — Actual Size / Fit Width', () => {
     // The REAL render path: PageCell sizes the reading view's cell with
     // displayWidthAt(page, pageHeight). A correct fit is the zoom whose resulting
     // width equals the pane — asserted through that same function, so a future
-    // divergence between solve and render fails here (round 3 caught exactly
+    // divergence between solve and render fails here (caught exactly
     // that: the solve still used the board's rounded width after the render had
     // moved to the true aspect, and Fit Width quietly undershot).
     const widthAtZoom1 = (page: Parameters<typeof displayWidthAt>[0]): number =>
@@ -501,12 +501,11 @@ describe('zoom presets — Actual Size / Fit Width', () => {
       expect(clampZoom(-3, 10)).toBe(MIN_ZOOM);
     });
   });
-  // P12 (brief 36) SUPERSEDED the height-axis zoom bound these pins used to
-  // cover: the spacer now caps at SAFE_ELEMENT_EXTENT and rows translate under
+  // The height-axis zoom bound these pins used to cover is gone: the spacer now caps at SAFE_ELEMENT_EXTENT and rows translate under
   // it (scrollMapFor), so NO page count may bound zoom — the presets must be
   // honest at any length. The WIDTH bound stays (width never accumulates
   // across pages, so a zoom cap is the right tool there), and its pins stay.
-  describe('maxZoomFor — width-only bound (P12: height never bounds zoom)', () => {
+  describe('maxZoomFor — width-only bound (height never bounds zoom)', () => {
     const CHROMIUM_ELEMENT_CAP = 33_554_428;
 
     it('page count no longer bounds zoom at ANY length', () => {
@@ -534,7 +533,7 @@ describe('zoom presets — Actual Size / Fit Width', () => {
     });
   });
 
-  // P12 — the scaled-spacer scroll map itself.
+  // The scaled-spacer scroll map itself.
   describe('scrollMapFor / virtualTopOf / realTopFor', () => {
     const rowH = READING_BASE_HEIGHT + PAGE_GAP;
     const viewportH = 900;

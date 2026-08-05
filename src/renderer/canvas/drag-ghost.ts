@@ -11,8 +11,8 @@ export function buildDragGhost(pageEl: HTMLElement, rect: DOMRect, count = 1): H
 
   // The ghost mounts on document.body, OUTSIDE the .canvas-view scope that
   // declares --surface (and any :root --accent) — a bare var() there always
-  // fell through to its fallback (latent: both are white/blue today, the
-  // punchlist's theme trap). Resolve the values HERE, from the page element,
+  // fell through to its fallback (latent: both are white/blue today).
+  // Resolve the values HERE, from the page element,
   // which sits inside every relevant scope.
   const computed = getComputedStyle(pageEl);
   const surface = computed.getPropertyValue('--surface').trim() || '#fff';

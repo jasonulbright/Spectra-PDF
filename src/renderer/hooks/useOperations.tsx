@@ -4,7 +4,7 @@ import type { NewFieldSpec } from '../lib/form-authoring';
 /** An undoable in-place workspace operation: snapshot the working copy, run the
  * engine op writing back to it, reload, and push an UPDATE_FILE undo entry.
  * This is App's `performOperation` — the SAME instance the canvas edit handlers
- * use — exposed to panels (which take no props) so an in-place op like 9.F5
+ * use — exposed to panels (which take no props) so an in-place op like
  * signing routes through the ONE flow instead of duplicating the snapshot/
  * commit choreography (and drifting from it). */
 export type PerformOperation = (

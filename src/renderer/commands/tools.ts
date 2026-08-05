@@ -1,7 +1,7 @@
 import type { Operation } from './operations';
 import type { CanvasTool } from '../state/types';
 
-// The workbench's TOOLS (Phase 4 M5, § 7) — the data the Tools Center tiles,
+// The workbench's TOOLS — the data the Tools Center tiles,
 // the task panes and the secondary toolbars all read. Like the menu tree and the
 // keymap, this is data over the command registry rather than hand-placed UI,
 // which makes the configuration directly testable.
@@ -85,7 +85,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     id: 'comment',
     title: 'Comment',
     description: 'Highlight, add text boxes, draw, stamp — and review every comment in the document.',
-    // U3 fold: 'comments' (the review list) was a SECOND tool sitting next to
+    // fold: 'comments' (the review list) was a SECOND tool sitting next to
     // this one in the grid, one letter apart — "Comment" to make them,
     // "Comments" to read them. That is not a distinction a user should have to
     // infer from a plural. It is one job, so it is one tool: the modes below
@@ -209,7 +209,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Crop & Page Boxes',
     description: 'Crop pages and edit the crop/bleed/trim/art boxes.',
     ops: ['pagebox'],
-    // P5b: opening the tool arms the draw mode, so the crop cursor is live on
+    // Opening the tool arms the draw mode, so the crop cursor is live on
     // the page the moment you pick Crop — the numeric fields in the dock are
     // where the drag LANDS, not a second way to do the same job.
     canvasTools: ['cropdraw'],
@@ -259,7 +259,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'export',
     title: 'Export',
-    // Properties left here at M5.5b: "what is this document?" is a dialog you
+    // Properties lives here: "what is this document?" is a dialog you
     // ask about the file in front of you (Ctrl+D), not a job you pick from a
     // grid of tools.
     description: 'Pull the text out of a document.',

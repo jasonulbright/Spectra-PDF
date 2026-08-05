@@ -5,7 +5,7 @@ import { expect } from '@wdio/globals';
 import { PDFDocument, rgb } from 'pdf-lib';
 import { waitForHarness, openByPaths, getState, invokeAppCommand } from '../support/harness.js';
 
-// Phase 9.D1 — vector-object addressability: list the drawn path objects on a
+// Vector-object addressability: list the drawn path objects on a
 // page, select one, delete it (undoable). Asserted via the harness vector
 // bridge + the generation-tagged reindex (a whole-file op rebuilds the page,
 // so waits key on the edit-vector page id advancing past the pre-op id).
@@ -72,7 +72,7 @@ async function waitForReindexed(
   );
 }
 
-describe('vector-object delete (Phase 9.D1)', () => {
+describe('vector-object delete', () => {
   let tmp: string;
   let pdfPath: string;
 

@@ -1,4 +1,4 @@
-"""Tests for page-image editing (Phase 7.1 — list/delete/replace/extract)."""
+"""Tests for page-image editing (list/delete/replace/extract)."""
 
 import os
 import zlib
@@ -106,7 +106,7 @@ class TestListPageImages:
             list_page_images(src, 9)
 
     def test_clipped_away_placement_flagged(self, tmp_dir):
-        # 9-§I.0-S8: a placement drawn wholly OUTSIDE a page-level clip lists
+        # A placement drawn wholly OUTSIDE a page-level clip lists
         # (index space unchanged) with clipped=True; one inside → clipped=False.
         path = os.path.join(tmp_dir, "clip.pdf")
         pdf = pikepdf.new()
@@ -486,7 +486,7 @@ class TestJpegInfoRobustness:
 
 
 class TestInlineImages:
-    """C4 re-ratified the 7.1 boundary: BI/ID/EI draws are PLACEMENTS now
+    """Re-ratified the boundary: BI/ID/EI draws are PLACEMENTS now
     (listed + editable via the wrap/drop family). The original pin here
     ('never listed, pass through verbatim') became this mixed-page pin:
     draw-order ids across both kinds, and byte-faithful survival of the
@@ -594,7 +594,7 @@ class TestInlineImages:
         assert names[0] != "/Fm1" and names[1] == "/Fm1"  # copy-on-edit
 
     def test_replace_promotes_inline_to_xobject(self, tmp_dir):
-        # P6 INVERSION (was: refusal). Replace PROMOTES the inline draw to
+        # INVERSION (was: refusal). Replace PROMOTES the inline draw to
         # an XObject Do — one instruction for one slot, so later placements
         # keep their ids, and the result is an ordinary placement.
         src = self._mixed_page(tmp_dir)
@@ -614,7 +614,7 @@ class TestInlineImages:
             assert b"BI" not in content  # the inline bytes went with the draw
 
     def test_extract_decodes_the_inline_image(self, tmp_dir):
-        # P6 INVERSION (was: refusal). Inline extraction decodes through
+        # INVERSION (was: refusal). Inline extraction decodes through
         # PIL and saves lossless PNG.
         from engine.page_images import extract_page_image
 
@@ -761,7 +761,7 @@ class TestAddPageImage:
         assert imgs[0]["native_width"] == 2
 
     def test_added_image_is_an_ordinary_placement(self, tmp_dir):
-        # Add, then TRANSFORM it (C1) — proves the added image is a normal
+        # Add, then TRANSFORM it — proves the added image is a normal
         # placement the rest of the pipeline sees with no special case.
         src = os.path.join(tmp_dir, "blank.pdf")
         _blank_page_pdf(src)
@@ -871,7 +871,7 @@ def _ops_in_page_stream(path):
 
 
 class TestCropPageImage:
-    """Phase 9.C3 — crop = a unit-space clip at the target draw."""
+    """Crop = a unit-space clip at the target draw."""
 
     def test_crop_wraps_the_target_draw(self, tmp_dir):
         src = os.path.join(tmp_dir, "s.pdf")
@@ -974,7 +974,7 @@ def _ops_in_form(path, name):
 
 def _page_with_content(path, content):
     """One page with /ImA registered and hand-authored `content` — for the
-    C3-tail recognition fixtures (author clips, pre-tail stacks, near-tool
+    Crop-recognition fixtures (author clips, plain stacks, near-tool
     frames, inline draws)."""
     pdf = pikepdf.new()
     page = pdf.add_blank_page(page_size=(612, 792))
@@ -986,7 +986,7 @@ def _page_with_content(path, content):
 
 
 class TestCropReEdit:
-    """Phase 9.C3-tail — re-crop is COLLAPSE-AND-REPLACE over the tool's own
+    """Re-crop is COLLAPSE-AND-REPLACE over the tool's own
     wrapper frames (exact `_emit_wrap` operator shapes only; anything foreign
     fails closed to the pre-tail intersect), and the lister reports the
     recognized crop as the additive `crop` field (None ⇒ no handles)."""
@@ -1018,7 +1018,7 @@ class TestCropReEdit:
         assert sum(1 for op, _ in ops if op == "W") == 1
 
     def test_recrop_recognizes_through_an_inner_transform_frame(self, tmp_dir):
-        # crop → C1 transform → re-crop. The transform wraps INSIDE the crop
+        # crop → transform → re-crop. The transform wraps INSIDE the crop
         # frame (a later op is innermost), so recognition must walk through
         # it to drop the outer crop — and must keep the transform intact.
         src = os.path.join(tmp_dir, "s.pdf")
@@ -1126,7 +1126,7 @@ class TestCropReEdit:
         assert imgs[1]["crop"] is None
 
     # An inline draw (cm [20 0 0 20 30 700] → box [30,700,50,720]) plus an
-    # XObject sibling — the C4 mixed shape.
+    # XObject sibling — the mixed shape.
     INLINE_MIXED = (
         b"q 20 0 0 20 30 700 cm BI /W 1 /H 1 /CS /G /BPC 8 ID \x7f EI Q "
         b"q 100 0 0 80 50 600 cm /ImA Do Q"
@@ -1246,7 +1246,7 @@ class TestCropReEdit:
         assert [i["crop"] for i in list_page_images(src2, 1)["images"]] == [None, None]
 
     def test_transform_carries_the_crop_innermost(self, tmp_dir):
-        # C3-tail follow-on (the sub's ranked seen-not-fixed #1): pre-fix,
+        # Pre-fix:
         # a crop-then-MOVE left the clip `re` OUTSIDE the new cm frame — in
         # pre-transform space — so the clip window stayed at the old page
         # position and slivered the moved image. The transform op now
@@ -1346,7 +1346,7 @@ class TestCropReEdit:
 
 
 class TestSetImageOpacity:
-    """Phase 9.C3 — opacity = a page-local ExtGState at the target draw."""
+    """Opacity = a page-local ExtGState at the target draw."""
 
     def test_opacity_registers_page_local_extgstate(self, tmp_dir):
         src = os.path.join(tmp_dir, "s.pdf")
@@ -1398,7 +1398,7 @@ class TestSetImageOpacity:
         assert listed[1]["opacity"] == pytest.approx(1.0)
 
     def test_opacity_does_not_leak_into_sibling_sharing_resources(self, tmp_dir):
-        # The C2 sibling-leak shape, for /ExtGState: two pages share ONE
+        # The sibling-leak shape, for /ExtGState: two pages share ONE
         # /Resources object; dimming page 1's image must not surface the
         # /EditGS entry on page 2.
         src = os.path.join(tmp_dir, "shared.pdf")
@@ -1486,7 +1486,7 @@ class TestSetImageOpacity:
 
 
 class TestWrapperCollapse:
-    """9-§I.5 P9 — repeat transform/opacity edits must not stack frames."""
+    """Repeat transform/opacity edits must not stack frames."""
 
     def _list(self, path):
         from engine.page_images import list_page_images
@@ -1494,7 +1494,7 @@ class TestWrapperCollapse:
         return list_page_images(path, 1)["images"]
 
     def test_repeat_transform_stops_at_two_frames(self, tmp_dir):
-        # Before P9 every move nested another `q cm … Q` around the draw, so
+        # Every move used to nest another `q cm … Q` around the draw, so
         # ten nudges left ten frames. The document's OWN placement frame is
         # kept (shape alone cannot tell it from ours, and folding it would
         # dissolve author structure for no gain); every tool frame after the
@@ -1582,7 +1582,7 @@ class TestWrapperCollapse:
 
 
 def _page_with_two_in_one_form(path):
-    """TWO images drawn inside ONE Form XObject, form drawn once — the P7
+    """TWO images drawn inside ONE Form XObject, form drawn once — the
     multi-op fixture: both nested targets must land in ONE form copy."""
     pdf = pikepdf.new()
     page = pdf.add_blank_page(page_size=(612, 792))
@@ -1624,7 +1624,7 @@ def _page_with_direct_and_form(path):
 
 
 class TestMultiImageOps:
-    """P7 multi-select: transform_page_images / delete_page_images — ONE
+    """Multi-select: transform_page_images / delete_page_images — ONE
     atomic rewrite for N placements (one save, one undo entry)."""
 
     def test_group_transform_moves_both_page_level_targets(self, tmp_dir):
@@ -1783,7 +1783,7 @@ def _wide_raw_source(tmp_dir, w, h):
 
 
 class TestAspectHonestPlacement:
-    """P7 slice C: fit="contain" on replace/add + natural-size click-place.
+    """fit="contain" on replace/add + natural-size click-place.
     The default "stretch" paths stay byte-stable (the existing suite runs
     them unchanged)."""
 
@@ -1812,7 +1812,7 @@ class TestAspectHonestPlacement:
         out = os.path.join(tmp_dir, "o.pdf")
         target = [60, 0, 0, 60, 200, 500]
         transform_page_image(mid, out, 1, 0, target)
-        # The letterbox frame is the recognized transform shape, so the P9
+        # The letterbox frame is the recognized transform shape, so the
         # fold absorbs it — the listing lands EXACTLY on the target.
         assert list_page_images(out, 1)["images"][0]["matrix"] == pytest.approx(target)
 
@@ -1871,7 +1871,7 @@ class TestAspectHonestPlacement:
 
 
 class TestBlendModes:
-    """P7 slice D: set_image_opacity grows `blend`; the collapse widens to
+    """set_image_opacity grows `blend`; the collapse widens to
     tool-owned {alpha, blend} frames and MERGES their state so a re-set
     never loses what an earlier set wrote."""
 
@@ -1927,7 +1927,7 @@ class TestBlendModes:
         assert list_page_images(out, 1)["images"][0]["blend"] == "Normal"
 
     def test_author_alpha_only_frame_now_survives_by_name(self, tmp_dir):
-        # The P7 ownership rule takes BOTH tests (name + content). An
+        # The ownership rule takes BOTH tests (name + content). An
         # author's PURE-alpha frame used to be collapsible under the
         # content-only rule; it now survives with our frame nested inside —
         # the inner value wins per key, so rendering is unchanged and the
@@ -1977,7 +1977,7 @@ LINEAR_MASK = {
 
 
 class TestGradientMask:
-    """P7 slice E: gradient soft masks on a placement — luminosity /SMask
+    """Gradient soft masks on a placement — luminosity /SMask
     over the image's unit square, marker-carried params, merge-preserved."""
 
     def test_linear_mask_emits_axial_shading_and_seeds_back(self, tmp_dir):
@@ -2144,7 +2144,7 @@ def _write_svg(tmp_dir, name="logo.svg", data=SIMPLE_SVG):
 
 
 class TestVectorPlacement:
-    """P7 slice F: a placed SVG is a first-class placement (kind "vector") —
+    """A placed SVG is a first-class placement (kind "vector") —
     the whole wrap family applies verbatim; replace/extract refuse by name;
     the vector lister leaves it alone; delete drops the form's bytes."""
 

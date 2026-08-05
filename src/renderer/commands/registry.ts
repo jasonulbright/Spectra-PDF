@@ -1,9 +1,9 @@
-// The command registry (19-phase4 § 4). COMMANDS is a TOTAL record over the
+// The command registry. COMMANDS is a TOTAL record over the
 // finite CommandId union — adding an id without a command (or a command
 // without an id) fails tsc, the tool-icons GLYPHS precedent. Menus, toolbars,
 // tool tiles and the keymap reference these ids; nothing re-implements a
-// handler. M1 registers every action that existed before the workbench;
-// M2+ chrome only *references* what is here.
+// handler. Every action is registered here; the chrome only
+// *references* what is here.
 import { isDocTab } from '../state/types';
 import { insertAnchor, showableDoc, tabFiles } from '../state/selectors';
 import type { AppState, CanvasTool, FocusedTab, NavPanelId } from '../state/types';
@@ -82,7 +82,7 @@ export function tabFilePaths(state: AppState): string[] {
 }
 
 /** The visible tab order: Home | one tab per open document. (The Tools
- * pseudo-tab retired in Phase 10 slice C — ops panels live in the dock.) */
+ * pseudo-tab is retired — ops panels live in the dock.) */
 export function tabOrder(state: AppState): FocusedTab[] {
   return ['home', ...tabFilePaths(state).map((doc) => ({ doc }))];
 }
@@ -211,11 +211,11 @@ export const COMMAND_IDS = [
 
 export type CommandId = (typeof COMMAND_IDS)[number];
 
-// Every id must live under a menu-bar namespace (§ 4.1).
+// Every id must live under a menu-bar namespace.
 COMMAND_IDS satisfies readonly CommandNamespace[];
 
 // "In the document board" = a doc tab is focused (the canvas board is the
-// pane content at M2). Tool + selection commands only make sense there.
+// pane content). Tool + selection commands only make sense there.
 const inCanvas = (ctx: CommandContext): boolean => isDocTab(ctx.state.ui.focusedTab);
 
 
@@ -268,7 +268,7 @@ function panelCommand(op: Operation): Command {
   };
 }
 
-/** Shared docless-tool flow (Phase 10 slice C): open the picker via the app
+/** Shared docless-tool flow: open the picker via the app
  * services; once a document lands (openFiles focuses its tab itself — the
  * openByPaths funnel), seat the op and open the dock. A cancelled picker
  * leaves everything untouched. */
@@ -316,7 +316,7 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   repair: [],
   watermark: [],
   headerfooter: [],
-  // P5b: pagebox owns the `cropdraw` mode, so its strip needs a way out.
+  // Pagebox owns the `cropdraw` mode, so its strip needs a way out.
   pagebox: ['tools.close'],
   pagelabels: [],
   attachments: [],
@@ -351,13 +351,13 @@ export const COMMANDS: Record<CommandId, Command> = {
   // toolbar's own exit. The pill made this implicit — you clicked "Select",
   // which only reads as "leave the tool" if you already know the eight modes
   // were grouped into tools, which was the pill's whole problem.
-  // File ▸ Properties… (Ctrl+D) — § 3.2. Needs a document it can describe.
+  // File ▸ Properties… (Ctrl+D). Needs a document it can describe.
   'file.properties': {
     title: 'Properties…',
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.openProperties(),
   },
-  // File ▸ Print… (Ctrl+P) — M-P, § 3.4. Needs a document to print; a ghost
+  // File ▸ Print… (Ctrl+P). Needs a document to print; a ghost
   // import source is refused like everywhere else (hasActiveFile).
   'file.print': {
     title: 'Print…',
@@ -392,7 +392,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.saveAs(),
   },
-  // O1 export (bundled LibreOffice). Same enablement as Save As — an active
+  // Export (bundled LibreOffice). Same enablement as Save As — an active
   // document. LibreOffice availability is handled engine-side: a missing
   // runtime surfaces as a clear operation-queue error, not a disabled menu, so
   // the capability is discoverable rather than silently absent.
@@ -471,9 +471,9 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.canvas !== null,
     run: (ctx) => ctx.canvas!.find.open(),
   },
-  // Copy the reading view's live TEXT selection (§ 9.1 Edit ▸ Copy). Ctrl+C
+  // Copy the reading view's live TEXT selection (Edit ▸ Copy). Ctrl+C
   // itself is native (the text layer is real DOM text and stays unbound in
-  // the keymap, § 9.2) — this is the menu's honest twin. `when` reads the DOM
+  // the keymap) — this is the menu's honest twin. `when` reads the DOM
   // selection because a selection isn't app state; menus resolve enablement
   // when they open, which is exactly when it's needed.
   'edit.copy': {
@@ -518,7 +518,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openPreferences(),
   },
-  // Phase 6 — needs NO document (operates on a picked folder tree, outside
+  // Needs NO document (operates on a picked folder tree, outside
   // the workspace entirely), so its only gate is App being mounted.
   'tools.batchOcr': {
     title: 'Batch OCR Folder…',
@@ -532,13 +532,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openScheduledRuns(),
   },
-  // O7 watched folders — same no-document shape: watches picked folder trees.
+  // Watched folders — same no-document shape: watches picked folder trees.
   'tools.watchedFolders': {
     title: 'Watched Folders…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openWatchedFolders(),
   },
-  // P22 — same no-document shape: builds a PDF from PICKED sources of any
+  // Same no-document shape: builds a PDF from PICKED sources of any
   // accepted kind (images, Office/text/web, PostScript, blank pages). The old
   // `file.createPdfFromPostScript` id is REMOVED, not aliased: a stale id in a
   // registry that drives the menus, the Home tab and the command palette is a
@@ -585,7 +585,7 @@ export const COMMANDS: Record<CommandId, Command> = {
   },
   // Reading-view only: the board has no honest notion of a page's true size or
   // of fitting one page's width, so it doesn't implement these and they DISABLE
-  // there rather than doing something else (§ 3.3 — the `when` reads the
+  // there rather than doing something else (the `when` reads the
   // optional method's presence, which is the capability, not the view mode).
   'view.actualSize': {
     title: 'Actual Size',
@@ -597,7 +597,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.canvas?.canvas()?.fitWidth != null,
     run: (ctx) => ctx.canvas!.canvas()!.fitWidth!(),
   },
-  // § 6.1's two modes, § 9.1's View items. "Organize All Documents" IS the
+  // The two modes, as the View menu names them. "Organize All Documents" IS the
   // board (it renders every open document — the cross-doc superpower); the
   // per-doc "Organize View" menu item is the Organize tool (tools.open.organize).
   'view.documentView': {
@@ -626,7 +626,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: inCanvas,
     run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_PROPERTIES_BAR' }),
   },
-  // Snapping (N11 slice A): the master toggle, mirrored from the status bar's
+  // Snapping: the master toggle, mirrored from the status bar's
   // Snap segment so it is keyboard- and OmniSearch-reachable. It flips a
   // persisted PREFERENCE, not workspace state, so it writes through the
   // snap-settings store rather than dispatching. Doc tabs only — there is
@@ -636,7 +636,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: inCanvas,
     run: () => toggleSnapping(),
   },
-  // Rulers / Grid / Guides (N11 slice B) — the same preference store for the
+  // Rulers / Grid / Guides — the same preference store for the
   // same reason. Show Grid and Snap to Grid stay SEPARATE (the grid type's
   // checkbox is in the Snap popover): drafting with a grid you snap to but
   // cannot see is an ordinary workflow, so the settings remain independent.
@@ -714,20 +714,20 @@ export const COMMANDS: Record<CommandId, Command> = {
   // document you were on (or Home when none).
   'view.toolsPane': {
     title: 'Tools Pane',
-    // Phase 10 slice C: the Tools TAB is gone — Shift+F4 toggles the right
+    // The Tools TAB is gone — Shift+F4 toggles the right
     // dock on the document instead (the pane the panels actually live in).
     when: inCanvas,
     run: ({ state, dispatch }) =>
       dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: !state.ui.toolDock.open }),
   },
-  // Ctrl+Shift+N (§ 9.2): land the caret in the reading view's page box.
+  // Ctrl+Shift+N: land the caret in the reading view's page box.
   'view.goToPage': {
     title: 'Go to Page…',
     when: (ctx) =>
       inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && ctx.canvas !== null,
     run: (ctx) => void ctx.canvas!.goToPage(),
   },
-  // Document ▸ Insert Pages ▸ … (§ 9.1/§ 9.3). Both insert AFTER the page
+  // Document ▸ Insert Pages ▸ …. Both insert AFTER the page
   // being read (insertAnchor) and both ride the byte-only import machinery,
   // so they're page-tier undoable like a drag-in.
   'document.insertBlankPage': {
@@ -740,7 +740,7 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null && insertAnchor(ctx.state) !== null,
     run: (ctx) => void ctx.app!.insertPagesFromFile(),
   },
-  // Combine Files (P22 slice D): opens the Combine dialog — a source list
+  // Combine Files: opens the Combine dialog — a source list
   // that accepts everything Create PDF accepts, converts the non-PDF members
   // through the one `create_pdf` door, and lands the result either in a NEW
   // document or in one that is already open (the old behaviour, which is
@@ -795,8 +795,8 @@ export const COMMANDS: Record<CommandId, Command> = {
   },
   // Split view uses two stacked panes over the same
   // document, independent scroll/zoom. Document mode only — the organize
-  // board is one d3 world with no honest second scroll position (§ 3.3:
-  // absent, not faked).
+  // board is one d3 world with no honest second scroll position
+  // (absent, not faked).
   'window.split': {
     title: 'Split',
     when: (ctx) =>
@@ -846,14 +846,14 @@ export const COMMANDS: Record<CommandId, Command> = {
   ...(Object.fromEntries(
     OPERATIONS.map((op) => [`tools.panel.${op}`, panelCommand(op)]),
   ) as Record<`tools.panel.${Operation}`, Command>),
-  // One command per TOOL (§ 7) — what the Tools menu and the Tools Center tiles
+  // One command per TOOL — what the Tools menu and the Tools Center tiles
   // both invoke, so the two can never disagree about what a tool opens.
   ...(Object.fromEntries(
     TOOL_DEFS.map((tool) => [
       `tools.open.${tool.id}`,
       {
         title: tool.title,
-        // The two-entry-point question M5.1 flagged here, settled: EVERY tool
+        // The two-entry-point question, settled: EVERY tool
         // sets `activeToolId` when opened, ops-less ones included. It is "the
         // tool that is open", full stop — one answer, not one per surface.
         //
@@ -878,7 +878,7 @@ export const COMMANDS: Record<CommandId, Command> = {
           const { state, dispatch } = ctx;
           const path = showableDoc(state);
           // OPENING A TOOL GOES WHERE ITS WORK IS. One rule, and it is the whole
-          // of the destination logic (Phase 10 B1 revision):
+          // of the destination logic (revision):
           //
           //   owns canvas modes, or has no ops  ⇒  the DOCUMENT (mode armed)
           //   a form to fill in, with a doc     ⇒  the DOCUMENT + the RIGHT DOCK
@@ -889,7 +889,7 @@ export const COMMANDS: Record<CommandId, Command> = {
           // away). Ops tools used to yank the user off the document to a
           // full-page form — the frankenstein seam the relayout exists to kill;
           // the dock keeps the document visible. The Tools tab survives as the
-          // no-document fallback until slice C retires it.
+          // no-document fallback.
           if (worksOnPage(tool)) {
             if (!path) return; // unreachable: `when` requires one.
             dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
@@ -903,7 +903,7 @@ export const COMMANDS: Record<CommandId, Command> = {
             // — their pane is one dock-click away, already seated.
             if (tool.ops.length > 0) dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
             else dispatch({ type: 'UI_OPEN_TOOL', toolId: tool.id });
-            // Scan & OCR's whole surface is Find's "Make searchable" (2m), so
+            // Scan & OCR's whole surface is Find's "Make searchable", so
             // the tool opens Find rather than inventing a second entry point.
             // Deferred, not called on ctx.canvas: the focus above has only been
             // SCHEDULED, so the canvas is still unmounted right now.

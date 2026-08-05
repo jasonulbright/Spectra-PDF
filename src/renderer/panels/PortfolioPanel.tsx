@@ -33,7 +33,7 @@ const isPdfMember = (m: Member): boolean =>
   m.mime === 'application/pdf' || /\.pdf$/i.test(m.name);
 
 export function PortfolioPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call, callRaw, saveFile } = useEngine();
@@ -485,7 +485,7 @@ export function PortfolioPanel(): React.ReactElement {
 }
 
 /**
- * "Opening a portfolio shows its members" (§ I.6): the first time a document
+ * "Opening a portfolio shows its members": the first time a document
  * becomes the visible document this session, ask the engine whether it is a
  * portfolio and open the Portfolio panel if so. Mounted once in App; keyed on
  * the SHOWABLE file (the selectors' ghost-safe answer), once per path, so tab

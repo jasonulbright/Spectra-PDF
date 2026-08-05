@@ -40,7 +40,7 @@ interface DragSession {
   started: boolean;
   ghost: HTMLElement | null;
   // Unregisters this drag's Escape-to-cancel from the keymap dispatcher's
-  // interceptor stack (Phase 4 M1; formerly an own window keydown listener).
+  // interceptor stack (formerly an own window keydown listener).
   unregisterEscape: () => void;
 }
 

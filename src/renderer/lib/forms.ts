@@ -1,13 +1,12 @@
-// AcroForm read via the Python engine (`read_form_fields`). Since FC4b (§I.0
-// S1/S6) the GUI read and fill share ONE implementation — the engine — so the
+// AcroForm read via the Python engine (`read_form_fields`). The GUI read
+// and fill share ONE implementation — the engine — so the
 // side panel and the on-canvas overlay see exactly what the CLI does, including
 // nested/typed-terminal widgets the old renderer-side pdf-lib enumeration
 // skipped. The fill also routes through the engine (`fill_form_fields`,
 // Unicode-capable + multi-select). This module is now just the read call plus
 // the pure engine→FormField MAPPING; the field-value/geometry TYPES it exports
 // are the shared contract consumed by the FormsPanel, the canvas overlay
-// (form-overlay.ts), and the fill fingerprint machinery. See
-// docs/architecture/08-phase2f-forms.md and 24-phase9 § FC4.
+// (form-overlay.ts), and the fill fingerprint machinery.
 import type { EngineCall } from './engine-call';
 
 export type FormFieldType =
@@ -23,7 +22,7 @@ export type FormFieldType =
 // none); optionlist -> selected strings.
 export type FormFieldValue = string | boolean | string[];
 
-// One widget annotation of a field, located on a page (2n.4b — the on-canvas
+// One widget annotation of a field, located on a page (the on-canvas
 // overlay's geometry source). `rect` is the raw PDF user-space /Rect
 // [x0,y0,x1,y1]; the overlay projects it into display space with the same
 // pdfRectToDisplay + in-memory-rotation recipe Find words use.
@@ -55,7 +54,7 @@ export interface FormField {
   widgets: FormWidgetPlacement[];
   // signature only: the field already holds a signature (/V present).
   filled?: boolean;
-  // button only (F8): the pushbutton's classified /A action. `reset` runs
+  // button only: the pushbutton's classified /A action. `reset` runs
   // for real; `uri` is SHOWN (this app deliberately opens no external
   // URLs itself); the rest report their kind honestly.
   action?: ButtonAction;

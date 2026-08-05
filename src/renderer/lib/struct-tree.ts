@@ -1,4 +1,4 @@
-// Structure-tree helpers for the Tags + Reading Order panels (§ I.6).
+// Structure-tree helpers for the Tags + Reading Order panels.
 //
 // The engine's get_struct_tree returns the logical structure tree with PATH
 // addressing and each node's DIRECT content references ({page, mcid} /

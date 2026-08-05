@@ -1,7 +1,7 @@
-"""Apply an INVISIBLE OCR text layer (the persistence half of Phase 2m).
+"""Apply an INVISIBLE OCR text layer — the persistence half of OCR.
 
 Recognition happens in ``recognize.py`` — the bundled native Tesseract run as
-a subprocess (Phase 12 retired the renderer-side tesseract.js worker) — and
+a subprocess (retired the renderer-side tesseract.js worker) — and
 the caller converts the word boxes to PDF user-space rects (the GUI via the
 same displayRectToPdf recipe as redaction/signature placement); this handler
 writes them into the file as an invisible-text overlay so the document

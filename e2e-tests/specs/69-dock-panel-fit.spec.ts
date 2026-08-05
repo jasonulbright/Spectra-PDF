@@ -4,7 +4,7 @@ import { waitForHarness, openByPaths, setView, invokeAppCommand } from '../suppo
 
 const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// Phase 10 slice B2 — the panel-fit AUDIT, automated: every operation panel
+// The panel-fit AUDIT, automated: every operation panel
 // must render inside the dock at its default width with NO horizontal
 // overflow. This measures instead of eyeballing; a panel that outgrows the
 // dock fails by name. (Audit width = the shipped default, 400px; the dock's
@@ -25,7 +25,7 @@ const OPS = [
   'comments', 'preflight', 'links', 'tags', 'readingorder', 'actions',
 ];
 
-describe('dock panel fit (Phase 10 B2)', () => {
+describe('dock panel fit', () => {
   before(async () => {
     await waitForHarness();
     await openByPaths([SAMPLE]);

@@ -53,7 +53,7 @@ interface PropertiesBarProps {
   onReorder: (direction: 'front' | 'back' | 'forward' | 'backward') => void;
   onRecolorGroup: (color: string) => void;
   onRemoveGroup: () => void;
-  /** Shared style edit (rung 2 + the N7 sheets) — the reducer applies each
+  /** Shared style edit (rung 2 + the sheets) — the reducer applies each
    * field only to kinds that carry it. */
   onRestyle: (style: {
     strokeWidth?: number;
@@ -62,7 +62,7 @@ interface PropertiesBarProps {
     lineEndings?: [string, string];
     cloudIntensity?: number;
   }) => void;
-  /** Quarter-turn / mirror for the vertex kinds (N7 residual). */
+  /** Quarter-turn / mirror for the vertex kinds (residual). */
   onRotateFlip: (op: { rotate: RotateDirection } | { flip: FlipAxis }) => void;
   onClose: () => void;
 }
@@ -248,7 +248,7 @@ export function PropertiesBar({
       )}
     </span>
   ) : null;
-  // Rotate/flip (N7 residual): only the vertex kinds — their geometry is
+  // Rotate/flip (residual): only the vertex kinds — their geometry is
   // the point list, so a quarter-turn is exactly representable in the file.
   const anyRotatable = selectedGroup.some(isRotatable);
   const rotateFlip = anyRotatable ? (
@@ -299,7 +299,7 @@ export function PropertiesBar({
       </button>
     </span>
   ) : null;
-  // Kind-specific sheets (N7 residual): endings for the open figures,
+  // Kind-specific sheets (residual): endings for the open figures,
   // intensity for clouds — over the same shared-restyle seam.
   const endingsRef =
     selectedGroup.find(

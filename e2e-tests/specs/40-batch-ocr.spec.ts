@@ -30,7 +30,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
   require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
 ).href;
 
-// Phase 6 — Batch OCR folder mirror (20-phase6-batch-ocr.md § Testing):
+// Batch OCR folder mirror:
 // fixture tree {a/scan.pdf (committed image-only fixture), born.pdf
 // (generated born-digital), broken.pdf (garbage bytes)} → run the dialog's
 // real flow with injected folders → assert the mirror: scanned output
@@ -56,7 +56,7 @@ async function extractAllText(path: string): Promise<string> {
   return out;
 }
 
-describe('batch OCR folder mirror (Phase 6)', () => {
+describe('batch OCR folder mirror', () => {
   let tmp: string;
   let src: string;
   let dest: string;
@@ -119,7 +119,7 @@ describe('batch OCR folder mirror (Phase 6)', () => {
 
     // The mirror on disk: structure recreated; born-digital byte-identical;
     // broken absent; scanned output independently extractable (the same
-    // acceptance bar as 2m: genuinely searchable ON DISK).
+    // acceptance bar as the OCR layer: genuinely searchable ON DISK).
     const mirroredScan = resolve(dest, 'a', 'scan.pdf');
     const mirroredBorn = resolve(dest, 'born.pdf');
     expect(existsSync(mirroredScan)).toBe(true);
@@ -132,7 +132,7 @@ describe('batch OCR folder mirror (Phase 6)', () => {
     const originalText = (await extractAllText(resolve(src, 'a', 'scan.pdf'))).trim();
     expect(originalText).toBe('');
 
-    // Issue #1 request 4: the run leaves a durable record. The dialog's report
+    // The run leaves a durable record. The dialog's report
     // dies with the dialog — this is the artefact that survives it, and the
     // only thing a scheduled run will ever leave behind, so the assertion is
     // on the FILE's contents, not on the on-screen path label.
@@ -168,7 +168,7 @@ describe('batch OCR folder mirror (Phase 6)', () => {
     await $('[data-testid="batch-ocr-cancel"]').click();
   });
 
-  // Issue #1 requests 2 and 3 — the only batch behaviour that MOVES the user's
+  // The only batch behaviour that MOVES the user's
   // own files, so this drives it against a REAL tree and asserts the source
   // folder afterwards, not just the report.
   //
@@ -257,7 +257,7 @@ describe('batch OCR folder mirror (Phase 6)', () => {
     rmSync(tree, { recursive: true, force: true });
   });
 
-  // Issue #1 request 1: a folder mixing English and French should not need two
+  // A folder mixing English and French should not need two
   // passes. Several languages are recognized TOGETHER (Tesseract loads each
   // model); this pins that the picker actually holds a set rather than
   // behaving like the single-select it replaced.

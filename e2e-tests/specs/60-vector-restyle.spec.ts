@@ -5,7 +5,7 @@ import { expect } from '@wdio/globals';
 import { PDFDocument, rgb } from 'pdf-lib';
 import { waitForHarness, openByPaths, getState, invokeAppCommand } from '../support/harness.js';
 
-// Phase 9.D3 — recolour / re-width a vector object. Driven via the harness
+// Recolour / re-width a vector object. Driven via the harness
 // restyle bridge; asserted via the generation-tagged reindex + the re-listed
 // fill/stroke/lineWidth.
 
@@ -67,7 +67,7 @@ async function waitForReindexed(
   );
 }
 
-describe('vector-object restyle (Phase 9.D3)', () => {
+describe('vector-object restyle', () => {
   let tmp: string;
   let pdfPath: string;
 

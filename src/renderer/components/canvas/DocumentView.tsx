@@ -52,8 +52,8 @@ import { rulerTicks, type RulerTick } from '../../lib/rulers';
 import { DEFAULT_MEASURE_SCALE, measureUnitsPerPoint } from '../../lib/measure';
 import { tChrome, tNumber } from '../../i18n';
 
-// The continuous reading view (Phase 4 M4, § 6): one document, a single
-// vertical column of the SAME PageCells the board uses (§ 6.2 — the reuse
+// The continuous reading view: one document, a single
+// vertical column of the SAME PageCells the board uses (the reuse
 // seam), laid out by a plain scroller with a scalar zoom instead of the d3
 // world transform. Every tool works here because the cells are identical; the
 // d3 camera and page-reorder drag stay Organize-view-only. Virtualized: only
@@ -76,7 +76,7 @@ const FIT_WIDTH_GUTTER = 16;
 // own pointer events inside PageCell. Stable identity preserves PageCell's memo.
 const NO_PAGE_POINTER = (): void => {};
 
-// N11 slice B: the ruler strips' thickness, in CSS pixels. Published to CSS as
+// The ruler strips' thickness, in CSS pixels. Published to CSS as
 // `--ruler-size` on the frame so the grid tracks and the drag preview's offset
 // cannot drift apart — one number, one owner.
 const RULER_PX = 18;
@@ -89,7 +89,7 @@ export interface DocumentViewProps {
   pageLayout?: PageLayout;
   /** Two-up only: show the first page alone (the book/cover convention). */
   twoUpCover?: boolean;
-  /** Rotate View's render-only quarter-turn for this file (M6.1); composed
+  /** Rotate View's render-only quarter-turn for this file; composed
    * with each page's own pending rotation for every display/capture read. */
   viewRotation?: 0 | 90 | 180 | 270;
   proxies: Map<string, PDFDocumentProxy>;
@@ -117,10 +117,10 @@ export interface DocumentViewProps {
   ) => void;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
-  /** N11 slice A: per-page snap geometry + the live snap preferences. */
+  /** Per-page snap geometry + the live snap preferences. */
   snapGeomByPage: ReadonlyMap<string, import('../../lib/snap-geometry').PageSnapGeometry>;
   snapSettings: import('../../lib/snap-settings').SnapSettings;
-  /** N11 slice B: ruler guides for this document, grouped by page. */
+  /** Ruler guides for this document, grouped by page. */
   guidesByPage: ReadonlyMap<string, PageGuide[]>;
   onAddGuide: (pageId: string, axis: GuideAxis, pos: number, rotationAtDraw: 0 | 90 | 180 | 270) => void;
   onMoveGuide: (guideId: string, axis: GuideAxis, pos: number, rotationAtDraw: 0 | 90 | 180 | 270) => void;
@@ -128,7 +128,7 @@ export interface DocumentViewProps {
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
-  /** P7 multi-select: the group frame context (N>1) + its one-op commit. */
+  /** Multi-select: the group frame context (N>1) + its one-op commit. */
   editImageGroup: import('./ImageGroupOverlay').ImageGroupCtx | null;
   onCommitImageGroupTransform: (
     pageId: string,
@@ -136,10 +136,10 @@ export interface DocumentViewProps {
   ) => void;
   vectorTransform: EditImageTransformCtx | null;
   onCommitVectorTransform: (pageId: string, index: number, matrix: number[]) => void;
-  /** 9.C3 crop mode: armed flag + unit-space rect commit. */
+  /** Crop mode: armed flag + unit-space rect commit. */
   imageCropArmed: boolean;
   onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
-  /** P7 slice E: the overlay's gradient-mask dot commit. */
+  /** The overlay's gradient-mask dot commit. */
   onCommitImageMask: (
     pageId: string,
     index: number,
@@ -190,9 +190,9 @@ export interface DocumentViewProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearNewFieldPlacement: () => void;
-  // Add-text placement (9.A2).
+  // Add-text placement.
   addTextPlacement: SignaturePlacement | null;
-  /** P5b: the pending crop rectangle, drawn on the page. */
+  /** The pending crop rectangle, drawn on the page. */
   cropPlacement: SignaturePlacement | null;
   onClearCropPlacement: () => void;
   onSetCropRect?: (
@@ -231,7 +231,7 @@ export interface DocumentViewProps {
   onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
   onRegroupCountMarks: (docId: string, pageId: string, annotationIds: string[], group: import('../../lib/count-marks').CountGroup) => void;
-  // N3 marquee zoom applied locally — the split layer syncs sibling panes'
+  // Marquee zoom applied locally — the split layer syncs sibling panes'
   // zoom to the returned value (quad zoom must stay equal).
   onMarqueeZoomApplied?: (zoom: number) => void;
   onAddRedactionMark: (
@@ -270,7 +270,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
 
-  // Rotate View (M6.1): every DISPLAY read in this component sees the page at
+  // Rotate View: every DISPLAY read in this component sees the page at
   // its EFFECTIVE rotation — (page.rotation + viewRotation), composed once
   // here. The page-tier `doc.pages` stays what commits; only what renders and
   // captures turns. Sizing MUST read these too (the row wrapper, the widest
@@ -341,14 +341,14 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // aspect), so offsets are a simple arithmetic series — the virtualizer needs
   // only counts, and centerOn/current-page are O(1).
   const contentHeight = rowCount * rowH;
-  // P12 (brief 36): the scaled-spacer scroll map. The DOM spacer caps at
+  // The scaled-spacer scroll map. The DOM spacer caps at
   // SAFE_ELEMENT_EXTENT and rows translate under it; every document-space
   // consumer below reads VIRTUAL offsets, and only the DOM write/read
   // converts. k === 1 (any doc under the cap) is the bit-for-bit identity.
   const smap = useMemo(() => scrollMapFor(contentHeight, viewportH), [contentHeight, viewportH]);
   const virtualTop = virtualTopOf(scrollTop, smap);
 
-  // The scrollable WIDTH (M4.1f). Without a real width the spacer is only as
+  // The scrollable WIDTH. Without a real width the spacer is only as
   // wide as the pane, and a page wider than it — routine at Actual Size on
   // anything landscape or large-format — is clipped symmetrically by the
   // centring with no way to reach its edges, making "Actual Size" useless on
@@ -435,7 +435,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     // Row metrics for the geometric half; the anchor's bounds check needs the
     // REAL page count (anchor.page is a PAGE number, which in two-up exceeds
     // the row count for most of the document).
-    // P12: document math reads VIRTUAL offsets (identity for docs under the
+    // Document math reads VIRTUAL offsets (identity for docs under the
     // element cap). Anchors record virtual too, so the comparison is uniform.
     const mRows = {
       scrollTop: virtualTop,
@@ -490,7 +490,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       if (idx < 0 || !el) return;
       // Center the page's ROW in the viewport when it's shorter than the pane;
       // otherwise align its top. The target is VIRTUAL; the DOM write converts
-      // (P12 — identity for docs under the element cap).
+      // (identity for docs under the element cap).
       const top = rowOfPage(idx, pageLayout, twoUpCover) * rowH;
       const offset = Math.max(0, (el.clientHeight - pageHeight) / 2);
       el.scrollTo({ top: realTopFor(Math.max(0, top - offset), smap), behavior: 'auto' });
@@ -500,7 +500,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       // a boundary-adjacent page into the boundary page itself. `viewportH` is
       // the STATE the reporter compares against — not the live `el.clientHeight`
       // used for the offset above — so the two can never disagree and silently
-      // stop the anchor from ever holding. Recorded VIRTUAL (P12), the space
+      // stop the anchor from ever holding. Recorded VIRTUAL, the space
       // the reporter's metrics carry.
       jumpAnchorRef.current = {
         scrollTop: virtualTopOf(el.scrollTop, smap),
@@ -541,7 +541,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     return pages[Math.min(pages.length, Math.max(1, currentPageRef.current)) - 1] ?? null;
   }, []);
 
-  // Hand mode's drag-scroll (M6.2). Window-level move/up listeners — the
+  // Hand mode's drag-scroll. Window-level move/up listeners — the
   // canvas pattern — with the full usePageDrag session hygiene, all
   // regression: a `blur` teardown (release outside the window otherwise
   // leaks the listeners), an unmount teardown (Ctrl+Tab mid-drag unmounts
@@ -622,7 +622,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     setZoom(clampZoom(z, rowCountRef.current, widestAtBaseRef.current));
   }, [currentPage]);
 
-  // N3 marquee zoom: zoom so the banded page region fills the pane, then
+  // Marquee zoom: zoom so the banded page region fills the pane, then
   // scroll it centered. The scroll runs after the new layout exists (double
   // rAF), computed analytically from the applied zoom — same row math the
   // virtualizer uses. Returns the applied zoom so the split layer can sync
@@ -651,7 +651,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           const rowHz = pageH + PAGE_GAP * z;
           const row = rowOfPage(idx, pageLayout, twoUpCover);
           const rowTop = row * rowHz;
-          // P12: the target is VIRTUAL — convert through the map AT THE NEW
+          // The target is VIRTUAL — convert through the map AT THE NEW
           // ZOOM (this runs two frames later, but the map depends only on the
           // new extent and the live viewport, both known here).
           const mapZ = scrollMapFor(rowCountRef.current * rowHz, elc.clientHeight);
@@ -684,7 +684,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     ref,
     (): CanvasHandle => ({
       // Every zoom path goes through clampZoom — the view's range plus the
-      // WIDTH-axis element bound (maxZoomFor). P12: the height axis no longer
+      // WIDTH-axis element bound (maxZoomFor). The height axis no longer
       // bounds zoom at all — the spacer caps and rows translate under it
       // (scrollMapFor), so presets are honest at any page count.
       zoomIn: () => setZoom(clampZoom(zoomRef.current * ZOOM_STEP, rowCountRef.current, widestAtBaseRef.current)),
@@ -705,14 +705,14 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     [centerOn, actualSize, fitWidth, zoomToPageRect],
   );
 
-  // ── Rulers and guides (N11 slice B) ───────────────────────────────────
+  // ── Rulers and guides ─────────────────────────────────────────────────
   // The rulers read against the page nearest the top of the viewport, and
   // their origin is that page's own top-left corner — a ruler that measured
   // the SCROLLER would tell you where you are in a pane, which is not a
   // quantity anyone drafting cares about.
   //
-  // The origin comes from a DOM rect, never from `row * rowH`. That is the P12
-  // rule taken at its word: past the element cap the spacer is scaled and rows
+  // The origin comes from a DOM rect, never from `row * rowH`. That is the
+  // scaled-spacer rule taken at its word: past the element cap the spacer is scaled and rows
   // TRANSLATE under it, so a document-space offset is not where the page is —
   // whereas a rect is right at every scroll position, on every document, by
   // construction.
@@ -871,7 +871,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     // MUST be the same widths PageCell renders (exact aspect — `textLayer` is
     // set below). This row is what CENTRES its content, so a divergent formula
     // offsets it in the pane and over-reports the scrollable width — the
-    // round-2 drift, relocated one level up (regression). Two-up: the row
+    // same drift, relocated one level up (regression). Two-up: the row
     // width is both cells + the inner gap; cells sit flex-side-by-side inside.
     const width =
       rowPageIdxs.reduce((acc, i) => acc + displayWidthAt(viewPages[i], pageHeight), 0) +
@@ -1021,7 +1021,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
         className="docview-row"
         style={{
           position: 'absolute',
-          // P12: rows sit at their virtual offset, corrected by the window's
+          // Rows sit at their virtual offset, corrected by the window's
           // slide (scrollTop − virtualTop). Under the cap the correction is
           // EXACTLY 0 (k = 1), so this is the shipped `r * rowH` bit-for-bit;
           // past it, the rendered window rides with the real scroll position
@@ -1119,7 +1119,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
         tabIndex={0}
         onScroll={onScroll}
         style={props.tool === 'hand' ? { cursor: 'grab' } : undefined}
-        // Hand (M6.2): drag-scroll the reading pane. CAPTURE phase, so the
+        // Hand: drag-scroll the reading pane. CAPTURE phase, so the
         // press never reaches a page cell — hand must not select, band, or
         // start an edit; it only holds the paper.
         onPointerDownCapture={props.tool === 'hand' ? handleHandDown : undefined}

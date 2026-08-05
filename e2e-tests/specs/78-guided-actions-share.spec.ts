@@ -12,7 +12,7 @@ import {
   setReactSelectValue,
 } from '../support/harness.js';
 
-// § parity-map 2 — guided actions slice 4: actions travel as FILES. Export
+// Guided actions: actions travel as FILES. Export
 // writes the CLI-consumable {name, steps} shape and can never carry a
 // password (secrets stripped by construction); import validates against the
 // catalog BY NAME, mints a fresh id, and the imported action runs through
@@ -68,7 +68,7 @@ async function importViaBridge(path: string): Promise<string | null> {
   }, path)) as string | null;
 }
 
-describe('guided actions — export/import as files (slice 4)', () => {
+describe('guided actions — export/import as files', () => {
   before(async () => {
     // Scratch lives INSIDE the app's static fs scope ($TEMP/spectrapdf/**):
     // the bridge injects paths without a native dialog, so the runtime scope

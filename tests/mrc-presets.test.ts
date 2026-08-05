@@ -1,4 +1,4 @@
-// O8 slice D/E — lib/mrc-presets.ts.
+// Lib/mrc-presets.ts.
 //
 // There is no DOM test environment, so the panel and the batch dialog cannot
 // be rendered. Everything they DECIDE about MRC lives in this module for that

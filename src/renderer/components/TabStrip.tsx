@@ -9,7 +9,7 @@ import { ChromeIcon } from './chrome-icons';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 
-// The tab strip (Phase 4 M2, § 3.1): Home | Tools | one tab per open
+// The tab strip: Home | Tools | one tab per open
 // document. A 1:1 evolution of the old Home/Tools/Canvas switcher + the
 // Tools-rail file list (both retire). Doc tabs carry a dirty dot, a close ×
 // (also middle-click), and an overflow dropdown when they don't fit.
@@ -25,7 +25,7 @@ const activeCls = 'bg-neutral-900 text-white';
 const idleCls = 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800';
 
 export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
-  // N12: re-render on language change; labels resolve via tChrome.
+  // Re-render on language change; labels resolve via tChrome.
   useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
@@ -76,7 +76,7 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
         <ChromeIcon icon="home" size={14} className="opacity-80" />
         {tChrome('chrome.tabs.home')}
       </button>
-      {/* The Tools pseudo-tab retired in Phase 10 slice C: ops panels live in
+      {/* The Tools pseudo-tab is retired: ops panels live in
           the right dock (Shift+F4), the tile grid lives on Home. */}
       <div ref={laneRef} className="flex items-stretch overflow-x-auto app-tab-lane">
         {docPaths.map((path, i) => {

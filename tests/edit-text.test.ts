@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { fetchTextRuns, unencodableChars } from '../src/renderer/lib/edit-text';
 
-describe('unencodableChars (7.2 live validation)', () => {
+describe('unencodableChars (live validation)', () => {
   it('empty when fully expressible', () => {
     expect(unencodableChars('Hello', 'Helo')).toEqual([]);
   });
@@ -49,7 +49,7 @@ describe('fetchTextRuns projection', () => {
     expect(runs[1].reason).toMatch(/Type3/);
   });
 
-  it('9-§I.0-S8: filters out clipped-away runs, preserving engine index', async () => {
+  it('Filters out clipped-away runs, preserving engine index', async () => {
     const runs = await fetchTextRuns(
       async () => ({
         runs: [
@@ -68,7 +68,7 @@ describe('fetchTextRuns projection', () => {
   });
 });
 
-describe('ligature-aware validation (9.B5)', () => {
+describe('ligature-aware validation', () => {
   it('accepts a char reachable only through a sequence (engine-order mirror)', () => {
     // 'i' is NOT single-encodable; "fi" is a listed sequence. A
     // singles-first walk would false-refuse — sequences match first.

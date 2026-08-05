@@ -1,7 +1,7 @@
 import { expect } from '@wdio/globals';
 import { waitForHarness, getState } from '../support/harness.js';
 
-// Phase 4 M2: the workbench frame — menu bar, main toolbar, tab strip — and
+// The workbench frame — menu bar, main toolbar, tab strip — and
 // the Home tab replace the old header/switcher/WelcomeScreen. The app name
 // lives in the native title bar; the version lives in Help ▸ About.
 

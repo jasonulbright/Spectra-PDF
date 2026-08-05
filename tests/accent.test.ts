@@ -1,4 +1,4 @@
-// Accent derivation (Phase 3b, contrast-corrected in the P21 WCAG round):
+// Accent derivation (contrast-corrected in the WCAG round):
 // Windows accents range from dark blues to light yellows. Text-on-accent is
 // pure WCAG arithmetic (white holds 4.5:1 only up to L 0.1833 — the old
 // 0.4 "when Windows flips" threshold shipped white-on-cyan at 2.45:1), and

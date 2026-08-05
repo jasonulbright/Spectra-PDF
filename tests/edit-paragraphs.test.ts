@@ -32,7 +32,7 @@ import {
   seedSpanSizes,
 } from '../src/renderer/lib/edit-paragraphs';
 
-describe('computeEditSpans (7.5 caret inheritance)', () => {
+describe('computeEditSpans (caret inheritance)', () => {
   const spans = [
     { start: 0, end: 6, run: 0 }, // "Hello "
     { start: 6, end: 11, run: 1 }, // "World"
@@ -127,7 +127,7 @@ describe('paragraphUnencodable (per-span validation)', () => {
   });
 });
 
-describe('relaxUnencodableSpans (T21 position-aware relaxation)', () => {
+describe('relaxUnencodableSpans (position-aware relaxation)', () => {
   const inv = new Map([
     [0, 'ab'],
     [1, 'cdé'],
@@ -208,7 +208,7 @@ describe('sanitizeParagraphInput', () => {
   });
 });
 
-describe('hexToRgb (A1 colour control)', () => {
+describe('hexToRgb (colour control)', () => {
   it('parses #rrggbb to 0-1 floats', () => {
     expect(hexToRgb('#ff0000')).toEqual([1, 0, 0]);
     expect(hexToRgb('#000000')).toEqual([0, 0, 0]);
@@ -277,7 +277,7 @@ describe('fetchEditTextListing projection', () => {
     expect(out.paragraphs[0].rect.x).toBeCloseTo(72 / 612);
   });
 
-  it('9-§I.0-S8: skips clipped paragraphs and filters clipped run boxes', async () => {
+  it('Skips clipped paragraphs and filters clipped run boxes', async () => {
     const withClipped = {
       runs: [
         { index: 0, text: 'Hello', rect: [72, 700, 100, 712] as [number, number, number, number], nested: false, editable: true, reason: null, encodable: 'Helo' },
@@ -303,7 +303,7 @@ describe('fetchEditTextListing projection', () => {
     expect(out.runBoxes.map((r) => r.index)).toEqual([1]);
   });
 
-  it('threads the writing mode; absent means horizontal (9.B4b)', async () => {
+  it('threads the writing mode; absent means horizontal', async () => {
     const vertical = {
       ...listing,
       paragraphs: [{ ...listing.paragraphs[0], vertical: true }],
@@ -325,7 +325,7 @@ describe('fetchEditTextListing projection', () => {
     expect(plain.paragraphs[0].vertical).toBe(false);
   });
 
-  it('threads the orientation; absent or unknown means horizontal (9.T13)', async () => {
+  it('threads the orientation; absent or unknown means horizontal', async () => {
     // The frame decides the resize grips' direction and the box-left
     // origin, so an engine that omits it must land on the IDENTITY map —
     // the shipped geometry — rather than leaving the field undefined.
@@ -362,7 +362,7 @@ describe('fetchEditTextListing projection', () => {
     expect(odd.paragraphs[0].orientation).toBe('horizontal');
   });
 
-  it('threads the bidi base direction; absent means left-to-right (9.T3)', async () => {
+  it('threads the bidi base direction; absent means left-to-right', async () => {
     // The editor sets the text box's `dir` from this, so an engine that
     // omits it must land on 'ltr' rather than leaving the field undefined —
     // a right-to-left box is unusable for left-to-right text and vice versa.
@@ -404,7 +404,7 @@ describe('fetchEditTextListing projection', () => {
   });
 });
 
-describe('utf16ToCodePointIndex (A4 split caret domain)', () => {
+describe('utf16ToCodePointIndex (split caret domain)', () => {
   it('is identity for BMP-only text', () => {
     expect(utf16ToCodePointIndex('hello world', 6)).toBe(6);
     expect(utf16ToCodePointIndex('hello', 0)).toBe(0);
@@ -420,7 +420,7 @@ describe('utf16ToCodePointIndex (A4 split caret domain)', () => {
   });
 });
 
-describe('remapRanges (9.A5a — per-span ranges follow the text)', () => {
+describe('remapRanges (per-span ranges follow the text)', () => {
   const R = [{ start: 6, end: 13, color: '#ff0000' }];
 
   it('shifts a range wholly after an insertion by the delta', () => {
@@ -461,7 +461,7 @@ describe('remapRanges (9.A5a — per-span ranges follow the text)', () => {
   });
 });
 
-describe('applySpanColor / mergeSpanColors (9.A5a selection → colour)', () => {
+describe('applySpanColor / mergeSpanColors (selection → colour)', () => {
   it('adds a colour to an empty set', () => {
     expect(applySpanColor([], 2, 5, '#ff0000')).toEqual([{ start: 2, end: 5, color: '#ff0000' }]);
   });
@@ -493,7 +493,7 @@ describe('applySpanColor / mergeSpanColors (9.A5a selection → colour)', () => 
   });
 });
 
-describe('seedSpanColors / styledSegments / spanColorsToStyles (9.A5a)', () => {
+describe('seedSpanColors / styledSegments / spanColorsToStyles', () => {
   it('seeds only spans that differ from the paragraph colour', () => {
     const spans = [
       { start: 0, end: 6, run: 0, color: '#000000' },
@@ -512,7 +512,7 @@ describe('seedSpanColors / styledSegments / spanColorsToStyles (9.A5a)', () => {
     ]);
   });
 
-  it('folds colour AND face independently, segmenting where either changes (A5b)', () => {
+  it('folds colour AND face independently, segmenting where either changes', () => {
     // "Hello world": bold [0,5), red [3,8) — the overlap [3,5) is bold+red.
     expect(
       styledSegments(
@@ -535,7 +535,7 @@ describe('seedSpanColors / styledSegments / spanColorsToStyles (9.A5a)', () => {
   });
 });
 
-describe('mergeSpanColors overlap flattening (9.A5a round-32 HIGH)', () => {
+describe('mergeSpanColors overlap flattening', () => {
   it('resolves an overlap to disjoint runs, later-start wins (preview==commit)', () => {
     // The lens repro: two same-extent ranges overlapping after a retype
     // must flatten so the backdrop preview and the engine fold agree.
@@ -582,7 +582,7 @@ describe('mergeSpanColors overlap flattening (9.A5a round-32 HIGH)', () => {
   });
 });
 
-describe('per-span FACE helpers (9.A5b)', () => {
+describe('per-span FACE helpers', () => {
   it('applySpanFace paints a weight onto a range, clipping overlaps', () => {
     const out = applySpanFace([], 2, 6, { bold: true, italic: false });
     expect(out).toEqual([{ start: 2, end: 6, bold: true, italic: false }]);
@@ -624,7 +624,7 @@ describe('per-span FACE helpers (9.A5b)', () => {
   });
 });
 
-describe('per-span SIZE helpers (9.A5c)', () => {
+describe('per-span SIZE helpers', () => {
   it('applySpanSize paints a size onto a range, clipping overlaps', () => {
     const out = applySpanSize([], 2, 6, 24);
     expect(out).toEqual([{ start: 2, end: 6, size: 24 }]);
@@ -650,7 +650,7 @@ describe('per-span SIZE helpers (9.A5c)', () => {
     ]);
   });
 
-  it('styledSegments carries the REAL per-span size (9.A5-tails-b)', () => {
+  it('styledSegments carries the REAL per-span size', () => {
     // Was: the segment only carried a `sized` flag, because the mirror
     // overlay could not render a different metric without desyncing the
     // textarea's caret. The contentEditable surface renders the size itself.
@@ -685,7 +685,7 @@ describe('per-span SIZE helpers (9.A5c)', () => {
   });
 });
 
-describe('9.A5-tails-b — caret code-point mapping over styled segments', () => {
+describe('Caret code-point mapping over styled segments', () => {
   const segs = [{ text: 'Hello ' }, { text: 'big' }, { text: ' world' }];
 
   it('maps a position inside a segment to an absolute code-point index', () => {
@@ -725,10 +725,10 @@ describe('9.A5-tails-b — caret code-point mapping over styled segments', () =>
   });
 });
 
-describe('9.A5-tails-a — per-segment face toggle + display seeds', () => {
+describe('Per-segment face toggle + display seeds', () => {
   describe('toggleSpanFaceAxis', () => {
     it('flips ONE axis per segment, keeping each segment family + other axis', () => {
-      // The round-33 LOW's exact shape: a selection spanning two DIFFERENT
+      // The the exact shape: a selection spanning two DIFFERENT
       // faces. The shipped toggle collapsed both to the start's face.
       const existing = [
         { start: 0, end: 5, bold: true, italic: false, family: 'serif' as const },
@@ -860,7 +860,7 @@ describe('9.A5-tails-a — per-segment face toggle + display seeds', () => {
   });
 });
 
-describe('9.A5-tails-a — setSpanFaceFamily (the family select shared the collapse bug)', () => {
+describe('setSpanFaceFamily (the family select shared the collapse bug)', () => {
   it('changes family per segment, keeping each segment weight and slant', () => {
     const existing = [
       { start: 0, end: 5, bold: true, italic: false, family: 'serif' as const },
@@ -879,7 +879,7 @@ describe('9.A5-tails-a — setSpanFaceFamily (the family select shared the colla
   });
 });
 
-describe('9.A5-tails-b — segmentsToHtml (the rich surface renders ONE html string)', () => {
+describe('segmentsToHtml (the rich surface renders ONE html string)', () => {
   const base = { basePx: 14, baseSize: 12, rev: 3 };
 
   it('escapes untrusted paragraph text', () => {
@@ -936,7 +936,7 @@ describe('9.A5-tails-b — segmentsToHtml (the rich surface renders ONE html str
   });
 });
 
-describe('9.A5-tails-a — display seeds must NEVER leak into sent overrides (round-40 CRITICAL)', () => {
+describe('Display seeds must NEVER leak into sent overrides', () => {
   // The review repro: a paragraph of "Plain " (Helvetica) + "bold"
   // (Helvetica-Bold). The listing seeds [6,10) bold. The user selects ONLY
   // "Plain " (0-6) and clicks Italic. Before the preserve/view split, the
@@ -981,7 +981,7 @@ describe('9.A5-tails-a — display seeds must NEVER leak into sent overrides (ro
   });
 });
 
-describe('9.K2 OpenType features (small caps / alternates)', () => {
+describe('OpenType features (small caps / alternates)', () => {
   it('spanFacesToStyles emits small_caps on the face entry', () => {
     const out = spanFacesToStyles([{ start: 0, end: 5, bold: false, italic: false, smallCaps: true }]);
     expect(out).toEqual([{ start: 0, end: 5, bold: false, italic: false, small_caps: true }]);

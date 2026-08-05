@@ -1,4 +1,4 @@
-"""Autotag (P20): heuristic structure for untagged PDFs — roles by font
+"""Autotag: heuristic structure for untagged PDFs — roles by font
 size, figures from image XObjects, full marked-content + ParentTree wiring,
 loud refusals, and the no-damage pin (extraction identical before/after)."""
 

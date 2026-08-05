@@ -8,13 +8,13 @@ import { TEST_HARNESS_ENABLED, registerDocumentJsHandler } from '../testHarness'
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 
-// Phase 9.S6 — the "Document JavaScripts" editor. Reads and rewrites the
+// The "Document JavaScripts" editor. Reads and rewrites the
 // catalog's /Names /JavaScript name tree as TEXT. The app NEVER executes the
-// scripts (DECISIONS #33) — this is an editor, not an interpreter. Saving
+// scripts — this is an editor, not an interpreter. Saving
 // routes through the undoable in-place workspace flow (like every content
 // edit), so the change lands on the working copy and is written to disk on
 // Save. No Monaco: a plain monospace textarea keeps the dependency footprint
-// flat (DECISIONS #4), and document JavaScript is edited, not run, here.
+// flat, and document JavaScript is edited, not run, here.
 
 interface DocScript {
   name: string;
@@ -22,7 +22,7 @@ interface DocScript {
 }
 
 export function DocumentJsPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();

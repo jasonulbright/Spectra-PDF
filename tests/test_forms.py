@@ -1,4 +1,4 @@
-"""Tests for the engine-side AcroForm read/fill/flatten (Phase 2l — the CLI
+"""Tests for the engine-side AcroForm read/fill/flatten (the CLI
 parity implementation; the GUI path is renderer-side pdf-lib)."""
 
 import re
@@ -17,7 +17,7 @@ FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 # radio group, dropdown. Cross-tool input for the engine implementation.
 PDFLIB_FORM = os.path.join(FIXTURES_DIR, "form-pdflib.pdf")
 
-# The vendored fallback fonts (Rust `get_edit_font_path` at runtime); FC1's
+# The vendored fallback fonts (Rust `get_edit_font_path` at runtime); the
 # Unicode-appearance tests need them and skip when the bundle isn't provisioned.
 FONTS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources", "fonts"
@@ -119,9 +119,9 @@ class TestReadFormFields:
         assert r["fields"] == [] and r["count"] == 0
 
     def test_fc3_widgets_carry_page_and_rect(self, tmp_dir):
-        # FC3: each field reports its widgets' 0-based page + normalized rect —
+        # Each field reports its widgets' 0-based page + normalized rect —
         # incl. the NESTED typed-terminal kids (person.first/last), which the
-        # engine already enumerates (S6) and now list WITH geometry (the shape
+        # engine already enumerates and now list WITH geometry (the shape
         # the on-canvas overlay needs when the read routes through the engine).
         src = os.path.join(tmp_dir, "raw.pdf")
         _make_raw_form(src)
@@ -155,7 +155,7 @@ class TestReadFormFields:
         assert f2["widgets"] == [{"page": 1, "rect": [10.0, 20.0, 110.0, 44.0], "hidden": False}]
 
     def test_fc4_multiselect_optionlist(self, tmp_dir):
-        # FC4: a LIST value on a multi-select list box stores /V as the export
+        # A LIST value on a multi-select list box stores /V as the export
         # ARRAY + /I as the sorted selected indices, regenerates an appearance,
         # and reads back the full selection. A single string still works.
         src = os.path.join(tmp_dir, "ms.pdf")
@@ -316,7 +316,7 @@ class TestReadFormFields:
         ]
 
     def test_fc4b_widget_hidden_flag(self, tmp_dir):
-        # FC4b: a widget with /F Hidden (bit 2) or NoView (bit 6) reports
+        # A widget with /F Hidden (bit 2) or NoView (bit 6) reports
         # hidden=True — the overlay offers no input where the raster shows
         # nothing. AF_HIDDEN = 1<<1 = 2.
         out = os.path.join(tmp_dir, "hid.pdf")
@@ -335,7 +335,7 @@ class TestReadFormFields:
         assert read_form_fields(out)["fields"][0]["widgets"][0]["hidden"] is True
 
     def test_fc4b_radio_widget_maps_to_its_option(self, tmp_dir):
-        # FC4b: each radio widget reports the DISPLAY option its on-state
+        # Each radio widget reports the DISPLAY option its on-state
         # selects — /Opt-indexed on-states ('0'/'1') map through /Opt, so the
         # overlay knows which option a widget commits.
         out = os.path.join(tmp_dir, "radio.pdf")
@@ -373,7 +373,7 @@ class TestReadFormFields:
         assert [w.get("option") for w in f["widgets"]] == ["Red", "Blue"]
 
     def test_fc4b_signature_filled_flag(self, tmp_dir):
-        # FC4b: a signature field reports filled=True only when /V is present.
+        # A signature field reports filled=True only when /V is present.
         out = os.path.join(tmp_dir, "sig.pdf")
         pdf = pikepdf.new()
         page = pdf.add_blank_page(page_size=(300, 300))
@@ -480,7 +480,7 @@ class TestFillFormFields:
 
     @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
     def test_fc1_unicode_value_embeds_font_and_round_trips(self, tmp_dir):
-        # FC1 (§I.0 S3): a Cyrillic+Greek value (outside WinAnsi) fills via an
+        # A Cyrillic+Greek value (outside WinAnsi) fills via an
         # EMBEDDED Type0/Identity-H font when font_dir is given, instead of
         # being refused; the value round-trips and the appearance shows a
         # hex-encoded string against the embedded font.
@@ -510,7 +510,7 @@ class TestFillFormFields:
 
     @pytest.mark.skipif(not _HAS_FONTS, reason="bundled fonts not provisioned")
     def test_fc1_cjk_fills_via_the_cjk_face(self, tmp_dir):
-        # T5 INVERSION (was: refusal). The value-driven CJK step lands a
+        # INVERSION (was: refusal). The value-driven CJK step lands a
         # CJK form value on Noto Sans CJK when the bundle carries it; the
         # refusal survives only when the CJK faces are absent.
         cjk_present = os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf"))
@@ -810,7 +810,7 @@ class TestReviewFindings2l:
 
 def _make_button_form(path: str) -> None:
     """Text field WITH /DV, checkbox with /DV on, and pushbuttons carrying
-    the /A kinds the F8 overlay classifies (URI / ResetForm / JavaScript)."""
+    the /A kinds the overlay classifies (URI / ResetForm / JavaScript)."""
     pdf = pikepdf.new()
     page = pdf.add_blank_page(page_size=(400, 400))
     helv = pdf.make_indirect(
@@ -875,7 +875,7 @@ def _make_button_form(path: str) -> None:
 
 
 class TestButtonActionsAndReset:
-    """F8 — pushbutton /A classification + the ResetForm engine op."""
+    """Pushbutton /A classification + the ResetForm engine op."""
 
     def test_read_reports_button_actions(self, tmp_dir):
         src = os.path.join(tmp_dir, "b.pdf")
@@ -939,7 +939,7 @@ def _drawn_gids(pdf_path, content: str):
     """The GLYPH ids the content stream actually draws, resolved through the
     embedded font's /CIDToGIDMap.
 
-    9.T25: a shaped subset addresses glyphs by CID, not by glyph id — several
+    A shaped subset addresses glyphs by CID, not by glyph id — several
     CIDs may point at ONE glyph, which is how a base glyph spells one cluster
     under one code and a different cluster under another. A test that wants to
     know which GLYPHS were drawn therefore has to go through the map;
@@ -973,7 +973,7 @@ def _contains_run(haystack, needle) -> bool:
 
 
 class TestRightToLeftFill:
-    """9.T25c — right-to-left form values fill instead of being refused."""
+    """Right-to-left form values fill instead of being refused."""
 
     AR = "مرحبا بالعالم"
     HE = "שלום עולם"

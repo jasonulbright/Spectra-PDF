@@ -1,5 +1,5 @@
 """Per-run text measurement — the ONE geometry authority for the content
-walkers (F15 slice A).
+walkers.
 
 Until this module existed there were TWO answers to "how wide is this show
 operator": `text_runs.py` decoded the run through its font and summed the real
@@ -239,7 +239,7 @@ def show_bytes(operator: str, operands: list) -> bytes:
 
 def _spaces_in(data: bytes, cap: FontCapability) -> int:
     # Tw applies to the SINGLE-BYTE code 32 only (spec) — never CID fonts,
-    # and never a multi-byte code that merely CONTAINS 0x20 (9.T10: a
+    # and never a multi-byte code that merely CONTAINS 0x20 (a
     # Shift-JIS trail byte can be 0x20-adjacent, so counting raw bytes would
     # invent word spacing mid-character).
     if not cap.single_byte_codes():
@@ -287,12 +287,12 @@ class ShowItem(NamedTuple):
 def show_items(
     operator: str, operands: list, cap: FontCapability, state: GraphicsTextState
 ) -> list[ShowItem]:
-    """A show operator decomposed per CODE (F15 slice B).
+    """A show operator decomposed per CODE.
 
     The split points are the codespace's own — `FontCapability.codes()` is
     "the ONE place the codespace is interpreted" — so a code is never cut in
     half and a LIGATURE, which is one code spelling several characters, is
-    structurally unsplittable here (T25 rule 2: what a glyph spells is a
+    structurally unsplittable here (rule 2: what a glyph spells is a
     property of the (glyph, cluster) pair, and a caller that re-split decoded
     text could only guess). Caller must have checked `measurable()`; the
     advances are meaningless otherwise.
@@ -303,12 +303,12 @@ def show_items(
 def show_items_from_segments(
     segments: list, cap: FontCapability, state: GraphicsTextState
 ) -> list[ShowItem]:
-    """`show_items` for a caller that already holds the segments (F15 slice C).
+    """`show_items` for a caller that already holds the segments.
 
     The run LISTER's detail channel carries `segments` detached from pikepdf so
     an analysis can outlive the walk; re-deriving them from operands the walk no
     longer has would mean a second decomposition of the same operator, which is
-    exactly the two-answers-to-one-question shape slice A deleted.
+    exactly the two-answers-to-one-question shape this module exists to avoid.
     """
     items: list[ShowItem] = []
     x = 0.0
@@ -336,7 +336,7 @@ def show_clusters(items: list[ShowItem]) -> list[list[int]]:
     """Group `show_items` into the units a split may fall BETWEEN.
 
     A cluster is one advancing glyph plus every zero-advance glyph that follows
-    it and the kerns around them. T25 rules 3 and 4: a combining mark carries
+    it and the kerns around them. A combining mark carries
     its horizontal offset as jump / zero-advance glyph / jump back, so cutting
     between a base and its mark would strand the mark on the wrong side of the
     redaction — and the jump routinely exceeds half a space, which is why the
@@ -410,7 +410,7 @@ def wide_width(
     a NEGATIVE spacing narrows the real run, and ignoring it keeps the estimate
     on the over-covering side. Forward TJ jumps (negative numbers) push the
     run's right edge out and ARE counted; backward ones are ignored for the
-    same reason. This is the R2 fail-closed direction: for a redaction tool the
+    same reason. This is the fail-closed direction: for a redaction tool the
     tolerable error is removing too much."""
     return wide_width_from_segments(_show_segments(operator, operands), cap, state)
 
@@ -437,7 +437,7 @@ def wide_width_from_segments(
 
 def _child_state(base_ctm, parent: Optional[GraphicsTextState]) -> GraphicsTextState:
     """A form's stream starts with the INVOKING stream's text parameters —
-    font, size, leading, Tz, Tc/Tw (and 7.5's Tr/Ts/colors) are graphics
+    font, size, leading, Tz, Tc/Tw, Tr/Ts and colours are graphics
     state a form inherits at its Do (the _redact_form rule); tm/tlm reset
     per stream."""
     if parent is None:

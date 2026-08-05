@@ -1,4 +1,4 @@
-// The ui slice (Phase 4 M1): view/tool/selection actions, the selection
+// The ui slice: view/tool/selection actions, the selection
 // modifier semantics that moved from WorkspaceCanvasView into the reducer,
 // and the buffer-identity invalidation that moved with them.
 import { describe, expect, it } from 'vitest';
@@ -56,11 +56,11 @@ const select = (s: AppState, pageIds: string[], anchor: string | null): AppState
 
 const selected = (s: AppState): string[] => [...s.ui.selectedPageIds].sort();
 
-// M4.1c — per-document focus for the reading view. The board renders every doc
+// Per-document focus for the reading view. The board renders every doc
 // at once, but the reading view renders exactly ONE, and a tab addresses a FILE
 // while a `.pdfx` partitions one file into several documents — so without this
 // the reading view could only ever show a file's FIRST partition.
-describe('ui per-document focus (M4.1c)', () => {
+describe('ui per-document focus', () => {
   // One .pdfx file partitioned into two documents, sharing a path.
   function partitionedState(): AppState {
     const a = makeFile('book.pdfx', 5);
@@ -104,7 +104,7 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(home.ui.focusedDocId).toBeNull();
   });
 
-  // Phase 5 (§ F) FLIPPED this suite's oldest rule. Positional ids are now
+  // This suite's oldest rule is flipped. Positional ids are now
   // GENERATION-TAGGED — a positional reindex can never re-serve an old id —
   // so an id that IS present in the incoming documents can only be the
   // authored-adoption case, where the same id means the same logical
@@ -133,7 +133,7 @@ describe('ui per-document focus (M4.1c)', () => {
   // The historic equal-swap trap, inverted: under adoption the id FOLLOWS
   // its partition to the new slot, so keeping the focus keeps the SAME
   // content (the reading view tracks the partition the user was reading —
-  // the § F payoff). Under the old positional world this exact shape was
+  // the payoff). Under the old positional world this exact shape was
   // the proof that survival was unsound; the generation tag is what
   // retired it.
   it('keeps the focus on a partition that moved slots (its adopted id moved with it)', () => {
@@ -228,9 +228,9 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(reindexed.ui.focusedDocId).toBe('b.pdf#0');
   });
 
-  // M4.1e — the reading position the Pages panel highlights/scroll-follows. It
+  // The reading position the Pages panel highlights/scroll-follows. It
   // is a positional id like every other, so it invalidates on the same triggers
-  // (roadmap § F): a stale one would mis-highlight a different physical page.
+  // a stale one would mis-highlight a different physical page.
   it('tracks the current page and clears it on a tab switch', () => {
     // Start IN doc-land: focusTab short-circuits a no-op switch, so reading
     // position must be established on a real doc tab first.
@@ -247,7 +247,7 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(appReducer(s, { type: 'SET_ACTIVE_FILE', path: 'a.pdf' }).ui.currentPageId).toBeNull();
   });
 
-  // § F flip: a current page whose id SURVIVES the reindex is the adoption
+  // flip: a current page whose id SURVIVES the reindex is the adoption
   // case — same id, same logical page — so the reading position holds. One
   // whose id vanishes (fresh generation) still clears.
   it('keeps the current page when its id survives the reindex; clears when it vanishes', () => {
@@ -291,7 +291,7 @@ describe('ui per-document focus (M4.1c)', () => {
     expect(reindexed.ui.currentPageId).toBe('a.pdf#p1');
   });
 
-  // Selection joins the same survive-or-prune pass (§ F).
+  // Selection joins the same survive-or-prune pass.
   it('prunes the selection to ids the incoming documents still carry', () => {
     const a = makeFile('a.pdf', 3);
     let s = select(twoDocState(), ['a.pdf#p0', 'a.pdf#p2', 'b.pdf#p0'], 'a.pdf#p2');
@@ -348,7 +348,7 @@ describe('ui per-document focus (M4.1c)', () => {
   });
 });
 
-describe('ui tab/tool actions (Phase 4 M2)', () => {
+describe('ui tab/tool actions', () => {
   it('focuses a tab', () => {
     const next = appReducer(twoDocState(), { type: 'UI_FOCUS_TAB', tab: { doc: 'a.pdf' } });
     expect(next.ui.focusedTab).toEqual({ doc: 'a.pdf' });
@@ -391,14 +391,14 @@ describe('ui tab/tool actions (Phase 4 M2)', () => {
   });
 
   it('a non-doc start keeps the tool when focusing Home again (only leaving doc-land resets)', () => {
-    // (Was home↔tools before slice C retired the Tools tab; the invariant —
+    // (Was home↔tools before the Tools tab was retired; the invariant —
     // the reset happens only on LEAVING doc-land — is unchanged.)
     let s = appReducer(twoDocState(), { type: 'UI_SET_TOOL', tool: 'redact' });
     s = appReducer(s, { type: 'UI_FOCUS_TAB', tab: 'home' });
     expect(s.ui.tool).toBe('redact');
   });
 
-  // M4.1g: a document OPENS in the reading view (§ 6.1 — a PDF is something you
+  // A document OPENS in the reading view (a PDF is something you
   // read; the board is the tool you switch to when you want to rearrange it).
   // Pinned so the flip can't be silently reverted: it was held back until every
   // default-flip gate closed, and un-flipping would quietly undo that milestone.
@@ -406,7 +406,7 @@ describe('ui tab/tool actions (Phase 4 M2)', () => {
     expect(initialState.ui.docViewMode).toBe('document');
   });
 
-  it('sets the document view mode (M4) and no-ops on the same mode', () => {
+  it('sets the document view mode and no-ops on the same mode', () => {
     const board = appReducer(initialState, { type: 'UI_SET_DOC_VIEW_MODE', mode: 'organize' });
     expect(board.ui.docViewMode).toBe('organize');
     expect(appReducer(board, { type: 'UI_SET_DOC_VIEW_MODE', mode: 'organize' })).toBe(board); // referential no-op
@@ -460,7 +460,7 @@ describe('recent files', () => {
   });
 });
 
-describe('nav pane (M3)', () => {
+describe('nav pane', () => {
   it('opens on a panel; re-opening the active panel closes (icon-strip toggle)', () => {
     let s = appReducer(initialState, { type: 'UI_OPEN_NAV_PANEL', panel: 'pages' });
     expect(s.ui.navPane).toMatchObject({ open: true, panel: 'pages' });
@@ -555,8 +555,8 @@ describe('UI_SELECT_ALL_PAGES / UI_CLEAR_SELECTION', () => {
   });
 });
 
-describe('selection invalidation on buffer-identity changes (§ F: per-path prune)', () => {
-  // Phase 5: non-authored buffer changes prune ONLY the touched path's
+describe('selection invalidation on buffer-identity changes (per-path prune)', () => {
+  // Non-authored buffer changes prune ONLY the touched path's
   // selection ids (their reindex mints a fresh generation — nothing could
   // survive) and LEAVE other files' selection intact; the authored commit
   // defers entirely to the SET_WORKSPACE_DOCUMENTS survive-or-prune pass
@@ -666,7 +666,7 @@ describe('selection invalidation on buffer-identity changes (§ F: per-path prun
   });
 });
 
-describe('UI_ROTATE_VIEW (M6.1 — Rotate View, render-only)', () => {
+describe('UI_ROTATE_VIEW (Rotate View, render-only)', () => {
   const rotate = (s: AppState, path: string, delta: 90 | 270): AppState =>
     appReducer(s, { type: 'UI_ROTATE_VIEW', path, delta });
 

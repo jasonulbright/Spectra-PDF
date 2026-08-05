@@ -1,4 +1,4 @@
-"""9.T3 — right-to-left paragraph reflow, end to end.
+"""Right-to-left paragraph reflow, end to end.
 
 The fixtures here build RTL pages the way a real producer does: text shaped
 by HarfBuzz and drawn LEFT TO RIGHT in visual order, embedded Identity-H with
@@ -155,7 +155,7 @@ def _drawn_gids(pdf_path, content: str):
     """The GLYPH ids the content stream actually draws, resolved through the
     embedded font's /CIDToGIDMap.
 
-    9.T25: a shaped subset addresses glyphs by CID, not by glyph id — several
+    A shaped subset addresses glyphs by CID, not by glyph id — several
     CIDs may point at ONE glyph, which is how a base glyph spells one cluster
     under one code and a different cluster under another. A test that wants to
     know which GLYPHS were drawn therefore has to go through the map;
@@ -310,7 +310,7 @@ class TestReflow:
         assert not _contains_run(drawn, [gid_of[n] for n in isolated])
 
     def test_following_content_in_the_SAME_stream_is_resynced(self, tmp_dir):
-        # The 7.5 correctness property, exercised in the one direction it had
+        # The reflow correctness property, exercised in the one direction it had
         # never seen: the re-emission removes the paragraph's shows and
         # re-anchors everything after the divergence against a parallel walk
         # of the original stream. A reordered, re-shaped, re-fonted paragraph
@@ -397,7 +397,7 @@ class TestShaping:
 
 def build_inplace_pdf(path, text=AR_HELLO, face_path=ARABIC_FACE):
     """A page whose Arabic embeds the FULL program (cmap + GSUB intact) —
-    the 9.T26 qualifying case, unlike `build_rtl_pdf` which drops GSUB the
+    the qualifying case, unlike `build_rtl_pdf` which drops GSUB the
     way real subsetters do."""
     pdf = pikepdf.new()
     page = pdf.add_blank_page(page_size=(612, 792))
@@ -456,7 +456,7 @@ def build_inplace_pdf(path, text=AR_HELLO, face_path=ARABIC_FACE):
 
 
 class TestShapeInPlace:
-    """9.T26 — an RTL edit keeps the document's own typeface when its
+    """An RTL edit keeps the document's own typeface when its
     embedded program still carries the cmap and GSUB most subsetters strip."""
 
     def _fonts_of(self, path):
@@ -502,7 +502,7 @@ class TestShapeInPlace:
         "One font, still /DocOwnFace" proves nothing was substituted, and the
         round trip proves /ToUnicode is right — and BOTH would still pass if
         the edit drew isolated letter forms, which is broken output wearing a
-        working font's name and the exact thing T26's GSUB half exists to
+        working font's name and the exact thing the GSUB half exists to
         prevent. /ToUnicode round-trips perfectly over wrong glyphs, so only
         the drawn glyph ids can tell.
 
@@ -553,7 +553,7 @@ class TestShapeInPlace:
         # The gate's other half: the standard fixture drops GSUB the way
         # real subsetters do, so the edit must NOT keep that font — shaping
         # against it would produce isolated forms wearing a working font's
-        # name. The bundled face substitutes, exactly as T3 shipped.
+        # name. The bundled face substitutes.
         src = build_rtl_pdf(os.path.join(tmp_dir, "sub.pdf"), [AR_HELLO])
         out = os.path.join(tmp_dir, "o.pdf")
         _apply(src, out, _paras(src)[0], AR_HELLO + " ونص")

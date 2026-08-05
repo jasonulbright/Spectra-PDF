@@ -101,7 +101,7 @@ describe('planCommit', () => {
       useManifest: false,
       pageCount: 3,
     });
-    // § F identity channel: the authored ids are EXACTLY the plan's pages
+    // Identity channel: the authored ids are EXACTLY the plan's pages
     // in written order — same source array, so the manifest and the
     // identity record cannot disagree.
     expect(plans[0].authoredPageIds).toHaveLength(3);
@@ -377,7 +377,7 @@ describe('annotations round-trip', () => {
   it('ink lands where authored at rotation 180', () => inkRoundTrip(180));
   it('ink lands where authored at rotation 270', () => inkRoundTrip(270));
 
-  it('multi-stroke ink bakes ONE /Ink with one InkList entry per stroke (N2)', async () => {
+  it('multi-stroke ink bakes ONE /Ink with one InkList entry per stroke', async () => {
     const { files } = await setup();
     const a = files.get('a.pdf')!;
     const strokes = [
@@ -561,7 +561,7 @@ describe('commitPageEdits (transactional)', () => {
     expect(fs.dispatched).toEqual([{ type: 'CLEAR_PAGE_EDITS' }]);
   });
 
-  // O5b — the signature-preserving transplant dep. The dep rewrites the
+  // The signature-preserving transplant dep. The dep rewrites the
   // staged temp engine-side; the state buffer must then carry the
   // TRANSPLANTED bytes (buffer identity keys the reindex), and any failure
   // must degrade to the plain rewrite, never block the commit.
@@ -693,7 +693,7 @@ describe('buildCommitBytes round-trip', () => {
   });
 });
 
-// N11 slice C — count marks and the placed legend must survive the ROUND TRIP
+// Count marks and the placed legend must survive the ROUND TRIP
 // through the file, because that is the whole design decision: the tallies are
 // derived from what the document carries, never from app state, so a drawing
 // counted on another machine has to open with its groups intact.
@@ -825,7 +825,7 @@ describe('count marks + takeoff legend round-trip', () => {
   });
 });
 
-// N11 slice D — a placed vector SYMBOL. The decision under test is that the
+// A placed vector SYMBOL. The decision under test is that the
 // GEOMETRY travels with the annotation: a symbol from an imported set has to
 // draw on a machine that never imported that set, and re-importing it as a
 // plain text stamp would turn the drawing into its own label.

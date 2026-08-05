@@ -592,7 +592,7 @@ class TestRedact:
         assert "LINE TWO" not in text
 
     def test_redact_descends_into_form_xobject_and_spares_shared_uses(self, tmp_dir):
-        # 2i: text drawn via a Form XObject under a region must be removed from
+        # Text drawn via a Form XObject under a region must be removed from
         # the OUTPUT BYTES, not just visually covered. And a form shared with a
         # second, non-overlapping placement must NOT lose its content there —
         # the redaction operates on a per-page copy, never the shared original.
@@ -646,7 +646,7 @@ class TestRedact:
             assert streams_with == 1
 
     def test_redact_removes_image_inside_form_and_prunes_its_bytes(self, tmp_dir):
-        # 2i: an image drawn inside a Form XObject under a region must be gone
+        # An image drawn inside a Form XObject under a region must be gone
         # from the file, not merely undrawn — its XObject bytes must be pruned.
         src = os.path.join(tmp_dir, "redact_formimg.pdf")
         out = os.path.join(tmp_dir, "redact_formimg_out.pdf")
@@ -689,7 +689,7 @@ class TestRedact:
                 stream.read_bytes()
 
     def test_redact_tracks_leading_based_lines(self, tmp_dir):
-        # 2i: text laid out with TL + T* (leading-based next-line moves), not
+        # Text laid out with TL + T* (leading-based next-line moves), not
         # explicit per-line Td, must track line positions so only the line
         # under the region is removed. The old walker ignored T*/leading and
         # collapsed every line onto the first line's origin.
@@ -716,7 +716,7 @@ class TestRedact:
         assert "LEADC" in text
 
     def test_redact_strips_overlapping_annotations(self, tmp_dir):
-        # 2i: an annotation whose /Rect overlaps a region is removed; one that
+        # An annotation whose /Rect overlaps a region is removed; one that
         # doesn't is kept. Content-stream stripping never touches annotation
         # appearances, so this is a separate removal path.
         src = os.path.join(tmp_dir, "redact_annot.pdf")
@@ -742,7 +742,7 @@ class TestRedact:
             assert [float(v) for v in annots[0].Rect] == [50, 20, 200, 60]
 
     def test_redact_cascades_to_linked_popup_annotations(self, tmp_dir):
-        # 2i review finding: removing a markup annotation whose /Popup sits at a
+        # Review finding: removing a markup annotation whose /Popup sits at a
         # non-overlapping /Rect must ALSO remove the popup — its /Parent keeps
         # the "removed" markup object (and its secret /Contents) reachable
         # otherwise. Verified by a full-object byte scan of the output.
@@ -774,7 +774,7 @@ class TestRedact:
                 assert contents is None or "TOPSECRETCOMMENT" not in str(contents)
 
     def test_redact_restores_font_size_across_q_q(self, tmp_dir):
-        # 2i review finding: text-state (font size / leading) is part of the
+        # Review finding: text-state (font size / leading) is part of the
         # graphics state and must be restored by Q. A transient small font
         # inside q..Q must not leave a stale size that under-sizes a later
         # bbox — that under-estimate is an under-redaction leak.
@@ -800,7 +800,7 @@ class TestRedact:
         assert "SECRETBIG" not in extract_text(out)["text"]
 
     def test_redact_survives_malformed_content_and_annots(self, tmp_dir):
-        # 2i review finding: adversarial/malformed input must not crash the
+        # Review finding: adversarial/malformed input must not crash the
         # whole operation. A 1-operand Td, a non-array TJ, and a null /Annots
         # entry are all tolerated; a valid region on the page still redacts.
         src = os.path.join(tmp_dir, "redact_malformed.pdf")
@@ -832,7 +832,7 @@ class TestRedact:
                 assert b"REALSECRET" not in data
 
     def test_redact_form_nesting_past_depth_cap_fails_closed(self, tmp_dir):
-        # 2i re-review finding: a Form chain deeper than MAX_FORM_DEPTH must
+        # Re-review finding: a Form chain deeper than MAX_FORM_DEPTH must
         # NOT leave content intact — and the drop must be SIGNALLED so it isn't
         # silently reverted by an enclosing form bottoming out. A 20-wrapper
         # chain (deeper than the cap) around a secret, all placed inside the
@@ -873,7 +873,7 @@ class TestRedact:
                 assert b"DEEPSECRET" not in data
 
     def test_redact_accounts_for_horizontal_scaling(self, tmp_dir):
-        # 2i re-review finding: Tz (horizontal scaling) > 100 makes text WIDER
+        # Re-review finding: Tz (horizontal scaling) > 100 makes text WIDER
         # than the flat width estimate; the bbox must fold it in so expanded
         # text that reaches into a region is still caught.
         src = os.path.join(tmp_dir, "redact_tz.pdf")
@@ -895,7 +895,7 @@ class TestRedact:
         assert "SECRETTAG" not in extract_text(out)["text"]
 
 
-# ── Redact: the F15-A false negative ──────────────────────────────────────
+# ── Redact: the false negative ────────────────────────────────────────────
 #
 # Every test below is MUTATION-VERIFIED BY CONSTRUCTION: each computes the old
 # flat estimate (`OLD_ESTIMATE_EM` per BYTE) from the fixture's own text and
@@ -953,7 +953,7 @@ def _identity_h_font(doc, widths: dict[int, int], default: int = 1000):
 
 
 class TestRedactMeasuresWithTheFont:
-    """F15 slice A. `redact.py` sized every show operator at a flat 0.5 em per
+    """Slice A. `redact.py` sized every show operator at a flat 0.5 em per
     BYTE while `text_runs.py` computed the real advance in the same walk. The
     guess ran NARROW on any face averaging more than half an em — every
     monospace document, bold sans, and plain Helvetica by ~1.5 characters — so
@@ -1106,7 +1106,7 @@ class TestRedactMeasuresWithTheFont:
     def test_an_unmeasurable_run_falls_wide(self, tmp_dir):
         """No /Font entry for the active name: nothing can be measured, so the
         box covers 1 em per byte — over-removal, the only tolerable error for a
-        redaction tool (R2's fail-closed direction). The old estimate covered
+        redaction tool (the fail-closed direction). The old estimate covered
         HALF that and let the second half of such a run escape."""
         size, x, y, text = 12.0, 72.0, 700.0, "SECRET"
         src = os.path.join(tmp_dir, "nofont.pdf")
@@ -1215,7 +1215,7 @@ class TestRedactMeasuresWithTheFont:
         assert run["rect"][2] - run["rect"][0] == pytest.approx(raw * 1.2, abs=1e-6)
 
 
-# ── Redact: partial-run removal (F15-B) ───────────────────────────────────
+# ── Redact: partial-run removal ───────────────────────────────────────────
 
 
 def _char_positions(path: str) -> list[tuple[str, float, float]]:
@@ -1283,11 +1283,11 @@ def _cid_font(doc, widths: dict[int, int], mapping: dict[int, str],
 
 
 class TestRedactSplitsPartiallyCoveredRuns:
-    """F15 slice B. `redact.py` kept or dropped a WHOLE show operator, so a mark
+    """Slice B. `redact.py` kept or dropped a WHOLE show operator, so a mark
     on one name inside a line a generator emitted as a single `Tj` deleted the
     line — the user got a word-sized black box over text that was no longer
     there. Word-sized marks are exactly what a search produces, so this is the
-    dominant shape for F15's own feature, not an edge case."""
+    dominant shape for the own feature, not an edge case."""
 
     LINE = "John Smith lives at 12 Oak Street Portland"
 
@@ -1383,7 +1383,7 @@ class TestRedactSplitsPartiallyCoveredRuns:
         assert "Left" in text and "Right" in text
 
     def test_a_combining_mark_is_removed_with_its_base(self, tmp_dir):
-        """T25 rules 3 and 4. A mark is drawn as jump / zero-advance glyph /
+        """Rules 3 and 4. A mark is drawn as jump / zero-advance glyph /
         jump back, so a split BETWEEN a base and its mark would strand the mark
         on the surviving side of a redaction — visible, and wrong."""
         from engine.content_walk import IDENTITY, GraphicsTextState
@@ -1423,7 +1423,7 @@ class TestRedactSplitsPartiallyCoveredRuns:
         assert list_text_runs(out, 1)["runs"][0]["text"] == "B"
 
     def test_a_ligature_code_is_never_cut(self, tmp_dir):
-        """One code can spell several characters (T25 rule 1). The split points
+        """One code can spell several characters (rule 1). The split points
         are the CODESPACE's, so half a ligature is not reachable — a mark over
         half of it takes the whole code and nothing beside it."""
         from engine.text_runs import list_text_runs
@@ -1448,7 +1448,7 @@ class TestRedactSplitsPartiallyCoveredRuns:
         assert list_text_runs(out, 1)["runs"][0]["text"] == "x"
 
     def test_a_vertical_column_splits_downward(self, tmp_dir):
-        """9.B4a: a vertical run's advance is downward, and a TJ number
+        """A vertical run's advance is downward, and a TJ number
         displaces along the writing direction, so the same mechanism works —
         the column above and below a removed glyph must not move."""
         from engine.text_runs import list_text_runs
@@ -1859,7 +1859,7 @@ class TestWatermark:
             watermark(file=src, output=out, text="X", layer="sideways")
 
     def test_watermark_latin1_stays_winansi_even_with_font_dir(self, tmp_dir):
-        # S4: a Latin-1 value keeps the byte-identical WinAnsi Helvetica path —
+        # A Latin-1 value keeps the byte-identical WinAnsi Helvetica path —
         # a `(...) Tj` show and a Type1 Helvetica font — even when font_dir is
         # passed (the embedded path is ONLY for non-Latin-1 text).
         src = os.path.join(tmp_dir, "wl_in.pdf")
@@ -1874,7 +1874,7 @@ class TestWatermark:
 
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
     def test_watermark_unicode_embeds_font_and_is_searchable(self, tmp_dir):
-        # S4 (§I.0 S4): a Cyrillic/Greek watermark (outside Latin-1) embeds a
+        # A Cyrillic/Greek watermark (outside Latin-1) embeds a
         # Type0/Identity-H font and stays SEARCHABLE (pdfminer decodes it via
         # ToUnicode) instead of rendering as "?".
         src = os.path.join(tmp_dir, "wu_in.pdf")
@@ -1891,10 +1891,10 @@ class TestWatermark:
 
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
     def test_watermark_cjk_stamps(self, tmp_dir):
-        # 9.T25b INVERTED: this pinned the B2 boundary — "Liberation covers
+        # INVERTED: this pinned the boundary — "Liberation covers
         # Latin/Cyrillic/Greek but not CJK, so a CJK watermark is refused".
         # The stamp now passes its TEXT to the face resolver, so the CJK
-        # step T5 added picks the face that can express it. CJK needs no
+        # step picks the face that can express it. CJK needs no
         # reordering and no shaping, so the plain character path draws it.
         src = os.path.join(tmp_dir, "wc_in.pdf")
         out = os.path.join(tmp_dir, "wc_out.pdf")
@@ -1907,7 +1907,7 @@ class TestWatermark:
 
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
     def test_watermark_right_to_left(self, tmp_dir):
-        # 9.T25b: an Arabic stamp shapes and reorders. Checked through the
+        # An Arabic stamp shapes and reorders. Checked through the
         # BIDI-AWARE lister, because that is the only reader that undoes the
         # visual order a PDF necessarily stores — a plain extractor returns
         # the drawn order, which is exactly what every real RTL PDF gives.
@@ -1937,7 +1937,7 @@ class TestWatermark:
 
     def test_watermark_unicode_without_font_dir_refused(self, tmp_dir):
         # Without a fonts dir, a non-Latin-1 watermark is refused (not silently
-        # "?"-mapped) — the §I.0 silent-degradation this slice closes.
+        # "?"-mapped) — the silent-degradation this slice closes.
         src = os.path.join(tmp_dir, "wn_in.pdf")
         out = os.path.join(tmp_dir, "wn_out.pdf")
         _make_watermark_fixture(src, page_count=1)
@@ -1948,7 +1948,7 @@ class TestWatermark:
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
     def test_watermark_unicode_with_control_char_fills(self, tmp_dir):
         # A tab in a non-Latin-1 stamp flattens to a space (single-line) rather
-        # than crashing build_fallback_font (the FC1 regression lesson).
+        # than crashing build_fallback_font (the regression lesson).
         src = os.path.join(tmp_dir, "wt_in.pdf")
         out = os.path.join(tmp_dir, "wt_out.pdf")
         _make_watermark_fixture(src, page_count=1)
@@ -2116,7 +2116,7 @@ class TestCompare:
         assert r["summary"]["lines_added"] == 20
 
     def test_intraline_segments_mark_only_the_changed_word(self, tmp_dir):
-        # 2j: a similar replaced-line pair carries word-level segments on both
+        # A similar replaced-line pair carries word-level segments on both
         # rows; joining segment texts reconstructs each line, and only the
         # edited word is flagged changed.
         a = os.path.join(tmp_dir, "il_a.pdf")
@@ -2187,7 +2187,7 @@ class TestCompareVisual:
         assert all(p["regions"] == [] for p in r["pages"])
 
     def test_image_only_change_caught_visually_but_not_by_text(self, tmp_dir, gs_path):
-        # THE acceptance scenario for 2j: content with no extractable text —
+        # THE acceptance scenario: content with no extractable text —
         # the text diff reads both files as identical; the visual diff must
         # flag the moved square and localize it.
         a = os.path.join(tmp_dir, "va.pdf")
@@ -2289,7 +2289,7 @@ class TestCompareVisual:
                 probe(name, content)
 
     def test_garbage_input_raises_never_identical(self, tmp_dir, gs_path):
-        # Review round 3: page counts must come from the RENDERING mechanism.
+        # Page counts must come from the RENDERING mechanism.
         # A soft-failing counter (gs pdfpagecount prints an error + fallback
         # "0" and exits 0 on garbage) once made two unreadable files compare
         # "identical: true" — the worst possible output for a compare tool.
@@ -2312,7 +2312,7 @@ class TestCompareVisual:
             compare_visual(g1, v, gs_path=gs_path)
 
     def test_semicolon_filenames_compare_fine(self, tmp_dir, gs_path):
-        # Review round 3: gs's --permit-file-read splits its value on the OS
+        # gs's --permit-file-read splits its value on the OS
         # path-list separator (';' on Windows), so the pdfpagecount approach
         # broke legitimate semicolon filenames. The rendering mechanism passes
         # the path as a plain positional argument — must just work.
@@ -2324,7 +2324,7 @@ class TestCompareVisual:
         assert r["summary"]["pairs_differing"] == 1
 
     def test_damaged_page_tree_refuses_instead_of_truncating(self, tmp_dir, gs_path):
-        # Review round 4: gs's page-tree walk halts SILENTLY (rc 0) at a
+        # gs's page-tree walk halts SILENTLY (rc 0) at a
         # damaged interior node — indistinguishable from document end — so a
         # 5-page file with a corrupted 3rd /Kids entry renders only 2 pages
         # and would compare as a 2-page document, reporting real pages 3-5 as
@@ -2348,7 +2348,7 @@ class TestCompareVisual:
             compare_visual(healthy, broken, gs_path=gs_path)
 
     def test_tail_damage_refuses_both_files_never_identical(self, tmp_dir, gs_path):
-        # Post-commit review of the first 2j commit: TAIL-positioned damage —
+        # TAIL-positioned damage —
         # where nothing real follows the break — made pikepdf's lenient
         # recovery count and gs's halt-at-damage count COINCIDE, so two
         # damaged files compared identical:true with zero signal. The strict
@@ -2786,7 +2786,7 @@ class TestSignPdf:
         assert not os.path.exists(out)
 
     def test_in_place_signing_appends_and_stays_valid(self, tmp_dir):
-        # 9.F5: signing IN PLACE (output == input, opt-in) is allowed — pyHanko
+        # Signing IN PLACE (output == input, opt-in) is allowed — pyHanko
         # appends an incremental revision, so the signed file is the original
         # bytes VERBATIM + the signature, covering the whole doc.
         pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
@@ -2875,7 +2875,7 @@ class TestSignPdf:
         )
         assert r["valid"] is True
 
-    # ── 2k: PEM signer source ────────────────────────────────────────────
+    # ── PEM signer source ────────────────────────────────────────────────
 
     def test_pem_signer_roundtrip(self, tmp_dir):
         key_path, cert_path = _make_test_pem(tmp_dir)
@@ -2916,7 +2916,7 @@ class TestSignPdf:
             assert len(certs) >= 2
 
     def test_pem_reversed_chain_still_signs_as_the_key_holder(self, tmp_dir):
-        # 2k review (HIGH): the signer certificate is selected by MATCHING THE
+        # Review (HIGH): the signer certificate is selected by MATCHING THE
         # KEY, never positionally. A root-first bundle (the other common
         # chain-file convention) used to claim the CA as the signer and write
         # a cryptographically INVALID signature with exit 0.
@@ -2963,7 +2963,7 @@ class TestSignPdf:
             sign_pdf(file=src, output=out, password="")
         assert not os.path.exists(out)
 
-    # ── 2k: visible appearance ───────────────────────────────────────────
+    # ── visible appearance ───────────────────────────────────────────────
 
     def test_visible_appearance_lands_on_requested_page_and_rect(self, tmp_dir):
         pfx = _make_test_pfx(os.path.join(tmp_dir, "signer.pfx"), "pw")
@@ -3055,7 +3055,7 @@ def _pdf_with_sig_field(path: str, name: str = "sigf", rect=(100, 100, 300, 160)
 
 
 class TestSignExistingField:
-    """2n.4d — filling an existing empty signature field by name. The field's
+    """Filling an existing empty signature field by name. The field's
     own widget /Rect provides the visible appearance; a zero-size widget
     signs invisibly; anything else refuses before signing work starts."""
 
@@ -3221,7 +3221,7 @@ class TestPdfVersion:
         assert r["target_version"] == "1.7"
 
 
-# ── Print (M-P) ───────────────────────────────────────────────────────────
+# ── Print ─────────────────────────────────────────────────────────────────
 
 
 class TestPrintPageSpec:
@@ -4157,7 +4157,7 @@ class TestPrintPipeline:
 
 
 class TestPrintPreview:
-    """O3 — the preview runs print_pdf's own validation and prepass, then
+    """The preview runs print_pdf's own validation and prepass, then
     renders sheets the way the job will print them. Real bundled gs; no
     printer, no spool, no winspool gate."""
 

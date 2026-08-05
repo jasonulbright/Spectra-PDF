@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mapEngineField, readFormFields } from '../src/renderer/lib/forms';
 
-// FC4b: the GUI form read routes through the Python engine (`read_form_fields`,
+// The GUI form read routes through the Python engine (`read_form_fields`,
 // covered by tests/test_forms.py over real bytes) and the renderer's remaining
 // job is the pure engine→FormField MAPPING. These tests pin that mapping —
 // type classification, value coercion, `editable` derivation, and the

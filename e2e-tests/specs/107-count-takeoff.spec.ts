@@ -1,4 +1,4 @@
-// N11 slice C — COUNT & TAKEOFF against the built binary.
+// COUNT & TAKEOFF against the built binary.
 //
 // The decision under test is the annotation representation: a count mark is a
 // real /Stamp carrying /IT /Count + /Subj + /SpectraSymbol, so the tallies are
@@ -7,7 +7,7 @@
 // groups reconstituted from the document — plus the CLI's own reading of the
 // same file, which is the third independent witness.
 //
-// Mechanics recorded by slices A and B and used here: measure the page cell
+// Mechanics used here: measure the page cell
 // AFTER arming a mode (the secondary toolbar reflows the canvas), never close
 // a popover with Escape (the chain disarms the mode), and keep every gesture
 // in the page's TOP BAND — a square page at the default zoom is taller than
@@ -113,7 +113,7 @@ async function clearPage(): Promise<void> {
   }
 }
 
-describe('count & takeoff (N11 slice C)', () => {
+describe('count & takeoff', () => {
   before(async () => {
     await waitForHarness();
     tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-takeoff-'));

@@ -1,4 +1,4 @@
-"""Tests for the SVG → Form XObject compiler (P7 slice F)."""
+"""Tests for the SVG → Form XObject compiler."""
 
 import math
 

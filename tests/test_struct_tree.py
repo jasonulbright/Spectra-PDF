@@ -1,4 +1,4 @@
-"""§ I.6 — structure-tree read/edit (Tags + Reading Order panels)."""
+"""Structure-tree read/edit (Tags + Reading Order panels)."""
 
 import os
 

@@ -62,7 +62,7 @@ async function editVectorDelete(): Promise<void> {
   }
 }
 
-// P8 slice D — `sh` shadings are OBJECTS against the built binary. The
+// `sh` shadings are OBJECTS against the built binary. The
 // gradient-fill idiom (`q <clip> W n /Sh0 sh Q`) lists as kind "shading"
 // with the CLIP's rect, transforms as one unit (clip + shading move
 // together), and deletes whole. The fixture builds the idiom with pdf-lib's
@@ -97,7 +97,7 @@ async function shadingFixture(path: string): Promise<void> {
   writeFileSync(path, await doc.save());
 }
 
-describe('shading objects (P8)', () => {
+describe('shading objects', () => {
   let tmp: string;
   let pdfPath: string;
 

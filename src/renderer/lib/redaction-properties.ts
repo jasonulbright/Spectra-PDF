@@ -1,4 +1,4 @@
-// The redaction MARK's appearance (F15 slice E — brief 42 § 6).
+// The redaction MARK's appearance.
 //
 // Every field here is a key on the `/Redact` annotation, which is why this is
 // a small typed record rather than an options bag: `/IC` is the fill,

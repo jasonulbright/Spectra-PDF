@@ -1,4 +1,4 @@
-"""N11 slice A — `list_page_geometry`, the snap-geometry probe.
+"""`list_page_geometry`, the snap-geometry probe.
 
 Per painted, unclipped path: its device-space SUBPATHS (curves flattened to a
 0.25 pt chord tolerance) plus a `closed` flag per subpath; per placed image or
@@ -148,7 +148,7 @@ class TestSubpaths:
         assert _pts(p["subpaths"][0])[0] == (300.0, 300.0)
 
     def test_clipped_away_paths_are_absent(self, tmp_dir):
-        # The S8 rule the walk already applies: a path wholly outside the
+        # The clip rule the walk already applies: a path wholly outside the
         # ambient clip is invisible, so it is not a snap target either.
         src = _pdf(
             tmp_dir,
@@ -178,7 +178,7 @@ class TestTransforms:
         assert _pts(p["subpaths"][0]) == [(0.0, 0.0), (0.0, 10.0)]
 
     def test_nested_form_ctm_composes_through_the_chain(self, tmp_dir):
-        # Depth 2 (the P8 slice-C chain): page cm ∘ outer /Matrix ∘ inner
+        # Depth 2 (the slice-C chain): page cm ∘ outer /Matrix ∘ inner
         # /Matrix must all compose onto the emitted points.
         path = os.path.join(tmp_dir, "nested.pdf")
         pdf = pikepdf.new()

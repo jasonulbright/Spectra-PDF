@@ -1,4 +1,4 @@
-"""F2/F4 — PAdES signing profiles (B-B/B-T/B-LT/B-LTA), TSA timestamps, and
+"""PAdES signing profiles (B-B/B-T/B-LT/B-LTA), TSA timestamps, and
 user-anchored trust validation.
 
 All offline: the TSA is pyHanko's DummyTimeStamper (a real RFC 3161 responder

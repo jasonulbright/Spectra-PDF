@@ -42,7 +42,7 @@ export function CloseIcon({ size = 16 }: IconProps): React.JSX.Element {
   );
 }
 
-// Merge-up (2o): an up-arrow flowing into a bar — "this document's pages
+// Merge-up: an up-arrow flowing into a bar — "this document's pages
 // join the one above".
 export function MergeUpIcon({ size = 16 }: IconProps): React.JSX.Element {
   return (

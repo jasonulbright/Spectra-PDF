@@ -1,9 +1,9 @@
-"""Engine-side OCR recognition (Phase 12 step 3).
+"""Engine-side OCR recognition.
 
 The pure parsing/validation is tested directly; the two tests that need the
 vendored binaries skip when those are absent, matching the gs_path fixture
 convention (an unprovisioned box must not fail the suite -- but per the
-punchlist rule, a gate count is only recorded from a run with NO skips).
+a gate count is only recorded from a run with NO skips).
 """
 
 import shutil
@@ -156,7 +156,7 @@ class TestAgainstTheVendoredStack:
             assert w["y"] + w["h"] <= 1.001
 
     def test_multi_language_still_recognises(self):
-        # Issue #1 request 1 must keep working on the native path: '+'-joined
+        # Multi-language selection must keep working on the native path: '+'-joined
         # loads both models rather than erroring.
         result = recognize(str(SCANNED), 1, "eng+fra", str(TESSERACT), str(GS))
         assert "INVOICE" in result["text"].upper()
@@ -173,7 +173,7 @@ class TestAgainstTheVendoredStack:
 
 
 class TestOcrFile:
-    """The single-file arm (guided-actions slice 2): composed from the SAME
+    """The single-file arm: composed from the SAME
     helpers as batch_ocr, so these pin the composition, not new logic."""
 
     def test_text_pdf_reported_not_rewritten(self, tmp_pdf, tmp_dir):
@@ -215,7 +215,7 @@ class TestOcrFile:
 
 
 class TestBatchInPlace:
-    """O7 in-place batch mode: originals replaced through staged temps."""
+    """In-place batch mode: originals replaced through staged temps."""
 
     def test_in_place_refuses_dest_and_moved(self, tmp_path):
         from engine.batch_ocr import batch_ocr

@@ -1,4 +1,4 @@
-"""F15 slice C — the shared matcher and the built-in pattern set.
+"""The shared matcher and the built-in pattern set.
 
 Two jobs. First, the CORPUS pin: `tests/fixtures/matcher-corpus.json` is read
 here and by `tests/matcher-corpus.test.ts`, so the engine's matcher and the

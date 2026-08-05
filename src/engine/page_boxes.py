@@ -1,4 +1,4 @@
-"""Crop pages / edit page boxes (§ I.5 P5).
+"""Crop pages / edit page boxes.
 
 Sets one of the four page boundary boxes — /CropBox, /BleedBox, /TrimBox,
 /ArtBox — by insetting the page's current effective box by per-edge margins

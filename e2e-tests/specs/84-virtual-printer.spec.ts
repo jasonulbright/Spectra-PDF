@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { expect } from '@wdio/globals';
 import { waitForHarness, invokeAppCommand, getState, saveActiveAs } from '../support/harness.js';
 
-// The virtual printer (O7): the loopback RAW listener + Ghostscript distill
+// The virtual printer: the loopback RAW listener + Ghostscript distill
 // + the open funnel, driven exactly the way the Windows spooler drives it —
 // a TCP stream of PostScript at 127.0.0.1:9100. No printer install needed
 // for this path (that half is admin-gated UI, asserted as affordance only),
@@ -22,7 +22,7 @@ function cliText(path: string): string {
   return (JSON.parse(out) as { text?: string }).text ?? '';
 }
 
-describe('virtual printer (O7)', () => {
+describe('virtual printer', () => {
   before(async () => {
     TMP = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-vprint-'));
     await waitForHarness();

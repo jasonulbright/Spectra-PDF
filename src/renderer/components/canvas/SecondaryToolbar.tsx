@@ -30,7 +30,7 @@ import {
   tToolTitle,
 } from '../../i18n';
 
-/** N11 slice D: the colour a symbol arms in when the tool has no colour set —
+/** The colour a symbol arms in when the tool has no colour set —
  * markup red, the same default a drawing shape takes. */
 const SYMBOL_STAMP_COLOR = '#e0393e';
 
@@ -58,16 +58,16 @@ async function importStampImage(path: string): Promise<{ dataUrl: string; aspect
   }
 }
 
-// The secondary toolbar (§ 3.1): "a contextual strip that appears while a tool
+// The secondary toolbar: "a contextual strip that appears while a tool
 // mode is active, hosting that tool's actions". It sits at the top of the
 // document pane, under the tab strip.
 //
 // It replaces the floating pill, which listed all eight canvas modes flat, at
 // all times, and made the user infer which belonged together. This shows ONE
 // tool's modes, because a tool is what you picked — and it can, because
-// `canvasTools` made mode→tool ownership a fact rather than a guess (M5.3).
+// `canvasTools` made mode→tool ownership a fact rather than a guess.
 //
-// WHICH tool: the one owning the armed MODE, per § 3.1's own wording ("while a
+// WHICH tool: the one owning the armed MODE, per the own wording ("while a
 // tool mode is active"). Deliberately NOT `ui.activeToolId` — that names the
 // tool whose pane the TOOLS TAB is showing, a different question with a
 // different answer. Nothing armed (`select`) ⇒ no tool ⇒ no strip.
@@ -89,7 +89,7 @@ export interface SecondaryToolbarProps {
   /** Stamp text preset; null = the default stamp. */
   stampPreset: StampPreset | null;
   onSetStampPreset: (preset: StampPreset | null) => void;
-  /** N11 slice C (count mode): the groups the picker offers — the DOCUMENT's
+  /** (count mode): the groups the picker offers — the DOCUMENT's
    * own groups merged with the remembered ones, resolved by the canvas view
    * because that is what holds the document. Which one is ARMED comes from the
    * module store this component reads directly, so the strip and the Takeoff
@@ -99,7 +99,7 @@ export interface SecondaryToolbarProps {
    * the stamp-preset sense. */
   shapeType: ShapeType;
   onSetShapeType: (type: ShapeType) => void;
-  /** Measure (parity map § 2): the scale ratio the readouts apply, whether a
+  /** Measure: the scale ratio the readouts apply, whether a
    * finished measurement lands as an ink markup, and the latest value —
    * mode options in the stamp-preset sense (props, not commands). */
   measureScale: MeasureScale;
@@ -111,12 +111,12 @@ export interface SecondaryToolbarProps {
   calibration: number | null;
   onApplyCalibration: (value: number, unit: MeasureUnit) => void;
   onCancelCalibration: () => void;
-  /** Edit tool (7.1): whether an image is selected, and its actions — mode
+  /** Edit tool: whether an image is selected, and its actions — mode
    * options in the stamp-preset sense (props+callbacks, not commands: they
    * act on transient canvas selection the registry can't see). */
   editHasSelection: boolean;
-  /** Which kind of edit object is selected (7.2 adds text runs; 7.5 adds
-   * paragraph boxes — the primary text surface). */
+  /** Which kind of edit object is selected: image, text run, or
+   * paragraph box (the primary text surface). */
   editSelectionKind: 'image' | 'text' | 'para' | null;
   /** Selected text run's/paragraph's editability + refusal reason
    * (paragraph boxes list only when editable, so 'para' is always true). */
@@ -131,16 +131,16 @@ export interface SecondaryToolbarProps {
   onEditAction: (kind: 'delete' | 'replace' | 'extract') => void;
   /** Open the inline editor for the selected text run. */
   onEditTextOpen: () => void;
-  /** 9.C3 image adjustments: the selected placement's current opacity
+  /** Image adjustments: the selected placement's current opacity
    * (null = no image selected), commit-on-release, the crop-mode toggle,
-   * and the rotate-90 steps (routed through the C1 transform). */
+   * and the rotate-90 steps (routed through the transform). */
   editImageOpacity: number | null;
   onSetImageOpacity: (value: number) => void;
-  /** P7 slice D: the selected placement's blend mode seed (null = no single
+  /** The selected placement's blend mode seed (null = no single
    * image selected) + commit. */
   editImageBlend: string | null;
   onSetImageBlend: (blend: string) => void;
-  /** P7 slice E: the selected placement's gradient-mask seed ({kind:'none'}
+  /** The selected placement's gradient-mask seed ({kind:'none'}
    * when a single image has no tool mask; null = no single selection) +
    * commit (the wire shape — full params or {kind:'none'} to clear). */
   editImageMask:
@@ -167,10 +167,10 @@ export interface SecondaryToolbarProps {
   imageCropArmed: boolean;
   onToggleImageCrop: () => void;
   onRotateImage: (dir: 1 | -1) => void;
-  /** P7 slice F: the single selected placement's kind — replace/extract
+  /** The single selected placement's kind — replace/extract
    * disable for a placed vector graphic (null = no single selection). */
   editImagePlacementKind: 'inline' | 'xobject' | 'vector' | null;
-  /** P7 multi-select: how many images are selected (0 when the selection is
+  /** Multi-select: how many images are selected (0 when the selection is
    * not images). Single-target actions disable above 1; the align/distribute
    * row appears at 2+ (distribute needs 3+). */
   editImageCount: number;
@@ -291,10 +291,10 @@ export function SecondaryToolbar({
   onRotateImage,
 }: SecondaryToolbarProps): React.JSX.Element | null {
   useTranslation();
-  // Custom stamp library (parity map § 2): loaded once, persisted on every
+  // Custom stamp library: loaded once, persisted on every
   // change. Hooks live above the early return (rules of hooks).
   const [customStamps, setCustomStamps] = useState<CustomStamp[]>(() => loadCustomStamps());
-  // N11 slice C: which count group is armed. Read from the module store, not
+  // Which count group is armed. Read from the module store, not
   // a prop — the Takeoff panel writes it and this strip must show the same
   // answer without a second owner in between.
   const takeoff = useSyncExternalStore(
@@ -303,7 +303,7 @@ export function SecondaryToolbar({
     getTakeoffSettings,
   );
   const [showNewStamp, setShowNewStamp] = useState(false);
-  // N11 slice D: the symbol palette rides in the stamp picker, collapsed by
+  // The symbol palette rides in the stamp picker, collapsed by
   // default — it is a searchable library, not a row of pills, and the strip is
   // a strip.
   const [showSymbols, setShowSymbols] = useState(false);
@@ -369,7 +369,7 @@ export function SecondaryToolbar({
   const modes = owner.canvasTools;
   const actions = SECONDARY_TOOLBAR_ACTIONS[owner.id];
   // Only the ANNOTATION modes carry a colour; a stamp carries its preset's —
-  // except a SYMBOL stamp (N11 slice D), which is line art the drafter colours
+  // except a SYMBOL stamp, which is line art the drafter colours
   // like any other markup, and placing twenty of them in the wrong colour to
   // recolour them one by one afterwards is not a workflow.
   const colored =
@@ -384,7 +384,7 @@ export function SecondaryToolbar({
       {/* The tool's modes. One button per mode it owns — the pill's job, minus
           the seven modes belonging to tools you didn't pick. */}
       {/* Every mode it owns gets a button, INCLUDING a lone one: Prepare Form
-          owns only `formfields`, and § 3.2 calls for its "+ Add Field" control
+          owns only `formfields`, and its "+ Add Field" control is named
           by name — gating on >1 silently deleted it, and Redact's too. */}
       <div className="secondary-toolbar-modes" role="group" aria-label={tChrome('canvas.toolbar.modes', { tool: tToolTitle(owner.id, owner.title) })}>
           {modes.map((m) => (
@@ -575,9 +575,9 @@ export function SecondaryToolbar({
               {editNotice.text}
             </span>
           )}
-          {/* P6: inline images replace (promoted to an ordinary embedded
+          {/* Inline images replace (promoted to an ordinary embedded
               image) and extract like any other — the old disable is gone.
-              P7: replace/extract/crop are single-target — they disable on a
+              Replace/extract/crop are single-target — they disable on a
               group; delete and rotate act on the whole selection. */}
           <button
             type="button"
@@ -626,7 +626,7 @@ export function SecondaryToolbar({
           >
             {tChrome('canvas.common.delete')}
           </button>
-          {/* 9.C3 image adjustments — enabled only with an image selected. */}
+          {/* Image adjustments — enabled only with an image selected. */}
           <button
             type="button"
             data-testid="edit-action-crop"
@@ -666,7 +666,7 @@ export function SecondaryToolbar({
               onCommit={onSetImageOpacity}
             />
           )}
-          {/* P7 slice D: blend mode — seeded from the listing, committed
+          {/* Blend mode — seeded from the listing, committed
               through the same gs frame as opacity (one merged frame). */}
           {editSelectionKind === 'image' && editImageBlend !== null && (
             <label
@@ -705,7 +705,7 @@ export function SecondaryToolbar({
               </select>
             </label>
           )}
-          {/* P7 slice E: gradient mask — kind select seeds/starts the fade;
+          {/* Gradient mask — kind select seeds/starts the fade;
               the on-canvas dots then steer its direction; alphas here. */}
           {editSelectionKind === 'image' && editImageMask !== null && (
             <label
@@ -793,7 +793,7 @@ export function SecondaryToolbar({
                 />
               </label>
             )}
-          {/* P7 multi-select: align/distribute the group — per-member
+          {/* Multi-select: align/distribute the group — per-member
               translates through the ONE multi commit (one undo entry). */}
           {editImageCount > 1 && (
             <span
@@ -852,7 +852,7 @@ export function SecondaryToolbar({
         </div>
       )}
       {tool === 'count' && (
-        // N11 slice C — the armed count group, on the strip where the mode is.
+        // The armed count group, on the strip where the mode is.
         // The full manager (colours, symbols, tallies, legend, CSV) is the
         // Takeoff dock panel; this is the one control the GESTURE needs, and
         // it reads the same module store the panel writes.
@@ -1001,7 +1001,7 @@ export function SecondaryToolbar({
         </div>
       )}
       {tool === 'stamp' && showSymbols && (
-        // N11 slice D — the SAME palette the Takeoff panel picks markers from
+        // The SAME palette the Takeoff panel picks markers from
         // (one registry, two consumers). Dragging a symbol onto the page
         // places it; clicking arms it for click-placement, exactly like a
         // preset pill.
@@ -1104,7 +1104,7 @@ export function SecondaryToolbar({
   );
 }
 
-/** 9.C3: opacity with commit-on-release — dragging previews the number
+/** Opacity with commit-on-release — dragging previews the number
  * locally; only releasing (pointer or keyboard) commits, so one drag is ONE
  * undoable engine op, not thirty. The parent keys this by the seed, so a
  * fresh listing remounts it holding the committed value. */

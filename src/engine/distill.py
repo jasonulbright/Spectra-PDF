@@ -1,4 +1,4 @@
-"""PostScript/EPS → PDF conversion via Ghostscript (Phase 8 — the
+"""PostScript/EPS → PDF conversion via Ghostscript (the
 Distiller job, done by the tool that is its documented work-alike).
 
 The compress.py invocation template: bundled gs, pdfwrite, -dSAFER (the
@@ -100,14 +100,14 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "gs"
     # request's bytes off the wire (review-PROVEN, exfiltrated via gs
     # stderr), which both leaks data and permanently hangs that request's
     # caller. EOF from DEVNULL closes the class.
-    # § 5.5: the budget is DERIVED from the input (budget.run keeps the
+    # The budget is DERIVED from the input (budget.run keeps the
     # stdin isolation the paragraph above is about).
     result = budget.gs(cmd, what="Ghostscript (distill)", path=input_path)
     if result.returncode != 0:
         raise RuntimeError(f"Ghostscript failed: {result.stderr.strip() or 'no diagnostics'}")
 
     # Post-validate: the result must be a PDF pikepdf can open. In the same
-    # pass, register any form-field pdfmarks (O8): gs lands Distiller /ANN
+    # pass, register any form-field pdfmarks: gs lands Distiller /ANN
     # Widget pdfmarks on the page with their field keys intact but never
     # writes /AcroForm — without adoption a distilled form renders dead.
     adopted = 0

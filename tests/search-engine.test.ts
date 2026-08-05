@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Phase 12: reconcile now also takes sourceDocId -> working-copy path, because
+// Reconcile now also takes sourceDocId -> working-copy path, because
 // recognition is an ENGINE call that reads a file rather than a pdf.js proxy.
 // These tests never reach OCR, so an empty map is the honest input (and the
 // engine's default recognizer throws if anything did reach it).
@@ -117,7 +117,7 @@ describe('highlightWords (review #2 — multi-word queries)', () => {
   });
 });
 
-describe('search matcher (P4 — regex / case / whole-word)', () => {
+describe('search matcher (regex / case / whole-word)', () => {
   it('normalizeIndexText preserves case (NFKC + soft-hyphen + whitespace only)', () => {
     expect(normalizeIndexText('Ｉｎｖｏｉｃｅ')).toBe('Invoice'); // fullwidth → NFKC, case kept
     expect(normalizeIndexText('  Total\n\tDue ')).toBe('Total Due');
@@ -211,7 +211,7 @@ describe('search engine', () => {
     expect(r.occurrences).toBe(1);
   });
 
-  it('advanced modes: case-sensitive, whole-word, and regex over the index (P4)', async () => {
+  it('advanced modes: case-sensitive, whole-word, and regex over the index', async () => {
     const doc = makeDoc('d1', 'C:/a.pdf', [pageRef('C:/a.pdf', 0), pageRef('C:/a.pdf', 1)]);
     const docsRef = { current: [doc] };
     extractMock
@@ -248,7 +248,7 @@ describe('search engine', () => {
     await flush();
     const snips = await engine.snippetsFor('invoice');
     expect(snips.size).toBe(1);
-    expect(snips.get('C:/a.pdf#p0')).toContain('invoice'); // case-preserving (P4); fixture is lowercase here
+    expect(snips.get('C:/a.pdf#p0')).toContain('invoice'); // case-preserving; fixture is lowercase here
     expect(snips.has('C:/a.pdf#p1')).toBe(false); // no match → absent
     expect((await engine.snippetsFor('   ')).size).toBe(0); // empty query → empty
   });
@@ -265,7 +265,7 @@ describe('search engine', () => {
     expect(snip).toBeDefined();
     expect(snip!.startsWith('…')).toBe(true);
     expect(snip!.endsWith('…')).toBe(true);
-    // Snippets now preserve the ORIGINAL case (P4) — the fixture wrote SECRET,
+    // Snippets now preserve the ORIGINAL case — the fixture wrote SECRET,
     // and the case-insensitive query still matched it.
     expect(snip).toContain('SECRET');
   });

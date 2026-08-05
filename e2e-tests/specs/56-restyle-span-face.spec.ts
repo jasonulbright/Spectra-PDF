@@ -12,13 +12,13 @@ import {
   openParagraphEditor,
 } from '../support/harness.js';
 
-// Phase 9.A5b — per-span bold on the paragraph editor: select a word, click
+// Per-span bold on the paragraph editor: select a word, click
 // Bold, and only that range substitutes into the bundled bold face. Asserted
 // on the WORKING COPY bytes (the styled BaseFont embeds for just that range,
 // the member font staying for the rest — a font name is grep-able even
-// though the content stream is compressed; the A3a spec's proof shape), plus
+// though the content stream is compressed; the spec's proof shape), plus
 // undo removing it. Waits key on the page id advancing past the pre-op id
-// (a pure restyle keeps the text identical — the A3 timing rule).
+// (a pure restyle keeps the text identical — the timing rule).
 
 interface Para {
   index: number;
@@ -44,7 +44,7 @@ async function editParagraphOpen(pageId: string, index: number): Promise<void> {
 }
 
 /** Select a CODE-POINT range in the paragraph editor. The editor is a
- * contentEditable rich surface (9.A5-tails-b), so this delegates to the
+ * contentEditable rich surface, so this delegates to the
  * harness helper that walks the rendered style segments' text nodes. */
 async function selectRange(start: number, end: number): Promise<void> {
   await setParagraphSelection(start, end);
@@ -67,7 +67,7 @@ async function waitForParagraphs(): Promise<void> {
   );
 }
 
-describe('restyle span face (Phase 9.A5b)', () => {
+describe('restyle span face', () => {
   let tmp: string;
   let pdfPath: string;
 

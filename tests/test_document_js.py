@@ -1,4 +1,4 @@
-"""Phase 9.S6 — document-level JavaScript editor (read + rewrite the
+"""Document-level JavaScript editor (read + rewrite the
 /Names /JavaScript name tree). The engine NEVER executes the JS."""
 
 import os

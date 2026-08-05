@@ -106,7 +106,7 @@ async function auditTheme(theme: WalkTheme, surface: string): Promise<void> {
   }
 }
 
-describe('theme consistency audit (P21)', () => {
+describe('theme consistency audit', () => {
   it('boots with the harness', async () => {
     await waitForHarness();
   });

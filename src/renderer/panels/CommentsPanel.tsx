@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
 
-// U3 (Phase 11) — THE comments surface. One.
+// THE comments surface. One.
 //
 // There used to be two, both reachable and both called "Comments": this panel
 // (engine-backed, complete, read-only, delete-all) and a separate sidebar the
@@ -26,7 +26,7 @@ import type { PanelKey } from '../i18n-panels';
 //   - the FILE's total comes from the engine, so a document carrying markup
 //     this app doesn't model reports honestly instead of quietly
 //     under-counting (multi-stroke ink and polygons, once that list's
-//     examples, are modeled since N2/rung 2 — the residue is exotica like
+//     examples, are modeled — the residue is exotica like
 //     3D or rich-media annotations);
 //   - Delete All is the engine op, so it removes everything and is undoable.
 
@@ -72,7 +72,7 @@ interface Overview {
 export function CommentsPanel(): React.ReactElement {
   const state = useAppState();
   const dispatch = useAppDispatch();
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();

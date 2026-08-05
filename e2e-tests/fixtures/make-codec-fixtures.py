@@ -1,14 +1,14 @@
-"""Builds the three IMAGE-CODEC render fixtures (O8 slice A).
+"""Builds the three IMAGE-CODEC render fixtures.
 
 Our own viewer could not decode /CCITTFaxDecode, /JBIG2Decode or /JPXDecode
-until slice A staged pdf.js's wasm modules — a fax-derived or
+until the build staged pdf.js's wasm modules — a fax-derived or
 scanner-optimized PDF rendered BLANK with no error the user could see. These
 three one-page PDFs are the regression pins: spec 111 opens each and asserts
 the rendered canvas carries ink in a recorded band.
 
 The band matters more than "non-blank": a stencil written with the wrong
 polarity renders 100% BLACK, which passes any not-blank check while being
-exactly as wrong (§ 1.6 rule 2 of the brief — polarity is a MEASUREMENT). So
+exactly as wrong (rule 2 of the brief — polarity is a MEASUREMENT). So
 each fixture is drawn from one synthetic pattern whose ink fraction is known
 by construction, and this generator DECODES ITS OWN OUTPUT with the bundled
 Ghostscript and refuses to write a fixture whose coverage is off.

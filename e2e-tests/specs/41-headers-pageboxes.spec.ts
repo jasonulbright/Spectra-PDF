@@ -61,7 +61,7 @@ async function applyAndSave(dest: string): Promise<void> {
   expect(existsSync(dest)).toBe(true);
 }
 
-describe('header/footer + page-box panels (P5)', () => {
+describe('header/footer + page-box panels', () => {
   let tmp: string;
   let source: string;
 
@@ -129,7 +129,7 @@ describe('header/footer + page-box panels (P5)', () => {
   });
 });
 
-describe('on-canvas crop draw (P5b)', () => {
+describe('on-canvas crop draw', () => {
   let tmp: string;
   let source: string;
 

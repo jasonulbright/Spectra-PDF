@@ -9,14 +9,14 @@ import { ZOOM_SETTLE_MS } from '../../canvas/reading-page';
 // same beat rather than storming the one pdf.js worker twice per burst.
 const SETTLE_MS = ZOOM_SETTLE_MS;
 
-// Selectable text over a rendered page (Phase 4 M4.2, § 6.3).
+// Selectable text over a rendered page.
 //
 // pdf.js's own TextLayer: it lays transparent, correctly-positioned spans over
 // the raster so the browser's native selection does the work — real
 // click-drag-select, double-click-word, triple-click-line, Ctrl+A, and Ctrl+C,
 // none of which we implement or could implement as well by hand.
 //
-// READING VIEW ONLY (§ 6.3). The board is a thumbnail arrangement surface, not
+// READING VIEW ONLY. The board is a thumbnail arrangement surface, not
 // a reading surface: text at 280px-tall thumbnails isn't selectable in any
 // useful sense, and the spans would fight the page-drag. So this mounts only
 // where PageCell is told to.

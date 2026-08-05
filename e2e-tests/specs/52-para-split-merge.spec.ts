@@ -13,7 +13,7 @@ import {
   openParagraphEditor,
 } from '../support/harness.js';
 
-// Phase 9.A4 — paragraph split (Enter mid-text) + merge (Backspace at the
+// Paragraph split (Enter mid-text) + merge (Backspace at the
 // start of an unchanged editor) against the built binary. Engine layout
 // and the caret-domain conversion are unit-tested; this proves the wire:
 // real editor keys → real ops → re-listed paragraph structure → undo.
@@ -41,7 +41,7 @@ async function editParagraphOpen(pageId: string, index: number): Promise<void> {
 }
 
 /** Place the REAL caret (collapsed) at a CODE-POINT offset. The editor is a
- * contentEditable rich surface (9.A5-tails-b) — the harness walks the styled
+ * contentEditable rich surface — the harness walks the styled
  * segments to find the spot. */
 async function setEditorCaret(offset: number): Promise<void> {
   await setParagraphSelection(offset, offset);
@@ -62,7 +62,7 @@ async function waitForReindexedParas(
   );
 }
 
-describe('paragraph split + merge (Phase 9.A4)', () => {
+describe('paragraph split + merge', () => {
   let tmp: string;
   let pdfPath: string;
   const LINE1 = 'Alpha beta gamma delta words';
@@ -150,11 +150,11 @@ describe('paragraph split + merge (Phase 9.A4)', () => {
     );
   });
 
-  // T18 — the geometry round: a user-chosen split gap, Delete-at-end
+  // The geometry round: a user-chosen split gap, Delete-at-end
   // merging the NEXT paragraph, an EDITED editor merging without dropping
   // its edit, and a grip-drag resize that really rewraps. Same fixture;
   // the previous test's undos leave it back at one paragraph.
-  it('T18: custom split gap, Delete-merge, edited-merge, grip resize', async function () {
+  it('Custom split gap, Delete-merge, edited-merge, grip resize', async function () {
     this.timeout(240_000);
     const joined = `${LINE1} ${LINE2}`;
     let nowId = (await editTextPageIds())[0];
@@ -215,7 +215,7 @@ describe('paragraph split + merge (Phase 9.A4)', () => {
     );
 
     // RESTYLE-ON-MERGE: split once more, set the editor's Size to 20, then
-    // Backspace-merge — one op must both join AND resize (slice 4).
+    // Backspace-merge — one op must both join AND resize.
     nowId = (await editTextPageIds())[0];
     const paraR = (await editParagraphs(nowId))[0];
     await editParagraphOpen(nowId, paraR.index);

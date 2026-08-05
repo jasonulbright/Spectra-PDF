@@ -1,4 +1,4 @@
-// N11 slice B — GRID and RULER math. Pure functions only: no DOM, no React,
+// GRID and RULER math. Pure functions only: no DOM, no React,
 // no i18n (a tick carries its NUMBER; the component formats it through
 // `tNumber`, because a pure module must not know the locale). Same reason
 // `measure.ts` and `snap.ts` are shaped this way — this repo has no DOM test
@@ -128,7 +128,7 @@ export interface RulerTickOpts {
   /** Where value 0 sits, in ruler pixels — the page's left (top ruler) or top
    * (left ruler) edge. Read from the DOM, never computed from document-space
    * offsets: the reading view caps its spacer and TRANSLATES rows under it
-   * (P12), so an offset derived from `row * rowH` would be wrong past the cap
+   * So an offset derived from `row * rowH` would be wrong past the cap
    * and a rect is right at every scroll position by construction. */
   originPx: number;
   /** The ruler's length in pixels. */

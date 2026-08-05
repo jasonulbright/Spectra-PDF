@@ -1,4 +1,4 @@
-// The linear-list reorder math for the Pages panel (Phase 4 M3.1b). Maps a
+// The linear-list reorder math for the Pages panel. Maps a
 // flat drop index to the (toDocId, toIndex) MOVE_PAGE/MOVE_PAGES expect — the
 // target index counted against the doc's pages AFTER the moving ones are
 // removed (the reducer's frame). The risky part of panel reorder, so unit it.

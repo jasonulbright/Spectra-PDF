@@ -191,7 +191,7 @@ def run_convert(
 # --------------------------------------------------------------------------
 
 # Measured working with a straight `--convert-to pdf` against the vendored
-# 26.2.1.2 tree (brief 41 § 1.2): docx, xlsx, pptx, odt, ods, rtf, txt, csv,
+# 26.2.1.2 tree: docx, xlsx, pptx, odt, ods, rtf, txt, csv,
 # html. The macro/template siblings listed beside each go through the SAME
 # import filter as their measured base format — a `.docm` is a `.docx` with a
 # macro part, and macros never run (MacroSecurityLevel 3).
@@ -402,7 +402,7 @@ def _unescape(value: str) -> str:
 def declared_faces(path: str | Path) -> set[str]:
     """The face names the SOURCE's drawn text asks for.
 
-    LibreOffice reports nothing about substitution, so § 6's
+    LibreOffice reports nothing about substitution, so the report's
     `fonts_substituted` is DERIVED. A format this cannot read returns an empty
     set — reporting NO substitutions rather than false ones. Silence beats a
     wrong accusation, and a wrong accusation is what teaches a user to stop

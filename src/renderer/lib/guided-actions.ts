@@ -10,7 +10,7 @@
 // engine surface: the catalog is a curation over ops that already ship.
 
 import { OCR_LANGUAGES } from '../ocr/languages';
-// N12: the unattended-run refusal is USER-FACING copy, so it resolves
+// The unattended-run refusal is USER-FACING copy, so it resolves
 // through the catalog. That is the one non-pure import here — i18n is
 // itself a data module (catalogs + i18next), so the helpers below stay
 // unit-testable with no DOM.
@@ -20,9 +20,8 @@ import { tChrome, tStepParam, tStepTitle } from '../i18n';
 // header/footer (one positioned text per step — several positions compose as
 // several steps), and ENCRYPT as a TERMINAL step that writes a NEW picked
 // file (an in-place encrypt would make the open working copy unreadable,
-// which is why slice 1 excluded it; EncryptPanel has the same shape).
-// P22 slice E added the one step that PRODUCES a document rather than
-// transforming one: `create_pdf`. It is why `StepDef` grew `sourceStep` —
+// which is why it is excluded; EncryptPanel has the same shape).
+// One step PRODUCES a document rather than transforming one: `create_pdf`. It is why `StepDef` grew `sourceStep` —
 // see that field, and `openDocumentBlocker` / `inPlaceBlocker` below.
 export type GuidedStepOp =
   | 'create_pdf'
@@ -214,7 +213,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
     ],
   },
   {
-    // P22 slice E. LAST in the catalog even though it is always FIRST in an
+    // LAST in the catalog even though it is always FIRST in an
     // action: `AddStepPicker` defaults to `STEP_CATALOG[0]`, and making the
     // rarest step the default "Add step" would be a regression for every
     // ordinary action. Position here is a picker default, not an order.
@@ -331,7 +330,7 @@ export function buildStepParams(
 
 /** null when valid; else the first human-readable problem.
  *
- * N12 slice E: every refusal is ONE interpolated catalog key, and the STEP
+ * Every refusal is ONE interpolated catalog key, and the STEP
  * and PARAM names inside it resolve through the same `gaction.*` keys the
  * editor renders — a message naming "Watermark" in a Spanish UI while the
  * step list above it says "Marca de agua" would be worse than English. */
@@ -431,8 +430,8 @@ export function validateRunValues(
 }
 
 /**
- * Why an action cannot run UNATTENDED, or null if it can (slice 5 —
- * scheduling). A scheduled run has nobody at the keyboard: ask-at-run values
+ * Why an action cannot run UNATTENDED, or null if it can (scheduling).
+ * A scheduled run has nobody at the keyboard: ask-at-run values
  * (and secrets, which are implicitly asked and by rule never persisted) make
  * a task that would fail every time it fires. Refuse at scheduling time,
  * naming the step — never register a task that will not run.
@@ -443,7 +442,7 @@ export function unattendedBlocker(action: GuidedAction): string | null {
     const def = stepDefFor(step.op);
     const asked = askedParamKeys(step);
     if (asked.length === 0) continue;
-    // N12: one whole interpolated message per refusal (the two halves
+    // One whole interpolated message per refusal (the two halves
     // used to be concatenated template fragments). The asked-for PARAM
     // KEYS stay verbatim — they are the action file's own vocabulary.
     const vars = { index: i + 1, step: tStepTitle(step.op, def.title) };
@@ -549,7 +548,7 @@ export function parseActionFile(text: string): GuidedAction {
   return action;
 }
 
-// N12 slice E: every refusal below is one interpolated catalog key. The `op`
+// Every refusal below is one interpolated catalog key. The `op`
 // id and the parameter NAMES stay verbatim inside them — they are the action
 // FILE's own vocabulary, and a translated key would name something the file
 // being fixed does not contain.

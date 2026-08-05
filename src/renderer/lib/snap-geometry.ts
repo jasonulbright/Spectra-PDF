@@ -1,4 +1,4 @@
-// N11 slice A — the SNAP-GEOMETRY boundary: fetch the engine's per-page
+// The SNAP-GEOMETRY boundary: fetch the engine's per-page
 // geometry probe and project it into the display-normalized space the canvas
 // gestures work in. The impure half of snapping; all the math is in the pure
 // `lib/snap.ts` beside it (the `edit-vectors.ts` / `measure.ts` split).

@@ -10,7 +10,7 @@ import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../../i18n';
 
-// Signatures nav panel (Phase 4 M3.3b, § 5) — a compact READ view over the same
+// Signatures nav panel — a compact READ view over the same
 // verify_signatures data the Tools ▸ Signatures panel shows. The Tools panel is
 // where signing occurs; this panel is the persistent status readout.
 // Shares the verify types + the valid/modified/invalid classifier
@@ -19,7 +19,7 @@ import { tChrome, tChromeCount } from '../../i18n';
 // No jump-to-signature-page affordance, by design (not a stub): the app's own
 // signatures are invisible — they cover the whole document and sit on no page —
 // and a visible-signature page jump would need the widget's /P from the engine
-// (M3 is renderer-only). Recorded as explicitly absent in the phase doc § 3.3.
+// (is renderer-only). Explicitly absent, not overlooked.
 //
 // Auto-verifies on the working file's BYTE identity (its buffer reference), so
 // editing + committing a signed file flips the badge but a Save (which doesn't
@@ -28,7 +28,7 @@ import { tChrome, tChromeCount } from '../../i18n';
 // flushed to the working file before it's read. (Keying details on the effect.)
 
 export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { call } = useEngine();
   const [result, setResult] = useState<VerifyResult | null>(null);

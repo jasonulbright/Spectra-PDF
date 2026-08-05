@@ -1,4 +1,4 @@
-"""Deterministic scan fixtures for the MRC pass (O8 slice C).
+"""Deterministic scan fixtures for the MRC pass.
 
 Run it to regenerate; the resulting PDFs are CHECKED IN beside it so a
 regeneration is reviewable as a git diff rather than a silent change to what

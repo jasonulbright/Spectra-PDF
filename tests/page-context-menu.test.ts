@@ -1,4 +1,4 @@
-// The shared page context menu (Phase 4 M3, § 3.2) — the builder extracted
+// The shared page context menu — the builder extracted
 // from WorkspaceCanvasView. Same items/guards as the inline version it
 // replaced: Open / Rotate CW/CCW / Extract Text / Delete, with the
 // multi-select labels and empties-a-file disabling.
@@ -80,7 +80,7 @@ describe('buildPageContextMenu', () => {
     expect(dispatch).toHaveBeenCalledWith({ type: 'ROTATE_PAGE_REF', docId: doc.id, pageId: 'a.pdf#p1', rotation: 90 });
   });
 
-  it('Open hands over the page identity for the reading jump (M6.2)', () => {
+  it('Open hands over the page identity for the reading jump', () => {
     // Was (path, 1-based number) for the PageInspector; the reading pane
     // replaced it, and a jump wants the page's id.
     const onOpen = vi.fn();

@@ -63,7 +63,7 @@ async function fieldValues(path: string): Promise<Map<string, unknown>> {
   return map;
 }
 
-describe('on-canvas form filling (2n.4b)', () => {
+describe('on-canvas form filling', () => {
   let tmp: string;
   let source: string;
 
@@ -140,7 +140,7 @@ describe('on-canvas form filling (2n.4b)', () => {
     expect(vals.get('full_name')).toBe('Survives Commit');
   });
 
-  it('creates a field on the canvas that is immediately fillable (2n.4c)', async () => {
+  it('creates a field on the canvas that is immediately fillable', async () => {
     // The prior test left the page committed at /Rotate 90, so this also
     // exercises placement conversion on a baked-rotated page.
     await placeNewField({ x: 0.1, y: 0.55, w: 0.4, h: 0.06 });
@@ -168,7 +168,7 @@ describe('on-canvas form filling (2n.4b)', () => {
     expect(message).toContain('already exists');
   });
 
-  it('creates an empty signature field, then signs INTO it (2n.4c + 2n.4d)', async () => {
+  it('creates an empty signature field, then signs INTO it', async () => {
     await placeNewField({ x: 0.55, y: 0.75, w: 0.35, h: 0.1 });
     // Read-back hardened (strike-3 rule): the sign-into-field below is
     // name-keyed and raced the post-create forms refetch under load —

@@ -1,7 +1,7 @@
-"""Page-VECTOR editing (Phase 9.D1 — the first vector slice).
+"""Page-VECTOR editing (the first vector slice).
 
 Lists, selects (via a bbox), and deletes VECTOR path objects on a page — the
-drawn rules, boxes, underlines, dividers, and logos that Track C's raster
+drawn rules, boxes, underlines, dividers, and logos that the raster
 tools can't touch (the phase-open ceiling: "Vector objects aren't
 addressable"). A "vector object" is ONE maximal run of path-CONSTRUCTION
 operators (`m l c v y re h`) terminated by a path-PAINTING operator that
@@ -10,18 +10,18 @@ DRAWS it (`f F f* S s B B* b b*`). It is the unit the user clicks.
 Ids are the depth-first encounter order of PAINTED paths in the page content
 stream — its OWN ordinal space, separate from `page_images`' — so the lister
 and the delete rewriter agree by construction (both walk in encounter order,
-the walker-agreement invariant Phase 7 established).
+the walker-agreement invariant).
 
 What is NOT a vector object (v1 boundaries — refusals, never broken output):
   - A path terminated by `n` (end-path-no-op), or ANY path that sets a clip
     (`W`/`W*`): a clip region, not a drawn object. This is exactly the shape
-    C3's crop frame emits (`re W n`), so the same rule keeps the tools' own
+    the crop frame emits (`re W n`), so the same rule keeps the tools' own
     frames from listing as phantom user objects. A clip-SETTING fill
     (`re W f`) is excluded too — deleting it would change the clipping of
     everything after it, which is more than "remove this object."
   - Paths inside Form XObjects — v1 lists PAGE-content paths only. Deleting
-    into a shared form is the copy-on-write complexity Track C paid for; D1
-    doesn't need it and won't half-pay it.
+    into a shared form is copy-on-write complexity this pass
+    does not need and will not half-pay for.
   - Shading (`sh`), images (`Do`), and text (shows) — not paths by
     definition.
 
@@ -32,9 +32,9 @@ delete leaves the state around a dropped `Do`). No wrap, no XObject/resource
 surgery; a `/Pattern`-filled path that becomes unreachable is swept by the
 same `remove_unreferenced_resources` reachability pass the image family uses.
 
-Named successors: D2 vector move/resize/rotate (the C1 mirror — `matrix` is
-listed for it, exactly as C1 needed the image CTM), then recolour /
-line-width, then form-nested paths.
+Named successors: vector move/resize/rotate (the image mirror — `matrix`
+is listed for it, exactly as the image transform needs the image CTM),
+then recolour / line-width, then form-nested paths.
 """
 
 import math
@@ -77,7 +77,7 @@ _PAINT_ALL = _PAINT_VISIBLE | {"n"}
 # Paint operators that CLOSE the current subpath before painting (§8.5.3.3).
 _PAINT_CLOSING = {"s", "b", "b*"}
 
-# N11 slice A: the chord tolerance `list_page_geometry` flattens curves to, in
+# The chord tolerance `list_page_geometry` flattens curves to, in
 # DEVICE points. 0.25 pt is below a hairline — a snapped endpoint is exact to
 # the eye — and it is what bounds the payload on a dense drawing sheet.
 GEOMETRY_TOL = 0.25
@@ -88,7 +88,7 @@ GEOMETRY_DECIMALS = 2
 
 class _PathPoints:
     """Device-space bbox points for the path under construction — EXACT for
-    curves (P8 slice A). Control points are transformed to device space
+    curves. Control points are transformed to device space
     FIRST (an affine map of a Bézier is the Bézier of the mapped control
     points — mapping a user-space bbox would be wrong under rotation),
     then the curve's true extrema accumulate via the shared `engine.bezier`
@@ -98,7 +98,7 @@ class _PathPoints:
     Malformed operand shapes contribute nothing — a listing never aborts
     on bad geometry.
 
-    N11 slice A adds an OPT-IN second product: the path's device-space
+    An OPT-IN second product: the path's device-space
     SUBPATHS, curves flattened to `GEOMETRY_TOL`. It is opt-in because the
     bbox listing (`list_page_vectors`, every Edit-tool pass) has no use for
     per-vertex geometry and must not pay for flattening it — `geometry=False`
@@ -109,13 +109,13 @@ class _PathPoints:
         self.cur = None  # user-space current point
         self.start = None  # user-space subpath start
         self.dev_cur = None  # the current point, already in device space
-        # N11: flattened device-space subpaths (opt-in).
+        # Flattened device-space subpaths (opt-in).
         self.geometry = geometry
         self.subpaths: list = []  # finished [[x,y,x,y,…], …]
         self.sub_closed: list = []  # parallel: was the subpath explicitly closed?
         self._sub = None  # the open subpath, or None
 
-    # ── N11 subpath bookkeeping ──────────────────────────────────────────
+    # ── Subpath bookkeeping ──────────────────────────────────────────
     def _flush(self, closed: bool) -> None:
         if self._sub is not None and len(self._sub) >= 4:
             self.subpaths.append(self._sub)
@@ -231,8 +231,8 @@ def _color_rgb(color_state, resources=None, pdf=None):
     Device colours (`g`/`rg`/`k`, and stroke `G`/`RG`/`K`) resolve inline. A
     `cs`/`scn` in a NON-device space (ICCBased, Indexed, Separation, DeviceN,
     Cal*, Lab) is resolved against `resources`'s `/ColorSpace` by
-    `color_spaces.resolve_color` (§ I.0 S5) — before S5 these returned None and
-    showed no swatch. Anything still unresolvable stays None (honest unknown,
+    `color_spaces.resolve_color`. These used to return None and
+    show no swatch. Anything still unresolvable stays None (honest unknown,
     never a wrong colour)."""
     if color_state is None:
         return None
@@ -260,12 +260,12 @@ def _color_rgb(color_state, resources=None, pdf=None):
             c, m, y, k = (max(0.0, min(1.0, n)) for n in nums)
             return [(1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k)]
         return None
-    # sc/scn in a named space — resolve via /Resources /ColorSpace (S5).
+    # sc/scn in a named space — resolve via /Resources /ColorSpace.
     return color_spaces.resolve_color(space_op, value_op, resources, pdf)
 
 
 def _emit_placement(out: list, xobj, ctm, clips, depth: int, do_chain) -> None:
-    """N11 slice A: append the device-space QUAD an XObject (or inline image)
+    """Append the device-space QUAD an XObject (or inline image)
     paints into, as a `"placement"` entry.
 
     An IMAGE fills the unit square by definition (§8.9.5.2), so its quad is
@@ -332,17 +332,17 @@ def _walk_vectors(
     geometry: bool = False,
 ) -> list:
     """One dict per PAINTED, non-clip path in depth-first encounter order.
-    Recurses into Form XObjects (9.D4) when `pdf`/`resources` are supplied, so
+    Recurses into Form XObjects when `pdf`/`resources` are supplied, so
     nested paths list too (a page-content-only walk passes neither and stays
     flat). Each dict carries the public listing fields plus internals the
     editors use: `drop_idxs` (the EXACT construction-op indices + the paint
     index — a precise SET so a state op interleaved into the path survives a
-    delete, round-36 HIGH) and, for a nested path, `_form_name` (the DIRECT
+    delete) and, for a nested path, `_form_name` (the DIRECT
     page-level form to copy-on-write) + `_root_do_idx` (the page `Do` to swap)
     + `_edit_depth` (only depth-1 nesting edits in v1; deeper lists but refuses
     the edit — copying a chain of forms is out of scope).
 
-    `geometry=True` (N11 slice A, `list_page_geometry` only) additionally
+    `geometry=True` (`list_page_geometry` only) additionally
     attaches each painted path's flattened device-space `subpaths`/`closed`
     and emits a `"placement"` entry per `Do`/inline image — the unit square
     (image) or the form's /BBox, mapped through the live CTM. It is OPT-IN so
@@ -352,7 +352,7 @@ def _walk_vectors(
     if out is None:
         out = []
     state = GraphicsTextState(base_ctm, fill_color=base_fill, stroke_color=base_stroke)
-    # 9-§I.0-S8: ambient clip tracking beside the state machine. page_vectors
+    # Ambient clip tracking beside the state machine. page_vectors
     # already EXCLUDES a path that itself sets a clip (`has_clip`); this catches
     # the other half — a PAINTED path drawn wholly outside an EARLIER clip lists
     # as `clipped` (invisible). `base_clip` is the parent form's device-space
@@ -361,11 +361,11 @@ def _walk_vectors(
     path_start = None  # instruction index of the current path's first construct op
     start_ctm = None  # CTM at the first construction op (the wrap-start space)
     construct_idxs: list = []  # EXACT indices of this path's construction ops
-    path_pts = _PathPoints(geometry)  # device-space bbox points (curve-exact, P8)
+    path_pts = _PathPoints(geometry)  # device-space bbox points (curve-exact)
     has_clip = False
     line_width = base_line_width  # `w` (PDF default 1.0) — a form inherits the caller's
     w_stack: list = []  # line width IS graphics state — q/Q-scoped like the rest
-    q_meta: list = []  # P8 slice D: open-frame metadata for `sh` recognition
+    q_meta: list = []  # Open-frame metadata for `sh` recognition
     for idx, instruction in enumerate(instructions):
         operator = str(instruction.operator)
         operands = list(instruction.operands)
@@ -373,11 +373,11 @@ def _walk_vectors(
         # consumes q/Q/cm). Its own path buffer is independent of `pts` below.
         clips.feed(operator, operands, state.ctm)
         # Line width is graphics state; GraphicsTextState doesn't track it, so
-        # save/restore it in lockstep with q/Q here (round-37 HIGH: a `w` set
+        # save/restore it in lockstep with q/Q here (a `w` set
         # inside a q…Q otherwise leaked forward and mis-inflated later strokes).
         if operator == "q":
             w_stack.append(line_width)
-            # P8 slice D: per-frame metadata for `sh` recognition. A frame is
+            # Per-frame metadata for `sh` recognition. A frame is
             # CLEAN while it contains only pure state (constructs, clips, gs,
             # cm/colour/text-state, w) — the gradient-fill idiom's exact
             # ingredient list. Opening a NESTED frame makes the parent
@@ -403,7 +403,7 @@ def _walk_vectors(
         if operator in _CONSTRUCT:
             if path_start is None:
                 path_start = idx
-                # P8 slice B: the CTM live at the FIRST construction op — the
+                # The CTM live at the FIRST construction op — the
                 # transform wrap opens HERE, so its conjugated matrix must be
                 # built against THIS space, not the paint-time CTM (they
                 # differ exactly when a `cm` interleaves into the path; a cm
@@ -460,24 +460,24 @@ def _walk_vectors(
                         "stroke": _color_rgb(state.stroke_color, resources, pdf)
                         if operator not in _PAINT_FILL
                         else None,
-                        # D3: the effective line width (the width control's seed);
+                        # The effective line width (the width control's seed);
                         # meaningful for a stroke/fillstroke, informational for a fill.
                         "line_width": round(line_width, 4),
                         "nested": depth > 0,
                         "drop_idxs": construct_idxs + [idx],
-                        # P8 slice C: the FULL Do chain (page-outward) —
+                        # The FULL Do chain (page-outward) —
                         # [(form name, Do index in its PARENT's stream), …];
                         # the chain copy-on-write edits any depth.
                         "_do_chain": list(do_chain),
                         "_edit_depth": depth,
-                        # 9-§I.0-S8: True when wholly outside the ambient clip.
+                        # True when wholly outside the ambient clip.
                         "clipped": clips.clips_away(vrect),
                     }
                 )
             path_start, start_ctm, construct_idxs, has_clip = None, None, [], False
             path_pts.reset()
             continue
-        # 9.D4: recurse into a Form XObject so its paths list too (page walk
+        # Recurse into a Form XObject so its paths list too (page walk
         # only — `pdf` is None for the flat page-content walks the editors run
         # on their own instruction list). The page-level `Do` index + the form
         # name ride down so a nested edit knows which form to copy and which
@@ -486,11 +486,11 @@ def _walk_vectors(
             fname = str(operands[0])
             xobj = _lookup_xobject(fname, resources, resources)
             if geometry:
-                # N11: an image's (or form's) placement QUAD is a snap target
+                # An image's (or form's) placement QUAD is a snap target
                 # in both references — corners, edge midpoints, centre. The
                 # walk already holds the CTM at the `Do`, so it costs nothing.
                 _emit_placement(out, xobj, state.ctm, clips, depth, do_chain)
-            # P7 slice F: a MARKED vector-graphic form (a placed SVG) is one
+            # A MARKED vector-graphic form (a placed SVG) is one
             # unit owned by the IMAGE-placement machinery — listing its
             # interior paths here would offer per-path edits that fork a
             # copy away from the marker and fight the placement selection.
@@ -504,7 +504,7 @@ def _walk_vectors(
                 # A form inherits the caller's graphics state (§8.10.2): thread
                 # the live CTM, line width, and fill/stroke into the recursion
                 # so a form whose own content sets none lists with the right
-                # colour/width/bbox (round-39 MED). Enclosing resources are the
+                # colour/width/bbox. Enclosing resources are the
                 # fallback for a form whose /Resources omits a nested name.
                 _walk_vectors(
                     list(pikepdf.parse_content_stream(xobj)),
@@ -590,7 +590,7 @@ def _walk_vectors(
 
 def list_page_vectors(file: str, page: int) -> dict:
     """Vector path objects on 1-based `page`, in the id order the editors
-    target. Page-content AND form-nested paths (9.D4); each carries a
+    target. Page-content AND form-nested paths; each carries a
     device-space `rect` (bbox for selection), the CTM `matrix` (for a
     transform), `kind` (fill/stroke/fillstroke), best-effort `fill`/`stroke`
     colours, `line_width`, and `nested` (inside a Form XObject)."""
@@ -603,7 +603,7 @@ def list_page_vectors(file: str, page: int) -> dict:
         vectors = _walk_vectors(
             list(pikepdf.parse_content_stream(p)), pdf=pdf, resources=_resolve_resources(p)
         )
-        # P8 slice D: an UNCLIPPED shading floods the visible page — its
+        # An UNCLIPPED shading floods the visible page — its
         # honest extent is the page's crop (or media) box.
         page_box = None
         try:
@@ -621,7 +621,7 @@ def list_page_vectors(file: str, page: int) -> dict:
 
 
 def list_page_geometry(file: str, page: int) -> dict:
-    """The SNAP GEOMETRY of 1-based `page` (N11 slice A) — device-space
+    """The SNAP GEOMETRY of 1-based `page` — device-space
     subpaths per painted path, plus a quad per placed image/form.
 
     Why a second listing rather than a field on `list_page_vectors`: that one
@@ -642,7 +642,7 @@ def list_page_geometry(file: str, page: int) -> dict:
                and contributes a CENTRE candidate.
 
     Same device frame as `list_page_vectors`' `rect`, so `pdfRectToDisplay`'s
-    projection applies unchanged. Clipped-away geometry is excluded (the S8
+    projection applies unchanged. Clipped-away geometry is excluded (the clip
     rule the walk already applies). Per page, on demand — never whole-document;
     that is what bounds the payload on a 60-sheet drawing set.
     """
@@ -688,7 +688,7 @@ def _sh_names_used(content_source, resources) -> set:
     """Every name any reachable `sh` still draws — the page/form stream plus
     every form reachable from `resources` (cycle-guarded, depth-bounded;
     OVER-collecting is safe, an unused name kept = dead weight, not a leak).
-    The P7 `_sweep_orphan_edit_gs` recipe, for /Shading — qpdf's GC leaves
+    The `_sweep_orphan_edit_gs` recipe, for /Shading — qpdf's GC leaves
     that table alone too (probe-verified), and a swept gradient's /Function
     can be a large sampled stream, the removed-bytes-still-embedded class."""
     used: set = set()
@@ -734,7 +734,7 @@ def _sh_names_used(content_source, resources) -> set:
 def _swept_shading_table(pdf, resources, sh_name: str, used: set):
     """A FRESH /Shading subdict without `sh_name` when nothing still draws
     it (the caller guarantees `resources` is page-local/copy-local — the
-    shared table is never mutated, the C2 sibling rule)."""
+    shared table is never mutated, the sibling rule)."""
     if sh_name in used:
         return
     try:
@@ -768,16 +768,16 @@ def _fresh_vec_name(resources) -> str:
 
 
 def _edit_nested_vector(pdf, p, obj, rewrite, sweep_shading=None) -> None:
-    """9.D4, generalized by P8 slice C to ANY depth ≤ MAX_FORM_DEPTH: edit a
+    """Generalized to ANY depth ≤ MAX_FORM_DEPTH: edit a
     vector object inside a CHAIN of Form XObjects on COPIES of every form
     along the chain — the innermost form's stream takes `rewrite`, then each
     ancestor is copied with its child's `Do` renamed to the child's copy,
     and finally the page-level `Do` swaps. A form stamped elsewhere (at any
     level) is untouched — each copy registers fresh-named on its PARENT's
-    copied resources (the C2 sibling rule at every level), and each
+    copied resources (the sibling rule at every level), and each
     superseded original is dropped when nothing in the rewritten parent
-    still draws it (qpdf's GC leaves forms; round-39 HIGH at page level,
-    the P7 slice-F precedent on copies). `rewrite` runs on the INNERMOST
+    still draws it (qpdf's GC leaves forms at page level, and the SVG
+    placement precedent applies on copies). `rewrite` runs on the INNERMOST
     form's instruction list and may raise (validation) before any mutation.
     A chain of length 1 is exactly the shipped depth-1 behavior."""
     from engine.page_images import _drop_replaced_forms, _names_drawn
@@ -808,7 +808,7 @@ def _edit_nested_vector(pdf, p, obj, rewrite, sweep_shading=None) -> None:
     def make_copy(orig, instrs):
         # Copy every key off the original EXCEPT the stream-encoding ones (a
         # BLOCKLIST like redact.py/page_images — an allowlist silently dropped
-        # keys the edited form needs, e.g. /OC layer membership; round-39 HIGH).
+        # keys the edited form needs, e.g. /OC layer membership).
         stream = pdf.make_stream(pikepdf.unparse_content_stream(instrs))
         for key in orig.keys():
             if str(key) in ("/Length", "/Filter", "/DecodeParms"):
@@ -818,9 +818,9 @@ def _edit_nested_vector(pdf, p, obj, rewrite, sweep_shading=None) -> None:
 
     child_copy = make_copy(forms[-1], new_inner_instrs)
     if sweep_shading:
-        # P8 slice D: a nested shading delete sweeps the entry off the INNER
+        # A nested shading delete sweeps the entry off the INNER
         # copy's own (COW'd) table — the original form's shared resources
-        # are never mutated (the C2 rule at this level too).
+        # are never mutated (the rule at this level too).
         inner_own = forms[-1].get("/Resources")
         inner_res = _copy_resources_for_write(
             pdf, inner_own if inner_own is not None else scopes[-1]
@@ -856,7 +856,7 @@ def _edit_nested_vector(pdf, p, obj, rewrite, sweep_shading=None) -> None:
     p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(page_instrs))
     # Reclaim the page-level form we just superseded — otherwise the OLD form
     # (incl. a "deleted" path's geometry) stays embedded + reachable forever,
-    # and repeated edits grow the file unbounded (round-39 HIGH). Only drops
+    # and repeated edits grow the file unbounded. Only drops
     # when nothing in the rewritten page still draws it (a form Do'd twice on
     # the page keeps its other occurrence — the reachability check handles it).
     _finalize_page_rewrite(p, page_instrs, {chain[0][0]})
@@ -885,8 +885,8 @@ def _resolve_target(pdf, p, index):
 
 
 def _interleaved_indices(instrs, drop: list) -> list:
-    """P8 slice B: the NON-path ops a producer placed inside the object's
-    [first..last] span. A wrap used to refuse these outright (round-36: the
+    """The NON-path ops a producer placed inside the object's
+    [first..last] span. A wrap used to refuse these outright (the
     wrap's `Q` would scope them away from following content); the lift keeps
     them in place INSIDE the wrap and REPLAYS them after the closing `Q` —
     exact, because `Q` restores the pre-frame state, so the replay composes
@@ -921,7 +921,7 @@ def _interleaved_indices(instrs, drop: list) -> list:
 def delete_page_vector(file: str, output: str, page: int, index: int) -> dict:
     """Remove one vector path object — drop its construction ops + paint op
     (per-object; surrounding state untouched). A NESTED path is dropped on a
-    copy of its form (9.D4)."""
+    copy of its form."""
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -935,9 +935,9 @@ def delete_page_vector(file: str, output: str, page: int, index: int) -> dict:
         # set). Every surrounding op stays — including a state op (q/Q/cm/colour)
         # a producer placed BETWEEN construction and paint: it flows to
         # following content EXACTLY as before, so removing it would change that
-        # content or unbalance q/Q (review round 36 HIGH). No resource sweep for
+        # content or unbalance q/Q. No resource sweep for
         # a /Pattern (small dead weight); a deleted SHADING's entry IS swept
-        # (P8 slice D — its /Function can be a large sampled stream, and qpdf's
+        # (its /Function can be a large sampled stream, and qpdf's
         # GC leaves /Shading alone, probe-verified).
         drop = set(obj["drop_idxs"])
 
@@ -952,7 +952,7 @@ def delete_page_vector(file: str, output: str, page: int, index: int) -> dict:
             p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
             if sweep_name:
                 # COW the page resources before touching the table (the
-                # shared dict is every sibling's — the C2 rule).
+                # shared dict is every sibling's — the rule).
                 resources = _copy_resources_for_write(pdf, _resolve_resources(p))
                 p.obj["/Resources"] = resources
                 _swept_shading_table(
@@ -968,8 +968,8 @@ def delete_page_vector(file: str, output: str, page: int, index: int) -> dict:
 
 
 def transform_page_vector(file: str, output: str, page: int, index: int, matrix: list) -> dict:
-    """Move / resize / rotate ONE vector object (Phase 9.D2) by wrapping its
-    path run in `q <cm> … Q` — the C1 mirror.
+    """Move / resize / rotate ONE vector object by wrapping its
+    path run in `q <cm> … Q`.
 
     `matrix` is the DESIRED absolute placement M' of the object's bbox as a
     unit-square matrix [a,b,c,d,e,f] in DEVICE space — what the canvas gesture
@@ -979,7 +979,7 @@ def transform_page_vector(file: str, output: str, page: int, index: int, matrix:
     D acts in DEVICE space even under a nested CTM, then wraps the object's
     contiguous op run. REFUSES an object whose path has graphics-state
     operators interleaved into it (non-contiguous — a wrap's `Q` would scope
-    them, the round-36 hazard) or a degenerate (zero-area) bbox."""
+    them, the hazard) or a degenerate (zero-area) bbox."""
     m_target = _as_matrix(matrix)
     if m_target is None:
         raise ValueError("matrix must be [a, b, c, d, e, f]")
@@ -1023,7 +1023,7 @@ def transform_page_vector(file: str, output: str, page: int, index: int, matrix:
         cm = _op([round(float(v), 6) for v in m_insert], "cm")
 
         def rewrite(instrs):
-            # P8 slice B: interleaved state ops no longer refuse — validated
+            # Interleaved state ops no longer refuse — validated
             # (balanced q/Q) and replayed after the wrap's Q. Computed HERE
             # because `instrs` is the FORM's list for a nested object and the
             # page's for a top-level one — drop_idxs are stream-local, and
@@ -1078,7 +1078,7 @@ def restyle_page_vector(
     stroke=None,
     line_width=None,
 ) -> dict:
-    """Recolour / re-width ONE vector object (Phase 9.D3) by wrapping its path
+    """Recolour / re-width ONE vector object by wrapping its path
     run in `q <state ops> … Q`.
 
     The new fill (`rg`), stroke (`RG`), and/or line width (`w`) are injected
@@ -1087,7 +1087,7 @@ def restyle_page_vector(
     colour is untouched — the object's own paint just uses the new state).
     `fill`/`stroke` are [r,g,b] 0-1 (clamped); `line_width` is a number ≥ 0.
     REFUSES an object with interleaved graphics-state operators (non-contiguous
-    run — a wrap's `Q` would scope them, the round-36 hazard) or a request that
+    run — a wrap's `Q` would scope them, the hazard) or a request that
     sets nothing."""
     ops: list = []
     if fill is not None:
@@ -1120,11 +1120,11 @@ def restyle_page_vector(
         contiguous = drop == list(range(first, last + 1))
 
         def rewrite(instrs):
-            # P8 slice B: an INTERLEAVED run restyles too — wrap + replay
+            # An INTERLEAVED run restyles too — wrap + replay
             # (validated balanced), with the new setters injected right
             # BEFORE the paint op, where they beat any interleaved colour a
             # producer set mid-run (setters at the wrap head would silently
-            # lose to them). The round-38 merge recognition stays
+            # lose to them). The merge recognition stays
             # CONTIGUOUS-only — its `q setters run Q` shape can't exist
             # around an interleaved run, and repeated interleaved restyles
             # nest bounded by each wrap's own Q (the outer Q discards the

@@ -16,14 +16,14 @@ import {
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 
-// The Reading Order panel (§ I.6) — the per-page view of the structure tree's
+// The Reading Order panel — the per-page view of the structure tree's
 // traversal order, which is the order assistive technology reads the page in.
 // Up/down moves an entry among its SIBLING tags in one atomic engine step;
 // entries in different branches say so and point at the Tags tree, where
 // indent/outdent can restructure — an honest refusal, never a silent no-op.
 
 export function ReadingOrderPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();

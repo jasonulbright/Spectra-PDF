@@ -1,9 +1,9 @@
-// O5b — annotating a SIGNED document commits as an INCREMENTAL APPEND:
+// Annotating a SIGNED document commits as an INCREMENTAL APPEND:
 // the working copy becomes original-bytes + one revision, so the embedded
 // signature keeps verifying. The CLI is the truth on both claims:
 // verify-signatures (still intact+valid) and comments-list (the annotation
-// is really in the file). Before O5b this exact flow silently broke the
-// signature — the commit was a pdf-lib rewrite.
+// is really in the file). This exact flow used to break the
+// signature silently — the commit was a pdf-lib rewrite.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,7 +31,7 @@ interface VerifyResult {
   signatures: { intact: boolean; valid: boolean }[];
 }
 
-describe('signed-document incremental commit (O5b)', () => {
+describe('signed-document incremental commit', () => {
   it('an added comment survives commit with the signature still verifying', async () => {
     await waitForHarness();
     await closeAllFiles();

@@ -1,7 +1,7 @@
 // Adapted from PDFx src/renderer/src/components/FindBar.tsx:
 // same search/OCR-progress/language surface, restyled to this app's Tailwind
 // idiom, plus match navigation (↑/↓/Enter) and the "Make searchable" action
-// (persist OCR text via the engine — the 2m addition PDFx doesn't have).
+// (persist OCR text via the engine — the addition PDFx doesn't have).
 import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SearchResult } from '../../search/engine';

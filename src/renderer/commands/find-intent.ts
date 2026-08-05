@@ -6,13 +6,13 @@ import type { CanvasServices } from './types';
 // DOCUMENT tab is focused. A command that focuses a doc tab and then wants Find
 // cannot simply call `find.open()` afterwards: the dispatch only SCHEDULES the
 // tab change, so the canvas stays unmounted for the rest of that synchronous run
-// and `ctx.canvas` is null. M5.1 shipped exactly that bug — `tools.open.ocr` was
+// and `ctx.canvas` is null. That was a live bug — `tools.open.ocr` was
 // a dead click, and its test passed only because the test pre-registered
 // services, a precondition that cannot hold at the tool's real entry point (the
 // Tools tab, where the canvas is by definition not mounted).
 //
 // So park the intent and let the mount drain it — the same park-then-flush shape
-// M4.1c used for cross-document find jumps.
+// cross-document find jumps use.
 //
 // The park is KEYED TO ITS TARGET, and the drain checks that the canvas which
 // mounted is showing that target. A bare boolean would fire on whatever canvas
@@ -20,7 +20,7 @@ import type { CanvasServices } from './types';
 // Find springs open there for no reason the user can see. The first draft
 // documented "callers must guarantee a doc tab lands" as the mitigation — but an
 // invariant that depends on future writers remembering is one that will break
-// (the same lesson M4.1c and this slice's own activeToolId fix already paid
+// (a lesson the cross-document jump and the activeToolId fix already paid
 // for), so the module enforces it rather than asking.
 //
 // This lives in its own module rather than in `context.ts` because `context`

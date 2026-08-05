@@ -1,8 +1,8 @@
-"""Headless batch OCR (Phase 12 step 3) -- the folder-mirror driver, engine side.
+"""Headless batch OCR -- the folder-mirror driver, engine side.
 
 This is the port of `src/renderer/lib/batch-ocr.ts`. It exists so a batch can
 run with NO WINDOW: that is what makes the CLI arm possible, and the CLI arm is
-what makes scheduling possible (issue #1 request 5). The GUI keeps its own
+what makes scheduling possible. The GUI keeps its own
 TypeScript driver for the interactive case; this one serves the CLI and every
 scheduled run.
 
@@ -31,7 +31,7 @@ from pathlib import Path
 import pikepdf
 
 from engine.compress import compress
-# P22: ONE image wrap for the whole product. batch OCR was where it lived and
+# ONE image wrap for the whole product. batch OCR was where it lived and
 # where its multi-frame data loss hid; it is now a first-class engine arm and
 # this module is a consumer like any other.
 from engine.create_pdf import IMAGE_SUFFIXES, image_to_pdf
@@ -55,10 +55,10 @@ def _mrc_step(
 ) -> tuple[bool, str]:
     """MRC-compress one already-recognised file. Returns (applied, note).
 
-    O8 slice D. ORDER is the whole reason this is a separate step rather than
+    ORDER is the whole reason this is a separate step rather than
     a flag on the recognition call: recognition rasterises from the PAGE, so
     MRC first would hand Tesseract the reconstruction instead of the scan
-    (§ 5.4). Here the recognised output IS the input, which makes the order
+    Here the recognised output IS the input, which makes the order
     structural rather than documented.
 
     A failure NEVER fails the file. The searchable copy is the deliverable the
@@ -189,7 +189,7 @@ def dest_conflicts_with_source(source_root: str, dest_root: str) -> bool:
     return dst == src or dst.startswith(src + "\\")
 
 
-# P3: image files a scan folder routinely holds beside its PDFs. Each is
+# Image files a scan folder routinely holds beside its PDFs. Each is
 # wrapped into a PDF and then OCR'd exactly like any other page — the
 # recognizer never learns there was no PDF to begin with. `IMAGE_SUFFIXES` and
 # the wrap itself are re-exported from `engine.create_pdf` (see the import).
@@ -199,9 +199,9 @@ def _list_sources(
     root: Path, images: bool, extra: tuple[str, ...] = ()
 ) -> tuple[list[tuple[Path, str]], list[str]]:
     """Every source under root, with its path RELATIVE to root, plus
-    unreadable dirs. PDFs always; image files when `images` is on (P3);
+    unreadable dirs. PDFs always; image files when `images` is on;
     `extra` for a caller that accepts more (a guided action whose FIRST step
-    is `create_pdf` walks Office sources too — P22 slice E).
+    is `create_pdf` walks Office sources too).
 
     A non-PDF's mirrored name gains `.pdf` rather than replacing the
     extension: `invoice.tif` and `invoice.pdf` in one folder must not
@@ -307,13 +307,13 @@ def ocr_file(
     handles output == file with a true-identity temp+rename) — COMPOSED
     beside batch_ocr from the shared helpers rather than extracted from it,
     so the batch loop's verified behavior is untouched. Built for the
-    guided-actions OCR step (slice 2); also the CLI's `ocr-file` arm.
+    guided-actions OCR step; also the CLI's `ocr-file` arm.
 
     A file with nothing that looks like a scan is reported, not rewritten:
     in-place → no write at all; to a distinct output → a byte copy.
 
-    `mrc` (O8) MRC-compresses the recognised result afterwards — recognition
-    first, always (§ 5.4). It never fails the file; the note rides the result.
+    `mrc` MRC-compresses the recognised result afterwards — recognition
+    first, always. It never fails the file; the note rides the result.
     """
     input_path = Path(file)
     output_path = Path(output)
@@ -398,12 +398,12 @@ def batch_ocr(
     mrc_verify_text: bool = False,
 ) -> dict:
     """Mirror a folder of PDFs into searchable copies — or, with `in_place`,
-    REPLACE each original with its searchable version (O7 in-place batch
+    REPLACE each original with its searchable version (in-place batch
     mode). In-place output goes through a staged temp beside the original
     and only replaces it after the verify-read succeeds, so a crash or a bad
     write can never leave a half-written original. Returns the report.
 
-    P3 — `passwords` maps a source's RELATIVE path (or its bare file name) to
+    `passwords` maps a source's RELATIVE path (or its bare file name) to
     the password that opens it. Supplied UP FRONT rather than prompted:
     a batch is exactly the run that has nobody to ask — a scheduled job under
     a service account has no desktop — so the credential has to arrive with
@@ -411,15 +411,15 @@ def batch_ocr(
     skipped as `password-protected`, which is what lets a caller run once,
     read the report, and re-run just the files it now has passwords for.
 
-    P3 — `include_images` adds loose image files (PNG/JPEG/TIFF/BMP) to the
+    `include_images` adds loose image files (PNG/JPEG/TIFF/BMP) to the
     sweep. Each is wrapped into a one-page PDF at its own natural size and
     then travels the identical path; the mirrored name gains `.pdf` rather
     than replacing the extension, so `invoice.tif` and `invoice.pdf` in one
     folder cannot collide.
 
-    O8 — `mrc` MRC-compresses each processed file AFTER recognition (§ 5.4:
+    `mrc` MRC-compresses each processed file AFTER recognition:
     recognition rasterises from the page, so the reverse order would hand
-    Tesseract the reconstruction). It is the answer to issue #5's "a batch
+    Tesseract the reconstruction). It answers "a batch
     option that could just compress automatically": the user with a folder of
     smartphone scans is standing in this run. A file MRC declines — anything
     that is not a scan — keeps the bytes it already had and says so; MRC
@@ -468,7 +468,7 @@ def batch_ocr(
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
         # In place: write to a staged temp BESIDE the original; the tail
         # replaces the original only after the verify-read succeeds.
-        # P3: an image's mirrored name GAINS `.pdf` rather than replacing the
+        # An image's mirrored name GAINS `.pdf` rather than replacing the
         # extension — `invoice.tif` and `invoice.pdf` in one folder must not
         # collide, and the original name stays legible in the output.
         out_rel = rel + ".pdf" if _is_image(abs_path) else rel
@@ -492,7 +492,7 @@ def batch_ocr(
                     "reason": "in-place mode cannot replace an image with a PDF",
                 }
             elif _is_image(abs_path):
-                # P3: an image becomes a PDF FIRST — one page per FRAME, so a
+                # An image becomes a PDF FIRST — one page per FRAME, so a
                 # multi-page fax TIFF OCRs whole — and everything after this
                 # line is the shipped PDF path with no branch.
                 scratch = out_path.parent / f".{out_path.stem}.image.tmp"
@@ -586,7 +586,7 @@ def batch_ocr(
 
             # ── MRC, after recognition and before the tail ──────────────
             #
-            # After, because § 5.4's order is structural here: the file this
+            # After, because the order is structural here: the file this
             # reads is the RECOGNISED one. Before the tail, because the tail
             # verifies the output and may move originals on the strength of
             # it — verifying bytes that are about to be replaced would verify
@@ -778,7 +778,7 @@ def _file_line(r: dict) -> str:
     else:
         line = f"{tag}{r['rel']} — {r['reason']}" if r.get("reason") else f"{tag}{r['rel']}"
     if r.get("mrc"):
-        # O8: the size saving — or the reason there was none — is the whole
+        # The size saving — or the reason there was none — is the whole
         # point of having asked for MRC, so it is never left to inference.
         line += f" [{r['mrc']}]"
     if r.get("repaired"):

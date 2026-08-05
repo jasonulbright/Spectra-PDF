@@ -16,7 +16,7 @@ import {
 // bookmarked.pdf: outline = Chapter 1 [Section 1.1, Section 1.2], Chapter 2.
 const BOOKMARKED_PDF = resolve(__dirname, '..', 'fixtures', 'bookmarked.pdf');
 
-// Phase 4 M3.2: the merged Bookmarks nav panel (OutlineSidebar's reorder+jump +
+// The merged Bookmarks nav panel (OutlineSidebar's reorder+jump +
 // OutlinePanel's editing, one surface). Drives the real DOM: display, inline
 // rename with a disk round-trip, and add.
 

@@ -2,7 +2,7 @@ import React, { useSyncExternalStore } from 'react';
 import { symbolById, type SymbolPart } from '../lib/count-marks';
 import { getSymbolSets, subscribeSymbolSets, symbolParts } from '../lib/symbol-library';
 
-// N11 slice C/D — a vector symbol as an inline SVG.
+// A vector symbol as an inline SVG.
 //
 // It draws the SAME unit-square parts `pdfx-build` turns into path operators
 // for the annotation's appearance, so the picker, the page and the printed

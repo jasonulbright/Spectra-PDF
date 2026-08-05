@@ -1,4 +1,4 @@
-// N12 slice D (brief 37) — the engine-message boundary.
+// The engine-message boundary.
 //
 // The FIXTURE is `src/renderer/locales/engine-messages.tsv`, produced by the
 // pytest sweep of `src/engine/*.py` and kept true to the engine by
@@ -40,7 +40,7 @@ afterAll(async () => {
   await i18next.changeLanguage('en');
 });
 
-describe('engine refusal table (N12 slice D)', () => {
+describe('engine refusal table', () => {
   it('parses the checked-in fixture', () => {
     expect(ENGINE_MESSAGE_ROWS.length).toBeGreaterThan(250);
     for (const row of ENGINE_MESSAGE_ROWS) {

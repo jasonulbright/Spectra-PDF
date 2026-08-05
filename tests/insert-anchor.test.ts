@@ -1,4 +1,4 @@
-// insertAnchor (M6.3, § 9.3): where Document ▸ Insert Pages puts new pages,
+// insertAnchor: where Document ▸ Insert Pages puts new pages,
 // and whose size a blank page copies. A state question, answered in
 // selectors.ts beside the other active-file questions.
 import { describe, expect, it } from 'vitest';

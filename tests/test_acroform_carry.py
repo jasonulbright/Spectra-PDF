@@ -1,4 +1,4 @@
-"""AcroForm preservation through the engine's structural page ops (2n.4a).
+"""AcroForm preservation through the engine's structural page ops.
 
 pikepdf page copies import widget annotations and their /Parent field chains
 but never the document-level /AcroForm — so merge and split outputs lost
@@ -424,7 +424,7 @@ def _co_names(pdf) -> list:
 
 
 class TestDocFormExtras:
-    """F11: /CO reconciled, catalog /AA carried, XFA page surgery refused."""
+    """/CO reconciled, catalog /AA carried, XFA page surgery refused."""
 
     def test_merge_reconciles_co_across_sources_with_renames(self, tmp_dir):
         a = os.path.join(tmp_dir, "a.pdf")

@@ -1,4 +1,4 @@
-"""Replacement-font fallback (Phase 7.4).
+"""Replacement-font fallback.
 
 When a run's own font cannot express the user's text (subset without the
 glyph, symbolic encoding…), the edit is re-rendered in the BUNDLED
@@ -19,8 +19,8 @@ The run rewrite itself reuses text_runs' targeted rewriter through its
 builder hook: this module only supplies "how to render the replacement" —
 `/NewFont size Tf`, the GID-encoded Tj, and a Tf restoring the run's
 original font so subsequent runs are untouched. Δwidth math, same-line
-anchor adjustment, and form copy-on-edit are the SAME code paths 7.2
-shipped and tested.
+anchor adjustment, and form copy-on-edit are the SAME code paths the
+run editor uses.
 """
 
 import io
@@ -35,7 +35,7 @@ from fontTools.ttLib import TTFont
 
 # The vendored fallback family (scripts/sync-edit-fonts.ps1); the engine
 # picks the face matching the run's own font so a serif document's
-# converted text stays serif (Phase 9.B1), and — since 9.A3b — the face
+# converted text stays serif, and the face
 # VARIANT matching the requested style, so a bold restyle lands on the
 # real Bold face. All twelve are metric-compatible with the Microsoft
 # cores.
@@ -60,7 +60,7 @@ _FACE_FILES = {
     },
 }
 
-# 9.K2: the feature-bearing family (Libertinus Serif OTF, SIL OFL). OPT-IN
+# The feature-bearing family (Libertinus Serif OTF, SIL OFL). OPT-IN
 # ONLY — deliberately NOT in `_FACE_FILES`, so `classify_font_family` /
 # `resolve_fallback_font`'s automatic ladder can never land here. It is
 # reached solely by an explicit feature request (small caps / alternates),
@@ -137,7 +137,7 @@ def classify_font_style(font_dict) -> tuple[bool, bool]:
     (ForceBold flag, Italic flag, ItalicAngle) plus BaseFont-name hints
     (the workhorse in practice: real-world bold is signalled by the name,
     ForceBold is a Type1 hinting flag most producers never set). Seeds
-    the 9.A3b style toggles; never authoritative for rendering."""
+    the style toggles; never authoritative for rendering."""
     bold = False
     italic = False
     for d in _descriptors_of(font_dict):
@@ -176,8 +176,8 @@ def style_key(bold: bool, italic: bool) -> str:
 def synthetic_family_font(family: str):
     """A minimal font dict whose classification is forced to `family` —
     the way to drive `resolve_fallback_font` when there is no original
-    font to match (authoring, 9.A2) or the user picked the family
-    explicitly (9.A3 restyle). serif/mono ride the /Flags bits the
+    font to match (authoring) or the user picked the family
+    explicitly (restyle). serif/mono ride the /Flags bits the
     classifier reads first; anything else lands on the sans default.
     The dict is only ever classified, never embedded."""
     if family == "serif":
@@ -194,7 +194,7 @@ def synthetic_family_font(family: str):
     )
 
 
-# T5: the CJK-capable faces (Noto Sans CJK SC — OFL, vendored by
+# The CJK-capable faces (Noto Sans CJK SC — OFL, vendored by
 # sync-edit-fonts.ps1). No CJK italic exists; the style map degrades
 # italic requests to Regular exactly like a missing family face.
 _CJK_FACES = {
@@ -204,7 +204,7 @@ _CJK_FACES = {
     "bolditalic": "NotoSansCJKsc-Bold.otf",
 }
 
-# T3: the right-to-left faces (IBM Plex Sans Arabic / Noto Sans Hebrew —
+# The right-to-left faces (IBM Plex Sans Arabic / Noto Sans Hebrew —
 # both OFL, vendored by sync-edit-fonts.ps1). Arabic is the SHAPING face: it
 # carries the GSUB joining rules a document's own subset almost never keeps,
 # which is why an Arabic run substitutes here rather than re-emitting per
@@ -235,7 +235,7 @@ _RTL_FACES = {
 }
 
 
-# 9.T12: the Mongolian face (Noto Sans Mongolian — OFL-1.1, vendored by
+# The Mongolian face (Noto Sans Mongolian — OFL-1.1, vendored by
 # sync-edit-fonts.ps1). ONE face, Regular only, so the style map degrades
 # exactly as the CJK map does for italic.
 #
@@ -262,7 +262,7 @@ _MONGOLIAN_FACES = {
 
 
 def resolve_mongolian_font(font_path: str, text: str, style: str = "regular") -> str:
-    """The bundled face that can DRAW Mongolian-family `text` (9.T12).
+    """The bundled face that can DRAW Mongolian-family `text`.
 
     Raises ValueError naming the text when the bundled face cannot express
     it — the signal the reflow turns into an honest refusal rather than a
@@ -286,7 +286,7 @@ def resolve_mongolian_font(font_path: str, text: str, style: str = "regular") ->
 
 def resolve_rtl_font(font_path: str, text: str, style: str = "regular") -> str:
     """The bundled face that can DRAW `text` — the Arabic face when the text
-    joins cursively, else whichever RTL face covers it (T3).
+    joins cursively, else whichever RTL face covers it.
 
     `font_path` must be the vendored fonts DIRECTORY. Raises ValueError
     naming the text when no bundled face can express it, which is the
@@ -342,14 +342,14 @@ def resolve_fallback_font(
     DIRECTORY (the vendored `resources/fonts` — the real app passes this,
     and the family matching the original font is chosen) or a FILE (a
     specific face — the test/back-compat path, used verbatim). `style`
-    (9.A3b: regular/bold/italic/bolditalic) picks the face variant.
+    (regular/bold/italic/bolditalic) picks the face variant.
     Degrade ladder: exact family+style → the family's Regular → Sans
     Regular → whatever single .ttf is present — face identity beats
     weight (a missing Bold lands on the family's Regular, never another
     family's Bold), and a partially provisioned bundle degrades instead
     of crashing.
 
-    T5: when `text` is given and the family face cannot express it, the
+    When `text` is given and the family face cannot express it, the
     CJK-capable face (Noto Sans CJK, full Latin included so mixed strings
     stay one face) takes over — a text-DRIVEN switch, never a silent
     substitution for text the family face already covers. Text neither
@@ -378,7 +378,7 @@ def resolve_fallback_font(
             cjk = os.path.join(font_path, candidate_name)
             if os.path.isfile(cjk) and face_covers(cjk, text):
                 return cjk
-        # T25: the same text-driven step for right-to-left scripts — but
+        # The same text-driven step for right-to-left scripts — but
         # OPT-IN, unlike the CJK one, and that difference is the whole
         # safety property. Resolving an RTL face is only correct for a
         # caller that also REORDERS the line and SHAPES the joining runs;
@@ -386,7 +386,7 @@ def resolve_fallback_font(
         # honest "the fallback font cannot express 'ب'" refusal into
         # silently broken output — disconnected letters in reverse. So each
         # emitter opts in as it is lifted (Add Text is; per-span styling,
-        # watermarks and form fill are not yet — § I rows T25a/b/c), and
+        # watermarks and form fill are not yet), and
         # everything else keeps the refusal it has today.
         if rtl_ok:
             try:
@@ -397,13 +397,13 @@ def resolve_fallback_font(
 
 
 def resolve_vertical_font(font_path: str, text: str, style: str = "regular") -> str:
-    """The bundled face that can draw `text` VERTICALLY — 9.T4.
+    """The bundled face that can draw `text` VERTICALLY.
 
     One family, deliberately: the CJK face is the only bundled one carrying
     `vert`/`vrt2` and `vmtx`, and a serif/mono request has nothing honest to
     resolve to. That is an ABSENCE (we vendor no vertical serif), not a
     refusal to look — a user who wants another vertical face picks one of
-    their own installed ones, which T6 made a first-class choice.
+    their own installed ones, which is a first-class choice.
 
     Raises ValueError naming the text when nothing bundled can draw it,
     which the caller turns into the same honest refusal it had before."""
@@ -443,7 +443,7 @@ def face_has_vertical_metrics(face_path: str) -> bool:
 
 def face_shapes_vertically(face_path: str, text: str) -> bool:
     """Whether `face_path` can draw every character of `text` vertically —
-    the gate for an INSTALLED face (T6) used on vertical text. A font with
+    the gate for an INSTALLED face used on vertical text. A font with
     no vertical machinery answers False rather than drawing sideways.
 
     Two independent absences, both refused: no vertical METRICS (no `vmtx`
@@ -467,7 +467,7 @@ def face_shapes_vertically(face_path: str, text: str) -> bool:
 
 def resolve_feature_font(font_path: str, style: str = "regular") -> str:
     """The bundled FEATURE-BEARING face (Libertinus Serif OTF) for `style`.
-    9.K2 — opt-in only; never returned by the automatic ladder above, so it
+    Opt-in only; never returned by the automatic ladder above, so it
     can't become a silent substitution of a document's body font."""
     if not os.path.isdir(font_path):
         return font_path
@@ -483,13 +483,13 @@ def _subset_font(font_path: str, text: str, glyphs=None, retain_gids=False) -> t
     """Subset the fallback font; returns (ttf bytes, the loaded subset TTFont
     for metrics/cmap reads).
 
-    9.K2: when `glyphs` (a set of glyph NAMES) is given, subset to those
+    When `glyphs` (a set of glyph NAMES) is given, subset to those
     glyphs directly instead of by character. Feature-substituted glyphs
     (`a.sc`, a stylistic alternate) are not reachable through the cmap, so a
     text-driven subset would drop them; a glyph-driven subset keeps exactly
     what will be drawn."""
     options = ft_subset.Options()
-    # 9.T3: a SHAPED subset keeps the source glyph ids (`retain_gids`), because
+    # A SHAPED subset keeps the source glyph ids (`retain_gids`), because
     # the shaper addresses glyphs by id and the subsetter drops the `post`
     # names that would otherwise let us re-find them. The character path keeps
     # the shipped renumbering — it re-derives every glyph through the subset's
@@ -537,7 +537,7 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for
     """Embed a subset of the fallback font for `text`. Returns
     (font_dict [indirect], encode(str)->bytes, width_1000(str)->float).
 
-    9.K2: `glyph_for` (a `{char: glyph_name}` map from `font_features.
+    `glyph_for` (a `{char: glyph_name}` map from `font_features.
     resolve_glyphs`) overrides the cmap lookup so a FEATURE-substituted glyph
     (small cap, alternate) is what gets embedded and drawn. ToUnicode still
     maps back to the original character, so small-caps text stays searchable
@@ -605,12 +605,12 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
     builders — descriptor, descendant CIDFont, /W, ToUnicode. Returns a
     1-tuple so the callers can concatenate their own encode/measure pair
     onto it; splitting it out is what keeps the shaped path from forking a
-    second copy of the embedding rules (9.T3).
+    second copy of the embedding rules.
 
     `tounicode_pairs` is [(code, text)] sorted by code; `text` may be empty
     (a shaped cluster's non-leading glyph maps to NOTHING, so the word
     extracts back exactly once) or several characters (a ligature)."""
-    # Derive the embedded BaseFont from the ACTUAL face (9.B1: it may now
+    # Derive the embedded BaseFont from the ACTUAL face (it may now
     # be Serif/Mono, not always Sans) — a hardcoded "LiberationSans" would
     # lie about a serif embed. "-Regular" is dropped; the "ABCDEF+" fake
     # subset tag marks it as subsetted.
@@ -618,7 +618,7 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
     if stem.endswith("-Regular"):
         stem = stem[: -len("-Regular")]
     base_name = f"ABCDEF+{stem or 'FallbackFont'}"
-    # 9.K2: the face may be CFF-flavoured (an .otf). That matters because the
+    # The face may be CFF-flavoured (an .otf). That matters because the
     # OpenType FEATURES this slice exists for live only in the OTF builds of
     # some families — Libertinus ships `smcp`/`salt` in its .otf faces and
     # strips them from its .ttf ones — so a TrueType-only embedder would make
@@ -666,7 +666,7 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
             FontDescriptor=descriptor,
             DW=1000,
             W=Array(w_array),
-            # 9.T4: a VERTICAL embed carries /W2 (the vertical advances, as
+            # A VERTICAL embed carries /W2 (the vertical advances, as
             # `c [w1y vx vy]` triplets) and /DW2. Per spec w1y is NEGATIVE —
             # the advance runs DOWN the page — while every width table in
             # this engine stores magnitudes, so the sign is applied here, at
@@ -695,7 +695,7 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
             # /CIDToGIDMap is defined for CIDFontType2 ONLY; for a CFF
             # descendant the CID-to-glyph mapping comes from the embedded
             # font, so emitting it here would be meaningless (and is what
-            # trips strict validators). 9.T25: a SHAPED subset passes a
+            # trips strict validators). A SHAPED subset passes a
             # stream, because several codes may point at one glyph — that is
             # how one base glyph spells `مَ` under one code and `مْ` under
             # another. The character path passes nothing and keeps /Identity.
@@ -742,12 +742,12 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
 
 
 def build_vertical_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
-    """Embed a subset for VERTICAL writing — 9.T4.
+    """Embed a subset for VERTICAL writing.
 
     Vertical CJK could not be restyled at all because "no vertical face is
-    bundled". T5 bundled one (Noto Sans CJK carries `vert`/`vrt2`, `vmtx`
-    and `VORG`) and T3 brought the shaper that can reach those features, so
-    the stated reason stopped being true and this is what replaces it.
+    bundled". One is bundled now (Noto Sans CJK carries `vert`/`vrt2`,
+    `vmtx` and `VORG`) and the shaper can reach those features, so the
+    stated reason stopped being true and this is what replaces it.
 
     Three things make an embed vertical rather than horizontal, and all
     three come from the font rather than from an assumption:
@@ -811,7 +811,7 @@ def build_vertical_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
         return bytes(out)
 
     def width_1000(s: str) -> float:
-        # The VERTICAL advance — the 9.B4a convention: magnitudes only, the
+        # The VERTICAL advance — the convention: magnitudes only, the
         # caller applies the downward direction.
         return sum(advances.get(used[ch], 1000.0) for ch in s if ch in used)
 
@@ -824,7 +824,7 @@ def build_vertical_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
 
 def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
     """Embed a subset that carries SHAPED glyphs as well as plain characters
-    (9.T3). Returns (font_dict, encode, width_1000, glyph_encode,
+    Returns (font_dict, encode, width_1000, glyph_encode,
     glyph_width) — the last two take a sequence of glyph NAMES, which is how
     a shaped run addresses glyphs the cmap cannot reach (a joining form, a
     lam-alef ligature, an attached mark).
@@ -904,7 +904,7 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
             # No mapping table to point several codes at one glyph, so a
             # glyph carries exactly ONE spelling. A collision REFUSES rather
             # than letting the second spelling overwrite the first — the
-            # T25/T26 rule, which is why a fatha does not come back a sukun.
+            # spelling rule, which is why a fatha does not come back a sukun.
             # The caller drops to the unshaped path, whose output is correct
             # (just without the ligature), never to wrong glyphs.
             code = g

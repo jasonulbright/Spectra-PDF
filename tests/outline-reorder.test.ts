@@ -103,7 +103,7 @@ describe('moveOutlineNode', () => {
     expect(moveOutlineNode(tree, [5], 0, 0)).toBe(tree); // no such node
   });
 
-  it('preserves opaque 2l action-preservation fields through a reorder', () => {
+  it('preserves opaque action-preservation fields through a reorder', () => {
     const tree: OutlineNode[] = [
       { title: 'Link', page: null, children: [], action: { s: 'https://x' }, action_lossy: false },
       n('Plain', [], 3),

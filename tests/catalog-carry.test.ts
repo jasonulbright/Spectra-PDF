@@ -3,7 +3,7 @@
 // rebuild. Before the carry, ONE committed page edit silently deleted every
 // bookmark, page label, the layer configuration, the document language and
 // viewer preferences — the same loss class as the /AcroForm and
-// /Names /EmbeddedFiles drops (found by inspection while scoping P19).
+// /Names /EmbeddedFiles drops (found by inspection).
 import { describe, expect, it } from 'vitest';
 import {
   PDFArray,
@@ -238,7 +238,7 @@ describe('catalog carry — own-source only', () => {
   });
 });
 
-// ── F11: document actions (/AA) ─────────────────────────────────────────────
+// ── document actions (/AA) ──────────────────────────────────────────────────
 
 async function withDocActions(bytes: Uint8Array, opts?: { gotoPage?: boolean }): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
@@ -260,7 +260,7 @@ async function withDocActions(bytes: Uint8Array, opts?: { gotoPage?: boolean }):
   return doc.save();
 }
 
-describe('catalog carry — /AA document actions (F11)', () => {
+describe('catalog carry — /AA document actions', () => {
   it('carries the own document\'s /AA whole', async () => {
     const src = await withDocActions(await plainSource());
     const out = await rebuild([pageOf(src, 0)]);

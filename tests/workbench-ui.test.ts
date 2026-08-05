@@ -1,4 +1,4 @@
-// workbench-ui persistence (Phase 4 M3; tool dock added Phase 10 B1).
+// workbench-ui persistence, including the tool dock.
 // readWorkbenchUi must coerce a corrupt/partial persisted value against
 // defaults field-by-field, so a bad entry can't propagate a wrong shape into
 // ui.navPane / ui.toolDock (the recent-files precedent). Uses a localStorage
@@ -40,7 +40,7 @@ describe('readWorkbenchUi', () => {
 
   it('drops a PRE-U3 entry\'s retired toolDock.view instead of choking on it', () => {
     // Every existing install has one of these on disk: the dock used to carry
-    // `view: 'tool' | 'comments'` and U3 retired it (comments are a normal op
+    // `view: 'tool' | 'comments'` and it is retired (comments are a normal op
     // panel now). The reader must keep the fields it still understands rather
     // than fall back to defaults and lose the user's width.
     store.set(

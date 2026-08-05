@@ -1,4 +1,4 @@
-// On-canvas form-field creation (2n.4c). Pure over bytes like lib/forms.ts —
+// On-canvas form-field creation. Pure over bytes like lib/forms.ts —
 // pdf-lib authors the field and generates its widget appearance, the caller
 // wraps it in the standard renderer-side whole-file-op shape. Signature
 // fields are the one hand-rolled case: pdf-lib has no high-level create for
@@ -6,15 +6,15 @@
 // level (an EMPTY signature field has no appearance stream by convention —
 // viewers draw their own affordance; the canvas overlay shows its badge).
 //
-// CLI-scope boundary (deliberate, recorded like 2m's OCR-recognition note so
-// it is never mistaken for an overlooked gap): field creation is an
+// CLI-scope boundary (deliberate, recorded so it is never mistaken for an
+// overlooked gap): field creation is an
 // interactive canvas AUTHORING gesture — the same class as annotations,
 // redaction marks, and signature placement, none of which have CLI arms; the
-// CLI's forms parity surface is the fill/read/flatten TRANSFORM (2l's
+// CLI's forms parity surface is the fill/read/flatten TRANSFORM (the
 // `forms` subcommand), which is unchanged by this.
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFString } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
-// N12 slice E: the spec problems are USER-FACING copy, so they resolve
+// The spec problems are USER-FACING copy, so they resolve
 // through the catalog. i18n is itself a data module (catalogs + i18next), so
 // this file stays pure over bytes and unit-testable with no DOM.
 import { tChrome, type UiKey } from '../i18n';
@@ -74,7 +74,7 @@ interface FieldProblem {
 /**
  * The refusal `addFormField` throws when a spec is invalid.
  *
- * Two properties earned in N12 slice E:
+ * Two properties:
  *   • the problems are reported ALL AT ONCE (the engine ops' fail-closed
  *     posture), and each is its OWN catalog key. Nothing glues several
  *     sentences into one key — a joined message would carry several
@@ -231,7 +231,7 @@ function addSignatureField(doc: PDFDocument, spec: NewFieldSpec): void {
   }
   annots.push(ref);
   // A document that can hold signatures advertises it (SigFlags bit 1) —
-  // the same recompute rule the 2n.4a carry applies.
+  // the same recompute rule the carry applies.
   acro.set(PDFName.of('SigFlags'), doc.context.obj(1));
 }
 

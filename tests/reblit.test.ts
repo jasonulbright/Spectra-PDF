@@ -1,4 +1,4 @@
-// Re-blit batching (the probe-classified flicker fix, 18-phase3-polish.md):
+// Re-blit batching (the probe-classified flicker fix):
 // buffer-swap re-renders complete staggered over hundreds of ms; the
 // scheduler must hold them through a quiet window, flush them TOGETHER in
 // arrival order, cap the hold under a continuous trickle, and batch anew
@@ -58,7 +58,7 @@ describe('scheduleReblit', () => {
   });
 
   it('flushes synchronously when an arrival lands past the cap (stalled timers)', () => {
-    // Review round 3: the cap can fire two ways — the remaining-capped
+    // The cap can fire two ways — the remaining-capped
     // timer, or the synchronous heldFor check when an arrival lands after
     // wall time passed the cap without timers running (a main-thread
     // stall). This pins the synchronous branch; test 2 pins the timer one.

@@ -101,7 +101,7 @@ def convert_cmyk(
         str(input_path),
     ]
 
-    # § 5.5: derived budget (budget.run keeps the stdin isolation — gs must
+    # Derived budget (budget.run keeps the stdin isolation — gs must
     # never inherit the RPC pipe, the distill review's finding).
     result = budget.gs(cmd, what="Ghostscript (CMYK conversion)", path=input_path, pages=info["pages"])
     if result.returncode != 0:
@@ -217,7 +217,7 @@ def convert_pdfx(
     info: str = "",
     gs_path: str = "gs",
 ) -> dict:
-    """Produce a PDF/X print master with a real output intent (O6 tail).
+    """Produce a PDF/X print master with a real output intent (tail).
 
     The conversion runs CMYK (colour-managed, like convert_cmyk) and the
     output carries /GTS_PDFXVersion + a /GTS_PDFX /OutputIntents entry. With
@@ -273,7 +273,7 @@ def convert_pdfx(
             def_path,
             str(input_path),
         ]
-        # § 5.5: derived budget; the floor stays at this call's own 600 s.
+        # Derived budget; the floor stays at this call's own 600 s.
         result = budget.gs(
             cmd, what="Ghostscript (PDF/X conversion)", path=input_path, base=600.0
         )

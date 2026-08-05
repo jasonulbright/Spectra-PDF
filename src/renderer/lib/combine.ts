@@ -1,4 +1,4 @@
-// P22 slice D — the Combine Files list model (brief 41 § 4).
+// The Combine Files list model.
 //
 // Combine is Create PDF with two differences, and only two: every member may
 // contribute a PAGE RANGE, and the assembled result can land in a document
@@ -143,7 +143,7 @@ export function clearRowResults(rows: readonly SourceRow[]): SourceRow[] {
   return rows.map(({ error: _error, contributed: _contributed, ...row }) => row);
 }
 
-/** One `sources` row as the engine reports it back (brief 41 § 6). */
+/** One `sources` row as the engine reports it back. */
 export interface CombineSourceReport {
   path?: string;
   kind: string;

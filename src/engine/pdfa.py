@@ -20,8 +20,7 @@ def convert_pdfa(
     reattached here: our field appearance streams reference unembedded
     fonts, which PDF/A forbids, so reattaching would silently break the very
     conformance this op exists to produce. Archival conversion of a form is
-    flatten-then-convert. (Boundary recorded in
-    docs/architecture/16-phase2n-canvas-completeness.md § 2n.4(a).)
+    flatten-then-convert.
 
     Args:
         file: Input PDF path.
@@ -60,7 +59,7 @@ def convert_pdfa(
         str(input_path),
     ]
 
-    # § 5.5: derived budget, not a fixed 300 s (budget.run isolates stdin).
+    # Derived budget, not a fixed 300 s (budget.run isolates stdin).
     result = budget.gs(cmd, what="Ghostscript (PDF/A)", path=input_path, pages=info["pages"])
     if result.returncode != 0:
         raise RuntimeError(f"Ghostscript PDF/A conversion failed: {result.stderr}")

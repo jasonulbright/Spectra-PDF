@@ -11,7 +11,7 @@ interface DocHeaderProps {
   onMove: (docId: string, direction: -1 | 1) => void;
   onRemove: (docId: string) => void;
   onRename: (docId: string, name: string) => void;
-  // Merge-up (2o): append a COPY of this document's pages to the document
+  // Merge-up: append a COPY of this document's pages to the document
   // above (disabled for the first document; reorder + repeat composes any
   // merge order). This document's strip stays until the user removes it.
   onMergeUp: (docId: string) => void;

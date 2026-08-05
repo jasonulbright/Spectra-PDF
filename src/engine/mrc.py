@@ -92,7 +92,7 @@ from .validate import validate_pdf
 #: codecs): the WORST good page any preset produced scored 0.9781 (the
 #: greyscale scan under archival), while the failure this gate exists for — a
 #: page thresholded for type that is not there — returns near-nothing, which
-#: is why recon scored a misjudged page in the low hundredths. The floors sit
+#: is why a misjudged page scores in the low hundredths. The floors sit
 #: between those two populations with room to spare. **0.98 was the first
 #: value here and the matrix caught it**: it would have REVERTED that
 #: greyscale page, handing the user back the original they asked to shrink —
@@ -137,8 +137,8 @@ PRESETS: dict[str, dict] = {
 }
 DEFAULT_PRESET = "balanced"
 
-#: The named codecs a caller may ask for, mapped to the codec ids slice B
-#: knows. Asking BY NAME disables the CCITT fallback (a silent codec swap
+#: The named codecs a caller may ask for, mapped to the encoder's own
+#: codec ids. Asking BY NAME disables the CCITT fallback (a silent codec swap
 #: would make the size claim untrue).
 MASK_CODEC_ALIASES = {
     "jbig2": JBIG2_SYMBOL,
@@ -191,7 +191,7 @@ class _Candidate:
 
 
 # --------------------------------------------------------------------------
-# Classification (§ 3.1)
+# Classification
 # --------------------------------------------------------------------------
 def _page_box(page) -> tuple[float, float, float, float]:
     box = page.obj.get("/CropBox", page.obj.get("/MediaBox"))
@@ -406,7 +406,7 @@ def _rasterize_placement(
 
 
 # --------------------------------------------------------------------------
-# Segmentation (§ 3.2)
+# Segmentation
 # --------------------------------------------------------------------------
 def _integral(a: np.ndarray) -> np.ndarray:
     """Summed-area table with a zero row/column, in float64.
@@ -441,7 +441,7 @@ def _box_sums(ii: np.ndarray, radius: int) -> tuple[np.ndarray, np.ndarray]:
 def sauvola_ink(gray: np.ndarray, window: int, k: float, R: float = SAUVOLA_R) -> np.ndarray:
     """EXACT Sauvola local thresholding — `thr = m·(1 + k·(σ/R − 1))`.
 
-    Exact rather than the block-mean approximation the numpy-free recon used:
+    Exact rather than a block-mean approximation:
     with integral images the true sliding window costs one extra table and
     removes the blockiness that approximation puts along a window boundary,
     which shows up as a dashed edge on a long rule.
@@ -773,7 +773,7 @@ def _mark_runs(target: np.ndarray, comp: _Components, keep: np.ndarray) -> None:
 
 
 # --------------------------------------------------------------------------
-# The continuous-tone layers (§ 3.3)
+# The continuous-tone layers
 # --------------------------------------------------------------------------
 _EPS = 1e-4
 
@@ -863,7 +863,7 @@ def _mask_image(ink: np.ndarray) -> Image.Image:
 
 
 # --------------------------------------------------------------------------
-# Assembly (§ 3.4)
+# Assembly
 # --------------------------------------------------------------------------
 def _image_xobject(pdf, data: bytes, width: int, height: int, filt: str, **extra):
     st = pikepdf.Stream(pdf, data)
@@ -945,7 +945,7 @@ def mrc_compress(
     (Compress's shipped semantics); the in-place CLI and guided-action arms
     carry the same warning `compress` already carries.
 
-    `verify_text` (slice E) recognises the SOURCE page and the reconstructed
+    `verify_text` recognises the SOURCE page and the reconstructed
     MRC page and REFUSES any page whose text similarity falls below the
     preset's threshold — that page keeps its original scan and the report says
     why. `engine/mrc_verify.py` records why the check is made against the
@@ -965,8 +965,8 @@ def mrc_compress(
         # is a modifier and not a fourth preset.)
         if mask_codec and codec != CCITT_G4:
             # Two explicit requests that cannot both hold. Overriding one of
-            # them silently is exactly the "silent codec swap" slice B refused
-            # to make, so the contradiction is named instead.
+            # them silently is exactly the "silent codec swap" the encoder
+            # refuses to make, so the contradiction is named instead.
             raise ValueError(
                 f"PDF/A-1 has no JBIG2 filter, so the mask codec {mask_codec} and "
                 "the PDF/A-safe option cannot both apply — choose one."

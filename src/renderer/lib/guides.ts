@@ -1,4 +1,4 @@
-// N11 slice B — ruler GUIDES. Pure model + math; the drag lives in the canvas
+// Ruler GUIDES. Pure model + math; the drag lives in the canvas
 // components, the state in WorkspaceCanvasView.
 //
 // A guide is per-document view state, like a redaction mark: it is never written
@@ -136,7 +136,7 @@ export function withoutPaths(
   return all.filter((g) => !paths.has(g.path));
 }
 
-/** Drop every guide whose page no longer exists — the § F id-holder rule: a
+/** Drop every guide whose page no longer exists — the id-holder rule: a
  * generation-tagged id that is gone must never be offered to a gesture. */
 export function prunedToPages(
   all: readonly PageGuide[],

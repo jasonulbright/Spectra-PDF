@@ -1,4 +1,4 @@
-//! Watched folders (O7) — drop a PDF into an intake folder and a saved
+//! Watched folders — drop a PDF into an intake folder and a saved
 //! guided action runs over it automatically: processed copies mirror into a
 //! destination and the originals file into a processed folder (Distiller's
 //! classic In → Out → Done shape, which is also what makes the watch
@@ -139,7 +139,7 @@ fn inside(root: &Path, candidate: &Path) -> bool {
             .collect()
     };
     let (rc, cc) = (lower(&r), lower(&c));
-    // Case-insensitive because this app is Windows-only (register row P13).
+    // Case-insensitive because this app is Windows-only.
     cc.len() >= rc.len() && rc.iter().zip(cc.iter()).all(|(a, b)| a == b)
 }
 

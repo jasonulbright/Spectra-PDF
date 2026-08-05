@@ -12,7 +12,7 @@ import {
   setReactSelectValue,
 } from '../support/harness.js';
 
-// § parity-map 2 — guided actions slice 3: FOLDER mode. The run happens
+// Guided actions, FOLDER mode. The run happens
 // ENGINE-side (one RPC, the batch-OCR mirror shape): a source tree of PDFs
 // mirrors into a destination with the steps applied, originals untouched,
 // one run log written. The CLI's `run-action` arm shares the same engine op
@@ -30,7 +30,7 @@ function cliText(path: string): string {
   return (JSON.parse(out) as { text?: string }).text ?? '';
 }
 
-describe('guided actions — folder mode (slice 3)', () => {
+describe('guided actions — folder mode', () => {
   before(async () => {
     SCRATCH = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-actions-folder-'));
     SRC = resolve(SCRATCH, 'src');
@@ -142,7 +142,7 @@ describe('guided actions — folder mode (slice 3)', () => {
     expect(cliText(resolve(dest2, 'c.pdf'))).toContain('CLI TREE');
   });
 
-  it('O7 in-place mode: --in-place REPLACES the originals, no mirror, no litter', () => {
+  it('In-place mode: --in-place REPLACES the originals, no mirror, no litter', () => {
     const src3 = resolve(SCRATCH, 'src3');
     mkdirSync(src3, { recursive: true });
     copyFileSync(SAMPLE_PDF, resolve(src3, 'd.pdf'));

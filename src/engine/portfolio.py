@@ -1,4 +1,4 @@
-"""PDF portfolios — /Collection over the /EmbeddedFiles tree (§ I.6).
+"""PDF portfolios — /Collection over the /EmbeddedFiles tree.
 
 A portfolio is a catalog `/Collection` dictionary plus member files in the
 same `/EmbeddedFiles` name tree that ordinary attachments use — so member

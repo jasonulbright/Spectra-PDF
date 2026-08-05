@@ -1,4 +1,4 @@
-// F10 — redaction marks persist as real /Redact annotations: save writes
+// Redaction marks persist as real /Redact annotations: save writes
 // them into the file (undoable, signature-preserving elsewhere), reopening
 // re-seeds them, and APPLYING consumes exactly the applied ones. Marks
 // themselves stay transient view state (the standing invariant) — the FILE
@@ -29,7 +29,7 @@ async function waitForMarkCount(n: number, msg: string): Promise<void> {
   });
 }
 
-describe('persistent redaction marks (F10)', () => {
+describe('persistent redaction marks', () => {
   it('marks survive save + reopen, and applying consumes exactly the applied set', async () => {
     await waitForHarness();
     await closeAllFiles();

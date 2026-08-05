@@ -50,9 +50,9 @@ def rebuild(
         str(input_path),
     ]
 
-    # § 5.5: derived budget, not a fixed 600 s (budget.run isolates stdin).
+    # Derived budget, not a fixed 600 s (budget.run isolates stdin).
     # base=600: rebuild re-renders every page through the interpreter, and
-    # 600 s was its own floor before the derived budget (§ 5.5's rule — the
+    # 600 s was its own floor before the derived budget (the rule — the
     # floor never drops).
     result = budget.gs(cmd, what="Ghostscript (rebuild)", path=input_path, base=600.0)
     if result.returncode != 0:

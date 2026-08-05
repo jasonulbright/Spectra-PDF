@@ -13,7 +13,7 @@ import {
   openParagraphEditor,
 } from '../support/harness.js';
 
-// Phase 7.5 — paragraph reflow round-trip against the real binary: a
+// Paragraph reflow round-trip against the real binary: a
 // two-line paragraph groups into ONE paragraph box; the REAL paragraph
 // editor commits a longer text; the engine rewraps at the measured box
 // width (line count grows in the re-listing); undo restores. Plus the
@@ -45,7 +45,7 @@ async function editParagraphOpen(pageId: string, index: number): Promise<void> {
  * then re-reads it has a check-then-read race: opening the tool (or any
  * reindex the previous test left in flight) drops and repopulates the page's
  * listing, so the second read can land on the empty window between the two.
- * That is a real full-suite failure, not a hypothetical — the A1 restyle test
+ * That is a real full-suite failure, not a hypothetical — the restyle test
  * got `paragraphs.length === 0` immediately after its own 30s wait proved the
  * listing non-empty. Fixed here, at the helper, so both callers are covered
  * rather than the one that happened to flake. */
@@ -75,7 +75,7 @@ async function firstParagraph(): Promise<{
   return { pageId: got.pageId, para: got.paras[0] };
 }
 
-describe('edit paragraph (Phase 7.5)', () => {
+describe('edit paragraph', () => {
   let tmp: string;
   let pdfPath: string;
 
@@ -216,7 +216,7 @@ describe('edit paragraph (Phase 7.5)', () => {
     );
   });
 
-  it('A1 restyle: raising the size rewraps the paragraph, undo restores it', async function () {
+  it('restyle: raising the size rewraps the paragraph, undo restores it', async function () {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.open.edit');
@@ -259,10 +259,10 @@ describe('edit paragraph (Phase 7.5)', () => {
     );
   });
 
-  it('T17: a paragraph continuing into a form XObject edits across streams', async function () {
+  it('A paragraph continuing into a form XObject edits across streams', async function () {
     this.timeout(120_000);
     // Fixture: the page draws line 1, a form XObject (Do'd right after)
-    // draws line 2 one leading below — the T17 grouping evidence. The edit
+    // draws line 2 one leading below — the grouping evidence. The edit
     // is width-preserving (wordz for words) so each half lands back in its
     // own stream and the output relists as ONE paragraph.
     const { PDFName } = await import('pdf-lib');

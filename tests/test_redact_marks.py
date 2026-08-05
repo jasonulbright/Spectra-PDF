@@ -1,4 +1,4 @@
-"""F10 — persistent redaction marks as real /Redact annotations.
+"""Persistent redaction marks as real /Redact annotations.
 
 Save replaces the file's /Redact set (idempotent); list feeds the canvas
 re-seed; APPLY consumes overlapping marks through the redaction engine's
@@ -51,7 +51,7 @@ class TestSaveAndList:
         assert r["removed_previous"] == 0
         listed = list_redact_annotations(src)
         assert listed["count"] == 2
-        # F15 slice E widened the listing: a mark now reports its REDACTION
+        # Widened the listing: a mark now reports its REDACTION
         # PROPERTIES alongside its rect, so the canvas can re-seed the fill and
         # the overlay the user chose. The exact-dict assertion this used to
         # make would have pinned the listing to "rect only" forever — the
@@ -169,13 +169,13 @@ def _with_annots(path, per_page):
 
 
 class TestUnreadableMarksRefuse:
-    """F12 — a mark that cannot be ACCOUNTED FOR refuses, loudly.
+    """A mark that cannot be ACCOUNTED FOR refuses, loudly.
 
     The old reader skipped it inside `except Exception: continue` and
     returned `count = len(survivors)`, so a document whose /Redact set we
     could only partly read looked identical to one we had read completely.
     The user then applied redactions over fewer bands than they had marked
-    and was told it worked — R2's fail-open shape, one module over.
+    and was told it worked — the fail-open shape, one module over.
     """
 
     @pytest.mark.parametrize("rect", [

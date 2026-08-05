@@ -1,4 +1,4 @@
-"""N12 slice D — regenerate the engine refusal table (brief 37 § Slices D).
+"""Regenerate the engine refusal table.
 
 MAINTENANCE TOOL, not a build step. Run it when the engine's refusal
 messages change, review the resulting diff to

@@ -1,7 +1,7 @@
 """Derived subprocess time budgets.
 
 A FIXED wall-clock budget on a whole-document render fails on exactly the
-documents the feature exists for. Issue #5's reporter hit `timeout=300` on a
+documents the feature exists for. the reporter hit `timeout=300` on a
 50 MB smartphone scan — the normal case for scanned-document work, not an
 outlier — and the same fixed 300 s appears across the Ghostscript-backed ops.
 
@@ -99,8 +99,8 @@ def gs(cmd: list[str], *, what: str, path: str | Path, pages: int = 0,
        text: bool = True) -> subprocess.CompletedProcess:
     """One Ghostscript run over `path`, with the budget derived from it.
 
-    The whole gs family shares this so the § 5.5 defect cannot be half-fixed:
-    a fixed 300 s died on the 50 MB scan that issue #5 reported, and every
+    The whole gs family shares this so the defect cannot be half-fixed:
+    a fixed 300 s died on a reported 50 MB scan, and every
     sibling op carried the same constant. The coefficients are one set on
     purpose — a per-op table would drift, and the honest statement is "time
     proportional to the work", not "this op is special".

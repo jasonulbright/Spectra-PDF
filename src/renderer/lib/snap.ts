@@ -1,4 +1,4 @@
-// N11 slice A — SNAPPING math. Pure functions only: no DOM, no fetch, no
+// SNAPPING math. Pure functions only: no DOM, no fetch, no
 // React, no i18n. This repo has no DOM test environment, so the breakable
 // part must be the testable part (the `measure.ts` precedent, stated in its
 // own header for the same reason).
@@ -537,7 +537,7 @@ export function snapDelta(
   };
 }
 
-// ── Angle constrain (N11 slice B) ────────────────────────────────────────
+// ── Angle constrain ──────────────────────────────────────────────────────
 // Shift, while a drag is live, holds the segment to the nearest increment.
 // Apply this after point snapping so an explicit geometric target takes
 // precedence over a constraint.

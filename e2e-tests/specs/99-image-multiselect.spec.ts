@@ -16,7 +16,7 @@ import {
   settledEditImagePageIds,
 } from '../support/harness.js';
 
-// P7 multi-select — group transform and group delete against the built
+// Image multi-select — group transform and group delete against the built
 // binary. Two placements are additively selected and moved by ONE multi
 // engine op; a SINGLE undo restores both (the whole point: one gesture,
 // one undo entry). Then both are deleted in one op and a single undo
@@ -76,7 +76,7 @@ async function waitForNoPlacements(msg: string): Promise<void> {
   );
 }
 
-describe('image multi-select (P7)', () => {
+describe('image multi-select', () => {
   let tmp: string;
   let pdfPath: string;
 
@@ -134,7 +134,7 @@ describe('image multi-select (P7)', () => {
       'the group move never applied',
     );
 
-    // The group re-selects after the rebuild (the P7 reselect stash).
+    // The group re-selects after the rebuild (the reselect stash).
     await browser.waitUntil(
       async () => {
         const s = await editImageSelection();

@@ -3,8 +3,8 @@ import { useAppState } from '../state/AppStateProvider';
 import { usePdfProxies } from '../hooks/usePdfProxies';
 import { useSearchIndex, type SearchIndex } from './useSearchIndex';
 
-// One shared search index for the whole workspace (Phase 4 M3.3). Before M3.3
-// the index lived inside WorkspaceCanvasView (for the floating FindBar); the
+// One shared search index for the whole workspace. The index used to
+// live inside WorkspaceCanvasView (for the floating FindBar); the
 // nav-pane Search panel needs the SAME index (double-instantiating would
 // double the OCR work and desync results), so it's lifted here and consumed by
 // both. Mounted high in AppContent, so the index PERSISTS across tab switches

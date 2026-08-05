@@ -1,9 +1,9 @@
-// N12 slice C (brief 37) — the CANVAS and its overlays: the contextual
+// The CANVAS and its overlays: the contextual
 // secondary toolbar, the page-cell editors and their annotation chrome, the
 // image/vector transform overlays, the text-selection menu, the find bar, the
 // document/presentation views and the drag hints that live over the page.
-// Fifth typed record after i18n-chrome.ts (slice A), i18n-panels.ts,
-// i18n-dialogs.ts and i18n-workbench.ts (slice B); same contract throughout —
+// Fifth typed record after i18n-chrome.ts, i18n-panels.ts,
+// i18n-dialogs.ts and i18n-workbench.ts; same contract throughout —
 // the record carries the English, the en catalog is GENERATED from it by
 // tests/i18n-catalog.test.ts, every shipped locale's key set must equal en's
 // exactly, and a surface is either FULLY threaded or not started.
@@ -28,7 +28,7 @@ export const CANVAS_STRINGS = {
   'canvas.common.delete': 'Delete',
   'canvas.common.working': 'Working…',
 
-  // ── The secondary toolbar (§ 3.1) ────────────────────────────────────
+  // ── The secondary toolbar ────────────────────────────────────────────
   // The mode group's label names the owning TOOL, so the tool name rides in
   // as a variable rather than being glued to the word "tools".
   'canvas.toolbar.modes': '{{tool}} tools',
@@ -43,7 +43,7 @@ export const CANVAS_STRINGS = {
   'canvas.shape.polyline': 'Polyline',
   'canvas.shape.cloud': 'Cloud',
 
-  // Measure (parity map § 2) — scale row + the calibration follow-up.
+  // Measure — scale row + the calibration follow-up.
   'canvas.measure.optionsGroup': 'Measure options',
   'canvas.measure.scale': 'Scale',
   'canvas.measure.paperAmount': 'Scale: paper amount',
@@ -56,7 +56,7 @@ export const CANVAS_STRINGS = {
   // through Intl (never toFixed) and arrives already rendered.
   'canvas.measure.measured': 'Measured {{length}} pt =',
 
-  // Edit tool (7.1) — image/text/paragraph actions.
+  // Edit tool — image/text/paragraph actions.
   'canvas.edit.actionsGroup': 'Image actions',
   'canvas.edit.hint': 'Click an image, a paragraph, or a line of text on the page',
   'canvas.edit.editParagraph': 'Edit Paragraph…',
@@ -71,7 +71,7 @@ export const CANVAS_STRINGS = {
   'canvas.edit.rotateCcw': 'Rotate 90° counter-clockwise',
   'canvas.edit.rotateCw': 'Rotate 90° clockwise',
 
-  // Blend modes (P7 slice D). The option VALUE stays the PDF name; these are
+  // Blend modes. The option VALUE stays the PDF name; these are
   // only the labels the reader sees.
   'canvas.edit.blend': 'Blend',
   'canvas.edit.blendTitle': 'Blend mode',
@@ -92,7 +92,7 @@ export const CANVAS_STRINGS = {
   'canvas.blend.Color': 'Color',
   'canvas.blend.Luminosity': 'Luminosity',
 
-  // Gradient fade mask (P7 slice E).
+  // Gradient fade mask.
   'canvas.edit.fade': 'Fade',
   'canvas.edit.fadeTitle': 'Gradient fade mask',
   'canvas.edit.fadeNone': 'None',
@@ -100,7 +100,7 @@ export const CANVAS_STRINGS = {
   'canvas.edit.fadeRadial': 'Radial',
   'canvas.edit.fadeAlphaTitle': 'Fade start and end opacity (%)',
 
-  // Align/distribute (P7 multi-select). The GLYPHS are shared with the
+  // Align/distribute (multi-select). The GLYPHS are shared with the
   // properties bar's annotation row and stay verbatim; the tooltips localize.
   'canvas.edit.alignGroup': 'Align images',
   'canvas.edit.alignLeft': 'Align left edges',
@@ -114,17 +114,17 @@ export const CANVAS_STRINGS = {
   'canvas.edit.groupCount_one': '{{count}} selected',
   'canvas.edit.groupCount_other': '{{count}} selected',
 
-  // Opacity (9.C3).
+  // Opacity.
   'canvas.edit.opacity': 'Opacity',
   'canvas.edit.opacityTitle': 'Image opacity',
   'canvas.edit.opacityValue': '{{value}}%',
 
-  // ── Stamps (parity map § 2) ──────────────────────────────────────────
+  // ── Stamps ───────────────────────────────────────────────────────────
   // The built-in stamp WORDS localize: a stamp's label is placed INTO the
   // document as its appearance text, so an author working in Spanish is
   // stamping their own document in Spanish (the new-bookmark-name precedent).
   // Identity is the preset's stable `id`, never its label — a label-derived
-  // test id or comparison is exactly the landmine slice B kept finding.
+  // test id or comparison is exactly the landmine this avoids.
   'canvas.stamp.presetGroup': 'Stamp preset',
   'canvas.stamp.preset.approved': 'APPROVED',
   'canvas.stamp.preset.rejected': 'REJECTED',
@@ -141,7 +141,7 @@ export const CANVAS_STRINGS = {
   'canvas.stamp.labelPlaceholder': 'Label — {date} {time} {name} allowed',
   'canvas.stamp.add': 'Add',
   'canvas.stamp.defaultName': 'Stamp',
-  // N11 slice D — the symbol palette inside the stamp picker.
+  // The symbol palette inside the stamp picker.
   'canvas.stamp.symbols': 'Symbols…',
   'canvas.stamp.symbolsHint':
     'Vector symbols — drag one onto the page, or click to place it with the next click',
@@ -316,7 +316,7 @@ export const CANVAS_STRINGS = {
   'canvas.widget.badge.signed': 'SIGNED',
   'canvas.widget.badge.signature': 'SIGNATURE',
 
-  // ── Vector-object chrome (P8) ────────────────────────────────────────
+  // ── Vector-object chrome ─────────────────────────────────────────────
   'canvas.editvec.shadingTitle':
     'A gradient fill has no flat colour to change — move or delete it',
   'canvas.editvec.shading': 'Gradient fill',
@@ -386,8 +386,8 @@ export const CANVAS_STRINGS = {
   'canvas.editpara.bundled': 'Bundled',
   'canvas.editpara.installed': 'Installed',
   'canvas.editpara.installedRestricted': 'Installed ({{count}} not shown — licence)',
-  // Vertical text CAN be restyled (9.T4): the weight axis is real and an
-  // installed vertical face is a first-class choice (9.T6). What stays
+  // Vertical text CAN be restyled: the weight axis is real and an
+  // installed vertical face is a first-class choice. What stays
   // unavailable is stated as the ABSENCE it is — no bundled vertical
   // family, and no feature request on a vertical embed.
   'canvas.editpara.verticalNoBundledFace':
@@ -417,7 +417,7 @@ export const CANVAS_STRINGS = {
   'canvas.editpara.missingGlyphs': "This document's font does not contain {{chars}}",
   'canvas.editpara.useCompatibleFont': 'Use a compatible font',
 
-  // ── The inline text-run editor (7.2/T14) ─────────────────────────────
+  // ── The inline text-run editor ───────────────────────────────────────
   'canvas.edittext.sizePlaceholder': '{{size}}pt',
   'canvas.edittext.keepColour': 'Keep current colour',
   'canvas.edittext.colour': 'Colour {{color}}',
@@ -456,7 +456,7 @@ export const CANVAS_STRINGS = {
   'canvas.redact.failed': 'Redaction failed — {{reasons}}. Those marks are still pending.',
   'canvas.redact.failedSingle': 'Redaction failed — {{reasons}}. The marks are still pending.',
   'canvas.redact.saveMarksFailed': 'Saving marks failed — {{reasons}}.',
-  // F12: the stored /Redact set could not be read back in full. Both of these
+  // The stored /Redact set could not be read back in full. Both of these
   // exist so a PARTIAL seed can never look like a complete one — the engine
   // refuses when a mark will not resolve, and the seed itself counts marks
   // whose page this view no longer has.
@@ -568,7 +568,7 @@ export const CANVAS_STRINGS = {
   'canvas.addtext.pageChanged': 'The page this text was placed on changed — draw the box again.',
   'canvas.addtext.pageGone': 'The page this text was placed on no longer exists.',
 
-  // Snapping (N11 slice A). The TYPE names double as the marker badge and as
+  // Snapping. The TYPE names double as the marker badge and as
   // what the aria-live announcement reads out — one string, two surfaces, so
   // a reader hearing "Endpoint" and a reader seeing it are told the same
   // thing. The keyboard modifiers (Alt/Tab) are key NAMES, not translatable
@@ -582,7 +582,7 @@ export const CANVAS_STRINGS = {
   'canvas.snap.type.edge': 'Edge',
   'canvas.snap.announce': 'Snapped to {{type}}',
 
-  // Rulers, grid and guides (N11 slice B). The ruler's NUMBERS go through
+  // Rulers, grid and guides. The ruler's NUMBERS go through
   // `tNumber` and its unit symbol is notation (ft/in/mm), so neither carries
   // a key; what localizes is the furniture around them — the accessible
   // names, and the guide's own announcement when one is placed or removed.
@@ -608,7 +608,7 @@ export const CANVAS_STRINGS = {
     "Text and images under each region are removed from the file's content, not just covered. Undo can restore the file while it stays open; once saved, the content is gone for good.",
   'canvas.redact.apply': 'Redact',
 
-  // Count & takeoff (N11 slice C). The GROUP NAME is user data and is never
+  // Count & takeoff. The GROUP NAME is user data and is never
   // translated — it lands in /Subj and in the mark's "<group> <seq>" contents
   // verbatim, the measure format-string rule. Only the chrome around it
   // localizes: the strip's picker and its hints.

@@ -1,4 +1,4 @@
-"""One right-to-left line, as content-stream BYTES — 9.T25b/c.
+"""One right-to-left line, as content-stream BYTES.
 
 Two engine surfaces build appearance streams by hand rather than through
 pikepdf instructions: the watermark stamp and the form-field appearance.
@@ -185,7 +185,7 @@ def build(pdf, face: str, text: str) -> "RtlText | None":
     caller uses, so output that needs neither reordering nor shaping keeps
     its shipped emission byte for byte.
 
-    9.T27: it needs one when the text is right-to-left (the reorder) OR when
+    It needs one when the text is right-to-left (the reorder) OR when
     any word shaped into something the character path cannot draw. The second
     half is why an accent typed into a watermark or a form field now composes
     instead of standing beside its letter; ordinary Latin still returns None

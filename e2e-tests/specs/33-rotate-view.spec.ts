@@ -25,7 +25,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// M6.1: Rotate View — render-only quarter-turns of the reading display.
+// Rotate View — render-only quarter-turns of the reading display.
 // The page tier and the committed file must never turn; overlays drawn WHILE
 // rotated must land where the user drew them.
 
@@ -39,7 +39,7 @@ async function firstCellBox(): Promise<{ x: number; y: number; w: number; h: num
   })) as { x: number; y: number; w: number; h: number };
 }
 
-describe('rotate view (M6.1)', () => {
+describe('rotate view', () => {
   let tmp: string;
 
   before(() => {
@@ -137,7 +137,7 @@ describe('rotate view (M6.1)', () => {
     }).promise;
     const page = await doc.getPage(1);
     // The highlight tool draws translucent BOXES — committed as /Square
-    // (the 2c.1 design; text-markup /Highlight needs QuadPoints on text).
+    // (the design; text-markup /Highlight needs QuadPoints on text).
     const annots = (await page.getAnnotations()) as { subtype: string; rect: number[] }[];
     const highlights = annots.filter((a) => a.subtype === 'Square');
     expect(highlights.length).toBe(1);

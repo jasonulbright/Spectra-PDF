@@ -33,7 +33,7 @@ describe('open valid PDF', () => {
 
   it('opening focuses a document tab (the board) automatically', async () => {
     const state = await getState();
-    // openByPaths lands on the opened doc's tab — the § M2 tab model.
+    // openByPaths lands on the opened doc's tab — the tab model.
     expect(state.focusedTab).toEqual({ doc: SAMPLE_PDF });
     expect(state.view).toBe('canvas'); // legacy projection of a doc tab
     await expect($('[data-testid="tab-doc-0"]')).toBeDisplayed();

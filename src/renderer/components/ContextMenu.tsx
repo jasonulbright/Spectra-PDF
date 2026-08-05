@@ -28,7 +28,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): React.R
   }, [onClose]);
 
   // An open menu owns Escape (the keymap dispatcher's interceptor stack —
-  // Phase 4 M1; formerly this component's own document keydown listener).
+  // formerly this component's own document keydown listener).
   useEffect(() => {
     return pushEscapeInterceptor(() => {
       onClose();

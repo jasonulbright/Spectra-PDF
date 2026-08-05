@@ -56,7 +56,7 @@ describe('compare panel diffs two open PDFs', () => {
     expect(await rows.getText()).toContain('DELTA');
   });
 
-  it('visual mode pixel-diffs the pair and lists differing pages (2j)', async () => {
+  it('visual mode pixel-diffs the pair and lists differing pages', async () => {
     // Same two files: the extra DELTA line is also a *visual* difference on
     // the page raster, so the visual pass must flag page pair 1. This drives
     // the real engine `compare_visual` (bundled Ghostscript raster) end to

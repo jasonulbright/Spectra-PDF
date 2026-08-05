@@ -1,7 +1,7 @@
-// N12 slice B (brief 37) — the WORKBENCH chrome's strings: the right tool
+// The WORKBENCH chrome's strings: the right tool
 // dock and its all-tools list, the left nav pane and its panels, the shared
 // page context menu, and App's confirm/notice MESSAGES. Fourth typed record
-// after i18n-chrome.ts (slice A chrome), i18n-panels.ts (dock panels) and
+// after i18n-chrome.ts (chrome), i18n-panels.ts (dock panels) and
 // i18n-dialogs.ts (chrome dialogs); same contract throughout — the record
 // carries the English, the en catalog is GENERATED from it by
 // tests/i18n-catalog.test.ts, every shipped locale's key set must equal en's
@@ -18,7 +18,7 @@
 //     the catalog gate derives `tool.desc.*` / `navpanel.*` from them, the way
 //     it derives the toolbar groups and the guided-action steps.
 export const WORKBENCH_STRINGS = {
-  // ── The right tool dock (Phase 10 slice B1) ───────────────────────────
+  // ── The right tool dock ───────────────────────────────────────────────
   'dock.paneLabel': 'Tool pane',
   'dock.resize': 'Drag to resize',
   'dock.allTools': 'All tools',
@@ -34,7 +34,7 @@ export const WORKBENCH_STRINGS = {
   'tools.sub': 'Choose what you want to do with your document.',
   'tools.openFirst': 'Open a PDF first',
 
-  // ── The left nav pane (Phase 4 M3) ────────────────────────────────────
+  // ── The left nav pane ─────────────────────────────────────────────────
   'nav.resize': 'Drag to resize',
   'nav.common.noDocument': 'No document open.',
 

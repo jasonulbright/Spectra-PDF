@@ -1,4 +1,4 @@
-// N12 slice E (brief 37) — the RENDERER's own refusal messages.
+// The RENDERER's own refusal messages.
 //
 // Slice D localized the ENGINE's refusals at the bridge; these are the ones
 // the renderer builds itself, in leaf libs that no component test can reach
@@ -32,7 +32,7 @@ afterAll(async () => {
   await i18next.changeLanguage('en');
 });
 
-describe('renderer refusal messages (N12 slice E)', () => {
+describe('renderer refusal messages', () => {
   it('the record is flat, non-empty, and every key is namespaced', () => {
     for (const [k, v] of Object.entries(REFUSAL_STRINGS)) {
       expect(k.startsWith('refusal.'), `${k} is not namespaced`).toBe(true);

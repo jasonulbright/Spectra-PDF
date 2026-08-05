@@ -1,10 +1,10 @@
-"""F15 slice C — `search_text_regions`, the glyph-accurate hit-rect door.
+"""`search_text_regions`, the glyph-accurate hit-rect door.
 
 The claim under test is a GEOMETRY claim, so it is checked against an
 authority outside our own content walk: pdfminer's per-character boxes on the
 same file. Horizontally the per-code slice is exact (the brief measured ±0.00
 pt and this suite pins 0.01); vertically the returned rect is the INK box —
-the font's own descent and ascent, slice A's `ink_extent_em` — so it must
+the font's own descent and ascent, the `ink_extent_em` — so it must
 CONTAIN pdfminer's character box rather than equal it, which is the whole
 point: a rect that stopped at the baseline would leave the descenders of
 `p g y j q` showing under the black box.
@@ -140,7 +140,7 @@ class TestHitRectGeometry:
         assert abs(rect[2] - truth[2]) < 0.01
 
     def test_the_rect_is_the_ink_box_and_contains_pdfminers_glyph_box(self, tmp_dir):
-        """The brief's § 1.5 second half: the lister's rect is baseline →
+        """The lister's rect is baseline →
         baseline + size and misses 2.48 pt of descender at 12 pt Helvetica.
         The derived MARK rect is the INK box, so it covers the glyphs."""
         text = "puppy jog"

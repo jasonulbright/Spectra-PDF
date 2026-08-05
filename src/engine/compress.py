@@ -132,8 +132,8 @@ def compress(
 
     cmd.extend([f"-sOutputFile={str(gs_target).replace('%', '%%')}", str(input_path)])  # % = gs template char (distill review)
 
-    # § 5.5: the budget is DERIVED from the input, never the fixed 300 s that
-    # issue #5's 50 MB scan died on. stdin isolation lives in budget.run — gs
+    # The budget is DERIVED from the input, never the fixed 300 s that
+    # a 50 MB scan died on. stdin isolation lives in budget.run — gs
     # must never inherit the RPC pipe (distill review).
     result = budget.gs(cmd, what="Ghostscript (compress)", path=input_path, pages=info["pages"])
     if result.returncode != 0:

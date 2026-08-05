@@ -63,7 +63,7 @@ interface DocumentRowProps {
   selectedVector: { pageId: string; index: number } | null;
   editImageTransform: EditImageTransformCtx | null;
   onCommitImageTransform: (pageId: string, index: number, matrix: number[]) => void;
-  /** P7 multi-select: the group frame context (N>1) + its one-op commit. */
+  /** Multi-select: the group frame context (N>1) + its one-op commit. */
   editImageGroup: import('./ImageGroupOverlay').ImageGroupCtx | null;
   onCommitImageGroupTransform: (
     pageId: string,
@@ -71,10 +71,10 @@ interface DocumentRowProps {
   ) => void;
   vectorTransform: EditImageTransformCtx | null;
   onCommitVectorTransform: (pageId: string, index: number, matrix: number[]) => void;
-  /** 9.C3 crop mode: armed flag + unit-space rect commit. */
+  /** Crop mode: armed flag + unit-space rect commit. */
   imageCropArmed: boolean;
   onCommitImageCrop: (pageId: string, index: number, rect: [number, number, number, number]) => void;
-  /** P7 slice E: the overlay's gradient-mask dot commit. */
+  /** The overlay's gradient-mask dot commit. */
   onCommitImageMask: (
     pageId: string,
     index: number,
@@ -113,13 +113,13 @@ interface DocumentRowProps {
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
-  // Form widgets keyed by pageId + pending values keyed by file path (2n.4b).
+  // Form widgets keyed by pageId + pending values keyed by file path.
   formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onSignFieldRequest: (path: string, fieldName: string) => void;
   onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => void;
-  // Add-field placement (2n.4c).
+  // Add-field placement.
   newFieldPlacement: SignaturePlacement | null;
   onSetNewFieldRect: (
     docId: string,
@@ -128,9 +128,9 @@ interface DocumentRowProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   onClearNewFieldPlacement: () => void;
-  // Add-text placement (9.A2).
+  // Add-text placement.
   addTextPlacement: SignaturePlacement | null;
-  /** P5b: the pending crop rectangle, drawn on the page. */
+  /** The pending crop rectangle, drawn on the page. */
   cropPlacement: SignaturePlacement | null;
   onClearCropPlacement: () => void;
   onSetCropRect?: (
@@ -415,7 +415,7 @@ function DocumentRowImpl({
     if (!collapsed) visible++;
   }
   emitGhost();
-  // Add-page ghost (2n.3): imports a picked file's pages at the end of this doc.
+  // Add-page ghost: imports a picked file's pages at the end of this doc.
   strip.push(
     <button
       key="__add_page"

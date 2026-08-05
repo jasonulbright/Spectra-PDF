@@ -5,7 +5,7 @@ import { ToolIcon } from './tool-icons';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tToolDescription, tToolTitle } from '../i18n';
 
-// The Tools tab's landing surface (Phase 4 M5, § 7): a grid of tiles, one per
+// The Tools tab's landing surface: a grid of tiles, one per
 // tool, rendered from `commands/tools.ts` — the same data the task panes and the
 // menu read, so a tool cannot exist in one and be missing from another.
 //
@@ -21,7 +21,7 @@ export interface ToolsCenterProps {
 }
 
 export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome/tTool*.
+  // Re-render on language change; strings resolve via tChrome/tTool*.
   useTranslation();
   return (
     <div
@@ -46,7 +46,7 @@ export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.J
             data-testid={`tool-tile-${tool.id}`}
             className="tool-tile"
             disabled={!enabled}
-            // The description is the TOOLTIP now, not a visible line (U1): the
+            // The description is the TOOLTIP now, not a visible line: the
             // NAME is what a user scans for, and it used to be the smallest
             // text in a tile the description dominated. The disabled reason
             // still wins the attribute — "why can't I click this" beats "what
@@ -71,7 +71,7 @@ export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.J
 
 // Which glyph fronts each tile. A tool with ops borrows its first op's glyph; a
 // canvas-mode tool (no ops) names the op whose glyph best says what it does.
-// Exported so the omnisearch (U2) shows a tool with the SAME glyph as its
+// Exported so the omnisearch shows a tool with the SAME glyph as its
 // tile — two surfaces naming one tool must not draw it differently.
 export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = {
   organize: 'rotate',

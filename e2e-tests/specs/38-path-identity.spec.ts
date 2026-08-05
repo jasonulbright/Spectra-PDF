@@ -11,13 +11,13 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// M7 — the path-identity gate: file identity is the raw path STRING
+// The path-identity gate: file identity is the raw path STRING
 // app-wide, and Windows spells one file many ways. Every spelling must
 // resolve to ONE open document; before the gate, each variant opened its own
 // tab with its own working copy, and File ▸ Save on the "wrong" one silently
 // diverged.
 
-describe('path identity (M7)', () => {
+describe('path identity', () => {
   let tmp: string;
   let file: string;
 

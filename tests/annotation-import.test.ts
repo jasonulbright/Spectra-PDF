@@ -105,8 +105,8 @@ describe('importPageAnnotations', () => {
     await pdf.loadingTask.destroy();
   });
 
-  it('N2 — a multi-stroke /Ink (a signature) imports WHOLE, one stroke per pen lift', async () => {
-    // Before N2 this exact shape was refused outright (the model held one
+  it('A multi-stroke /Ink (a signature) imports WHOLE, one stroke per pen lift', async () => {
+    // This exact shape used to be refused outright (the model held one
     // stroke); now every /InkList sub-path arrives as its own stroke.
     const doc = await PDFDocument.create();
     const page = doc.addPage([300, 400]);
@@ -292,7 +292,7 @@ describe('imported annotation commit round trip', () => {
     await rebuilt.loadingTask.destroy();
   });
 
-  it('N2 INVERSION — a multi-stroke Ink imports whole and round-trips all strokes', async () => {
+  it('INVERSION — a multi-stroke Ink imports whole and round-trips all strokes', async () => {
     // This test used to pin the REFUSAL ("would lose strokes after the
     // first on edit") — the no-degradation rule under a single-stroke
     // model. The model now holds per-stroke paths, so the same rule is
@@ -419,7 +419,7 @@ describe('imported annotation commit round trip', () => {
   });
 });
 
-// N1 — native quad-based text markup (Highlight/Underline/StrikeOut/Squiggly).
+// Native quad-based text markup (Highlight/Underline/StrikeOut/Squiggly).
 // Authored raw (as a foreign tool would), with /QuadPoints over two text runs.
 async function makeMarkupPdf(
   subtype: 'Highlight' | 'Underline' | 'StrikeOut' | 'Squiggly',
@@ -443,7 +443,7 @@ async function makeMarkupPdf(
   return doc.save();
 }
 
-describe('N1 — native text markup', () => {
+describe('Native text markup', () => {
   it('imports a foreign /Highlight as an editable textmarkup with quads', async () => {
     const bytes = await makeMarkupPdf('Highlight');
     const pdf = await loadPdf(bytes);
@@ -544,7 +544,7 @@ describe('N1 — native text markup', () => {
   });
 });
 
-// N1 tail — native /Text sticky notes as editable annotations.
+// Native /Text sticky notes as editable annotations.
 async function makeStickyNotePdf(rect: [number, number, number, number] = [40, 300, 58, 318]): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([300, 400]);
@@ -555,7 +555,7 @@ async function makeStickyNotePdf(rect: [number, number, number, number] = [40, 3
   return doc.save();
 }
 
-describe('N1 — native /Text sticky notes', () => {
+describe('Native /Text sticky notes', () => {
   it('imports a /Text as an editable note with its text', async () => {
     const pdf = await loadPdf(await makeStickyNotePdf());
     const imported = await importPageAnnotations(await pdf.getPage(1));

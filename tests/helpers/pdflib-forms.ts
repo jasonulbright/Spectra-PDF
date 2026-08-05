@@ -1,7 +1,7 @@
 // Test-only pdf-lib AcroForm read/fill over bytes.
 //
-// Production routes the form read AND fill through the Python engine (FC4b —
-// see src/renderer/lib/forms.ts). But several renderer-side tests operate on
+// Production routes the form read AND fill through the Python engine
+// (see src/renderer/lib/forms.ts). But several renderer-side tests operate on
 // PDF bytes in Node, where the Python sidecar is unavailable, and need to
 // enumerate/fill form fields to verify byte-level behaviour that is NOT the
 // engine's job: AcroForm carry across structural page ops (acroform-carry),

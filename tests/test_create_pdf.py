@@ -1,6 +1,6 @@
-"""P22 — Create PDF: the image arm (slice A) and the door (slice C).
+"""Create PDF: the image arm and the door.
 
-The pins that matter in the image half are the two the recon measured as LIVE
+The pins that matter in the image half are the two measured as LIVE
 defects: a multi-frame TIFF must produce one page PER FRAME (it produced one
 page, full stop, in shipped batch OCR), and every page must be sized from its
 own stored DPI (Pillow's `save_all` gives every frame the FIRST frame's).
@@ -456,7 +456,7 @@ class TestOrderAndAssembly:
 
 
 class TestPerMemberPageRanges:
-    """P22 slice D — Combine Files' per-member range, through the one door.
+    """Combine Files' per-member range, through the one door.
 
     Applied AFTER that member's conversion, which is why it reads the same on
     a `.docx` as on a PDF and why no arm had to learn ranges exist.
