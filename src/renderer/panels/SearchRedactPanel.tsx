@@ -27,6 +27,7 @@ import {
   type PatternId,
   type SearchHit,
 } from '../lib/search-redact';
+import { RedactionPropertiesFields } from '../components/RedactionPropertiesFields';
 
 // Search & Redact (F15 slice D — brief 42 § 4).
 //
@@ -80,6 +81,7 @@ export function SearchRedactPanel(): React.ReactElement {
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [markCount, setMarkCount] = useState(() => getCanvasServices()?.redaction.count() ?? 0);
+  const [showProperties, setShowProperties] = useState(false);
 
   // The results describe BYTES. When a file's buffer changes underneath them
   // (a commit, a whole-file op, an undo, an apply) every rect in the list
@@ -468,6 +470,22 @@ export function SearchRedactPanel(): React.ReactElement {
           ))}
         </div>
       </fieldset>
+
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowProperties((v) => !v)}
+          data-testid="search-redact-properties-toggle"
+          aria-expanded={showProperties}
+          className="text-sm text-neutral-300 hover:text-white"
+        >
+          {showProperties ? '▾' : '▸'} {tChrome('panel.searchRedact.properties')}
+        </button>
+        {/* F15 slice E: the SAME control surface the hand-drawn band reads —
+            the properties persist and govern both producers, so a FOIA code
+            chosen here is on the next band too. */}
+        {showProperties && <RedactionPropertiesFields />}
+      </div>
 
       <div className="flex items-center gap-2">
         <button
