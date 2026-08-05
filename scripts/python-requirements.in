@@ -30,3 +30,11 @@ uharfbuzz==0.56.0
 # exists for. BSD-3-Clause; a cp314 win_amd64 wheel exists, so nothing
 # compiles at packaging time.
 numpy==2.5.1
+# P22 Create PDF: HEIC/HEIF decoding. HEIC is the default camera format on the
+# phones users photograph documents with and it is in the king's accepted set;
+# the bundled Pillow cannot read it (`features.check("heif")` is False —
+# measured). AVIF, WEBP and JPEG 2000 are already decodable by Pillow itself.
+# BSD-3-Clause for the plugin; its binary wheel bundles libheif/libde265
+# (LGPLv3) and x265 (GPLv2) — ordinary notice rows for an MIT open-source
+# project with a public repository, listed in THIRD-PARTY-LICENSES.md.
+pillow-heif==1.5.0

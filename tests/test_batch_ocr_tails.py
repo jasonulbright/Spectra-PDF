@@ -8,12 +8,13 @@ import pytest
 
 from engine.batch_ocr import (
     IMAGE_SUFFIXES,
-    _image_to_pdf,
     _is_image,
     _list_sources,
     batch_ocr,
     ocr_file,
 )
+# P22: the image wrap is a first-class engine arm now; batch OCR is a consumer.
+from engine.create_pdf import image_to_pdf
 from engine.encrypt import encrypt
 from engine.extract_text import extract_text
 from engine.image_export import export_images
@@ -126,7 +127,7 @@ class TestImageSources:
 
         png = _scan_png(tmp_dir, os.path.join(tmp_dir, "s.png"))
         out = Path(tmp_dir) / "wrapped.pdf"
-        _image_to_pdf(Path(png), out)
+        image_to_pdf(Path(png), out)
         with pikepdf.open(str(out)) as pdf:
             box = [float(v) for v in pdf.pages[0].mediabox]
         # A 200-dpi raster of a 612x792 page comes back near its own size —
@@ -210,7 +211,7 @@ class TestBatchMrc:
         png = _scan_png(tmp_dir, os.path.join(tmp_dir, "scan-src.png"))
         image = Image.open(png).convert("RGB")
         Path(dest).parent.mkdir(parents=True, exist_ok=True)
-        _image_to_pdf(Path(png), Path(dest))
+        image_to_pdf(Path(png), Path(dest))
         image.close()
         return dest
 

@@ -31,6 +31,10 @@ from pathlib import Path
 import pikepdf
 
 from engine.compress import compress
+# P22: ONE image wrap for the whole product. batch OCR was where it lived and
+# where its multi-frame data loss hid; it is now a first-class engine arm and
+# this module is a consumer like any other.
+from engine.create_pdf import IMAGE_SUFFIXES, image_to_pdf
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
 from engine.repair import repair
@@ -186,9 +190,9 @@ def dest_conflicts_with_source(source_root: str, dest_root: str) -> bool:
 
 
 # P3: image files a scan folder routinely holds beside its PDFs. Each is
-# wrapped into a one-page PDF and then OCR'd exactly like any other page —
-# the recognizer never learns there was no PDF to begin with.
-IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
+# wrapped into a PDF and then OCR'd exactly like any other page — the
+# recognizer never learns there was no PDF to begin with. `IMAGE_SUFFIXES` and
+# the wrap itself are re-exported from `engine.create_pdf` (see the import).
 
 
 def _list_sources(root: Path, images: bool) -> tuple[list[tuple[Path, str]], list[str]]:
@@ -212,27 +216,6 @@ def _list_sources(root: Path, images: bool) -> tuple[list[tuple[Path, str]], lis
 
 def _is_image(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_SUFFIXES
-
-
-def _image_to_pdf(src: Path, dest: Path) -> None:
-    """Wrap ONE image into a one-page PDF at its own natural size.
-
-    The page is sized from the image's stored DPI so a 300-dpi scan becomes
-    a physically correct page rather than a giant one — that matters here
-    because the OCR raster is taken FROM the page, so a wrong page size
-    would rescale the text and cost accuracy."""
-    from PIL import Image
-
-    with Image.open(src) as im:
-        if im.mode not in ("RGB", "L"):
-            im = im.convert("RGB")
-        dpi = im.info.get("dpi")
-        try:
-            resolution = float(dpi[0]) if dpi and float(dpi[0]) > 1 else 200.0
-        except (TypeError, ValueError, IndexError):
-            resolution = 200.0
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        im.save(str(dest), "PDF", resolution=resolution)
 
 
 def _unique_destination(dest: Path) -> Path:
@@ -505,11 +488,12 @@ def batch_ocr(
                     "reason": "in-place mode cannot replace an image with a PDF",
                 }
             elif _is_image(abs_path):
-                # P3: an image becomes a one-page PDF FIRST, so everything
-                # after this line is the shipped PDF path with no branch.
+                # P3: an image becomes a PDF FIRST — one page per FRAME, so a
+                # multi-page fax TIFF OCRs whole — and everything after this
+                # line is the shipped PDF path with no branch.
                 scratch = out_path.parent / f".{out_path.stem}.image.tmp"
                 try:
-                    _image_to_pdf(abs_path, scratch)
+                    image_to_pdf(abs_path, scratch)
                     source_for_open = scratch
                 except Exception as exc:
                     scratch = None
