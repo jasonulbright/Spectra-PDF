@@ -17,6 +17,7 @@ import esChrome from './locales/es/chrome.json';
 import frChrome from './locales/fr/chrome.json';
 import deChrome from './locales/de/chrome.json';
 import itChrome from './locales/it/chrome.json';
+import ptBrChrome from './locales/pt-BR/chrome.json';
 import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chrome';
 import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
@@ -26,7 +27,7 @@ import { REFUSAL_STRINGS, type RefusalKey } from './i18n-refusals';
 import { loadSettings } from './lib/app-settings';
 import { OCR_LANGUAGES } from './ocr/languages';
 
-export const SHIPPED_LOCALES: readonly string[] = ['en', 'es', 'fr', 'de', 'it'];
+export const SHIPPED_LOCALES: readonly string[] = ['en', 'es', 'fr', 'de', 'it', 'pt-BR'];
 
 /** Each locale's display name in ITS OWN language (the language-picker
  * convention — a reader hunting for their language finds it by its native
@@ -37,10 +38,20 @@ export const LOCALE_NATIVE_NAMES: Record<string, string> = {
   fr: 'Français',
   de: 'Deutsch',
   it: 'Italiano',
+  'pt-BR': 'Português (Brasil)',
 };
 
 /** Resolve a stored language preference ('system' | code) to a shipped
- * locale. Exported for the Settings panel and for tests. */
+ * locale. Exported for the Settings panel and for tests.
+ *
+ * Three steps, in order: exact tag, then the wanted tag's BASE language, then
+ * any shipped locale whose base matches. The third step is what a REGIONAL
+ * shipped tag needs and a bare one never did: `pt-BR` and `zh-CN` are the only
+ * catalogs for their languages, so `navigator.language` of `pt-PT`, `pt`,
+ * `zh`, `zh-Hans` or `zh-TW` must land on them rather than fall through to
+ * English — which is what happened while the match was exact-or-base-only.
+ * (Same rule i18next spells `nonExplicitSupportedLngs`.)
+ */
 export function resolveLanguage(pref: string): string {
   const want = pref === 'system'
     ? (typeof navigator === 'undefined' ? 'en' : navigator.language || 'en')
@@ -49,7 +60,11 @@ export function resolveLanguage(pref: string): string {
   const exact = SHIPPED_LOCALES.find((l) => l.toLowerCase() === w);
   if (exact) return exact;
   const base = w.split('-')[0];
-  return SHIPPED_LOCALES.find((l) => l.toLowerCase() === base) ?? 'en';
+  return (
+    SHIPPED_LOCALES.find((l) => l.toLowerCase() === base) ??
+    SHIPPED_LOCALES.find((l) => l.toLowerCase().split('-')[0] === base) ??
+    'en'
+  );
 }
 
 function detectLanguage(): string {
@@ -91,6 +106,7 @@ void i18next.use(initReactI18next).init({
     fr: { chrome: frChrome },
     de: { chrome: deChrome },
     it: { chrome: itChrome },
+    'pt-BR': { chrome: ptBrChrome },
     ...(import.meta.env.DEV || import.meta.env.VITE_E2E
       ? { qps: { chrome: pseudo(enChrome as Record<string, string>) } }
       : {}),
