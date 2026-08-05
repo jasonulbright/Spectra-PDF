@@ -29,6 +29,12 @@ export const REFUSAL_STRINGS = {
   'refusal.action.paramRequired': 'Step {{index}} ({{step}}): {{param}} is required.',
   'refusal.action.terminalNotLast':
     '{{step}} writes a new file and must be the last step.',
+  'refusal.action.sourceNotFirst':
+    '{{step}} produces the document the rest of the action works on, so it must be the first step.',
+  'refusal.action.sourceNeedsFolder':
+    '{{step}} creates a document, so this action runs over a folder of files rather than against the document you have open.',
+  'refusal.action.sourceNotInPlace':
+    '{{step}} creates a new document, so this action cannot replace the original files.',
   'refusal.action.runParamRequired': '{{step}}: {{param}} is required.',
   'refusal.action.encryptNeedsPassword': 'Encrypt: set an open or an owner password.',
 

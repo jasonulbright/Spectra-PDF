@@ -186,24 +186,10 @@ pub async fn pick_create_pdf_sources(
     // P22: Create PDF used to accept PostScript and nothing else. The filter
     // is now every kind the engine's four arms convert, and the pick is
     // MULTIPLE — the dialog builds an ordered list, not a single source.
-    // Keep these lists in step with `engine/create_pdf.py`'s accepted set and
-    // `src/renderer/lib/create-pdf.ts` (the vitest totality pin covers the
-    // two halves that can be tested in one process; this one is the picker).
-    const IMAGES: &[&str] = &[
-        "png", "jpg", "jpeg", "jpe", "tif", "tiff", "bmp", "dib", "gif", "webp", "jp2", "j2k",
-        "j2c", "jpc", "jpf", "jpx", "avif", "heic", "heif",
-    ];
-    const OFFICE: &[&str] = &[
-        "doc", "docx", "docm", "dot", "dotx", "odt", "ott", "fodt", "rtf", "txt", "xls", "xlsx",
-        "xlsm", "xlt", "xltx", "ods", "ots", "fods", "csv", "ppt", "pptx", "pptm", "pot", "potx",
-        "odp", "otp", "fodp", "odg", "otg", "html", "htm", "xhtml",
-    ];
-    const POSTSCRIPT: &[&str] = &["ps", "eps"];
-
-    let mut all: Vec<&str> = vec!["pdf"];
-    all.extend_from_slice(IMAGES);
-    all.extend_from_slice(OFFICE);
-    all.extend_from_slice(POSTSCRIPT);
+    // The set itself lives in `create_pdf_sources` so this picker and the
+    // CLI's `batch --operation create-pdf` walk share ONE Rust copy.
+    use crate::create_pdf_sources::{IMAGES, OFFICE, POSTSCRIPT};
+    let all = crate::create_pdf_sources::all();
 
     let result = app
         .dialog()

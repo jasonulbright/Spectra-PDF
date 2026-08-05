@@ -90,10 +90,12 @@ forms.couldnTRegenerateAppearance	pattern	forms	couldn't regenerate the appearan
 forms.valueContainsCharactersOutside	exact	forms	value contains characters outside the form font's encoding (WinAnsi)
 grayscale.ghostscriptGrayscaleConversionFailed	pattern	grayscale	Ghostscript grayscale conversion failed: {{v0}}
 guided_actions.actionSteps	exact	guided_actions	the action has no steps
+guided_actions.createPdfMustFirst	exact	guided_actions	create_pdf must be the first step — it produces the document the rest of the action works on
 guided_actions.destinationMustOutsideSource	exact	guided_actions	The destination must be outside the source folder -- choose a separate folder for the processed copies.
 guided_actions.encryptMustLastStep	exact	guided_actions	encrypt must be the last step
 guided_actions.encryptSetOpenOwner	exact	guided_actions	encrypt: set an open or an owner password
 guided_actions.mrcCompressionMustCome	exact	guided_actions	MRC compression must come after OCR — OCR reads the page image, and MRC replaces it
+guided_actions.placeModeCannotStart	exact	guided_actions	In-place mode cannot start with create_pdf -- the converted document is a new file, not a replacement for its source.
 guided_actions.processedOriginalsFolderMust	exact	guided_actions	The processed-originals folder must be outside the destination folder.
 guided_actions.processedOriginalsFolderMust2	exact	guided_actions	The processed-originals folder must be outside the source folder.
 guided_actions.stepParamsMustObject	pattern	guided_actions	step {{v0}} ({{op}}): params must be an object
