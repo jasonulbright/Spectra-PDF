@@ -1,4 +1,4 @@
-import type { AppState, OpenFile, PageRef } from './types';
+import type { AppState, OpenDocument, OpenFile, PageRef } from './types';
 
 // Questions about the state that more than one layer needs to ask, answered
 // once. A leaf: types only, so anything may import it.
@@ -40,6 +40,23 @@ export function showableFile(state: AppState): OpenFile | null {
 /** The open files that get tabs — byte-only import sources (2n.3) don't. */
 export function tabFiles(state: AppState): OpenFile[] {
   return [...state.files.values()].filter((f) => !f.importOnly);
+}
+
+/**
+ * Every workspace DOCUMENT the user can see — `tabFiles`, asked per partition.
+ *
+ * `tabFiles` is not the same question: one file can carry several workspace
+ * documents (a .pdfx manifest's partitions), and "which document do I add
+ * these pages to?" is answered per document, not per file. Ghost-backed
+ * documents are excluded for the reason `showableDoc` gives — a ghost's path
+ * is the ORIGINAL file, so offering one as a destination would import pages
+ * into something with no tab and no dirty marker.
+ */
+export function showableDocuments(state: AppState): OpenDocument[] {
+  return state.workspace.documents.filter((d) => {
+    const f = state.files.get(d.path);
+    return f !== undefined && !f.importOnly;
+  });
 }
 
 /**

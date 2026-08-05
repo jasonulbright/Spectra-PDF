@@ -267,6 +267,41 @@ export function registerCreatePdf(handlers: CreatePdfHandlers | null): void {
 }
 
 /**
+ * Combine Files (P22 slice D): same shape and the same reason — the source
+ * picker and the save dialog are native, so e2e injects the LIST and the
+ * output and the REAL assembly runs.
+ *
+ * `ranges` is positional against `sources`, so a range can be set on a member
+ * without driving a text input; `target: 'append'` sends the result into an
+ * open document instead of a new file (and then `output` is ignored).
+ */
+export interface CombineRunOptions {
+  target?: 'new' | 'append';
+  /** Which open document an append lands in; defaults to the dialog's own
+   * current selection. */
+  docId?: string;
+  /** Output path for a `new` run — the dialog fills this from the save
+   * dialog when a human drives it. */
+  output?: string;
+  /** Per-source page ranges, positional. `null`/absent means every page. */
+  ranges?: (string | null)[];
+}
+
+export interface CombineHandlers {
+  run: (
+    sources: string[],
+    output: string,
+    options?: CombineRunOptions,
+  ) => Promise<{ output: string; pages: number } | null>;
+}
+
+let combine: CombineHandlers | null = null;
+
+export function registerCombine(handlers: CombineHandlers | null): void {
+  combine = handlers;
+}
+
+/**
  * Compress panel (O8): the save dialog is native and undrivable, so e2e sets
  * the panel's REAL controls and runs the REAL engine call with an injected
  * output path — the createPdfRun precedent. `setQuality` goes through the
@@ -1001,6 +1036,13 @@ export interface TestHarness {
     sources: string[],
     output: string,
     options?: CreatePdfRunOptions,
+  ) => Promise<{ output: string; pages: number } | null>;
+  /** Combine Files (P22 slice D; dialog must be open). For `target: 'append'`
+   * the result's `output` is empty and `pages` is what was imported. */
+  combineRun: (
+    sources: string[],
+    output: string,
+    options?: CombineRunOptions,
   ) => Promise<{ output: string; pages: number } | null>;
   /** Compress panel (O8; panel must be mounted). Sets the panel's own
    * controls, then runs the real engine call with an injected output path. */
@@ -1798,6 +1840,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return createPdf.run(sources, output, options);
+    },
+    combineRun: async (sources, output, options) => {
+      if (!combine) {
+        const msg = 'combineRun: dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return combine.run(sources, output, options);
     },
     compressRun: async (output, opts) => {
       if (!compress) {

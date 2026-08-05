@@ -227,6 +227,50 @@ export const DIALOG_STRINGS = {
   'dialog.createPdf.converting': 'Converting…',
   'dialog.createPdf.convert': 'Convert…',
 
+  // Combine Files (P22 slice D). It shares Create PDF's row vocabulary
+  // deliberately — `kind*`, `moveUp`, `moveDown`, `remove`, `blankPage` are
+  // the SAME keys, because they are the same list in the same product and a
+  // second translation of "Move up" is a second chance to disagree.
+  'dialog.combine.title': 'Combine Files',
+  'dialog.combine.addFiles': 'Add Files…',
+  'dialog.combine.addBlank': 'Add Blank Page',
+  'dialog.combine.empty':
+    'Add PDFs, images, Word, Excel or PowerPoint documents, text, HTML or PostScript files — anything that is not already a PDF is converted on the way in.',
+  'dialog.combine.listLabel': 'Files, in the order they will be combined',
+  'dialog.combine.pagesAll': 'All',
+  'dialog.combine.pagesAria': 'Pages to take from {{name}}',
+  'dialog.combine.pageCount_one': '{{count}} page',
+  'dialog.combine.pageCount_other': '{{count}} pages',
+  'dialog.combine.viaNone': 'Added as it is',
+  'dialog.combine.viaImage': 'Converted at its own resolution',
+  'dialog.combine.viaOffice': 'Converted with LibreOffice',
+  'dialog.combine.viaPostScript': 'Converted with Ghostscript',
+  'dialog.combine.viaNothing': 'Nothing here can convert this',
+  'dialog.combine.target': 'Put the combined pages in',
+  'dialog.combine.targetNew': 'A new PDF',
+  'dialog.combine.targetAppend': 'A document that is already open',
+  'dialog.combine.destination': 'Document to add the pages to',
+  'dialog.combine.destinationOption_one': '{{name}} — {{count}} page',
+  'dialog.combine.destinationOption_other': '{{name}} — {{count}} pages',
+  'dialog.combine.noDestinations': 'No document is open — combine into a new PDF instead.',
+  'dialog.combine.needsSources': 'Add at least one file to combine.',
+  'dialog.combine.hasUnsupported': 'Remove the highlighted files — nothing here can convert them.',
+  'dialog.combine.badRange': 'Fix the page ranges — write pages and spans like 1-3,5.',
+  'dialog.combine.needsDestination': 'Choose the document to add the pages to.',
+  'dialog.combine.planned_one': '{{count}} page will be combined.',
+  'dialog.combine.planned_other': '{{count}} pages will be combined.',
+  'dialog.combine.plannedUnknown':
+    'The page count is known once the documents have been converted.',
+  'dialog.combine.combine': 'Combine…',
+  'dialog.combine.combining': 'Combining…',
+  'dialog.combine.done_one': 'Combined {{count}} page → {{path}}',
+  'dialog.combine.done_other': 'Combined {{count}} pages → {{path}}',
+  'dialog.combine.appended_one': 'Added {{count}} page to {{name}}.',
+  'dialog.combine.appended_other': 'Added {{count}} pages to {{name}}.',
+  'dialog.combine.noWorkingCopy':
+    'That document has no working copy to add pages beside — reopen it and try again.',
+  'dialog.combine.nothingConverted': 'None of these files could be converted, so nothing was added.',
+
   'dialog.exportImages.title': 'Export Pages as Images',
   'dialog.exportImages.aria': 'Export pages as images',
   'dialog.exportImages.format': 'Format',
