@@ -12,11 +12,14 @@ import {
   type RedactionProperties,
 } from '../lib/redaction-properties';
 import {
+  BUILTIN_CODE_SETS,
   addCodeSet,
   codeSetToJson,
   getCodeSets,
   parseCodeSetFile,
   subscribeCodeSets,
+  type RedactionCode,
+  type RedactionCodeSet,
 } from '../lib/redaction-codes';
 
 // Redaction properties (F15 slice E — brief 42 § 6).
@@ -31,6 +34,24 @@ import {
 // text (the format has no separate key), so choosing `(b)(6)` sets the
 // overlay to `(b)(6)` and remembers which code that was, purely so the picker
 // can show it selected again.
+
+/** A built-in code's description, localized; a user set's, verbatim.
+ *
+ * The LABEL is never translated — it is the statutory citation itself, and it
+ * is what gets DRAWN into the file, so a translated one would misname the
+ * exemption a release is checked against. The DESCRIPTION is our prose about
+ * it, and it localizes like every other built-in catalogue label does (the
+ * symbol-name precedent). A user set has no catalog keys and is shown as the
+ * firm wrote it. */
+function describeCode(setId: string, code: RedactionCode): string {
+  if (!BUILTIN_CODE_SETS.some((s) => s.id === setId)) return code.description;
+  return tChrome(`panel.redactProps.desc.${setId}.${code.id}` as Parameters<typeof tChrome>[0]);
+}
+
+function setName(set: RedactionCodeSet): string {
+  if (!BUILTIN_CODE_SETS.some((s) => s.id === set.id)) return set.name;
+  return tChrome(`panel.redactProps.set.${set.id}` as Parameters<typeof tChrome>[0]);
+}
 
 export function RedactionPropertiesFields(): React.JSX.Element {
   // N12: re-render on language change; strings resolve via tChrome.
@@ -131,10 +152,10 @@ export function RedactionPropertiesFields(): React.JSX.Element {
         >
           <option value="">{tChrome('panel.redactProps.noCode')}</option>
           {sets.map((set) => (
-            <optgroup key={set.id} label={set.name}>
+            <optgroup key={set.id} label={setName(set)}>
               {set.codes.map((code) => (
                 <option key={code.id} value={`${set.id}/${code.id}`}>
-                  {code.label} — {code.description}
+                  {code.label} — {describeCode(set.id, code)}
                 </option>
               ))}
             </optgroup>

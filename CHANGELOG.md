@@ -3,6 +3,46 @@
 ## 1.0.20
 
 ### Redaction
+- **Search & Redact: mark every occurrence of something in one pass.** Until
+  now the only way to mark content for removal was to draw a box around it by
+  hand, one box at a time — which does not survive contact with a two-hundred
+  page set of documents. The Redact tool now carries a Search & Redact panel:
+  type a term, paste or import a list of terms, or pick from the built-in
+  patterns — phone number, email address, credit card number, social security
+  number, date, IBAN, NHS number, Canadian social insurance number — and
+  search this document, a range of its pages, or every document you have
+  open. Matching is the same as the find bar's, including match case, whole
+  word and regular expressions.
+- **You decide which matches go.** The results are grouped by document and
+  page, with a checkbox on every match, a checkbox on every group, and
+  **nothing ticked to begin with**. Clicking a match takes you to its page so
+  you can read it in context before deciding. "Mark checked" turns the ones
+  you ticked into ordinary redaction marks — the same marks the hand-drawn
+  box makes — which you can then move, delete, undo, save into the document,
+  or apply, exactly as before. Searching never removes anything on its own,
+  and a match you already marked is shown as such rather than offered twice.
+  Where the numbers carry a check digit — card numbers, IBANs, NHS and social
+  insurance numbers — they are verified, so the list is not padded with every
+  long number on the page.
+- **Choose what each mark covers.** A match can be marked exactly as found,
+  grown to the whole word containing it, or grown to the whole line it was
+  drawn with — spelled out in the panel, because whether searching for "55"
+  in "1955" should black out two digits or the whole year is your decision to
+  make. Pages that are scans with no text are searched through the app's own
+  text recognition where it has already read them, and any page still without
+  searchable text is reported with Scan & OCR one click away, so a scanned set
+  never quietly returns fewer results than it has.
+- **Redaction properties: the box has a colour, a caption and a code.** The
+  black box is no longer always black: choose its fill colour, and the text
+  drawn over it — a FOIA exemption such as (b)(6), a Privacy Act exemption
+  such as (k)(2), or anything you type — with its alignment, size and colour,
+  optionally repeated to fill the box. Both exemption sets are built in with
+  their descriptions, and you can import your own set of codes as a file and
+  export it again to share with colleagues. The settings apply to hand-drawn
+  boxes and searched matches alike, and they are stored in the document with
+  the mark, so a mark you save, close and reopen comes back the way you left
+  it — and other PDF programs read it too, because it is written in the
+  format's own vocabulary.
 - **Redaction now measures text with the document's own fonts, and covers
   everything it draws a black box over.** The width of a line of text was
   previously estimated rather than measured, and the estimate ran short on
