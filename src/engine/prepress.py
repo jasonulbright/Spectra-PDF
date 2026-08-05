@@ -1,20 +1,20 @@
-"""ICC-managed colour conversion for prepress (Phase 9.S5).
+"""ICC-managed colour conversion for prepress.
 
-Converts a document's colour to DeviceCMYK for print — the industry editor's
-"Convert Colors → Device CMYK". Ghostscript drives the conversion through its
+Converts a document's color to DeviceCMYK for print. Ghostscript drives the
+conversion through its
 built-in ICC engine (LittleCMS + its compiled-in default CMYK profile), so the
 transform is colour-managed even though no external profile is bundled: an RGB
 red (`1 0 0 rg`) comes out as CMYK (`0 0.996 1 0 k`), not a naive component
 copy.
 
-O6 tail (2026-08-01) — the follow-ons landed: ``convert_cmyk`` takes a
-DESTINATION ICC profile (a user's .icc file, or a bare name resolved against
+``convert_cmyk`` takes a destination ICC profile, either a user's .icc file or
+a bare name resolved against
 gs's ROM-filesystem profiles like ``default_cmyk.icc`` — probe-verified), and
 ``convert_pdfx`` produces a PDF/X master with a real /OutputIntents entry
 (GTS_PDFX, registered characterization by identifier, optionally embedding
 the user's destination profile as /DestOutputProfile) via a customized
 PDFX_def.ps against the bundled template's contract. Soft-proofing remains a
-distinct capability (§ I).
+distinct capability.
 """
 
 import subprocess
@@ -35,7 +35,7 @@ from .validate import validate_pdf
 # perceptual — that profile has no Saturation (AToB2) table, so LittleCMS falls
 # back to perceptual per the ICC spec. It stays a valid value (a bundled
 # destination profile that defines it would make it distinct), but the UI does
-# not offer it while it would be a no-op (round-42 gauntlet, § I.0).
+# not offer it while it would be a no-op.
 _RENDER_INTENTS = {"perceptual": 0, "relative": 1, "saturation": 2, "absolute": 3}
 
 

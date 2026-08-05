@@ -143,7 +143,7 @@ const INTERNAL_METHODS = new Set([
   // get_pdf_version/measure_text_box hazard in its sharpest form: it refetches
   // whenever the workspace changes, and an ANNOTATION is a pending page edit,
   // so gating it would flush the user's just-drawn markup to disk the instant
-  // they drew it (e2e-caught: specs 87 and 88 lost their page-tier
+  // they drew it (e2e regression: specs 87 and 88 lost their page-tier
   // annotations mid-suite). Correctness does NOT rest on the gate here — the
   // probe addresses the SOURCE file at `sourcePageIndex`, exactly the page
   // pdf.js rasterizes, so a pending reorder cannot mis-address it and a

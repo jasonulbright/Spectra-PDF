@@ -30,22 +30,20 @@ GLYPH_HEIGHT_EM = HELVETICA_ASCENT_EM + HELVETICA_DESCENT_EM  # 0.925
 
 # Layout-only characters that are NEVER glyphs -- an embedded subset font's
 # coverage check rejects them, so any drawn-text path that embeds a font must
-# flatten them to spaces first (the FC1/S4 gauntlet class: a stray control char
-# in otherwise-renderable text must not crash/refuse the whole value). Covers
+# flatten them to spaces first so a stray control character in otherwise
+# renderable text cannot crash or reject the whole value. Covers
 # C0 controls (0x00-0x1F), DEL (0x7F), and the Unicode LINE/PARAGRAPH
 # separators (0x2028/0x2029).
 #
-# str.translate over EXPLICIT integer codepoints, deliberately -- the third
-# representation this list has had, each retreat forced by a tool: literal
-# U+2028/U+2029 chars were invisible in an editor and one whitespace-
-# normalising edit from vanishing (became regex escapes 2026-07-29), then the
-# regex character RANGES tripped CodeQL's py/overly-large-range on the
+# Use str.translate with explicit integer codepoints. Literal U+2028/U+2029
+# characters are invisible in editors and vulnerable to whitespace
+# normalization, while regex character ranges trigger CodeQL's
+# py/overly-large-range on the
 # keeps-newline class (a false positive -- C0 minus 0x0A IS 0x00-0x09 plus
 # 0x0B-0x1F -- but removing the construct beats maintaining the exception).
-# Integer codepoints have neither failure mode. Do not "simplify" this back
-# to a regex or to literal characters. Equivalence with the old regexes was
-# proven over U+0000..U+2FFF when the tables went in (2026-07-30,
-# prove-metrics-equiv.local.py).
+# Integer codepoints avoid both failure modes. Do not replace them with regex
+# ranges or literal control characters; prove-metrics-equiv.local.py verifies
+# equivalence over U+0000..U+2FFF.
 #
 # CR (0x0D) is in the tables deliberately -- flatten_control_chars normalises
 # CRLF and CR to LF BEFORE translating, so no CR ever reaches the table and

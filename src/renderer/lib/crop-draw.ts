@@ -1,8 +1,8 @@
 /**
  * On-canvas crop draw — 9-§I.5 P5b.
  *
- * Page cropping shipped as numeric per-edge insets in the Page Boxes panel;
- * the king lets you drag the rectangle on the page. This is the conversion
+ * Page cropping accepts numeric per-edge insets in the Page Boxes panel and a
+ * rectangle drawn directly on the page. This module converts
  * between the two, kept out of the component because there is no DOM test
  * environment — the arithmetic is where the mistakes live, so the
  * arithmetic is what gets pinned.

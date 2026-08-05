@@ -137,8 +137,8 @@ describe('portfolio authoring (§ I.6)', () => {
       { timeoutMsg: 'add did not reach 3 members' },
     );
 
-    // A non-PDF member offers the OS-open affordance (the resolved 2026-07-30
-    // shell-scope deferral). Existence only — clicking would launch the OS
+    // A non-PDF member offers the OS-open affordance. Existence only: clicking
+    // would launch the OS
     // default handler on the runner (the licenses-spec precedent); the scope
     // gate itself is cargo-tested.
     await expect($('[data-testid="portfolio-open-os-e2e-note.txt"]')).toBeDisplayed();

@@ -10,7 +10,7 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// M6.4: Acrobat's single-key tool accelerators — pref-gated, DEFAULT OFF.
+// Single-key tool accelerators are preference-gated and off by default.
 
 async function setSingleKeyPref(on: boolean): Promise<void> {
   await browser.keys(['Control', 'k']);

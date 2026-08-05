@@ -182,7 +182,7 @@ export function SignaturesPanel(): React.ReactElement {
       setSignError(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       // Clear the secret from component state on EVERY exit — success,
-      // failure, or a cancelled save dialog (review-caught: a cancel used to
+      // failure, or a cancelled save dialog (regression: a cancel used to
       // strand the typed password in state).
       setPassword('');
       signingRef.current = false;
@@ -210,7 +210,7 @@ export function SignaturesPanel(): React.ReactElement {
         // A token source takes the password field as its PIN (F3).
         ...(sourceParams.pkcs11_module ? { pkcs11_pin: pw } : { password: pw }),
         // The engine refuses output == input UNLESS this opt-in is set — the
-        // in-place flow is the one caller that intends it (round-42 gauntlet).
+        // in-place flow is the one caller that intends it (regression).
         allow_in_place: true,
         ...(rsn && rsn.trim() ? { reason: rsn.trim() } : {}),
         ...(loc && loc.trim() ? { location: loc.trim() } : {}),

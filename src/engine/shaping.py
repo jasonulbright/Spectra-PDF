@@ -7,7 +7,7 @@ stumps. That is broken output, not a narrow limitation, which is why RTL
 reflow could not ship on bidi reordering alone.
 
 So the reflow shapes. `uharfbuzz` (Apache-2.0) is HarfBuzz itself, the same
-engine the browsers and the king use, and it answers the only two questions
+engine used by browsers, and it answers the only two questions
 the layout asks: WHICH glyphs, and HOW WIDE. Everything here is a thin,
 honest wrapper around that:
 
@@ -460,17 +460,10 @@ def vertical_forms(face_path: str) -> dict:
     side in a column (a 、, a 「, a bracket). Reading the lookup itself is
     therefore exact and positional by construction.
 
-    Brief 39 § 5.4 proposed harvesting the map from a second, top-to-bottom
-    SHAPING pass instead, on a recon observation that a Mongolian letter
-    changed glyph under `ttb`. Measured against both real faces
-    (`vert-harvest.local.py`), that observation was misattributed: neither
-    face's `vert` covers a single Mongolian LETTER — both cover only
-    punctuation and brackets — and the letter differences under `ttb` are the
-    cursive shaper picking DIFFERENT positional forms (and, in Noto Sans
-    Mongolian, dropping a ligature: 5 glyphs under `ltr` against 6 under
-    `ttb`, so the two passes are not even positionally comparable). A `ttb`
-    pass therefore changes far more than `vert` and would silently rewrite
-    letters. The feature is what we want; the feature is what we read."""
+    A second top-to-bottom shaping pass is not a substitute: it may select
+    different cursive positional forms or ligatures and is not positionally
+    comparable with the original run. Reading the GSUB feature limits this
+    map to the substitutions the font explicitly defines."""
     from fontTools.ttLib import TTFont
 
     out: dict[str, str] = {}

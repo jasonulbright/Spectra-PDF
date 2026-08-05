@@ -11,11 +11,8 @@ import {
   scheduleRemove,
 } from '../support/harness.js';
 
-// Phase 12, issue #1 request 5 — scheduled batch runs.
-//
-// The owner's ruling: scheduling is a GUI feature, not a documentation page,
-// "so the user never has to touch task scheduler". So this spec asserts the
-// LIFECYCLE through the app — create, list, delete — and then checks Windows
+// Scheduled batch runs. This spec asserts the lifecycle through the app —
+// create, list, and delete — and then checks Windows
 // itself, because the only thing that proves a schedule exists is Task
 // Scheduler having it.
 //
@@ -108,8 +105,8 @@ describe('scheduled batch runs (Phase 12 request 5)', () => {
   });
 
   it('refuses a run under another account with no explicit log folder', async () => {
-    // The owner's requirement: a service account resolves the default log
-    // location inside ITS OWN profile, so the run would write its audit trail
+    // A service account resolves the default log location inside its own
+    // profile, so the run would write its audit trail
     // where the person who set it up cannot find it. Refuse at registration
     // rather than register a task whose output nobody will ever see.
     let message = '';

@@ -8,11 +8,10 @@ export interface CanvasHandle {
   zoomOut(): void;
   reset(): void;
   /**
-   * Zoom presets — Acrobat's Actual Size (Ctrl+1) and Fit Width (Ctrl+2).
+   * Zoom presets — Actual Size (Ctrl+1) and Fit Width (Ctrl+2).
    *
-   * On the READING view they act on the current page/spread (DocumentView's
-   * own implementations). On the Organize board (P10, 2026-08-01 — this
-   * replaced an "absent, not faked" refusal) they anchor to the SELECTED
+   * In the reading view they act on the current page or spread. On the
+   * Organize board they anchor to the selected
    * page cell, else the cell nearest the viewport centre, and solve the
    * camera zoom from the cell's `data-natural-*` extents: Actual Size makes
    * that page render at its true PDF size (1pt = 1 CSS px), Fit Width fills

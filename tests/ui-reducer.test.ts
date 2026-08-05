@@ -585,7 +585,7 @@ describe('selection invalidation on buffer-identity changes (§ F: per-path prun
     });
   }
 
-  // The phantom-id class (review-caught HIGH, both lenses): CLOSE_FILE
+  // The phantom-id class (regression, both lenses): CLOSE_FILE
   // removes pages by CONTAINMENT (the path's documents, wholesale) AND by
   // SOURCE (its pages stripped out of other documents) — the prune must
   // cover the same union, or a dead id survives in the selection forever
@@ -727,7 +727,7 @@ describe('split view modes (two-pane + spreadsheet quad)', () => {
     expect(s.ui.splitView).toBe('two');
     s = appReducer(s, { type: 'UI_TOGGLE_SPREADSHEET_SPLIT' });
     expect(s.ui.splitView).toBe('quad');
-    // From the quad, Window ▸ Split switches SHAPE (the king's menu model)…
+    // From quad mode, Window ▸ Split switches the split shape.
     s = appReducer(s, { type: 'UI_TOGGLE_SPLIT_VIEW' });
     expect(s.ui.splitView).toBe('two');
     // …and each mode toggled against itself turns split off.

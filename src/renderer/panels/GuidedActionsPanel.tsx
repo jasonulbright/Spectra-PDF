@@ -27,8 +27,8 @@ import {
 import { useTranslation } from 'react-i18next';
 import { tChrome, tStepTitle, tStepParam, tStepOption, tStepHint } from '../i18n';
 
-// Guided actions (parity map § 2 — the king's Action Wizard), slice 1: named
-// sequences of existing gated engine ops, authored in a compact editor and
+// Guided actions are named sequences of existing gated engine operations,
+// authored in a compact editor and
 // run over the OPEN document. Each step goes through the standard
 // snapshot → call → reload shape, so a run is undoable step-by-step and
 // stops on the first failure with the step named. Later slices (ledger):

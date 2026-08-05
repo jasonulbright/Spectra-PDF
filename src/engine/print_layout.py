@@ -39,7 +39,7 @@ import pikepdf
 RENDER_TIMEOUT_S = 600
 
 # Annotation subtypes kept per mode. "all" never strips (no temp file).
-# Widgets are form fields (Acrobat prints them in every mode); links carry no
+# Widgets are form fields and remain printable in every mode; links carry no
 # printable appearance in practice but are document structure, not markup.
 # /Popup is intentionally absent everywhere: it dies with its parent markup.
 ANNOT_KEEP = {

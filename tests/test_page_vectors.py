@@ -837,8 +837,8 @@ def _sh_pdf(tmp_dir, content: bytes, name="sh.pdf") -> str:
 
 
 class TestShadingObjects:
-    """P8 slice D: `sh` paints are OBJECTS — the king selects gradient
-    fills. The gradient-fill idiom (`q <clip> W n [gs] sh Q`) recognizes as
+    """`sh` paints are objects. The gradient-fill idiom
+    (`q <clip> W n [gs] sh Q`) recognizes as
     a frame: delete removes it whole (clip included), transform moves clip
     AND shading together. A bare `sh` lists and deletes but refuses
     transform by name; restyle always refuses (nothing to recolour)."""

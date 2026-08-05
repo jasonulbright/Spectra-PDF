@@ -609,15 +609,12 @@ class TestKerning:
 
 
 class TestKernCoverageBits:
-    """Round-41 review: the legacy `kern` subtable COVERAGE filter.
+    """The legacy `kern` subtable coverage filter.
 
     Bits (kern format 0): 0x1 horizontal, 0x2 minimum, 0x4 cross-stream,
     0x8 override. Only horizontal, additive pair kerning may reach a `TJ`
-    array. The first cut tested 0x2 while calling it cross-stream and never
-    checked horizontal at all, so a genuine cross-stream or vertical-only
-    subtable passed straight through — inert for every shipped Liberation
-    face (all are coverage 0x01) but live the moment a resync or a new
-    family brought one in.
+    array. The test must exercise the cross-stream and horizontal bits so a
+    cross-stream or vertical-only subtable cannot pass through.
     """
 
     class _Sub:
@@ -1020,9 +1017,8 @@ class TestRightToLeftAuthoring:
 
 
 class TestFreeRotation:
-    """T19 — arbitrary-angle authoring: the layout stays local and
-    angle-blind; ONE free-rotation frame turns the drawn box about its own
-    center (the king's text-box rotation semantic). The four step angles
+    """Arbitrary-angle authoring keeps layout local and angle-blind. One
+    free-rotation frame turns the drawn box about its own center. Step angles
     keep the shipped frames byte-for-byte (pinned above)."""
 
     def test_37_degree_frame_is_exact(self, tmp_dir):

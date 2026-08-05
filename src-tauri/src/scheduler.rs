@@ -1,15 +1,13 @@
-//! Scheduled batch runs (Phase 12, issue #1 request 5).
+//! Scheduled batch runs.
 //!
-//! The owner's ruling: scheduling is a GUI FEATURE, not a documentation page —
-//! "so the user never has to touch task scheduler". So the app owns the whole
-//! lifecycle: create, list, run-now, enable/disable and DELETE.
+//! The app owns the complete lifecycle: create, list, run now, enable, disable,
+//! and delete.
 //!
-//! **Windows Task Scheduler runs them, not us.** The requested case is "every
-//! day at 09:30", and an in-app timer only fires while the app happens to be
+//! **Windows Task Scheduler runs them, not us.** An in-app timer only fires
+//! while the app happens to be
 //! running — a scheduled job that silently does not happen is worse than no
-//! scheduling. Task Scheduler survives logoff and reboot, and it means we ship
-//! no background service of our own (the same posture as the notify-only
-//! updater). The owner was explicit: not a fan of a system service.
+//! scheduling. Task Scheduler survives logoff and reboot without requiring the
+//! app to ship a background service.
 //!
 //! **One source of truth.** The registered task IS the store: its `<Arguments>`
 //! carry the whole run, and its `<Description>` carries the profile JSON the UI
@@ -85,10 +83,8 @@ pub struct ScheduledRun {
     /// rather than hidden, because it will still FIRE.
     pub profile: Option<ScheduleProfile>,
     /// Task Scheduler's own status ("Ready", "Disabled", "Running", …).
-    /// DISPLAY ONLY — schtasks localizes it, so nothing may branch on its
-    /// text (the GUI used to decide the Enable/Disable button by looking for
-    /// the substring "disabled", which is wrong on every non-English
-    /// Windows). `enabled` below is the discriminant.
+    /// Display only: schtasks localizes it, so nothing may branch on the text.
+    /// `enabled` below is the locale-independent discriminant.
     pub status: String,
     /// Whether the task is enabled, read from the task XML's
     /// `<Settings><Enabled>` — a boolean, so it is locale-independent.
@@ -295,8 +291,7 @@ fn run(cmd: &mut Command) -> Result<String, String> {
 
 /// The refusals that must happen BEFORE a task is registered.
 ///
-/// The rule that matters most is the last one, and it is an owner requirement:
-/// a run under a service account resolves `%APPDATA%` inside THAT account's
+/// A run under a service account resolves `%APPDATA%` inside that account's
 /// profile, so a scheduled run's log would land somewhere the person who set it
 /// up cannot see. Registering such a task without an explicit shared log folder
 /// produces exactly the failure this whole logging feature exists to prevent —
@@ -423,9 +418,8 @@ pub async fn create_scheduled_run(
 
     // Registration goes through TASK XML, not `/TR`, and that is not a style
     // choice: `/TR` is capped at 261 characters by schtasks, and a real run
-    // (exe path + source + destination + moved + error + log folders) blows
-    // past that immediately. Found the hard way — the first cut registered
-    // fine for short paths and failed for realistic ones.
+    // (exe path + source + destination + moved + error + log folders) exceeds
+    // that cap with realistic paths.
     let xml = build_task_xml(&exe, &profile, password.as_deref())?;
 
     // COM takes the XML as a string, so no staged temp file and no
@@ -977,11 +971,9 @@ mod tests {
 
     /// The fresh-machine case, provable on ANY machine: registration into a
     /// folder that does not exist yet must succeed and end with the task
-    /// queryable. An external review flagged this path as probably broken
-    /// (RegisterTask is not documented to create folders); the 2026-08-02
-    /// mutation check showed Win11 26200 auto-creates even WITHOUT our
-    /// ensure step — so on this build the test pins the whole path, and on
-    /// builds where the undocumented behavior is absent it pins the ensure
+    /// queryable. RegisterTask is not documented to create folders, although
+    /// current Windows builds may do so. The test pins the whole path; on
+    /// builds where the undocumented behavior is absent, it pins the ensure
     /// step itself. Uses its own probe folder so the app's real folder —
     /// which may hold a user's schedules — is never touched or deleted.
     #[test]

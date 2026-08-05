@@ -1,6 +1,4 @@
-//! File ▸ Send To ▸ Email (owner-ruled in scope 2026-07-31 — a local OS
-//! integration with the DEFAULT DESKTOP MAIL CLIENT, distinct from the
-//! excluded cloud-share cluster).
+//! File ▸ Send To ▸ Email integrates with the default desktop mail client.
 //!
 //! Simple MAPI (`MAPISendMailW`) is the one Windows mechanism that ATTACHES a
 //! file to a compose window — `mailto:` cannot carry attachments. The client

@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { tChrome, tNumber } from '../../i18n';
 import { formatKey } from '../../commands/keymap';
 
-// Full-screen presentation mode (I.6 view-mode tail — an Acrobat parity item).
+// Full-screen presentation mode.
 // One page fills the screen on a black backdrop; arrow/space/PageUp-Down/Home/End
 // navigate, Escape leaves. It is a self-contained OVERLAY over the whole app —
 // deliberately NOT a change to the virtualized reading column (that stays the

@@ -188,7 +188,7 @@ describe('visibleRange — the rendered window', () => {
 // page 2 wants a negative scrollTop and centring page 49/50 overshoots maxScroll,
 // so both land on exactly the scroll offset that "scrolled to the top/bottom"
 // occupies. The jump anchor records intent so those report what the user asked
-// for. (Round-3 review caught the clamps reopening the snap-back here.)
+// for. (regression the clamps reopening the snap-back here.)
 describe('anchorHolds — a jump wins until the user scrolls away', () => {
   const zoom = 0.233;
   const pageCount = 50;
@@ -268,7 +268,7 @@ describe('anchorHolds — a jump wins until the user scrolls away', () => {
     expect(anchorHolds(null, shorter, undefined)).toBe(false);
   });
 
-  // Round-4 regression: a page-tier edit renumbers pages WITHOUT remounting the
+  // regression: a page-tier edit renumbers pages WITHOUT remounting the
   // reading view and can leave scrollTop untouched, so layout+scroll both still
   // "match" while a different page now occupies the slot.
   it('drops when a page-tier delete renumbers the page out from under it', () => {
@@ -354,7 +354,7 @@ describe('zoom presets — Actual Size / Fit Width', () => {
   const LETTER = { id: 'p', width: 612, height: 792, rotation: 0 as const }; // 72dpi points
   const A4 = { id: 'p', width: 595, height: 842, rotation: 0 as const };
 
-  // M4.2 round-2 regression. The board's `displayWidthOf` rounds the width to a
+  // M4.2 regression. The board's `displayWidthOf` rounds the width to a
   // whole pixel AT BASE_PAGE_HEIGHT (280) — right for thumbnail packing, wrong
   // for the reading view, which SCALES that already-rounded number, amplifying
   // the aspect error linearly with zoom. The pdf.js text layer derives its own

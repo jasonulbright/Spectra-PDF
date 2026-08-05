@@ -1,6 +1,6 @@
-"""Preflight — print-production checks (§ I.6, § I.3).
+"""Preflight — print-production checks.
 
-A read-only report of the print-readiness issues Acrobat's Preflight surfaces:
+A read-only report of print-readiness issues:
 are all fonts embedded, what colour spaces are used (RGB in a press job is a
 red flag), is there live transparency, and is the document encrypted in a way
 that blocks printing. It REPORTS; the Convert-to-CMYK / grayscale / optimize

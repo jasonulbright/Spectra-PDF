@@ -309,7 +309,7 @@ def _tiny_jpeg() -> bytes:
 def _page_with_single_form_image(path):
     """The form (with its OWN /Resources holding /ImF) drawn exactly ONCE —
     the prune-completeness case: deleting its lone image must leave NO image
-    bytes in the file (review-caught: the superseded form kept them)."""
+    bytes in the file (regression: the superseded form kept them)."""
     pdf = pikepdf.new()
     page = pdf.add_blank_page(page_size=(612, 792))
     im_f = _rgb_image(pdf, 7, 7, 7)
@@ -812,7 +812,7 @@ class TestAddPageImage:
         # Two pages share ONE /Resources object (a generator that hoisted a
         # single /Resources — the shape qpdf flattens onto each page BY
         # REFERENCE). Adding an image to page 1 must NOT leak the entry into
-        # page 2's /XObject (review-caught: registering on the shared dict).
+        # page 2's /XObject (regression: registering on the shared dict).
         src = os.path.join(tmp_dir, "shared.pdf")
         pdf = pikepdf.new()
         im = _rgb_image(pdf, 10, 20, 30)

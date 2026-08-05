@@ -49,7 +49,7 @@ async function resolveGsPath(): Promise<void> {
     // BOTH resolution calls failed (one early IPC hiccup). Un-pin the
     // attempt: a resolver that rejects once must not stay a permanently
     // rejected promise that kills every gs feature for the whole session
-    // (review-caught HIGH) — ensureGsPath retries a failed attempt.
+    // (regression) — ensureGsPath retries a failed attempt.
     gsPathResolved = false;
   }
 }
@@ -146,9 +146,7 @@ function stampTheme(effective: ThemeName, generation: number): void {
 /**
  * Read the Windows accent and apply it for whatever theme is stamped.
  *
- * The accent is the product's ONE accent in every theme (owner direction
- * 2026-08-02, after explicit themes fell back to a second, teal accent while
- * active-state chips stayed system-blue — two accents on one screen). What is
+ * The product uses one accent in every theme. What is
  * theme-dependent is the DERIVATION, not the source: see lib/accent.ts. The
  * CSS tables carry the Windows-default blue when the read fails, so nothing
  * ever needs clearing.

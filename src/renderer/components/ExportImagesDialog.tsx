@@ -9,8 +9,8 @@ import { tChrome, tChromeCount, tNumber } from '../i18n';
 
 // File ▸ Export ▸ Images… (O1, image half): render pages of the ACTIVE
 // document to PNG/JPEG (one file per page) or a multi-page TIFF, on the
-// bundled Ghostscript rasteriser. A dialog, not a bare menu action, because
-// the export has real options (format/DPI/range/grayscale) the king exposes.
+// bundled Ghostscript rasterizer. A dialog is required because the export has
+// format, DPI, range, and grayscale options.
 //
 // Unlike CreatePdfDialog this targets a WORKSPACE file, so the engine call is
 // the gated `call` — the commit gate flushes pending page edits first and the

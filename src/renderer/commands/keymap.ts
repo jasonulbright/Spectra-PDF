@@ -140,8 +140,8 @@ function radixDialogOpen(): boolean {
   );
 }
 
-// Space = temporary Hand while held (M6.2, Acrobat's own gesture). Module
-// state, one owner: the prior mode to restore on keyup. Deliberately restored
+// Space temporarily activates Hand while held. Module state stores the prior
+// mode to restore on keyup. It is deliberately restored
 // by direct dispatch (not a command) so the release always works — even if a
 // dialog opened mid-hold.
 let spaceHandPrior: CanvasTool | null = null;
@@ -199,7 +199,7 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
   if (radixMenuOpen()) {
     // Radix owns navigation/typeahead/Escape — but the webview's own
     // accelerators are still OURS to refuse: F5 over an open File menu
-    // reloaded the entire app (review-caught HIGH).
+    // reloaded the entire app (regression).
     suppressBrowserDefault(e);
     return;
   }
@@ -222,14 +222,14 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
   // before the table — Space has no binding. preventDefault is NOT gated on
   // e.repeat: holding is the whole gesture, and auto-repeat keydowns would
   // otherwise fall through to the browser's Space (page-down scroll, focused-
-  // button activation) and fight the pan (review-caught). Re-arming is
+  // button activation) and fight the pan (regression). Re-arming is
   // already impossible — `spaceHandPrior` is set for the whole hold.
   if (e.key === ' ' && isDocTab(ctx.state.ui.focusedTab) && !isEditable(e.target)) {
     if (spaceHandPrior === null && ctx.state.ui.tool !== 'hand') {
       spaceHandPrior = ctx.state.ui.tool;
       ctx.dispatch({ type: 'UI_SET_TOOL', tool: 'hand' });
     }
-    e.preventDefault(); // Acrobat's Space doesn't also scroll
+    e.preventDefault(); // Temporary Hand activation must not also scroll.
     return;
   }
   if (e.key === 'Escape') {
@@ -247,7 +247,7 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
   // to the browser (typing 'h' somewhere non-editable does nothing).
   // Auto-repeat is also refused for THESE bindings only: they point at
   // toggle-shaped tool commands, so a held H would flip the mode on/off at
-  // the OS repeat rate and land on parity (review-caught). Held Ctrl+Z /
+  // the OS repeat rate and land on parity (regression). Held Ctrl+Z /
   // `]` keep repeating — those commands are meant to.
   if (binding.requiresPref && (e.repeat || !getSettings()[binding.requiresPref])) return;
   if (binding.scope === 'canvas' && !isDocTab(ctx.state.ui.focusedTab)) {

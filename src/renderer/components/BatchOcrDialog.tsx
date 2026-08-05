@@ -84,7 +84,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // Stop feedback must be STATE (it drives paint); the ref twin below is what
   // the driver's isCancelled() polls — a ref mutation alone never re-renders,
   // so a ref-driven button label was a button that ignored the click
-  // (review-caught).
+  // (regression).
   const [stopping, setStopping] = useState(false);
 
   const cancelledRef = useRef(false);
@@ -96,7 +96,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // unmounts the node holding focus and Chromium drops focus to <body> —
   // OUTSIDE the shell the Tab trap listens on (useAppModal attaches to the
   // shell element; keydowns from body never reach it). Re-anchor focus on
-  // each phase's primary control (review-caught; the sibling dialogs dodge
+  // each phase's primary control (regression; the sibling dialogs dodge
   // this structurally by toggling props on persistent nodes).
   const stopBtnRef = useRef<HTMLButtonElement>(null);
   const doneCloseBtnRef = useRef<HTMLButtonElement>(null);
@@ -117,7 +117,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // enumeration, and without this a SLOW first response landing last would
   // overwrite the displayed folder's listing with another folder's files —
   // and Start would then run against a list the conflict check never saw
-  // (review-caught). Only the latest request may touch state.
+  // (regression). Only the latest request may touch state.
   const scanTokenRef = useRef(0);
   const selectSource = async (path: string): Promise<void> => {
     const token = ++scanTokenRef.current;
@@ -395,7 +395,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // Run-again from the report: source/dest/language/entries are all still
   // valid (the run never mutates the source tree), so only the run state
   // resets. Without this, a second batch meant reopening from the menu and
-  // re-picking both folders (review-caught dead end).
+  // re-picking both folders (regression dead end).
   const runAnother = (): void => {
     setReport(null);
     setProgress(null);
@@ -443,7 +443,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // already pending, a SECOND close attempt falls through to a real close —
   // the escape hatch for a wedged engine call that would otherwise make the
   // modal unclosable, since nothing can abort an in-flight sidecar write
-  // (review-caught). The abandoned run settles in the background: its state
+  // (regression). The abandoned run settles in the background: its state
   // updates land on an unmounted component (safe no-ops) and the finally
   // still disposes the worker.
   const guardedClose = phase === 'running' ? (stopping ? onClose : cancel) : onClose;
@@ -458,7 +458,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const moveFailures = report?.results.filter((r) => r.moveError) ?? [];
   const notedCopies = report?.results.filter((r) => r.status === 'copied' && r.reason) ?? [];
   // 'ocr' rows carry a reason too when SOME scanned pages had no
-  // recognizable text — the mixed-file honesty note (review-caught).
+  // recognizable text — the mixed-file honesty note (regression).
   const notedOcr = report?.results.filter((r) => r.status === 'ocr' && r.reason) ?? [];
   const notedMrc = report?.results.filter((r) => r.mrc) ?? [];
 
@@ -766,7 +766,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           <p className="text-sm" data-testid="batch-ocr-summary">
             {/* Each segment is a WHOLE message; only the ' · ' separator is
                 assembled. "already searchable" must not absorb the
-                OCR-ran-but-found-nothing copies (review-caught mislabel) —
+                OCR-ran-but-found-nothing copies (regression mislabel) —
                 those carry a reason and get their own segment. */}
             {(() => {
               const parts = [
@@ -964,7 +964,7 @@ function ProgressLine({
 function ProgressBar({ progress }: { progress: BatchProgress | null }): React.JSX.Element {
   // Interpolate WITHIN the current file — a whole-file numerator pins a
   // single-file batch at 0% for its entire (possibly minutes-long) run
-  // (review-caught). Recognition advances page/pageCount; the write/copy
+  // (regression). Recognition advances page/pageCount; the write/copy
   // phases count the file as done.
   let intra = 0;
   if (progress) {

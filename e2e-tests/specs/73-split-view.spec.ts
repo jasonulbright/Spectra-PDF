@@ -7,7 +7,7 @@ import {
   invokeAppCommand,
 } from '../support/harness.js';
 
-// § I.6 split view (the king's Window ▸ Split): two stacked panes over the
+// Split view uses two stacked panes over the
 // SAME document, each with its own scroll/zoom; the ACTIVE pane owns the
 // page readout and the camera commands. Split state is session-scoped and
 // this file toggles it off at the end (specs share one workspace per file —

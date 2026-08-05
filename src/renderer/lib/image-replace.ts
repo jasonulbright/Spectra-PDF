@@ -31,7 +31,7 @@ export const isSvgPath = (path: string): boolean => /\.svg$/i.test(path);
  * 1 when absent/unparseable. Byte passthrough embeds the SENSOR pixel grid —
  * PDF viewers ignore EXIF — so a phone photo shot in portrait would land
  * sideways; any orientation ≠ 1 must take the decode path instead, where the
- * webview applies the rotation (review-caught).
+ * webview applies the rotation (regression).
  */
 export function jpegExifOrientation(data: Uint8Array): number {
   if (data.length < 4 || data[0] !== 0xff || data[1] !== 0xd8) return 1;
@@ -120,7 +120,7 @@ export async function decodeToRawSource(
 ): Promise<RawReplacementSource> {
   const copy = new Uint8Array(bytes); // detached-buffer hygiene
   // 'from-image' EXPLICITLY: EXIF orientation must be applied here — this
-  // path is exactly where EXIF-rotated photos are routed (review-caught).
+  // path is exactly where EXIF-rotated photos are routed (regression).
   const bitmap = await createImageBitmap(new Blob([copy.buffer as ArrayBuffer]), {
     imageOrientation: 'from-image',
   });

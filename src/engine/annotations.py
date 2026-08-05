@@ -4,12 +4,11 @@ The canvas edits the four annotation kinds it authors (Square/FreeText/Ink/
 Stamp). This module works at the whole-document level over EVERY markup
 annotation — including native Highlight/Underline/StrikeOut/Text/Link the editor
 doesn't import inline — to (a) summarise what comments a document carries and
-(b) delete them all ("Delete All Comments", an Acrobat staple). It is a
+(b) delete them all. It is a
 whole-file op: the renderer routes it through the snapshot/commit flow and
 re-indexes afterward, so it never fights the inline annotation lifecycle.
 
-Form fields (/Widget) and links (/Link) are NOT comments and are kept, matching
-the king's "Delete All Comments".
+Form fields (/Widget) and links (/Link) are not comments and are kept.
 """
 
 import shutil

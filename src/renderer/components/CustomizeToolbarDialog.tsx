@@ -12,8 +12,8 @@ import {
   withToolbarVisibility,
 } from '../lib/toolbar-layout';
 
-// Customize Toolbar (I.6) — per-item show/hide over the toolbar catalog, the
-// king's classic-toolbar model (order stays; groups stay). Checkboxes apply
+// Toolbar customization changes item visibility while preserving order and
+// groups. Checkboxes apply
 // LIVE (the toolbar renders the same ui.toolbarOverrides), Reset returns to
 // the shipped default, and App persists the overrides to localStorage.
 

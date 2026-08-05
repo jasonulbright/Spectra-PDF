@@ -60,7 +60,7 @@ export function CreatePdfDialog({
   onClose: () => void;
   /** Open the created PDF through the normal open funnel; rejection is
    * surfaced IN the dialog (the fire-and-forget shape lost failures once
-   * the dialog had closed — review-caught). */
+   * the dialog had closed — regression). */
   onOpenResult: (path: string) => Promise<void>;
   /** Sources the dialog opens pre-populated with — a drop of non-PDF files
    * on the window lands here rather than doing nothing. */
@@ -83,7 +83,7 @@ export function CreatePdfDialog({
   // updates land (the whole native save-dialog round trip) — a second
   // click read a stale busy=false closure, both clicks awaited the SAME
   // serialized dialog promise, and BOTH ran the conversion
-  // (review-caught; the committingTextRef discipline).
+  // (regression; the committingTextRef discipline).
   const convertingRef = useRef(false);
 
   // A drop that arrives while the dialog is ALREADY open must still land —
@@ -194,7 +194,7 @@ export function CreatePdfDialog({
 
   // Escape/backdrop obey the same busy discipline as the Close button —
   // a conversion has no cancel, and closing mid-call abandons an in-flight
-  // engine job (the BatchOcr guardedClose rule; review-caught CRITICAL
+  // engine job (the BatchOcr guardedClose rule; regression
   // when only the button was gated).
   const guardedClose = busy ? () => {} : onClose;
 

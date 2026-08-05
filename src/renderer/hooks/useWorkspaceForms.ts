@@ -91,7 +91,7 @@ export function useWorkspaceForms(
                 // readFormFields await, and getDocumentProxy for a stale
                 // buffer would DESTROY the canvas's live newer proxy —
                 // re-creating the mid-flight-destroy hang on the current
-                // generation (review-caught HIGH, repro'd against the
+                // generation (regression, repro'd against the
                 // real cache). The newer generation's own run covers the
                 // fresh buffer; just stop.
                 if (gen !== genRef.current) return;

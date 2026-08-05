@@ -224,8 +224,7 @@ describe('print (M-P)', () => {
     // CLI → engine `print` registration → real winspool existence check.
     // This must refuse in seconds: gs's mswinpr2, handed a name it can't
     // open, raises its own INVISIBLE printer dialog and hangs to the 600s
-    // timeout — the first cut of this very test proved that live. The
-    // duration assertion is what discriminates the pre-check from the hang.
+    // timeout. The duration assertion distinguishes the pre-check from the hang.
     const started = Date.now();
     let status = 0;
     let stderr = '';

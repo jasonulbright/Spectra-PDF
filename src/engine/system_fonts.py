@@ -1,9 +1,9 @@
 """The fonts installed on this machine — 9.T6.
 
 Text editing has offered Keep-original plus three bundled families since
-7.4. The bundled faces exist so a REPLACEMENT is always available offline
-and metric-compatible; they were never meant to be the whole choice, and
-the king offers every installed font. This is that list.
+7.4. The bundled faces ensure a metric-compatible replacement is available
+offline; they are not the whole user-facing font choice. This module lists
+the usable installed fonts.
 
 Two things decide whether a face belongs in it, and both are read off the
 font itself rather than assumed:

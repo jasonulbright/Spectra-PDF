@@ -1,8 +1,8 @@
 // N11 slice B — ruler GUIDES. Pure model + math; the drag lives in the canvas
 // components, the state in WorkspaceCanvasView.
 //
-// LIFETIME. A guide is per-document VIEW state, exactly like a redaction mark:
-// it is never written into the file (the king's aren't either), it invalidates
+// A guide is per-document view state, like a redaction mark: it is never written
+// into the file, it invalidates
 // on buffer identity, and it is bound to a generation-tagged page id. It
 // carries `rotationAtDraw` and projects through it for the same reason a mark
 // does — the page it is pinned to can turn under it, from Rotate View or from
@@ -107,8 +107,7 @@ export function guideAt(
   return best ? best.g : null;
 }
 
-/** A guide dragged past the page's edge is DELETED — the king's gesture is
- * "drag it back to the ruler", and off-page is the general form of that. A
+/** A guide dragged past the page edge is deleted. A
  * hair of slack so a guide parked exactly on the edge survives. */
 export function isOffPage(pos: number): boolean {
   return !(pos >= -1e-6 && pos <= 1 + 1e-6);

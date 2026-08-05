@@ -332,7 +332,7 @@ function AppContent(): React.ReactElement {
   // Mirror the nav-pane state (M3) to the workbench-ui key. Debounced: a resize
   // drag dispatches a new width per pointermove, and an unthrottled synchronous
   // localStorage write per event competes with the drag for main-thread time
-  // (review-caught). Each change reschedules; only the settled value persists.
+  // (regression). Each change reschedules; only the settled value persists.
   useEffect(() => {
     const t = setTimeout(
       () => writeWorkbenchUi({ navPane: state.ui.navPane, toolDock: state.ui.toolDock }),
@@ -541,7 +541,7 @@ function AppContent(): React.ReactElement {
         if (existing && !existing.importOnly) {
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
           recent = withRecent(recent, filePath, Date.now()); // only on success — a cancel/throw
-          lastOpened = filePath;                  // must not pollute Recent (review-caught)
+          lastOpened = filePath;                  // must not pollute Recent (regression)
           changed = true;
           continue;
         }
@@ -585,7 +585,7 @@ function AppContent(): React.ReactElement {
       // batch are the same string, and `state.files` is a stale snapshot
       // for this whole call — without the Set both passes take the
       // "unregistered" branch and IMPORT_PAGES splices duplicate PageRef
-      // ids into the document (review-caught).
+      // ids into the document (regression).
       const filePaths = [...new Set(await app.canonicalizePaths(rawPaths))];
       const toRegister: {
         path: string;
@@ -967,12 +967,11 @@ function AppContent(): React.ReactElement {
   // that writes a NEW image file where the user chose. `opts` lets the e2e
   // harness inject what the native dialogs would collect.
   const editWarnedPathsRef = useRef<Set<string>>(new Set());
-  // Content edits invalidate embedded signatures — warn BEFORE the first
-  // mutation (the sign-into-field honesty precedent; Acrobat warns here
-  // too). The verify itself always runs (cheap, and a file UNSIGNED at the
+  // Content edits invalidate embedded signatures, so warn before the first
+  // mutation. Verification always runs because a file unsigned at the
   // last check may have been signed in-session since); only the dialog is
   // remembered, and only after the user said Continue for a file that
-  // actually had signatures (review-caught: caching the bare "checked
+  // actually had signatures (regression: caching the bare "checked
   // once" skipped the warning after an in-session sign). Shared by image
   // AND text edits — one warning per file, whichever comes first.
   const confirmEditOfSignedDoc = useCallback(
@@ -1337,7 +1336,7 @@ function AppContent(): React.ReactElement {
             // EXIF-rotated photos must NOT passthrough: PDF viewers render
             // the sensor pixel grid and ignore EXIF, so a portrait phone
             // photo would land sideways. Route those to the decode path,
-            // where the webview applies the rotation (review-caught).
+            // where the webview applies the rotation (regression).
             const head = await batch.readFileBuffer(pickedPath);
             if (jpegExifOrientation(head) === 1) source = { jpeg_path: pickedPath };
           }
@@ -1345,7 +1344,7 @@ function AppContent(): React.ReactElement {
         // ONE snapshot for the whole attempt — the passthrough-then-raw
         // retry lives INSIDE it. Two performOperation calls would snapshot
         // twice and leak the first copy on every CMYK fallback
-        // (review-caught); this is performOperation's exact shape with the
+        // (regression); this is performOperation's exact shape with the
         // retry between snapshot and reload.
         const tempFiles: string[] = [];
         const writeTemp = async (data: Uint8Array): Promise<string> => {
@@ -1416,7 +1415,7 @@ function AppContent(): React.ReactElement {
         });
         // The engine appends the encoding's REAL extension — surface the
         // actual filename so "photo.png" quietly becoming photo.jpg is
-        // seen, not suffered (review-caught).
+        // seen, not suffered (regression).
         const out = (r as unknown as { output?: string }).output;
         return out ? `Saved ${out.split(/[\\/]/).pop()}` : undefined;
       }
@@ -1632,9 +1631,8 @@ function AppContent(): React.ReactElement {
     dispatch({ type: 'MARK_SAVED', path: activeFile.path });
   }, [activeFile, saveFile, dispatch, commitOrAbort]);
 
-  // File ▸ Send To ▸ Email (owner-ruled in 2026-07-31 — a local OS
-  // integration, distinct from the excluded cloud-share cluster). Flush
-  // pending page edits, stage a copy of the CURRENT working state under the
+  // File ▸ Send To ▸ Email is a local OS integration. Flush pending page edits
+  // and stage a copy of the current working state under the
   // document's real name, and hand it to the default desktop mail client via
   // MAPI. The compose window is the mail client's own — nothing here sends
   // anything by itself; failures (chiefly: no mail client registered) come
@@ -2165,7 +2163,7 @@ function AppContent(): React.ReactElement {
                   // PageInspector. One implementation (the canvas's
                   // pending-jump path); a local mode-dispatch + jumpToPage
                   // here read a stale view ref and landed on page 1
-                  // (review-caught).
+                  // (regression).
                   getCanvasServices()?.openPageForReading(pageId)
                 }
                 onExtractText={handleExtractFromCanvas}

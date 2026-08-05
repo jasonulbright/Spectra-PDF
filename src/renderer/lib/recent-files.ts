@@ -21,7 +21,7 @@ export interface RecentEntry {
 }
 
 // Pure, testable core: JSON-valid-but-wrong-shape (object, string, null) →
-// [], never a non-array that would crash HomeTab's .map (review-caught).
+// [], never a non-array that would crash HomeTab's .map (regression).
 // Accepts both shapes: the legacy string[] and the entry form.
 export function parseRecent(raw: string | null): RecentEntry[] {
   try {
@@ -81,7 +81,7 @@ export function formatOpenedAt(openedAt: number | null, now: number): string {
   if (sameDay(then, today)) return tChrome('chrome.recent.today', { time });
   // A CALENDAR step, not now-24h: a real-time subtraction overshoots across
   // a 23-hour DST spring-forward day and mislabels yesterday for an hour
-  // (review-caught).
+  // (regression).
   const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
   if (sameDay(then, yesterday)) return tChrome('chrome.recent.yesterday', { time });
   // N12: the date part follows the ACTIVE locale (Intl owns month names —

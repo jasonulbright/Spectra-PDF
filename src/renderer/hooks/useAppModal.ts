@@ -27,7 +27,7 @@ export function useAppModal(onClose: () => void): React.RefObject<HTMLDivElement
     const trap = (e: KeyboardEvent): void => {
       // Plain Tab only: Ctrl+Tab is the (suppressed) tab-switch chord, and
       // treating it as focus movement relocated focus for no reason the
-      // user asked for (review-caught).
+      // user asked for (regression).
       if (e.key !== 'Tab' || e.ctrlKey || e.metaKey || e.altKey || !el) return;
       const focusables = el.querySelectorAll<HTMLElement>(
         'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',

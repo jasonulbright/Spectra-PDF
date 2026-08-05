@@ -18,14 +18,13 @@ export interface Settings {
   theme: string;
   minimizeToTray: boolean;
   startMinimized: boolean;
-  /** Acrobat's single-key tool accelerators (H/V/U/X/D/K — § 9.2, M6.4).
-   * Default OFF, Acrobat's own posture: bare letters arming tools surprise
+  /** Single-key tool accelerators (H/V/U/X/D/K). They default off because
+   * bare letters arming tools surprise
    * anyone who doesn't know the preset exists. */
   singleKeyAccelerators: boolean;
   /** Check GitHub for a newer release shortly after launch. Default ON, and
-   * safe to leave on: the check only ever SHOWS a banner — the app never
-   * downloads or installs anything itself (owner ruling 2026-07-25, "no self
-   * respecting enterprise allows auto-updates"). Turn it off for air-gapped
+   * safe to leave on: the check only ever shows a banner; the app never
+   * downloads or installs anything itself. Turn it off for air-gapped
    * deployments, or suppress it machine-wide with the DisableAutoUpdate
    * policy, which still wins over this preference. */
   checkUpdatesOnLaunch: boolean;
@@ -37,8 +36,8 @@ export interface Settings {
    * forever — deliberately NOT "delete everything", since 0 is what an
    * unset or corrupted value resolves to. The requester suggested 30. */
   batchLogRetentionDays: number;
-  /** The user's display name for dynamic stamps' {name} token (the king's
-   * identity-in-stamps model). Empty = the token resolves to nothing and the
+  /** The user's display name for dynamic stamps' {name} token. Empty means the
+   * token resolves to nothing and the
    * label collapses cleanly. */
   identityName: string;
   /** Where batch logs are written. Empty = the app's own data folder.
@@ -48,8 +47,7 @@ export interface Settings {
    * path inside THAT account's profile, so the audit trail for precisely the
    * runs nobody watched would land where the person who set them up cannot
    * see it. A shared, explicitly chosen folder is the fix — and once
-   * scheduling exists, setting one is REQUIRED for a non-interactive identity
-   * rather than optional (owner requirement 2026-07-26). */
+   * scheduling exists, setting one is required for a non-interactive identity. */
   batchLogDir: string;
   /** N12: the UI language — 'system' resolves against the shipped locales
    * (falling back to en), an explicit code pins one. Stored values are

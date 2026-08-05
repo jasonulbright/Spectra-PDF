@@ -118,7 +118,7 @@ class TestDocumentJs:
             )
 
     def test_malformed_js_tree_degrades_gracefully(self, tmp_dir):
-        # Round-42 gauntlet: a hostile/corrupt `/Names << /JavaScript 42 >>`
+        # regression: a hostile/corrupt `/Names << /JavaScript 42 >>`
         # (a scalar where a name tree belongs) must read as "no scripts", not
         # raise a raw TypeError out of pikepdf.NameTree.
         src = _blank(tmp_dir)
@@ -129,7 +129,7 @@ class TestDocumentJs:
         assert list_document_js(bad) == {"scripts": [], "count": 0}
 
     def test_reads_a_bom_less_utf8_js_stream(self, tmp_dir):
-        # Round-42 gauntlet: some producers write /JS as UTF-8 WITHOUT a BOM;
+        # regression: some producers write /JS as UTF-8 WITHOUT a BOM;
         # decoding it as Latin-1/PDFDocEncoding mojibakes non-ASCII text, and a
         # later save would bake that corruption in. Strict-UTF-8-first recovers.
         src = _blank(tmp_dir)
@@ -150,7 +150,7 @@ class TestDocumentJs:
     def test_in_place_output_equals_input(self, tmp_dir):
         # The renderer routes through the undoable workspace flow, which passes
         # the working copy as BOTH file and output. pikepdf refuses to overwrite
-        # the file it opened; the temp+replace path must handle it (e2e-caught).
+        # the file it opened; the temp+replace path must handle it (e2e regression).
         src = _blank(tmp_dir)
         set_document_js(src, src, [{"name": "Init", "js": "one();"}])
         assert list_document_js(src)["scripts"] == [{"name": "Init", "js": "one();"}]
@@ -159,9 +159,8 @@ class TestDocumentJs:
         assert list_document_js(src)["scripts"] == [{"name": "Init", "js": "two();"}]
 
     def test_broken_javascript_is_saved_verbatim_not_parsed(self, tmp_dir):
-        # The editor stores text; it never parses/executes. A syntactically
-        # broken script must round-trip byte-for-byte (the king validates at
-        # run time — which is not us).
+        # The editor stores text without parsing or executing it, so a
+        # syntactically broken script must round-trip byte-for-byte.
         src = _blank(tmp_dir)
         out = os.path.join(tmp_dir, "broken.pdf")
         broken = "function( { this is not valid javascript"

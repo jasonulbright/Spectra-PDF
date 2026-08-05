@@ -1,55 +1,14 @@
-"""Create a PDF from a source that is not one (P22, brief 41).
+"""Create PDFs through one conversion and assembly pipeline.
 
-**ONE door, not four.** Create PDF, Combine Files, the CLI and guided actions
-all call `create_pdf`; `distill`, the image wrap and the blank builder are its
-ARMS. This repo's own "fixed four times at four dispatchers" lesson says a
-second create path is how a surface gets left behind, so there is not one.
+Create PDF, Combine Files, the CLI, guided actions, and batch OCR all use
+`create_pdf`. Each non-PDF source is converted independently, its page range is
+applied, and the results are assembled with the form-aware merge path. Page
+sizing is applied once to the assembled document.
 
-**Convert-then-merge, never merge-then-convert.** Each non-PDF source becomes a
-PDF in a scratch directory and the assembly is the SHIPPED merge
-(`engine/merge.py` on pikepdf's form-aware `add_pages_from`, plus
-`engine/acroform.py`'s carries), so `/AcroForm` carry, outline carry and the
-rest come for free and cannot be forgotten — the structural-page-ops invariant.
-A single source with no others still goes through a one-member merge, so the
-single and multi cases cannot drift.
-
-**Page sizing happens at ASSEMBLY**, once, on the merged document — not per
-converter — so a mixed set of sources behaves the same however it arrived.
-**A per-member page range is applied once too**, right after that member's
-conversion, which is why "pages 2-3 of that spreadsheet" works and no arm has
-to know ranges exist.
-
-The IMAGE arm was promoted out of `batch_ocr` and fixed here; batch OCR is now
-a consumer of it, which is how the multi-frame data loss below reached the
-shipped feature it was hiding in.
-
-Why the image route is OURS and not LibreOffice's: measured (brief 41 § 1.2),
-LibreOffice puts a 200-dpi PNG, a 150-dpi JPEG and a 300-dpi TIFF all on one
-612x792 Letter page. It is not DPI-honest, and DPI honesty is the whole point —
-a 300-dpi scan must become a Letter page, not a 25-inch one.
-
-Four rules here, each MEASURED (`p22-image-probe{,2}.local.py` and their logs):
-
-1. **The page is sized from the image's own stored DPI**, falling back to
-   `dpi_default`. Pillow's PDF plugin IGNORES `im.info["dpi"]` — only the
-   `resolution=` keyword sizes the page — so the DPI is read here and passed.
-2. **Every frame is a page.** `im.save(..., "PDF")` without `save_all` writes
-   the FIRST frame and silently discards the rest: a 3-frame TIFF came out as
-   1 page. Multi-page TIFF is the normal shape of a fax or a departmental
-   scanner's output, so that was silent data loss in shipped batch OCR.
-3. **Frames are saved SEPARATELY and concatenated**, never through
-   `save_all=True, append_images=[...]`. Two measured reasons: `save_all`
-   applies ONE resolution to every frame (a 150-dpi second frame was sized at
-   the first frame's 300 dpi), and Pillow LEAKS `encoderinfo` onto an
-   append_images member — a later `save(..., resolution=150)` on that same
-   object silently reused the stale 300. Concatenation is `add_pages_from`,
-   never a bare `extend` (the structural-page-ops invariant).
-4. **Normalisation is measured, not guessed.** The PDF plugin takes `1`
-   (CCITT G4 — what a bilevel fax should stay), `L`, `RGB` and `CMYK`
-   (DCTDecode) directly; it REFUSES `I`, `I;16`, `F` and `PA`; and it writes
-   `P` as an ASCIIHex-encoded /Indexed image 23x larger than the same picture
-   as RGB. Alpha is composited onto WHITE, because a bare `convert("RGB")` on
-   a fully transparent red pixel yields opaque RED.
+Images use the Pillow path because it preserves stored DPI. Each multi-frame
+image frame is saved separately so its own DPI controls its page size; the
+pages are then concatenated with `add_pages_from`. Supported modes are passed
+through, palette images are converted to RGB, and alpha is composited on white.
 """
 
 from __future__ import annotations
@@ -76,11 +35,8 @@ from engine.acroform import (
 )
 from engine.split import parse_ranges
 
-# The accepted raster set. Widened past batch OCR's original png/jpg/tif/bmp:
-# WEBP, JPEG 2000 and AVIF are decodable by the BUNDLED Pillow already (a
-# measured `features.check`), GIF is ordinary, and HEIC/HEIF arrive with the
-# vendored pillow-heif plugin. HEIC is the default camera format on the phones
-# users photograph documents with, so its absence was a real hole.
+# Accepted raster formats. Bundled Pillow decodes WEBP, JPEG 2000, AVIF, GIF,
+# and common formats; pillow-heif supplies HEIC/HEIF camera-image support.
 IMAGE_SUFFIXES = (
     ".png",
     ".jpg",
@@ -460,7 +416,7 @@ def _place_page(pdf, page, target: tuple[float, float], margin: float) -> None:
 
 
 def _apply_page_size(path: Path, page_size: str, orientation: str, margin: float) -> None:
-    """Sizing, applied ONCE to the assembled document (brief 41 § 3.1)."""
+    """Apply sizing once to the assembled document."""
     if page_size == "auto" and orientation == "auto":
         return
     with pikepdf.open(str(path), allow_overwriting_input=True) as pdf:

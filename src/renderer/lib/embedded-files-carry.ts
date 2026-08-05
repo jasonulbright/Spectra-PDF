@@ -5,10 +5,9 @@
 // pdf-lib's copyPages copies page subtrees only — document-level catalog
 // trees are LEFT BEHIND, so before this module any committed page edit (one
 // rotation suffices) silently deleted every attachment the document carried,
-// and would have stripped a portfolio to its cover sheet. Same loss class as
-// the /AcroForm drop that acroform-carry.ts exists for; found while building
-// portfolio authoring (2026-07-30), pinned by embedded-files-carry.test.ts
-// and the portfolio e2e's rotate-then-refresh leg.
+// and would strip a portfolio to its cover sheet. This is the same loss class
+// as the /AcroForm drop handled by acroform-carry.ts and is pinned by
+// embedded-files-carry.test.ts plus the portfolio rotate-then-refresh test.
 //
 // Carried from the committed FILE'S OWN prior bytes only — never from the
 // other contributing sources: embedded files are document-level property,

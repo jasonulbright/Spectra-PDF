@@ -60,7 +60,7 @@ export const dialog = {
   /** Pick one or more Create PDF sources (P22 — images, Office, text, web,
    * PostScript and PDFs). Serialized like openFiles/saveFile — modality lands
    * a beat after the click, so a rapid second click must join the open dialog,
-   * not stack another (review-caught: the single-file version this replaces
+   * not stack another (regression: the single-file version this replaces
    * was added without the guard the comment above exists to explain). */
   pickCreatePdfSources: () => {
     if (!createPdfDialogInflight) {
@@ -335,7 +335,7 @@ export interface PrinterCapabilities {
 
 export const app = {
   getGsPath: () => invoke<string>('get_gs_path'),
-  /** File ▸ Send To ▸ Email (owner-ruled in 2026-07-31). Stage a copy of the
+  /** File ▸ Send To ▸ Email stages a copy of the
    * working file under the document's real name (mail clients may read the
    * attachment lazily — the live working copy would race later edits)… */
   stageSendCopy: (path: string, displayName: string) =>
@@ -369,9 +369,8 @@ export const app = {
    *  "Open member" (per-portfolio, created on demand; Rust owns the path). */
   portfolioMemberDir: (portfolioPath: string) =>
     invoke<string>('portfolio_member_dir', { portfolioPath }),
-  /** Shell-open an EXTRACTED member with the OS default handler. Scoped
-   * Rust-side to the managed portfolio-members dir — never arbitrary paths
-   * (the 2026-07-30 deferral's recorded unblock, owner-ruled in). */
+  /** Shell-open an extracted member with the OS default handler. Rust restricts
+   * the path to the managed portfolio-members directory. */
   openPortfolioMemberFile: (path: string) =>
     invoke<void>('open_portfolio_member_file', { path }),
   getBundledGsInfo: () => invoke<GsInfo>('get_bundled_gs_info'),

@@ -148,7 +148,7 @@ export const CANVAS_STRINGS = {
 
   'canvas.toolbar.colorGroup': 'Annotation colour',
 
-  // ── The properties bar (I.6, Acrobat's Ctrl+E) ───────────────────────
+  // ── Properties bar ──────────────────────────────────────────────────
   'canvas.pbar.barLabel': 'Properties bar',
   // What the selected annotation IS, in human words. Deliberately NOT the
   // Comments panel's `panel.comments.kind.*` — those are the PDF's own

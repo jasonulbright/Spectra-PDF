@@ -1,5 +1,5 @@
-// Guided actions (parity map § 2 — the king's Action Wizard), slice 1: the
-// sequence MODEL. A LEAF module — localStorage + pure helpers only — so the
+// Guided actions sequence model. This leaf module uses localStorage and pure
+// helpers so the
 // catalog integrity, validation, and param mapping are unit-testable (no DOM
 // test environment; the breakable part must be the testable part).
 //

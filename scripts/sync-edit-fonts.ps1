@@ -61,9 +61,9 @@ $Faces = @(
 # in their GSUB - Liberation has NONE of those, and Libertinus's own TTF builds
 # STRIP the features (only 'kern' survives), so the CFF-flavoured OTF is
 # REQUIRED (the engine embeds it via FontFile3 /OpenType). Libertinus is NOT a
-# metric-compatible drop-in for Liberation and NEVER a silent/automatic
-# fallback - it is an explicit opt-in family for small-caps/alternate authoring
-# (owner-approved 2026-07-21). Libertinus has no Sans BoldItalic face, so Serif
+# metric-compatible drop-in for Liberation and never a silent or automatic
+# fallback. It is an explicit opt-in family for small-caps and alternate
+# authoring. Libertinus has no Sans BoldItalic face, so Serif
 # only. THIRD-PARTY-LICENSES.md carries the OFL pointer.
 $LibVersion = '7.051'
 $LibUrl = "https://github.com/alerque/libertinus/releases/download/v$LibVersion/Libertinus-$LibVersion.zip"
@@ -84,11 +84,8 @@ $Dest = Join-Path $Root 'resources\fonts'
 #
 # EVERY face means every face the script vendors, not just the two families
 # it started with: the CJK and right-to-left blocks live BELOW this guard, so
-# a repo carrying only Liberation + Libertinus used to short-circuit here and
-# report "all faces present and verified" over a fonts directory with no CJK
-# and no Arabic in it (caught 2026-08-01 running the script for T3). The
-# later blocks read these same tables, so the guard and the download can
-# never again disagree about what the set is.
+# The presence guard and download blocks read the same tables so a partial font
+# directory cannot be reported as complete.
 $CjkFaces = @(
     @{ Name = 'NotoSansCJKsc-Regular.otf'; Sha256 = '2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b' }
     @{ Name = 'NotoSansCJKsc-Bold.otf';    Sha256 = 'b5f0d1a190a7f9b43c310a8850630af12553df32c4c050543f9059732d9b4c0a' }
@@ -196,7 +193,7 @@ Write-Host "Vendored: $Target"
 Remove-Item $LibTmp -Force
 Remove-Item $LibExtract -Recurse -Force
 
-# --- Noto Sans CJK SC (T5, 2026-08-01): the CJK-capable fallback face ---
+# --- Noto Sans CJK SC: the CJK-capable fallback face ---
 # SIL OFL 1.1 like the rest. Regular + Bold (no CJK italic exists; the
 # resolve ladder's style degrade lands italic requests on Regular by
 # design). Pinned per-face from the tagged release tree; ~16MB/weight is
@@ -223,7 +220,7 @@ if ($h -ne $CjkLicense.Sha256) {
 }
 Write-Host "Vendored: $NotoLicense"
 
-# --- Right-to-left faces (T3, 2026-08-01) ---
+# --- Right-to-left faces ---
 # IBM Plex Sans Arabic (OFL 1.1) is the SHAPING face and Noto Sans Hebrew
 # (OFL 1.1) the coverage face. Both ship Regular + Bold; neither has an
 # italic, so the resolve ladder degrades italic requests to Regular exactly

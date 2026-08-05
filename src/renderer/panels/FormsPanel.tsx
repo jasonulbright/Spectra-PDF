@@ -29,7 +29,7 @@ export function FormsPanel(): React.ReactElement {
   // The values as first read — Apply sends only the fields the user CHANGED
   // (a diff), never the full current-state snapshot: the engine validates every
   // edit as authoritative, so resending an untouched read-only/button/unselected
-  // field would abort the whole fill (gauntlet CRITICAL). pdf-lib's per-field
+  // field would abort the whole fill (regression). pdf-lib's per-field
   // no-op tolerated the full snapshot; the engine does not.
   const initialValues = useRef<Record<string, FormFieldValue>>({});
   // Field names the user has typed into since the last read landed. The read
