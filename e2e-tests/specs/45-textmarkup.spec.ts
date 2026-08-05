@@ -48,7 +48,7 @@ async function highlightCount(path: string): Promise<number> {
   return annots.filter((a) => a.subtype === 'Highlight').length;
 }
 
-describe('native text markup imported inline (N1)', () => {
+describe('native text markup imported inline', () => {
   let tmp: string;
   let source: string;
 

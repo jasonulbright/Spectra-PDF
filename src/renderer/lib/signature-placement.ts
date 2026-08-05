@@ -5,7 +5,6 @@
 // tier, dies when its file's buffer identity changes or the canvas unmounts,
 // and resolves its page by pageId so it follows in-memory moves. Unlike
 // redaction marks there is at most ONE placement — drawing again replaces it.
-// Design notes: docs/architecture/13-phase2k-signature-completeness.md.
 import { displayRectToPdf } from './pdfx-build';
 import { workspacePageNumber } from './workspace-commit';
 import type { PageGeometry } from './redaction';
@@ -23,9 +22,9 @@ export interface SignaturePlacement {
   // file at sign time and composed there — storing the composition would
   // double-count it; same contract as RedactionMark.rotationAtDraw).
   rotationAtDraw: 0 | 90 | 180 | 270;
-  /** A2-tail, Add-Text placements only: the authoring rotation the card
+  /** Add-Text placements only: the authoring rotation the card
    * currently shows — drives the box preview's reading-direction arrow.
-   * T19: any degree value (quarter turns keep the step layout).
+   * Any degree value (quarter turns keep the step layout).
    * Signature/new-field placements never set it. */
   rotate?: number;
 }

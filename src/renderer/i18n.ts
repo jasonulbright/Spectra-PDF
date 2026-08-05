@@ -1,4 +1,4 @@
-// N12 (brief 37) — the i18next core. Catalogs are BUNDLED (no runtime
+// The i18next core. Catalogs are BUNDLED (no runtime
 // fetch); keys are STABLE SEMANTIC IDS derived from the data tables that
 // already name every surface (command ids, menu ids), so English copy can
 // change without orphaning translations. `en` is the source catalog,
@@ -9,7 +9,7 @@
 //
 // Under VITE_E2E the language is FORCED to 'en': the e2e suite asserts
 // English text in places, and locale coverage is its own spec driving the
-// Settings control (slice E).
+// Settings control.
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import enChrome from './locales/en/chrome.json';
@@ -82,7 +82,7 @@ function detectLanguage(): string {
   return resolveLanguage(loadSettings().language ?? 'system');
 }
 
-/** qps — the DEV/e2e pseudo-locale (brief 37): every en string bracketed
+/** qps — the DEV/e2e pseudo-locale: every en string bracketed
  * and vowel-stretched, so a covered surface shows [Ẽẽxãã...] and a bare
  * English leak stands out. Generated from en at init — never authored,
  * never shipped (not in SHIPPED_LOCALES, absent from the Settings list). */
@@ -132,8 +132,7 @@ void i18next.use(initReactI18next).init({
  * and spell-check heuristics keyed off the wrong language. Found by the
  * slice-E RTL spot-check — the attribute is also where a future RTL locale
  * would carry `dir`, but nothing sets `dir` today and nothing should until a
- * mirrored layout exists (see the punchlist's RTL row: half-mirroring is
- * worse than not mirroring).
+ * mirrored layout exists — half-mirroring is worse than not mirroring.
  */
 function syncDocumentLanguage(lng: string): void {
   if (typeof document === 'undefined') return;
@@ -240,7 +239,7 @@ export function tOcrLanguage(code: string): string {
   }
 }
 
-/** Locale-aware number formatting (brief 37: `Intl.NumberFormat`, never a
+/** Locale-aware number formatting (`Intl.NumberFormat`, never a
  * hand-rolled decimal — the separator and grouping are locale properties). */
 export function tNumber(value: number, opts?: Intl.NumberFormatOptions): string {
   return new Intl.NumberFormat(i18next.language, opts).format(value);
@@ -273,9 +272,9 @@ export function tToolbarGroup(groupId: string, englishLabel: string): string {
   return i18next.t(`toolbar.group.${groupId}`, { defaultValue: englishLabel });
 }
 
-// The typed UI records, merged: chrome (slice A) + panels, dialogs and the
-// workbench chrome (slice B) + the canvas and its overlays (slice C) + the
-// renderer's own refusal messages (slice E). One helper set serves all six —
+// The typed UI records, merged: chrome + panels, dialogs and the
+// workbench chrome + the canvas and its overlays + the
+// renderer's own refusal messages. One helper set serves all six —
 // a key is compile-time-checked against the union.
 const UI_STRINGS: Record<string, string> = {
   ...CHROME_STRINGS,
@@ -321,7 +320,7 @@ export function tChrome(
  * `_one`/`_other` catalog pair from `count` per the locale's plural rules.
  */
 /**
- * N12 slice B — the guided-actions STEP CATALOG's display strings. The
+ * The guided-actions STEP CATALOG's display strings. The
  * catalog is serialized DATA (saved actions carry op ids, never titles),
  * so titles/labels localize at render through keys DERIVED from the
  * table (`gaction.*`), generated into the en catalog by the i18n-catalog
@@ -346,7 +345,7 @@ export const tStepHint = (op: string, key: string, english: string): string =>
  * key what its literal prefix is in the CURRENT locale — so the status
  * bar's error tone is exact in every language.
  *
- * The landmine this exists to kill (the RepairPanel class, N12 slice B):
+ * The landmine this exists to kill (the RepairPanel class):
  * chrome that discriminates by sniffing its own ENGLISH text — here
  * `message.startsWith('Error')` — goes silently wrong the moment the text
  * is translated. Prefer a state discriminant; where the only signal IS the

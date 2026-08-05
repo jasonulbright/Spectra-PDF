@@ -17,11 +17,11 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// § 6.6's commit-trigger matrix (recovered M4.3 scope), all four rows:
+// The commit-trigger matrix, all four rows:
 //   1. doc→doc tab switches do NOT commit (the tier is workspace-global);
 //   2. LEAVING doc-tab-land (to Home/Tools) commits — panels and Home always
 //      see materialized state;
-//   3. a byte-READING surface gates the commit first (Properties, M5.5b);
+//   3. a byte-READING surface gates the commit first (Properties);
 //   4. File ▸ Save commits first, to the original path.
 
 async function pendingBadgeVisible(): Promise<boolean> {
@@ -45,7 +45,7 @@ async function addPendingRotate(): Promise<void> {
   });
 }
 
-describe('commit-trigger matrix (§ 6.6)', () => {
+describe('commit-trigger matrix', () => {
   let tmp: string;
   let fileA: string;
   let fileB: string;
@@ -99,7 +99,7 @@ describe('commit-trigger matrix (§ 6.6)', () => {
     expect(await pendingBadgeVisible()).toBe(false);
   });
 
-  it('a byte-READING surface gates the commit first (Properties, the M5.5b rule)', async () => {
+  it('a byte-READING surface gates the commit first (Properties, the rule)', async () => {
     await addPendingRotate(); // same page again: pending 90 on top of 90
     await browser.keys(['Control', 'd']);
     await $('[data-testid="properties-dialog"]').waitForDisplayed();

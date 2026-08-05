@@ -1,11 +1,11 @@
 // Recent-files list (the `spectra-recent` localStorage key). Lives in the ui
 // slice so the File ▸ Open Recent menu and the Home tab render it reactively
-// (Phase 4 M2); App mirrors ui.recentFiles → localStorage in one effect, so
+// App mirrors ui.recentFiles → localStorage in one effect, so
 // callers only compute the next list (withRecent) and dispatch. readRecent is
 // the one validated reader — used by boot hydration.
 //
-// M7: entries carry WHEN they were opened (the Home tab's opened-when
-// column, an M2 deviation held on the deferral tracker until now). Legacy
+// Entries carry WHEN they were opened (the Home tab's opened-when
+// column). Legacy
 // bare-string entries migrate with `openedAt: null` — an honest "unknown",
 // displayed as an em dash, never a fabricated date.
 
@@ -16,7 +16,7 @@ const MAX = 10;
 
 export interface RecentEntry {
   path: string;
-  /** Epoch ms of the last open; null for entries persisted before M7. */
+  /** Epoch ms of the last open; null for entries persisted before it was recorded. */
   openedAt: number | null;
 }
 
@@ -84,7 +84,7 @@ export function formatOpenedAt(openedAt: number | null, now: number): string {
   // (regression).
   const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
   if (sameDay(then, yesterday)) return tChrome('chrome.recent.yesterday', { time });
-  // N12: the date part follows the ACTIVE locale (Intl owns month names —
+  // The date part follows the ACTIVE locale (Intl owns month names —
   // never a hand-rolled table). en output is byte-identical to the old
   // 'Mmm D' / 'Mmm D, YYYY' strings, which is what keeps the pure tests
   // meaningful as en pins.

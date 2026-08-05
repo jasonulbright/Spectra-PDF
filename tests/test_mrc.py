@@ -1,4 +1,4 @@
-"""O8 slice C — the MRC pass.
+"""The MRC pass.
 
 The fixtures are built by the checked-in `tests/fixtures/make_scans.py` and
 committed beside it, so every number below is measured against bytes a
@@ -14,13 +14,13 @@ What is pinned, and why each pin exists rather than being obvious:
     page count come through untouched. If anyone ever swaps the surgery for a
     rebuild, this is the group that fails loudly.
   * **Size** — a recorded band against the SOURCE and against Ghostscript's
-    `/ebook`, which is the comparison the register row actually claims.
+    `/ebook`, which is the comparison the actually claims.
   * **Legibility** — the point of the feature is that the words survive. The
     similarity is computed with `autojunk=False` over a normalized word list,
     because `SequenceMatcher`'s autojunk heuristic discards any token
     appearing in over 1% of a sequence longer than 200 — on prose that is
-    most words, and it scored a CORRECT page at 7/713 in the recon.
-  * **PDF/A** — probe-verified in recon (§ 1.7) that gs keeps the layering
+    most words, and it scores a CORRECT page at 7/713.
+  * **PDF/A** — probe-verified that gs keeps the layering
     and transcodes JPX to DCT for PDF/A-1; the pin freezes that.
 """
 
@@ -324,7 +324,7 @@ class TestPresets:
 
 
 # --------------------------------------------------------------------------
-# Classification (§ 3.1)
+# Classification
 # --------------------------------------------------------------------------
 class TestClassification:
     def test_every_scan_fixture_classifies_as_a_scan(self, scan):
@@ -412,7 +412,7 @@ class TestClassification:
 
 
 # --------------------------------------------------------------------------
-# Segmentation (§ 3.2)
+# Segmentation
 # --------------------------------------------------------------------------
 class TestSegmentation:
     def test_sauvola_is_local_not_global(self):
@@ -515,7 +515,7 @@ class TestSegmentation:
     def test_the_background_averages_paper_only(self, text_scan):
         # Rule 1, as an inequality rather than a picture: the masked mean over
         # PAPER must be lighter than a mean that lets the ink in, because the
-        # difference IS the ghost the recon measured as unreadable OCR.
+        # difference IS the ghost measured as unreadable OCR.
         with pikepdf.open(text_scan) as pdf:
             candidate, _ = _classify_page(pdf, pdf.pages[0], 1)
             source = _lift_image(pdf, pdf.pages[0], candidate)
@@ -542,7 +542,7 @@ class TestSegmentation:
 
 
 # --------------------------------------------------------------------------
-# Assembly — what must survive (§ 3.4)
+# Assembly — what must survive
 # --------------------------------------------------------------------------
 class TestSurvival:
     def test_the_page_becomes_two_layers_over_one_stencil(self, text_scan, tmp_dir, gs_path):
@@ -618,7 +618,7 @@ class TestSurvival:
                 arr = np.asarray(im.convert("L"), dtype=np.uint8)
         # A coverage BAND, not "not blank": an inverted stencil renders 100%
         # black and would pass any not-blank check while being exactly as
-        # wrong (slice A's lesson, applied to the pass that writes them).
+        # wrong (the lesson, applied to the pass that writes them).
         dark = float((arr < 128).mean())
         assert 0.01 < dark < 0.35
 
@@ -653,7 +653,7 @@ class TestSurvival:
 
 
 # --------------------------------------------------------------------------
-# Size (§ 1.5 — the claim the register row actually makes)
+# Size (the claim the actually makes)
 # --------------------------------------------------------------------------
 class TestSize:
     @pytest.mark.parametrize("preset", ("archival", "balanced", "smallest"))
@@ -675,7 +675,7 @@ class TestSize:
         assert sizes == sorted(sizes, reverse=True)
 
     def test_the_default_preset_beats_ghostscript_ebook(self, scan, tmp_dir, gs_path):
-        # The comparison the register row claims: at the same or better
+        # The comparison the claims: at the same or better
         # legibility, MRC lands between /screen and /ebook in SIZE while
         # keeping the text at the scan's own resolution.
         mrc = os.path.join(tmp_dir, "mrc.pdf")
@@ -701,7 +701,7 @@ class TestSize:
 
 
 # --------------------------------------------------------------------------
-# Legibility (§ 1.6 rule 4)
+# Legibility (rule 4)
 # --------------------------------------------------------------------------
 @needs_tesseract
 class TestLegibility:
@@ -732,7 +732,7 @@ class TestLegibility:
 
 
 # --------------------------------------------------------------------------
-# The text-verification gate (slice E, § 5 / brief § 7 E)
+# The text-verification gate
 # --------------------------------------------------------------------------
 class TestVerifyText:
     """A compression setting may be lossy; it may not quietly destroy the text.
@@ -746,7 +746,7 @@ class TestVerifyText:
 
     def test_an_empty_source_scores_one(self):
         # A scan with no recognisable text has nothing to lose, and MRC does
-        # not create a text layer (§ 9 boundary 3). Scoring it 0 would revert
+        # not create a text layer (boundary 3). Scoring it 0 would revert
         # every page of a wordless scan.
         assert mrc_verify.text_similarity("", "anything at all")[0] == 1.0
 
@@ -758,7 +758,7 @@ class TestVerifyText:
         assert first, "the first divergence is reported, not just the number"
 
     def test_autojunk_is_off(self):
-        # The recon bug this exists for: autojunk discards any token in over
+        # The bug this exists for: autojunk discards any token in over
         # 1% of a sequence longer than 200, which on prose is most words — it
         # scored a CORRECT page at 7/713.
         words = ("the quick brown fox jumps over the lazy dog and then some " * 25).split()
@@ -870,7 +870,7 @@ class TestVerifyText:
 
 
 # --------------------------------------------------------------------------
-# PDF/A (§ 1.7 — probe-measured in recon, frozen here)
+# PDF/A (probe-measured, frozen here)
 # --------------------------------------------------------------------------
 class TestPdfa:
     def test_pdfa_safe_writes_only_pdfa1_filters(self, text_scan, tmp_dir, gs_path):
@@ -899,7 +899,7 @@ class TestPdfa:
 
 
 # --------------------------------------------------------------------------
-# The one door (§ 6.1)
+# The one door
 # --------------------------------------------------------------------------
 class TestCompressDoor:
     def test_quality_mrc_reaches_the_pass(self, text_scan, tmp_dir, gs_path):
@@ -988,7 +988,7 @@ class TestCompressDoor:
 
 
 # --------------------------------------------------------------------------
-# Report (§ 3.5)
+# Report
 # --------------------------------------------------------------------------
 class TestReport:
     def test_every_page_is_accounted_for(self, text_scan, tmp_dir, gs_path):

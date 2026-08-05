@@ -13,7 +13,7 @@ import {
   invokeAppCommand,
 } from '../support/harness.js';
 
-// Phase 5 (§ F) — durable identity across the AUTHORED rebuild, observed
+// Durable identity across the AUTHORED rebuild, observed
 // against the real binary: a canvas selection spanning two files survives
 // the atomic page-tier commit (the reindex ADOPTS the commit's published
 // ids), and a file-level undo — a NON-authored restore — prunes exactly
@@ -51,7 +51,7 @@ async function rotateSelectedCanvasPages(delta: 90 | 270): Promise<void> {
   }, delta);
 }
 
-describe('durable identity (Phase 5 § F)', () => {
+describe('durable identity', () => {
   let tmp: string;
   let fileA: string;
   let fileB: string;
@@ -96,7 +96,7 @@ describe('durable identity (Phase 5 § F)', () => {
     await commitPendingEdits();
 
     // Adoption: the SAME ids survive the rebuild — in the workspace
-    // listing AND in the live selection (the § F payoff, end to end).
+    // listing AND in the live selection (the payoff, end to end).
     await browser.waitUntil(
       async () => {
         const ids = await getWorkspacePageIds();
@@ -108,7 +108,7 @@ describe('durable identity (Phase 5 § F)', () => {
 
     // File-level undo restores fileA's pre-commit bytes — a NON-authored
     // rebuild. Its reindex mints a fresh generation: fileA's selected id
-    // dies, fileB's selection is untouched (per-path § F pruning).
+    // dies, fileB's selection is untouched (per-path pruning).
     const active = (await getState()).activeFile?.path ?? '';
     const undonePath = active.includes('ident-a') ? fileA : fileB;
     const survivor = undonePath === fileA ? bIds[0] : aIds[1];

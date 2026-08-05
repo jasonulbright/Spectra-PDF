@@ -1,4 +1,4 @@
-// On-canvas form overlay support (2n.4b): pure projection + pending-value
+// On-canvas form overlay support: pure projection + pending-value
 // bookkeeping, kept out of React so it unit-tests directly.
 //
 // The pdf.js render path bakes widget appearances as static pixels — there is
@@ -15,7 +15,7 @@
 // an Apply-changes (dropping them would punish routine edits). They are
 // PRUNED against each re-read of the file's fields (name gone, no longer
 // editable, or value shape no longer matches the field's type) and dropped
-// with the file (a path absent from the read map). See the phase doc §2n.4(b).
+// with the file (a path absent from the read map).
 import { pdfRectToDisplay } from './pdfx-build';
 import type { FormField, FormFieldType, FormFieldValue } from './forms';
 
@@ -36,7 +36,7 @@ export interface OverlayWidget {
   multiline?: boolean;
   radioOption?: string;
   sigFilled?: boolean;
-  /** button only (F8): the classified /A action the click acts on. */
+  /** button only: the classified /A action the click acts on. */
   action?: import('./forms').ButtonAction;
 }
 
@@ -58,8 +58,8 @@ export function projectFieldWidgets(
   geometryFor: (pageIndex: number) => { box: PageBox; bakedRotate: number } | null,
 ): Map<number, OverlayWidget[]> {
   const byPage = new Map<number, OverlayWidget[]>();
-  // Buttons used to be excluded here ("never an overlay surface") — F8
-  // lifts that: a pushbutton projects as a CLICK surface whose classified
+  // Buttons used to be excluded here ("never an overlay surface").
+  // A pushbutton projects as a CLICK surface whose classified
   // /A action the renderer acts on (reset for real, the rest honestly).
   for (const w of field.widgets) {
     if (w.hidden) continue;
@@ -111,7 +111,7 @@ export function valueShapeMatches(type: FormFieldType, value: FormFieldValue): b
 }
 
 // Whether a canvas placement can anchor to (or still trusts) the workspace's
-// page ids for a path (2n.4c). Workspace documents carry the buffer they were
+// page ids for a path. Workspace documents carry the buffer they were
 // indexed from; when the files map holds a NEWER buffer, a non-authored
 // reindex is in flight and will mint a fresh id generation — a placement
 // anchored to the current ids dies at SET_WORKSPACE_DOCUMENTS, and a create
@@ -132,7 +132,7 @@ export function placementDocsCurrent(
 
 // ---- fill-target resolution across the gate commit ------------------------
 // (regression) The fill's snapshot runs the commit gate, which can
-// bake a PENDING IMPORT into the file — and the 2n.4(a) carry resolves
+// bake a PENDING IMPORT into the file — and the carry resolves
 // field-name collisions by renaming (name -> name+1). A pending value typed
 // against the target's own field, keyed by name alone, could then silently
 // land on the IMPORTED document's same-named field. Values must follow the
@@ -154,7 +154,7 @@ function fingerprintOf(field: FormField): string {
   // Options join on NUL (as the escape sequence — a literal NUL byte makes
   // git/grep treat the source as binary): options are free-form author text
   // that can contain spaces and pipes, so a printable delimiter could alias
-  // two different option SETS into one fingerprint (the 2n.2 outlinesEqual
+  // two different option SETS into one fingerprint (the outlinesEqual
   // lesson). Worst case of any residual collision is an over-cautious
   // refusal, never a misfile — family scoping still gates every match.
   return `${field.type}|${(field.options ?? []).join('\u0000')}|${field.multiline ? 'm' : ''}|${rects}`;

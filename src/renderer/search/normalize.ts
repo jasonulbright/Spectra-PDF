@@ -3,7 +3,7 @@ const WHITESPACE = /\s+/g
 
 // Case-PRESERVING index/query normalization (NFKC + soft-hyphen strip +
 // whitespace collapse + trim). This is what the search index now stores per
-// page (P4): keeping original case is what lets case-sensitive AND regex modes
+// page: keeping original case is what lets case-sensitive AND regex modes
 // work — case-insensitivity is applied at match time via the regex `i` flag,
 // not by pre-lowercasing the corpus. Literal (non-regex) queries are put
 // through the SAME normalization so a soft-hyphen/fullwidth/whitespace query
@@ -20,7 +20,7 @@ export function normalizeText(input: string): string {
 
 export const normalizeQuery = normalizeText
 
-// The three advanced Find modes (P4). All default false (the plain
+// The three advanced Find modes. All default false (the plain
 // case-insensitive substring search).
 export interface SearchOptions {
   regex?: boolean
@@ -44,7 +44,7 @@ export function escapeRegExp(s: string): string {
 }
 
 // The word character class the whole-word boundary is defined over, spelled
-// out rather than left to `\b` (F15 slice C).
+// out rather than left to `\b`.
 //
 // Two reasons, both measured against the engine's matcher while building the
 // shared corpus (tests/fixtures/matcher-corpus.json, asserted by BOTH this

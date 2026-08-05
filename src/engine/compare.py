@@ -17,10 +17,9 @@ scanned/image PDFs that the text diff cannot see. Both documents render with
 the same gs build and settings in the same run, so identical content produces
 identical bytes and the default tolerance is 0.
 
-Deliberately stdlib difflib rather than the roadmap's suggested
-`diff-match-patch` / `similar` crate, and deliberately Ghostscript-side rather
-than the suggested renderer-side `pixelmatch` — see
-docs/architecture/09-phase2g-compare.md for both rationales.
+Deliberately stdlib difflib rather than a `diff-match-patch` / `similar`
+dependency, and deliberately Ghostscript-side rather than renderer-side
+`pixelmatch`.
 """
 
 import difflib
@@ -335,7 +334,7 @@ def _render_ppm_range(
         f"-sOutputFile={out_dir / (prefix + '-%d.ppm')}",
         str(file),
     ]
-    # § 5.5: derived from the file being rasterized and the page span asked
+    # Derived from the file being rasterized and the page span asked
     # for, not a fixed 600 s — a 200-page scan is the normal case here.
     result = budget.gs(
         cmd,

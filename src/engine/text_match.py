@@ -1,4 +1,4 @@
-"""One matcher semantics for every text search surface (F15 slice C).
+"""One matcher semantics for every text search surface.
 
 Three matchers already existed and were already documented as mirrors of each
 other: `normalize.compileMatcher` (renderer, sync + worker) and
@@ -8,7 +8,7 @@ callers import it, while the renderer's copy is pinned against this one by a
 shared corpus (`tests/fixtures/matcher-corpus.json`, asserted by BOTH
 `tests/test_text_match.py` and `tests/matcher-corpus.test.ts`).
 
-That corpus is the S1 lesson applied before it happens rather than after: the
+That corpus is the lesson applied before it happens rather than after: the
 GUI and the CLI running different forms implementations was found by a user.
 Two divergences it caught while being written, both fixed here:
 
@@ -25,7 +25,7 @@ Two divergences it caught while being written, both fixed here:
     means. The lookaround form says what was meant — not preceded, and not
     followed, by a word character.
 
-The built-in pattern set (§ 5 of the brief) lives here too, because a pattern
+The built-in pattern set (of the brief) lives here too, because a pattern
 is a query by another name. Each one is VALIDATED where its format carries a
 checksum: a "credit card" pattern that fires on every 16-digit number teaches
 the user to ignore it, which is worse than not shipping it.

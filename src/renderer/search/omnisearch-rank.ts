@@ -1,6 +1,6 @@
 import type { ToolId } from '../commands/tools';
 
-// The tool half of U2's omnisearch, as a PURE leaf module.
+// The tool half of the omnisearch, as a PURE leaf module.
 //
 // It lives apart from `components/OmniSearch.tsx` deliberately: there is no
 // DOM test environment in this repo, so importing the component into a test

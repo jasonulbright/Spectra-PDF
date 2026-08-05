@@ -1,4 +1,4 @@
-// N11 — the persisted snap/drafting preferences. The point of the module is
+// The persisted snap/drafting preferences. The point of the module is
 // that a stored entry written by an OLDER build (or a corrupt one) can only
 // ever be a no-op: every field is coerced against the defaults, one by one,
 // iterating the CODE's field list rather than the stored object's keys.
@@ -44,7 +44,7 @@ describe('snap settings', () => {
     expect(readSnapSettings()).toEqual(next);
   });
 
-  it('carries ALL SEVEN types from birth, so slice B migrated nothing', () => {
+  it('carries ALL SEVEN types from birth, so nothing needed migrating', () => {
     for (const t of SNAP_PRIORITY) expect(t in DEFAULT_SNAP_SETTINGS.types).toBe(true);
   });
 

@@ -1,4 +1,4 @@
-"""§ I.5 P5 — page number labels (/PageLabels)."""
+"""Page number labels (/PageLabels)."""
 
 import os
 

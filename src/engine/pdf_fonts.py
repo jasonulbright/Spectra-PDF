@@ -1,39 +1,39 @@
-"""Per-font round-trip capability for text editing (Phase 7.2).
+"""Per-font round-trip capability for text editing.
 
 For a pikepdf font dictionary, answers the four questions editing needs:
 decode (bytes → unicode), encode (unicode → bytes, refusing characters the
-font cannot express; 9.B5 — multi-char ligature sequences with an
+font cannot express; multi-char ligature sequences with an
 unambiguous inverse round-trip longest-match-first), the finite ENCODABLE
 character inventory (the live edit-box validation set; sequences are the
 additive `encodable_sequences()` layer on top of that single-char floor),
 and per-character advance widths (1000/em) for the Δwidth anchor math.
 
 Leverages pdfminer.six's own tables and parsers (it is already the bundled
-extraction engine) rather than re-deriving them — the recon-verified,
+extraction engine) rather than re-deriving them — the verified,
 document-free subset:
   - `EncodingDB.get_encoding(base, differences)` for simple-font code maps
     (Differences glyph names must be `PSLiteral` — plain strings are
-    silently skipped, a recon-caught trap).
+    silently skipped).
   - `CMapParser` + `FileUnicodeMap` fed the RAW ToUnicode bytes via
     BytesIO — never through `stream_value`, which silently returns an
-    EMPTY map for non-PDFStream input (the other recon-caught trap).
+    EMPTY map for non-PDFStream input.
   - `FONT_METRICS` for base-14 widths (keyed by unicode CHAR, not code).
   - `get_widths` for the CID /W array (standalone, takes a plain list).
 
 Editability taxonomy (every run is LISTED; refusal carries the reason):
   - Simple Type1/TrueType with a resolvable encoding → editable.
   - Symbolic simple fonts without one: ToUnicode when present, else a map
-    DERIVED from the embedded program's cmap + glyph names (9.B3); refused
+    DERIVED from the embedded program's cmap + glyph names; refused
     only when neither yields a single code.
   - Type0 + Identity-H + ToUnicode → editable (the copy-paste capability
     bar: text you can extract is text you can re-enter). Identity-V and
-    Uni*-UCS2-V are their vertical twins (9.B4a): same 2-byte codes, same
+    Uni*-UCS2-V are their vertical twins: same 2-byte codes, same
     ToUnicode round-trip; the capability carries `vertical=True` and its
     widths are the /W2//DW2 VERTICAL advances (|w1y|, 1000/em) — callers
     apply the downward direction.
   - Type3 ("glyphs are procedures"), Type0 without ToUnicode or with a
     non-Identity CMap, and fonts with no resolvable encoding → refused,
-    with that reason. These are the rare classes; 7.4's replacement-font
+    with that reason. These are the rare classes; the replacement-font
     fallback lifts coverage refusals for the editable ones.
 """
 
@@ -60,7 +60,7 @@ def _code_lengths(trie: dict) -> dict[int, int]:
     """{code integer → its byte length} for a CMap trie. The length is a
     property of the code's PREFIX, so it has to be read off the trie rather
     than assumed — that is the whole difference between these encodings and
-    the fixed-width ones (9.T10/T11)."""
+    the fixed-width ones."""
     out: dict[int, int] = {}
 
     def walk(node, prefix: int, depth: int) -> None:
@@ -136,7 +136,7 @@ class FontCapability:
         self._uni2code = uni2code
         self._widths = widths
         self._default_width = default_width
-        # F15-A: is `default_width` DECLARED by the document, or a placeholder?
+        # Is `default_width` DECLARED by the document, or a placeholder?
         # A composite font's /DW (default 1000 per spec) genuinely states the
         # advance of every CID its /W omits, so a code outside /W is measured,
         # not guessed. The simple/Type3 paths have no such declaration — their
@@ -144,7 +144,7 @@ class FontCapability:
         # NARROW is a redaction false negative. `measures()` is the only reader.
         self._default_declared = default_declared
         self._code_bytes = code_bytes  # 1 (simple) or 2 (Identity-H CID)
-        # 9.T10/T11: a VARIABLE-WIDTH codespace, as pdfminer's CMap trie —
+        # A VARIABLE-WIDTH codespace, as pdfminer's CMap trie —
         # `{byte: cid | {byte: ...}}`, so a code is 1..4 bytes and its length
         # is a property of its prefix, not of the font. Present for the
         # legacy CJK encodings (Shift-JIS/EUC/Big5/GBK, where ASCII is one
@@ -157,12 +157,12 @@ class FontCapability:
         self._code_len: dict[int, int] = {}
         if code_trie is not None:
             self._code_len = _code_lengths(code_trie)
-        # 9.B5: multi-char sequence → its single ligature code (len 2..4,
+        # Multi-char sequence → its single ligature code (len 2..4,
         # unambiguous inverse, encode-guard-filtered — see _ligatures).
         # encode()/text_width() match these longest-first; encodable()/
         # can_encode stay the single-char conservative floor.
         self._sequences = sequences or {}
-        # 9.B4a: vertical writing mode. When True, `widths`/`default_width`
+        # Vertical writing mode. When True, `widths`/`default_width`
         # ARE the vertical advances (|w1y| from /W2//DW2, 1000/em), so
         # char_width/text_width/decoded_width return the vertical advance
         # magnitude unchanged — callers apply the downward direction.
@@ -170,7 +170,7 @@ class FontCapability:
         # refused vertical font reports False (the run listing's documented
         # contract — the field describes what was actually computed).
         # `writes_vertical` describes the FONT: a -V encoding writes downward
-        # whether or not its text can be re-entered. F15-A: a walker measuring
+        # whether or not its text can be re-entered. A walker measuring
         # INK must ask this one — a refused Identity-V run measured on the
         # horizontal axis leaves its whole column unprotected.
         self.vertical = vertical
@@ -180,7 +180,7 @@ class FontCapability:
     def decode_units(self, data: bytes) -> list[str]:
         """One string per CODE — the true unit boundaries of the drawn text.
 
-        9.T25: `decode` joins these, and a caller that then has to re-split
+        `decode` joins these, and a caller that then has to re-split
         them can only guess (the `_sequences` table is deliberately filtered
         to UNAMBIGUOUS inverses, so a ligature also expressible as separate
         codes is absent from it). The bidi reorder must not guess: reversing
@@ -192,7 +192,7 @@ class FontCapability:
     def codes(self, data: bytes) -> list[tuple[int, int]]:
         """[(code integer, byte length)] — the ONE place the codespace is
         interpreted, so every measure/decode/count path agrees about where a
-        code begins (9.T10/T11)."""
+        code begins."""
         if self._code_trie is not None:
             return _split_codes(data, self._code_trie)
         if self._code_bytes == 1:
@@ -219,7 +219,7 @@ class FontCapability:
 
     # -- encode ------------------------------------------------------------
     def _sequence_at(self, text: str, i: int) -> Optional[str]:
-        # 9.B5: the longest listed ligature sequence starting at i (4→3→2),
+        # The longest listed ligature sequence starting at i (4→3→2),
         # else None — the ONE matcher encode() and text_width() share, so
         # emitted bytes and measured widths can never tokenize differently.
         for n in (4, 3, 2):
@@ -229,7 +229,7 @@ class FontCapability:
         return None
 
     def encode(self, text: str) -> bytes:
-        """unicode → bytes, longest-match-first (9.B5): a listed ligature
+        """unicode → bytes, longest-match-first: a listed ligature
         sequence consumes its single code before the single-char map; a
         char reachable neither way refuses, naming it."""
         out = bytearray()
@@ -258,17 +258,17 @@ class FontCapability:
 
     def encodable(self) -> str:
         """The finite character inventory, sorted — the edit box's local
-        validation set. SINGLE-CHAR only (the conservative floor, 9.B5:
+        validation set. SINGLE-CHAR only (the conservative floor:
         sequences are the additive encodable_sequences() layer)."""
         return "".join(sorted(self._uni2code.keys()))
 
     def encodable_sequences(self) -> list[str]:
         """The multi-char sequences encode() round-trips via one unambiguous
-        ligature code (9.B5), sorted — the run listing's `sequences` field."""
+        ligature code, sorted — the run listing's `sequences` field."""
         return sorted(self._sequences.keys())
 
     def can_encode(self, ch: str) -> bool:
-        """True when the font can express `ch` (7.5 uses this to decide
+        """True when the font can express `ch` (uses this to decide
         real-space-glyph vs kern-gap emission — char_width's default is a
         width, not an existence claim)."""
         return ch in self._uni2code
@@ -282,7 +282,7 @@ class FontCapability:
 
     def text_width(self, text: str) -> float:
         """Sum of glyph advances in 1000/em units (no size/Tz/Tc applied —
-        the walker composes those). Longest-match like encode() (9.B5): a
+        the walker composes those). Longest-match like encode(): a
         matched sequence consumes its LIGATURE code's width, not the sum
         of its chars' widths."""
         total = 0.0
@@ -307,7 +307,7 @@ class FontCapability:
 
     def measures(self, data: bytes) -> bool:
         """True when `decoded_width(data)` is DECLARED rather than defaulted
-        (F15-A). Redaction asks this before trusting a width: the placeholder
+        Redaction asks this before trusting a width: the placeholder
         default is 0.5 em, which is exactly the estimate whose narrowness left
         the tail of every monospace line unprotected. A composite font's /DW is
         a real declaration and answers for every code its /W omits; a simple
@@ -332,7 +332,7 @@ def _refused(
     their locked overlays, and 1-byte iteration over 2-byte CIDs doubled
     every refused-Type0 rect (review-measured).
 
-    F15-A: the WIDTHS are right too wherever the document declares them.
+    The WIDTHS are right too wherever the document declares them.
     Whether text can be DECODED and how wide it is are independent questions —
     /Widths and /W//DW state the advance of every code regardless of whether
     any /ToUnicode names it — and throwing them away meant every refused run
@@ -356,7 +356,7 @@ def _refused(
 
 def _reverse(code2uni: dict[int, str]) -> dict[str, int]:
     """unicode → code; single-char values only (multi-char decode strings
-    ride the 9.B5 ligature table instead — this floor stays byte-identical);
+    ride the ligature table instead — this floor stays byte-identical);
     collisions keep the LOWEST code (deterministic)."""
     uni2code: dict[str, int] = {}
     for code in sorted(code2uni.keys()):
@@ -367,7 +367,7 @@ def _reverse(code2uni: dict[int, str]) -> dict[str, int]:
 
 
 def _ligatures(code2uni: dict[int, str], encode_map: dict[int, str]) -> dict[str, int]:
-    """sequence → code (9.B5): multi-char decode strings (len 2..4) whose
+    """sequence → code: multi-char decode strings (len 2..4) whose
     inverse is UNAMBIGUOUS — exactly one code in the full DECODE map
     produces the string; two codes = excluded, never guess — and whose code
     survives the same subset-/Widths encode guard as single chars
@@ -444,7 +444,7 @@ def _simple_encoding_map(font_obj) -> Optional[dict[int, str]]:
 
 
 def _hmtx_code_widths(tt, code2glyph: dict[int, str]) -> dict[int, float]:
-    """hmtx advances × (1000/unitsPerEm), keyed by the derived codes (9.B3)."""
+    """hmtx advances × (1000/unitsPerEm), keyed by the derived codes."""
     try:
         hmtx = tt["hmtx"]
         upem = int(tt["head"].unitsPerEm)
@@ -487,7 +487,7 @@ def _glyph_names_to_maps(
 
 
 def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
-    """T9: bare-CFF FontFile3 (Type1C). The CFF carries its OWN encoding
+    """Bare-CFF FontFile3 (Type1C). The CFF carries its OWN encoding
     (code→glyph name) and every charstring encodes its advance — cffLib
     exposes both, so 'two refusals, zero justification' had a two-parser
     answer. CID-keyed CFF has no encoding and returns empty (a CID program
@@ -537,7 +537,7 @@ def _cff_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
 
 
 def _type1_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
-    """T9: /FontFile (Type1, PFA or PFB). t1Lib parses from a temp file
+    """/FontFile (Type1, PFA or PFB). t1Lib parses from a temp file
     (its API is path-based); the font's builtin encoding + charstring
     widths come out the same way the CFF path's do."""
     import os
@@ -586,12 +586,12 @@ def _type1_encoding_map(raw: bytes) -> tuple[dict[int, str], dict[int, float]]:
 
 def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
     """code → unicode + code → advance (1000/em) derived from the embedded
-    font program (9.B3, widened by T9) — the last resort for a symbolic
+    font program — the last resort for a symbolic
     simple font with no usable /Encoding and no ToUnicode. FontFile2 and
     SFNT-wrapped FontFile3 (/OpenType) parse via fontTools' TTFont; bare-CFF
     FontFile3 (Type1C) falls through to cffLib's builtin encoding +
-    charstring widths, and /FontFile (Type1 PFA/PFB) to t1Lib's — T9 lifted
-    both former refusals.
+    charstring widths, and /FontFile (Type1 PFA/PFB) to t1Lib's — both were
+    once refusals.
     TTFont subtable preference (first that derives any unicode wins):
       (3,1) Windows-Unicode — code c maps to chr(c) when c is in the cmap;
       (3,0) Windows-Symbol  — glyph at 0xF000+c (or bare c), then the glyph
@@ -625,7 +625,7 @@ def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
         tt = TTFont(BytesIO(raw), fontNumber=0, lazy=True)
         subtables = list(tt["cmap"].tables)
     except Exception:
-        # Not an SFNT: a FontFile3 that TTFont rejects is bare CFF (T9).
+        # Not an SFNT: a FontFile3 that TTFont rejects is bare CFF.
         return _cff_encoding_map(raw)
     from fontTools import agl
 
@@ -670,7 +670,7 @@ def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
 
 def _declared_simple_widths(font_obj) -> dict[int, float]:
     """code → advance straight from /Widths + /FirstChar. Needs no encoding,
-    so it is readable even for a font whose text cannot be decoded (F15-A)."""
+    so it is readable even for a font whose text cannot be decoded."""
     widths: dict[int, float] = {}
     w = font_obj.get("/Widths")
     if w is None:
@@ -706,13 +706,13 @@ def _simple_widths(font_obj, code2uni: dict[int, str]) -> tuple[dict[int, float]
 
 
 def _cmap_code_widths(named_cmap, codes, cid_widths: dict[int, float]) -> dict[int, float]:
-    """Remap CID-keyed /W to CODE-keyed for a predefined CMap (9.B2):
+    """Remap CID-keyed /W to CODE-keyed for a predefined CMap:
     each code decodes to a CID via the CMap, whose /W width becomes the
     code's. A code the CMap can't decode is left to the capability's default
     width — text still edits, only its same-line Δ is approximate for that
     glyph.
 
-    9.T10/T11: the code's BYTE LENGTH comes from the CMap's own trie rather
+    The code's BYTE LENGTH comes from the CMap's own trie rather
     than being assumed to be 2. Assuming 2 silently dropped every one-byte
     code of a legacy CJK encoding (the ASCII half of Shift-JIS, EUC and
     Big5) to the default width, and every code longer than two of a UTF-8
@@ -737,14 +737,14 @@ def _cmap_code_widths(named_cmap, codes, cid_widths: dict[int, float]) -> dict[i
 
 
 def _cid_to_unicode_map(font_obj, vertical: bool) -> dict[int, str]:
-    """CID→Unicode WITHOUT a /ToUnicode (T8), via two honest routes:
+    """CID→Unicode WITHOUT a /ToUnicode, via two honest routes:
 
     1. The CID system's REGISTRY map: a /CIDSystemInfo naming a known
        ordering (Adobe-Japan1, Adobe-GB1, …) has a published CID→Unicode
        table, bundled with pdfminer (`CMapDB.get_unicode_map`). This is the
        same information a /ToUnicode for that ordering would encode.
-    2. The embedded font PROGRAM's own cmap table, reversed — the B3
-       precedent applied to composite fonts. For Adobe-Identity-0 subsets
+    2. The embedded font PROGRAM's own cmap table, reversed — the simple-font
+       derivation applied to composite fonts. For Adobe-Identity-0 subsets
        (the modern majority) the registry says nothing, but the TrueType/
        OpenType program still maps unicode→glyph; inverted through
        /CIDToGIDMap that is CID→unicode.
@@ -868,7 +868,7 @@ def _cid_vertical_advances(descendant) -> tuple[dict[int, float], float]:
     """CID → |w1y| vertical advance (1000/em) from /W2 (both spec forms:
     `c [w1y vx vy …]` triplets and `cfirst clast w1y vx vy` — pdfminer's
     get_widths2 parses both), default from /DW2 (spec default [880 -1000] →
-    advance 1000). 9.B4a: magnitudes only — the walker applies the downward
+    advance 1000). Magnitudes only — the walker applies the downward
     direction; the vx/vy position vectors are approximated by the v1 rect
     (vx = w/2 centering), not stored."""
     from pdfminer.pdffont import get_widths2
@@ -895,7 +895,7 @@ def font_capability(font_obj) -> FontCapability:
     subtype = str(font_obj.get("/Subtype", "")).lstrip("/")
 
     if subtype == "Type3":
-        # T7: the GLYPHS are procedures (the renderer's concern — pdf.js
+        # The GLYPHS are procedures (the renderer's concern — pdf.js
         # runs them), but the TEXT MODEL is a simple font's: /Encoding
         # names the codes and /Widths the advances. Two Type3-specific
         # rules: widths live in GLYPH SPACE, so /FontMatrix scales them to
@@ -961,8 +961,8 @@ def font_capability(font_obj) -> FontCapability:
     if subtype == "Type0":
         enc = str(font_obj.get("/Encoding", "")).lstrip("/")
         # Identity-H (code == CID) OR a predefined UNICODE horizontal CMap
-        # (Uni*-H — the modern CJK majority; 9.B2), plus their vertical
-        # twins Identity-V / Uni*-UCS2-V (9.B4a) — same 2-byte codes, same
+        # (Uni*-H — the modern CJK majority), plus their vertical
+        # twins Identity-V / Uni*-UCS2-V — same 2-byte codes, same
         # ToUnicode round-trip; only the ADVANCE AXIS differs, carried as
         # `vertical=True` + /W2//DW2 advances. The named CMap is loaded
         # via pdfminer's bundled CMap DB and used ONLY to remap widths
@@ -973,7 +973,7 @@ def font_capability(font_obj) -> FontCapability:
 
         def _refuse_composite(reason: str) -> FontCapability:
             """A composite refusal carrying whatever the document DECLARES
-            (F15-A). Under Identity-H/V the byte code IS the CID, so /W (or
+            Under Identity-H/V the byte code IS the CID, so /W (or
             /W2) is code-keyed as it stands and /DW answers for the rest —
             real advances, available with no /ToUnicode in sight. Under a
             named CMap the codes would have to be remapped through the whole
@@ -1000,8 +1000,8 @@ def font_capability(font_obj) -> FontCapability:
             )
 
         if enc not in ("Identity-H", "Identity-V"):
-            # 9.T10/T11: ANY predefined CMap the bundled tables carry, not
-            # just the -UCS2- family. B2 admitted UCS-2 alone because UCS-2
+            # ANY predefined CMap the bundled tables carry, not
+            # just the -UCS2- family. UCS-2 alone was admitted because UCS-2
             # is by definition fixed 2-byte and the pipeline's fixed-2-byte
             # walk was exact for it; UTF-8 is 3 bytes for CJK, UTF-32 is 4,
             # UTF-16 uses surrogate pairs, and the legacy CJK encodings
@@ -1019,9 +1019,9 @@ def font_capability(font_obj) -> FontCapability:
                 cm = CMapDB.get_cmap(enc) if enc else None
             except Exception:
                 cm = None
-            # 9.B4a: the loaded CMap's own writing mode must AGREE with
+            # The loaded CMap's own writing mode must AGREE with
             # the name's -H/-V suffix (a disagreement is malformed) —
-            # for -H names this is B2's is_vertical() gate unchanged.
+            # for -H names this is the is_vertical() gate unchanged.
             if cm is None or getattr(cm, "code2cid", None) is None:
                 return _refuse_composite(
                     f"unsupported composite-font encoding ({enc or 'embedded CMap'})"
@@ -1033,10 +1033,10 @@ def font_capability(font_obj) -> FontCapability:
             named_cmap = cm
         tou = font_obj.get("/ToUnicode")
         if tou is None:
-            # T8: recover the mapping WITHOUT /ToUnicode — the registry's
+            # Recover the mapping WITHOUT /ToUnicode — the registry's
             # published CID→Unicode table for a named ordering, else the
             # embedded program's own cmap reversed through /CIDToGIDMap
-            # (the B3 precedent applied to composite fonts). Code-keyed via
+            # (the precedent applied to composite fonts). Code-keyed via
             # Identity (code == CID) or the predefined CMap's code→CID.
             cid2uni = _cid_to_unicode_map(font_obj, vertical)
             if named_cmap is None:
@@ -1052,7 +1052,7 @@ def font_capability(font_obj) -> FontCapability:
                         code2uni[code] = cid2uni[cids[0]]
             if not code2uni:
                 if vertical:
-                    # 9.B4a: the reason keeps naming the vertical class
+                    # The reason keeps naming the vertical class
                     # (the zoo pins the "vertical" substring).
                     return _refuse_composite(
                         "no ToUnicode map and no recoverable mapping — "
@@ -1073,7 +1073,7 @@ def font_capability(font_obj) -> FontCapability:
         cid_widths: dict[int, float] = {}
         default = 1000.0
         if desc_fonts is not None and len(desc_fonts) > 0:
-            # 9.B4a: a vertical capability's widths ARE the vertical
+            # A vertical capability's widths ARE the vertical
             # advances (/W2//DW2); /W//DW stay the horizontal path's,
             # byte-identical.
             if vertical:
@@ -1083,7 +1083,7 @@ def font_capability(font_obj) -> FontCapability:
         if named_cmap is None:
             # Identity-H: the byte code IS the CID, so the /W table
             # (CID-keyed) doubles as code-keyed unchanged (Identity-V
-            # likewise for /W2; 9.B4a).
+            # likewise for /W2).
             widths = cid_widths
         else:
             # Named CMap: remap /W (CID-keyed) to CODE-keyed via the
@@ -1091,9 +1091,9 @@ def font_capability(font_obj) -> FontCapability:
             # emitted CODE bytes, which are what encode() produces, so the
             # widths dict must be code-keyed to stay honest. The -V CMaps
             # carry their own code->CID (incl. vertical-variant CIDs), so
-            # the same remap serves /W2 (9.B4a).
+            # the same remap serves /W2.
             widths = _cmap_code_widths(named_cmap, code2uni.keys(), cid_widths)
-        # 9.B5: no /Widths subset guard on the composite path, so the
+        # No /Widths subset guard on the composite path, so the
         # ligature table's encode filter is the decode map itself.
         return FontCapability(
             True,
@@ -1105,10 +1105,10 @@ def font_capability(font_obj) -> FontCapability:
             2,
             sequences=_ligatures(code2uni, code2uni),
             vertical=vertical,
-            # 9.T10/T11: a named CMap's own code→CID trie IS the codespace.
+            # A named CMap's own code→CID trie IS the codespace.
             # Identity-H/V pass None and keep the fixed 2-byte walk exactly.
             code_trie=getattr(named_cmap, "code2cid", None) if named_cmap else None,
-            # F15-A: /DW (or its spec default of 1000) declares the advance of
+            # /DW (or its spec default of 1000) declares the advance of
             # every CID /W omits, so this default is measured, not guessed.
             default_declared=True,
         )
@@ -1128,13 +1128,13 @@ def font_capability(font_obj) -> FontCapability:
             # Symbolic font, but ToUnicode names its codes — usable both ways.
             code2uni = tou_map
         else:
-            # 9.B3: exactly where the refusal used to fire — derive from the
+            # Exactly where the refusal used to fire — derive from the
             # embedded program. ToUnicode and usable-/Encoding paths above
             # stay byte-identical; an empty derivation keeps the refusal
             # (never accept a font that would decode as garbage).
             derived, program_widths = _program_encoding_map(font_obj)
             if not derived:
-                # F15-A: /Widths is code-keyed and needs no encoding, so the
+                # /Widths is code-keyed and needs no encoding, so the
                 # advances survive the refusal even though the text does not.
                 return _refused(
                     "no resolvable encoding (symbolic font without ToUnicode)",
@@ -1148,7 +1148,7 @@ def font_capability(font_obj) -> FontCapability:
         merged.update(tou_map)
         code2uni = merged
     widths, default = _simple_widths(font_obj, code2uni)
-    # 9.B3: declared /Widths entries stay authoritative PER CODE; the
+    # Declared /Widths entries stay authoritative PER CODE; the
     # embedded program's own hmtx (1000/em-scaled, keyed by the derived
     # codes) fills every code /Widths does not cover — a wholesale
     # An either/or merge drops real program advances to the 500 default for
@@ -1163,7 +1163,7 @@ def font_capability(font_obj) -> FontCapability:
     # (the subset-generator norm), restrict the ENCODE direction to codes
     # inside [FirstChar, FirstChar+len-1]; decoding stays broad (bytes
     # already in the document decode by the full table). Not airtight (a
-    # generator may emit a full-range /Widths for a true subset — 7.4's
+    # generator may emit a full-range /Widths for a true subset — the
     # fontTools pass can read the real charset), but it closes the common
     # real-world shape at zero new dependencies.
     encode_map = code2uni
@@ -1182,10 +1182,10 @@ def font_capability(font_obj) -> FontCapability:
             encode_map = {c: u for c, u in code2uni.items() if first <= c <= last}
         except (TypeError, ValueError):
             pass
-    # 9.B5: the ligature table takes the SAME guarded encode_map as the
+    # The ligature table takes the SAME guarded encode_map as the
     # single-char reverse — an out-of-range ligature code must not encode.
     # This covers every simple-font decode source alike (encoding map,
-    # ToUnicode merge, and 9.B3's program derivation, whose AGL names like
+    # ToUnicode merge, and the program derivation, whose AGL names like
     # f_i decode multi-char).
     return FontCapability(
         True,

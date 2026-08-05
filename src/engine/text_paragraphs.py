@@ -1,22 +1,21 @@
-"""Paragraph grouping + reflow (Phase 7.5 — the last content-editing slice).
+"""Paragraph grouping + reflow (the last content-editing slice).
 
 Groups the text runs of a page into PARAGRAPH BOXES — the industry
 editor's model — and re-lays-out a paragraph's text inside its box on
 edit (rewrap at the measured width, alignment/indent/leading preserved,
-growth downward). The design record is `docs/architecture/21` §7.5; the
-one-line summary of every structural rule:
+growth downward). The one-line summary of every structural rule:
 
   - Grouping happens HERE (engine), from the SAME `_walk_runs` walk that
     produces the run listing — index agreement by construction. Lines never
     mix streams, but a paragraph MAY continue across a stream boundary
     (page → form, form → form) under strict evidence: the same geometric
     join tests, plus z-order adjacency — no visible foreign run between the
-    fragments in content order (T17; the false-positive direction is the
+    fragments in content order (the false-positive direction is the
     dangerous one). An apply then runs ONE per-stream rewrite per involved
     stream — each member's replacement text lands in ITS stream, form-hosted
     members via copy-on-write of the whole Do chain, one atomic save.
   - Only axis-aligned runs under a SHARED linear matrix group; rotated /
-    skewed text simply never forms a paragraph and stays on the 7.2
+    skewed text simply never forms a paragraph and stays on the
     run-box surface. Refused paragraphs (uneditable member, RTL) are
     LISTED with their reason and decompose to run boxes in the renderer.
   - Line assembly: baseline clustering, superscript attach (near-baseline
@@ -29,7 +28,7 @@ one-line summary of every structural rule:
     — never de-/re-hyphenated).
   - The heuristic THRESHOLDS below are code constants pinned by the
     fixture matrix (tests own the numbers, the doc owns the intent).
-  - Vertical runs (9.B4b) ride the SAME pipeline under one 90°
+  - Vertical runs ride the SAME pipeline under one 90°
     transposition T(x, y) = (−y, x), applied at exactly TWO boundaries:
     member admission (`_members_from` — a column IS a line, the column
     pitch IS the leading, top-alignment IS left-alignment) and the
@@ -37,7 +36,7 @@ one-line summary of every structural rule:
     linear part is untouched — glyphs stay upright, the walker's
     vertical advance model owns the direction). Every grouping heuristic
     between the boundaries applies unchanged. Modes never mix: the
-    writing mode rides INSIDE lkey, which also makes the A4 merge's
+    writing mode rides INSIDE lkey, which also makes the merge's
     lkey guard refuse cross-mode merges for free.
 
 The rewrite half (`replace_paragraph_text`) lives here too: member show
@@ -104,7 +103,7 @@ WRAP_TOL = 0.5  # user units of slack when refilling lines
 BULLET_CHARS = "•◦▪‣·∙–—*"
 _ENUM_RE = re.compile(r"^(\d{1,3}|[A-Za-z])[.)]([\s ]|$)")
 
-# Kinsoku (JIS X 4051; T16 deepened the lite set): characters that must not
+# Kinsoku (JIS X 4051): characters that must not
 # START a wrapped line — closing punctuation, plus small kana, the prolonged
 # sound mark and iteration marks (行頭禁則), and mid-leader continuation.
 NO_LINE_START = set(
@@ -118,7 +117,7 @@ NO_LINE_START = set(
     "…‥"
 )
 
-# T16: characters that must not END a wrapped line (行末禁則) — opening
+# Characters that must not END a wrapped line (行末禁則) — opening
 # brackets and quotes glue FORWARD to the word they open.
 NO_LINE_END = set("（｛［「『【〈《〔〖〘〚(［{«‹“‘\"'")
 
@@ -140,7 +139,7 @@ class _Member:
         "b",
         "c",
         "d",
-        # 9.T13: the member's ORIENTATION (which quarter turn / writing
+        # The member's ORIENTATION (which quarter turn / writing
         # mode it is), the FRAME that orientation transposes through, and
         # the two scalars the frame makes of its linear part — `adv` is the
         # advance axis's user scale (+x′) and `perp` the perpendicular's
@@ -150,7 +149,7 @@ class _Member:
         "adv",
         "perp",
         "rise_scale",
-        # 9.T12D — tate-chu-yoko: an UPRIGHT horizontal block absorbed into a
+        # Tate-chu-yoko: an UPRIGHT horizontal block absorbed into a
         # column as ONE unit. `atomic` makes it indivisible to the styling,
         # the width model and the line breaker alike; `tcy_em` is the inline
         # extent it consumes of the column (one em — the typographic
@@ -171,7 +170,7 @@ class _Member:
         "space_w",
         "rect",
         "ptext",
-        # 9.T25: the run's text as UNITS — one per drawn code, so the bidi
+        # The run's text as UNITS — one per drawn code, so the bidi
         # reorder permutes what the font actually drew rather than a guess.
         "punits",
         "gaps_1000",
@@ -199,9 +198,9 @@ def _axis_aligned(m) -> bool:
 # The writing mode is not a boolean but an ORIENTATION, and an orientation's
 # entire content is a SIGNED AXIS PERMUTATION T: the map sending a
 # paragraph's reading direction to +x′ and its line-stacking direction to
-# −y′ — the horizontal model's own frame. 9.B4b already did this for one
-# case (T(x, y) = (−y, x) admits a CJK column); T13 is the same idea with
-# the map chosen per member instead of hardcoded, which is why rotated-glyph
+# −y′ — the horizontal model's own frame. One case was hardcoded
+# (T(x, y) = (−y, x) admits a CJK column); the map is now chosen per
+# member instead, which is why rotated-glyph
 # vertical forms cost a table rather than a pipeline.
 HORIZONTAL = "horizontal"
 VERTICAL_RL = "vertical-rl"
@@ -217,7 +216,7 @@ ROTATED_180 = "rotated-180"
 _ORIENTATIONS = {
     HORIZONTAL: (1.0, 0.0, 0.0, 1.0),
     VERTICAL_RL: (0.0, -1.0, 1.0, 0.0),
-    # 9.T12: the same reading axis (page −y → +x′) with the columns stacking
+    # The same reading axis (page −y → +x′) with the columns stacking
     # the OTHER way — Mongolian, Todo, Sibe, Manchu, Phags-pa, Soyombo. Its
     # determinant is −1, i.e. it is a REFLECTION rather than a rotation, and
     # that is not an implementation detail to hide: a column set advances
@@ -238,8 +237,8 @@ _ORIENTATIONS = {
 
 # The FRAME is the map itself. Members co-group only inside one frame (it
 # rides in `lkey`), so a vertical-rl column can never merge with a rotated-
-# ccw block — nor with a vertical-LR one, which is how 9.T12's column
-# direction gets the A4 merge guard for free — while an upright column glyph
+# ccw block — nor with a vertical-LR one, which is how the column
+# direction gets the merge guard for free — while an upright column glyph
 # and a sideways Latin run — same map, different orientation — group as the
 # one paragraph they visually are.
 _FRAME_NAME = {
@@ -250,7 +249,7 @@ _FRAME_NAME = {
     _ORIENTATIONS[ROTATED_180]: ROTATED_180,
 }
 
-# 9.T12: the two column directions, as the listing names them.
+# The two column directions, as the listing names them.
 COLUMNS_RTL = "rtl"
 COLUMNS_LTR = "ltr"
 
@@ -277,9 +276,9 @@ def _frame_page_span(frame: tuple, box) -> tuple[float, float]:
     """The page's extent along the frame's INLINE axis (x'), which is what
     the single-line symmetric-margin rule measures against.
 
-    9.B4b did this by hand for one frame (a column's x' extent is T of the
-    page's y extent, x' = -y); T13 derives it from the frame, so a rotated
-    block gets the same rule with no new case."""
+    One frame was hand-derived (a column's x' extent is T of the
+    page's y extent, x' = -y); deriving it from the frame gives a rotated
+    block the same rule with no new case."""
     x0, y0, x1, y1 = (float(v) for v in box)
     xs = [
         _t(frame, x, y)[0]
@@ -295,9 +294,9 @@ def _orientation_of(m, vertical: bool, columns: str = COLUMNS_RTL) -> str | None
     drawn at the same matrix is the FONT, never the matrix: a vertical-writing
     member advances down its own text space, a horizontal one advances along +x and gets its
     downward travel, if any, from the rotation. Anything skewed, mirrored or
-    off-quarter answers None and stays on the 7.2 run-box surface.
+    off-quarter answers None and stays on the run-box surface.
 
-    9.T12: `columns` says which way a DOWN-READING member's columns advance.
+    `columns` says which way a DOWN-READING member's columns advance.
     It defaults to `rtl` — the shipped assumption — so every call that does
     not supply evidence gets exactly the shipped answer, and every CJK
     document alive lands byte for byte where it lands now."""
@@ -305,7 +304,7 @@ def _orientation_of(m, vertical: bool, columns: str = COLUMNS_RTL) -> str | None
     ltr = columns == COLUMNS_LTR
     if vertical:
         # The writing mode decides; the strict test below still requires the
-        # glyphs to be upright (the shipped B4a/B4b geometry).
+        # glyphs to be upright (the vertical-run geometry).
         return VERTICAL_LR if ltr else VERTICAL_RL
     lim = MATRIX_TOL * max(abs(a), abs(b), abs(c), abs(d), 1e-9)
     if abs(b) <= lim:
@@ -319,7 +318,7 @@ def _orientation_of(m, vertical: bool, columns: str = COLUMNS_RTL) -> str | None
 
 def _frame_reflects(frame: tuple) -> bool:
     """Whether the frame is a REFLECTION (determinant −1) rather than a
-    rotation. Exactly one orientation is: `vertical-lr` (9.T12)."""
+    rotation. Exactly one orientation is: `vertical-lr`."""
     m11, m12, m21, m22 = frame
     return (m11 * m22 - m12 * m21) < 0
 
@@ -331,10 +330,10 @@ def _transposed_linear(m, vertical: bool, frame: tuple) -> tuple | None:
     This IS the shipped `_axis_aligned` predicate (`a′ > 0 ∧ d′ > 0`, no
     skew), evaluated one frame later. For `horizontal` the map is the
     identity and the test is byte-identical to the shipped one; for a CJK
-    column it is equivalent to the page-space test B4b ran, since the map
+    column it is equivalent to the page-space test, since the map
     only permutes which entries are compared.
 
-    9.T12: `+y′` is not "the glyph's up" — it is the OPPOSITE of the
+    `+y′` is not "the glyph's up" — it is the OPPOSITE of the
     direction lines stack in, which is what the horizontal model actually
     means by up. The two coincide for every rotation, and they are opposite
     under the one reflection in the table, because a left-to-right column set
@@ -385,7 +384,7 @@ def _linear_key(m) -> tuple:
 def _ptext_and_gaps(det) -> tuple[str, list[float], list[str]]:
     """The run's paragraph-text (synthetic spaces at TJ word gaps), the
     observed gap widths (1000ths of em) for the paragraph's median, and the
-    text as UNITS — one entry per drawn code, which is what the 9.T25 bidi
+    text as UNITS — one entry per drawn code, which is what the bidi
     reorder permutes. A ligature the font drew as one glyph is one unit, so
     its characters can never be reversed against each other."""
     cap = det["cap"]
@@ -428,7 +427,7 @@ def _ptext_and_gaps(det) -> tuple[str, list[float], list[str]]:
 
 
 def _column_direction_evidence(text: str) -> str | None:
-    """9.T12 § 5.1 — which way THIS run's columns advance, from its own
+    """Which way THIS run's columns advance, from its own
     strong characters, or None when it carries none.
 
     Script evidence DECIDES: a run whose strong characters are Mongolian
@@ -484,14 +483,14 @@ def _column_directions(pending: list[dict]) -> dict[int, str]:
 
 
 def _draw_order_direction(bucket: list[dict]) -> str:
-    """9.T12 § 5.1 — the tiebreak, used ONLY when a column set carries no
+    """The tiebreak, used ONLY when a column set carries no
     strong character of either class.
 
     Compare the columns' CONTENT order (the global run index, which is DFS
     content order) with their x order. Strict agreement with left-to-right
     picks `ltr`; anything else — disagreement, a single column, no columns —
     keeps `rtl`, because the default being the status quo is what replaces
-    the involution proof T3 had and this cannot have."""
+    the involution proof the bidi reorder has and this cannot have."""
     columns: list[tuple[float, int]] = []  # (page x, first content index)
     for item in sorted(bucket, key=lambda i: i["index"]):
         x = item["pen"][0]
@@ -511,7 +510,7 @@ def _draw_order_direction(bucket: list[dict]) -> str:
 
 
 def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
-    # 9.T12: TWO passes, because a down-reading member's frame depends on
+    # TWO passes, because a down-reading member's frame depends on
     # evidence that spans the members. Pass one classifies and measures
     # everything that does not need the frame; `_column_directions` then
     # answers the one question left; pass two builds. For every member that
@@ -524,9 +523,9 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         if cap is None:
             continue  # no active font: degenerate, run-box surface
         vertical = bool(cap.vertical)
-        # 9.T13: admission is the shipped axis-alignment test, asked in the
+        # Admission is the shipped axis-alignment test, asked in the
         # member's OWN transposed frame instead of in page space. That one
-        # move is the whole of T13: a 90°-rotated run of a horizontal font
+        # move is the whole point: a 90°-rotated run of a horizontal font
         # is an ordinary axis-aligned member once transposed, so every
         # grouping heuristic downstream learns nothing.
         kind = _orientation_of(m, vertical)
@@ -592,7 +591,7 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         space_1000 = (
             cap.char_width(" ") if cap.can_encode(" ") else FALLBACK_SPACE_1000
         )
-        # 9.B4b generalized: the pen (e, f) maps through the frame to the
+        # generalized: the pen (e, f) maps through the frame to the
         # transposed anchor (x0, y); the advance sum runs along +x′ at the
         # `adv` scale; the em ACROSS the writing axis is the line size. Tz
         # never applies to a vertical writing mode (spec 9.4.4: Th is
@@ -613,7 +612,7 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.gaps_1000 = item["gaps_1000"]
         mem.punits = item["punits"]
         mem.editable = bool(run["editable"])
-        # 9-§I.0-S8: the run's clip flag rides through so a paragraph whose
+        # The run's clip flag rides through so a paragraph whose
         # every member is clipped away lists as invisible (aggregated in
         # _listing). Additive — never affects grouping.
         mem.clipped = bool(run.get("clipped", False))
@@ -623,19 +622,19 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.blocking_reason = (
             run["reason"] if (not run["editable"] and run["text"].strip()) else None
         )
-        # 9.T13: Ts displaces along the glyph's own +y, so the axis it
+        # Ts displaces along the glyph's own +y, so the axis it
         # LANDS on is orientation-specific — the perpendicular (+y′) for a
         # horizontal or a rotated member, where the horizontal model already
         # puts a rise; the INLINE axis (+x′) for a vertical writing member,
         # which is why that case refuses below. Both shipped modes take `d`
         # here exactly as before (horizontal perp = d, vertical adv = d).
-        # 9.T12 made it a derivation rather than a table: the glyph's up
+        # It is a derivation rather than a table: the glyph's up
         # vector, transposed. It reduces to the same numbers everywhere the
         # frame is a rotation, and NEGATES under the one reflection, where a
         # positive Ts really does move the glyph toward −y′.
         mem.rise_scale = _rise_scale(m, vertical, frame, adv, perp)
         mem.rise_user = style["rise"] * mem.rise_scale
-        # 9.T12D: ordinary members are never atomic. A tate-chu-yoko block is
+        # Ordinary members are never atomic. A tate-chu-yoko block is
         # re-framed into its column AFTER grouping, where the evidence lives.
         mem.atomic = False
         mem.tcy_em = 0.0
@@ -644,8 +643,8 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         mem.tcy_width0 = 0.0
         mem.tm = det["tm"]
         mem.ctm = det["ctm"]
-        # 9.B4b/T13: the FRAME rides INSIDE lkey, over the TRANSPOSED linear
-        # part — frames can never co-group (so the A4 merge's existing lkey
+        # The FRAME rides INSIDE lkey, over the TRANSPOSED linear
+        # part — frames can never co-group (so the merge's existing lkey
         # guard refuses a cross-frame merge for free, no new merge code),
         # while an upright column glyph and a sideways Latin run of the same
         # size share a transposed key and group as the one paragraph they
@@ -756,7 +755,7 @@ class _Paragraph:
     __slots__ = (
         "lines",
         "stream",
-        # T17: every distinct stream the members live in, ordered by first
+        # Every distinct stream the members live in, ordered by first
         # appearance in content order. `stream` stays the FIRST of these (the
         # primary — the listing sort key and the single-stream common case);
         # a cross-stream paragraph has len(streams) > 1 and its rewrite runs
@@ -774,7 +773,7 @@ class _Paragraph:
         "editable",
         "reason",
         "box",
-        # 9.T3: the paragraph's bidi base level (0 LTR / 1 RTL) and whether
+        # The paragraph's bidi base level (0 LTR / 1 RTL) and whether
         # its text was normalized from the page's VISUAL order into logical
         # order to get here. `base_level` is 0 and `bidi` False for every
         # paragraph with no strong RTL character — i.e. the shipped path.
@@ -792,7 +791,7 @@ class _Paragraph:
 
     @property
     def frame(self) -> tuple:
-        # 9.T13: all members share one FRAME by group construction (it rides
+        # All members share one FRAME by group construction (it rides
         # in lkey) — the paragraph's frame is any member's. GEOMETRY asks
         # this: which axis permutation the layout ran under, and therefore
         # how the emission untransposes.
@@ -816,7 +815,7 @@ class _Paragraph:
 
     @property
     def columns(self) -> str:
-        """9.T12 — which way this paragraph's columns advance, for the
+        """Which way this paragraph's columns advance, for the
         listing. Derived from the FRAME (the direction rides inside `lkey`,
         so every member agrees by construction): the reflecting frame is the
         left-to-right one and nothing else is. A horizontal paragraph reports
@@ -827,7 +826,7 @@ class _Paragraph:
 
     @property
     def vertical(self) -> bool:
-        # The WRITING MODE — after T13 no longer the same question as the
+        # The WRITING MODE — not the same question as the
         # frame, because a column may hold upright Identity-V members AND
         # sideways horizontal ones. True iff any member draws vertically,
         # which is what every writing-mode-specific decision actually asks
@@ -842,7 +841,7 @@ def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
     fails the moment two columns interleave in y order — the candidate
     search is what keeps side-by-side columns separate AND contiguous.
 
-    T17: a line never mixes streams (assembly is per-stream), but the pool
+    A line never mixes streams (assembly is per-stream), but the pool
     may hold several streams' lines. A join that would bring a NEW stream
     into a paragraph passes every geometric test above PLUS `cross_ok(
     paragraph_member_indexes, line_member_indexes)` — the z-order adjacency
@@ -904,7 +903,7 @@ def _join_paragraphs(lines: list[_Line], cross_ok=None) -> list[list[_Line]]:
 def _detect_alignment(
     lines: list[_Line], left: float, right: float, base_rtl: bool = False
 ) -> str:
-    # 9.T3: with no alignment EVIDENCE, a right-to-left paragraph's default
+    # With no alignment EVIDENCE, a right-to-left paragraph's default
     # is flush RIGHT — that is where its text starts, and it is the edge new
     # lines must grow from. `base_rtl=False` (every LTR paragraph, i.e. the
     # shipped call) keeps "left" in all four no-evidence branches, so the
@@ -957,7 +956,7 @@ def _line_pieces(line: _Line, gaps: list[float]) -> list[tuple[str, int]]:
             if gap > 0 and gap >= WORD_GAP_FRACTION * prev.space_w:
                 if not (pieces and pieces[-1][0].endswith(" ")):
                     pieces.append((" ", prev.index, [" "]))
-                # 9.B4b/T13: the gap converts to 1000ths at the ADVANCE
+                # The gap converts to 1000ths at the ADVANCE
                 # axis's user scale — the member's transposed `adv`, times
                 # h_scale unless the FONT is vertical (Tz never applies to a
                 # vertical writing mode). Byte-identical in both shipped
@@ -974,7 +973,7 @@ def _line_pieces(line: _Line, gaps: list[float]) -> list[tuple[str, int]]:
 
 
 def _to_logical(pieces: list[tuple[str, int]], base_level: int, cap_of):
-    """9.T3 — one line's PAGE-ORDER pieces re-ordered into LOGICAL order,
+    """One line's PAGE-ORDER pieces re-ordered into LOGICAL order,
     or None when the reconstruction cannot be proven.
 
     Page order IS visual order: the lister assembles a line left to right by
@@ -1028,7 +1027,7 @@ def _assemble_text(
 ) -> tuple[str, list[dict], list[float]] | None:
     """(logical text, spans [{start,end,run}], observed word gaps 1000).
 
-    9.T3: `base_level` None is the shipped path — page order IS logical order
+    `base_level` None is the shipped path — page order IS logical order
     for left-to-right text. An int normalizes each line from page (visual)
     order into logical order under that base direction, and returns None when
     any line's reconstruction cannot be verified."""
@@ -1075,7 +1074,7 @@ def _assemble_text(
 
 
 def _resolve_bidi_text(lines: list[_Line], visual):
-    """9.T3 — (text, spans, gaps, base_level) in LOGICAL order, or None.
+    """(text, spans, gaps, base_level) in LOGICAL order, or None.
 
     Both base directions are tried because the page gives no direct evidence
     of the producer's: P2/P3 on the VISUAL string is unreliable (a paragraph
@@ -1101,10 +1100,10 @@ def _resolve_bidi_text(lines: list[_Line], visual):
 
 
 def _stream_direction_conflict(lines: list[_Line]) -> bool:
-    """T17: True when two streams of one (bidi-normalized) paragraph resolve
+    """True when two streams of one (bidi-normalized) paragraph resolve
     to DIFFERENT base directions from their own text. Each per-stream half
     would reorder against a different base on the way back out, so the
-    reconstruction cannot be trusted — the refusal family of the T3 unproven
+    reconstruction cannot be trusted — the refusal family of the unproven
     case. Streams whose text carries no strong character can't disagree."""
     texts: dict[tuple, list[str]] = defaultdict(list)
     for line in lines:
@@ -1123,7 +1122,7 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
     for lines in paras:
         p = _Paragraph()
         p.lines = lines
-        # T17: distinct member streams in content order; the first is the
+        # Distinct member streams in content order; the first is the
         # primary (the single-stream `stream` field, unchanged meaning).
         first_of: dict[tuple, int] = {}
         for line in lines:
@@ -1152,7 +1151,7 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
         p.text, p.spans, gaps = _assemble_text(lines)
         bidi_failed = False
         if bidi.has_strong_rtl(p.text):
-            # 9.T3: page order is VISUAL order. Normalize to logical so the
+            # Page order is VISUAL order. Normalize to logical so the
             # editor edits reading order, and re-detect alignment now that
             # the base direction is known.
             resolved = _resolve_bidi_text(lines, p.text)
@@ -1187,7 +1186,7 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
             p.editable = False
             p.reason = f"contains text that cannot be edited ({blocker.blocking_reason})"
         elif bidi_failed:
-            # 9.T3: the refusal that REPLACED "right-to-left text does not
+            # The refusal that REPLACED "right-to-left text does not
             # reflow". RTL now reflows; what is refused is the narrow case
             # where the page's visual order cannot be proven to come from any
             # single logical order under either base direction — nesting past
@@ -1197,7 +1196,7 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
             p.editable = False
             p.reason = "this paragraph's right-to-left order could not be reconstructed"
         elif len(p.streams) > 1 and p.bidi and _stream_direction_conflict(lines):
-            # T17: the stated cross-stream refusal — the streams disagree
+            # The stated cross-stream refusal — the streams disagree
             # about the paragraph's base direction, so the per-stream halves
             # of an edit would reorder against different bases.
             p.editable = False
@@ -1206,16 +1205,16 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
                 "its text direction"
             )
         elif any(m.vertical and m.rise_user != 0.0 for m in p.members):
-            # 9.B4b review (round 28 HIGH): a vertical member's rise_user
+            # review: a vertical member's rise_user
             # carries a REAL-X displacement (its transposed-y offset from
             # the column baseline — e.g. a ruby/superscript run attached
             # BESIDE the column), but Ts displaces along the advance axis
             # (real Y for vertical text) — it structurally cannot express
             # a sideways shift, so an edit would silently restack the run
             # INTO the column. Fail closed, the v1 refusal family; the
-            # runs stay individually editable on the 7.2 surface.
+            # runs stay individually editable on the surface.
             #
-            # 9.T13 NARROWED this from per-paragraph to per-MEMBER, because
+            # This is per-MEMBER rather than per-paragraph, because
             # the reasoning is orientation-specific: a ROTATED member's Ts
             # displaces along its glyph's own up vector, which the frame
             # sends to +y′ — the perpendicular, exactly where the horizontal
@@ -1240,7 +1239,7 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
     return out
 
 
-# 9.T13 § 4.4 — tate-chu-yoko (縦中横): a HORIZONTAL-font run drawn UPRIGHT
+# Tate-chu-yoko (縦中横): a HORIZONTAL-font run drawn UPRIGHT
 # inside a vertical column, which is how a date, a page number or a
 # two-digit figure is set in vertical Japanese. Its transposed advance runs
 # along the BLOCK axis, so it cannot be a line member of the column, and its
@@ -1273,7 +1272,7 @@ def _tcy_candidates(p: _Paragraph, members: list[_Member]) -> list[_Member]:
             continue
         # Its advance, in the COLUMN's frame: along ±y′ is the block axis (a
         # member advancing along +x′ would simply have joined the column,
-        # which is T13's whole point).
+        # which is the whole point).
         ax, ay = _t(p.frame, m.a, m.b)
         if abs(ax) > MATRIX_TOL * max(abs(ay), 1e-9):
             continue
@@ -1292,7 +1291,7 @@ def _tcy_candidates(p: _Paragraph, members: list[_Member]) -> list[_Member]:
 def _absorb_tate_chu_yoko(
     paragraphs: list[_Paragraph], members: list[_Member]
 ) -> bool:
-    """9.T12D — re-frame every ADMISSIBLE tate-chu-yoko block into its
+    """Re-frame every ADMISSIBLE tate-chu-yoko block into its
     column, as ONE atomic member. Returns whether anything moved.
 
     Slice B made the silent case loud: before it, the block's linear key
@@ -1373,7 +1372,7 @@ def _mark_tate_chu_yoko(paragraphs: list[_Paragraph], members: list[_Member]) ->
     that never moved. Text on text, no error, in a document class (vertical
     Japanese with numbers in it) that is not rare.
 
-    9.T12D turned the ordinary case into SUPPORT — `_absorb_tate_chu_yoko`
+    The ordinary case is SUPPORTED — `_absorb_tate_chu_yoko`
     re-frames the block into the column as one atomic unit. What is left
     here is the residue: a block that is turned rather than upright, one
     whose characters JOIN, one carrying a rise, one that is not editable at
@@ -1412,7 +1411,7 @@ def _reading_tiebreak(p: _Paragraph) -> float:
 def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
     members = _members_from(runs, detail)
     paragraphs = _assemble(members, runs)
-    # 9.T12D: a tate-chu-yoko block is re-framed into its column and the
+    # A tate-chu-yoko block is re-framed into its column and the
     # grouping RE-RUN, because the evidence that identifies one is exactly
     # the paragraphs the first pass produced (a column's box, its line size,
     # and which members did NOT join it). Nothing is re-walked: the members
@@ -1420,7 +1419,7 @@ def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
     # frame and key.
     if _absorb_tate_chu_yoko(paragraphs, members):
         paragraphs = _assemble(members, runs)
-    # What the absorption could not admit keeps slice B's named refusal —
+    # What the absorption could not admit keeps the named refusal —
     # loud, where it used to be silent.
     _mark_tate_chu_yoko(paragraphs, members)
     # Reading order on a MIXED page needs a frame-agnostic PRIMARY key:
@@ -1431,7 +1430,7 @@ def _group(runs: list[dict], detail: list[dict]) -> list[_Paragraph]:
     # horizontal reads leftmost-first, vertical columns read
     # rightmost-first (the RTL column convention) — `_reading_tiebreak`
     # derives that from the frame's own line-stacking direction rather
-    # than from a writing-mode boolean, which after T13 no longer answers
+    # than from a writing-mode boolean, which does not answer
     # the geometric question.
     paragraphs.sort(key=lambda p: (p.stream, -p.box[3], _reading_tiebreak(p)))
     return paragraphs
@@ -1441,7 +1440,7 @@ def _assemble(members: list[_Member], runs: list[dict]) -> list[_Paragraph]:
     groups: dict[tuple, list[_Member]] = defaultdict(list)
     for mem in members:
         groups[(mem.stream, mem.lkey)].append(mem)
-    # T17: line ASSEMBLY stays per (stream, lkey) — a line never mixes
+    # Line ASSEMBLY stays per (stream, lkey) — a line never mixes
     # streams — but paragraph JOINING pools every stream's lines under one
     # lkey, so a paragraph may continue across a stream boundary (page →
     # form, form → form) when the geometric evidence holds AND the fragments
@@ -1472,7 +1471,7 @@ def _assemble(members: list[_Member], runs: list[dict]) -> list[_Paragraph]:
 
 def _validated_family(family) -> str:
     """A face selector: one of the three bundled families, or an ABSOLUTE
-    PATH to an installed font file (9.T6).
+    PATH to an installed font file.
 
     An explicit selector, so garbage REFUSES rather than silently keeping
     the original — a swap that did nothing would be a success that lied.
@@ -1491,7 +1490,7 @@ def _validated_family(family) -> str:
 
 
 def _fill_color_hex(color) -> str:
-    """Best-effort #rrggbb for the A1 colour swatch seed. Device gray/rgb
+    """Best-effort #rrggbb for the colour swatch seed. Device gray/rgb
     convert exactly; k (CMYK) approximates; anything else (the default,
     Separation, ICC…) seeds black — the editor only SENDS a colour the
     user actively changes, so a black seed on an unknown space keeps the
@@ -1520,7 +1519,7 @@ def _fill_color_hex(color) -> str:
 
 def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
     out = []
-    # A5-tails-a: `style_of` reads the pdf's font dicts, so memoize per member
+    # `style_of` reads the pdf's font dicts, so memoize per member
     # index — the per-SPAN display seeds below call it once per span and a
     # paragraph routinely has many spans over few distinct members.
     style_cache: dict[int, tuple[bool, bool, str | None]] = {}
@@ -1537,13 +1536,13 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
         # editor shows is the size that scale is reasoned from (a first-by-
         # index lead-in marker otherwise seeds a mismatched number.
         first = _widest(p.lines[0].members)
-        # A3b seeds: the dominant member's own weight/slant, classified by
+        # seeds: the dominant member's own weight/slant, classified by
         # the caller (needs the pdf's font dicts — `style_of(member)` →
         # (bold, italic); None = unclassified, seeds regular).
         b, it, _fam = member_style(first)
-        # A5a: enrich each style-source span with its member's fill colour,
+        # Enrich each style-source span with its member's fill colour,
         # so the editor seeds per-range colours (a source PDF or a prior
-        # A5a edit with mixed colours re-opens showing them). Additive —
+        # per-span edit with mixed colours re-opens showing them). Additive —
         # the run index the span already carries is unchanged.
         members_by_index = {m.index: m for m in p.members}
         spans_out = []
@@ -1552,7 +1551,7 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
             m = members_by_index.get(int(sp["run"]))
             if m is not None:
                 entry["color"] = _fill_color_hex(m.style["fill_color"])
-                # A5-tails-a: per-span DISPLAY seeds — the span's own
+                # Per-span DISPLAY seeds — the span's own
                 # weight/slant/family/size, so a reopened editor can SHOW
                 # genuinely mixed per-span styling instead of starting blank.
                 # DISPLAY-ONLY BY CONTRACT: the renderer keeps these apart
@@ -1560,7 +1559,7 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
                 # face entry SUBSTITUTES its range into a bundled Liberation
                 # face — re-sending a seed would silently replace the
                 # document's own foundry font on any commit. (That hazard is
-                # why the A5b round left the seed out entirely.)
+                # why the round left the seed out entirely.)
                 sb, sit, sfam = member_style(m)
                 entry["bold"] = sb
                 entry["italic"] = sit
@@ -1579,12 +1578,12 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
                 "line_count": len(p.lines),
                 "editable": p.editable,
                 "reason": p.reason,
-                # 9.B4b, additive: the paragraph's writing mode (the run
-                # listing's B4a field, lifted). Boxes are REAL rects in
+                # Additive: the paragraph's writing mode (the run
+                # listing's vertical field, lifted). Boxes are REAL rects in
                 # both modes; alignment names are the TRANSPOSED ones for
                 # vertical ("left" ≡ top — the editor doesn't label them).
                 "vertical": p.vertical,
-                # 9.T13, additive: the paragraph's ORIENTATION — the frame
+                # Additive: the paragraph's ORIENTATION — the frame
                 # its layout ran in, one of horizontal / vertical-rl /
                 # rotated-ccw / rotated-180. This is the GEOMETRY question
                 # `vertical` used to stand in for and no longer can: a
@@ -1593,26 +1592,26 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
                 # hold sideways members. The renderer's resize grips and
                 # box-left origin read this, never `vertical`.
                 "orientation": p.orientation,
-                # 9.T12, additive: which way the columns advance — `rtl`
+                # Additive: which way the columns advance — `rtl`
                 # (the CJK convention, and the value every horizontal
                 # paragraph reports) or `ltr` (Mongolian and its relatives).
                 # Derivable from `orientation`, and carried anyway because a
                 # consumer asking "which way does this read?" should not
                 # have to know which of five names is the reflection.
                 "columns": p.columns,
-                # 9.T3, additive: the paragraph's bidi base direction. The
+                # Additive: the paragraph's bidi base direction. The
                 # editor sets the textarea's `dir` from this, so the caret,
                 # selection and typing behave as the reading order the text
                 # is now stored in.
                 "rtl": p.base_level == 1,
                 "bidi": p.bidi,
-                # A1 restyle seeds: the paragraph's dominant (first-member)
+                # Restyle seeds: the paragraph's dominant (first-member)
                 # size + fill colour.
                 "font_size": round(first.style["size"], 2),
                 "color": _fill_color_hex(first.style["fill_color"]),
                 "bold": b,
                 "italic": it,
-                # 9-§I.0-S8, additive: the paragraph is invisible only when
+                # Additive: the paragraph is invisible only when
                 # EVERY member is clipped away — a paragraph with any visible
                 # run stays offered (the safe direction). The renderer filters
                 # clipped paragraphs (and their decomposed run boxes) out.
@@ -1646,14 +1645,14 @@ def list_text_paragraphs(file: str, page: int) -> dict:
         )
         paragraphs = _group(runs, detail)
 
-        # A3b: seed the style toggles from each paragraph's dominant
-        # member's OWN font (stream-scoped resources — the B1 discipline).
+        # Seed the style toggles from each paragraph's dominant
+        # member's OWN font (stream-scoped resources — the discipline).
         from engine.font_fallback import classify_font_family, classify_font_style
         from engine.text_runs import _lookup_font
 
         def style_of(member: _Member) -> tuple[bool, bool, str | None]:
             """(bold, italic, family) of a member's OWN font. The family is a
-            DISPLAY seed only (A5-tails-a) — it names what the member already
+            DISPLAY seed only — it names what the member already
             is, never a substitution request."""
             try:
                 fd = _lookup_font(
@@ -1701,13 +1700,13 @@ class _StyleRef:
     """One rendering style for a slice of new text: a member run's
     measured style, optionally re-fonted to a fallback subset.
 
-    9.A5b: `fallback` is a FACE KEY `(family_or_None, bold, italic)` when
+    `fallback` is a FACE KEY `(family_or_None, bold, italic)` when
     this slice substitutes into a bundled Liberation face (a per-span
-    bold/italic/family override, the whole-para A3 swap, or a convert
+    bold/italic/family override, the whole-paragraph swap, or a convert
     char), else None to render in the member's own font. The key indexes
     `_Emission.fallbacks`; `family_or_None=None` resolves the face from the
-    member's own classified family (mirrors A3b style-only). Was a plain
-    bool (one shared subset) through A5a — a non-None key is the new truth,
+    member's own classified family (mirrors a style-only swap). It was a plain
+    bool (one shared subset) once — a non-None key is the truth now,
     so every emission site tests `is not None`, not truthiness."""
 
     __slots__ = ("member", "fallback", "size_override", "color_override", "shaped")
@@ -1717,12 +1716,12 @@ class _StyleRef:
     ):
         self.member = member
         self.fallback = fallback
-        # 9.T3: an `engine.shaping.ShapedRun` when this slice is ONE shaped
+        # An `engine.shaping.ShapedRun` when this slice is ONE shaped
         # word — the glyphs, their advances and their mark offsets, decided
         # by HarfBuzz rather than by a per-character cmap lookup. None
         # everywhere else, which is every left-to-right slice ever emitted.
         self.shaped = shaped
-        # A1: uniform size (points) / fill-color (ColorState) overrides,
+        # Uniform size (points) / fill-color (ColorState) overrides,
         # or None to keep the member's own. Applied via style().
         self.size_override = size_override
         self.color_override = color_override
@@ -1738,7 +1737,7 @@ class _StyleRef:
         )
 
     def style(self) -> dict:
-        """The effective style: the member's, with A1 size/color overrides
+        """The effective style: the member's, with whole-paragraph size/color overrides
         applied. All width/emit paths read THIS, not member.style."""
         s = self.member.style
         if self.size_override is None and self.color_override is None:
@@ -1748,7 +1747,7 @@ class _StyleRef:
             s["size"] = self.size_override
         if self.color_override is not None:
             s["fill_color"] = self.color_override
-            # 9.A5a: (None, None) is the explicit-default-black RESET marker
+            # (None, None) is the explicit-default-black RESET marker
             # — a per-span keep-segment whose member had no colour of its
             # own emits `0 g` (via _color_sync) so a recoloured neighbour
             # can't bleed forward. It is NOT a real colour, so it must not
@@ -1779,11 +1778,11 @@ def _to_stroke_color(color):
 
 
 class _Fallback:
-    """One embedded fallback subset (7.4 machinery). 9.A5b: an edit carries
+    """One embedded fallback subset (machinery). An edit carries
     a DICT of these keyed by face — one per distinct requested face — where
-    A5a/A3 carried exactly one. `name` is allocated at emission time against
+    Carried exactly one. `name` is allocated at emission time against
     the target stream's resources (deterministic sorted-face order, so the
-    single-subset A3 case keeps its shipped `/EditFb0`)."""
+    single-subset case keeps its shipped `/EditFb0`)."""
 
     __slots__ = (
         "name", "font_dict", "encode", "width_1000", "used", "face_path", "kern_pairs",
@@ -1796,23 +1795,23 @@ class _Fallback:
         self.font_dict = font_dict
         self.encode = encode
         self.width_1000 = width_1000
-        # 9.T3: the GLYPH-level pair, present only on a shaped subset. A
+        # The GLYPH-level pair, present only on a shaped subset. A
         # shaped run addresses joining forms, ligatures and marks the cmap
         # cannot reach, so it encodes and measures by glyph, not character.
         self.glyph_encode = glyph_encode
         self.glyph_width = glyph_width
         self.used = False
-        # 9.K1b: the resolved face file, so the kern source can read this
+        # The resolved face file, so the kern source can read this
         # face's own pair table rather than guessing from the family.
         self.face_path = face_path
-        # 9.K2: pre-captured kern pairs for an IN-PLACE feature face, whose
+        # Pre-captured kern pairs for an IN-PLACE feature face, whose
         # temp program is unlinked before the emission pass runs — reading
         # face_path then would find nothing and silently un-kern the run.
         self.kern_pairs = kern_pairs
 
 
 def _feature_source(font_path, member, resources, chars, feats, alt, style):
-    """9.K2: the (face_path, glyph_for, tmp_to_delete) for a feature key.
+    """The (face_path, glyph_for, tmp_to_delete) for a feature key.
 
     IN PLACE when the member's OWN embedded font both advertises the feature
     AND actually contains the substituted glyphs — an aggressively subsetted
@@ -1897,10 +1896,10 @@ def _normalize_para_features(features) -> tuple:
 
 
 def _span_features(entry: dict) -> tuple:
-    """9.K2: (features_tuple, alt_index) from a span/paragraph style entry.
+    """(features_tuple, alt_index) from a span/paragraph style entry.
     `small_caps: true` -> (smcp, c2sc); `alternates: true` -> (salt,) with an
     optional `alt_index`. Returns `((), 0)` when no feature is requested, so a
-    plain restyle key is byte-identical to A5b."""
+    plain restyle key is byte-identical to a featureless one."""
     feats: list = []
     if entry.get("small_caps"):
         feats.extend(("smcp", "c2sc"))
@@ -1926,7 +1925,7 @@ def _shaping_needed(text: str) -> bool:
 
 
 def _is_mongolian(ch: str) -> bool:
-    """9.T12: a joining character of the Mongolian family — the one cursive
+    """A joining character of the Mongolian family — the one cursive
     script whose text is LEFT to right and whose bundled face is its own."""
     from engine import shaping
 
@@ -1937,10 +1936,10 @@ def _face_sort_key(key: tuple) -> tuple:
     """Total order over face keys `(family_or_None, bold, italic, features,
     alt_index)` — None family sorts as "" so the sort never compares NoneType
     to str. Pins the per-subset name allocation + build order (deterministic
-    bytes). 9.K2 added the trailing (features, alt_index); a no-feature key
-    carries `((), 0)`, so its sort position is unchanged from A5b.
+    bytes). The trailing (features, alt_index) is additive; a no-feature key
+    carries `((), 0)`, so its sort position is unchanged.
 
-    9.K2 also allows `fam` to be a member INDEX int on a per-span feature key
+    `fam` may also be a member INDEX int on a per-span feature key
     (baked so each run re-embeds the feature from its own font). Map it to a
     high-codepoint-prefixed string so int/str/None never compare across types
     and int keys sort AFTER every family string — leaving the family/None
@@ -1972,24 +1971,24 @@ def _styled_chars(
     Refuses (ValueError, naming the char) when a char is unencodable and
     convert is off — the renderer validates live, this is the belt.
 
-    9.A5b — face resolution per code point (per-span face at pos > the
-    whole-para A3 substitution `whole_para_face` > None=keep the member
+    Face resolution per code point (per-span face at pos > the
+    whole-paragraph substitution `whole_para_face` > None=keep the member
     font). A non-None key routes THAT char through a keyed fallback subset
     (one char at a time, spaces included, ligatures never formed — the
     face is a different font, the member's own coverage is moot), exactly
     the shipped `force_fallback` behaviour generalized from one boolean to
     N faces. `whole_para_face` is None or the single whole-paragraph key
-    `(family_or_None, bold, italic)` (A3a/A3b) — when set it covers every
+    `(family_or_None, bold, italic)` — when set it covers every
     char, so it collapses to ONE key/subset and stays byte-identical to
-    the shipped single-face output. The convert path keeps the B1
+    the shipped single-face output. The convert path keeps the
     dominant-face key `(None, False, False)`.
 
-    `color_by_pos` (9.A5a per-span colour) is None or a list one entry per
+    `color_by_pos` (per-span colour) is None or a list one entry per
     code point of new_text: a ColorState overrides the char at that
     position, None falls through to the call-level `color_override` (the
-    A1 whole-paragraph colour). `size_by_pos` (9.A5c per-span size) is the
+    Whole-paragraph colour). `size_by_pos` (per-span size) is the
     same shape for size (points): a float overrides the char at that
-    position, None falls through to the call-level `size_override` (the A1
+    position, None falls through to the call-level `size_override` (the
     whole-paragraph size). Colour, face, and size lookups fold
     INDEPENDENTLY from the same span_styles list — a char may be per-span
     red AND bold AND bigger, on unaligned ranges. All None (the default)
@@ -2014,8 +2013,8 @@ def _styled_chars(
 
     def ref(member: _Member, fb, col, siz) -> _StyleRef:
         # `fb` is a face KEY (tuple) or None — both hashable, so the memo
-        # key + _StyleRef.key stay hashable/comparable (9.A5b). `siz` is
-        # the resolved per-char size (9.A5c: per-span > A1 call > None);
+        # key + _StyleRef.key stay hashable/comparable. `siz` is
+        # the resolved per-char size (per-span > call-level > None);
         # keyed so two chars of one member at different sizes split into
         # their own segment (via _StyleRef.key), each emitting its own Tf.
         k = (member.index, fb, col, siz)
@@ -2024,14 +2023,14 @@ def _styled_chars(
         return refs[k]
 
     def color_at(pos: int, member: _Member):
-        # A5a: resolve this code point's fill override.
+        # Resolve this code point's fill override.
         if color_by_pos is None:
             return color_override  # shipped path — one call-level colour
         psc = color_by_pos[pos] if 0 <= pos < len(color_by_pos) else None
         if psc is not None:
             return psc  # per-span colour wins
         if color_override is not None:
-            return color_override  # then the A1 whole-paragraph colour
+            return color_override  # then the whole-paragraph colour
         # A per-span edit's KEEP segments must emit a CONCRETE colour so a
         # recoloured neighbour never bleeds: a member with a REAL colour of
         # its own already emits (col=None keeps it), but a member at the
@@ -2044,8 +2043,8 @@ def _styled_chars(
         return None if member.style.get("fill_color") != (None, None) else (None, None)
 
     def size_at(pos: int):
-        # A5c: resolve this code point's size (points). Per-span size at
-        # pos wins, else the A1 call-level size_override, else None (keep
+        # Resolve this code point's size (points). Per-span size at
+        # pos wins, else the call-level size_override, else None (keep
         # the member's own). size_by_pos None ⇒ the shipped single size —
         # `size_override` for every char, byte-identical to before.
         if size_by_pos is None:
@@ -2054,7 +2053,7 @@ def _styled_chars(
         return pss if pss is not None else size_override
 
     def face_at(pos: int, member: _Member):
-        # A5b: per-span face at pos wins, else the whole-para A3 face, else
+        # Per-span face at pos wins, else the whole-paragraph face, else
         # None (keep the member's own font).
         if face_by_pos is not None:
             k = face_by_pos[pos] if 0 <= pos < len(face_by_pos) else None
@@ -2068,11 +2067,11 @@ def _styled_chars(
                     # the member is known, so chars from different families
                     # split into their own subsets and the build step embeds
                     # the right typeface. `whole_para_face` (the true
-                    # whole-paragraph A3b key) is returned untouched below —
+                    # whole-paragraph key) is returned untouched below —
                     # it resolves from the DOMINANT member, byte-identical.
                     k = (member_family.get(member.index), kb, ki, kfeats, kalt)
                 elif kfeats and fam is None:
-                    # 9.K2 (round-42 CRITICAL fix): a per-span feature with no
+                    # (fix): a per-span feature with no
                     # explicit family applies IN PLACE from THIS char's own
                     # member. Bake the member INDEX so a feature on one run of
                     # a mixed-font paragraph re-embeds from THAT run's font
@@ -2104,7 +2103,7 @@ def _styled_chars(
         member = members_by_index[int(span["run"])]
         seg_text = new_text[span["start"] : span["end"]]
         if member.atomic and seg_text:
-            # 9.T12D: a tate-chu-yoko block is ONE entry — indivisible to
+            # A tate-chu-yoko block is ONE entry — indivisible to
             # the width model, to the line breaker (it can never straddle a
             # column break, the same way a shaped word cannot) and to the
             # emission, which writes it as a single positioned show with its
@@ -2134,7 +2133,7 @@ def _styled_chars(
         while i < len(seg_text):
             ch = seg_text[i]
             pos = span["start"] + i
-            # A5a/A5c: a ligature/atomic entry can carry ONE colour AND one
+            # A ligature/atomic entry can carry ONE colour AND one
             # size — resolve both at its FIRST position (the glyph is
             # indivisible; a colour/face/size boundary inside a sequence
             # takes the start value).
@@ -2142,19 +2141,19 @@ def _styled_chars(
             siz = size_at(pos)
             fk = face_at(pos, member)
             if rtl_style is not None and _requires_shaping(ch):
-                # 9.T3: a cursively joining character ALWAYS routes to a
+                # A cursively joining character ALWAYS routes to a
                 # SHAPING path, whatever `convert` says and whatever face was
                 # asked for. This is not a conversion the user opts into:
                 # the character cannot be re-emitted per code without drawing
                 # a row of disconnected isolated forms, and broken output is
                 # not an option the completeness standard leaves open.
                 #
-                # 9.T26: WHICH shaping path is the fidelity question. When
+                # WHICH shaping path is the fidelity question. When
                 # the caller qualified the document's own font (its embedded
                 # program still carries the cmap and GSUB most subsetters
                 # strip), the character keeps that font — the edit preserves
                 # the document's typeface. Otherwise the bundled face
-                # substitutes, exactly as T3 shipped. An explicit face
+                # substitutes. An explicit face
                 # request (fk) always substitutes: asking for bold IS asking
                 # to leave the document font.
                 if fk is None and inplace_ok:
@@ -2176,7 +2175,7 @@ def _styled_chars(
                 if member.vertical and not vertical_ok:
                     # The belt behind the paragraph-level routing: a
                     # horizontal face dropped into a column lays out on the
-                    # wrong axis. Lifted (T4) when the caller resolved a
+                    # wrong axis. Lifted when the caller resolved a
                     # vertical-capable face for it.
                     raise ValueError(
                         "vertical text cannot be converted to the fallback font"
@@ -2186,7 +2185,7 @@ def _styled_chars(
                 styled.append((ch, ref(member, key, col, siz)))
                 i += 1
                 continue
-            # 9.B5: an unambiguous ligature sequence becomes ONE atomic
+            # An unambiguous ligature sequence becomes ONE atomic
             # styled entry — matched BEFORE the single map (the encode
             # order), so the width math and the emitted bytes agree by
             # construction (text_width and encode share the matcher).
@@ -2200,19 +2199,19 @@ def _styled_chars(
                 styled.append((ch, ref(member, None, col, siz)))
             elif convert:
                 if member.vertical and not vertical_ok:
-                    # The 7.4 fallback embeds a HORIZONTAL Identity-H face —
+                    # The fallback embeds a HORIZONTAL Identity-H face —
                     # dropped into a column it would render on the wrong
-                    # axis. T4 lifts this exactly when a vertical-capable
+                    # axis. It is allowed exactly when a vertical-capable
                     # face was resolved for the paragraph.
                     raise ValueError(
                         "vertical text cannot be converted to the fallback font"
                     )
-                # B1 dominant/convert face: family resolves from the first
+                # Dominant/convert face: family resolves from the first
                 # member (the build step), style regular — byte-identical to
-                # the shipped single convert subset. 9.K2: no feature ⇒
+                # the shipped single convert subset. No feature ⇒
                 # `((), 0)`, so the convert key is unchanged in effect.
                 ck = _VERTICAL_KEY if member.vertical else (None, False, False, (), 0)
-                # T27: a mark falling back drags its base with it, or the two
+                # A mark falling back drags its base with it, or the two
                 # end up in different fonts and the accent draws beside the
                 # letter instead of on it.
                 if unicodedata.combining(ch):
@@ -2233,7 +2232,7 @@ class _Word:
         self.width = 0.0
         self.gap_after = 0.0  # user units of following space chars
         self.gap_styles: list[tuple[str, _StyleRef, float]] = []  # (char, style, w)
-        # 9.T3: each char's width AS MEASURED during tokenizing, i.e. in
+        # Each char's width AS MEASURED during tokenizing, i.e. in
         # LOGICAL order with its logical kern neighbour. A bidi line is
         # re-ordered before emission, so re-measuring downstream would take
         # kern pairs from the VISUAL neighbours and quietly disagree with the
@@ -2243,17 +2242,17 @@ class _Word:
 
 
 class _KernSource:
-    """Pair kerning for whatever face a slice actually renders in (9.K1b).
+    """Pair kerning for whatever face a slice actually renders in.
 
     Resolution per style: a slice substituted into a bundled face kerns from
     that face; a slice left in the document's own font kerns from that font —
     its EMBEDDED program if it has one, else its metric twin among the bundled
-    faces (B1 vendored Liberation for Helvetica/Times/Courier metric
+    faces (vendored Liberation for Helvetica/Times/Courier metric
     compatibility, and kerning is a metric).
 
     Kerning the document's own fonts is the point, not a bonus: re-emitting a
     paragraph DISCARDS the kerning its original `TJ` carried, so before this
-    an edit visibly un-kerned the text (DECISIONS #37).
+    an edit visibly un-kerned the text.
 
     Memoized on (member index, face key) — members repeat across spans and
     parsing a font program per character would be absurd. `{}` everywhere
@@ -2280,7 +2279,7 @@ class _KernSource:
 
             if st.fallback is not None:
                 fb = self._fallbacks.get(st.fallback)
-                # 9.K2: an in-place feature face captured its kerning at build
+                # An in-place feature face captured its kerning at build
                 # time (its temp program is already unlinked), so use that;
                 # otherwise read the (bundled, still-present) face's table.
                 captured = getattr(fb, "kern_pairs", None) if fb is not None else None
@@ -2319,7 +2318,7 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
     m = st.member
     s = st.style()
     if m.atomic:
-        # 9.T12D: a tate-chu-yoko block consumes exactly ONE EM of the
+        # A tate-chu-yoko block consumes exactly ONE EM of the
         # column, whatever it says and however many characters it says it
         # in. That is the typographic definition of the construct, and it
         # is what keeps the surrounding column's pitch right — the block's
@@ -2327,13 +2326,13 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
         # (`_Emission._emit`).
         return m.tcy_em
     if st.shaped is not None:
-        # 9.T3: a shaped word measures as the GLYPHS the shaper chose, and
+        # A shaped word measures as the GLYPHS the shaper chose, and
         # the number to sum is the shaper's POSITIONED advance — because that
         # is exactly what the emission steps by. `_pieces` writes each glyph
         # as [-x_off, glyph, x_off + width - advance]: the pen moves x_off,
         # then the /W width, then back by the correction, netting `advance`.
         #
-        # 9.T22 fix: this used to sum the /W widths instead, on the reasoning
+        # fix: this used to sum the /W widths instead, on the reasoning
         # that /W is what the viewer adds up. Per glyph it is — but the TJ
         # correction is part of the same pen walk, so the DRAWN advance is
         # the shaper's, and measuring by /W disagreed by exactly the GPOS
@@ -2356,7 +2355,7 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
         # Synthetic gap — emitted as a TJ kern, so no Tc/Tw applies.
         w = median_gap_1000 / 1000.0 * s["size"]
     else:
-        # 9.B5: text_width longest-matches — a single char measures as
+        # text_width longest-matches — a single char measures as
         # char_width; an atomic ligature entry measures as its ONE code's
         # width with ONE char_spacing (one rendered glyph).
         w = m.cap.text_width(ch) / 1000.0 * s["size"] + s["char_spacing"]
@@ -2366,39 +2365,39 @@ def _char_width_user(ch: str, st: _StyleRef, fallbacks: dict, median_gap_1000: f
                     w += s["word_spacing"]
             except ValueError:
                 pass
-    # 9.K1b: the pair kern with the PRECEDING character, when both render in
+    # The pair kern with the PRECEDING character, when both render in
     # the same style. The width model must carry it or wrapping, justify and
     # the resync would disagree with what the TJ actually draws.
     if kerns is not None and prev_ch and prev_st is not None and prev_st.key == st.key:
         w += kerns.between(prev_ch, ch, st) / 1000.0 * s["size"]
-    # 9.B4b/T13: every member's advance lives on the transposed x′ axis,
+    # Every member's advance lives on the transposed x′ axis,
     # whose user scale is `adv` — Tz never applies to a vertical writing
     # mode (Tc does, and already rode in above), and DOES apply to a rotated
     # horizontal run. Both shipped modes are byte-identical.
     return w * m.adv * (1.0 if m.vertical else s["h_scale"])
 
 
-# 9.T3: the face-key family that means "the bundled right-to-left face".
+# The face-key family that means "the bundled right-to-left face".
 # It is not a user-selectable family like serif/sans/mono — it is the
-# automatic, TEXT-driven switch a joining script forces, the same shape T5's
+# automatic, TEXT-driven switch a joining script forces, the same shape the
 # CJK switch has. `_face_sort_key` orders it with the named families.
 RTL_FAMILY = "rtl"
-# 9.T12: the same idea for the one joining script that is NOT right-to-left.
+# The same idea for the one joining script that is NOT right-to-left.
 # It needs its own key rather than riding RTL_FAMILY because the two resolve
 # DIFFERENT bundled faces from the same paragraph — a Mongolian column with an
 # Arabic quotation in it is two subsets, and one key would ask one face to
 # express both scripts and refuse the whole edit.
 MONGOL_FAMILY = "mongolian"
-# 9.T26: the face key meaning "shape with the DOCUMENT'S OWN embedded
+# The face key meaning "shape with the DOCUMENT'S OWN embedded
 # program" — reachable only when the paragraph's font passes the in-place
 # gate, never from user input (`_validated_family` refuses anything that is
 # not the bundled trio or an absolute path).
 INPLACE_FAMILY = "inplace"
-# 9.T4/T13: the face key meaning "the paragraph's resolved VERTICAL face".
+# The face key meaning "the paragraph's resolved VERTICAL face".
 # Like RTL_FAMILY it is text-driven rather than user-selectable — a member
 # drawing in a vertical writing mode takes it, whatever family was asked
 # for, because a horizontal face in a column lays out on the wrong axis.
-# T13 is why it must be a distinct KEY rather than a paragraph-wide branch:
+# It must be a distinct KEY rather than a paragraph-wide branch:
 # a column may now also hold sideways horizontal members, and those must
 # still substitute into an ordinary horizontal face. Style axes are
 # normalized away because ONE vertical face serves the paragraph (the
@@ -2409,12 +2408,12 @@ _VERTICAL_KEY = (VERTICAL_FAMILY, False, False, (), 0)
 
 
 def _shape_word(face: str, word: str, sideways: bool):
-    """ONE call for every shaping site — 9.T12.
+    """ONE call for every shaping site.
 
     Direction comes from the TEXT (a Mongolian word shaped right-to-left
     comes back reversed), and `sideways` asks for a COLUMN's rendering, where
     the face's own `vert` forms of the punctuation are what the reader is
-    owed. It must be one call because the T26 PREQUALIFICATION and the
+    owed. It must be one call because the PREQUALIFICATION and the
     EMISSION have to shape identically: the prequalification decides whether
     the document's own font can carry the edit by checking what each glyph
     would spell, and a different glyph set there than here would qualify a
@@ -2429,7 +2428,7 @@ def _shape_word(face: str, word: str, sideways: bool):
 def _shape_styled_runs(
     styled: list, key: tuple, face: str, sideways: bool = False
 ) -> tuple[list, list]:
-    """9.T3 — collapse each run of same-style joining-script characters in
+    """Collapse each run of same-style joining-script characters in
     `styled` into ONE shaped entry, and return (new styled, shaped runs).
 
     Per WORD, because cursive joining never crosses a space: that is the
@@ -2473,7 +2472,7 @@ def _shape_styled_runs(
 
 
 def _pull_base_into_fallback(styled: list, fb_by_face: dict, key: tuple) -> None:
-    """9.T27 — a combining mark cannot render in a different font from the
+    """A combining mark cannot render in a different font from the
     letter it sits on, so move that letter into the mark's face.
 
     The convert path routes ONE CHARACTER AT A TIME: it keeps whatever the
@@ -2489,7 +2488,7 @@ def _pull_base_into_fallback(styled: list, fb_by_face: dict, key: tuple) -> None
     one font's metrics over a glyph drawn from another is wrong even
     unshaped. Only a single preceding character is moved, and only when it
     is genuinely a base in the document font: a space, an atomic ligature
-    entry (9.B5) or a slice already substituted is left alone rather than
+    entry or a slice already substituted is left alone rather than
     guessed at."""
     j = len(styled) - 1
     # Marks already pulled across for this same cluster.
@@ -2508,7 +2507,7 @@ def _pull_base_into_fallback(styled: list, fb_by_face: dict, key: tuple) -> None
 
 
 def _shape_ltr_runs(styled: list, key: tuple, face: str) -> tuple[list, list]:
-    """9.T22/T23 — shape same-style LEFT-TO-RIGHT words against the face this
+    """Shape same-style LEFT-TO-RIGHT words against the face this
     style is about to embed, keeping only the runs shaping actually changes.
 
     The mirror of `_shape_styled_runs` (which serves joining scripts), with
@@ -2571,7 +2570,7 @@ def _shape_ltr_runs(styled: list, key: tuple, face: str) -> tuple[list, list]:
 
 
 def _embed_shaping_aware(pdf, face: str, chars: str, styled: list, key: tuple):
-    """9.T22/T23 — embed the subset this style needs, shaped when shaping
+    """Embed the subset this style needs, shaped when shaping
     changes the result and a plain simple font when it does not.
 
     Returns `(styled, _Fallback)`; `styled` comes back with any shaped word
@@ -2631,7 +2630,7 @@ def _tokenize(
             current.gap_styles.append((ch, st, w))
             continue
         if current.gap_styles:
-            # T16 (行末禁則): a chunk ENDING with an opening bracket/quote
+            # (行末禁則): a chunk ENDING with an opening bracket/quote
             # must not end a line — the break opportunity after it is
             # suppressed by FOLDING the gap into the word and continuing,
             # so the opener travels with the word it opens. The spaces stay
@@ -2648,10 +2647,10 @@ def _tokenize(
         elif (
             current.chars
             and ch not in NO_LINE_START
-            # T16: no break AFTER an opener either (the CJK-boundary break
+            # No break AFTER an opener either (the CJK-boundary break
             # is the common Japanese case: 「日 must stay together).
             and current.chars[-1][0][-1] not in NO_LINE_END
-            # 9.B5: entries can be atomic multi-char ligatures — classify
+            # Entries can be atomic multi-char ligatures — classify
             # the break by the boundary-adjacent code points.
             and (_cjk(current.chars[-1][0][-1]) or _cjk(ch[0]))
         ):
@@ -2672,17 +2671,17 @@ class _LayoutLine:
         self.x = 0.0
         self.y = 0.0
         self.justify_extra = 0.0  # per-gap addition (justified lines)
-        # 9.A5c: the tallest glyph's effective size on this line, filled by
+        # The tallest glyph's effective size on this line, filled by
         # _fill_lines — drives the per-line leading when sizes vary.
         self.max_eff = 0.0
-        # 9.T3: the line's items already in VISUAL order, with their measured
+        # The line's items already in VISUAL order, with their measured
         # widths, for a bidi paragraph. None keeps `_segments` on the shipped
         # word walk, so every left-to-right emission is untouched.
         self.vis_items: list | None = None
 
 
 def _visual_items(line: _LayoutLine, base_level: int) -> list:
-    """9.T3 — the line's items in VISUAL order.
+    """The line's items in VISUAL order.
 
     An item is `("ch", text, style, width)` or `("gap", char, style, width)`;
     the trailing word's gap is dropped exactly as the shipped `_segments`
@@ -2714,7 +2713,7 @@ def _visual_items(line: _LayoutLine, base_level: int) -> list:
 
 
 def _char_eff(st: _StyleRef) -> float:
-    # 9.A5c: this char's effective size, scaling the member's OWN eff by the
+    # This char's effective size, scaling the member's OWN eff by the
     # per-span size ratio. Using member.eff (not a raw size·a) keeps the axis
     # CONSISTENT with dom_eff_orig / base_ratio — horizontal eff is size·d,
     # vertical size·a; deriving from member.eff picks the right one for free
@@ -2727,7 +2726,7 @@ def _char_eff(st: _StyleRef) -> float:
 
 
 def _line_max_eff(line: _LayoutLine) -> float:
-    # 9.A5c: the tallest glyph's effective size on the line. Spaces
+    # The tallest glyph's effective size on the line. Spaces
     # (gap_styles) count too, so a per-span size on a trailing space still
     # tallies. Equal across every line ⇒ no per-span size ⇒ _position_lines
     # takes the shipped path.
@@ -2776,21 +2775,21 @@ def _position_lines(
     has_span_size: bool = False,
     box_edges: tuple[float, float] | None = None,
 ) -> None:
-    # T18 resize: center/right/justify position against the paragraph's OWN
+    # resize: center/right/justify position against the paragraph's OWN
     # edges — an explicit box passes its edges here or those alignments
     # would ignore the resize entirely. None = the shipped para edges.
     left_edge, right_edge = box_edges if box_edges else (para.left, para.right)
     # y0 overrides the anchor for a block that does NOT start at the
-    # paragraph's own first baseline (A4 split: the second block starts
+    # paragraph's own first baseline (split: the second block starts
     # 2×leading below the first block's last line).
     if y0 is None:
         y0 = para.lines[0].y
-    # 9.A5c per-line leading: when the lines' tallest glyphs DIFFER (a
+    # Per-line leading: when the lines' tallest glyphs DIFFER (a
     # per-span size edit), each baseline drops by the adjacent-max rule —
     # `max(max_eff[i-1], max_eff[i]) · base_ratio`, base_ratio = the
     # leading-per-unit-size the CALLER resolved (`build` passes it from BOTH
-    # the measured-leading and the single-line-fallback branches — round-34
-    # HIGH: an originally-single-line paragraph has `para.leading` None even
+    # the measured-leading and the single-line-fallback branches):
+    # an originally-single-line paragraph has `para.leading` None even
     # after it reflows to many lines, so gating on `para.leading` left its
     # wrapped output with flat leading around a big glyph). This gives the
     # bigger line its descenders + the next line's ascenders room. THE
@@ -2798,12 +2797,12 @@ def _position_lines(
     # per-span size — the uniform + A1-whole-para cases), take the EXACT
     # shipped `y0 - i·leading` (ONE multiply, float-identical). Per-line
     # accumulation would drift the last bits, so it fires ONLY when sizes
-    # vary. The A4 split gap stays inter-BLOCK (the caller's y0 chaining).
-    # Round 35 (finding 2): the gate is `has_span_size`, NOT max_eff spread —
+    # vary. The split gap stays inter-BLOCK (the caller's y0 chaining).
+    # The gate is `has_span_size`, NOT max_eff spread —
     # a grouped paragraph can carry members that ALREADY differ in size (up to
     # SIZE_JUMP_RATIO) with no size edit at all, and inferring "a size was
     # requested" from the spread reflowed such a paragraph's lines on a plain
-    # colour/null edit. A whole-paragraph A1 size also stays flat here (its
+    # colour/null edit. A whole-paragraph size also stays flat here (its
     # scale is uniform ⇒ shipped path), so `size_override` deliberately does
     # NOT arm this — only a per-span size does.
     effs = [ln.max_eff for ln in lines]
@@ -2889,11 +2888,11 @@ def _f(v: float) -> float:
 # before wrapping, and wrapped lines stack at standard single spacing.
 SINGLE_LINE_LEADING_EM = 1.2
 
-# A1 size clamp: the common PDF viewer maximum (matches the editor input's
+# Size clamp: the common PDF viewer maximum (matches the editor input's
 # declared max). Bounds a fat-fingered size so text can't fly off the page.
 _MAX_EDIT_SIZE = 1638.0
 
-# 9.A5c per-line-leading uniformity floor: lines whose tallest-glyph eff
+# Per-line-leading uniformity floor: lines whose tallest-glyph eff
 # differ by more than this (points) get per-line leading; equal within it
 # take the shipped constant-leading path (byte-identity gate). Point sizes
 # differ by whole points, and a uniform line's max_eff is float-EXACT, so an
@@ -2911,66 +2910,66 @@ class _Emission:
         base_level=None, split_gap=None, box_width=None, box_left=None,
     ):
         self.para = para
-        # 9.T3: the bidi base level when this paragraph reorders (0 or 1),
+        # The bidi base level when this paragraph reorders (0 or 1),
         # None when it does not. Set ⇒ every wrapped line is permuted from
         # logical into visual order before segmentation; None ⇒ the shipped
         # word walk, untouched.
         self.base_level = base_level
         self.styled = styled
-        # 9.K1b: pair-kerning source for whatever face each slice renders
+        # Pair-kerning source for whatever face each slice renders
         # in; None keeps the pre-K1b un-kerned emission.
         self.kerns = kerns
-        # 9.A5c: True when the caller folded per-span SIZE ranges (size_by_pos
+        # True when the caller folded per-span SIZE ranges (size_by_pos
         # is not None). The per-line-leading rule + the size-aware split gap
-        # fire ONLY under this flag — a whole-paragraph A1 size or a
+        # fire ONLY under this flag — a whole-paragraph size or a
         # no-size/colour/face edit keeps the shipped flat rhythm and split
         # gap, so those stay byte-identical even for a paragraph whose grouped
-        # members already vary in size (review round 35, finding 2). The
+        # members already vary in size. The
         # anisotropic-eff variance a≠d edge is why this can't be inferred from
         # max_eff spread alone.
         self.has_span_size = has_span_size
-        # 9.A5b: {face key → _Fallback}, one subset per distinct requested
+        # {face key → _Fallback}, one subset per distinct requested
         # face (was the single `self.fb`). Empty when nothing substitutes.
         self.fallbacks = fallbacks
-        # 9.B4b: for a vertical paragraph the caller passes the TRANSPOSED
+        # For a vertical paragraph the caller passes the TRANSPOSED
         # page bounds (x′ = −y of the mediabox) — the whole layout runs in
         # transposed space, the single-line margin rule included.
         self.page_x0 = page_x0
         self.page_x1 = page_x1
-        # 9.B4b: the paragraph's writing mode — the rewriter advances its
+        # The paragraph's writing mode — the rewriter advances its
         # emitted-state machine on this axis after each emitted show.
-        # 9.T13: the ADVANCE AXIS is now per PIECE (`build` reports it with
+        # The ADVANCE AXIS is now per PIECE (`build` reports it with
         # each show), because one paragraph can hold upright vertical
         # members and sideways horizontal ones; this flag stays as the
         # paragraph-level answer the listing and the callers still ask.
         self.vertical = para.vertical
-        # 9.T13: the frame the layout ran in — the emission untransposes
+        # The frame the layout ran in — the emission untransposes
         # its anchors through T⁻¹ of exactly this map.
         self.frame = para.frame
-        # A1: when the size is overridden, the paragraph leading scales by
+        # When the size is overridden, the paragraph leading scales by
         # the same factor so bigger text doesn't overlap (and smaller
         # text doesn't waste space) — the ratio to the paragraph's
         # dominant original size.
         self.size_override = size_override
-        # A4: a styled-index split point — the second block lays out as its
+        # A styled-index split point — the second block lays out as its
         # own paragraph 2×leading below the first (a gap the re-listing
         # grouping can never join across, so the output relists as TWO
         # paragraphs through the shipped heuristics).
         self.split_at = split_at
-        # T18: the split gap as a LEADING multiple (None = the shipped 2.0).
+        # The split gap as a LEADING multiple (None = the shipped 2.0).
         # The 2×eff relist floor below is never scaled by it — a tighter
         # request stops at the tightest gap that still lists as two.
         self.split_gap = split_gap
-        # T18 resize: an explicit box width (points, paragraph space) and,
+        # resize: an explicit box width (points, paragraph space) and,
         # optionally, a new left edge. None = the shipped derived measures,
         # byte-identical.
         self.box_width = box_width
         self.box_left = box_left
-        # T17: the positioned layout, computed ONCE — a cross-stream edit
+        # The positioned layout, computed ONCE — a cross-stream edit
         # calls build once per target stream and every call must see the
         # SAME lines (same _StyleRef identities, same positions).
         self._laid: list[_LayoutLine] | None = None
-        # T17: user-space bbox of the pieces the LAST build call emitted
+        # User-space bbox of the pieces the LAST build call emitted
         # (None when it emitted nothing) — the rewriter expands a target
         # form copy's /BBox by this so emitted text is never clipped away.
         self.last_build_bbox: list[float] | None = None
@@ -2980,13 +2979,13 @@ class _Emission:
         {'op','show'} — the caller feeds ops into its emitted-state machine
         and advances after shows.
 
-        9.T13: a SHOW tuple carries a FOURTH element, the piece's advance
+        A SHOW tuple carries a FOURTH element, the piece's advance
         axis (True = the member draws in a vertical writing mode). It is
         per PIECE and not per paragraph because a column may hold sideways
         horizontal members; `op` tuples stay three wide, since nothing ever
         advances on them.
 
-        T17: `stream` filters the emission to pieces whose style MEMBER
+        `stream` filters the emission to pieces whose style MEMBER
         lives in that stream (None = everything, the single-stream path —
         identical output, since every member then shares the one stream).
         Segments never span members (`_StyleRef.key` carries the member
@@ -3011,12 +3010,12 @@ class _Emission:
         body_left = min(body_lefts) if body_lefts else first_left
         if para.alignment in ("center", "right"):
             first_left = body_left = para.left
-        # A1 leading scale: new size / the dominant original size.
+        # Leading scale: new size / the dominant original size.
         dom_style_size = _widest(para.lines[0].members).style["size"] or 12.0
         size_scale = (self.size_override / dom_style_size) if self.size_override else 1.0
-        # 9.A5c: the per-line leading rule (below) maps a line's tallest eff
+        # The per-line leading rule (below) maps a line's tallest eff
         # to its baseline gap via `base_ratio`, resolved HERE in BOTH branches
-        # (round-34 HIGH: an originally-single-line paragraph keeps
+        # (an originally-single-line paragraph keeps
         # `para.leading` None even once its edit reflows it to many lines).
         dom_eff_orig = _widest(para.lines[0].members).eff
         if para.leading is not None:
@@ -3033,7 +3032,7 @@ class _Emission:
             # is exactly SINGLE_LINE_LEADING_EM (leading / base_eff).
             base_ratio = SINGLE_LINE_LEADING_EM
             if self.base_level == 1:
-                # 9.T3: a right-to-left paragraph grows LEFTWARD from its own
+                # A right-to-left paragraph grows LEFTWARD from its own
                 # right edge, so the symmetric-margin rule mirrors — the
                 # measure is bounded by the LEFT page margin, and the box's
                 # left edge moves rather than its right. Without this the
@@ -3049,7 +3048,7 @@ class _Emission:
                 right_limit = max(self.page_x1 - margin, para.right)
         first_measure = right_limit - first_left
         body_measure = right_limit - body_left
-        # T18 resize: an explicit width replaces the derived measures. The
+        # resize: an explicit width replaces the derived measures. The
         # first-line indent (its delta from the body edge) survives, so the
         # opener keeps its shape at the new width. An explicit left edge
         # moves the whole box — the renderer sends it when the LEFT handle
@@ -3067,7 +3066,7 @@ class _Emission:
                     "the requested box is narrower than the first-line indent"
                 )
             box_edges = (body_left, body_left + body_measure)
-        # A4 split: each block is its OWN paragraph (fresh first-line
+        # split: each block is its OWN paragraph (fresh first-line
         # indent, own justify-final-line), the second anchored below the
         # first by a gap the re-listing grouping can never join across.
         # Twice the leading is insufficient when
@@ -3090,7 +3089,7 @@ class _Emission:
         else:
             parts = [self.styled]
         dom_eff = _widest(para.lines[0].members).eff * size_scale
-        # T18: the user's gap factor scales the LEADING term only; the 2×eff
+        # The user's gap factor scales the LEADING term only; the 2×eff
         # relist floor is the guarantee the output still lists as two
         # paragraphs (it defeats the 1.6-em join cap with margin) and never
         # shrinks below it. Factor 2.0 (the default) is byte-identical.
@@ -3116,8 +3115,8 @@ class _Emission:
                             "the paragraph cannot wrap to that width — a word is wider than the box"
                         )
             if prev_last is not None and block:
-                # A4 split gap from the previous block's last line to this
-                # block's first line. 9.A5c (review round 35, finding 1): with
+                # The split gap from the previous block's last line to this
+                # block's first line: with
                 # a per-span size the boundary line's tallest glyph can be far
                 # bigger than the paragraph's dominant size, and a fixed
                 # `2×leading` gap let an enlarged word's DESCENDER bleed into
@@ -3142,7 +3141,7 @@ class _Emission:
                 prev_last = block[-1]
             lines.extend(block)
         if lines and self.base_level is not None:
-            # 9.T3: wrapping happened in LOGICAL order (that is where line
+            # Wrapping happened in LOGICAL order (that is where line
             # breaks live); each finished line now permutes into the visual
             # order the page will draw. Per LINE, after wrapping — rule L1's
             # line-end reset is meaningless before the lines exist.
@@ -3162,12 +3161,12 @@ class _Emission:
         def linear_of(m) -> tuple:
             """The PAGE-SPACE linear part this segment writes into its Tm.
 
-            9.T13: it comes from the segment's own MEMBER, because one
+            It comes from the segment's own MEMBER, because one
             paragraph can now hold two of them — an upright column glyph
             and a sideways Latin run share a transposed key but not a page
             matrix. A member whose page key equals the dominant member's
             takes the dominant's numbers verbatim, so every paragraph that
-            could group before T13 emits byte-identically (grouping only
+            could group under the earlier model emits byte-identically (grouping only
             ever compared keys ROUNDED to four places)."""
             if _linear_key((m.a, m.b, m.c, m.d, 0.0, 0.0)) == base_key:
                 return (base.a, base.b, base.c, base.d)
@@ -3193,7 +3192,7 @@ class _Emission:
                 for dx, dy, encoded_items, raw in self._pieces(seg, mem.perp):
                     h_scale = st.style()["h_scale"]
                     if mem.atomic:
-                        # 9.T12D: a tate-chu-yoko block anchors at the
+                        # A tate-chu-yoko block anchors at the
                         # BASELINE inside the em the layout gave it, and
                         # keeps its own offset across the column so an
                         # untouched block re-emits at the pen it was drawn
@@ -3221,17 +3220,17 @@ class _Emission:
                     # Rise renders via Ts (a state op), never the matrix —
                     # the line target is the BASELINE.
                     #
-                    # 9.B4b/T13: THE untranspose — layout ran wholly in the
+                    # THE untranspose — layout ran wholly in the
                     # paragraph's FRAME; only the anchor maps back, through
                     # that frame's T⁻¹. The linear part is the segment's own
                     # member's (glyphs keep the rotation they were drawn
                     # with; for an upright vertical member the advance
                     # DIRECTION is the walker's vertical model, never the
                     # matrix). For `horizontal` and `vertical-rl` the
-                    # arithmetic is exactly what B4b shipped.
+                    # arithmetic is the horizontal one.
                     tx, ty = _t_inv(self.frame, line.x + dx, line.y + dy)
                     target = (lin_a, lin_b, lin_c, lin_d, tx, ty)
-                    # T17: a CONSERVATIVE user-space envelope of this piece
+                    # A CONSERVATIVE user-space envelope of this piece
                     # (full em above the baseline, 0.35 em below, advance
                     # along the writing axis) — only ever used to EXPAND a
                     # target form's /BBox, where over-covering is harmless
@@ -3239,7 +3238,7 @@ class _Emission:
                     size = st.style()["size"]
                     if mem.vertical:
                         # An upright column glyph: one em either side of the
-                        # column, the advance sum downward — the shipped B4b
+                        # column, the advance sum downward — the vertical
                         # envelope, kept as-is.
                         em = size * abs(mem.perp)
                         grow(tx - em, ty - raw * abs(mem.adv), tx + em, ty)
@@ -3261,7 +3260,7 @@ class _Emission:
                     tm_op = mat_mult(target, ctm_inv)
                     out.append(("op", _instruction([_f(v) for v in tm_op], "Tm"), None))
                     out.extend(self._state_ops(st, used, h_scale=h_scale))
-                    # 9.T13: a SHOW tuple carries the piece's ADVANCE AXIS as
+                    # A SHOW tuple carries the piece's ADVANCE AXIS as
                     # a fourth element — a rotated member's advance is
                     # horizontal in the font's own terms (its downward travel
                     # is the matrix's doing), so the caller's emitted-state
@@ -3294,7 +3293,7 @@ class _Emission:
 
         Every ordinary segment is exactly ONE piece at the segment's own dx
         and no dy — byte-identical to the shipped single-show emission. A
-        SHAPED segment (9.T3) splits only where a glyph carries a vertical
+        SHAPED segment splits only where a glyph carries a vertical
         mark offset, because a baseline shift is the one thing a TJ array
         cannot express: the piece gets its own Tm, raised by that offset. The
         horizontal half of mark positioning, and the GPOS advance deltas,
@@ -3352,7 +3351,7 @@ class _Emission:
         if line.vis_items is not None:
             return self._split_segments(self._visual_stream(line))
         stream: list[tuple] = []  # ("ch", ch, style, w) | ("kern", style, w)
-        # 9.K1b: the preceding char/style, so a pair kern is only taken
+        # The preceding char/style, so a pair kern is only taken
         # between adjacent chars rendering in the SAME style.
         prev_ch_seg = None
         prev_st_seg = None
@@ -3377,7 +3376,7 @@ class _Emission:
         return self._split_segments(stream)
 
     def _visual_stream(self, line: _LayoutLine) -> list[tuple]:
-        """9.T3 — the same item stream `_segments` builds, from a line whose
+        """The same item stream `_segments` builds, from a line whose
         characters are already in visual order. Widths are the ones measured
         at wrap time; a run of adjacent gap items is one inter-word space, so
         the justify extra lands after it exactly as in the logical walk."""
@@ -3420,8 +3419,8 @@ class _Emission:
 
     def _state_ops(self, st: _StyleRef, used=None, h_scale=None) -> list[tuple]:
         m = st.member
-        s = st.style()  # A1: effective (possibly size/color-overridden)
-        # 9.T12D: `h_scale` is the emission's recomputed Tz for a
+        s = st.style()  # Effective (possibly size/color-overridden)
+        # `h_scale` is the emission's recomputed Tz for a
         # tate-chu-yoko block, whose horizontal condensation is a function
         # of the text it now holds. None everywhere else, which is every
         # show ever emitted before it.
@@ -3432,7 +3431,7 @@ class _Emission:
             fb = self.fallbacks[st.fallback]
             fb.used = True  # marks THIS subset for registration (per face)
             if used is not None:
-                used.add(st.fallback)  # T17: per-STREAM usage for the caller
+                used.add(st.fallback)  # Per-STREAM usage for the caller
             font = fb.name
         else:
             font = s["font_name"]
@@ -3442,7 +3441,7 @@ class _Emission:
         ops.append(("op", _instruction([_f(s["char_spacing"])], "Tc"), None))
         ops.append(("op", _instruction([_f(s["word_spacing"])], "Tw"), None))
         ops.append(("op", _instruction([int(s["render_mode"])], "Tr"), None))
-        # 9.T13: the Ts is the user-space rise divided by the scale of the
+        # The Ts is the user-space rise divided by the scale of the
         # axis Ts DISPLACES ALONG — `rise_scale`, which is `d` in both
         # shipped modes and is what a rotated member has instead (its page
         # `d` is zero at a quarter turn, so dividing by it silently dropped
@@ -3460,7 +3459,7 @@ class _Emission:
         text-space advance (pre-h_scale) for state feeding."""
         st: _StyleRef = seg["style"]
         m = st.member
-        s = st.style()  # A1: effective size/color
+        s = st.style()  # Effective size/color
         items: list = []
         buf: list[str] = []
         raw = 0.0
@@ -3487,13 +3486,13 @@ class _Emission:
             items.append(encoded)
             buf.clear()
 
-        # 9.B4b/T13: kern numbers and the raw advance convert at the
+        # Kern numbers and the raw advance convert at the
         # ADVANCE axis's user scale — the member's transposed `adv`, times
         # h_scale unless the FONT is vertical (Tz never applies there). The
-        # kern SIGN convention is the B4a mirror (negative pushes the pen
+        # kern SIGN convention is the mirror (negative pushes the pen
         # along the advance) in every orientation.
         axis = m.adv * (1.0 if m.vertical else s["h_scale"])
-        # 9.K1b: a pair kern splits the buffer and emits its own TJ number,
+        # A pair kern splits the buffer and emits its own TJ number,
         # exactly like the synthetic-gap kerns below. The sign convention is
         # this loop's existing one — `items.append(-kern_1000)` — so a
         # tightening (negative) kern becomes a POSITIVE TJ number, which moves
@@ -3520,7 +3519,7 @@ class _Emission:
         flush()
         raw = seg["width"] / axis if axis else 0.0
         if m.atomic:
-            # 9.T12D: the width model reports what a tate-chu-yoko block
+            # The width model reports what a tate-chu-yoko block
             # COSTS THE COLUMN — one em along the reading axis — which is
             # deliberately not what its own pen does. The pen moves the
             # block's natural horizontal advance, and that is the number the
@@ -3617,7 +3616,7 @@ def _state_sync_instructions(orig: GraphicsTextState, emit: GraphicsTextState) -
 
 def _member_ordinals_by_stream(detail: list[dict], member_set: set) -> dict:
     """{stream → set of member SHOW ordinals within that stream} — the
-    rewriter's removal targets, one entry per involved stream (T17)."""
+    rewriter's removal targets, one entry per involved stream."""
     per_stream_counts: dict[tuple, int] = defaultdict(int)
     out: dict[tuple, set] = defaultdict(set)
     for i, det in enumerate(detail):
@@ -3629,12 +3628,12 @@ def _member_ordinals_by_stream(detail: list[dict], member_set: set) -> dict:
 
 
 def _allocate_fallback_names(members: list, fallbacks: dict, counter, reserved: set) -> None:
-    """9.A5b naming, hoisted out of the rewriter for T17: allocate each
+    """Subset naming, hoisted out of the rewriter for cross-stream edits: allocate each
     substitute subset's name ONCE, fresh against EVERY involved stream's
     fonts — one name serves all streams (a cross-stream edit registers the
     same font dict into each using stream's resources under it). For a
     single-stream edit the taken-set is exactly the shipped in-rewriter
-    allocation's, so names and bytes are unchanged. 9.T26: an in-place
+    allocation's, so names and bytes are unchanged. An in-place
     entry IS the document's own font (font_dict None) — it keeps its name
     from construction and is never renamed."""
     if not any(fallbacks[k].font_dict is not None for k in fallbacks):
@@ -3654,7 +3653,7 @@ def _allocate_fallback_names(members: list, fallbacks: dict, counter, reserved: 
 
 
 class _StreamTarget:
-    """T17: one involved stream's share of a paragraph edit — its member
+    """One involved stream's share of a paragraph edit — its member
     show ordinals (within that stream), where its emission lands, the fonts
     to register into ITS resources, and the user-space extent it emitted
     (to expand a form copy's /BBox)."""
@@ -3679,14 +3678,14 @@ class _StreamTarget:
 
 class _ParaEditState:
     def __init__(self, ordinals_by_stream: dict, emission, fallbacks):
-        # T17: one target per involved stream (the single-stream edit is a
+        # One target per involved stream (the single-stream edit is a
         # dict of one). Each target's portion of the emission lands at ITS
         # first member; member removal + resync run per stream.
         self.targets: dict[tuple, _StreamTarget] = {
             stream: _StreamTarget(ords) for stream, ords in ordinals_by_stream.items()
         }
         self.emission = emission
-        # 9.A5b: {face key → _Fallback} (was the single `fallback`).
+        # {face key → _Fallback} (was the single `fallback`).
         self.fallbacks = fallbacks
         self.superseded_forms: set = set()
 
@@ -3696,7 +3695,7 @@ class _ParaEditState:
 
 
 def _expand_form_bbox(copy, edit: "_ParaEditState", child: tuple, form_ctm) -> None:
-    """T17: grow a form COPY's /BBox to cover everything emitted into it or
+    """Grow a form COPY's /BBox to cover everything emitted into it or
     into any target beneath it — /BBox clips at EVERY level of a Do chain,
     and reflowed text may extend past the original's crop. Rewritten only
     when it must strictly GROW: an unchanged box keeps the original object
@@ -3749,7 +3748,7 @@ def _rewrite_paragraph_stream(
     verbatim (descending ONLY along target paths — local form ordinals make
     that navigable); every TARGET stream gets member removal + its share of
     the emission + the dual-machine resync described in the module
-    docstring. T17: `edit.targets` may name several streams (a cross-stream
+    docstring. `edit.targets` may name several streams (a cross-stream
     paragraph) — each receives its portion at its own first member, and a
     target stream can itself host a deeper target's Do."""
     tgt = edit.targets.get(path)
@@ -3806,7 +3805,7 @@ def _rewrite_paragraph_stream(
                 my_ordinal = form_ordinal
                 form_ordinal += 1
                 child = path + (my_ordinal,)
-                # T17: descend when ANY target lies at or beneath this Do —
+                # Descend when ANY target lies at or beneath this Do —
                 # a target stream can itself host a deeper target.
                 on_path = any(
                     len(t) >= len(child) and t[: len(child)] == child
@@ -3852,8 +3851,8 @@ def _rewrite_paragraph_stream(
                         if child_tgt is not None and child_tgt.pending_fonts:
                             # /Font must be DEEP-copied into the copy
                             # first: _copy_resources_for_write shares
-                            # non-XObject entries by reference (the 7.4
-                            # lesson, test-caught live there).
+                            # non-XObject entries by reference (test-caught
+                            # live there).
                             src_fonts = copy_res.get("/Font")
                             fresh_fonts = Dictionary()
                             if src_fonts is not None:
@@ -3898,16 +3897,16 @@ def _rewrite_paragraph_stream(
                         pass
             cap = fonts.capability(resources, fallback_res, orig.font_name)
             _text, raw = _run_metrics(operator, operands, cap, orig)
-            # 9.B4a: a KEPT vertical run advances the parallel walks
+            # A KEPT vertical run advances the parallel walks
             # downward — the model's tm must match reality or the next
-            # injected absolute Tm would move a kept show. (9.B4b lifted
-            # the B4a members-are-never-vertical boundary: the emission
+            # injected absolute Tm would move a kept show. (lifted
+            # the members-are-never-vertical boundary: the emission
             # feed below advances the emit machine on the PARAGRAPH's
             # axis, so its model matches the emitted shows too.)
             vert = bool(cap is not None and cap.vertical)
             if is_member:
                 if show_ordinal == tgt.first_ordinal:
-                    # T17: THIS stream's share of the emission, anchored at
+                    # THIS stream's share of the emission, anchored at
                     # its own first member's ctm (fallback names were
                     # allocated ONCE by the caller — same names in every
                     # stream). `used_keys` collects the subsets this stream
@@ -3919,7 +3918,7 @@ def _rewrite_paragraph_stream(
                         kind, ins = item[0], item[1]
                         kept.append(ins)
                         if kind == "show":
-                            # 9.T13: the PIECE's axis (item[3]), not the
+                            # The PIECE's axis (item[3]), not the
                             # paragraph's — a rotated member advances
                             # horizontally in its own text space and only
                             # the Tm turns it down the page.
@@ -3928,7 +3927,7 @@ def _rewrite_paragraph_stream(
                             emit_feed(ins)
                     for key in sorted(used_keys, key=_face_sort_key):
                         fb = edit.fallbacks[key]
-                        # 9.T26: an in-place entry IS the document's own font
+                        # An in-place entry IS the document's own font
                         # (font_dict None) — it registers nothing.
                         if fb.font_dict is not None:
                             tgt.pending_fonts.append((fb.name, fb.font_dict))
@@ -4017,7 +4016,7 @@ def _rewrite_paragraph_stream(
 
 
 def _augment_cid_widths(font_dict, additions: dict[int, float]) -> None:
-    """Append `/W` entries for the gids an in-place edit introduced — 9.T26.
+    """Append `/W` entries for the gids an in-place edit introduced.
 
     Only gids `/W` does not already cover (the caller filtered), each with
     its PROGRAM advance, so the viewer's advance, the layout's measurement
@@ -4037,12 +4036,12 @@ def _augment_cid_widths(font_dict, additions: dict[int, float]) -> None:
 
 def _augment_tounicode(pdf, font_dict, additions: dict[int, str]) -> None:
     """Extend a font's /ToUnicode with the shaped glyphs an in-place edit
-    drew — 9.T26.
+    drew.
 
     Additive ONLY: the prequalification and the build both refuse a glyph
     that would need a DIFFERENT spelling than the document already gives it
-    (code == gid under Identity-H, so one glyph gets one entry — the T25
-    collision, closed at the gate rather than papered over here). The whole
+    (code == gid under Identity-H, so one glyph gets one entry — the
+    spelling collision, closed at the gate rather than papered over here). The whole
     map is re-emitted as bfchar entries, chunked at the CMap spec's 100 per
     block; semantically identical to whatever mix of bfchar/bfrange the
     producer wrote."""
@@ -4091,7 +4090,7 @@ class _PreparedStyle:
     """Everything the styled-chars pipeline resolves for an edit: the styled
     stream, the fallback subsets, and the whole-paragraph overrides. Built by
     `_prepare_styled` — ONE implementation shared by replace (which adds
-    per-span styling, bidi machinery and the T26 in-place path) and merge
+    per-span styling, bidi machinery and the in-place path) and merge
     (whole-paragraph restyle only, shipped substitution behaviour kept)."""
 
     __slots__ = (
@@ -4122,8 +4121,8 @@ def _prepare_styled(
     bidi_aware: bool = False,
     members_override: dict | None = None,
 ) -> _PreparedStyle:
-    """The A1/A3/A5/9.K2/9.T26 styling pipeline, extracted verbatim from
-    `replace_paragraph_text` for T18 so a merge can restyle through the
+    """The whole-paragraph and per-span styling pipeline, extracted verbatim
+    from `replace_paragraph_text` so a merge can restyle through the
     SAME machinery instead of a drifting copy. `allow_inplace=False` and
     `bidi_aware=False` keep a caller byte-identical to the pre-extraction
     bare `_styled_chars` call when every restyle argument is None."""
@@ -4131,7 +4130,7 @@ def _prepare_styled(
     inplace_font_dict = None
     inplace_tounicode: dict[int, str] = {}
     inplace_widths: dict[int, float] = {}
-    # A1 overrides: a size in points (clamped to a sane editing range —
+    # overrides: a size in points (clamped to a sane editing range —
     # an unbounded value can push most of the paragraph off the page on a typo),
     # and an [r,g,b] fill color.
     size_override = None
@@ -4150,18 +4149,18 @@ def _prepare_styled(
             rgb = []
         if len(rgb) == 3:
             color_override = (None, ("rg", tuple(rgb)))
-    # A3a family swap: an explicit selector, so garbage REFUSES rather
+    # Family swap: an explicit selector, so garbage REFUSES rather
     # than silently keeping the original (a swap that did nothing would
     # be a success that lied).
     family_override = None
     if family is not None:
         family_override = _validated_family(family)
-    # A3b style axis: a PRESENT bold/italic is the substituted face's
+    # Style axis: a PRESENT bold/italic is the substituted face's
     # absolute weight/slant; both None = no style substitution.
     style_override = None
     if bold is not None or italic is not None:
         style_override = (bool(bold), bool(italic))
-    # 9.K2 whole-paragraph OpenType features (small caps / alternates).
+    # Whole-paragraph OpenType features (small caps / alternates).
     # `features` accepts the tokens "small_caps"/"smcp"/"c2sc"/"salt"; a
     # feature forces the Libertinus-Serif switch (Liberation has none) and
     # substitutes the whole paragraph. `((), 0)` when absent, so the
@@ -4174,23 +4173,23 @@ def _prepare_styled(
     substituting = (
         family_override is not None or style_override is not None or bool(para_feats)
     )
-    # 9.T4: a VERTICAL paragraph substitutes into a vertical-capable
+    # A VERTICAL paragraph substitutes into a vertical-capable
     # face. This used to refuse outright ("vertical text cannot
     # substitute a horizontal face") because the bundled Liberation
     # faces are horizontal and nothing else was vendored — a true
-    # statement that stopped being true when T5 bundled Noto Sans CJK
-    # (which carries `vert`/`vrt2` and `vmtx`) and T3 brought the shaper
-    # that can reach those features. Family serif/sans/mono has nothing
+    # statement that stopped being true once Noto Sans CJK was bundled
+    # (it carries `vert`/`vrt2` and `vmtx`) and the shaper could reach
+    # those features. Family serif/sans/mono has nothing
     # honest to resolve to for a column, so it is IGNORED here rather
     # than obeyed into a sideways result; the weight axis is real, and a
     # user who wants a different vertical face picks an installed one
-    # (T6), which is checked for vertical machinery before it is used.
+    # Which is checked for vertical machinery before it is used.
     vertical_face = None
     # `convert` counts as well as a style request. A column whose own
     # font cannot express a typed character needs the vertical face for
     # exactly the reason a restyle does, and without this it raised
     # "vertical text cannot be converted to the fallback font" — the
-    # refusal T4 was supposed to have lifted. It survived because the
+    # refusal that should already have been lifted. It survived because the
     # shipped pin for the escape hatch passes `bold=True`, which sets
     # `substituting` on its own and hid the plain-convert case.
     if (substituting or convert) and para.vertical:
@@ -4228,9 +4227,9 @@ def _prepare_styled(
                 ),
             )
 
-    # A5a/A5b/A5c per-span styling: fold the sparse span_styles ranges
-    # into per-code-point lookups — `color_by_pos` (A5a colour),
-    # `face_by_pos` (A5b face key), and `size_by_pos` (A5c size, points)
+    # Per-span styling: fold the sparse span_styles ranges
+    # into per-code-point lookups — `color_by_pos` (colour),
+    # `face_by_pos` (face key), and `size_by_pos` (size, points)
     # INDEPENDENTLY, so one entry may carry a colour, a face, a size, or
     # any combination, on unaligned ranges. Last-writer-wins on overlap.
     # All three stay None when unused → _styled_chars byte-identical.
@@ -4269,21 +4268,21 @@ def _prepare_styled(
                 for k in range(st, en):
                     color_by_pos[k] = cs
             if has_face:
-                # A5b face key (family_or_None, bold, italic): family in
+                # Per-span face key (family_or_None, bold, italic): family in
                 # the trio or absent (None = keep the member family);
                 # bold/italic coerced bool (absent = False — the absolute
-                # A3b weight/slant semantics, now per span).
+                # absolute weight/slant semantics, now per span).
                 fam = entry.get("family")
                 if fam is not None:
                     try:
                         fam = _validated_family(fam)
                     except ValueError as exc:
                         raise ValueError(f"span style {exc}") from None
-                # 9.K2: a per-span OpenType feature request (small caps /
+                # A per-span OpenType feature request (small caps /
                 # alternates) rides the SAME face key. small_caps expands
                 # to smcp+c2sc; a feature forces a feature-bearing face
                 # (Libertinus Serif) in the build below, because Liberation
-                # has none. No feature => `((), 0)`, byte-identical to A5b.
+                # has none. No feature => `((), 0)`, byte-identical to a plain face key.
                 feats, alt = _span_features(entry)
                 facekey = (fam, bool(entry.get("bold")), bool(entry.get("italic")), feats, alt)
                 if face_by_pos is None:
@@ -4291,7 +4290,7 @@ def _prepare_styled(
                 for k in range(st, en):
                     face_by_pos[k] = facekey
             if has_size:
-                # A5c per-span size (points): coerce + clamp to the A1
+                # Per-span size (points): coerce + clamp to the editing
                 # range [1.0, _MAX_EDIT_SIZE] (a fat-fingered 5000 lands
                 # at the viewer max, never off-page); a non-number refuses
                 # named, mirroring the colour shape check.
@@ -4305,10 +4304,10 @@ def _prepare_styled(
                 for k in range(st, en):
                     size_by_pos[k] = sv
 
-    # A3a/A3b whole-paragraph substitution → ONE face key covering every
+    # Whole-paragraph substitution → ONE face key covering every
     # char (family_override may be None = keep the member family). None
     # when not substituting. Per-span faces (face_by_pos) override it per
-    # position; the single-key case stays byte-identical to shipped A3.
+    # position; the single-key case stays byte-identical.
     whole_para_face = None
     if substituting:
         wb = style_override[0] if style_override is not None else False
@@ -4320,7 +4319,7 @@ def _prepare_styled(
         if members_override is not None
         else {m.index: m for m in para.members}
     )
-    # 9.A5b (round-33 HIGH): each member's OWN classified family, so a
+    # Each member's OWN classified family, so a
     # per-span face with no explicit family lands on that member's family
     # (a bolded mono word in a serif paragraph → mono-bold). Only needed
     # when per-span faces are present; the font is looked up in the
@@ -4335,17 +4334,17 @@ def _prepare_styled(
         for m in para.members:
             fd = _lookup_font(m.style["font_name"], m.resources or resources, resources)
             member_family[m.index] = classify_font_family(fd) if fd is not None else "sans"
-    # 9.T3: a paragraph that reorders may carry a cursively joining
+    # A paragraph that reorders may carry a cursively joining
     # script, which has to be SHAPED into a face that still knows how.
     # The per-member weight/slant comes along so a bold Arabic run lands
     # on the bold face rather than flattening.
     #
-    # 9.T12 widened the GATE, and the widening is a defect fix. It used to
+    # The GATE is wider than it looks, and the widening is a defect fix. It used to
     # read `para.bidi` — "does this paragraph reorder?" — as a stand-in for
     # "does this paragraph shape", which is true of thirteen of the fourteen
     # joining scripts and false of Mongolian, the one that joins WITHOUT
     # being right-to-left. So Mongolian text re-emitted per character:
-    # disconnected isolated forms, the exact broken output the T3 rule says
+    # disconnected isolated forms, the exact broken output the rule says
     # is never an option. The question the code wants is `requires_shaping`,
     # and now that is the question it asks. Every other script's answer is
     # unchanged (an Arabic paragraph has strong RTL, so `para.bidi` was
@@ -4367,7 +4366,7 @@ def _prepare_styled(
             except Exception:
                 rtl_style[m.index] = (False, False)
 
-    # 9.T26: qualify the document's OWN font for in-place shaping, so an
+    # Qualify the document's OWN font for in-place shaping, so an
     # RTL edit keeps the document's typeface instead of substituting the
     # bundled face. Every condition below is a correctness gate, not a
     # preference:
@@ -4384,7 +4383,7 @@ def _prepare_styled(
     #   - no glyph SPELLING collision: code == gid here, so one glyph
     #     gets exactly one ToUnicode entry — a shaped cluster that wants
     #     gid G to spell Y when the document already has it spelling X
-    #     cannot be expressed, and the T25 fatha-as-sukun lesson says
+    #     cannot be expressed, and the fatha-as-sukun lesson says
     #     never to try. Any failed condition falls back to the bundled
     #     face, which is the shipped, correct behaviour.
     if (
@@ -4447,8 +4446,8 @@ def _prepare_styled(
         vertical_ok=vertical_face is not None,
         inplace_ok=inplace_face is not None,
     )
-    # 9.A5b: build ONE _Fallback per face key, sorted-face order so the
-    # subset names + embedded bytes are deterministic. The whole-para A3
+    # Build ONE _Fallback per face key, sorted-face order so the
+    # subset names + embedded bytes are deterministic. The whole-paragraph
     # path yields exactly one key here → one subset → byte-identical to
     # the shipped single-_Fallback output.
     fallbacks: dict[tuple, _Fallback] = {}
@@ -4468,15 +4467,15 @@ def _prepare_styled(
         # the dominant face and
         # reproduces the shipped whole-para style-only / convert resolve
         # exactly. family=serif|sans|mono keys bypass classification via
-        # a synthetic /Flags dict (the A2 trick).
+        # a synthetic /Flags dict.
         first = min(para.members, key=lambda m: m.index)
         for key in sorted(fb_by_face, key=_face_sort_key):
             fam, kbold, kitalic, kfeats, kalt = key
             chars = "".join(sorted(fb_by_face[key]))
             if fam == VERTICAL_FAMILY and vertical_face is not None:
-                # 9.T4: ONE vertical face serves every VERTICAL-WRITING
+                # ONE vertical face serves every VERTICAL-WRITING
                 # member of the paragraph — the weight was resolved with
-                # it. 9.T13 narrowed this from a paragraph-wide branch to
+                # it. This is narrower than a paragraph-wide branch:
                 # a per-KEY one: a column may hold sideways horizontal
                 # members too, and they substitute into an ordinary
                 # horizontal face through the branches below.
@@ -4490,7 +4489,7 @@ def _prepare_styled(
                 )
                 continue
             if fam == INPLACE_FAMILY:
-                # 9.T26: shape with the DOCUMENT'S OWN program and emit
+                # Shape with the DOCUMENT'S OWN program and emit
                 # its own glyph ids — Identity-H makes a gid the two-byte
                 # code, so nothing new embeds, no name allocates, and the
                 # Tf the emission writes is the font the paragraph
@@ -4557,7 +4556,7 @@ def _prepare_styled(
                         if existing is None:
                             inplace_tounicode[gid] = spells
                         elif spells and existing != spells:
-                            # The T25 lesson, held as a refusal: one code
+                            # Held as a refusal: one code
                             # cannot spell two things, and here code==gid.
                             raise ValueError(
                                 "this edit cannot keep the document font — "
@@ -4570,19 +4569,19 @@ def _prepare_styled(
                 )
                 continue
             if fam in (RTL_FAMILY, MONGOL_FAMILY):
-                # 9.T3: resolve the bundled shaping face, SHAPE every word
+                # Resolve the bundled shaping face, SHAPE every word
                 # that routed here against it, then embed a subset that
                 # carries the resulting glyphs. The order is forced: the
                 # subset has to contain the shaper's output, and the
                 # shaper needs the face.
                 #
-                # 9.T12: the Mongolian key resolves its OWN face and embeds
+                # The Mongolian key resolves its OWN face and embeds
                 # it HORIZONTALLY — `build_shaped_font` under a rotated Tm,
                 # never `build_vertical_font` under /Identity-V. A Mongolian
                 # face states no vertical advance worth embedding as /W2
                 # (Mongolian Baiti, the script's reference implementation,
                 # carries no `vmtx` at all), so an /Identity-V embed would
-                # have to invent the pitch — the § 1.5b defect again.
+                # have to invent the pitch — the defect again.
                 from engine.font_fallback import (
                     build_shaped_font,
                     resolve_mongolian_font,
@@ -4607,12 +4606,12 @@ def _prepare_styled(
                 )
                 continue
             if kfeats:
-                # 9.K2: apply the OpenType feature. IN PLACE using the
+                # Apply the OpenType feature. IN PLACE using the
                 # OWNING member's font when it carries the feature AND the
                 # substituted glyphs; otherwise the explicit switch to
                 # bundled Libertinus Serif (Liberation has no features).
                 # ToUnicode keeps the plain letters (searchable) either way.
-                # The in-place source member (round-42 CRITICAL fix): a
+                # The in-place source member (fix): a
                 # per-span key baked its own member index into `fam`; a
                 # whole-paragraph key (None) resolves from the dominant
                 # `first`; an explicit family + feature (str) can only get
@@ -4635,7 +4634,7 @@ def _prepare_styled(
                     # Capture the IN-PLACE face's kerning while its temp
                     # program still exists — the emission pass reads it
                     # later (by which point `tmp` is unlinked), so reading
-                    # the path then would silently un-kern the run (K1b).
+                    # the path then would silently un-kern the run.
                     if tmp:
                         from engine.font_kerning import kern_pairs as _kp
 
@@ -4651,7 +4650,7 @@ def _prepare_styled(
                 )
                 continue
             if isinstance(fam, str) and os.path.isabs(fam):
-                # 9.T6: an INSTALLED font, chosen by the user. It bypasses
+                # An INSTALLED font, chosen by the user. It bypasses
                 # the family ladder entirely — the ladder exists to pick a
                 # bundled stand-in, and there is nothing to stand in for
                 # when the face itself was named. Coverage still decides
@@ -4714,44 +4713,44 @@ def replace_paragraph_text(
     features: list | None = None,
     alt_index: int = 0,
 ) -> dict:
-    """Replace a paragraph's text and re-lay-out inside its box (7.5).
+    """Replace a paragraph's text and re-lay-out inside its box.
 
     `spans` is the renderer-computed style mapping (char range → member
     run); `expected_runs`/`expected_text` are the fingerprint — grouping
     is a heuristic, so the apply re-derives it and REFUSES on mismatch
     rather than ever silently retargeting. `convert=True` renders
     characters the mapped font cannot express in the bundled fallback
-    font (`font_path`), the 7.4 machinery shared at span granularity.
+    font (`font_path`), the machinery shared at span granularity.
 
-    A1 restyle: `size` (points) applies a uniform new font size to the
+    restyle: `size` (points) applies a uniform new font size to the
     whole paragraph (scaling leading + rewrapping); `color` is an
     [r, g, b] triple (0-1) applied as a uniform fill colour. Either None
     keeps the paragraph's own.
 
-    A3a/A3b restyle: `family` ("serif" | "sans" | "mono") and/or
+    restyle: `family` ("serif" | "sans" | "mono") and/or
     `bold`/`italic` (absolute booleans — a present value states the
     substituted face's weight/slant outright) substitute the WHOLE
     paragraph into the matching bundled Liberation face — every
     character re-embeds via the fallback machinery (`font_path`
     required), an honest substitution of the original foundry font.
-    Family defaults to the first member's own classification (B1) when
+    Family defaults to the first member's own classification when
     only a style is given, so bold-only on a serif paragraph lands
     LiberationSerif-Bold. Characters the Liberation face lacks refuse
     with a stated reason. All three None keeps the paragraph's own
-    fonts (the shipped 7.5/A1 path, byte-identical).
+    fonts (the unstyled path, byte-identical).
 
-    A4 split: `split_at` (a code-point offset strictly inside
+    split: `split_at` (a code-point offset strictly inside
     `new_text`) lays the text out as TWO blocks, the second starting
     2×leading below the first — a gap the re-listing grouping can never
     join across, so the result lists as two paragraphs. None = the
     shipped single-block layout (byte-identical).
 
-    T18 split gap: `split_gap` (leading multiples, [1.3, 10]) scales the
+    Split gap: `split_gap` (leading multiples, [1.3, 10]) scales the
     gap between the two blocks; the 2×eff relist floor never shrinks, so
     every allowed factor still lists as two paragraphs. Requires
     `split_at`; None = the shipped 2.0.
 
-    T18 resize: `box_width` (points, paragraph space) rewraps the
+    resize: `box_width` (points, paragraph space) rewraps the
     paragraph to an explicit measure — first-line indent preserved,
     center/right/justify positioned against the new edges, and a width no
     word can wrap into REFUSES rather than overflowing the box the user
@@ -4759,26 +4758,26 @@ def replace_paragraph_text(
     edge — the renderer sends it when the LEFT handle dragged. Both None
     = the shipped derived measures, byte-identical.
 
-    A5a/A5b/A5c per-span styling: `span_styles` is None or a list of
+    Per-span styling: `span_styles` is None or a list of
     `{start, end, color?: [r, g, b], family?, bold?, italic?, size?}` over
     CODE-POINT ranges of `new_text` (distinct from the style-SOURCE
     `spans`; sparse; need not align to span boundaries; overlaps fold
-    last-wins). A `color` recolours its range, overriding the A1
-    whole-paragraph `color` (A5a, metric-neutral). A `family`/`bold`/
+    last-wins). A `color` recolours its range, overriding the
+    whole-paragraph `color` (metric-neutral). A `family`/`bold`/
     `italic` SUBSTITUTES its range into the matching bundled Liberation
-    face (A5b) — one embedded subset per distinct requested face, family
+    face — one embedded subset per distinct requested face, family
     absent = keep the char's member family, the same honest substitution
-    A3 does whole-paragraph. A `size` (points, clamped [1, 1638]) resizes
-    just its range, overriding the A1 whole-paragraph `size` (A5c) — the
+    Does whole-paragraph. A `size` (points, clamped [1, 1638]) resizes
+    just its range, overriding the whole-paragraph `size` — the
     range's Tf grows/shrinks, its width and wrap follow, and the LINE it
     lands on gets tallest-glyph leading while other lines keep theirs. The
     colour, face, and size axes fold INDEPENDENTLY (a range can be red AND
-    bold AND bigger, on unaligned ranges). Per-span faces inherit A3's
+    bold AND bigger, on unaligned ranges). Per-span faces inherit the substitution's
     refusals (a char the Liberation face lacks is named); vertical
-    paragraphs refuse substitution (B4b). None throughout = byte-identical
+    paragraphs refuse substitution. None throughout = byte-identical
     shipped.
 
-    9.B4b: vertical paragraphs reflow through the same pipeline in
+    Vertical paragraphs reflow through the same pipeline in
     transposed space (columns fill top-down at the measured pitch, growth
     adds columns leftward; size scales the pitch, split gaps transpose).
     Family/bold/italic substitution and per-char convert refuse — the
@@ -4786,7 +4785,7 @@ def replace_paragraph_text(
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
-    # 9.T26: initialized BEFORE any refusal can raise — the finally block
+    # Initialized BEFORE any refusal can raise — the finally block
     # reads these, and a validation error firing earlier would otherwise
     # turn into an UnboundLocalError that buries the real message.
     inplace_face = None
@@ -4825,7 +4824,7 @@ def replace_paragraph_text(
         if [int(r) for r in expected_runs] != para.run_indexes or str(expected_text) != para.text:
             raise ValueError("the page's text changed underneath this edit — reopen the editor")
 
-        # A4 split: an explicit selector — a caret offset outside the open
+        # split: an explicit selector — a caret offset outside the open
         # interval refuses (a "split" that splits nothing would be a
         # success that lied). Code points: Python strings index them
         # natively; the renderer converts from UTF-16 before sending.
@@ -4838,7 +4837,7 @@ def replace_paragraph_text(
             if not (0 < sp < len(str(new_text))):
                 raise ValueError("split position must be inside the text")
             split_point = sp
-        # T18: the split gap in LEADING multiples. Bounded — below ~1.3 the
+        # The split gap in LEADING multiples. Bounded — below ~1.3 the
         # grouping's ±25% drift window can re-join the halves (garbled
         # output), above 10 the second block walks off the page for no
         # articulable reason.
@@ -4853,7 +4852,7 @@ def replace_paragraph_text(
             if not (1.3 <= gv <= 10.0):
                 raise ValueError("split gap must be between 1.3 and 10 line heights")
             gap_value = gv
-        # T18 resize: an explicit positive width; the emission refuses a
+        # resize: an explicit positive width; the emission refuses a
         # width no word-wrap can honour.
         width_value = None
         left_value = None
@@ -4875,9 +4874,9 @@ def replace_paragraph_text(
         elif box_left is not None:
             raise ValueError("box left requires a box width")
 
-        # T18: the styling pipeline lives in _prepare_styled now — replace
+        # The styling pipeline lives in _prepare_styled now — replace
         # passes everything through (per-span styling, bidi machinery, the
-        # T26 in-place path included).
+        # in-place shaping path included).
         prep = _prepare_styled(
             pdf, para, resources, str(new_text), list(spans),
             convert=bool(convert), font_path=font_path,
@@ -4910,11 +4909,11 @@ def replace_paragraph_text(
                 size_override=size_override, split_at=split_point,
                 split_gap=gap_value, box_width=width_value, box_left=left_value,
                 has_span_size=prep.has_span_size,
-                # 9.K1b: kern from whatever face each slice renders in — the
+                # Kern from whatever face each slice renders in — the
                 # bundled subset when substituted, the document's own font
                 # (embedded program, else its metric twin) otherwise.
                 kerns=_KernSource(resources, font_path, fallbacks),
-                # 9.T3: only a paragraph the listing actually normalized
+                # Only a paragraph the listing actually normalized
                 # reorders on the way out — the two halves are the same
                 # decision, taken once.
                 base_level=para.base_level if para.bidi else None,
@@ -4970,21 +4969,21 @@ def merge_paragraph_with_previous(
     expected_prev_text: str,
     expected_runs: list,
     expected_text: str,
-    # 9.K1b: the bundled-fonts dir, so a merge kerns the same way an edit
+    # The bundled-fonts dir, so a merge kerns the same way an edit
     # does. Without it a non-embedded standard-14 font would kern on edit
     # (via its metric twin) but not on merge — "some documents, not others".
     font_path: str | None = None,
-    # T18: merge DIRECTION — with_next merges the NEXT paragraph into the
+    # Merge DIRECTION — with_next merges the NEXT paragraph into the
     # selected one (the selected box anchors, exactly as the previous box
     # anchors the shipped direction). expected_prev_* always fingerprints
     # the ANCHOR paragraph, expected_* the one merging into it.
     with_next: bool = False,
-    # T18: the selected paragraph's EDITED text (+ the renderer's span map
+    # The selected paragraph's EDITED text (+ the renderer's span map
     # for it) — an edited editor no longer refuses the merge; the page
     # fingerprints still prove the on-disk state.
     selected_text_override: str | None = None,
     selected_spans_override: list | None = None,
-    # T18: whole-paragraph restyle riding the merge — the same A1/A3
+    # Whole-paragraph restyle riding the merge — the same
     # semantics replace has, through the same pipeline (_prepare_styled).
     size=None,
     color=None,
@@ -4992,15 +4991,15 @@ def merge_paragraph_with_previous(
     bold=None,
     italic=None,
 ) -> dict:
-    """Merge a paragraph into the one above it in the listing (A4): the
+    """Merge a paragraph into the one above it in the listing: the
     joined text (space-joined; no space across a CJK-CJK boundary — the
     line-join rule) re-lays-out in the PREVIOUS paragraph's box, both
     originals' show ops removed — one op, one undo step. Fingerprints for
     BOTH paragraphs refuse a stale view; different content streams refuse
     (a cross-column merge is nonsense); unencodable characters refuse
-    named (a decoded char without a single-char reverse — the B5
+    named (a decoded char without a single-char reverse — the ligature
     boundary — cannot re-emit). Cross-writing-mode merges refuse via the
-    existing lkey guard — the mode rides in lkey (9.B4b)."""
+    existing lkey guard — the mode rides in lkey."""
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -5038,7 +5037,7 @@ def merge_paragraph_with_previous(
         for para_, label in ((prev, "previous"), (cur, "selected")):
             if not para_.editable:
                 raise ValueError(para_.reason or f"the {label} paragraph is not editable")
-        # T17 kept this refusal DELIBERATELY (now over stream SETS): the
+        # This refusal is kept DELIBERATELY (now over stream SETS): the
         # multi-target rewrite could express a cross-stream merge, but the
         # merged single-line case lands both fragments on ONE baseline in
         # different streams — which can never relist as one paragraph
@@ -5058,7 +5057,7 @@ def merge_paragraph_with_previous(
         if [int(r) for r in expected_runs] != cur.run_indexes or str(expected_text) != cur.text:
             raise ValueError("the page's text changed underneath this edit — reopen the editor")
 
-        # T18: an edited editor rides its text into the merge as the
+        # An edited editor rides its text into the merge as the
         # SELECTED side (cur for the shipped previous-merge, prev/anchor
         # for with_next), with the renderer's span map for that text. The
         # fingerprints above already proved the PAGE state.
@@ -5090,7 +5089,7 @@ def merge_paragraph_with_previous(
             for s in cur_spans_src
         ]
 
-        # T18 restyle-on-merge refusal: a face substitution on right-to-left
+        # Restyle-on-merge refusal: a face substitution on right-to-left
         # text cannot ride a merge — this emission has no shaping pass, so a
         # substituted joining script would come out in unshaped forms.
         # Restyling the merged paragraph afterwards goes through replace,
@@ -5104,7 +5103,7 @@ def merge_paragraph_with_previous(
             )
         members_by_index = {m.index: m for m in prev.members}
         members_by_index.update({m.index: m for m in cur.members})
-        # T18: the same styling pipeline replace uses. With every restyle
+        # The same styling pipeline replace uses. With every restyle
         # argument None this is byte-identical to the old bare
         # `_styled_chars(new_text, spans, members_by_index, False)` call
         # (allow_inplace/bidi_aware off = the shipped merge behaviour).
@@ -5154,7 +5153,7 @@ def merge_paragraph_with_previous(
             _register_xobject(pdf, resources, nm, st)
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         _finalize_page_rewrite(p, kept, edit.superseded_forms)
-        # T18: a restyled merge can embed a substitute face — register it,
+        # A restyled merge can embed a substitute face — register it,
         # exactly as replace does (a Tf naming an unregistered font renders
         # nothing).
         page_tgt = edit.targets.get(())

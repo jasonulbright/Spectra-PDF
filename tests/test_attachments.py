@@ -1,4 +1,4 @@
-"""§ I.6 — embedded file attachments."""
+"""Embedded file attachments."""
 
 import os
 

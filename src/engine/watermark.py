@@ -27,10 +27,9 @@ via pdf_tree.walk_inheritable, the one shared /Parent-chain walk that
 redact's resource lookup also uses (one implementation, so a fix propagates
 to every consumer).
 
-Deliberately NOT Ghostscript (the roadmap row offers both): a gs pdfwrite
-round-trip regenerates the whole file to add one stream per page, and
-GS-backed ops don't run in dev until the bundle script has been run. See
-docs/architecture/07-phase2e-watermark.md.
+Deliberately NOT Ghostscript: a gs pdfwrite round-trip regenerates the
+whole file to add one stream per page, and GS-backed ops don't run in dev
+until the bundle script has been run.
 """
 
 import math
@@ -45,7 +44,7 @@ from pikepdf import Dictionary, Name
 from engine.pdf_tree import walk_inheritable
 
 
-# Helvetica metrics moved to pdf_metrics.py (shared with forms.py — Phase 2l);
+# Helvetica metrics moved to pdf_metrics.py (shared with forms.py);
 # the aliases below keep this module's call sites and tests unchanged.
 from engine.pdf_metrics import (
     GLYPH_HEIGHT_EM as _GLYPH_HEIGHT_EM,
@@ -147,7 +146,7 @@ def _auto_font_size(
         disp_w / sin_a if sin_a > 1e-9 else math.inf,
         disp_h / cos_a if cos_a > 1e-9 else math.inf,
     )
-    # S4: on the embedded-Unicode path the caller passes the run's own em
+    # On the embedded-Unicode path the caller passes the run's own em
     # advance AND its real ascent+descent extent; WinAnsi keeps the Helvetica
     # metrics (byte-identical auto-size). Using Helvetica's 0.925-em height for
     # a taller embedded face such as Liberation Sans silently shrinks the
@@ -171,7 +170,7 @@ def _unicode_watermark_face(font_dir: str, text: str = "") -> str | None:
     matching the WinAnsi Helvetica shape). None when no fonts DIR is available
     → the text is refused (never crashed on a bogus path).
 
-    T25b: `text` opts into the text-driven step, so a right-to-left stamp
+    `text` opts into the text-driven step, so a right-to-left stamp
     lands on a face that can express it. Passing the text is only correct
     because the stamp emitter now reorders and shapes (`_rtl_stamp`) — an
     emitter that did neither would draw the words reversed and the letters
@@ -190,7 +189,7 @@ def _unicode_watermark_face(font_dir: str, text: str = "") -> str | None:
 
 
 def _rtl_stamp(pdf, face: str, draw_text: str):
-    """T25b — (font object, em width, show bytes) for a right-to-left stamp,
+    """(font object, em width, show bytes) for a right-to-left stamp,
     or None when the text is not right-to-left.
 
     A stamp is a SINGLE line, so there is no wrap to interact with and the
@@ -239,7 +238,7 @@ def _make_watermark_form(
     """Form XObject with the stamp drawn about the center of a [0 0 W H] box,
     baseline direction rotated by theta (radians, user space).
 
-    S4: `uni=(font_obj, em_width, show_bytes)` draws the text with a SHARED
+    `uni=(font_obj, em_width, show_bytes)` draws the text with a SHARED
     embedded Type0/Identity-H font (built once per `watermark` call, since the
     text is constant for every page); `uni=None` keeps the byte-identical
     standard-14 Helvetica/WinAnsi path (the `?`-for-non-Latin-1 fallback)."""
@@ -335,7 +334,7 @@ def watermark(
     pages_watermarked = 0
     font_size_applied = 0.0
     with pikepdf.open(file) as pdf:
-        # S4: a non-Latin-1 stamp is drawn with a subsetted Type0 font SHARED
+        # A non-Latin-1 stamp is drawn with a subsetted Type0 font SHARED
         # across pages (the text is constant), else the WinAnsi Helvetica path
         # (uni=None, byte-identical). Resolve the FACE upfront (cheap, no
         # mutation) so a bad font_dir refuses before touching pages; the embed
@@ -375,7 +374,7 @@ def watermark(
             if width <= 0 or height <= 0:
                 continue
             if needs_unicode and uni is None:
-                # T25b: a right-to-left stamp reorders (and shapes, where the
+                # A right-to-left stamp reorders (and shapes, where the
                 # script joins) before it is drawn; everything else keeps the
                 # shipped single-`Tj` emission byte for byte.
                 rtl_built = _rtl_stamp(pdf, face, draw_text)

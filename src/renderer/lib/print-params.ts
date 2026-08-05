@@ -1,11 +1,11 @@
-// Print parameter assembly + validation (M-P + O2). Pure, so the wire
+// Print parameter assembly + validation. Pure, so the wire
 // contract the dialog sends is unit-testable: the engine's `print_pdf`
 // accepts exactly these keys, and `tests/print-params.test.ts` pins them —
 // a renamed key here would otherwise only surface as every print failing
 // with an unexpected-argument error at run time. The Python side pins the
 // same set from its signature (TestPrintPdf.test_wire_contract...).
 
-// N12: the VALIDATION messages below are dialog chrome, so they resolve
+// The VALIDATION messages below are dialog chrome, so they resolve
 // through the catalog. The wire contract this module builds is untouched
 // — engine keys and values stay exactly as pinned.
 import { tChrome, tChromeCount } from '../i18n';

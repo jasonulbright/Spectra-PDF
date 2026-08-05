@@ -1,8 +1,8 @@
-// The keymap layer (19-phase4 § 4.4): ONE window-level dispatcher owns every
+// The keymap layer: ONE window-level dispatcher owns every
 // shortcut. Scope order: Escape interceptor stack (in-flight drag, open
 // context menu — LIFO) → the shared inline-edit guard → table bindings.
 // This replaces the six hand-rolled keydown effects and both duplicated
-// isEditable helpers that predated Phase 4.
+// isEditable helpers this replaced.
 import { useEffect } from 'react';
 import { KEY_BINDINGS, type KeyBinding } from './acrobat-keys';
 import { COMMANDS, type CommandId } from './registry';
@@ -47,7 +47,7 @@ function matches(b: KeyBinding, e: KeyLike): boolean {
   return true;
 }
 
-// N12 slice C — the keyboard-shortcut HELP surface. A NAMED key has a word
+// The keyboard-shortcut HELP surface. A NAMED key has a word
 // for a name and localizes ("Del" is "Supr" in Spanish); a single character
 // is the letter engraved on the reader's own keyboard and never does. The
 // function-key names (F3, F10) are their own international notation.
@@ -68,7 +68,7 @@ export function formatKey(key: string): string {
  * The display shortcut for a command, derived from the FIRST keymap binding
  * that targets it (multi-bound commands like redo/zoom show their primary
  * chord). Menus render from this, so a menu's label and the live binding can
- * never drift — the § 4.4 PhotoGIMP property. Null when the command is
+ * never drift — the PhotoGIMP property. Null when the command is
  * unbound. Exported for the menu layer and its integrity test.
  */
 export function shortcutForCommand(command: CommandId): string | null {
@@ -95,7 +95,7 @@ export function resolveBinding(
 }
 
 /**
- * The Escape chain (§ 4.4), replacing four independent listeners:
+ * The Escape chain, replacing four independent listeners:
  *   1. interceptors — an in-flight page drag or an open context menu owns
  *      Escape while active (LIFO; these can't coexist);
  *   2. exit the armed canvas tool (NOT edit-guarded — the legacy tool-exit
@@ -116,16 +116,16 @@ function dispatchEscape(ctx: CommandContext, target: EventTarget | null): void {
   }
 }
 
-// Overlay ownership (§ 4.4 "native menu/dialog handling wins", reworked at
-// M6.5 into the dialog keyboard model):
+// Overlay ownership ("native menu/dialog handling wins", as the dialog
+// keyboard model states it):
 //  1. An open Radix MENU owns the keyboard entirely (typeahead/arrows/its
 //     own Escape) — the dispatcher steps aside.
 //  2. The plain-div app modals (Preferences/About/Properties/Print) register
 //     on the app-modal STACK via useAppModal. While one is up, the
 //     dispatcher closes the TOP on Escape — one rule for every dialog
-//     (M5.5b's recorded gap) — and still preventDefaults the
+//     (the recorded gap) — and still preventDefaults the
 //     always-suppress chords so Ctrl+P/S/O can't summon the webview's own
-//     UI over a modal (M-P's recorded gap). Commands never RUN.
+//     UI over a modal (the recorded gap). Commands never RUN.
 //  3. A Radix DIALOG (Confirm/Password) owns its keys like a menu — they
 //     ship Escape/focus handling. Detected by DOM presence; ours are
 //     distinguished by having registered on the stack.
@@ -173,7 +173,7 @@ export function dispatchWindowBlur(): void {
 }
 
 /**
- * Browser accelerators the webview must NEVER act on, bound or not (M6.5):
+ * Browser accelerators the webview must NEVER act on, bound or not:
  * reload blanks the whole app state, browser zoom rescales the chrome, F7
  * raises the caret-browsing prompt, and Ctrl+U/J/H open browser surfaces.
  * Checked on every path that declines a key — a canvas-scoped Ctrl+= on the
@@ -241,7 +241,7 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
     suppressBrowserDefault(e);
     return;
   }
-  // Pref-gated bindings (the single-key accelerators, M6.4) are dead until
+  // Pref-gated bindings (the single-key accelerators) are dead until
   // their Settings switch is on. Checked here, not in resolveBinding — the
   // resolver stays pure/table-testable, and a dead binding must fall through
   // to the browser (typing 'h' somewhere non-editable does nothing).

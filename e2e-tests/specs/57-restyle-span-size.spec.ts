@@ -13,12 +13,12 @@ import {
   openParagraphEditor,
 } from '../support/harness.js';
 
-// Phase 9.A5c — per-span size on the paragraph editor: select a word, set a
+// Per-span size on the paragraph editor: select a word, set a
 // bigger size, and only that range grows (its line gains leading; the rest
 // keep theirs). Asserted via the re-listing (the paragraph lists back with
 // the larger size among its runs — the working copy stream is compressed, so
 // the listing round-trip is the on-disk proof), plus undo removing it. Waits
-// key on the page id advancing past the pre-op id (the A3 timing rule — a
+// key on the page id advancing past the pre-op id (the timing rule — a
 // pure restyle keeps the text identical).
 
 interface Para {
@@ -46,7 +46,7 @@ async function editParagraphOpen(pageId: string, index: number): Promise<void> {
 }
 
 /** Select a CODE-POINT range in the paragraph editor. The editor is a
- * contentEditable rich surface (9.A5-tails-b), so this delegates to the
+ * contentEditable rich surface, so this delegates to the
  * harness helper that walks the rendered style segments' text nodes. */
 async function selectRange(start: number, end: number): Promise<void> {
   await setParagraphSelection(start, end);
@@ -78,7 +78,7 @@ async function waitForReindexed(
   );
 }
 
-describe('restyle span size (Phase 9.A5c)', () => {
+describe('restyle span size', () => {
   let tmp: string;
   let pdfPath: string;
 
@@ -123,7 +123,7 @@ describe('restyle span size (Phase 9.A5c)', () => {
     // The reindexed listing carries the larger size among the runs AND the
     // ORIGINAL ~14 size for the rest — a per-span resize, not a whole-para
     // one (which would list only 28). `sizes` is a structured field, so this
-    // stronger check costs nothing (round-34 LOW; unlike spec 56's byte-grep).
+    // stronger check costs nothing (unlike spec 56's byte-grep).
     await waitForReindexed(
       pageId,
       (paras) =>

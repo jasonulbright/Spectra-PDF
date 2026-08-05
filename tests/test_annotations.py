@@ -1,4 +1,4 @@
-"""§ I.2/I.6 — comment overview + delete-all-comments."""
+"""Comment overview + delete-all-comments."""
 
 import os
 

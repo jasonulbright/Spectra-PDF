@@ -12,7 +12,7 @@ import {
   setReactSelectValue,
 } from '../support/harness.js';
 
-// § parity-map 2 — guided actions (Action Wizard), slice 1: author a
+// Guided actions (Action Wizard): author a
 // two-step sequence through the REAL editor, validation refuses an empty
 // draft, the runner drives both steps through the gated engine pipeline over
 // the open document, and the REAL CLI reads the watermark back out of the
@@ -44,7 +44,7 @@ async function storedActions(): Promise<{ id: string; name: string }[]> {
   )) as { id: string; name: string }[];
 }
 
-describe('guided actions (parity map § 2, slice 1)', () => {
+describe('guided actions', () => {
   before(async () => {
     SCRATCH = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-actions-'));
     await waitForHarness();
@@ -112,7 +112,7 @@ describe('guided actions (parity map § 2, slice 1)', () => {
     await $('[data-testid="run-close"]').click();
   });
 
-  it('slice 2: ask-at-run + header tokens through the pre-run form', async () => {
+  it('Ask-at-run + header tokens through the pre-run form', async () => {
     // Author: watermark with its TEXT asked at run (left empty — legal,
     // because asked) + a {page} footer.
     await $('[data-testid="action-new"]').click();
@@ -149,7 +149,7 @@ describe('guided actions (parity map § 2, slice 1)', () => {
     expect(text).toContain('Page 1'); // the engine resolved the {page} token
   });
 
-  it('slice 2: the OCR step offers the full language list in the editor', async () => {
+  it('The OCR step offers the full language list in the editor', async () => {
     await $('[data-testid="action-new"]').click();
     await setReactSelectValue('[data-testid="action-add-op"]', 'ocr_file');
     await $('[data-testid="action-add-step"]').click();
@@ -159,7 +159,7 @@ describe('guided actions (parity map § 2, slice 1)', () => {
     await $('[data-testid="actions-list"]').waitForDisplayed();
   });
 
-  it('slice 2: encrypt runs as a TERMINAL step — new file locked, open doc untouched', async () => {
+  it('Encrypt runs as a TERMINAL step — new file locked, open doc untouched', async () => {
     await $('[data-testid="action-new"]').click();
     await setReactInputValue('[data-testid="action-name"]', 'Lock');
     await setReactSelectValue('[data-testid="action-add-op"]', 'encrypt');

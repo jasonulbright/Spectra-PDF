@@ -29,11 +29,11 @@ interface SignResult {
 }
 
 export function SignaturesPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
-  // 9.F5: the SAME undoable in-place flow the canvas edits use, so signing in
+  // The SAME undoable in-place flow the canvas edits use, so signing in
   // place snapshots for undo and only touches the on-disk file on Save.
   const { performOperation } = useOperations();
   const [result, setResult] = useState<VerifyResult | null>(null);
@@ -49,13 +49,13 @@ export function SignaturesPanel(): React.ReactElement {
   const [signing, setSigning] = useState(false);
   const [signResult, setSignResult] = useState<SignResult | null>(null);
   const [signError, setSignError] = useState<string | null>(null);
-  // PAdES / TSA / LTV (F2/F4). TSA + LTV are network calls to endpoints the
+  // PAdES / TSA / LTV. TSA + LTV are network calls to endpoints the
   // USER configures — inherent to the capability, never a bundled service.
   const [pades, setPades] = useState(false);
   const [tsaUrl, setTsaUrl] = useState('');
   const [ltv, setLtv] = useState(false);
 
-  // F4 trust management: user-chosen CA anchors, persisted. The OS store is
+  // Trust management: user-chosen CA anchors, persisted. The OS store is
   // deliberately never consulted (the panel's standing explicit-trust rule);
   // these are the ONLY anchors `trusted` can chain to.
   const [trustRoots, setTrustRoots] = useState<string[]>(() => {
@@ -135,7 +135,7 @@ export function SignaturesPanel(): React.ReactElement {
         file: activeFile.workingPath,
         output,
         ...sourceParams,
-        // A token source takes the password field as its PIN (F3).
+        // A token source takes the password field as its PIN.
         ...(sourceParams.pkcs11_module ? { pkcs11_pin: pw } : { password: pw }),
         ...(rsn && rsn.trim() ? { reason: rsn.trim() } : {}),
         ...(loc && loc.trim() ? { location: loc.trim() } : {}),
@@ -190,7 +190,7 @@ export function SignaturesPanel(): React.ReactElement {
     }
   }, [activeFile, source, password, reason, location, doSign, pades, tsaUrl, ltv]);
 
-  // 9.F5: the core in-place sign, shared by the UI handler and the e2e harness
+  // The core in-place sign, shared by the UI handler and the e2e harness
   // hook (the native .pfx picker is not WebDriver-drivable, exactly as doSign).
   // Routes through the workspace's undoable performOperation (snapshot → sign
   // the working copy → UPDATE_FILE), so the signature becomes part of the open
@@ -207,7 +207,7 @@ export function SignaturesPanel(): React.ReactElement {
       if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
       await performOperation(activeFile.path, 'sign_pdf', {
         ...sourceParams,
-        // A token source takes the password field as its PIN (F3).
+        // A token source takes the password field as its PIN.
         ...(sourceParams.pkcs11_module ? { pkcs11_pin: pw } : { password: pw }),
         // The engine refuses output == input UNLESS this opt-in is set — the
         // in-place flow is the one caller that intends it (regression).
@@ -351,7 +351,7 @@ export function SignaturesPanel(): React.ReactElement {
               <SignatureCard
                 key={sig.field ?? i}
                 sig={sig}
-                // F7: jump to the widget's page. jumpToFilePage (not
+                // Jump to the widget's page. jumpToFilePage (not
                 // centerOn) — the bookmark rule: it resolves page number →
                 // live id, partitions included.
                 onJump={
@@ -362,7 +362,7 @@ export function SignaturesPanel(): React.ReactElement {
               />
             ))}
           </div>
-          {/* Trust posture (F4): with no anchors, identity is explicitly
+          {/* Trust posture: with no anchors, identity is explicitly
               unverified (never the OS store); with user anchors, `trusted`
               is validated against exactly those. */}
           {trustRoots.length === 0 ? (
@@ -431,7 +431,7 @@ export function SignaturesPanel(): React.ReactElement {
           <p className="text-xs text-neutral-500 -mt-1">
             {tChrome('panel.sig.signBlurb')}
           </p>
-          {/* F6: the visible-signature path from the PANEL — hands off to the
+          {/* The visible-signature path from the PANEL — hands off to the
               canvas placement flow with these signer details prefilled, so
               nothing is typed twice. Offered only while the canvas is up. */}
           {getCanvasServices()?.startVisibleSignature && (

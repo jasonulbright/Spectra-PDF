@@ -1,4 +1,4 @@
-// P21 — WCAG 2.1 A/AA evidence, run against the LIVE app: an axe-core sweep
+// WCAG 2.1 A/AA evidence, run against the LIVE app: an axe-core sweep
 // of every major surface (the shared walk in support/surface-walk.ts: home,
 // the open document, all 24 tools and every op panel inside them, every nav
 // panel, the find bar, an open menu, the Properties dialog, every
@@ -105,7 +105,7 @@ async function runAxe(theme: string, surface: string): Promise<void> {
   }
 }
 
-describe('WCAG 2.1 A/AA sweep (P21)', () => {
+describe('WCAG 2.1 A/AA sweep', () => {
   it('boots with the harness', async () => {
     await waitForHarness();
   });

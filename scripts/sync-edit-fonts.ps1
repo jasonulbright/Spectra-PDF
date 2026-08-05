@@ -1,4 +1,4 @@
-# Vendors the Edit-tool fallback font FAMILY (Phase 7.4 + 9.B1 + 9.A3b)
+# Vendors the Edit-tool fallback font FAMILY
 # into resources/fonts - the same repo-hygiene class as resources/python and
 # resources/ghostscript: assembled by script, gitignored, SHIPPED in the
 # product bundle (tauri.conf.json resources maps ../resources/fonts -> fonts).
@@ -10,7 +10,7 @@
 #   Serif -> Times New Roman
 #   Mono  -> Courier New
 # The engine (font_fallback.resolve_fallback_font) picks the face matching
-# the run's own font family (and, since 9.A3b, the requested style) so a
+# the run's own font family and the requested style, so a
 # serif document's converted text stays serif and a bold restyle lands on
 # the real Bold face. THIRD-PARTY-LICENSES.md section Fonts carries the license
 # text pointer.
@@ -56,7 +56,7 @@ $Faces = @(
     @{ Name = 'LiberationMono-BoldItalic.ttf';  Sha256 = '79451f3c09fe25116098853b7a2ca6e2436220ccc11af022979adbcf195be130' }
 )
 
-# 9.K2 OpenType features: Libertinus Serif (SIL OFL 1.1) as a SECOND, feature-
+# OpenType features: Libertinus Serif (SIL OFL 1.1) as a SECOND, feature-
 # bearing family. The four Serif OTF faces carry smcp/c2sc/salt/onum/liga/dlig
 # in their GSUB - Liberation has NONE of those, and Libertinus's own TTF builds
 # STRIP the features (only 'kern' survives), so the CFF-flavoured OTF is
@@ -159,7 +159,7 @@ Write-Host "Vendored: $Target"
 Remove-Item $Tmp -Force
 Remove-Item $Extract -Recurse -Force
 
-# --- Libertinus Serif OTF (9.K2 OpenType features) ---
+# --- Libertinus Serif OTF (OpenType features) ---
 $LibTmp = Join-Path $env:TEMP "libertinus-$LibVersion.zip"
 Write-Host "Downloading Libertinus $LibVersion..."
 Invoke-WebRequest -Uri $LibUrl -OutFile $LibTmp -UseBasicParsing
@@ -259,10 +259,10 @@ $RtlSources = @(
         License = @{ In = 'OFL.txt'; Out = 'LICENSE-NotoHebrew-OFL.txt'; Sha256 = '9b9fe028b5ba74d231659a1bbaf0ed09b11e759d1ca6a070999e16d151616b47' }
     }
     @{
-        # 9.T12 — the Mongolian shaping face. Mongolian joins cursively, and a
+        # The Mongolian shaping face. Mongolian joins cursively, and a
         # PDF viewer never shapes, so a re-emitted Mongolian column MUST come
         # from a face that still carries the joining rules; the document's own
-        # program is preferred (T26 in-place) and this is what substitutes when
+        # program is preferred (in-place) and this is what substitutes when
         # it cannot.
         #
         # Chosen on the same MEASUREMENT that chose IBM Plex over Noto Sans

@@ -1,4 +1,4 @@
-// P22 slice D — the Combine Files list model (brief 41 § 4, § 10 vitest).
+// The Combine Files list model (vitest).
 //
 // The same reason `create-pdf.test.ts` exists: there is no DOM test
 // environment here, so the rules that decide what Combine sends and what it

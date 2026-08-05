@@ -1,4 +1,4 @@
-// Tree reorder for the canvas outline sidebar (2n.2). Bookmarks form a tree,
+// Tree reorder for the canvas outline sidebar. Bookmarks form a tree,
 // so "drag-reorder" must support both re-sequencing siblings AND reparenting
 // (nesting / un-nesting). This is the projected-depth model dnd-kit's sortable
 // tree used, but implemented over plain index paths with no per-node ids and
@@ -11,7 +11,7 @@
 // always valid because the dragged node's projected depth is clamped so it can
 // never exceed "one deeper than the row above it".
 //
-// OutlineNode carries opaque `action`/`dest`/`action_lossy` fields (2l action
+// OutlineNode carries opaque `action`/`dest`/`action_lossy` fields (action
 // preservation) beyond {title, page, children}; every node is cloned by spread
 // so those ride along untouched through a reorder.
 
@@ -19,7 +19,7 @@ export interface OutlineNode {
   title: string;
   page: number | null;
   children: OutlineNode[];
-  // Opaque 2l action-preservation payloads — never inspected here, only
+  // Opaque action-preservation payloads — never inspected here, only
   // preserved. Indexed access keeps them through the `{ ...node }` clones.
   [key: string]: unknown;
 }

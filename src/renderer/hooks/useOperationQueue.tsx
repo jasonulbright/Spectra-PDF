@@ -77,7 +77,7 @@ export const FRIENDLY_NAMES: Record<string, string> = {
 // anything trackable, which would make merely LOOKING at a document flush its
 // pending page edits to disk.
 //
-// `get_pdf_version` was missing from this list (found by M5.5b's Properties
+// `get_pdf_version` was missing from this list (found by the Properties
 // e2e): every read of the PDF version — the Optimize pane's, and now the
 // Properties dialog's — was queuing as an operation and gating a commit.
 const INTERNAL_METHODS = new Set([
@@ -87,16 +87,16 @@ const INTERNAL_METHODS = new Set([
   'get_metadata',
   'get_pdf_version',
   'get_outline',
-  // 9.S6: reading the document's JavaScript is a pure lookup — trackable would
+  // Reading the document's JavaScript is a pure lookup — trackable would
   // route it through the commit gate and flush pending page edits just for
   // opening the panel (the get_pdf_version/get_outline hazard).
   'list_document_js',
-  // 9.A2-tail-2 fit indicator (round 31): a pure read despite taking a file
+  // Fit indicator: a pure read despite taking a file
   // — it measures how NEW text would wrap, independent of page content, so
   // gating it would force-commit unrelated pending page edits on every
   // keystroke pause in the Add Text card (the exact get_pdf_version bug).
   'measure_text_box',
-  // FC4b: the GUI form read routes through the engine (`lib/forms.ts`). It is a
+  // The GUI form read routes through the engine (`lib/forms.ts`). It is a
   // pure lookup that drives the FormsPanel + the on-canvas overlay on every
   // buffer change — gating it would flush the user's pending page edits to disk
   // just for showing a form's fields (the get_pdf_version/measure_text_box
@@ -105,7 +105,7 @@ const INTERNAL_METHODS = new Set([
   // Reading /PageLabels to seed the editor panel — a lookup, not an edit;
   // set_page_labels stays gated.
   'get_page_labels',
-  // 9.T6: enumerating the machine's installed fonts touches no document at
+  // Enumerating the machine's installed fonts touches no document at
   // all — it names no file, so the commit gate and the per-file lock have
   // nothing to gate, and running it through them would put a font-picker
   // open in front of the user's actual work in the serial engine queue.
@@ -139,7 +139,7 @@ const INTERNAL_METHODS = new Set([
   // Reading the structure tree to seed the Tags + Reading Order panels — a
   // read; the set/move/delete/add tag mutations stay gated.
   'get_struct_tree',
-  // N11 slice A — the snap-geometry probe. A pure read, and the
+  // The snap-geometry probe. A pure read, and the
   // get_pdf_version/measure_text_box hazard in its sharpest form: it refetches
   // whenever the workspace changes, and an ANNOTATION is a pending page edit,
   // so gating it would flush the user's just-drawn markup to disk the instant
@@ -161,7 +161,7 @@ function fileName(path: unknown): string {
 }
 
 /**
- * N12 slice B — what a queue line SAYS, as data rather than as a finished
+ * What a queue line SAYS, as data rather than as a finished
  * English sentence. The queue stores this descriptor and renders it at the
  * current language on every paint, while the operation LOG renders the same
  * descriptor pinned to English (a diagnostic sink — the slice-D boundary).
@@ -348,7 +348,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }): Reac
       },
       (err) => {
         // The queue LINE renders in the UI language; the LOG stays English
-        // (N12 slice D — an engine refusal keeps its original text in the
+        // (an engine refusal keeps its original text in the
         // diagnostic sink, exactly as the label above passes `lng: 'en'`).
         const message = err instanceof Error ? err.message : String(err);
         setItems((prev) => prev.map((item) =>

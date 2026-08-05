@@ -157,10 +157,10 @@ interface WorkspaceCanvasViewProps {
   // performOperation, so the commit gate flushes pending page edits, a
   // snapshot lands on the undo chain, and the buffer reloads after.
   onRedactFile: (path: string, regions: RedactionRegion[]) => Promise<void>;
-  // F10: persist the pending marks as the file's /Redact annotation set
+  // Persist the pending marks as the file's /Redact annotation set
   // (same performOperation shape — undoable; the reload re-seeds).
   onSaveRedactionMarks: (path: string, regions: RedactionRegion[]) => Promise<void>;
-  // F8: a pushbutton widget clicked in fill mode, with its classified /A.
+  // A pushbutton widget clicked in fill mode, with its classified /A.
   onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => Promise<void>;
   // Author link regions from a text selection (same performOperation shape:
   // gate flush -> snapshot -> engine add_links -> reload, so it undoes).
@@ -168,7 +168,7 @@ interface WorkspaceCanvasViewProps {
   // Persist OCR text layers into one file — same performOperation routing as
   // onRedactFile (gate flush -> snapshot -> engine apply_ocr_layer -> reload).
   onApplyOcrLayer: (path: string, pages: OcrApplyPage[]) => Promise<void>;
-  // Edit ▸ Images (7.1): one handler, three actions, all App-routed (delete/
+  // Edit ▸ Images: one handler, three actions, all App-routed (delete/
   // replace via the snapshot→engine→reload shape — undoable; extract = gated
   // read + save, resolving to a user-facing notice naming the real output).
   // `opts` is the harness's dialog bypass.
@@ -187,7 +187,7 @@ interface WorkspaceCanvasViewProps {
       mask?: import('../../lib/edit-images').EditImageMaskParam;
     },
   ) => Promise<string | void>;
-  // P7 multi-select: group transform/delete — ONE engine call for N
+  // Multi-select: group transform/delete — ONE engine call for N
   // placements (one snapshot, one undo entry). Same EDIT_DECLINED contract.
   onEditImagesGroup: (
     kind: 'transform' | 'delete',
@@ -195,7 +195,7 @@ interface WorkspaceCanvasViewProps {
     page: number,
     opts: { targets?: { index: number; matrix: number[] }[]; indexes?: number[] },
   ) => Promise<string | void>;
-  // Edit ▸ Vectors (9.D1/D2/D3): delete, transform, or restyle one vector path
+  // Edit ▸ Vectors: delete, transform, or restyle one vector path
   // object — same undoable App routing. EDIT_DECLINED on a refused signed-doc
   // warning, like the image/text handlers.
   onEditVector: (
@@ -210,7 +210,7 @@ interface WorkspaceCanvasViewProps {
       lineWidth?: number;
     },
   ) => Promise<string | void>;
-  // Edit ▸ Text (7.2+7.3): replace one run's text — same one-snapshot,
+  // Edit ▸ Text: replace one run's text — same one-snapshot,
   // undoable App routing (engine replace_text_run). Resolves EDIT_DECLINED
   // when the signed-doc warning was refused (the canvas restores its
   // listing and says so).
@@ -221,7 +221,7 @@ interface WorkspaceCanvasViewProps {
     newText: string,
     opts?: { convert?: boolean },
   ) => Promise<string | void>;
-  /** T14: run-scoped size/color restyle (text unchanged) — same App routing
+  /** Run-scoped size/color restyle (text unchanged) — same App routing
    * and EDIT_DECLINED contract as onEditText. */
   onRestyleText: (
     path: string,
@@ -229,7 +229,7 @@ interface WorkspaceCanvasViewProps {
     index: number,
     style: { size?: number; color?: [number, number, number] },
   ) => Promise<string | void>;
-  // Edit ▸ Paragraphs (7.5): replace a paragraph's text and re-lay-out
+  // Edit ▸ Paragraphs: replace a paragraph's text and re-lay-out
   // inside its box — same one-snapshot, undoable App routing (engine
   // replace_paragraph_text), same EDIT_DECLINED contract. The canvas
   // supplies the fingerprint (member runs + logical text) and the
@@ -242,7 +242,7 @@ interface WorkspaceCanvasViewProps {
     spans: { start: number; end: number; run: number }[],
     opts?: ParagraphEditOpts,
   ) => Promise<string | void>;
-  // A4 merge: the engine validates BOTH fingerprints and refuses stale
+  // merge: the engine validates BOTH fingerprints and refuses stale
   // views / cross-stream pairs; EDIT_DECLINED on the signed-doc refusal.
   onMergeParagraph: (
     path: string,
@@ -256,7 +256,7 @@ interface WorkspaceCanvasViewProps {
       restyle?: MergeRestyle;
     },
   ) => Promise<string | void>;
-  // Author a NEW text object (9.A2): a rubber-band box + entered text become a
+  // Author a NEW text object: a rubber-band box + entered text become a
   // fresh Type0 run via the engine's add_text_box. `rect` is PDF user-space
   // points; the return mirrors onEditParagraph (EDIT_DECLINED on a signed-doc
   // refusal). Undoable.
@@ -273,13 +273,13 @@ interface WorkspaceCanvasViewProps {
       bold?: boolean;
       italic?: boolean;
       kern?: boolean;
-      // 9.K2 OpenType features — ['small_caps'] and/or ['salt']; alt_index
+      // OpenType features — ['small_caps'] and/or ['salt']; alt_index
       // picks the salt alternate.
       features?: string[];
       alt_index?: number;
     },
   ) => Promise<string | void>;
-  // Embed a NEW image (9.C2) at a user-space rect. `source` is optional — the
+  // Embed a NEW image at a user-space rect. `source` is optional — the
   // App handler PICKS the file when it's absent; the harness injects it (the
   // native picker is undrivable). Undoable; EDIT_DECLINED on a signed-doc
   // refusal.
@@ -293,18 +293,18 @@ interface WorkspaceCanvasViewProps {
       | { svg_path: string },
     at?: [number, number],
   ) => Promise<string | void>;
-  // Add-page ghost (2n.3): pick file(s) and import their pages into a document
+  // Add-page ghost: pick file(s) and import their pages into a document
   // at an index (byte-only import machinery, undoable via the page tier).
   onAddPages: (docId: string, toIndex: number) => void;
-  // Bake pending on-canvas form values into one file (2n.4b) — App implements
+  // Bake pending on-canvas form values into one file — App implements
   // the FormsPanel shape (snapshot(gate) → engine fill_form_fields → reload →
   // UPDATE_FILE), so it lands on the snapshot-undo chain.
   onFillFormValues: (path: string, values: Record<string, FormFieldValue>) => Promise<void>;
-  // Author a new form field into one file (2n.4c) — same whole-file-op shape.
+  // Author a new form field into one file — same whole-file-op shape.
   onAddFormField: (path: string, spec: NewFieldSpec) => Promise<void>;
   /** Author N fields as ONE undoable act — what an accepted candidate set uses. */
   onAddFormFields: (path: string, specs: readonly NewFieldSpec[]) => Promise<void>;
-  // Per-position external drop (2n.3): the canvas publishes a resolver here so
+  // Per-position external drop: the canvas publishes a resolver here so
   // App's drop handler can map a drop point to the document + index under it
   // (returns null for a between/empty drop → App falls back to appending).
   dropResolverRef: React.MutableRefObject<CanvasDropResolver | null>;
@@ -321,7 +321,7 @@ export type CanvasDropResolver = (clientX: number, clientY: number) => CanvasDro
 
 // Stable empties so the "no pending marks" hot path never breaks the layer
 // components' memoization when unrelated state changes.
-// Hand mode (M6.2): a press on a page must NOT pick it up — and by not
+// Hand mode: a press on a page must NOT pick it up — and by not
 // stopping propagation, the pointer falls through to the board's d3 pan, so
 // hand drags the whole board from anywhere, page or background.
 const HAND_SUPPRESSES_PICKUP = (): void => {};
@@ -429,7 +429,7 @@ function RecalibratePopover({
 const NO_EDIT_IMAGES: ReadonlyMap<string, EditImagePlacement[]> = new Map();
 const NO_EDIT_VECTORS: ReadonlyMap<string, EditVectorObject[]> = new Map();
 const NO_EDIT_GEOM: ReadonlyMap<string, PageGeometry> = new Map();
-// N11 slice A: per-page snap geometry, and how many pages either side of the
+// Per-page snap geometry, and how many pages either side of the
 // reading position get one.
 const NO_SNAP_GEOM: ReadonlyMap<string, PageSnapGeometry> = new Map();
 const SNAP_PAGE_WINDOW = 2;
@@ -477,7 +477,7 @@ export function WorkspaceCanvasView({
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const canvasRef = useRef<CanvasHandle | null>(null);
-  // Document view (M4): its reading-mode CanvasHandle, and a ref-mirror of the
+  // Document view: its reading-mode CanvasHandle, and a ref-mirror of the
   // mode so the registered `canvas()` getter routes to the active view.
   const documentViewRef = useRef<CanvasHandle | null>(null);
   const docViewMode = state.ui.docViewMode;
@@ -528,7 +528,7 @@ export function WorkspaceCanvasView({
             : documentViewRefD.current,
     [],
   );
-  // N3 marquee zoom: the gesture's DocumentView applied its own zoom+scroll;
+  // Marquee zoom: the gesture's DocumentView applied its own zoom+scroll;
   // sibling panes sync to the SAME zoom (quad's equal-zoom invariant — see
   // activeCanvasHandle's broadcast note below). Their scroll follows the
   // frozen-pane DOM links, exactly as with any active-pane navigation.
@@ -602,7 +602,7 @@ export function WorkspaceCanvasView({
     pendingJumpRef.current = null;
     activeCanvasHandle()?.centerOn(pid);
   }, [focusedDoc, docViewMode, activeCanvasHandle]);
-  // Reading-view page navigation (M4.1b): the current page (from DocumentView's
+  // Reading-view page navigation: the current page (from DocumentView's
   // scroll tracking) + the editable page box. `pageBox` mirrors currentPage
   // except while the user is typing in it (so a scroll doesn't clobber a
   // half-typed number).
@@ -614,7 +614,7 @@ export function WorkspaceCanvasView({
   // just focusing + wheel-scrolling (no typing) resyncs the readout instead of
   // teleporting back to the frozen number (regression).
   const pageBoxDirty = useRef(false);
-  // P5 follow-on: the document's own page LABELS, so the readout counts the
+  // Follow-on: the document's own page LABELS, so the readout counts the
   // way the printed thing does (i, ii, iii, then a body restarting at 1) and
   // typing "iv" goes where a reader means. Empty for a document with no
   // /PageLabels, which keeps every path below on the plain sheet number.
@@ -645,7 +645,7 @@ export function WorkspaceCanvasView({
   }, [docViewMode, focusedDoc?.id]);
 
   // Publish the reading position so the Pages nav panel can highlight and
-  // scroll-follow it (M4.1e). Resolved to a PageRef id here — the panel matches
+  // scroll-follow it. Resolved to a PageRef id here — the panel matches
   // ids, and reconstructing one from a number there would duplicate this view's
   // page-order knowledge. Null in Organize mode: the board shows every page at
   // once and has no "current" page, so the panel must not claim one.
@@ -658,7 +658,7 @@ export function WorkspaceCanvasView({
   // highlight the panel would keep showing.
   useEffect(() => () => void dispatch({ type: 'UI_SET_CURRENT_PAGE', pageId: null }), [dispatch]);
 
-  // Publish the external-drop resolver (2n.3) so App's drop handler can map a
+  // Publish the external-drop resolver so App's drop handler can map a
   // drop point to the document + index under it. Reads live layout/canvas via
   // refs; an 'into' target imports, a 'between' target returns null so App
   // appends a new strip (today's behavior). The clientToWorld + computeDropTarget
@@ -676,8 +676,8 @@ export function WorkspaceCanvasView({
   }, [dropResolverRef]);
   // Multi-select is view state (never the page-edit tier): a set of selected
   // page ids plus the anchor for shift-range selection. Batched page ops
-  // (move/delete/rotate) act on the whole set as one undo step (2n.1). It
-  // lives in the ui slice (Phase 4 M1) so command enablement can read it;
+  // (move/delete/rotate) act on the whole set as one undo step. It
+  // lives in the ui slice so command enablement can read it;
   // buffer-identity invalidation moved into the reducer with it.
   const selectedPageIds = state.ui.selectedPageIds;
   const [renderVersion, setRenderVersion] = useState(0);
@@ -698,7 +698,7 @@ export function WorkspaceCanvasView({
   const [stampPreset, setStampPreset] = useState<StampPreset | null>(null);
   // Shape mode's figure picker (rung 2) — the stamp-preset pattern.
   const [shapeType, setShapeType] = useState<ShapeType>('rect');
-  // Measure (parity map § 2): the scale ratio the readouts apply, whether a
+  // Measure: the scale ratio the readouts apply, whether a
   // finished measurement lands as an ink markup, and the latest value shown
   // in the secondary toolbar. Session-scoped like toolColor.
   const [measureScale, setMeasureScale] = useState<MeasureScale>(DEFAULT_MEASURE_SCALE);
@@ -743,7 +743,7 @@ export function WorkspaceCanvasView({
   // Pending visible-signature placement — single, transient, same lifecycle
   // as redaction marks (see lib/signature-placement.ts).
   const [sigPlacement, setSigPlacement] = useState<SignaturePlacement | null>(null);
-  // Sign-into-an-existing-field target (2n.4d) — mutually exclusive with the
+  // Sign-into-an-existing-field target — mutually exclusive with the
   // rubber-band placement; same transient lifecycle.
   const [sigFieldTarget, setSigFieldTarget] = useState<{ path: string; fieldName: string } | null>(
     null,
@@ -756,14 +756,14 @@ export function WorkspaceCanvasView({
   const [signError, setSignError] = useState<string | null>(null);
   const [signDone, setSignDone] = useState<{ signer: string | null; output: string; ok: boolean } | null>(null);
   const { call: engineCall, callRaw: engineCallRaw } = useEngine();
-  // 9.T6: prime the installed-font listing ONCE per session. It is a
+  // Prime the installed-font listing ONCE per session. It is a
   // property of the machine, not of any document, so it is fetched here
   // (where the engine handle lives) and read from the module cache by the
   // pickers deep in the page tree.
   useEffect(() => {
     primeSystemFonts(engineCall);
   }, [engineCall]);
-  // P5 follow-on: fetch the focused document's page labels. Declared HERE
+  // Follow-on: fetch the focused document's page labels. Declared HERE
   // rather than beside `pageLabels` because the engine handle is only in
   // scope from this line down.
   const focusedPath = focusedDoc?.path;
@@ -808,11 +808,11 @@ export function WorkspaceCanvasView({
     // the wrong sheet (`resolvePageEntry` refuses an out-of-range one, but
     // an in-range wrong one it cannot see).
   }, [focusedWorkingPath, focusedBuffer, engineCall]);
-  // Find/OCR (2m): the ONE workspace search index, lifted to a provider so the
-  // Search nav panel shares it (Phase 4 M3.3 — double-instantiating would
+  // Find/OCR: the ONE workspace search index, lifted to a provider so the
+  // Search nav panel shares it (double-instantiating would
   // double the OCR work and desync results). Ctrl+F opens the bar.
   const searchIndex = useSearchContext();
-  // F15 slice D: the Search & Redact panel's OCR arm reads the index through
+  // The Search & Redact panel's OCR arm reads the index through
   // the services seam, which is registered once — so it reaches the CURRENT
   // index through a ref rather than a captured one.
   const searchIndexRef = useRef(searchIndex);
@@ -848,7 +848,7 @@ export function WorkspaceCanvasView({
   const [applyingOcr, setApplyingOcr] = useState(false);
   const [ocrApplyError, setOcrApplyError] = useState<string | null>(null);
 
-  // On-canvas forms (2n.4b): per-file field reads + widget projections, and
+  // On-canvas forms: per-file field reads + widget projections, and
   // the pending-values map. Pending values are NAME-keyed per file —
   // deliberately not the positional-id lifecycle of marks/selection: a field
   // name survives page edits and commits, so half-typed values survive an
@@ -896,7 +896,7 @@ export function WorkspaceCanvasView({
     return n;
   }, [pendingFormValues]);
 
-  // Add-field sub-mode (2n.4c): while armed, forms mode draws a placement
+  // Add-field sub-mode: while armed, forms mode draws a placement
   // band. The placement itself is transient view state with the
   // signature-placement lifecycle: single (drawing again replaces), dies on
   // buffer-identity change or when its page leaves the workspace.
@@ -916,14 +916,14 @@ export function WorkspaceCanvasView({
     ) => {
       const doc = docs.find((d) => d.id === docId);
       if (!doc) return;
-      // Anchor only to CURRENT ids (2n.4c / Phase 9): docs indexed from a
+      // Anchor only to CURRENT ids: docs indexed from a
       // superseded buffer are about to be re-identified (fresh generation),
       // so a placement drawn against them is stillborn — refuse it rather
       // than arm a box that dies at SET_WORKSPACE_DOCUMENTS moments later.
       if (!placementDocsCurrent(state.files, docs, doc.path)) return;
       setNewFieldPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
       setSigPlacement(null); // one placement card at a time (see onSetSignaturePlacement)
-      setAddTextPlacement(null); // …including the Add-Text card (9.A2)
+      setAddTextPlacement(null); // …including the Add-Text card
       setNfError(null);
     },
     [docs, state.files],
@@ -1026,7 +1026,7 @@ export function WorkspaceCanvasView({
     }).catch(() => undefined); // surfaced via nfError; the card stays open
   }, [createFieldFromPlacement, nfName, nfType, nfOptions, nfMultiline]);
 
-  // --- 9.A2 Add Text ------------------------------------------------------
+  // --- Add Text ------------------------------------------------------
   // Same placement lifecycle as the new-field card (single, transient, dies
   // when its page leaves). The band draws the box; this card collects the
   // text/size/colour/family; commit runs the display→PDF rect conversion
@@ -1034,7 +1034,7 @@ export function WorkspaceCanvasView({
   const [addTextPlacement, setAddTextPlacement] = useState<SignaturePlacement | null>(null);
   const [atText, setAtText] = useState('');
   const [atSize, setAtSize] = useState(12);
-  // T15: per-span styling — spans over atText's character positions,
+  // Per-span styling — spans over atText's character positions,
   // captured from the textarea's live selection. Any TEXT change clears
   // them (positions would silently drift under arbitrary edits; a visible
   // reset is the predictable rule) — the card notes it.
@@ -1046,21 +1046,21 @@ export function WorkspaceCanvasView({
   const [atSpanBold, setAtSpanBold] = useState(false);
   const [atSpanItalic, setAtSpanItalic] = useState(false);
   const atTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  // A2-tail: authoring-time rotation (90-deg steps; sticky like size/family).
-  // T19: any finite degree value — the step button cycles quarters, the
+  // Authoring-time rotation (90-deg steps; sticky like size/family).
+  // Any finite degree value — the step button cycles quarters, the
   // number field takes free angles.
   const [atRotate, setAtRotate] = useState<number>(0);
-  // A2-tail-2: whole-box style toggles (sticky) + the live fit result
+  // Whole-box style toggles (sticky) + the live fit result
   // (null = unknown/measuring; the notice shows only on a definite no).
   const [atBold, setAtBold] = useState(false);
   const [atItalic, setAtItalic] = useState(false);
-  // 9.K2 OpenType features (sticky like the other style toggles). Authoring
+  // OpenType features (sticky like the other style toggles). Authoring
   // renders in a bundled face, so a feature switches to Libertinus Serif;
   // alternates picks its glyph by index.
   const [atSmallCaps, setAtSmallCaps] = useState(false);
   const [atAlternates, setAtAlternates] = useState(false);
   const [atAltIndex, setAtAltIndex] = useState(0);
-  // 9.K1: pair kerning, ON by default (correct typography is the right
+  // Pair kerning, ON by default (correct typography is the right
   // default and is what the fit measurement assumes); the toggle is an
   // opt-OUT, and only that opt-out is ever sent.
   const [atKern, setAtKern] = useState(true);
@@ -1078,8 +1078,8 @@ export function WorkspaceCanvasView({
     ) => {
       const doc = docs.find((d) => d.id === docId);
       if (!doc) return;
-      // Anchor only to CURRENT ids — the onSetNewFieldRect rule (2n.4c /
-      // Phase 9, round 24 tail: the sibling flows shared the silent-no-op
+      // Anchor only to CURRENT ids — the onSetNewFieldRect rule:
+      // The sibling flows shared the silent-no-op
       // pattern without the guard). A placement drawn against docs indexed
       // from a superseded buffer dies at SET_WORKSPACE_DOCUMENTS — refuse.
       if (!placementDocsCurrent(state.files, docs, doc.path)) return;
@@ -1099,7 +1099,7 @@ export function WorkspaceCanvasView({
     },
     [docs, state.files, atRotate],
   );
-  // --- P5b Crop draw ------------------------------------------------------
+  // --- Crop draw ------------------------------------------------------
   // The band is the region to KEEP. Nothing commits here: the insets are
   // computed where the page's own view box and baked rotation are reachable,
   // then published to the Page Boxes panel, which owns Apply — so a drawn
@@ -1182,14 +1182,14 @@ export function WorkspaceCanvasView({
       rotate?: number;
       bold?: boolean;
       italic?: boolean;
-      /** 9.K1: pair kerning — ON by default engine-side, so only `false`
+      /** Pair kerning — ON by default engine-side, so only `false`
        * travels. */
       kern?: boolean;
-      /** 9.K2 OpenType features. */
+      /** OpenType features. */
       smallCaps?: boolean;
       alternates?: boolean;
       altIndex?: number;
-      /** T15: per-span styling over the text's character positions. */
+      /** Per-span styling over the text's character positions. */
       spans?: {
         start: number;
         end: number;
@@ -1201,7 +1201,7 @@ export function WorkspaceCanvasView({
     }): Promise<void> => {
       if (creatingTextRef.current) return; // re-entry: the button is disabled while creating
       const placement = liveAddTextPlacement;
-      // Same reject-loudly rule as createFieldFromPlacement (round 24 tail):
+      // Same reject-loudly rule as createFieldFromPlacement:
       // a buffer change between place and commit kills the placement, and
       // while its reindex is in flight the surviving ids are about to rotate
       // — converting sourcePageIndex against the new bytes could land the
@@ -1239,15 +1239,15 @@ export function WorkspaceCanvasView({
             ...(params.color !== undefined ? { color: params.color } : {}),
             ...(params.family !== undefined ? { family: params.family } : {}),
             // rotate=0 sends NOTHING — the engine's no-param path is pinned
-            // byte-identical to shipped A2 (the A2-tail regression). The
+            // byte-identical to an unrotated authored box. The
             // style toggles share the rule (false sends nothing).
             ...(params.rotate ? { rotate: params.rotate } : {}),
             ...(params.bold ? { bold: true } : {}),
             ...(params.italic ? { italic: true } : {}),
-            // 9.K1 inverts the send-nothing rule: kerning is ON by default,
+            // Inverts the send-nothing rule: kerning is ON by default,
             // so only an explicit opt-OUT travels.
             ...(params.kern === false ? { kern: false } : {}),
-            // 9.K2 features (send-nothing when off, byte-identical no-feature
+            // Features (send-nothing when off, byte-identical no-feature
             // path). alt_index travels only with alternates.
             ...(params.smallCaps || params.alternates
               ? {
@@ -1258,8 +1258,8 @@ export function WorkspaceCanvasView({
                   ...(params.alternates ? { alt_index: params.altIndex ?? 0 } : {}),
                 }
               : {}),
-            // T15: per-span styling (send-nothing when unstyled — the
-            // spanless path stays byte-identical to shipped A2).
+            // Per-span styling (send-nothing when unstyled — the
+            // spanless path stays byte-identical).
             ...(params.spans && params.spans.length > 0 ? { spans: params.spans } : {}),
           },
         );
@@ -1278,7 +1278,7 @@ export function WorkspaceCanvasView({
     },
     [liveAddTextPlacement, docs, state.files, onAddText],
   );
-  // A2-tail-2: the live fit indicator — measure_text_box is the SAME
+  // The live fit indicator — measure_text_box is the SAME
   // layout pass the author op runs (one shared engine function), called
   // debounced so the card can warn before commit. Non-blocking by design
   // (the box is a guide, not a clip); errors just clear the notice (the
@@ -1321,9 +1321,9 @@ export function WorkspaceCanvasView({
             // The fit indicator MUST measure with the same kerning the commit
             // will use, or the card could promise a fit the commit breaks.
             ...(atKern ? {} : { kern: false }),
-            // 9.K2: measure with the SAME features the commit applies — small
+            // Measure with the SAME features the commit applies — small
             // caps change advances, so a plain measurement could promise a fit
-            // the small-caps commit then breaks (the K1 kerning discipline).
+            // the small-caps commit then breaks (the kerning discipline).
             ...(atSmallCaps || atAlternates
               ? {
                   features: [
@@ -1333,8 +1333,8 @@ export function WorkspaceCanvasView({
                   ...(atAlternates ? { alt_index: atAltIndex } : {}),
                 }
               : {}),
-            // T15: the fit indicator measures with the SAME spans the commit
-            // sends (mixed sizes change line heights — the K1 discipline).
+            // The fit indicator measures with the SAME spans the commit
+            // sends (mixed sizes change line heights — the discipline).
             ...(atSpans.length > 0 ? { spans: atSpans } : {}),
           })) as { fits?: boolean };
           if (!stale) setAtFits(typeof res?.fits === 'boolean' ? res.fits : null);
@@ -1452,7 +1452,7 @@ export function WorkspaceCanvasView({
   // Keyboard shortcuts (Escape chain, Ctrl+F, select-all/delete/rotate/zoom)
   // are owned by the app-level keymap dispatcher now (commands/keymap.ts) —
   // the canvas registers its camera + find services for the commands instead
-  // of its own window listeners (Phase 4 M1).
+  // of its own window listeners.
   const findRef = useRef(find);
   findRef.current = find;
   const jumpToPageRef = useRef(jumpToPage);
@@ -1467,7 +1467,7 @@ export function WorkspaceCanvasView({
       // `canvas().centerOn` — the reading view shows one document, so centring
       // a page in another one silently does nothing.
       jumpToPage: (pageId) => jumpToPageRef.current(pageId),
-      // Number → id resolution lives HERE, against live docs (§ F: ids
+      // Number → id resolution lives HERE, against live docs (ids
       // are opaque; only workspace state knows the page). Resolution is
       // by SOURCE identity — a bookmark's number addresses the file's
       // on-disk order, so the jump lands on that physical page even
@@ -1478,7 +1478,7 @@ export function WorkspaceCanvasView({
         if (id) jumpToPageRef.current(id);
         return !!id;
       },
-      // F6: the Signatures PANEL's "visible signature" hand-off — arm the
+      // The Signatures PANEL's "visible signature" hand-off — arm the
       // placement mode and seed the canvas sign card with the panel's
       // signer details, so nothing is typed twice.
       startVisibleSignature: (prefill) => {
@@ -1505,7 +1505,7 @@ export function WorkspaceCanvasView({
       // through the snap-settings store) this one has to route through the
       // services seam — the same reason the find bar does.
       clearGuides: () => clearGuidesRef.current(),
-      // F15 slice D. Every method reaches the live implementation through a
+      // Every method reaches the live implementation through a
       // ref — the registration happens once at mount, while `docs`, the mark
       // set and the search index all change under it.
       redaction: {
@@ -1553,7 +1553,7 @@ export function WorkspaceCanvasView({
     [dispatch],
   );
 
-  // e2e harness for multi-select (2n.1): modifier-click selection and the
+  // e2e harness for multi-select: modifier-click selection and the
   // pointer-capture group drag aren't reliably WebDriver-drivable, so the
   // canvas registers selection setters/readers + the batched delete/rotate
   // command paths here, mirroring the redaction/signature/OCR hooks.
@@ -1628,7 +1628,7 @@ export function WorkspaceCanvasView({
     [],
   );
 
-  // N11 slice C: the count mode's Ctrl-marquee re-files the marks it covered
+  // The count mode's Ctrl-marquee re-files the marks it covered
   // into the armed group. The reducer renumbers them (a sequence is unique per
   // group across the whole document), so all this passes is the group.
   const onRegroupCountMarks = useCallback(
@@ -1901,7 +1901,7 @@ export function WorkspaceCanvasView({
     },
     [resolvedAnnots, dispatch],
   );
-  // N7 residual: quarter-turn / mirror for the vertex kinds — one dispatch,
+  // residual: quarter-turn / mirror for the vertex kinds — one dispatch,
   // one undo step, same TRANSFORM machinery as align/size-match.
   const onRotateFlipSelection = useCallback(
     (op: { rotate: 'cw' | 'ccw' } | { flip: 'h' | 'v' }) => {
@@ -1943,7 +1943,7 @@ export function WorkspaceCanvasView({
         if (movable.length === 0) return;
         e.preventDefault();
         // Arrows are SCREEN directions. Stored geometry lives in the page's
-        // real-rotation frame; Rotate View (M6.1) projects it by
+        // real-rotation frame; Rotate View projects it by
         // viewRotation for display — so the screen vector un-projects by the
         // inverse view rotation before it can be a stored-frame delta.
         // (Vector form of rotateNormalizedPoint: translation cancels.)
@@ -1986,7 +1986,7 @@ export function WorkspaceCanvasView({
   // Declared HERE, above the services registration that reads them, and
   // populated further down where the mark machinery lives — the registration
   // effect runs after render, so both are always filled by the time a caller
-  // arrives. Same shape as `docsRef`/`filesRef`, which the F10 seed already
+  // arrives. Same shape as `docsRef`/`filesRef`, which the seed already
   // reads from above their own declarations.
   const markSubscribersRef = useRef(new Set<() => void>());
   const redactionServiceRef = useRef<{
@@ -2077,7 +2077,7 @@ export function WorkspaceCanvasView({
           pageId,
           rect,
           rotationAtDraw,
-          // F15 slice E: a band drawn by hand takes the SAME properties the
+          // A band drawn by hand takes the SAME properties the
           // Search & Redact panel's marks take, read at draw time. One
           // setting, both producers — the properties are how the user works,
           // not something a second surface gets its own copy of.
@@ -2097,7 +2097,7 @@ export function WorkspaceCanvasView({
   // Per-document view state with the redaction-mark lifetime: never written
   // into the file, invalidated on buffer
   // identity, and pruned to pages that still exist so a dead generation-tagged
-  // id can never be offered to a gesture (§ F, the id-holder rule).
+  // id can never be offered to a gesture (the id-holder rule).
   const [guides, setGuides] = useState<PageGuide[]>(NO_GUIDES);
   const liveGuides = useMemo(() => {
     if (guides.length === 0) return NO_GUIDES;
@@ -2160,13 +2160,13 @@ export function WorkspaceCanvasView({
     ) => {
       const doc = docs.find((d) => d.id === docId);
       if (!doc) return;
-      // Anchor only to CURRENT ids — the onSetNewFieldRect rule (2n.4c /
-      // Phase 9, round 24 tail): a placement drawn against docs indexed from
+      // Anchor only to CURRENT ids — the onSetNewFieldRect rule:
+      // a placement drawn against docs indexed from
       // a superseded buffer is stillborn — refuse rather than arm it.
       if (!placementDocsCurrent(state.files, docs, doc.path)) return;
       setSigPlacement({ id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw });
       setNewFieldPlacement(null);
-      setAddTextPlacement(null); // one placement card at a time (9.A2)
+      setAddTextPlacement(null); // one placement card at a time
       setSigFieldTarget(null);
       setSignDone(null);
       setSignError(null);
@@ -2175,14 +2175,14 @@ export function WorkspaceCanvasView({
   );
   const onClearSignaturePlacement = useCallback(() => setSigPlacement(null), []);
 
-  // Clicking an empty signature widget in forms mode targets it (2n.4d). The
+  // Clicking an empty signature widget in forms mode targets it. The
   // early pending-page-edits notice mirrors the hard check in applySignature.
   const onSignFieldRequest = useCallback(
     (path: string, fieldName: string) => {
       setSigFieldTarget({ path, fieldName });
       setSigPlacement(null);
       setNewFieldPlacement(null);
-      setAddTextPlacement(null); // one card at a time — incl. the Add-Text card (9.A2)
+      setAddTextPlacement(null); // one card at a time — incl. the Add-Text card
       setSignDone(null);
       setSignError(
         state.pageDirtyPaths.includes(path)
@@ -2206,7 +2206,7 @@ export function WorkspaceCanvasView({
   // a DIFFERENT physical page — for a destructive tool, dropping the marks is
   // the only safe answer. Buffer identity is exactly what the indexer keys
   // on, so this fires precisely when the workspace is about to be rebuilt.
-  // F10 re-seed: a file's stored /Redact set loads back into transient
+  // Re-seed: a file's stored /Redact set loads back into transient
   // marks whenever its buffer SETTLES (open, commit, whole-file op, undo —
   // the very moments the invalidation below clears them). Marks and file
   // agree by construction: the transient set is always a projection of the
@@ -2216,13 +2216,13 @@ export function WorkspaceCanvasView({
   const seedSeqRef = useRef(new Map<string, number>());
   const pendingSeedRef = useRef<Set<string>>(new Set());
 
-  // ONE page-space → mark conversion, shared by the F10 seed and F15's
-  // Search & Redact panel (slice D). Both take the same payload shape
+  // ONE page-space → mark conversion, shared by the seed and the
+  // Search & Redact panel. Both take the same payload shape
   // `list_redact_annotations` returns and `save_redaction_marks` accepts —
   // `{page, rect}` in the page's own point space — so the stored marks, the
   // searched ones and the applied regions cannot disagree about geometry.
-  // A page this view cannot resolve is COUNTED, never guessed at: the F12
-  // refusal one layer down would be pointless if the conversion silently
+  // A page this view cannot resolve is COUNTED, never guessed at: the
+  // engine refusal one layer down would be pointless if the conversion silently
   // dropped what it could not place.
   const marksFromFileRects = useCallback(
     async (
@@ -2258,7 +2258,7 @@ export function WorkspaceCanvasView({
           pageId: pageRef.id,
           rect,
           rotationAtDraw: pageRef.rotation,
-          // F15 slice E: the entry's own properties when it HAS them (a mark
+          // The entry's own properties when it HAS them (a mark
           // seeded from the file carries the fill and overlay it was saved
           // with), else the ones the user is currently working with (a mark
           // the panel just made). `propertiesFromPayload` never invents a
@@ -2281,7 +2281,7 @@ export function WorkspaceCanvasView({
         const listed = (await engineCallRaw('list_redact_annotations', {
           file: f.workingPath,
         })) as unknown as {
-          // F15 slice E widened the listing: a stored mark reports its
+          // Widened the listing: a stored mark reports its
           // REDACTION PROPERTIES beside its rect, and the seed carries them
           // back onto the transient mark so a saved fill/overlay survives a
           // reopen.
@@ -2305,7 +2305,7 @@ export function WorkspaceCanvasView({
         }
       } catch (err) {
         if (seedSeqRef.current.get(path) !== seq) return; // superseded
-        // F12: the listing REFUSES when the file carries marks it cannot
+        // The listing REFUSES when the file carries marks it cannot
         // account for. Swallowing that put the silence back one layer up —
         // the user would draw over a document whose stored marks were only
         // partly shown and apply a redaction that misses bands they marked.
@@ -2362,7 +2362,7 @@ export function WorkspaceCanvasView({
       // A buffer change can rename/remove fields — a name-keyed sign target
       // must not survive it (the user re-clicks the widget, which re-reads).
       setSigFieldTarget((prev) => (prev && invalidated.has(prev.path) ? null : prev));
-      // Add-Text placement (9.A2): the SAME `bakedRotate + rotationAtDraw`
+      // Add-Text placement: the SAME `bakedRotate + rotationAtDraw`
       // hazard the sig/new-field placements are cleared for. rotationAtDraw is
       // frozen at draw; bakedRotate is re-fetched fresh at commit. A page-tier
       // rotate that gets baked into /Rotate by a commit changes bakedRotate
@@ -2377,7 +2377,7 @@ export function WorkspaceCanvasView({
     }
   }, [state.files]);
 
-  // F10 drain: run queued mark seeds once the workspace's docs reflect the
+  // drain: run queued mark seeds once the workspace's docs reflect the
   // settled buffer (the reindex is async — seeding earlier would bind marks
   // to PageRefs a rebuild is about to kill).
   useEffect(() => {
@@ -2470,17 +2470,17 @@ export function WorkspaceCanvasView({
     }
   }, [docs, state.files, searchIndex, onApplyOcrLayer]);
 
-  // --- Edit ▸ Images (7.1): placements + selection --------------------------
+  // --- Edit ▸ Images: placements + selection --------------------------------
   // Placements come from the engine per page of the FOCUSED document (the
   // reading view's document; the board shows its outlines too — the
-  // documented 7.1 scope). The mode's entry flushes pending page edits so the
+  // documented scope). The mode's entry flushes pending page edits so the
   // engine's committed order matches what's displayed, then listings load
   // incrementally (one cheap engine call per page) under a token that drops
   // stale batches — the batch-OCR selectSource race lesson, applied here from
   // the start. Buffer identity in the deps refetches after every edit/undo.
   const [editImagesByPage, setEditImagesByPage] =
     useState<ReadonlyMap<string, EditImagePlacement[]>>(NO_EDIT_IMAGES);
-  // 9.D1: per-page vector path objects, filled by the same edit-listing pass.
+  // Per-page vector path objects, filled by the same edit-listing pass.
   const [editVectorsByPage, setEditVectorsByPage] =
     useState<ReadonlyMap<string, EditVectorObject[]>>(NO_EDIT_VECTORS);
   // The selected vector object (one at a time), or null. Its own state —
@@ -2488,16 +2488,16 @@ export function WorkspaceCanvasView({
   const [selectedVector, setSelectedVector] = useState<{ pageId: string; index: number } | null>(
     null,
   );
-  // Per-page {box, bakedRotate} for the image pages — the C1 transform gesture
+  // Per-page {box, bakedRotate} for the image pages — the transform gesture
   // needs it to convert pointer↔user space; filled alongside editImagesByPage.
   const [editGeomByPage, setEditGeomByPage] =
     useState<ReadonlyMap<string, PageGeometry>>(NO_EDIT_GEOM);
   const [editTextByPage, setEditTextByPage] =
     useState<ReadonlyMap<string, EditTextListing>>(NO_EDIT_TEXT);
   // ONE selection across all edit-object kinds — the secondary toolbar's
-  // actions key off the kind. 'para' (7.5) is the primary text surface;
+  // actions key off the kind. 'para' is the primary text surface;
   // 'text' survives for runs outside any editable paragraph. The image arm
-  // carries `indexes` (P7 multi-select): `index` stays the anchor (last
+  // carries `indexes` (multi-select): `index` stays the anchor (last
   // clicked) so single-selection consumers read it unchanged; a group is
   // simply indexes.length > 1, same page by construction.
   const [editSel, setEditSel] = useState<
@@ -2532,16 +2532,16 @@ export function WorkspaceCanvasView({
   const prevEditCtxRef = useRef<{ tool: unknown; docId: unknown; buffer: unknown; path: unknown }>(
     { tool: null, docId: null, buffer: null, path: null },
   );
-  // C1-tail (keep selection across a transform): count-PRESERVING image
+  // Keep selection across a transform: count-PRESERVING image
   // ops (transform/rotate/crop/opacity/replace) stash {pageNumber, indexes}
   // at commit; when the post-op refetch lands (page ids regenerated —
   // the non-authored-rebuild rule), the effect below re-selects the same
   // placement(s) so chained nudges need no re-click. Delete/extract never
   // stash (the index dies / nothing changes); declines and failures
-  // clear it. P7: the stash carries the whole group; restore is
+  // clear it. The stash carries the whole group; restore is
   // all-or-nothing (count-preserving ops keep every member alive).
   const imageReselectRef = useRef<{ pageNumber: number; indexes: number[] } | null>(null);
-  // 9.D2 (round-37 MED): the same reselect stash for a vector transform — a
+  // The same reselect stash for a vector transform — a
   // whole-file op regenerates every page id, so the pre-op selectedVector id
   // is dead; this re-selects the object on its page once the fresh listing
   // lands, so chained move/resize/rotate (and a follow-up delete) need no
@@ -2580,7 +2580,7 @@ export function WorkspaceCanvasView({
       setSelectedVector(null);
       vectorReselectRef.current = null;
     }
-    // § F, the id-holder rule applied to the EDIT LISTINGS. These maps are
+    // The id-holder rule applied to the EDIT LISTINGS. These maps are
     // keyed by generation-tagged page ids, and a whole-file op REBUILDS the
     // file: `docs` rotates to a fresh generation one render before the
     // refetch below can publish anything (the two-pass anatomy described
@@ -2647,7 +2647,7 @@ export function WorkspaceCanvasView({
       // (regression; the ctxChanged guard alone only stopped
       // the explicit clears). Stale-by-a-pass entries are safe here
       // precisely because ctxChanged=false means these bytes didn't
-      // change; a REAL context change still starts empty (the 7.1
+      // change; a REAL context change still starts empty (the
       // stale-index discipline). Per-page deletes below prune pages
       // whose fresh listing came back empty.
       const validIds = new Set(doc.pages.map((p) => p.id));
@@ -2701,12 +2701,12 @@ export function WorkspaceCanvasView({
           setEditImagesByPage(new Map(nextImages)); // incremental fill
           setEditVectorsByPage(new Map(nextVectors));
           setEditGeomByPage(new Map(nextGeom));
-          // C1-tail: restore the stashed selection when ITS page's fresh
+          // Restore the stashed selection when ITS page's fresh
           // listing lands. Matched on sourcePageIndex, NOT the recomputed
           // tier position — a concurrent page-strip drag reorders tier
           // positions mid-flight while sourcePageIndex stays the physical
-          // file slot (round 28 MEDIUM). The stash PERSISTS across passes
-          // (round 28 HIGH: a commit's buffer pass and its reindex pass
+          // file slot. The stash PERSISTS across passes
+          // (a commit's buffer pass and its reindex pass
           // each wipe editSel; a one-shot consume restored on the first
           // pass only for the second to wipe it) — restoring is idempotent
           // (the functional ?? keeps any user pick), and the stash dies on
@@ -2730,7 +2730,7 @@ export function WorkspaceCanvasView({
               imageReselectRef.current = null;
             }
           }
-          // 9.D2 (round-37 MED): the same idempotent reselect for a vector
+          // The same idempotent reselect for a vector
           // transform — restore selectedVector to the moved object on its
           // fresh-id page (the functional ?? keeps any user pick).
           const vstash = vectorReselectRef.current;
@@ -2827,7 +2827,7 @@ export function WorkspaceCanvasView({
     );
   }, []);
 
-  // 9.D1: select a vector object (toggle off on re-click). Its own selection
+  // Select a vector object (toggle off on re-click). Its own selection
   // state, independent of the image/text `editSel`.
   const handleSelectEditVector = useCallback((pageId: string, index: number) => {
     setEditNotice(null);
@@ -2837,7 +2837,7 @@ export function WorkspaceCanvasView({
     );
   }, []);
 
-  // 9.D1: delete the selected vector object (undoable, App-routed). On success
+  // Delete the selected vector object (undoable, App-routed). On success
   // the selection clears — the object is gone and the surviving ordinals
   // renumber, so a stale index must never linger.
   const handleDeleteVector = useCallback(async () => {
@@ -2862,10 +2862,10 @@ export function WorkspaceCanvasView({
     }
   }, [selectedVector, focusedDoc, docs, onEditVector, editBusy]);
 
-  // 9.D2: commit a move/resize/rotate — the transform overlay produces the
+  // Commit a move/resize/rotate — the transform overlay produces the
   // target placement matrix M' (device space). The whole-file op rebuilds the
   // page, so re-fetch drops the selection like every other vector op; a second
-  // gesture re-derives from the re-listed bbox (the C1 "rebuild → re-select"
+  // gesture re-derives from the re-listed bbox (the "rebuild → re-select"
   // shape). No committingTextRef churn — the overlay's own busy gate blocks a
   // second gesture mid-commit.
   const commitVectorTransform = useCallback(
@@ -2896,7 +2896,7 @@ export function WorkspaceCanvasView({
     [focusedDoc, docs, onEditVector, editBusy],
   );
 
-  // 9.D3: recolour / re-width a vector object. The whole-file op rebuilds the
+  // Recolour / re-width a vector object. The whole-file op rebuilds the
   // page, so it reselects like a transform (the same stash).
   const commitVectorRestyle = useCallback(
     async (
@@ -3162,7 +3162,7 @@ export function WorkspaceCanvasView({
     [focusedDoc, docs, editTextByPage, onEditText],
   );
 
-  // T14: the run editor's style commit — same stale-window + restore-on-
+  // The run editor's style commit — same stale-window + restore-on-
   // decline discipline as the text commit above, engine restyle_text_run.
   const handleRestyleTextEdit = useCallback(
     async (
@@ -3233,7 +3233,7 @@ export function WorkspaceCanvasView({
       setEditSel(null);
       setEditBusy(true);
       setEditNotice(null);
-      // T21: the commit applies the SAME position-aware relaxation the
+      // The commit applies the SAME position-aware relaxation the
       // editor validated with (one implementation — the mappings cannot
       // disagree). Substitution/feature commits skip it, exactly as the
       // editor's validation does (the member inventories no longer govern).
@@ -3292,11 +3292,11 @@ export function WorkspaceCanvasView({
     [focusedDoc, docs, editTextByPage, onEditParagraph],
   );
 
-  // A4: merge the edited paragraph into the one above (fires only from an
+  // Merge the edited paragraph into the one above (fires only from an
   // unchanged editor at caret 0 — the editor enforces that). Same commit
   // shape as handleCommitParagraphEdit: close editor, drop the page's stale
   // listing synchronously, restore on decline/error.
-  // T18 generalized core: `anchor` keeps its box, `merging` folds into it.
+  // Generalized core: `anchor` keeps its box, `merging` folds into it.
   // The shipped Backspace path is anchor=index−1/merging=index (upward);
   // the Delete path is anchor=index (the selected)/merging=index+1. An
   // edited editor's text rides as the SELECTED side's override (the
@@ -3435,7 +3435,7 @@ export function WorkspaceCanvasView({
         editListingPendingRef.current = -1;
       }
       try {
-        // P7: a group delete is ONE engine call (one undo entry) — every
+        // A group delete is ONE engine call (one undo entry) — every
         // other action stays single-target (the toolbar restricts them to
         // N=1; the anchor is the honest target if one slips through).
         const notice =
@@ -3508,7 +3508,7 @@ export function WorkspaceCanvasView({
     };
   }, [editSel, editImagesByPage, editGeomByPage, editBusy]);
 
-  // P7: the group transform context (N>1) — every member's committed matrix +
+  // The group transform context (N>1) — every member's committed matrix +
   // the shared page geometry. Members missing from the listing (mid-refetch)
   // drop out; below 2 the group frame stands down.
   const editImageGroup = useMemo(() => {
@@ -3530,7 +3530,7 @@ export function WorkspaceCanvasView({
     };
   }, [editSel, editImagesByPage, editGeomByPage, editBusy]);
 
-  // 9.D2: the selected vector's transform context — the SAME shape the image
+  // The selected vector's transform context — the SAME shape the image
   // transform overlay consumes (reused directly), with the object's bbox as a
   // unit-square placement matrix [w,0,0,h,x0,y0] and no crop (vectors don't
   // crop). Null unless a vector is selected on a page with known geometry.
@@ -3554,9 +3554,9 @@ export function WorkspaceCanvasView({
     };
   }, [selectedVector, editVectorsByPage, editGeomByPage, editBusy]);
 
-  // Commit a transform gesture (9.C1). M' is user-space and /Rotate-invariant
+  // Commit a transform gesture. M' is user-space and /Rotate-invariant
   // (the redaction-mark rule), so the commit gate baking a pending page
-  // rotation can't invalidate it — no re-projection needed, unlike A2's
+  // rotation can't invalidate it — no re-projection needed, unlike the
   // signature placement. The whole-file op rebuilds the page (positional ids
   // regenerate); the reselect stash restores the selection when the fresh
   // listing lands, so chained nudges need no re-click (the shipped C-tail).
@@ -3593,7 +3593,7 @@ export function WorkspaceCanvasView({
     [focusedDoc, docs, onEditImage, editBusy],
   );
 
-  // P7: commit a GROUP gesture — per-member absolute targets through the ONE
+  // Commit a GROUP gesture — per-member absolute targets through the ONE
   // multi op (one undo entry). The stash re-selects the whole group when the
   // fresh listing lands (count-preserving, so all members survive).
   const commitImageGroupTransform = useCallback(
@@ -3708,7 +3708,7 @@ export function WorkspaceCanvasView({
     [editImageGroup, commitImageGroupTransform],
   );
 
-  // 9.C3: crop mode (toolbar toggle) — armed, the overlay's body drag draws
+  // Crop mode (toolbar toggle) — armed, the overlay's body drag draws
   // the crop band. Reset whenever the selection changes: a stale armed crop
   // on a fresh selection would surprise.
   const [imageCropArmed, setImageCropArmed] = useState(false);
@@ -3729,7 +3729,7 @@ export function WorkspaceCanvasView({
     [editSel, runEditAction],
   );
 
-  // 9.C3: opacity commit (slider release) — same shared routing.
+  // Opacity commit (slider release) — same shared routing.
   const commitImageOpacity = useCallback(
     (value: number): void => {
       void runEditAction('opacity', { opacity: value });
@@ -3771,11 +3771,11 @@ export function WorkspaceCanvasView({
     [editImageTransform, editImageGroup, commitImageTransform, commitImageGroupTransform],
   );
 
-  // C4: the selected placement's kind — replace/extract disable for an
+  // The selected placement's kind — replace/extract disable for an
   // inline draw (honest disable at the control, engine refusal as belt).
   // The selected placement's current opacity — the slider's honest seed.
   const editImageOpacity = useMemo(() => {
-    // Single selection only (P7): per-member opacities diverge in a group,
+    // Single selection only: per-member opacities diverge in a group,
     // so a shared slider would lie about N−1 of them.
     if (!editSel || editSel.kind !== 'image' || editSel.indexes.length !== 1) return null;
     return (
@@ -3783,7 +3783,7 @@ export function WorkspaceCanvasView({
     );
   }, [editSel, editImagesByPage]);
 
-  // P7 slice F: the single selected placement's KIND — the toolbar disables
+  // The single selected placement's KIND — the toolbar disables
   // replace/extract for a placed vector graphic (engine refusal as belt).
   const editImageSelKind = useMemo(() => {
     if (!editSel || editSel.kind !== 'image' || editSel.indexes.length !== 1) return null;
@@ -3792,7 +3792,7 @@ export function WorkspaceCanvasView({
     );
   }, [editSel, editImagesByPage]);
 
-  // P7 slice D: the selected placement's blend mode (seed) — single-only,
+  // The selected placement's blend mode (seed) — single-only,
   // same divergence rule as opacity.
   const editImageBlend = useMemo(() => {
     if (!editSel || editSel.kind !== 'image' || editSel.indexes.length !== 1) return null;
@@ -3809,7 +3809,7 @@ export function WorkspaceCanvasView({
     [runEditAction],
   );
 
-  // P7 slice E: the selected placement's tool gradient mask (seed) —
+  // The selected placement's tool gradient mask (seed) —
   // 'none' when a single image is selected without one, null when the
   // control has no target at all.
   const editImageMask = useMemo(() => {
@@ -3843,8 +3843,8 @@ export function WorkspaceCanvasView({
     [editSel, commitImageMask],
   );
 
-  // 9.C2 Add Image: the band draws the box; convert display→user space
-  // (buildSignatureAppearance, verbatim from A2) and hand it to App's
+  // Add Image: the band draws the box; convert display→user space
+  // (buildSignatureAppearance, verbatim from Add Text) and hand it to App's
   // onAddImage, which picks the file and embeds. No card — the native picker
   // is the second step. Reentrancy-guarded (a modal pick blocks other edits
   // meanwhile; a cancelled pick just resets it).
@@ -3881,7 +3881,7 @@ export function WorkspaceCanvasView({
           };
         });
         if (!built) throw new Error(tChrome('canvas.edit.imagePageGone'));
-        // P7 (slice C): the PageCell click sentinel (w=h=0) degenerates the
+        // The PageCell click sentinel (w=h=0) degenerates the
         // appearance rect to the click point — route it as a natural-size
         // `at` placement instead of a drawn box.
         const isClick = rect.w === 0 && rect.h === 0;
@@ -3907,14 +3907,14 @@ export function WorkspaceCanvasView({
     [docs, state.files, onAddImage, editBusy],
   );
 
-  // --- Snapping (N11 slice A): per-page geometry + the live preferences -----
+  // --- Snapping: per-page geometry + the live preferences -------------------
   // The preferences are a MODULE store, not reducer state: `View ▸ Snapping`
   // is a registered command whose `run` has no access to this view, and a
   // persisted preference is not workspace state. One owner, three readers
   // (menu command, status bar, canvas).
   const snapSettings = useSyncExternalStore(subscribeSnapSettings, getSnapSettings, getSnapSettings);
 
-  // --- Count & takeoff (N11 slice C): the group list the strip offers -------
+  // --- Count & takeoff: the group list the strip offers ---------------------
   // The DOCUMENT's own groups (derived from its marks) merged with the
   // remembered ones — resolved here because this is the component that holds
   // the document; the page cell and the panel each derive what they need.
@@ -3969,7 +3969,7 @@ export function WorkspaceCanvasView({
     tool === 'cropdraw' ||
     tool === 'addtext' ||
     tool === 'addimage' ||
-    // N11 slice C: a count mark is a PLACEMENT, so it snaps like every other
+    // A count mark is a PLACEMENT, so it snaps like every other
     // one — landing a door count on the door's own corner is the whole point
     // of counting on a drawing rather than near it.
     tool === 'count' ||
@@ -3977,7 +3977,7 @@ export function WorkspaceCanvasView({
   const snapBuffer = focusedDoc ? state.files.get(focusedDoc.path)?.buffer : undefined;
   useEffect(() => {
     const token = ++snapFetchTokenRef.current;
-    // § F, the id-holder rule (the spec-99 discipline, same as the edit
+    // The id-holder rule (the spec-99 discipline, same as the edit
     // listings): these maps are keyed by GENERATION-TAGGED page ids, and a
     // whole-file op rebuilds the file, so `docs` rotates to a fresh
     // generation one render before this can publish anything. Prune to what
@@ -4074,7 +4074,7 @@ export function WorkspaceCanvasView({
     engineCall,
   ]);
 
-  // Harness bridge for Edit ▸ Images + Text (7.1/7.2) — refs pattern.
+  // Harness bridge for Edit ▸ Images + Text — refs pattern.
   const editImagesRef = useRef(editImagesByPage);
   editImagesRef.current = editImagesByPage;
   const editVectorsRef = useRef(editVectorsByPage);
@@ -4117,7 +4117,7 @@ export function WorkspaceCanvasView({
     const doc = docs.find((d) => d.path === state.activeFileId);
     const page = doc?.pages[0];
     if (!doc || !page) return false;
-    // Same currency rule as harnessPlaceFieldRef (round 24 tail) — the
+    // Same currency rule as harnessPlaceFieldRef — the
     // harness polls this, so refusing while a reindex is in flight makes
     // place→commit atomic against the id rotation instead of arming a
     // doomed placement.
@@ -4181,7 +4181,7 @@ export function WorkspaceCanvasView({
         imageReselectRef.current = null; // harness picks are user picks
         // Deliberately NON-toggling (unlike the click handler): harness
         // re-selects must be idempotent — specs select the same placement
-        // repeatedly across commits. `additive` grows the group (P7).
+        // repeatedly across commits. `additive` grows the group.
         setEditSel((prev) => {
           if (additive && prev?.kind === 'image' && prev.pageId === pageId) {
             return prev.indexes.includes(index)
@@ -4209,23 +4209,23 @@ export function WorkspaceCanvasView({
           lineCount: p.lineCount,
           alignment: p.alignment,
           vertical: p.vertical,
-          // 9.T13: the frame the paragraph's layout ran in, so a spec can
+          // The frame the paragraph's layout ran in, so a spec can
           // assert a rotated block LISTS as one rather than inferring it
           // from geometry.
           orientation: p.orientation,
-          // 9.A5a: the distinct per-span colours (seed hexes) — an e2e can
+          // The distinct per-span colours (seed hexes) — an e2e can
           // assert a recoloured range survives the round-trip.
           colors: Array.from(
             new Set(p.spans.map((sp) => sp.color).filter((c): c is string => !!c)),
           ),
-          // 9.A5c: the distinct member-run font sizes.
+          // The distinct member-run font sizes.
           sizes: p.runSizes,
         })),
       openParagraphEditor: (pageId, index) => openParagraphEditorRef.current(pageId, index),
       act: (kind, opts) => runEditActionRef.current(kind, opts),
       placeAddText: (rect) => harnessPlaceAddTextRef.current(rect),
       commitAddText: (params) => commitAddTextRef.current(params),
-      // 9.D1 vector objects.
+      // Vector objects.
       vectorPageIds: () => [...editVectorsRef.current.keys()],
       vectors: (pageId) =>
         (editVectorsRef.current.get(pageId) ?? []).map((v) => ({
@@ -4248,7 +4248,7 @@ export function WorkspaceCanvasView({
     return () => registerCanvasEditImages(null);
   }, []);
 
-  // Harness bridge for on-canvas forms (2n.4b): the overlay inputs live
+  // Harness bridge for on-canvas forms: the overlay inputs live
   // inside transformed canvas space (flaky to drive via WebDriver), so the
   // canvas registers value-setting + apply against the REAL pending-map and
   // fill paths. Refs keep the registration stable across renders.
@@ -4282,7 +4282,7 @@ export function WorkspaceCanvasView({
     });
     return true;
   };
-  // Sign-into-field for the harness (2n.4d): the same engine call the sign
+  // Sign-into-field for the harness: the same engine call the sign
   // card's field branch makes, with the native save dialog's output injected.
   const harnessSignFieldRef = useRef<
     (params: {
@@ -4391,7 +4391,7 @@ export function WorkspaceCanvasView({
   // harness rethrows them.
   // Ref, not just state: two clicks in the same tick both read a stale
   // `redacting === false` (same failure mode as the commit-race double-click,
-  // see the punchlist's reentrancy tripwire note).
+  // the same reentrancy class).
   // Selection -> link regions. Geometry comes from the CURRENT buffer's proxy
   // (the same contract as applyMarks), and the engine call is commit-gated, so
   // the page numbers and user space line up with what lands on disk.
@@ -4476,7 +4476,7 @@ export function WorkspaceCanvasView({
     }
   }, [liveMarks, docs, state.files, onRedactFile]);
 
-  // F10: persist the marks into the file(s) as /Redact annotations — the
+  // Persist the marks into the file(s) as /Redact annotations — the
   // SAME geometry pipeline as apply, so save and apply cannot disagree
   // about where a mark sits. The reload each op triggers clears the
   // transient marks and the re-seed loads them straight back from the
@@ -4550,14 +4550,14 @@ export function WorkspaceCanvasView({
     }
   }, [liveMarks, docs, state.files, onSaveRedactionMarks]);
 
-  // ── F15 slice D: the Search & Redact panel's seam ────────────────────────
+  // ── the Search & Redact panel's seam ─────────────────────────────────────
   //
   // The panel is a PRODUCER OF MARKS and nothing else — it never calls
   // `redact`, and the status bar's apply / save marks / clear stays the only
   // destructive path. What crosses this seam is page-space `{page, rect}`,
   // the payload shape `list_redact_annotations` returns and
   // `save_redaction_marks` takes, converted here by `marksFromFileRects` —
-  // the F10 seed's own conversion, so there is exactly one of it.
+  // the seed's own conversion, so there is exactly one of it.
   const geometryForPage = useCallback(
     async (page: PageRef): Promise<PageGeometry> => {
       const f = filesRef.current.get(page.sourceDocId);
@@ -4599,7 +4599,7 @@ export function WorkspaceCanvasView({
       // "Mark checked" twice must not stack marks the user then has to
       // delete twice.
       const existing = await markedRects();
-      // F15 slice E: the panel's marks take the properties the user is
+      // The panel's marks take the properties the user is
       // currently working with, exactly as a hand-drawn band does. Merged in
       // as the engine PAYLOAD so both producers travel the one conversion
       // (`marksFromFileRects`) rather than two.
@@ -4648,7 +4648,7 @@ export function WorkspaceCanvasView({
       query: string,
       options: SearchOptions,
     ): Promise<{ text: string; rect: [number, number, number, number] }[]> => {
-      // The SECOND rect authority (§ 1.6): an image-only page has no text
+      // The SECOND rect authority: an image-only page has no text
       // runs for the engine to slice, but the in-app index already recognised
       // it and holds word boxes. They convert to page space through the same
       // machinery "Make searchable" uses, so a scanned page's marks and an
@@ -4785,7 +4785,7 @@ export function WorkspaceCanvasView({
   }, [fieldCandidates]);
 
   // Sign the placement's file (visible stamp at the drawn box) or fill the
-  // targeted existing empty signature field (2n.4d — the field's own widget
+  // targeted existing empty signature field (the field's own widget
   // rect is the stamp box). Geometry for a placement is read from the
   // CURRENT buffer's proxy (same contract as applyMarks); the engine gate
   // then flushes pending page edits before sign_pdf reads the file, so the
@@ -4798,7 +4798,7 @@ export function WorkspaceCanvasView({
     if ((!placement && !fieldTarget) || signingRef.current) return;
     // Synchronous validation only above this line. The reentrancy ref MUST be
     // taken before the FIRST await (regression; same double-click class as
-    // the punchlist's applyMarks tripwire) — a second click during
+    // the applyMarks reentrancy class) — a second click during
     // buildSignatureAppearance or the native save dialog would otherwise
     // start an overlapping sign flow.
     const resolved = signerSourceParams(sigSource);
@@ -4812,7 +4812,7 @@ export function WorkspaceCanvasView({
     }
     if (fieldTarget && state.pageDirtyPaths.includes(fieldTarget.path)) {
       // The gate-commit inside sign_pdf could rename fields (a pending
-      // import's name collision, 2n.4(a)) out from under a name-only target.
+      // import's name collision) out from under a name-only target.
       // Unlike the value fill — which re-resolves renames by fingerprint —
       // a signature is not silently re-appliable, so refuse until the page
       // edits are applied and the target re-clicked against the fresh read.
@@ -4820,7 +4820,7 @@ export function WorkspaceCanvasView({
       return;
     }
     if (placement && !placementDocsCurrent(state.files, docs, placement.path)) {
-      // Same stale-docs rule as createFieldFromPlacement (round 24 tail): a
+      // Same stale-docs rule as createFieldFromPlacement: a
       // placement whose docs were indexed from a superseded buffer converts
       // sourcePageIndex against ids that are about to rotate — the stamp
       // could land on the wrong page. The invalidation effect clears the
@@ -4866,7 +4866,7 @@ export function WorkspaceCanvasView({
         file: file.workingPath,
         output: dest,
         ...resolved.params!,
-        // A token source takes the password field as its PIN (F3).
+        // A token source takes the password field as its PIN.
         ...(resolved.params!.pkcs11_module ? { pkcs11_pin: sigPassword } : { password: sigPassword }),
         ...(sigReason.trim() ? { reason: sigReason.trim() } : {}),
         ...(sigLocation.trim() ? { location: sigLocation.trim() } : {}),
@@ -4935,7 +4935,7 @@ export function WorkspaceCanvasView({
     const doc = docs.find((d) => d.path === state.activeFileId);
     const page = doc?.pages[0];
     if (!doc || !page) return false;
-    // Same currency rule as harnessPlaceFieldRef (round 24 tail) — the
+    // Same currency rule as harnessPlaceFieldRef — the
     // harness polls this, so a transient refusal during a reindex
     // self-heals instead of arming a doomed placement.
     if (!placementDocsCurrent(state.files, docs, doc.path)) return false;
@@ -4948,7 +4948,7 @@ export function WorkspaceCanvasView({
     });
     return true;
   };
-  // P5b: the crop band, driven the way the gesture drives it — through the
+  // The crop band, driven the way the gesture drives it — through the
   // REAL `onSetCropRect`, so the geometry read, the rotation-aware inset
   // conversion and the publish to the panel are all exercised rather than
   // simulated.
@@ -5090,7 +5090,7 @@ export function WorkspaceCanvasView({
     [dispatch],
   );
 
-  // Double-click a page = READ it (M6.2, the M4.3 plan): the reading pane is
+  // Double-click a page = READ it: the reading pane is
   // the "look closely" surface, so the PageInspector retired in its favor —
   // its rotate/delete were commands already.
   //
@@ -5142,7 +5142,7 @@ export function WorkspaceCanvasView({
 
   const menuItems = useMemo((): MenuItem[] => {
     if (!menu) return [];
-    // Shared with the nav-pane Pages panel — one menu definition (M3, § 3.2).
+    // Shared with the nav-pane Pages panel — one menu definition.
     return buildPageContextMenu({
       docs,
       docId: menu.docId,
@@ -5159,7 +5159,7 @@ export function WorkspaceCanvasView({
     [dispatch],
   );
 
-  // Canvas whole-document merge (2o): append a COPY of this document's pages
+  // Canvas whole-document merge: append a COPY of this document's pages
   // to the document above — one IMPORT_PAGES dispatch = one undo step. Copy,
   // not move (the zero-page guard forbids emptying a file); the source strip
   // stays until the user removes it, and after Apply changes the copies
@@ -5189,7 +5189,7 @@ export function WorkspaceCanvasView({
       if (!doc) return;
       const siblings = docs.filter((d) => d.path === doc.path);
       if (siblings.length === 1) {
-        // Close-guard (2o): a STAGED merge copy still reads its bytes from
+        // Close-guard: a STAGED merge copy still reads its bytes from
         // this file — closing it would orphan the refs and fail every later
         // commit of the target. Scoped to dirty referencing paths: after
         // Apply changes the lingering (reindex-pending) refs are hazardless
@@ -5215,7 +5215,7 @@ export function WorkspaceCanvasView({
     [dispatch, docs],
   );
 
-  // e2e harness for the canvas merge (2o): the header hover actions sit in
+  // e2e harness for the canvas merge: the header hover actions sit in
   // the transformed overlay, so the doc listing + the REAL merge-up and
   // guarded-remove paths register here. Refs keep the registration stable.
   const docsRef = useRef(docs);
@@ -5279,7 +5279,7 @@ export function WorkspaceCanvasView({
         (tool === 'forms' ? ' forms-mode' : '')
       }
     >
-      {/* § 3.1: the contextual strip, at the top of the document pane. It shows
+      {/* The contextual strip, at the top of the document pane. It shows
           the tool that owns the armed mode; nothing armed ⇒ nothing here. */}
       <SecondaryToolbar
         tool={tool}
@@ -5803,7 +5803,7 @@ export function WorkspaceCanvasView({
               mode: docViewMode === 'document' ? 'organize' : 'document',
             })
           }
-          // U3: the status bar and the Comments TOOL now open the SAME panel —
+          // The status bar and the Comments TOOL now open the SAME panel —
           // there is one comments surface, seated like any other op. The dock's
           // separate `view: 'comments'` mode is gone with the second list.
           showComments={state.ui.toolDock.open && state.ui.activeOp === 'comments'}
@@ -6107,7 +6107,7 @@ export function WorkspaceCanvasView({
             placeholder={tChrome('canvas.addtext.placeholder')}
             onChange={(e) => {
               setAtText(e.target.value);
-              // T15: character positions drift under edits — clear spans
+              // Character positions drift under edits — clear spans
               // visibly rather than let them silently mis-bind.
               if (atSpans.length > 0) setAtSpans([]);
             }}
@@ -6356,7 +6356,7 @@ export function WorkspaceCanvasView({
             >
               {tChrome('canvas.addtext.italic')}
             </button>
-            {/* 9.K2 OpenType features. Authoring always renders a bundled face,
+            {/* OpenType features. Authoring always renders a bundled face,
                 so a feature switches to Libertinus Serif (Liberation has none). */}
             <button
               type="button"

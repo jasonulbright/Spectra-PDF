@@ -6,7 +6,7 @@ export type Extent = [[number, number], [number, number]];
 // the viewport on an axis (`d1 > d0` — the inverted-extent span exceeds the
 // content span), the default applies NO constraint on that axis, so extreme
 // zoom-out let a pan fling the whole workspace off-screen with only "Fit" to
-// recover (PDFx-inherited; punchlist polish item). The fitted case now
+// recover (inherited behaviour). The fitted case now
 // CENTER-clamps instead — d3's own documented centered-constrain variant —
 // so a smaller-than-viewport workspace stays centered on that axis while
 // larger-than-viewport panning keeps the ordinary edge clamping.

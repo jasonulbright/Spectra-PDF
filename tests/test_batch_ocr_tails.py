@@ -1,4 +1,4 @@
-"""9-§I.5 P3 — the batch-OCR tails: supplied passwords and image sources."""
+"""The batch-OCR tails: supplied passwords and image sources."""
 
 import os
 import shutil
@@ -13,7 +13,7 @@ from engine.batch_ocr import (
     batch_ocr,
     ocr_file,
 )
-# P22: the image wrap is a first-class engine arm now; batch OCR is a consumer.
+# The image wrap is a first-class engine arm now; batch OCR is a consumer.
 from engine.create_pdf import image_to_pdf
 from engine.encrypt import encrypt
 from engine.extract_text import extract_text
@@ -194,7 +194,7 @@ class TestSuppliedPasswords:
 
 
 class TestBatchMrc:
-    """O8 — issue #5's "a batch option that could just compress automatically".
+    """The reported ask: "a batch option that could just compress automatically".
 
     The order is the claim: recognition rasterises from the PAGE, so MRC must
     read the RECOGNISED output, never the other way round. Everything else

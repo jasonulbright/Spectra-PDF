@@ -19,8 +19,8 @@ import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../../i18n';
 
-// Bookmarks nav panel (Phase 4 M3.2) — the ONE bookmarks surface, merging the
-// canvas OutlineSidebar (drag-reorder + click-to-jump, § 2n.2) with the
+// Bookmarks nav panel — the ONE bookmarks surface, merging the
+// canvas OutlineSidebar (drag-reorder + click-to-jump) with the
 // OutlinePanel's editing (rename / retarget page / add child / delete). Reorder
 // starts ONLY from the drag handle so the inline inputs stay editable. Every
 // mutation (reorder, edit-on-blur, add, delete) routes through one queued
@@ -59,7 +59,7 @@ interface DragState {
 }
 
 export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { call } = useEngine();
   const dispatch = useAppDispatch();
@@ -312,7 +312,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       // of the FILE, which may sit in a `.pdfx` partition the reading view
       // isn't showing — centring there was a silent, zero-feedback no-op
       // (regression). The service resolves page number → id from live
-      // workspace state (§ F: ids are opaque — generation-tagged or
+      // workspace state (ids are opaque — generation-tagged or
       // adopted — so string-building `path#p{n}` is no longer valid).
       getCanvasServices()?.jumpToFilePage(activeFile.path, page);
     },
@@ -425,7 +425,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
 
   useEffect(() => () => detachRef.current(), []);
 
-  // e2e harness (moved from OutlineSidebar in M3.2b): the tree drag is
+  // e2e harness (moved from OutlineSidebar): the tree drag is
   // pointer-capture, so expose the reader + the exact drop path while mounted.
   const queuePersistRef = useRef(queuePersist);
   queuePersistRef.current = queuePersist;

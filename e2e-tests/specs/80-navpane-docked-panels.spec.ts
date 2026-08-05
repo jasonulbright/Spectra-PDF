@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
 import { waitForHarness, openByPaths, getState, invokeAppCommand } from '../support/harness.js';
 
-// Left-dock candidates (§ I.6): Attachments, Layers, and Tags join the nav
+// Left-dock candidates: Attachments, Layers, and Tags join the nav
 // pane. The nav panels MOUNT THE SAME components the tool dock uses (one
 // implementation per capability — the surfaces cannot disagree), so the
 // assertion here is the real panel's own honest state on the untagged,

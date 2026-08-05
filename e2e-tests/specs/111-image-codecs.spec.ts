@@ -1,9 +1,9 @@
-// O8 slice A — the viewer decodes the filters scanners and fax gateways write.
+// The viewer decodes the filters scanners and fax gateways write.
 //
 // pdf.js 6 routes THREE image filters through WebAssembly modules it fetches
 // at run time: /JBIG2Decode and /CCITTFaxDecode both ride on `jbig2.wasm`
 // (CCITTFaxStream delegates to JBig2CCITTFaxImage), /JPXDecode on
-// `openjpeg.wasm`. Until slice A, `pdfRenderer.ts` set only `workerSrc` and
+// `openjpeg.wasm`. `pdfRenderer.ts` used to set only `workerSrc` and
 // nothing staged those modules into the build, so every one of those pages
 // rendered BLANK — silently, with the failure logged inside the decoder and
 // nothing surfaced to the user.
@@ -72,7 +72,7 @@ async function readCanvasInk(): Promise<CanvasInk> {
   });
 }
 
-describe('image codecs render (O8 slice A)', () => {
+describe('image codecs render', () => {
   before(async () => {
     await waitForHarness();
   });
@@ -115,17 +115,17 @@ describe('image codecs render (O8 slice A)', () => {
   });
 });
 
-// O8 slice D/E — the journey the register row is about: a user opens a scan,
+// The journey the is about: a user opens a scan,
 // picks "Scanned document (MRC)" in the Compress panel, runs it, and gets a
 // materially smaller file that STILL DRAWS in this app's own canvas.
 //
-// The last clause is the one that needed slice A, and it is why this spec
+// The last clause is the one that needs the staged wasm modules, and it is why this spec
 // carries both halves: an MRC output whose stencil our viewer cannot decode
 // would render blank here while looking perfect in another reader. The
 // assertion is the same coverage BAND the codec fixtures use, for the same
 // reason — an inverted stencil renders solid black and passes any not-blank
 // check.
-describe('MRC compression, end to end (O8)', () => {
+describe('MRC compression, end to end', () => {
   const SCAN = resolve(__dirname, '..', '..', 'tests', 'fixtures', 'scan-text.pdf');
   let tmp: string;
 
@@ -150,7 +150,7 @@ describe('MRC compression, end to end (O8)', () => {
     await closeAllFiles();
     await openByPaths([SCAN]);
     // `setActiveOp` seats the panel; it does NOT open the dock that mounts it
-    // (Phase 10 slice C — 'operations' is the name-compatible bridge that
+    // ('operations' is the name-compatible bridge that
     // focuses the doc tab and opens the right dock). Without this line the
     // panel never mounts and the harness answers "panel not mounted", which
     // is exactly what it did on the first battery run.

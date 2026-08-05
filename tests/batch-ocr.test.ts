@@ -12,7 +12,7 @@ import {
 } from '../src/renderer/lib/batch-ocr';
 import type { OcrResult } from '../src/renderer/ocr/types';
 
-// The Phase 6 driver, exercised with all IO faked (the 2m no-WASM-in-vitest
+// The batch-OCR driver, exercised with all IO faked (the no-WASM-in-vitest
 // precedent): classification (ocr/copied/skipped), per-file failure
 // isolation, cancellation quiescence, mirror path math, report aggregation.
 
@@ -45,7 +45,7 @@ function fakeDoc(spec: FakeSpec, destroyed: string[]): BatchPdfDoc {
   };
 }
 
-/** Phase 12 knobs: which fake operations fail, and what a repair produces. */
+/** knobs: which fake operations fail, and what a repair produces. */
 interface IoOpts {
   /** Mirror outputs that fail the read-back verification. */
   verifyFails?: string[];
@@ -406,7 +406,7 @@ describe('runBatchOcr', () => {
   });
 });
 
-// ── Phase 12 requests 2/3: the moved/error folders and auto-repair ─────────
+// ── the moved/error folders and auto-repair ────────────────────────────────
 //
 // These are the only batch behaviours that MUTATE the user's source tree, so
 // the tests are written around the question "when is a source allowed to
@@ -634,7 +634,7 @@ describe('runBatchOcr — auto-repair', () => {
   });
 });
 
-describe('runBatchOcr — MRC (O8)', () => {
+describe('runBatchOcr — MRC', () => {
   it('compresses the MIRROR OUTPUT, never the source, and only when asked', async () => {
     const { io, compressed } = makeIo({
       'C:\\src\\scan.pdf': { pages: [true] },

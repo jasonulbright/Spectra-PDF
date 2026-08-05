@@ -60,7 +60,7 @@ interface ScopeState {
 const MAX_HITS = 50000;
 
 export function SearchRedactPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, allFiles, openNewFiles } = useActiveFile();
   const { call } = useEngine();
@@ -220,7 +220,7 @@ export function SearchRedactPanel(): React.ReactElement {
           error: string | null;
         };
         const hits = [...(raw.hits ?? [])];
-        // The SECOND authority (§ 1.6): a page the engine found no text on is
+        // The SECOND authority: a page the engine found no text on is
         // an image-only page, and the in-app index may already hold its OCR
         // word boxes. Searching them here is what keeps a scanned discovery
         // set usable — reporting "N pages carry no text" and stopping would

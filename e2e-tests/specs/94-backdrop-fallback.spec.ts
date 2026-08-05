@@ -1,4 +1,4 @@
-// P14/R8 — the opaque fallback IS the designed presentation wherever DWM
+// The opaque fallback IS the designed presentation wherever DWM
 // composes no backdrop (transparency effects off, remote sessions, builds
 // below 22000). The rest of the battery only ever exercises backdrop-ON,
 // because a dev box composes Mica; this session launches with
@@ -20,7 +20,7 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-describe('backdrop fallback presentation (P14/R8)', () => {
+describe('backdrop fallback presentation', () => {
   it('renders the solid shell: no data-backdrop, opaque surfaces, working app', async () => {
     await waitForHarness();
 
@@ -47,8 +47,7 @@ describe('backdrop fallback presentation (P14/R8)', () => {
     // fractional alpha over the composed backdrop; without a backdrop each
     // layer is either fully opaque or unpainted at that level (alpha 0 —
     // the opaque paint lives below it in an opaque window). A fractional
-    // alpha here is styling for a material DWM never composed — the exact
-    // defect R8 closed.
+    // alpha here is styling for a material DWM never composed.
     const backgrounds = await browser.execute(() =>
       ['.app-shell', '.app-shell-bar'].map((sel) => {
         const el = document.querySelector(sel);

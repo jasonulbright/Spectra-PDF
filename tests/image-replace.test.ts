@@ -8,7 +8,7 @@ import {
 } from '../src/renderer/lib/image-replace';
 import { fetchEditPlacements } from '../src/renderer/lib/edit-images';
 
-describe('image-replace helpers (7.1)', () => {
+describe('image-replace helpers', () => {
   it('hasAlpha: fully opaque is false; any translucency is true', () => {
     expect(hasAlpha(new Uint8Array([1, 2, 3, 255, 4, 5, 6, 255]))).toBe(false);
     expect(hasAlpha(new Uint8Array([1, 2, 3, 255, 4, 5, 6, 254]))).toBe(true);
@@ -64,7 +64,7 @@ describe('image-replace helpers (7.1)', () => {
   });
 });
 
-describe('fetchEditPlacements (7.1)', () => {
+describe('fetchEditPlacements', () => {
   it('projects engine PDF rects into display-normalized space', async () => {
     // 612x792 page, unrotated: PDF y is bottom-up; display y top-down.
     const placements = await fetchEditPlacements(
@@ -76,10 +76,10 @@ describe('fetchEditPlacements (7.1)', () => {
       { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
     );
     expect(placements).toEqual([
-      // opacity defaults to 1 when the engine omits it (9.C3 seed);
-      // kind defaults to 'xobject' (9.C4 — inline draws report 'inline');
-      // crop defaults to null (C3-tail — pre-tail engines omit it);
-      // blend defaults to 'Normal' and mask to null (P7 seeds).
+      // opacity defaults to 1 when the engine omits it (seed);
+      // kind defaults to 'xobject' (inline draws report 'inline');
+      // crop defaults to null (pre-tail engines omit it);
+      // blend defaults to 'Normal' and mask to null (seeds).
       {
         index: 0,
         nested: false,
@@ -94,7 +94,7 @@ describe('fetchEditPlacements (7.1)', () => {
     ]);
   });
 
-  it('9-§I.0-S8: filters out clipped-away placements, preserving engine index', async () => {
+  it('Filters out clipped-away placements, preserving engine index', async () => {
     const placements = await fetchEditPlacements(
       async () => ({
         images: [
@@ -112,7 +112,7 @@ describe('fetchEditPlacements (7.1)', () => {
     expect(placements.map((p) => p.index)).toEqual([0, 2]);
   });
 
-  it('crop threads through; degenerate/inverted intersections null out (C3-tail)', async () => {
+  it('crop threads through; degenerate/inverted intersections null out', async () => {
     const fetch = (crop: unknown): ReturnType<typeof fetchEditPlacements> =>
       fetchEditPlacements(
         async () => ({ images: [{ index: 0, rect: [0, 0, 100, 100], nested: false, crop }] }),

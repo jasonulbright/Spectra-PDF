@@ -61,7 +61,7 @@ function labelFor(ranges: Range[], page1: number): string {
 }
 
 export function PageLabelsPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();

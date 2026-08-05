@@ -56,7 +56,7 @@ async function resolveGsPath(): Promise<void> {
 let gsPathReady = resolveGsPath();
 
 /**
- * The gs path, guaranteed resolved (M7 polish — an M-P review disposition).
+ * The gs path, guaranteed resolved.
  * `getSettings().gsPath` is '' for the first IPC round-trip after a fresh
  * launch (the resolver persists asynchronously), and a gs job started in
  * that window failed with a raw spawn error. Every gs caller awaits this
@@ -223,7 +223,7 @@ function GsInfoDisplay({ info, label }: { info: GsInfo | null; label: string }):
 }
 
 /**
- * Preferences categories (§ 7). Data, like every other list in the workbench:
+ * Preferences categories. Data, like every other list in the workbench:
  * the nav renders from it, so a category cannot exist in one and be missing
  * from the other. `Record<PrefCategory, …>` keeps the labels total.
  *
@@ -235,7 +235,7 @@ function GsInfoDisplay({ info, label }: { info: GsInfo | null; label: string }):
 export const PREF_CATEGORIES = ['general', 'appearance', 'engine', 'tray', 'licenses'] as const;
 export type PrefCategory = (typeof PREF_CATEGORIES)[number];
 
-// N12: values are catalog KEYS; the nav renders tChrome(label).
+// Values are catalog KEYS; the nav renders tChrome(label).
 export const PREF_CATEGORY_LABELS: Record<PrefCategory, PanelKey> = {
   general: 'panel.settings.catGeneral',
   appearance: 'panel.settings.catAppearance',
@@ -250,7 +250,7 @@ export interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProps = {}): React.ReactElement {
-  // N12: re-render on language change (the Language select switches live).
+  // Re-render on language change (the Language select switches live).
   useTranslation();
   const [category, setCategory] = useState<PrefCategory>(initialCategory);
   const [settings, setSettings] = useState<Settings>(loadSettings);
@@ -380,7 +380,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           <option value="ebook">{tChrome('panel.compress.ebook')}</option>
           <option value="printer">{tChrome('panel.compress.printer')}</option>
           <option value="prepress">{tChrome('panel.compress.prepress')}</option>
-          {/* O8: a user whose corpus is scans can make MRC the default. It is
+          {/* A user whose corpus is scans can make MRC the default. It is
               a quality of the same compress op, so it belongs in this list
               rather than in a setting of its own. */}
           <option value="mrc">{tChrome('panel.compress.mrc')}</option>
@@ -515,7 +515,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         </select>
       </div>
       <div>
-        {/* N12: the UI language. Options show each locale's NATIVE name (the
+        {/* The UI language. Options show each locale's NATIVE name (the
             picker convention); 'system' re-resolves against the OS locale.
             The switch is LIVE — react-i18next re-renders hooked chrome. */}
         <label className="block text-sm text-neutral-400 mb-1">
@@ -662,7 +662,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
   );
 }
 
-// O7 virtual printer: "Spectra PDF" in every app's print dialog. The
+// Virtual printer: "Spectra PDF" in every app's print dialog. The
 // loopback listener + install/remove orchestration live in Rust
 // (print_to_pdf.rs); this block is the whole GUI surface. Install/Remove is
 // ONE visible UAC elevation (printer ports are machine objects) — never

@@ -1,4 +1,4 @@
-"""O1 (image half) — export PDF pages as raster images via Ghostscript."""
+"""Export PDF pages as raster images via Ghostscript."""
 
 import os
 import struct

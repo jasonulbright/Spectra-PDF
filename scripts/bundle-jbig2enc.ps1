@@ -1,6 +1,6 @@
 # Vendors the official upstream jbig2enc binary into resources/jbig2enc/.
 #
-# O8 slice B. The MRC pass writes its 1-bit text stencil as /JBIG2Decode, and
+# The MRC pass writes its 1-bit text stencil as /JBIG2Decode, and
 # nothing in the shipped stack can encode JBIG2: qpdf decodes only, Ghostscript
 # has no JBIG2 encoder, Pillow has none, and the OCR runtime's libjbig-0.dll is
 # JBIG*1* (T.85, for TIFF) which PDF does not accept. A pure-Python encoder is

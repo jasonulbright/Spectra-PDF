@@ -1,4 +1,4 @@
-// P22 — the renderer half of Create PDF (brief 41 § 5.1).
+// The renderer half of Create PDF.
 //
 // The engine (`engine/create_pdf.py`) is the authority on what converts what;
 // this is the SAME table, so a picker can badge a row and refuse a file

@@ -1,4 +1,4 @@
-"""F3: PKCS#11 token signing, exercised against a real SoftHSM2 stack.
+"""PKCS#11 token signing, exercised against a real SoftHSM2 stack.
 
 The dev-only SoftHSM2 portable build lives at tests/softhsm2/ (gitignored,
 fetched like the e2e msedgedriver); tests SKIP when it is absent, the

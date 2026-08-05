@@ -1,4 +1,4 @@
-// P21, keyboard half — the app's chrome must be OPERABLE from the keyboard
+// Keyboard half — the app's chrome must be OPERABLE from the keyboard
 // (WCAG 2.1.1), and modal surfaces must be leavable (2.1.2). The axe sweep
 // (spec 95) covers names/roles/contrast; what it cannot prove is that focus
 // actually reaches the regions and that key handling works — that is this
@@ -26,7 +26,7 @@ async function activeDescriptor(): Promise<string> {
   });
 }
 
-describe('keyboard operability (P21)', () => {
+describe('keyboard operability', () => {
   before(async () => {
     await waitForHarness();
     await closeAllFiles();

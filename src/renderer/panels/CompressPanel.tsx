@@ -40,15 +40,15 @@ const MRC_PRESET_KEYS: Record<MrcPreset, { label: UiKey; hint: UiKey }> = {
   },
 };
 
-// O8 slice D — "Scanned document (MRC)" is a QUALITY of the same compress op,
-// not a second operation (brief 40 § 6.1), which is why it joins this select
+// "Scanned document (MRC)" is a QUALITY of the same compress op,
+// not a second operation, which is why it joins this select
 // rather than growing the tool list. Choosing it hides the DPI slider, because
 // DPI is meaningless for MRC: the stencil stays at the scan's own resolution
 // and that is the whole point of it (the engine refuses `dpi` alongside `mrc`
 // rather than quietly dropping one).
 
 export function CompressPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call, saveFile } = useEngine();

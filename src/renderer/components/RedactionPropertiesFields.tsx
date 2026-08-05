@@ -22,7 +22,7 @@ import {
   type RedactionCodeSet,
 } from '../lib/redaction-codes';
 
-// Redaction properties (F15 slice E — brief 42 § 6).
+// Redaction properties.
 //
 // The mark's APPEARANCE, in the format's own vocabulary: `/IC` fill,
 // `/OverlayText`, `/Repeat`, `/Q` and the size/colour half of `/DA`. It is
@@ -54,7 +54,7 @@ function setName(set: RedactionCodeSet): string {
 }
 
 export function RedactionPropertiesFields(): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const [props, setProps] = useState<RedactionProperties>(() => loadRedactionProperties());
   const [sets, setSets] = useState(() => getCodeSets());

@@ -51,7 +51,7 @@ def split(file: str, ranges: str, output_dir: str) -> dict:
         pure_renames = carry_pure_data_fields(result, pdf)
         refresh_sig_flags(result)
         # /CO reconciled to the surviving copied fields; catalog /AA carried
-        # whole (F11). Single source, but same-name single-source fields can
+        # whole. Single source, but same-name single-source fields can
         # still rename — feed both reports.
         split_renames = dict(copy.renamed_fields)
         split_renames.update({r["from"]: r["to"] for r in pure_renames})

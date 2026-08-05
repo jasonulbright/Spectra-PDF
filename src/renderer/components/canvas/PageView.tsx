@@ -103,7 +103,7 @@ function PageViewImpl({
     const visW = visRight - visLeft;
     const visH = visBottom - visTop;
 
-    // P11: with a pending 90°/270° turn the page's natural HEIGHT runs along
+    // With a pending 90°/270° turn the page's natural HEIGHT runs along
     // the display x-axis — both the render scale and the "is the base raster
     // already enough" threshold measure in display orientation. The pending
     // turn itself is baked into the detail viewport (renderDetail's

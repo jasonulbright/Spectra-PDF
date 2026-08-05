@@ -1,5 +1,5 @@
 /**
- * On-canvas crop draw — 9-§I.5 P5b.
+ * On-canvas crop draw.
  *
  * Page cropping accepts numeric per-edge insets in the Page Boxes panel and a
  * rectangle drawn directly on the page. This module converts

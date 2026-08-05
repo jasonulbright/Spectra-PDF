@@ -1,17 +1,17 @@
 """Document-level JavaScript: read and EDIT the catalog's /Names /JavaScript
-name tree (Phase 9.S6 — "AcroJS editor").
+name tree ("AcroJS editor").
 
 The app EDITS document-level JavaScript — the scripts the industry-standard
 editor lists under "Document JavaScripts" — as TEXT IN, TEXT OUT. It NEVER
 EXECUTES that JavaScript: no eval, no JS engine, no sandbox. Running document
-JS is a security surface we deliberately do not build (DECISIONS #33, roadmap
-§ I "AcroJS never executing (security) — LEGIT"). So this module only reads and
+JS is a security surface this app deliberately does not build. So this
+module only reads and
 rewrites the `/Root /Names /JavaScript` name tree; the scripts run in no
 process of ours.
 
 Scope: the document-level name tree only. Per-field and page /AA additional
-actions and /OpenAction are separate action sites (named in § I F11) — a later
-extension, not this slice.
+actions and /OpenAction are separate action sites — a later extension,
+not this module's scope.
 """
 
 import os

@@ -9,7 +9,7 @@ import { expect } from '@wdio/globals';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { waitForHarness, getState, invokeAppCommand } from '../support/harness.js';
 
-// Phase 8 — Create PDF from PostScript (Distill) against the real binary:
+// Create PDF from PostScript (Distill) against the real binary:
 // the File-menu dialog opens, the harness injects paths (native pickers
 // are undrivable), the REAL engine converts via the bundled Ghostscript,
 // the output is independently validated Node-side with pdf.js, and the
@@ -30,7 +30,7 @@ showpage
 %%EOF
 `;
 
-// P22: the harness bridge now takes a source LIST (the dialog builds one).
+// The harness bridge now takes a source LIST (the dialog builds one).
 async function createPdfRun(sources: string[], output: string): Promise<boolean> {
   return browser.executeAsync<boolean, [string[], string]>(
     function (srcs, out, done) {
@@ -43,7 +43,7 @@ async function createPdfRun(sources: string[], output: string): Promise<boolean>
   );
 }
 
-describe('create PDF from PostScript (Phase 8)', () => {
+describe('create PDF from PostScript', () => {
   let tmp: string;
   let psPath: string;
   let outPath: string;

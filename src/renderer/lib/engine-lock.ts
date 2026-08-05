@@ -1,5 +1,5 @@
 /**
- * Per-file serialization for engine operations — 9-§I.5 P17.
+ * Per-file serialization for engine operations.
  *
  * The commit gate guarantees the engine reads bytes matching what the user
  * sees; it does NOT guarantee that two independent whole-file operations
@@ -38,9 +38,9 @@ const chains = new Map<string, Promise<unknown>>();
 
 /**
  * Every file path an engine call names. Paths are compared as raw strings,
- * the M7 identity rule: producers canonicalize at the Rust boundary, so two
+ * the identity rule: producers canonicalize at the Rust boundary, so two
  * spellings of one file are already one string by the time they get here —
- * and "normalizing" locally with string tricks is the thing M7 forbids.
+ * and "normalizing" locally with string tricks is forbidden.
  */
 export function lockKeysFor(params: Record<string, unknown>): string[] {
   const out: string[] = [];

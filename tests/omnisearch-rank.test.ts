@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { rankToolMatches } from '../src/renderer/search/omnisearch-rank';
 import { TOOL_DEFS } from '../src/renderer/commands/tools';
 
-// U2: the tool half of the omnisearch. There is no DOM test environment (the
+// The tool half of the omnisearch. There is no DOM test environment (the
 // component itself drags in pdf.js and dies on DOMMatrix), so the ranking —
 // the part that decides what a user sees first — lives in a pure leaf module
 // and is pinned here.

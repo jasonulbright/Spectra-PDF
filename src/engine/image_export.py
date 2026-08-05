@@ -1,4 +1,4 @@
-"""Export PDF pages as raster images via bundled Ghostscript (O1, image half).
+"""Export PDF pages as raster images via bundled Ghostscript (image half).
 
 Why Ghostscript and not the LibreOffice route the Office exports use:
 LibreOffice's CLI image export renders the FIRST page only — useless for a
@@ -16,7 +16,7 @@ The user's own ``%`` characters in the output name are escaped (``%%``) before
 our ``%d`` is appended — gs treats ``%`` as a template character, and a name
 like "Q4 50% off.png" would otherwise silently splinter (the distill review's
 class). Page selection reuses the print dialog's strict ``parse_page_spec``
-(the 2e lesson: a lax parse turns a typo into a whole-document run).
+(the lesson: a lax parse turns a typo into a whole-document run).
 """
 
 import subprocess

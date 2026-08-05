@@ -1,4 +1,4 @@
-// N11 slice B — ruler GUIDES: the projection, the lookup, and the lifetime
+// Ruler GUIDES: the projection, the lookup, and the lifetime
 // helpers. Pure, so the rotation algebra is proven here rather than by
 // eyeballing a rotated page.
 import { describe, it, expect } from 'vitest';
@@ -161,7 +161,7 @@ describe('lifetime helpers', () => {
     expect(withoutGuide(all, 'a').map((x) => x.id)).toEqual(['b']);
     expect(withoutPaths(all, new Set(['a.pdf'])).map((x) => x.id)).toEqual(['b']);
     expect(prunedToPages(all, new Set(['p2'])).map((x) => x.id)).toEqual(['b']);
-    // A guide whose page id is gone must never survive — the § F id-holder
+    // A guide whose page id is gone must never survive — the id-holder
     // rule, the same one the snap-geometry map follows.
     expect(prunedToPages(all, new Set())).toEqual([]);
   });

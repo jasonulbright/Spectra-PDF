@@ -4,11 +4,11 @@ import { waitForHarness, openByPaths, setView, invokeAppCommand, addAnnotation }
 
 const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// Phase 10 slices B1+C: ops-tool panels open in the RIGHT DOCK beside an
-// always-visible document. The Tools tab is GONE (slice C); the harness
+// Ops-tool panels open in the RIGHT DOCK beside an
+// always-visible document. The Tools tab is GONE; the harness
 // setView('operations') bridge — asserted in the last leg — is what keeps
 // the legacy panel specs mechanical.
-describe('right tool dock (Phase 10 B1)', () => {
+describe('right tool dock', () => {
   before(async () => {
     await waitForHarness();
     await openByPaths([SAMPLE]);
@@ -72,7 +72,7 @@ describe('right tool dock (Phase 10 B1)', () => {
     await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 5_000 });
   });
 
-  // U3: the status-bar toggle and the Comments TOOL now land on the SAME
+  // The status-bar toggle and the Comments TOOL now land on the SAME
   // panel. Before, they opened two different lists that both called themselves
   // "Comments" and disagreed about the count.
   it('the Comments toggle opens THE comments panel, and the tool opens the same one', async () => {
@@ -92,7 +92,7 @@ describe('right tool dock (Phase 10 B1)', () => {
     expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
 
     // The TOOL route lands on the very same panel — one comments surface.
-    // Note the id: the review tool was FOLDED INTO `comment` (U3), so there is
+    // Note the id: the review tool was FOLDED INTO `comment`, so there is
     // no `tools.open.comments` any more. Comment authors markup AND owns the
     // list; the grid no longer carries two tiles a plural apart.
     expect(await invokeAppCommand('tools.open.comment')).toBe(true);
@@ -110,7 +110,7 @@ describe('right tool dock (Phase 10 B1)', () => {
     });
   });
 
-  // The concrete defect U3 removed: the status bar's old list filtered to
+  // The concrete defect the fold removed: the status bar's old list filtered to
   // annotations carrying a NOTE (`if (!a.note) continue`), while the Comments
   // tool counted everything — so a highlight with no note was invisible in one
   // "Comments" and counted in the other. One list now, and it shows both.
@@ -136,7 +136,7 @@ describe('right tool dock (Phase 10 B1)', () => {
     });
   });
 
-  it("the harness bridge: setView('operations') opens the dock (slice C)", async () => {
+  it("the harness bridge: setView('operations') opens the dock", async () => {
     // The Tools tab is GONE; the name-compatible bridge keeps the ~30 legacy
     // panel specs mechanical — 'operations' now means "doc tab + dock open".
     // (The previous leg may have left the dock closed already.)
@@ -151,7 +151,7 @@ describe('right tool dock (Phase 10 B1)', () => {
     expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
   });
 
-  // U1: the dock is sized to what it HOLDS — the all-tools list contracts to
+  // The dock is sized to what it HOLDS — the all-tools list contracts to
   // TOOL_DOCK_LIST_WIDTH, a tool panel expands to the user's width. Pinned by
   // MEASUREMENT, not by class name, because the failure mode is visual. The
   // no-wrap assertion is the one that earned its place: the list's tiles were

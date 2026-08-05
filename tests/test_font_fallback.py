@@ -1,4 +1,4 @@
-"""Tests for the replacement-font fallback (Phase 7.4)."""
+"""Tests for the replacement-font fallback."""
 
 import os
 
@@ -10,8 +10,8 @@ from engine.extract_text import extract_text
 from engine.text_runs import convert_text_run, list_text_runs
 
 # The vendored fallback font (scripts/sync-edit-fonts.ps1). Skip like the
-# gs-backed tests when unprovisioned — and per the punchlist dev-notes
-# rule, a recorded gate count must come from a run WITHOUT skips.
+# gs-backed tests when unprovisioned — a recorded gate count must come
+# from a run WITHOUT skips.
 FONT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "resources",
@@ -455,7 +455,7 @@ class TestConvertTextRun:
 
 
 class TestVerticalFaceGate:
-    """Brief 39 slice A — `face_shapes_vertically` reads METRICS.
+    """`face_shapes_vertically` reads METRICS.
 
     Its docstring always said "a font with no vertical machinery answers
     False rather than drawing sideways"; the implementation asked the
@@ -481,7 +481,7 @@ class TestVerticalFaceGate:
     def test_mongolian_face_is_not_vertical_either(self):
         # The reference implementation of a vertical SCRIPT, and it still
         # answers False: Mongolian Baiti stores horizontal glyphs and its
-        # columns come from ROTATING the run (recon § 1.3), so there is no
+        # columns come from ROTATING the run, so there is no
         # honest /W2 to embed. Refusing it here is what sends a Mongolian
         # column down the rotated-run path instead of an /Identity-V embed.
         from engine.font_fallback import face_has_vertical_metrics, face_shapes_vertically

@@ -1,4 +1,4 @@
-// AcroForm preservation through the from-scratch rebuild (2n.4a). The
+// AcroForm preservation through the from-scratch rebuild. The
 // page-tier commit rebuilds dirty files via buildPdf/buildPdfx; before
 // lib/acroform-carry.ts existed that rebuild dropped /AcroForm entirely —
 // fields kept rendering (copied widget /AP pixels) but nothing was fillable
@@ -389,7 +389,7 @@ describe('multi-source rebuilds (the import machinery)', () => {
   });
 
   // Non-simple subtypes hide their rendering data where a top-level check
-  // can't see it (review round 2): Type0/CID fonts keep /FontDescriptor
+  // can't see it: Type0/CID fonts keep /FontDescriptor
   // nested under /DescendantFonts; Type3 fonts have no descriptor at all —
   // their rendering IS their /CharProcs. The allow-list must refuse both.
   async function withRawDrFont(
@@ -412,7 +412,7 @@ describe('multi-source rebuilds (the import machinery)', () => {
     return doc.save({ updateFieldAppearances: false });
   }
 
-  it('composite (Type0) fonts never count as equivalent — descriptor hides in DescendantFonts (review round 2)', async () => {
+  it('composite (Type0) fonts never count as equivalent — descriptor hides in DescendantFonts', async () => {
     const type0 = (marker: string) => (doc: PDFDocument) => {
       const descriptor = doc.context.register(
         doc.context.obj({ Type: 'FontDescriptor', FontName: marker }),
@@ -444,7 +444,7 @@ describe('multi-source rebuilds (the import machinery)', () => {
     expect(da.get('fb')).toBe('/C0_1 10 Tf 0 g');
   });
 
-  it('Type3 fonts never count as equivalent — rendering lives in /CharProcs (review round 2)', async () => {
+  it('Type3 fonts never count as equivalent — rendering lives in /CharProcs', async () => {
     const type3 = (proc: string) => (doc: PDFDocument) =>
       doc.context.register(
         doc.context.obj({
@@ -597,7 +597,7 @@ describe('AcroForm flags and boundaries', () => {
   });
 });
 
-// ── F11: /CO reconciliation and the XFA refusal ─────────────────────────────
+// ── /CO reconciliation and the XFA refusal ──────────────────────────────────
 
 // Decorate a pdf-lib-authored form with /CO listing the given root names (in
 // that order) plus a per-field calculation /AA — pdf-lib's high-level API
@@ -661,7 +661,7 @@ async function coNamesOf(bytes: Uint8Array): Promise<string[]> {
   return names;
 }
 
-describe('F11 — document-level form behavior', () => {
+describe('Document-level form behavior', () => {
   it('carries /CO through a full rebuild, order preserved, refs re-bound', async () => {
     const src = await withCalcOrder(await makeMultiPageForm(), ['only-p2', 'title']);
     const rebuilt = await buildPdf(pagesOf(src, 'a', [0, 1, 2]));

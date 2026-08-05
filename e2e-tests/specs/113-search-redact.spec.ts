@@ -1,4 +1,4 @@
-// F15 — Search & Redact: one search marks every occurrence across every open
+// Search & Redact: one search marks every occurrence across every open
 // document, and the CHECKBOX is what decides which ones go.
 //
 // 25-search covers find and its modes; 92-redaction-marks covers the /Redact
@@ -95,7 +95,7 @@ async function clickEl(selector: string): Promise<void> {
   }, selector);
 }
 
-describe('Search & Redact (F15)', () => {
+describe('Search & Redact', () => {
   let tmp: string;
   let fileA: string;
   let fileB: string;
@@ -192,7 +192,7 @@ describe('Search & Redact (F15)', () => {
     expect(textsA[0]).not.toContain(TERM);
     expect(textsB[0]).not.toContain(TERM);
     // …their neighbours on the same line SURVIVED, which is what proves the
-    // removal was per-glyph and not "drop the whole show operator" (slice B).
+    // removal was per-glyph and not "drop the whole show operator".
     expect(textsA[0]).toContain('CONFIDENTIAL');
     expect(textsA[0]).toContain('report');
     expect(textsB[0]).toContain('Contact');

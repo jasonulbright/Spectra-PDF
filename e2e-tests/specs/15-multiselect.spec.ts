@@ -51,7 +51,7 @@ async function waitForWorkspacePages(expected: number): Promise<string[]> {
   return ids;
 }
 
-describe('multi-select page ops (2n.1)', () => {
+describe('multi-select page ops', () => {
   let tmp: string;
   let sampleA: string;
   let sampleB: string;
@@ -170,10 +170,10 @@ describe('multi-select page ops (2n.1)', () => {
     await pdf.loadingTask.destroy();
   });
 
-  it('the selection SURVIVES an authored commit — its ids are adopted by the reindex (Phase 5 § F)', async () => {
+  it('the selection SURVIVES an authored commit — its ids are adopted by the reindex', async () => {
     // FLIPPED from the historic clear-on-reindex pin. That pin guarded the
     // regression where surviving positional ids could re-bind to a
-    // DIFFERENT physical page after the rebuild. Phase 5 killed the hazard
+    // DIFFERENT physical page after the rebuild. That hazard is dead
     // structurally: positional ids are generation-tagged (a rebuild can
     // never re-serve an old id) and the AUTHORED commit publishes its
     // old→new mapping, which the reindex adopts — so a surviving id is

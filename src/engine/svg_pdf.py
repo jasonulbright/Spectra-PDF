@@ -1,11 +1,11 @@
-"""SVG → PDF Form XObject compiler (P7 slice F — vector placement).
+"""SVG → PDF Form XObject compiler (vector placement).
 
 Compiles the STATIC subset of SVG that maps onto PDF graphics into a Form
 XObject with BBox [0,0,1,1] (the viewBox normalized to the unit square with
 the SVG y-flip baked in), so a placed vector graphic draws EXACTLY like an
 image placement — the unit square under the live CTM — and the whole
 transform/delete/opacity/blend/mask/crop machinery in `page_images.py`
-applies to it verbatim (the P7 convergence). The form carries a private
+applies to it verbatim. The form carries a private
 `/SpectraVector` marker naming the source viewBox; the placement walker
 treats marker-carrying forms as LEAF placements and never recurses.
 
@@ -596,7 +596,7 @@ def path_bbox(segs):
     """The TIGHT bbox of parsed segments — cubic extrema included (an
     objectBoundingBox gradient mapped to a control-point bbox would land the
     fade visibly off). The extrema math is `engine.bezier` — the SAME
-    implementation `page_vectors` boxes with (P8 slice A dedupe)."""
+    implementation `page_vectors` boxes with (dedupe)."""
     pts: list[tuple[float, float]] = []
     cx = cy = 0.0
     for seg in segs:

@@ -1,4 +1,4 @@
-// Canvas whole-document merge helpers (2o).
+// Canvas whole-document merge helpers.
 import { describe, expect, it } from 'vitest';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import {

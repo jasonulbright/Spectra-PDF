@@ -1,4 +1,4 @@
-// Phase 9.C1 — image-placement transform math.
+// Image-placement transform math.
 //
 // The engine's `transform_page_image` takes an ABSOLUTE target matrix M' in
 // page USER space; the renderer builds it from a move/resize/rotate gesture on
@@ -91,7 +91,7 @@ export function applyResizeCorner(
   return matMul(s, m); // local scale first, then M
 }
 
-/** P7 slice A: skew the placement by dragging one EDGE-mid handle parallel
+/** Skew the placement by dragging one EDGE-mid handle parallel
  * to its edge, with the OPPOSITE edge pinned. `edge` is 0=left 1=bottom
  * 2=right 3=top (the applyCropEdge convention). Computed in the placement's
  * LOCAL frame like resize, so it stays correct for a rotated placement: the
@@ -146,7 +146,7 @@ export function applyRotate(m: Mat, angleRad: number): Mat {
 /** Normalize two LOCAL (image-unit-space) drag points into a crop rect
  * [x0, y0, x1, y1] clamped to the unit square, or null when the result is
  * degenerate (below `minSize` on either axis — a bare click or a sliver
- * must not commit). 9.C3: the engine takes exactly this rect. */
+ * must not commit). The engine takes exactly this rect. */
 export function cropRectFromLocalPoints(
   a: [number, number],
   b: [number, number],
@@ -161,7 +161,7 @@ export function cropRectFromLocalPoints(
   return [x0, y0, x1, y1];
 }
 
-/** C3-tail: drag ONE edge of an existing crop rect to a new LOCAL
+/** Drag ONE edge of an existing crop rect to a new LOCAL
  * coordinate. `edge` is 0=left 1=bottom 2=right 3=top (local unit space,
  * y up — matching the rect's [x0,y0,x1,y1] order). The dragged edge
  * clamps to the unit square AND to `minSize` short of its opposite edge,

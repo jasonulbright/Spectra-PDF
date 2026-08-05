@@ -1,9 +1,9 @@
 /**
- * Page LABELS in the navigation readout — 9-§I.5 P5 follow-on.
+ * Page LABELS in the navigation readout.
  *
  * A document that defines `/PageLabels` numbers its pages the way the
  * printed thing does: front matter as i, ii, iii, the body restarting at 1,
- * an appendix as A-1. The editors for that shipped in P5; what did not was
+ * an appendix as A-1. The editors for that exist; what did not was
  * CONSUMING them — the page box still counted physical sheets, so on a book
  * with twelve roman pages the reader's "page 1" and ours were eleven apart,
  * and typing "iv" did nothing.

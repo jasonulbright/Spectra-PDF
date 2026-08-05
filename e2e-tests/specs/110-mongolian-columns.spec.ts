@@ -11,7 +11,7 @@ import {
   openParagraphEditor,
 } from '../support/harness.js';
 
-// Phase 9.T12 (brief 39 slice C) — LEFT-TO-RIGHT vertical columns against
+// LEFT-TO-RIGHT vertical columns against
 // the built binary. The committed fixture (fixtures/mongolian-columns.pdf,
 // generated with pikepdf — nothing in the app authors a rotated run, and
 // there is no vertical writing mode on the authoring surface at all)
@@ -22,11 +22,11 @@ import {
 //
 // Two things are proved here that nothing else can prove:
 //   * the LEFT column reads first — the exact opposite of the CJK
-//     convention spec 54 pins, and the whole of T12;
+//     convention spec 54 pins;
 //   * a retype comes BACK as the characters that were typed. Mongolian
 //     joins cursively and a PDF viewer never shapes, so the re-emission
 //     goes through a shaped subset; a shaped edit that cannot be read back
-//     is a one-way trip (the T25 lesson), and only a round trip through the
+//     is a one-way trip, and only a round trip through the
 //     real binary shows it is not.
 //
 // Waits are generation-keyed (README §Adding-a-spec 4).
@@ -87,7 +87,7 @@ async function waitForReindexedParas(
   );
 }
 
-describe('Mongolian left-to-right columns (Phase 9.T12)', () => {
+describe('Mongolian left-to-right columns', () => {
   let tmp: string;
   let pdfPath: string;
 
@@ -124,7 +124,8 @@ describe('Mongolian left-to-right columns (Phase 9.T12)', () => {
     // The frame is the reflecting one — columns advance rightward.
     expect(column!.orientation).toBe('vertical-lr');
     // The writing MODE is horizontal: the column is the matrix's doing, not
-    // a `-V` CMap's. That distinction is the reason T12 needed T13 first.
+    // a `-V` CMap's. That distinction is why the orientation model has to
+// come from the frame rather than from the writing mode.
     expect(column!.vertical).toBe(false);
     expect(column!.lineCount).toBe(2);
   });

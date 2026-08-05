@@ -1,5 +1,5 @@
-"""Direct tests for the shared state machine's 7.5 additions (Tr/Ts and
-opaque color capture). The pre-7.5 tracking is pinned through the client
+"""Direct tests for the shared state machine's Tr/Ts and opaque-colour
+capture. The rest of the tracking is pinned through the client
 suites (redact / page_images / text_runs) — the no-drift proof — so this
 file covers only the new fields' semantics."""
 

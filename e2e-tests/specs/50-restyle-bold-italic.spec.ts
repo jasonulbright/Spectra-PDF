@@ -11,7 +11,7 @@ import {
   openParagraphEditor,
 } from '../support/harness.js';
 
-// Phase 9.A3b — bold/italic substitution end to end: the B toggle
+// Bold/italic substitution end to end: the B toggle
 // substitutes the whole paragraph into the bundled Bold face. Waits are
 // generation-keyed (see e2e README §Adding-a-spec 4 and spec 49's
 // timing rule — a pure restyle keeps the text identical, so content
@@ -60,7 +60,7 @@ async function waitForReindexedListing(
   );
 }
 
-describe('restyle bold/italic (Phase 9.A3b)', () => {
+describe('restyle bold/italic', () => {
   let tmp: string;
   let pdfPath: string;
 

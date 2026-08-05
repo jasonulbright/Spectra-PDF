@@ -1,8 +1,8 @@
-// N11 slice D — the SYMBOL registry: named sets of vector symbols, the
+// The SYMBOL registry: named sets of vector symbols, the
 // built-in artwork, and the JSON interchange a firm brings its own standard
 // set through.
 //
-// It is the stamp library's third species, in the shape slice C already
+// It is the stamp library's third species, in the shape the count marks
 // established: a symbol is a small VECTOR PART LIST (`poly`/`circle` in the
 // unit square, `count-marks.ts`), not SVG path data. One geometry drives every
 // consumer — the palette's inline SVG, the annotation overlay, and the PDF
@@ -90,7 +90,7 @@ function circle(cx: number, cy: number, r: number): SymbolPart {
 
 /** The slice-C count markers, re-presented as a set. Same geometry object —
  * the marker a count group draws and the symbol the palette offers are one
- * registry, which is the point of slice D. */
+ * registry, which is the point. */
 const MARKER_NAMES: Record<string, string> = {
   circle: 'Circle',
   square: 'Square',

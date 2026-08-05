@@ -21,8 +21,8 @@ import {
   setReactSelectValue,
 } from '../support/harness.js';
 
-// Guided actions slice 5 — schedule a saved action (ours-extra; run_action
-// was built engine-side FOR this). A scheduled action = the Phase-12 Task
+// Schedule a saved action (run_action was built engine-side FOR this).
+// A scheduled action = the Task
 // Scheduler lifecycle + a FROZEN copy of the action in this app's
 // machine-scoped ProgramData folder: a task must not depend on the GUI's
 // localStorage (wrong profile under a service account, and it fires with the
@@ -60,7 +60,7 @@ function forceDelete(name: string): void {
   }
 }
 
-describe('scheduled guided actions (slice 5)', () => {
+describe('scheduled guided actions', () => {
   let tmp: string;
   let src: string;
   let dest: string;

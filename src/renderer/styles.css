@@ -45,17 +45,15 @@
 /* ── Light theme overrides ────────────────────────────────────────────────
    Remaps the dark utility palette to light equivalents. This block IS the
    panels' light theme, permanently — NOT a legacy shim awaiting deletion.
-   The workbench CHROME themes via semantic vars (--bar-bg etc., § 10.2 of
-   the phase-4 doc); panel BODIES deliberately kept their utility classes at
-   M5 (ported, not restyled), so this remap is their theming mechanism and
-   deleting it would delete the light theme (decision recorded in the
-   phase-4 doc § 10.2 revision note + § 15 M7.2). Audited class-by-class at
-   M7.2; a NEW dark utility class used on a panel must add its light remap
-   here in the same change.
+   The workbench CHROME themes via semantic vars (--bar-bg etc.); panel
+   BODIES deliberately kept their utility classes when they were ported, so
+   this remap is their theming mechanism and deleting it would delete the
+   light theme. Audited class-by-class; a NEW dark utility class used on a
+   panel must add its light remap here in the same change.
    Selector specificity ([data-theme] .class) beats a bare Tailwind class.
    ──────────────────────────────────────────────────────────────────────── */
 
-/* ── Shared dim-text token (P21 WCAG sweep) ──────────────────────────────
+/* ── Shared dim-text token (WCAG sweep) ──────────────────────────────
    ONE variable, three theme values, each AA on the surfaces it appears on
    (dark shell #171717/#191919, light #ffffff/#f9fafb, HC #000000). The
    custom components converted onto it used six near-identical greys, four
@@ -118,7 +116,7 @@
 
 /* Opacity variants — these slipped past the solid table above: a 60% dark
    wash composites to #7d7d7d over white, which put card text at 3.6:1 and
-   card hint text at 1.2:1 (P21 axe sweep, the checker/preflight rows). */
+   card hint text at 1.2:1 (axe sweep, the checker/preflight rows). */
 [data-theme="light"] .bg-neutral-800\/60 { background-color: #f3f4f6; }
 [data-theme="light"] .bg-neutral-800\/50 { background-color: #f3f4f6; }
 [data-theme="light"] .bg-neutral-800\/40 { background-color: rgba(243, 244, 246, 0.7); }
@@ -167,7 +165,7 @@
 [data-theme="light"] .hover\:bg-red-500:hover { background-color: #e85963; }
 [data-theme="light"] .bg-red-500 { background-color: #D2424E; color: #ffffff; }
 
-/* Status/badge text tints (M7.2 light-theme sweep) — the dark-theme pastel
+/* Status/badge text tints (light-theme sweep) — the dark-theme pastel
    tints (red-400, green-300, amber-200…) sit at or under 3:1 on white,
    sub-AA for exactly the text that must be readable: errors, warnings,
    verification results. Remapped to their dark full-strength counterparts;
@@ -218,7 +216,7 @@
 [data-theme="light"] ::-webkit-scrollbar-track  { background-color: #f3f4f6; }
 
 /* Custom components the light tables never covered — measured 1.2:1–3.4:1
-   on white in the P21 sweep (the dock title was near-invisible). The dock
+   on white in the sweep (the dock title was near-invisible). The dock
    itself keeps its dark literal background otherwise, which is wrong in
    BOTH light presentations (mica frosts it white, solid keeps it black
    behind light-remapped text). */
@@ -307,10 +305,10 @@
   color: var(--text-dim);
 }
 
-/* ── Workbench chrome (Phase 4 M2) ────────────────────────────────────────
+/* ── Workbench chrome ─────────────────────────────────────────────────────
    The menu bar, main toolbar, and tab strip all carry `.app-shell-bar`, so
    the Mica frame rules below (keyed on that class) tint them automatically —
-   the § 10.3 "re-key in the same slice" done by class reuse rather than new
+   the re-key done by class reuse rather than new
    selectors. They have no background of their own; in the solid look they
    show `.app-shell` (bg-neutral-900 / light remap) through, exactly as the
    old single header did, keeping the no-attribute fallback canonical.
@@ -383,11 +381,10 @@
   background-color: #ffffff;
 }
 
-/* ── Left navigation pane (Phase 4 M3, § 5) ───────────────────────────────
+/* ── Left navigation pane ─────────────────────────────────────────────────
    The icon strip carries `.app-rail` (Mica frame tint under a backdrop; the
    panel body carries `.app-content`, opaque). Dark defaults + a light remap,
-   dark-defaults-plus-light-remap being the house pattern (semantic tokens
-   are M7).
+   dark-defaults-plus-light-remap being the house pattern.
    ──────────────────────────────────────────────────────────────────────── */
 .nav-icon-strip {
   display: flex;
@@ -478,7 +475,7 @@
   pointer-events: none;
 }
 
-/* Bookmarks nav panel (M3.2) — one surface: reorder handle + inline edit. */
+/* Bookmarks nav panel — one surface: reorder handle + inline edit. */
 .bookmarks-list { padding: 4px 6px; }
 .bookmark-row {
   display: flex;
@@ -557,7 +554,7 @@
 .bookmark-add-btn:hover { color: #e5e5e5; background: #262626; }
 .bookmark-status { font-size: 11px; color: var(--text-dim); }
 
-/* Search nav panel (M3.3) — query box + per-file hit list with snippets. */
+/* Search nav panel — query box + per-file hit list with snippets. */
 .search-panel-input-row {
   padding: 8px;
   border-bottom: 1px solid #262626;
@@ -620,7 +617,7 @@
 [data-theme="light"] .search-hit-page { color: #1f2937; }
 [data-theme="light"] .search-hit-snippet { color: #6b7280; }
 
-/* Signatures nav panel (M3.3b) — compact status read-view of verify_signatures. */
+/* Signatures nav panel — compact status read-view of verify_signatures. */
 .signatures-nav-count {
   padding: 6px 10px 4px;
   font-size: 11px;
@@ -742,7 +739,7 @@
   cursor: grab;
 }
 
-/* Document view (M4) — the continuous reading column (plain scroller, not the
+/* Document view — the continuous reading column (plain scroller, not the
    d3 board). Pages are absolutely positioned inside a full-height spacer by the
    virtualizer; each row shows the page shadow + a white backing so a page reads
    as a page even before its raster lands. */
@@ -762,7 +759,7 @@
    centre within that, hugging the left edge instead of the viewport. */
 .docview-spacer { min-width: 100%; }
 
-/* pdf.js text layer (M4.2, § 6.3) — selectable text over the raster.
+/* pdf.js text layer — selectable text over the raster.
    These rules are pdf.js's OWN contract, hand-copied from its
    `web/pdf_viewer.css`: it positions each span with `left`/`top` plus a
    `--font-height`/`--scale-x`/`--rotate` custom-property triple and expects the
@@ -999,7 +996,7 @@
   width: max-content;
 }
 
-/* Add-page ghost (2n.3): a dashed "+" at the end of a document's strip. Width
+/* Add-page ghost: a dashed "+" at the end of a document's strip. Width
    is set inline from layout.ts ADD_GHOST_WIDTH so the layout math and the DOM
    agree on the wrap. */
 .page-add-ghost {
@@ -1289,7 +1286,7 @@
   pointer-events: none;
 }
 
-/* Edit ▸ Images (7.1): clickable placement outlines. Quiet at rest, obvious
+/* Edit ▸ Images: clickable placement outlines. Quiet at rest, obvious
    on hover, accent when selected — the selection is what the secondary
    toolbar's actions operate on. */
 .page-editimg {
@@ -1309,7 +1306,7 @@
   background: rgba(59, 130, 246, 0.12);
 }
 
-/* 9.D1 vector objects — a distinct teal tint separates them from images
+/* Vector objects — a distinct teal tint separates them from images
    (blue) and text. The box is the container; a transparent hit button fills
    it; a small delete affordance shows when selected. */
 .page-editvec {
@@ -1392,7 +1389,7 @@
   padding: 1px 3px;
 }
 
-/* C1 image transform overlay (9.C1): outline quad + handles on the selected
+/* Image transform overlay: outline quad + handles on the selected
    image. The root spans the page (coordinate reference); only the polygon and
    handle dots take pointer events. */
 .page-imgtx {
@@ -1438,7 +1435,7 @@
   border-radius: 50%;
   cursor: grab;
 }
-/* P7 multi-select: the group frame (dashed box over the union bounds) and
+/* Multi-select: the group frame (dashed box over the union bounds) and
    the per-member outlines inside it. Members take the pointer for drags,
    modifier toggles, and collapse clicks. */
 .page-imgtx-groupframe {
@@ -1456,7 +1453,7 @@
   pointer-events: fill;
   cursor: move;
 }
-/* P7 slice A: skew handles — diamonds at the edge midpoints, visually
+/* Skew handles — diamonds at the edge midpoints, visually
    distinct from the square resize corners and the round rotate knob. */
 .page-imgtx-skew {
   position: absolute;
@@ -1477,7 +1474,7 @@
   align-self: center;
   padding: 0 4px;
 }
-/* P7 multi-select: the align/distribute cluster in the Edit strip. */
+/* Multi-select: the align/distribute cluster in the Edit strip. */
 .secondary-toolbar-align {
   display: inline-flex;
   align-items: center;
@@ -1490,7 +1487,7 @@
   color: #f87171;
 }
 
-/* Measure (parity map § 2): the scale-ratio controls + latest-value readout. */
+/* Measure: the scale-ratio controls + latest-value readout. */
 .measure-scale-input {
   width: 52px;
   padding: 2px 4px;
@@ -1521,7 +1518,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* N11 slice D — the symbol palette (the stamp picker's third species and the
+/* The symbol palette (the stamp picker's third species and the
    Takeoff panel's marker picker: ONE component, so one block of style). */
 .symbol-palette {
   display: flex;
@@ -1646,7 +1643,7 @@
   opacity: 0.85;
 }
 
-/* Custom stamp library (parity map § 2). */
+/* Custom stamp library. */
 .stamp-custom-wrap {
   position: relative;
   display: inline-flex;
@@ -1692,7 +1689,7 @@
   align-self: center;
 }
 
-/* Edit ▸ Text (7.2): run outlines — quieter than image boxes at rest (text
+/* Edit ▸ Text: run outlines — quieter than image boxes at rest (text
    pages are dense); locked runs show a subdued outline whose title carries
    the refusal reason. */
 .page-edittext {
@@ -1716,7 +1713,7 @@
   border-color: rgba(200, 160, 120, 0.45);
 }
 
-/* Paragraph boxes (7.5) — the primary edit-mode text surface. A calmer
+/* Paragraph boxes — the primary edit-mode text surface. A calmer
    dash than run boxes so a page of paragraphs reads as regions, not
    clutter; selection matches the shared accent. */
 .page-editpara {
@@ -1740,7 +1737,7 @@
   position: absolute;
   z-index: 5;
 }
-/* 9.A5a: the textarea + its colour backdrop share ONE box so the coloured
+/* The textarea + its colour backdrop share ONE box so the coloured
    text lines up under the caret. The wrapper is sized by the textarea (in
    flow); the backdrop absolutely fills it. */
 .page-editpara-inputwrap {
@@ -1765,7 +1762,7 @@
 .page-editpara-editor textarea.invalid {
   border-color: #dc2626;
 }
-/* 9.A5-tails-b: the paragraph editor's RICH SURFACE — one contentEditable
+/* The paragraph editor's RICH SURFACE — one contentEditable
    where the styled text IS the input, so the caret/selection/wrapping are
    computed from the glyphs the user sees. (It replaced a styled backdrop +
    transparent textarea, whose separate uniform metrics drifted from any
@@ -1800,7 +1797,7 @@
 .page-editpara-rich.invalid {
   border-color: #dc2626;
 }
-/* A1 restyle toolbar: a compact size + colour row above the textarea. */
+/* Restyle toolbar: a compact size + colour row above the textarea. */
 .page-editpara-toolbar {
   display: flex;
   align-items: center;
@@ -1834,7 +1831,7 @@
   background: none;
   cursor: pointer;
 }
-/* A3a family swap: the substitute-face dropdown beside size/colour. */
+/* Family swap: the substitute-face dropdown beside size/colour. */
 .page-editpara-ctl select {
   padding: 1px 3px;
   border: 1px solid rgba(120, 120, 120, 0.5);
@@ -1843,7 +1840,7 @@
   color: #111;
   font-size: 11px;
 }
-/* C3 image adjustments: the crop band + the armed crop quad + the opacity
+/* Image adjustments: the crop band + the armed crop quad + the opacity
    slider row. */
 .page-imgtx-quad.crop {
   cursor: crosshair;
@@ -1855,7 +1852,7 @@
   stroke-dasharray: 4 3;
   pointer-events: none;
 }
-/* C3-tail: the LISTED tool crop (persistent outline) + its edge handles. */
+/* The LISTED tool crop (persistent outline) + its edge handles. */
 .page-imgtx-croprect {
   fill: none;
   stroke: var(--accent, #3b82f6);
@@ -1863,7 +1860,7 @@
   stroke-dasharray: 5 4;
   pointer-events: none;
 }
-/* P7 slice E: gradient-mask direct manipulation — the from/to dots and the
+/* Gradient-mask direct manipulation — the from/to dots and the
    axis line between them. */
 .page-imgtx-maskaxis {
   stroke: var(--accent, #3b82f6);
@@ -1912,7 +1909,7 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-/* P7 slice D: the blend-mode select beside the opacity slider. */
+/* The blend-mode select beside the opacity slider. */
 .secondary-toolbar-blend {
   display: inline-flex;
   align-items: center;
@@ -1921,7 +1918,7 @@
   color: inherit;
 }
 
-/* A3b style toggles: B / I substitution buttons. */
+/* Style toggles: B / I substitution buttons. */
 .page-editpara-style {
   min-width: 20px;
   height: 20px;
@@ -2029,7 +2026,7 @@
   color: rgba(196, 181, 253, 0.95);
 }
 
-/* Find (2m): matching pages get a ring; OCR'd pages get per-word boxes. */
+/* Find: matching pages get a ring; OCR'd pages get per-word boxes. */
 .page.find-match {
   outline: 2px solid rgba(59, 130, 246, 0.9);
   outline-offset: 2px;
@@ -2043,7 +2040,7 @@
   pointer-events: none;
 }
 
-/* On-canvas form widgets (2n.4b). Interactive only in the Forms tool; a
+/* On-canvas form widgets. Interactive only in the Forms tool; a
    widget with a pending value stays visible (inert, emerald) in every other
    tool. Inputs are opaque so the baked — now stale — widget pixels
    underneath can't show through a pending edit. */
@@ -2173,7 +2170,7 @@
   border-color: #a78bfa;
 }
 
-/* T14: the run editor's style row — size + colour for one run. */
+/* The run editor's style row — size + colour for one run. */
 .page-edittext-stylerow {
   display: flex;
   align-items: center;
@@ -2209,7 +2206,7 @@
   outline-offset: 1px;
 }
 
-/* F8 pushbuttons: the page raster draws the button's own face, so the
+/* pushbuttons: the page raster draws the button's own face, so the
  * overlay is a bare click surface — native button chrome stripped, a faint
  * hover tint as the only affordance. */
 .page-form-button {
@@ -2232,19 +2229,19 @@
   border-color: #10b981;
 }
 
-/* Add-Text band (9.A2): sky, to read as authoring rather than a form field. */
+/* Add-Text band: sky, to read as authoring rather than a form field. */
 .page-annot-band.band-addtext {
   background: rgba(56, 189, 248, 0.16);
   border-color: #38bdf8;
 }
 
-/* Add-Image band (9.C2): violet, distinct from Add-Text's sky. */
+/* Add-Image band: violet, distinct from Add-Text's sky. */
 .page-annot-band.band-addimage {
   background: rgba(167, 139, 250, 0.18);
   border-color: #a78bfa;
 }
 
-/* Crop band + the placement it leaves behind (P5b): amber, and UNFILLED —
+/* Crop band + the placement it leaves behind: amber, and UNFILLED —
    the rectangle marks what is KEPT, so shading its interior would read as the
    part being taken away. Every other band means the opposite, which is
    exactly why this one states it in a label. */
@@ -2277,7 +2274,7 @@
   white-space: nowrap;
 }
 
-/* Pending new-field placement (2n.4c): emerald frame, same pointer contract
+/* Pending new-field placement: emerald frame, same pointer contract
    as .page-signature — only the × takes events. */
 .page-form-new {
   position: absolute;
@@ -2300,7 +2297,7 @@
   color: rgba(110, 231, 183, 0.95);
 }
 
-/* Pending Add-Text placement (9.A2): sky frame, distinct from the emerald
+/* Pending Add-Text placement: sky frame, distinct from the emerald
    new-field box; same base + pointer contract as .page-form-new. */
 .page-form-new.page-addtext-new {
   background: rgba(56, 189, 248, 0.12);
@@ -2353,7 +2350,7 @@
   pointer-events: none;
 }
 
-/* N11 slice C — a placed takeoff legend's on-canvas body. It mirrors what the
+/* A placed takeoff legend's on-canvas body. It mirrors what the
    appearance stream prints (symbol · group · tally, then the total), and
    scales with the box so the reading view's zoom does not desync the two. */
 .page-annot-legend {
@@ -2404,7 +2401,7 @@
   height: 100%;
 }
 
-/* Measure tool (parity map § 2): the live value chip riding the cursor. */
+/* Measure tool: the live value chip riding the cursor. */
 .measure-live-label {
   position: absolute;
   transform: translateY(-100%);
@@ -2457,7 +2454,7 @@
   user-select: none;
 }
 
-/* N11 slice D — a placed vector SYMBOL: the line art alone, like an image
+/* A placed vector SYMBOL: the line art alone, like an image
    stamp, and the same unit-square geometry the appearance stream draws. */
 .page-annot-stamp:has(.page-annot-symbol-svg) {
   border-width: 0;
@@ -2497,13 +2494,12 @@
   pointer-events: auto;
 }
 
-/* ── Tools Center + task panes (Phase 4 M5, § 7) ───────────────────────────
+/* ── Tools Center + task panes ─────────────────────────────────────────────
    The Tools tab's two states. With no tool open you get the tile grid — the
    tab answers "what job are you here to do?"; with one open you get its task
    pane, headed by the tool's name and a way back to the grid.
 
-   Dark defaults + a light remap, per the nav-pane pattern above (semantic
-   tokens are M7).
+   Dark defaults + a light remap, per the nav-pane pattern above.
    ──────────────────────────────────────────────────────────────────────── */
 .tools-center {
   flex: 1;
@@ -2535,7 +2531,7 @@
   display: grid;
   /* Tiles size themselves: the grid is a fluid number of columns, so the grid
      reflows with the window instead of pinning a column count that only looks
-     right at one width. U1 narrowed the track from 220px to 168px — with the
+     right at one width. The track narrowed from 220px to 168px — with the
      description gone the tile is a single icon+name row, so a wide track only
      bought empty space (and fewer tools on screen). Still >= the dock's
      single-column width, so both homes render from the one component. */
@@ -2543,7 +2539,7 @@
   gap: 8px;
 }
 .tool-tile {
-  /* One row now (U1): icon + name, vertically centred. Was a two-row grid
+  /* One row now: icon + name, vertically centred. Was a two-row grid
      whose second row held the description that is now the tooltip. */
   display: flex;
   align-items: center;
@@ -2562,7 +2558,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 34 -> 24 (U1): the chip was competing with the name for attention. */
+  /* 34 -> 24: the chip was competing with the name for attention. */
   flex: 0 0 auto;
   width: 24px;
   height: 24px;
@@ -2571,7 +2567,7 @@
   color: #cfcfcf;
 }
 .tool-tile:hover .tool-tile-icon { color: #ffffff; }
-/* 13 -> 14px (U1): the name is the thing being scanned for, so it is now the
+/* 13 -> 14px: the name is the thing being scanned for, so it is now the
    largest text in the tile rather than the smallest. Wraps rather than
    truncates — a clipped tool name is worse than a two-line one, and the grid
    row stretches its tiles to match. */
@@ -2583,7 +2579,7 @@
 }
 
 
-/* ── U2: the universal search box in the toolbar row ─────────────────────── */
+/* ── the universal search box in the toolbar row ─────────────────────── */
 .omnisearch {
   position: relative;
 }
@@ -2718,17 +2714,17 @@
 [data-theme="light"] .tool-op:hover { background: #f3f4f6; color: #111827; }
 [data-theme="light"] .tool-op.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 
-/* The task pane's document picker (M5.2) — replaces the retired rail's standing
+/* The task pane's document picker — replaces the retired rail's standing
    "Active File" column. The Tools tab isn't a doc tab, so a tool's panels need
    their target named somewhere; one control in the pane head says it without
    spending a column on it. Only rendered with >1 file open. */
 
 
-/* ── Secondary toolbar (Phase 4 M5.4, § 3.1) ──────────────────────────────
+/* ── Secondary toolbar ────────────────────────────────────────────────────
    The contextual strip at the top of the document pane, present only while a
    tool mode is armed. Replaces the floating pill, which showed all eight modes
-   flat and permanently. Docked, not floating: it belongs to the pane's chrome
-   (§ 3's layout), and a floating cluster over the page was covering the thing
+   flat and permanently. Docked, not floating: it belongs to the pane's
+   chrome, and a floating cluster over the page was covering the thing
    it acts on.
    ──────────────────────────────────────────────────────────────────────── */
 .secondary-toolbar {
@@ -2740,7 +2736,7 @@
   border-bottom: 1px solid #2e2e2e;
   background: #1f1f1f;
   flex-shrink: 0;
-  /* The symbol palette (N11 slice D) hangs off this strip. */
+  /* The symbol palette hangs off this strip. */
   position: relative;
 }
 
@@ -2905,7 +2901,7 @@
   white-space: nowrap;
 }
 
-/* The right tool dock (Phase 10 slice B1) — ops-tool panels beside an
+/* The right tool dock — ops-tool panels beside an
    always-visible document. Anchored right; resize handle on its left edge. */
 .tool-dock {
   position: relative;
@@ -2972,14 +2968,14 @@
   font-size: 12px;
   white-space: nowrap;
 }
-/* The dock contracts to the tools list and expands back to a panel (U1). The
+/* The dock contracts to the tools list and expands back to a panel. The
    class is dropped while a resize drag is live, so a pointer-tracked width
    never animates behind the cursor. */
 .tool-dock-animated {
   transition: width 140ms ease;
 }
 
-/* T18 — paragraph-editor resize grips + split-gap scrub. Accent-tinted so
+/* Paragraph-editor resize grips + split-gap scrub. Accent-tinted so
    they theme with everything else; the grips sit ON the card edge along
    the paragraph's inline axis (side classes cover every rotation/writing
    mode combination the editor computes). */
@@ -3051,7 +3047,7 @@
   grid-template-columns: 1fr;
 }
 
-/* The docked status bar (Phase 10 slice A) — view state + pending commits,
+/* The docked status bar — view state + pending commits,
    anchored under the document area. Replaces the floating bottom-right
    cluster (the "covering the thing being worked on" class, now law). */
 .canvas-status-bar {
@@ -3329,9 +3325,9 @@
 [data-theme="light"] .secondary-tool.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 
 /* An ops-less tool's Tools-tab pane: it has no form here, so it says so rather
-   than borrowing another operation's (§ 3.3, the absence fence). */
+   than borrowing another operation's (the absence fence). */
 
-/* ── Preferences (Phase 4 M5.5, § 7) ──────────────────────────────────────
+/* ── Preferences ──────────────────────────────────────────────────────────
    Category nav + one section at a time, replacing a flat scroll of every
    setting. The nav is what gives Help ▸ Third-party Licenses somewhere to land.
    ──────────────────────────────────────────────────────────────────────── */
@@ -3469,7 +3465,7 @@
   background: #333;
 }
 
-/* ── HIGH-CONTRAST THEME (N14) — GENERATED from the light block by
+/* ── HIGH-CONTRAST THEME — GENERATED from the light block by
    gen-hc-theme.local.py; edit the MAP there, not these lines. ── */
 [data-theme="high-contrast"] .bg-neutral-900 { background-color: #000000; }
 [data-theme="high-contrast"] .bg-neutral-850 { background-color: #000000; }
@@ -3510,7 +3506,7 @@
 [data-theme="high-contrast"] .bg-red-500 { background-color: #D2424E; color: #000000; }
 [data-theme="high-contrast"] .text-red-400 { color: #ff8080; }
 [data-theme="high-contrast"] .text-red-300 { color: #ff8080; }
-/* P21: the greens, ambers and red-200 below previously carried the LIGHT
+/* The greens, ambers and red-200 below previously carried the LIGHT
    theme's dark-on-white values (#15803d, #92400e, #991b1b) — dark ink on a
    black theme, 4.2:1 at best. High contrast brightens; it never darkens. */
 [data-theme="high-contrast"] .text-red-200 { color: #ffb3b3; }
@@ -3562,7 +3558,7 @@
 [data-theme="high-contrast"] .properties-bar { background: #000000; border-bottom-color: #1a1a1a; }
 [data-theme="high-contrast"] .properties-bar-note { color: #ffffff; }
 [data-theme="high-contrast"] .properties-bar-action { color: #ffffff; background: #1a1a1a; border-color: #2e2e2e; }
-/* P21: high contrast does NOT frost. The white wash here was the light
+/* High contrast does NOT frost. The white wash here was the light
    theme's mica treatment pasted onto a black theme — it put the shell's
    light-on-dark text on a white bar (1.2:1 across the tab strip). The HC
    contract is maximum contrast, and Windows' own HC mode disables
@@ -3655,7 +3651,7 @@
 }
 /* ── end high-contrast (generated) ── */
 
-/* Snapping (N11 slice A). The marker rides the snapped point in its own
+/* Snapping. The marker rides the snapped point in its own
    16×16 box (the annotation overlays' 0..1 viewBox would squash the glyphs),
    the badge names the type beside it, and the live region carries the same
    name for a reader who cannot see either. */
@@ -3697,7 +3693,7 @@
   white-space: nowrap;
 }
 
-/* ── N11 slice B: rulers, grid, guides ────────────────────────────────────
+/* ── rulers, grid, guides ─────────────────────────────────────────────────
    The ruler FRAME. With rulers off it is `display: contents`, so the scroller
    stays a direct child of the pane's flex column and the reading view's
    geometry is bit-for-bit what shipped — a drafting aid must not perturb the
@@ -3799,7 +3795,7 @@
 .docview-guide-draft.axis-y { left: 0; right: 0; height: 1px; }
 
 /* The grid, drawn over the raster and under the annotation layer. The page
-   raster's forced-color rule applies here too (N14): a high-contrast theme
+   raster's forced-color rule applies here too: a high-contrast theme
    re-tints the shell, never the document surface. */
 .page-grid {
   position: absolute;

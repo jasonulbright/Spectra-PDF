@@ -1,4 +1,4 @@
-// N11 slice D — SYMBOL PALETTES against the built binary.
+// SYMBOL PALETTES against the built binary.
 //
 // The decision under test is that a placed symbol carries its own GEOMETRY.
 // A firm's set is imported from a JSON file on one machine; the drawing it
@@ -7,7 +7,7 @@
 // place, commit, save, reopen — plus the refusal path, because an import that
 // half-succeeded would leave a set the drafter cannot trust.
 //
-// Mechanics inherited from slices A–C and used here: measure the page cell
+// Mechanics used here: measure the page cell
 // AFTER arming a mode (the secondary toolbar reflows the canvas), keep every
 // gesture in the page's TOP BAND (a square page at the default zoom is taller
 // than the pane, and WebDriver raises "move target out of bounds" below
@@ -126,7 +126,7 @@ async function clearPage(): Promise<void> {
   for (const a of await annotations()) await removeAnnotation(docId, pageId, a.id);
 }
 
-describe('symbol palettes (N11 slice D)', () => {
+describe('symbol palettes', () => {
   before(async () => {
     await waitForHarness();
     // The set file is read through the app's OWN fs bridge (the native picker

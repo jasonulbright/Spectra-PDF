@@ -1,4 +1,4 @@
-// Real-IO assembly for the Batch OCR driver (Phase 6) — the thin layer
+// Real-IO assembly for the Batch OCR driver — the thin layer
 // between lib/batch-ocr.ts's pure state machine and the world: pdf.js
 // standalone loads (NOT the workspace pdfDocCache — batch files are never
 // workspace members and must not be retained by it), the shared tesseract
@@ -51,7 +51,7 @@ export function createBatchIo(
     repair: (source: string, output: string) => Promise<void>;
     /** Recognise one page of `path` (0-based index). */
     recognize: (path: string, pageIndex: number) => Promise<OcrResult>;
-    /** O8: `compress` with `quality="mrc"` over `path`, in place. Resolves to
+    /** `compress` with `quality="mrc"` over `path`, in place. Resolves to
      * the engine's own report so the note can be shaped here rather than in
      * the pure driver. */
     compressMrc: (path: string, preset: string, verifyText: boolean) => Promise<MrcReport>;

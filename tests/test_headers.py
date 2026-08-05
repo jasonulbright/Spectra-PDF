@@ -1,4 +1,4 @@
-"""§ I.5 P5 — headers, footers, and Bates numbering."""
+"""Headers, footers, and Bates numbering."""
 
 import os
 
@@ -66,7 +66,7 @@ class TestAnchor:
         assert abs(pos["bl"][1] - m) < 1e-6
 
     def test_top_inset_follows_the_embedded_face_height(self):
-        # T28: a taller embedded face reserves more room at the top, so its
+        # A taller embedded face reserves more room at the top, so its
         # ascenders stay inside the margin instead of riding into it. The
         # bottom anchor is a baseline and does not move; the default keeps the
         # standard-14 placement exactly where it was.
@@ -196,7 +196,7 @@ def _form_font(path: str, page: int = 1):
 
 
 class TestNonLatinStamps:
-    """T28 — headers, footers and Bates numbering in CJK and RTL.
+    """Headers, footers and Bates numbering in CJK and RTL.
 
     The face was resolved with NO text (`_unicode_watermark_face(font_dir)`),
     so `resolve_fallback_font`'s text-driven steps never ran: CJK fell to

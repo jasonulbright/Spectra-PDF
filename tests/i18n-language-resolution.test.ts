@@ -1,4 +1,4 @@
-// N12 wave-1 locales — `resolveLanguage` is the ONE place an OS locale (or a
+// `resolveLanguage` is the ONE place an OS locale (or a
 // stored preference) becomes a shipped catalog, and it is the only piece of
 // the i18n surface the catalog parity gate cannot see. It earned a test when
 // the first REGIONAL locales shipped: `pt-BR` and `zh-CN` are the only
@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../src/renderer/i18n';
 
-describe('resolveLanguage (N12)', () => {
+describe('resolveLanguage', () => {
   it('takes an exact tag', () => {
     for (const locale of SHIPPED_LOCALES) {
       expect(resolveLanguage(locale)).toBe(locale);

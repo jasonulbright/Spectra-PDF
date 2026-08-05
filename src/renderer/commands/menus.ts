@@ -1,4 +1,4 @@
-// The menu tree as DATA (19-phase4 § 4.1 / § 9.1). Every static item
+// The menu tree as DATA. Every static item
 // references a registered command id — the menu layer never holds a handler.
 // Dynamic sections (Open Recent, the Window document list) are item factories
 // over CommandContext. The MenuBar component renders this; a vitest asserts
@@ -64,11 +64,11 @@ const recentSubmenu: MenuNode = {
   ],
 };
 
-// Tools menu — the twelve TOOLS (§ 9.1), in the Tools Center's own order.
+// Tools menu — the twelve TOOLS, in the Tools Center's own order.
 //
 // It used to list the 19 operations under the RAIL's five groups (Pages /
-// Transform / Repair / Security / Content). The rail was deleted in M5.2 but its
-// taxonomy outlived it here — and that taxonomy is precisely what M5.1 removed:
+// Transform / Repair / Security / Content). The rail is gone but its
+// taxonomy outlived it here — and that taxonomy is precisely what was removed:
 // it named what the ENGINE does, not what the user came to do. Generated from
 // TOOL_DEFS, so the menu, the tile grid and the task panes cannot disagree about
 // which tools exist.
@@ -79,7 +79,7 @@ const recentSubmenu: MenuNode = {
 // armed. This is how you arm one.
 const toolsItems: MenuNode[] = [
   ...TOOL_DEFS.map((t): MenuNode => cmd(`tools.open.${t.id}`, `menuitem-tool-${t.id}`)),
-  // Phase 6 — the one Tools entry that is NOT a tool tile: it needs no open
+  // The one Tools entry that is NOT a tool tile: it needs no open
   // document (the tiles are disabled without one), so it lives here where it
   // stays reachable from an empty workspace.
   sep,
@@ -89,7 +89,7 @@ const toolsItems: MenuNode[] = [
 ];
 
 // Window ▸ open-document list — focus that doc's tab. importOnly sources
-// (2n.3) have no tab and are excluded (mirrors registry.tabFiles).
+// have no tab and are excluded (mirrors registry.tabFiles).
 const windowDocList: MenuNode = {
   kind: 'dynamic',
   id: 'window-docs',
@@ -126,7 +126,7 @@ export const MENUS: MenuDef[] = [
         id: 'file-export',
         label: 'Export',
         // "Text…" is the extract-text pane — the same op the Document menu
-        // reaches; § 9.1 lists both entry points. The rest are O1's editable
+        // reaches; both entry points exist deliberately. The rest are the editable
         // exports (bundled LibreOffice).
         items: [
           cmd('tools.panel.extract_text', 'menuitem-file-export-text'),

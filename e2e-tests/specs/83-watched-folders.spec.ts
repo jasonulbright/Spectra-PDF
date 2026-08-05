@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
 import { waitForHarness, invokeAppCommand } from '../support/harness.js';
 
-// Watched folders (O7): drop a PDF into the intake and the saved action runs
+// Watched folders: drop a PDF into the intake and the saved action runs
 // over it with nobody at the keyboard — processed copy in Out, original
 // filed to Done, intake left empty (the idempotence property). This drives
 // the REAL machinery end to end: the in-app polling watcher, the spawned
@@ -39,7 +39,7 @@ async function watcherRemove(id: string): Promise<void> {
   }, id);
 }
 
-describe('watched folders (O7)', () => {
+describe('watched folders', () => {
   before(async () => {
     TMP = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-watch-'));
     IN = resolve(TMP, 'in');

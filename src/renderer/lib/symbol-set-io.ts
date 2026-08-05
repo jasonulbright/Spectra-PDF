@@ -1,4 +1,4 @@
-// N11 slice D — symbol sets as FILES: the impure edge of `symbol-library.ts`.
+// Symbol sets as FILES: the impure edge of `symbol-library.ts`.
 //
 // Separate from the library for the reason every other leaf split here is:
 // the library is pure enough to unit-test (schema, refusals, lookup, search),

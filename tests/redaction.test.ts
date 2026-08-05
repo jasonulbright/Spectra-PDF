@@ -242,7 +242,7 @@ describe('buildRedactionRegions', () => {
   });
 });
 
-describe('rotateNormalizedPoint(s) — the rect projector’s point twin (M6.1)', () => {
+describe('rotateNormalizedPoint(s) — the rect projector’s point twin', () => {
   it('matches rotateNormalizedRect on zero-size corners, every delta', () => {
     for (const d of [0, 90, 180, 270]) {
       for (const [x, y] of [[0, 0], [1, 1], [0.25, 0.7], [0.5, 0.5]]) {

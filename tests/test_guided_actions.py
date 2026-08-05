@@ -1,6 +1,6 @@
-"""Guided-actions folder runs (slice 3): step validation, the mirror walk,
+"""Guided-actions folder runs: step validation, the mirror walk,
 per-file isolation, logs — plus the encrypt/decrypt in-place pins the runner
-forced (the same latent CLI bug class slice 1 fixed for five other ops)."""
+forced (the same latent CLI bug class fixed for five other ops)."""
 
 import os
 from pathlib import Path
@@ -53,7 +53,7 @@ class TestValidateSteps:
             validate_steps([])
 
     def test_mrc_compression_must_come_after_ocr(self):
-        # § 5.4, enforced rather than documented: `recognize` rasterizes FROM
+        # Enforced rather than documented: `recognize` rasterizes FROM
         # the page, so an OCR step after MRC would read the reconstruction
         # instead of the scan the user actually has.
         with pytest.raises(ValueError, match="MRC compression must come after OCR"):
@@ -115,7 +115,7 @@ class TestValidateSteps:
     def test_header_footer_form_sugar_folds_to_placements(self):
         # The GUI's saved/exported shape stores ONE position+text pair per
         # step; the fold makes an exported action file CLI-consumable
-        # without translation (slice 4).
+        # without translation.
         steps = validate_steps([
             {
                 "op": "add_header_footer",
@@ -137,7 +137,7 @@ class TestValidateSteps:
             ])
         with pytest.raises(ValueError, match="go together"):
             validate_steps([{"op": "add_header_footer", "params": {"position": "br"}}])
-        # The placements shape stays first-class (slice 3 files unchanged).
+        # The placements shape stays first-class (files unchanged).
         steps = validate_steps([
             {"op": "add_header_footer", "params": {"placements": [{"position": "bc", "text": "x"}]}}
         ])
@@ -241,7 +241,7 @@ class TestEncryptDecryptInPlace:
 
 
 class TestRunActionInPlace:
-    """O7 in-place mode: originals replaced through staged temps, per-file
+    """In-place mode: originals replaced through staged temps, per-file
     isolation intact, refusals loud."""
 
     def test_in_place_replaces_originals(self, tree, tmp_path):
@@ -349,7 +349,7 @@ def _png(path, dpi=300, size=(600, 900)) -> None:
 
 
 class TestCreatePdfStep:
-    """P22 slice E — the one step that PRODUCES the document.
+    """The one step that PRODUCES the document.
 
     It is why `run_action` grew a branch: every other step is
     `fn(file=p, output=p)` on a COPY of the source, and `create_pdf` refuses
@@ -396,7 +396,7 @@ class TestCreatePdfStep:
         self, tree, tmp_path
     ):
         # `scan.png` and `scan.pdf` in one folder must not collide, and the
-        # original name stays legible (the P3 image-source rule).
+        # original name stays legible (the image-source rule).
         _png(tree / "scan.png")
         dest = tmp_path / "out"
         run_action(

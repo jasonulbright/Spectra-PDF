@@ -19,7 +19,7 @@ export function resolveInitialTheme(
   try {
     const parsed: unknown = JSON.parse(storedSettingsJson ?? 'null');
     const theme = (parsed as { theme?: unknown } | null)?.theme;
-    // N14: high-contrast is a stored explicit theme like the others — it
+    // High-contrast is a stored explicit theme like the others — it
     // must stamp before first render or the shell flashes the default.
     if (theme === 'light' || theme === 'dark' || theme === 'high-contrast') return theme;
   } catch {

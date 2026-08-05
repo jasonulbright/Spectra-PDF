@@ -13,7 +13,7 @@ import {
   editImageAct,
 } from '../support/harness.js';
 
-// Phase 9.C4 — inline (BI/ID/EI) images against the built binary: they
+// Inline (BI/ID/EI) images against the built binary: they
 // list as placements beside XObject draws, the wrap/drop family works on
 // them (transform, delete), and undo restores. The engine ordinal
 // agreement and refusals are pytest-pinned; this proves the wire.
@@ -31,7 +31,7 @@ async function placements(): Promise<
   return await editImagePlacements(ids[0]);
 }
 
-describe('inline images (Phase 9.C4)', () => {
+describe('inline images', () => {
   it('lists both kinds, transforms and deletes the inline draw, undo restores', async function () {
     this.timeout(180_000);
     expect(existsSync(FIXTURE)).toBe(true);

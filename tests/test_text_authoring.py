@@ -1,4 +1,4 @@
-"""Tests for Add Text — authoring a new text object (Phase 9.A2).
+"""Tests for Add Text — authoring a new text object.
 
 gs-independent but font-dependent: gated on the vendored fallback family
 (scripts/sync-edit-fonts.ps1), like test_font_fallback."""
@@ -186,7 +186,7 @@ class TestAddText:
 
 
 class TestAddTextRotated:
-    """A2-tail: rotated authoring. Every positional test pins its corner
+    """Rotated authoring. Every positional test pins its corner
     anchor with the actual matrix arithmetic in a comment — device points
     computed by hand from Tm × frame, never by intuition."""
 
@@ -218,7 +218,7 @@ class TestAddTextRotated:
         assert (y1 - y0) > (x1 - x0)  # rotated: tall, not wide
         assert y1 <= 700 + 1.0  # inside the drawn box
         assert run["editable"] is True  # the run surface still edits it
-        # 9.T13 INVERSION: an authored rotated label now GROUPS as a
+        # INVERSION: an authored rotated label now GROUPS as a
         # paragraph (admission runs in the member's own transposed frame),
         # so the label is editable as text rather than only as a run box.
         # A 90° CCW quarter turn reads UP the page.
@@ -326,7 +326,7 @@ class TestAddTextRotated:
         assert "cm" not in ops
 
     def test_rotate_refuses_non_numbers_and_takes_any_angle(self, tmp_dir):
-        # T19 LIFTED the four-step domain (this pin used to refuse 45/-90/
+        # The four-step domain is lifted (this pin used to refuse 45/-90/
         # 360): any finite number of degrees is a rotation now. The
         # STRICTNESS stays — booleans, strings and non-finite values refuse.
         src = _blank(tmp_dir)
@@ -400,8 +400,8 @@ class TestAddTextRotated:
 
 
 class TestAddTextStyleAndMeasure:
-    """Phase 9.A2-tail-2 — authoring style toggles (bold/italic through the
-    A3b face ladder) + `measure_text_box` (the card's fit indicator, run
+    """Authoring style toggles (bold/italic through the
+    styled face ladder) + `measure_text_box` (the card's fit indicator, run
     through the SAME `_layout_box` pass as the commit so they can never
     disagree)."""
 
@@ -423,7 +423,7 @@ class TestAddTextStyleAndMeasure:
         with pikepdf.open(out) as pdf:
             fonts = pdf.pages[0]["/Resources"]["/Font"]
             names = [str(fonts[k].get("/BaseFont")) for k in fonts.keys()]
-        # The subset tag (ABCDEF+) prefixes the face name; the A3b style
+        # The subset tag (ABCDEF+) prefixes the face name; the style
         # suffix rides the family, e.g. ABCDEF+LiberationSerif-Bold.
         assert any(f"LiberationSerif{suffix}" in n for n in names), names
 
@@ -506,7 +506,7 @@ class TestAddTextStyleAndMeasure:
 
 
 class TestKerning:
-    """Phase 9.K1 — pair kerning for text WE lay out in a bundled face.
+    """Pair kerning for text WE lay out in a bundled face.
 
     Scope note that is load-bearing, not timidity: only bundled faces kern.
     Text kept in a document's own embedded font already carries its kerning
@@ -680,7 +680,7 @@ class TestKernCoverageBits:
 def test_kern_validation_runs_before_font_work(tmp_dir):
     """Round-41 LOW: input-shape checks run FIRST, so an invalid `kern`
     reports itself rather than surfacing whatever the font machinery hits
-    on the way (the round-31 precedent this had broken)."""
+    on the way (the precedent this had broken)."""
     src = _blank(tmp_dir, "precedence-in.pdf")
     out = os.path.join(tmp_dir, "precedence.pdf")
     with pytest.raises(ValueError, match="kern must be"):
@@ -689,7 +689,7 @@ def test_kern_validation_runs_before_font_work(tmp_dir):
 
 
 class TestT15SpanStyling:
-    """T15: per-span size/colour/bold/italic on the Add-Text box. The span
+    """Per-span size/colour/bold/italic on the Add-Text box. The span
     path shares _layout_box's entry (same validation precedence) and the
     whole-box path stays byte-identical when spans is absent."""
 
@@ -762,7 +762,7 @@ class TestT15SpanStyling:
 
 
 class TestT5CjkAuthoring:
-    """T5: CJK text authors via the vendored Noto Sans CJK face — a
+    """CJK text authors via the vendored Noto Sans CJK face — a
     TEXT-driven switch, never a substitution for text Liberation covers."""
 
     _needs_cjk = pytest.mark.skipif(
@@ -806,7 +806,7 @@ def _drawn_gids(pdf_path, content: str):
     """The GLYPH ids the content stream actually draws, resolved through the
     embedded font's /CIDToGIDMap.
 
-    9.T25: a shaped subset addresses glyphs by CID, not by glyph id — several
+    A shaped subset addresses glyphs by CID, not by glyph id — several
     CIDs may point at ONE glyph, which is how a base glyph spells one cluster
     under one code and a different cluster under another. A test that wants to
     know which GLYPHS were drawn therefore has to go through the map;
@@ -840,7 +840,7 @@ def _contains_run(haystack, needle) -> bool:
 
 
 class TestRightToLeftAuthoring:
-    """9.T25 — Add Text authors right-to-left scripts.
+    """Add Text authors right-to-left scripts.
 
     Until this, the bundled Liberation faces could not express them, so
     `build_fallback_font` refused BY NAME. That refusal was honest but it
@@ -940,7 +940,7 @@ class TestRightToLeftAuthoring:
         assert m["lines"] == c["lines"]
 
     def test_per_span_styling_on_whole_words(self, tmp_dir):
-        # 9.T25a: styling a whole word — what the card's selection actually
+        # Styling a whole word — what the card's selection actually
         # produces — reorders and shapes like the rest of the line.
         from engine.text_paragraphs import list_text_paragraphs
 

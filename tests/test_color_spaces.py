@@ -1,4 +1,4 @@
-"""§ I.0 S5 — resolve non-device vector colours to approximate sRGB.
+"""Resolve non-device vector colours to approximate sRGB.
 
 Covers the PDF function evaluator (types 0/2/3/4) and the colour-space
 resolvers (Device/Cal*/Lab/ICCBased/Indexed/Separation/DeviceN), plus the

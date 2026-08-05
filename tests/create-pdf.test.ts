@@ -1,4 +1,4 @@
-// P22 slice C — the renderer half of Create PDF (brief 41 § 10, vitest).
+// The renderer half of Create PDF (vitest).
 //
 // There is no DOM test environment in this repo, which is precisely why the
 // list model lives in `lib/create-pdf.ts` and not inside the component: a rule

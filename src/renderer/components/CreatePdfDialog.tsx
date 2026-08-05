@@ -27,7 +27,7 @@ import {
   toEngineSources,
 } from '../lib/create-pdf';
 
-// File ▸ Create PDF (P22, architecture/41): ONE door for images, Office /
+// File ▸ Create PDF: ONE door for images, Office /
 // text / web documents, PostScript and a blank page. A MENU dialog, not a
 // tool tile — creating needs no open document (the batch-OCR precedent).
 //
@@ -66,7 +66,7 @@ export function CreatePdfDialog({
    * on the window lands here rather than doing nothing. */
   initialPaths?: readonly string[];
 }): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { callRaw } = useEngine();
   const { track } = useOperationQueue();

@@ -12,12 +12,12 @@ import type { PageRef } from '../../state/types';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../../i18n';
 
-// Pages (thumbnails) panel — Phase 4 M3.1 (§ 5.1). Small renders of the active
+// Pages (thumbnails) panel. Small renders of the active
 // file's pages through the same pdf.js proxy the board uses (one per file via
 // pdfDocCache); virtualized to a window around the scroll viewport. Click →
 // select (the SHARED ui.selectedPageIds) + centerOn the board; the context
-// menu is the shared page menu (§ 3.2). Drag-reorder lands in the next M3.1
-// sub-slice; the board's reorder remains available meanwhile.
+// menu is the shared page menu. Drag-reorder is not implemented here;
+// the board's reorder remains available.
 
 const ROW_H = 172; // fixed slot: thumbnail area + page-number label
 const THUMB_MAX_H = 136;
@@ -143,7 +143,7 @@ function Thumbnail({
 }
 
 export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelComponentProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome. The
+  // Re-render on language change; strings resolve via tChrome. The
   // context menu's own labels are built when it OPENS (a right-click creates a
   // fresh `menu`), so they always read the language current at that moment.
   useTranslation();
@@ -205,7 +205,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
 
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string; pageId: string } | null>(null);
 
-  // ── Drag-reorder (M3.1b) ─────────────────────────────────────────────────
+  // ── Drag-reorder ─────────────────────────────────────────────────────────
   // A linear-list pointer drag (window-level listeners, the canvas pattern —
   // HTML5 DnD can't complete in the webview). Below the threshold it's a click
   // (select); above, it reorders via MOVE_PAGE/MOVE_PAGES. Refs feed the stable
@@ -344,7 +344,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
     [dispatch],
   );
 
-  // Scroll-follow the page being read (M4.1e). Keyed on the page id ALONE, so it
+  // Scroll-follow the page being read. Keyed on the page id ALONE, so it
   // fires when the reading view moves to a different page and NOT on the user's
   // own panel scrolling (which would fight them) — `scrollTop` is deliberately
   // not a dependency. Only nudges when the row is actually out of view, so

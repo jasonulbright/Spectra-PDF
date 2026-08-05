@@ -11,14 +11,14 @@ import {
   openParagraphEditor,
 } from '../support/harness.js';
 
-// Phase 9.T13 (brief 39 slice B) — the ORIENTATION model against the built
+// The ORIENTATION model against the built
 // binary. The committed fixture (fixtures/vertical-orientations.pdf,
 // generated with pikepdf — pdf-lib can author neither an /Identity-V font
 // nor a rotated run) carries two paragraphs that the shipped engine could
 // not produce at all:
 //
-//   * a CJK column with a 90°-CW-rotated LATIN run inside it. Before T13
-//     the column grouped WITHOUT the Latin — a reflow moved the CJK over
+//   * a CJK column with a 90°-CW-rotated LATIN run inside it. The column
+//     used to group WITHOUT the Latin — a reflow moved the CJK over
 //     text that never moved. Now both members transpose into one frame and
 //     list as ONE paragraph.
 //   * a standalone rotated block near no CJK at all, which the old
@@ -34,10 +34,10 @@ const COLUMN = 'あいうPDF';
 const COLUMN_RETYPED = 'あいういPDF';
 const BLOCK = 'Rotated block';
 const BLOCK_RETYPED = 'Turned';
-// 9.T12D — a second column carrying a TATE-CHU-YOKO block: the upright
-// two-digit year set inside vertical text. Before slice B the column
-// grouped WITHOUT it and a reflow moved the CJK over a date that never
-// moved; slice B made that loud; slice D makes it work. The retype turns
+// A second column carrying a TATE-CHU-YOKO block: the upright
+// two-digit year set inside vertical text. The column used to group
+// WITHOUT it and a reflow moved the CJK over a date that never
+// moved. The retype turns
 // two digits into four, which is the case that proves the block is ATOMIC:
 // it re-condenses to one em of the column rather than pushing the kana.
 const TCY = 'あい26う';
@@ -90,7 +90,7 @@ async function waitForReindexedParas(
   );
 }
 
-describe('rotated-glyph vertical forms (Phase 9.T13)', () => {
+describe('rotated-glyph vertical forms', () => {
   let tmp: string;
   let pdfPath: string;
 
@@ -128,7 +128,7 @@ describe('rotated-glyph vertical forms (Phase 9.T13)', () => {
     const tcy = paras.find((p) => p.text === TCY);
     expect(column).toBeDefined();
     expect(block).toBeDefined();
-    // 9.T12D: the year is IN the column's text, and the column is editable
+    // The year is IN the column's text, and the column is editable
     // rather than refusing by name.
     expect(tcy).toBeDefined();
     expect(tcy!.orientation).toBe('vertical-rl');
@@ -191,7 +191,7 @@ describe('rotated-glyph vertical forms (Phase 9.T13)', () => {
     );
   });
 
-  it('edits a tate-chu-yoko block as part of its column (Phase 9.T12D)', async function () {
+  it('edits a tate-chu-yoko block as part of its column', async function () {
     this.timeout(180_000);
     const pageId = (await editTextPageIds())[0];
     const paras = await editParagraphs(pageId);

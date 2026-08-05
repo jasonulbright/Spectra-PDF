@@ -1,4 +1,4 @@
-"""§ I.6 — PDF portfolios (/Collection over /EmbeddedFiles)."""
+"""PDF portfolios (/Collection over /EmbeddedFiles)."""
 
 import os
 

@@ -34,7 +34,7 @@ export function rotateAnnotationRect(a: PageAnnotation, delta: number): PageAnno
       points.push(px, py);
     }
   }
-  // Ink strokes reproject exactly like points, per stroke (N2).
+  // Ink strokes reproject exactly like points, per stroke.
   let strokes: number[][] | undefined;
   if (a.strokes) {
     strokes = a.strokes.map((stroke) => {
@@ -114,7 +114,7 @@ export const initialUiState: UiState = {
 // Leaving doc-tab-land re-applies the board's parked-state semantics: the
 // tool disarms and the selection clears (pre-M2 this was the canvas
 // component's unmount; the commit-on-leave effect stays in App). Doc→doc
-// switches keep both — same board, different active file (§ 6.6).
+// switches keep both — same board, different active file.
 function focusTab(state: AppState, tab: FocusedTab): AppState {
   const prev = state.ui.focusedTab;
   const same =
@@ -122,7 +122,7 @@ function focusTab(state: AppState, tab: FocusedTab): AppState {
   if (same) return state;
   // A doc tab must reference an open, tab-bearing file — a stale focus
   // request (file closed underneath a queued dispatch) is rejected rather
-  // than rendered, and byte-only import sources (2n.3) never get tabs.
+  // than rendered, and byte-only import sources never get tabs.
   if (isDocTab(tab)) {
     const f = state.files.get(tab.doc);
     if (!f || f.importOnly) return state;
@@ -130,7 +130,7 @@ function focusTab(state: AppState, tab: FocusedTab): AppState {
   const leftDocLand = isDocTab(prev) && !isDocTab(tab);
   return {
     ...state,
-    // Focusing a doc tab IS activating that file (§ 4.3: focusedTab doubles
+    // Focusing a doc tab IS activating that file (focusedTab doubles
     // as the SET_ACTIVE_FILE driver). Home/Tools leave the active file alone.
     activeFileId: isDocTab(tab) ? tab.doc : state.activeFileId,
     ui: leftDocLand
@@ -170,13 +170,13 @@ export const initialState: AppState = {
 // data), so clearing it whenever a file's bytes change (or a file closes)
 // is the safe answer — formerly a WorkspaceCanvasView buffer-watching
 // effect; folded into the reducer cases that change buffers now that the
-// selection lives in the ui slice (Phase 4 M1).
+// selection lives in the ui slice.
 function clearSelection(state: AppState): AppState {
   if (state.ui.selectedPageIds.size === 0 && state.ui.selectionAnchor === null) return state;
   return { ...state, ui: { ...state.ui, selectedPageIds: NO_SELECTION, selectionAnchor: null } };
 }
 
-/** Phase 5 (§ F): drop ONLY the selection ids this action's workspace
+/** Drop ONLY the selection ids this action's workspace
  * effect actually removes, keeping cross-file selection intact — an
  * operation on one file must not nuke a selection in another. The doomed
  * set is per-site:
@@ -272,7 +272,7 @@ function pruneEmptyDocs(documents: OpenDocument[]): OpenDocument[] {
   return pruned.length === documents.length ? documents : pruned;
 }
 
-// Drop byte-only import sources (2n.3) that no workspace page references any
+// Drop byte-only import sources that no workspace page references any
 // more — but only once the page tier is empty, since an undoable/redoable
 // import still needs its source bytes. After a commit bakes imported pages into
 // the target file and the indexer reindexes them back to sourceDocId=target,
@@ -337,7 +337,7 @@ function applyFileUpdate(
     dirty: true,
     undoStack: [...existing.undoStack, update.snapshotPath],
     redoStack: [], // new action clears redo
-    // The § F identity channel: an authored update (page-tier commit)
+    // The identity channel: an authored update (page-tier commit)
     // records the ids the reindex should adopt, keyed to THIS buffer
     // object; a non-authored update leaves any stale record inert (the
     // buffer-identity check fails) — but drop it anyway for hygiene.
@@ -400,7 +400,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'OPEN_FILE': {
       // A REOPEN replaces the path's buffer — ITS selection ids die (fresh
-      // generation on reindex); other files' selection survives (§ F). A
+      // generation on reindex); other files' selection survives. A
       // fresh open leaves the selection alone entirely.
       const base = state.files.has(action.path)
         ? pruneSelectionForPaths(state, [action.path], false)
@@ -443,7 +443,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
     case 'REGISTER_IMPORT_SOURCE': {
-      // Byte-only source for IMPORT_PAGES (2n.3): register its bytes so imported
+      // Byte-only source for IMPORT_PAGES: register its bytes so imported
       // pages render and the commit builder can resolve them, but WITHOUT a
       // strip (the indexer skips importOnly) and WITHOUT touching the active
       // file or the page-edit tier (unlike OPEN_FILE). Idempotent — if the path
@@ -465,7 +465,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
     case 'CLOSE_FILE': {
       // Closing a file drops ITS selected pages; selection in other files
-      // survives (§ F — and a later reopen can no longer collide anyway:
+      // survives (and a later reopen can no longer collide anyway:
       // reindex mints a fresh generation). includeSourced: CLOSE also
       // strips this path's SOURCED pages out of other documents below, so
       // their ids leave the workspace with it (regression phantom).
@@ -580,7 +580,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         state.pageRedoStack.length === 0 &&
         state.pageDirtyPaths.length === 0;
       // Buffer replaced (engine op) — this path's ids die at its reindex
-      // (fresh generation); other files' selection survives (§ F). The
+      // (fresh generation); other files' selection survives. The
       // defensive gate-bypass branch below invalidates EVERY dirty path's
       // docs, so its prune spans the same set (regression).
       const base = pruneSelectionForPaths(
@@ -613,7 +613,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // workspace is left alone — the indexer re-derives each updated path
       // from its new buffer.
       //
-      // Phase 5 (§ F): selection is NOT cleared here anymore. This is the
+      // Selection is NOT cleared here anymore. This is the
       // AUTHORED path — the update carries the identity record, the
       // reindex ADOPTS the selected pages' ids, and the survive-or-prune
       // pass at SET_WORKSPACE_DOCUMENTS keeps exactly the pages that
@@ -669,7 +669,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         state.pageUndoStack.length === 0 &&
         state.pageRedoStack.length === 0 &&
         state.pageDirtyPaths.length === 0;
-      // Same § F rule as UPDATE_FILE (incl. the defensive multi-path span).
+      // Same identity rule as UPDATE_FILE (incl. the defensive multi-path span).
       const base = pruneSelectionForPaths(
         state,
         tierEmpty ? [action.path] : [action.path, ...state.pageDirtyPaths],
@@ -715,7 +715,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         state.pageUndoStack,
         state.pageRedoStack,
       );
-      // SURVIVE-OR-PRUNE (Phase 5 § F, architecture/22 — this block used
+      // SURVIVE-OR-PRUNE (this block used
       // to hard-clear, and its old essay explained why: positional ids
       // were REUSED, so a surviving focus/selection could silently
       // re-bind to different content, and comparing content was proven
@@ -1015,7 +1015,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const doc = state.workspace.documents.find((d) => d.id === action.docId);
       const page = doc?.pages.find((p) => p.id === action.pageId);
       if (!doc || !page) return state;
-      // N11 slice C: a count mark's SEQUENCE is allocated here, not at the
+      // A count mark's SEQUENCE is allocated here, not at the
       // gesture. The number is unique per group across the whole DOCUMENT and
       // a page cell can only see its own page — the reducer is the one place
       // that holds every page, so it is the only place that can number a mark
@@ -1286,7 +1286,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
                   const styleable = a.kind === 'shape' || a.kind === 'callout' || a.kind === 'ink';
                   if (!styleable) return a;
                   const fillable = a.kind !== 'ink';
-                  // Kind-specific sheet fields (N7 residual): endings only
+                  // Kind-specific sheet fields (residual): endings only
                   // mean anything on the open-ended figures; intensity only
                   // on clouds. Anything else silently keeps its look — the
                   // same applicability seam as fill.
@@ -1585,7 +1585,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_TOOLBAR_OVERRIDES':
       return { ...state, ui: { ...state.ui, toolbarOverrides: action.overrides } };
     case 'UI_ROTATE_VIEW': {
-      // Render-only quarter-turn of the reading display (M6.1). Only real,
+      // Render-only quarter-turn of the reading display. Only real,
       // showable files can be rotated — a view state for a ghost would be
       // unreachable-to-clear (no tab to close it from).
       const f = state.files.get(action.path);

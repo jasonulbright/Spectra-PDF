@@ -11,7 +11,7 @@ import {
   openParagraphEditor,
 } from '../support/harness.js';
 
-// Phase 9.B4b — vertical paragraph reflow against the built binary. The
+// Vertical paragraph reflow against the built binary. The
 // committed fixture (fixtures/vertical-text.pdf, generated with pikepdf —
 // pdf-lib cannot author Identity-V) carries two top-aligned columns at
 // pitch 14: under the engine's transposition they group as ONE paragraph
@@ -46,9 +46,9 @@ async function editParagraphOpen(pageId: string, index: number): Promise<void> {
 
 /** Replace the editor's text wholesale (WebDriver key injection is
  * unreliable for CJK on Windows). The editor is a contentEditable rich
- * surface (9.A5-tails-b), so this goes through the harness helper, which
+ * surface, so this goes through the harness helper, which
  * fires the same `input` event the browser does and leaves the caret at the
- * END so Enter commits rather than splitting (the A4 mid-text branch). */
+ * END so Enter commits rather than splitting (the mid-text branch). */
 async function setEditorValue(text: string): Promise<void> {
   await setContentEditableValue('[data-testid="edit-para-input"]', text);
 }
@@ -68,7 +68,7 @@ async function waitForReindexedParas(
   );
 }
 
-describe('vertical paragraph reflow (Phase 9.B4b)', () => {
+describe('vertical paragraph reflow', () => {
   let tmp: string;
   let pdfPath: string;
 
@@ -101,14 +101,14 @@ describe('vertical paragraph reflow (Phase 9.B4b)', () => {
     );
     const pageId = (await editTextPageIds())[0];
     const paras = await editParagraphs(pageId);
-    // Before B4b these two columns were SKIPPED (run boxes only); now they
+    // These two columns used to be SKIPPED (run boxes only); now they
     // group as one vertical paragraph of two column-lines.
     expect(paras).toHaveLength(1);
     expect(paras[0].text).toBe(ORIGINAL);
     expect(paras[0].lineCount).toBe(2);
     expect(paras[0].vertical).toBe(true);
 
-    // Editor: substitution restyles are LIVE for vertical text (9.T4 —
+    // Editor: substitution restyles are LIVE for vertical text (
     // Noto Sans CJK carries `vert`/`vrt2` and `vmtx`, and the shaper can
     // reach them). The controls must remain enabled for capable fonts. What
     // stays unavailable
@@ -148,9 +148,9 @@ describe('vertical paragraph reflow (Phase 9.B4b)', () => {
 
   it('commits a bold restyle on the column and re-lists it vertical', async function () {
     this.timeout(180_000);
-    // T4's headline — "the weight axis is real, Bold asked for is Bold
+    // the headline — "the weight axis is real, Bold asked for is Bold
     // embedded" — reaching a USER for the first time: the control that
-    // sends it was disabled until brief 39 slice A.
+    // sends it used to be disabled.
     const ids = await editTextPageIds();
     const pageId = ids[0];
     const before = await editParagraphs(pageId);
@@ -167,7 +167,7 @@ describe('vertical paragraph reflow (Phase 9.B4b)', () => {
     );
     // Re-set the SAME text through the harness helper rather than clicking
     // into the editor: it leaves the caret at the END, so Enter commits
-    // instead of splitting the paragraph (the A4 mid-text branch).
+    // instead of splitting the paragraph (the mid-text branch).
     await setEditorValue(ORIGINAL);
     await browser.keys(['Enter']);
     await waitForReindexedParas(

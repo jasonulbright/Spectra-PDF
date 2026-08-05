@@ -61,7 +61,7 @@ describe('gesture builders (user space)', () => {
     approx(transformPoint(m2, 1, 1), [250, 760]); // dragged corner at P
   });
 
-  it('skew shears the dragged edge along itself and pins the opposite edge (P7)', () => {
+  it('skew shears the dragged edge along itself and pins the opposite edge', () => {
     // Top edge (3) of M dragged +30 user-x: bottom corners stay, top corners
     // shift by exactly the drag (k measured at the dragged edge).
     const s = applySkewEdge(M, 3, 100, 680, 130, 680)!;
@@ -143,7 +143,7 @@ describe('display projection', () => {
   });
 });
 
-describe('crop rect from local drag points (9.C3)', () => {
+describe('crop rect from local drag points', () => {
   it('normalizes any drag direction into an ordered rect', () => {
     expect(cropRectFromLocalPoints([0.8, 0.7], [0.2, 0.1])).toEqual([0.2, 0.1, 0.8, 0.7]);
     expect(cropRectFromLocalPoints([0.2, 0.7], [0.8, 0.1])).toEqual([0.2, 0.1, 0.8, 0.7]);
@@ -175,7 +175,7 @@ describe('crop rect from local drag points (9.C3)', () => {
   });
 });
 
-describe('crop edge drag (9.C3-tail)', () => {
+describe('crop edge drag', () => {
   const rect: [number, number, number, number] = [0.25, 0.25, 0.75, 0.75];
 
   it('moves exactly the dragged edge, other three fixed', () => {

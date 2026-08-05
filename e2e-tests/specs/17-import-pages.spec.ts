@@ -44,7 +44,7 @@ async function waitForWorkspacePages(expected: number): Promise<string[]> {
   return ids;
 }
 
-describe('import pages into a document (2n.3)', () => {
+describe('import pages into a document', () => {
   let tmp: string;
   let targetA: string;
   let targetC: string;
@@ -73,7 +73,7 @@ describe('import pages into a document (2n.3)', () => {
     });
   });
 
-  // Phase 5 (§ F): ids are OPAQUE — generation-tagged positional or
+  // Ids are OPAQUE — generation-tagged positional or
   // adopted-authored — so the spec never predicts an id string. Doc ids
   // come from the pages' ids only via the shared suffix rule (a page id is
   // `<docid-prefix>#p<n>` in the positional world), and page assertions

@@ -1,4 +1,4 @@
-"""Tests for text-run listing + replacement (Phase 7.2+7.3)."""
+"""Tests for text-run listing + replacement."""
 
 import os
 
@@ -70,7 +70,7 @@ class TestListTextRuns:
         assert w["rect"][0] == pytest.approx(112, abs=0.01)  # 72 + Td 40
 
     def test_clipped_away_run_flagged(self, tmp_dir):
-        # 9-§I.0-S8: a run whose bbox is wholly outside the active clip lists
+        # A run whose bbox is wholly outside the active clip lists
         # (index space unchanged) with clipped=True; one inside → clipped=False.
         src = os.path.join(tmp_dir, "clip.pdf")
         pdf = pikepdf.new()
@@ -425,7 +425,7 @@ class TestReplaceTextRun:
 
 
 class TestPredefinedCjkEditing:
-    """Phase 9.B2 — end-to-end edit of CJK text under a named Unicode CMap."""
+    """End-to-end edit of CJK text under a named Unicode CMap."""
 
     def _cjk_page(self, pdf, chars, content):
         from tests.test_pdf_fonts import _tounicode_stream
@@ -489,7 +489,7 @@ class TestPredefinedCjkEditing:
 
 
 class TestLigatureSequencesListing:
-    """Phase 9.B5 — the run listing's additive `sequences` field, and the
+    """The run listing's additive `sequences` field, and the
     replacement path encoding through a ligature code end to end."""
 
     def _lig_font(self, pdf, mapping, w_array=None):
@@ -559,8 +559,8 @@ class TestLigatureSequencesListing:
         page.Contents = pdf.make_stream(b"BT /F1 12 Tf 72 700 Td <0001> Tj ET")
         pdf.save(src)
         pdf.close()
-        # 'f' and 'i' are reachable ONLY via the ligature — pre-9.B5 this
-        # replacement refused outright.
+        # 'f' and 'i' are reachable ONLY via the ligature — this
+        # replacement used to refuse outright.
         replace_text_run(src, out, 1, 0, "afi")
         relisted = list_text_runs(out, 1)["runs"]
         assert relisted[0]["text"] == "afi"
@@ -571,11 +571,11 @@ class TestLigatureSequencesListing:
 
 
 class TestVerticalRunEditing:
-    """Phase 9.B4a — Identity-V runs on the 7.2 surface: rects stack
+    """Identity-V runs on the surface: rects stack
     DOWNWARD by the /W2 advances, edits re-encode in place, and the
     Δ-anchor resync transposes (same-COLUMN followers shift in y; a tx
     change is a column boundary). Verification is the re-list round-trip
-    (the B2 discipline — pdfminer's extraction is not what's under test)."""
+    (the discipline — pdfminer's extraction is not what's under test)."""
 
     # あ=900, い=800 (triplet form), う=750 (range form); 1000/em.
     CHARS = {3: "あ", 4: "い", 5: "う"}
@@ -632,7 +632,7 @@ class TestVerticalRunEditing:
         # advance sum (900+800)/1000×10 = 17 DOWNWARD from y=700.
         assert runs[0]["rect"] == pytest.approx([95, 683, 105, 700], abs=0.05)
         # Run 1 FLOWS after the vertical advance — its column continues at
-        # y=683 and spans う's 7.5 (proving the tm.f advance direction).
+        # y=683 and spans う's height (proving the tm.f advance direction).
         assert runs[1]["rect"] == pytest.approx([95, 675.5, 105, 683], abs=0.05)
 
     def test_edit_shifts_same_column_follower_by_delta(self, tmp_dir):
@@ -687,7 +687,7 @@ class TestVerticalRunEditing:
         self._vertical_page(pdf, b"BT /F1 10 Tf 100 700 Td <0003> Tj ET")
         pdf.save(src)
         pdf.close()
-        # The 7.4 fallback embeds a HORIZONTAL face — dropped into a
+        # The fallback embeds a HORIZONTAL face — dropped into a
         # vertical column it would render on the wrong axis; refuse.
         fonts_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -714,7 +714,7 @@ _EDIT_FONT = os.path.join(
     reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
 )
 class TestOffPageRetypeGuard:
-    """Round 30 (A2-tail lens): a retype re-anchors at the original
+    """Round 30 (lens): a retype re-anchors at the original
     position, so longer text marched off the page silently — success
     result, invisible text. Worst for rotated authored runs (no
     paragraph-editor fallback). The guard refuses when the NEW rect
@@ -800,7 +800,7 @@ class TestOffPageRetypeGuard:
 
 
 class TestRestyleTextRun:
-    """T14: size + color restyle of ONE run, text unchanged — the q…Q wrap
+    """Size + color restyle of ONE run, text unchanged — the q…Q wrap
     reverts graphics state after the run while the advance stays."""
 
     def _two_word_pdf(self, tmp_dir):

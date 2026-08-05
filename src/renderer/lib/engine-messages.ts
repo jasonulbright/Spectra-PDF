@@ -1,4 +1,4 @@
-// N12 slice D (brief 37) — the ENGINE-MESSAGE BOUNDARY.
+// The ENGINE-MESSAGE BOUNDARY.
 //
 // The Python engine refuses in ENGLISH and keeps doing so: the CLI, the
 // operation log, the diagnostics and the fingerprint text are all English by

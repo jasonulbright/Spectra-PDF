@@ -1,4 +1,4 @@
-"""Complex-script shaping (HarfBuzz) for the paragraph reflow — 9.T3.
+"""Complex-script shaping (HarfBuzz) for the paragraph reflow.
 
 A PDF viewer does NOT shape: the content stream already carries the final
 glyph selections, so re-emitting Arabic text as its base letters draws the
@@ -30,8 +30,8 @@ Two conventions the callers depend on:
 
 What this module deliberately does NOT do: GPOS mark positioning offsets
 (x_offset/y_offset) are dropped, because expressing them needs a per-glyph
-text-matrix push that the emission has no shape for — that is register row
-T22, still open, and dropping the offsets degrades vowel-mark placement on
+text-matrix push that the emission has no shape for. Dropping the
+offsets degrades vowel-mark placement on
 fully-vocalised text rather than corrupting the letters.
 """
 
@@ -60,7 +60,7 @@ _JOINING_SCRIPTS = frozenset((
     "Thaa",  # Thaana (joining-transparent marks, but shaped as a unit)
 ))
 
-# 9.T12: the joining scripts that run LEFT to right. Every other entry above
+# The joining scripts that run LEFT to right. Every other entry above
 # is a right-to-left script, and the shaping direction used to be derived as
 # "it joins, therefore rtl" — which shaped Mongolian backwards, because
 # Mongolian is the one cursive script in the set whose logical order runs the
@@ -71,8 +71,8 @@ _LTR_JOINING_SCRIPTS = frozenset((
     "Mong",  # Mongolian, and with it Todo, Sibe and Manchu (one block)
 ))
 
-# 9.T12: the scripts whose text sets in vertical COLUMNS by convention, with
-# the columns advancing LEFT to right — the T12 direction evidence. Mongolian
+# The scripts whose text sets in vertical COLUMNS by convention, with
+# the columns advancing LEFT to right — the direction evidence. Mongolian
 # and its relatives are the living case; Phags-pa and the Zanabazar/Soyombo
 # pair set the same way. Ranges rather than fontTools script names because a
 # reader needs to see exactly what is claimed.
@@ -87,7 +87,7 @@ _LTR_COLUMN_RANGES = (
 
 def sets_columns_left_to_right(text: str) -> bool:
     """True when `text` carries a character of a script whose vertical
-    columns advance LEFT to right (9.T12 § 5.1 script evidence).
+    columns advance LEFT to right (script evidence).
 
     A TEXT test, like `requires_shaping`, and for the same reason: the
     column direction has to be decidable before any font is resolved."""
@@ -114,7 +114,7 @@ def requires_shaping(text: str) -> bool:
 
 
 def shapes_right_to_left(text: str) -> bool:
-    """The direction to hand HarfBuzz for `text` — 9.T12.
+    """The direction to hand HarfBuzz for `text`.
 
     Strong bidi evidence decides first (Hebrew joins nothing and is still
     right-to-left). Failing that, a joining script's own direction decides,
@@ -266,7 +266,7 @@ def shape(face_path: str, text: str, rtl: bool = True) -> ShapedRun:
 
 
 def changed_it(run: ShapedRun, word: str) -> bool:
-    """9.T22/T23 — did shaping this word produce anything the per-character
+    """Did shaping this word produce anything the per-character
     path cannot?
 
     Three ways it can, and they are the whole point:
@@ -280,7 +280,7 @@ def changed_it(run: ShapedRun, word: str) -> bool:
 
     Everything else is a glyph-per-character run whose only difference is the
     GPOS advance deltas, i.e. KERNING — which the character paths already
-    apply from the same font (9.K1b). Answering "no" there is not a shortcut:
+    apply from the same font. Answering "no" there is not a shortcut:
     it keeps the emission byte-identical for the overwhelming majority of
     text, so shaping changes output exactly where the old output was WRONG (a
     combining acute drawn as a spacing glyph beside its letter) and nowhere
@@ -316,7 +316,7 @@ def shape_if_it_changes(face_path: str, word: str) -> "ShapedRun | None":
     # Direction comes from the TEXT, never from "does it join". Hebrew joins
     # nothing but is still right-to-left, and shaping it left-to-right hands
     # back a reversed glyph stream; Mongolian joins and is left-to-right, and
-    # shaping it right-to-left hands back the same reversal (9.T12).
+    # shaping it right-to-left hands back the same reversal.
     try:
         run = shape(face_path, word, rtl=shapes_right_to_left(word))
     except ValueError:
@@ -371,8 +371,7 @@ def program_bytes(font_dict) -> bytes | None:
 
 
 def in_place_face(font_dict) -> str | None:
-    """The document font's OWN program as a shapeable temp file, or None —
-    9.T26.
+    """The document font's OWN program as a shapeable temp file, or None.
 
     `can_shape_in_place` checks the PDF-side shape (Type0/Identity-H,
     Identity CIDToGIDMap, an embedded program); this extracts the program
@@ -415,7 +414,7 @@ def in_place_face(font_dict) -> str | None:
 
 def shape_vertical(face_path: str, ch: str):
     """(glyph name, vertical advance per 1000/em) for ONE character drawn
-    top-to-bottom, or None when the face cannot express it — 9.T4.
+    top-to-bottom, or None when the face cannot express it.
 
     Shaping with the buffer running `ttb` is what reaches the font's
     vertical machinery: the `vert`/`vrt2` GSUB features swap in the upright
@@ -452,8 +451,7 @@ def shape_vertical(face_path: str, ch: str):
 
 @lru_cache(maxsize=32)
 def vertical_forms(face_path: str) -> dict:
-    """The face's `vert`/`vrt2` glyph→glyph map, read straight out of GSUB —
-    9.T12 § 5.4.
+    """The face's `vert`/`vrt2` glyph→glyph map, read straight out of GSUB.
 
     `vert` is by OpenType definition a SINGLE substitution: one glyph in, one
     glyph out, the upright variant of a mark that would otherwise lie on its
@@ -510,7 +508,7 @@ def _hmtx_1000(face_path: str) -> dict:
 
 def shape_sideways(face_path: str, text: str) -> ShapedRun:
     """Shape ONE word for a COLUMN of a script whose font stores horizontal
-    glyphs — 9.T12.
+    glyphs.
 
     A Mongolian (or Phags-pa, or Soyombo) column is not `-V`-CMap vertical
     text: the face has no honest vertical metric to embed, the glyphs are the
@@ -521,7 +519,7 @@ def shape_sideways(face_path: str, text: str) -> ShapedRun:
 
     Raises ValueError when a substituted glyph has no `hmtx` entry: the
     advance is what the column's length is measured from, and inventing one
-    is the § 1.5b defect wearing a different hat."""
+    is the defect wearing a different hat."""
     run = shape(face_path, text, rtl=shapes_right_to_left(text))
     vmap = vertical_forms(face_path)
     if not vmap or not any(name in vmap for name, _a, _x, _y in run.glyphs):
@@ -552,7 +550,7 @@ def face_can_shape(face_path: str, text: str) -> bool:
     ladder's probe, so a face that merely CONTAINS the letters but not their
     joining forms is not mistaken for a working one.
 
-    9.T12: the probe runs in the TEXT's own direction. It used to take
+    The probe runs in the TEXT's own direction. It used to take
     `shape`'s right-to-left default, which is correct for every joining
     script but Mongolian — and a probe that shapes backwards answers about a
     run nobody will draw."""

@@ -1,4 +1,4 @@
-// N11 slice B — the GRID and RULER math. Pure, so it is tested here rather
+// The GRID and RULER math. Pure, so it is tested here rather
 // than through the DOM; the drawing itself is proven by e2e spec 106.
 import { describe, it, expect } from 'vitest';
 import {

@@ -11,12 +11,12 @@ import {
   setReactInputValue,
 } from '../support/harness.js';
 
-// Phase 7.2+7.3 — Edit Text round-trip: arm the Edit tool, wait for run
+// Edit Text round-trip: arm the Edit tool, wait for run
 // listings, open the REAL inline editor via the harness (double-click on
 // transformed canvas is unreliable), type through the REAL input (validated
 // live), Enter commits → engine replace_text_run → undo restores.
 //
-// Since 7.5 the paragraph layer is the PRIMARY text surface and covered
+// The paragraph layer is the PRIMARY text surface and covered
 // runs leave the run-box layer — so this spec's fixture is ROTATED text,
 // which never groups (the documented boundary) and therefore still lands
 // on the run editor. That is exactly where the product still offers this
@@ -49,7 +49,7 @@ async function editTextOpen(pageId: string, index: number): Promise<void> {
   );
 }
 
-describe('edit text (Phase 7.2+7.3)', () => {
+describe('edit text', () => {
   let tmp: string;
   let pdfPath: string;
 
@@ -60,10 +60,10 @@ describe('edit text (Phase 7.2+7.3)', () => {
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const page = doc.addPage([400, 300]);
     // Rotated OFF-QUARTER, so this run stays on the run-box surface under
-    // the 7.5 paragraph layer — which is what this spec is about. It used
-    // to be a clean 90 degrees, and 9.T13 lifted exactly that case: a
-    // quarter turn is now an ordinary axis-aligned member in its own
-    // transposed frame and GROUPS. What T13 deliberately kept is the
+    // the paragraph layer — which is what this spec is about. It used
+    // to be a clean 90 degrees, and that case is now lifted: a
+    // quarter turn is an ordinary axis-aligned member in its own
+    // transposed frame and GROUPS. What is deliberately kept is the
     // `a' > 0 and d' > 0` test, so skew and off-quarter angles still
     // decompose to run boxes.
     page.drawText('Original words here', {
@@ -172,7 +172,7 @@ describe('edit text (Phase 7.2+7.3)', () => {
     await setReactInputValue('[data-testid="edit-text-input"]', 'bad → char');
     await $('[data-testid="edit-text-error"]').waitForDisplayed({ timeout: 5_000 });
 
-    // 7.4: the coverage-refusal escape hatch — convert re-renders the run
+    // The coverage-refusal escape hatch — convert re-renders the run
     // in the bundled fallback font, and the result is extractable (the
     // engine's ToUnicode round-trips through the listing refetch).
     await $('[data-testid="edit-text-convert"]').click();

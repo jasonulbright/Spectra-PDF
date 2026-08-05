@@ -1,4 +1,4 @@
-// Batch OCR run log (Phase 12, issue #1 request 4) — the text of one run.
+// Batch OCR run log — the text of one run.
 //
 // Pure formatting, no IO: the caller hands it a finished run and gets back a
 // filename and a body, which Rust writes into the app-data log folder. Kept
@@ -94,7 +94,7 @@ function fileLine(r: BatchFileResult): string {
   } else {
     line = r.reason ? `${tag}${r.rel} — ${r.reason}` : `${tag}${r.rel}`;
   }
-  // O8: the size saving — or the reason there was none — is the whole point
+  // The size saving — or the reason there was none — is the whole point
   // of having asked for MRC, so it is never left to inference. Byte-identical
   // to engine/batch_ocr.py's `_file_line`, like every other field here.
   if (r.mrc) line += ` [${r.mrc}]`;

@@ -13,7 +13,7 @@ import {
   editImageAdd,
 } from '../support/harness.js';
 
-// Phase 9.C2 — Add Image against the built binary. Arm Edit, then embed a new
+// Add Image against the built binary. Arm Edit, then embed a new
 // raster at a user-space box via the REAL commit (the native file picker is
 // undrivable — the harness injects the source). The new placement appears at
 // the box, coexisting with the existing image; undo removes it. The engine
@@ -37,7 +37,7 @@ async function currentPlacements(): Promise<{ index: number; matrix: number[] }[
   return editImagePlacements(ids[0]);
 }
 
-describe('add image (Phase 9.C2)', () => {
+describe('add image', () => {
   let tmp: string;
   let pdfPath: string;
   let rawPath: string;
@@ -74,7 +74,7 @@ describe('add image (Phase 9.C2)', () => {
     });
     expect((await currentPlacements()).length).toBe(1); // the existing image
 
-    // Embed a new image at user band [200,150,320,240]. P7 (slice C): the
+    // Embed a new image at user band [200,150,320,240]. The
     // add is ASPECT-HONEST — the SQUARE 2x2 source lands contained in the
     // 120x90 band as a 90x90 box centered → cm [90,0,0,90,215,150]
     // (pre-P7 this stretched to [120,0,0,90,200,150] and distorted).
@@ -108,7 +108,7 @@ describe('add image (Phase 9.C2)', () => {
     );
   });
 
-  it('click-places at natural size (P7): rect=null + at → 1px=1pt centered on the click', async function () {
+  it('click-places at natural size: rect=null + at → 1px=1pt centered on the click', async function () {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.open.edit');

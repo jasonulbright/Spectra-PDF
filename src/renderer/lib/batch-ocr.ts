@@ -1,10 +1,9 @@
-// Batch OCR (Phase 6) — the folder-mirror driver. Design:
-// docs/architecture/20-phase6-batch-ocr.md.
+// Batch OCR — the folder-mirror driver.
 //
 // Pure orchestration: every side effect (fs, pdf.js, the tesseract worker,
 // the engine) arrives injected through `BatchIo`, so vitest exercises the
 // whole state machine — classification, cancellation, per-file failure
-// isolation, report aggregation — with no WASM and no Tauri (the 2m
+// isolation, report aggregation — with no WASM and no Tauri (the
 // faked-client precedent).
 //
 // Word→rect conversion is byte-identical to the workspace "Make searchable"
@@ -38,14 +37,14 @@ export interface BatchFileResult {
    * "made searchable" never silently overstates (regression). */
   reason?: string;
   /** Where the ORIGINAL was moved to, when a moved/error root was given
-   * (Phase 12 requests 2/3). Absent means the source is where it always was. */
+   * Absent means the source is where it always was. */
   movedTo?: string;
   /** A requested move (or repaired-original replacement) that did NOT happen.
    * Never changes the file's status — the OCR result stands on its own — but
    * never silent either: the user asked for their tree to be reorganised and
    * has to be told which files were left behind. */
   moveError?: string;
-  /** O8: what the MRC pass did to this file, or why it did nothing. Present
+  /** What the MRC pass did to this file, or why it did nothing. Present
    * only when the run asked for MRC. Never a failure of its own — the
    * searchable copy is the deliverable and it already exists. */
   mrc?: string;
@@ -110,7 +109,7 @@ export interface BatchIo {
   /** Is the mirror output at `path` a readable PDF of `expectedPages` pages?
    * Called only before a source is about to move — see the run loop. */
   verifyOutput(path: string, expectedPages: number): Promise<boolean>;
-  /** O8: MRC-compress the mirror output IN PLACE. Resolves to the note that
+  /** MRC-compress the mirror output IN PLACE. Resolves to the note that
    * goes on the result and into the log, or rejects — a rejection is a note,
    * never a file failure (the searchable copy is already written). Called
    * only when the run asked for MRC. */
@@ -142,8 +141,8 @@ export interface BatchRunOptions {
    * `repairDamaged`; the repaired copy is the pre-OCR one, deliberately — the
    * user asked for their file fixed, not for a searchable derivative of it. */
   replaceRepairedOriginals?: boolean;
-  /** OPT-IN (O8, issue #5). MRC-compress each mirrored file AFTER recognition
-   * — the order is § 5.4's and it is structural here, since the file MRC
+  /** OPT-IN. MRC-compress each mirrored file AFTER recognition
+   * — the order is the and it is structural here, since the file MRC
    * reads is the recognised output. */
   mrc?: { preset: string; verifyText: boolean };
 }
@@ -343,8 +342,8 @@ export async function runBatchOcr(
       // Everything that touches the user's SOURCE tree happens here, once,
       // after the file's outcome is known — never inside a success branch.
       if (result) {
-        // O8 — MRC, after recognition (the file it reads IS the recognised
-        // output, which makes § 5.4's order structural rather than
+        // MRC, after recognition (the file it reads IS the recognised
+        // output, which makes the order structural rather than
         // documented) and before the verification below (which may let an
         // original move on the strength of the output; verifying bytes about
         // to be replaced would verify the wrong file). A failure here is a
@@ -438,7 +437,7 @@ export async function runBatchOcr(
 /**
  * The ENGLISH text of a failure, for the batch REPORT.
  *
- * N12 slice D: a report `reason` is written byte-identically into the batch
+ * A report `reason` is written byte-identically into the batch
  * log (`lib/batch-log.ts`, pinned by tests/batch-log.test.ts) and read back by
  * whoever audits the run, so it stays English regardless of the UI language —
  * the same boundary the operation log sits on. `rawEngineMessage` returns an

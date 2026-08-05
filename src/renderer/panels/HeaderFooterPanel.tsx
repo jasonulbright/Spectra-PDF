@@ -23,7 +23,7 @@ const SLOTS: { pos: string; label: PanelKey }[] = [
 const COLORS = ['#16161a', '#5b6270', '#e0393e', '#2f6fed'];
 
 export function HeaderFooterPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();

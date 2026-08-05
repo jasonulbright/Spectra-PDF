@@ -12,7 +12,7 @@ import {
   saveActiveAs,
 } from '../support/harness.js';
 
-// § parity-map 2 — the Measure tool: distance drag, area click-ring, the
+// The Measure tool: distance drag, area click-ring, the
 // scale ratio applied through the REAL toolbar controls, and the left-behind
 // ink markup whose note carries the value. Trusted pointer input via the W3C
 // actions API (the spec-23 mechanism); geometry against the visible page
@@ -63,7 +63,7 @@ async function dragMeasure(rect: CellRect, x0: number, y0: number, x1: number, y
 
 const valueOf = (text: string): number => parseFloat(text);
 
-describe('measure tool (parity map § 2)', () => {
+describe('measure tool', () => {
   before(async () => {
     await waitForHarness();
     await openByPaths([SAMPLE_PDF]);

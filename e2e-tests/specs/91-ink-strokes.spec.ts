@@ -1,4 +1,4 @@
-// N5 — freehand ink capture with stroke merging: pen lifts inside the merge
+// Freehand ink capture with stroke merging: pen lifts inside the merge
 // window extend the SAME annotation (a signature drawn in two strokes is ONE
 // /Ink), while a stroke after the window starts a new drawing. Real pointer
 // gestures through the page cell's window-level ink listeners; the state
@@ -49,7 +49,7 @@ async function drawStroke(r: { x: number; y: number; w: number; h: number },
   }
 }
 
-describe('ink capture with stroke merging (N5)', () => {
+describe('ink capture with stroke merging', () => {
   it('two quick strokes land in ONE annotation; a late stroke starts a new one', async () => {
     await waitForHarness();
     await closeAllFiles();
@@ -99,7 +99,7 @@ describe('ink capture with stroke merging (N5)', () => {
     await closeAllFiles();
   });
 
-  it('the eraser SPLITS a crossed stroke (N5b) and removes a fully-erased drawing', async () => {
+  it('the eraser SPLITS a crossed stroke and removes a fully-erased drawing', async () => {
     await closeAllFiles();
     await openByPaths([SAMPLE_PDF]);
     await setView('canvas');
