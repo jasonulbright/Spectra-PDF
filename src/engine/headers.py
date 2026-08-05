@@ -13,6 +13,19 @@ composed text matrix the watermark stamp uses. Non-Latin-1 text embeds a
 subsetted Unicode font (the S4 machinery); a pure-Latin-1 stamp uses standard-14
 Helvetica/WinAnsi. Reuses watermark's colour/box/rotate/escaping helpers so the
 two stampers can't drift.
+
+T28: the face is resolved from the TEXT (`_unicode_watermark_face(font_dir,
+probe)`), which is what admits CJK (the T5 step is gated on `text is not
+None`) and right-to-left scripts (the T25 step is opt-in on `rtl_ok`) — and
+right-to-left text is emitted through `rtl_text.build`, the same builder the
+watermark and the form-field appearance use, because a covering face without
+the reorder-and-shape emission would draw a joining script disconnected and
+backwards. Resolution is PER PLACEMENT: one call can carry a Japanese header
+and an Arabic footer, and no single bundled face expresses both. The probe
+substitutes DIGITS for the {page}/{pages}/{bates} tokens, so the face is
+chosen against every character the stamp can actually draw — a Bates number
+inside right-to-left text is then an ordinary mixed-direction line, resolved
+by the bidi algorithm rather than by anything invented here.
 """
 
 import math
@@ -70,7 +83,11 @@ def _bates_value(text: str, start: int, digits: int, index: int) -> str:
     return f"{n:0{max(1, int(digits))}d}"
 
 
-def _substitute(text: str, page_no: int, total: int, bates: str) -> str:
+def _substitute(text: str, page_no: int | str, total: int | str, bates: str) -> str:
+    """Token substitution. The counts are `str`-able rather than strictly int
+    so `_coverage_probe` can push a digit ALPHABET through the same code the
+    stamp uses — one substitution implementation, so the characters the face
+    is chosen for cannot drift from the characters that get drawn."""
     return (
         text.replace("{page}", str(page_no))
         .replace("{pages}", str(total))
@@ -78,11 +95,31 @@ def _substitute(text: str, page_no: int, total: int, bates: str) -> str:
     )
 
 
-def _anchor(position: str, text_w: float, size: float, dw: float, dh: float, margin: float):
+_DIGITS = "0123456789"
+
+
+def _coverage_probe(text: str) -> str:
+    """Every character this placement can DRAW, on any page.
+
+    Substitution only ever puts digits in, so the probe replaces each token
+    with all ten — the face has to express the Bates number as well as the
+    literal text, and resolving against the literal alone would pick a face
+    on evidence that excludes half the stamp."""
+    return _substitute(text, _DIGITS, _DIGITS, _DIGITS)
+
+
+def _anchor(position: str, text_w: float, size: float, dw: float, dh: float, margin: float,
+            glyph_h: float = _GLYPH_HEIGHT_EM):
     """(baseline-start x, y) in DISPLAYED space for `position`. Horizontal
-    alignment uses the text width; vertical uses a cap-height inset at the top
-    and the margin at the bottom (baseline)."""
-    cap = size * _GLYPH_HEIGHT_EM
+    alignment uses the text width; vertical uses a glyph-height inset at the
+    top and the margin at the bottom (baseline).
+
+    `glyph_h` is the EMBEDDED face's own ascent+descent extent where one is
+    embedded (T28; the watermark's `_face_glyph_height_em`) — Helvetica's
+    0.925 em under-reserves for a taller face, which pushed a CJK top header's
+    ascenders up into the margin. Defaults to the Helvetica value, so the
+    standard-14 path is unchanged."""
+    cap = size * glyph_h
     if position[1] == "l":
         dx = margin
     elif position[1] == "c":
@@ -146,26 +183,37 @@ def add_header_footer(
         lo = max(1, int(first_page))
         hi = total if last_page is None else min(total, int(last_page))
 
-        # Resolve the Unicode face ONCE if any placement text (post-substitution
-        # can only shrink the character set for {page}/{pages}/{bates}, which are
-        # ASCII) has a non-Latin-1 char in its literal parts. Build the embedded
-        # font lazily per (page, distinct string) — headers vary per page, so
-        # unlike the watermark we can't share one font object across pages.
-        literal = "".join(str(pl.get("text", "")) for pl in placements)
-        needs_unicode = False
-        face = ""
-        try:
-            literal.encode("latin-1")
-        except UnicodeEncodeError:
-            needs_unicode = True
-            face = _unicode_watermark_face(font_dir)
-            if not face:
-                raise ValueError(
-                    "text contains characters outside Latin-1 and no fallback font "
-                    "is available"
-                )
+        # Resolve a Unicode face PER PLACEMENT, from that placement's own
+        # drawable character set (T28) — a Japanese header and an Arabic
+        # footer in one call need two different faces, and each face is
+        # chosen on the text it will draw. A pure-Latin-1 placement keeps the
+        # standard-14 WinAnsi path byte for byte.
+        faces: list[str] = []
+        glyph_heights: list[float] = []
+        for pl in placements:
+            probe = _coverage_probe(str(pl.get("text", "")))
+            try:
+                probe.encode("latin-1")
+            except UnicodeEncodeError:
+                face = _unicode_watermark_face(font_dir, probe) or ""
+                if not face:
+                    raise ValueError(
+                        "text contains characters outside Latin-1 and no fallback font "
+                        "is available"
+                    )
+                faces.append(face)
+                glyph_heights.append(_face_glyph_height_em(face))
+            else:
+                faces.append("")
+                glyph_heights.append(_GLYPH_HEIGHT_EM)
 
-        glyph_h = _face_glyph_height_em(face) if needs_unicode else _GLYPH_HEIGHT_EM
+        # (face, drawn string) -> (font object, em width, show bytes). A static
+        # footer draws the same string on every page, and one embedded subset
+        # for the document beats one per page; a string carrying {page} or
+        # {bates} simply never hits. The font SIZE is fixed for the whole call,
+        # so it is not part of the key even though the show bytes depend on it
+        # (a mark's rise scales with it).
+        embedded: dict[tuple[str, str], tuple] = {}
 
         bates_index = 0
         for index, page in enumerate(pdf.pages, start=1):
@@ -180,15 +228,22 @@ def add_header_footer(
             bates = _bates_value("", bates_start, bates_digits, bates_index)
 
             drew_any = False
-            for pl in placements:
+            for slot, pl in enumerate(placements):
                 raw = _substitute(str(pl.get("text", "")), index, total, bates)
                 draw = _flatten_control_chars(raw, keep_newline=False)
                 if draw == "":
                     continue
+                face = faces[slot]
+                uni = None
+                if face:
+                    uni = embedded.get((face, draw))
+                    if uni is None:
+                        uni = _embed(pdf, face, draw, size)
+                        embedded[(face, draw)] = uni
                 form = _stamp_form(
                     pdf, draw, pl["position"], size, (r, g, b),
-                    width, height, dw, dh, rotate, margin, glyph_h,
-                    face if needs_unicode else "",
+                    width, height, dw, dh, rotate, margin, glyph_heights[slot],
+                    uni,
                 )
                 if form is not None:
                     page.add_overlay(form, pikepdf.Rectangle(x0, y0, x1, y1))
@@ -212,17 +267,36 @@ def add_header_footer(
     return {"output": str(output_path), "pages_stamped": stamped}
 
 
+def _embed(pdf, face: str, text: str, size: float) -> tuple:
+    """(font object, em width, show bytes) for one drawn string on `face`.
+
+    T28: right-to-left (and any word shaping changes) goes through the shared
+    `rtl_text` builder — the same one the watermark stamp and the form-field
+    appearance use — so a joining script is shaped and the line is permuted
+    into visual order. `size` scales a combining mark's vertical offset into
+    this stamp's text space, which is at the drawn font size (unlike the
+    watermark's 1-em form). Everything else keeps the single `Tj` emission
+    byte for byte."""
+    from engine import rtl_text
+
+    built = rtl_text.build(pdf, face, text)
+    if built is not None:
+        return built.font_obj, built.width_em(text), built.show(text, size)
+
+    from engine.font_fallback import build_fallback_font
+
+    font_obj, encode, width_1000 = build_fallback_font(pdf, face, text)
+    return font_obj, width_1000(text) / 1000.0, b"<" + encode(text).hex().encode("ascii") + b"> Tj"
+
+
 def _stamp_form(
-    pdf, text, position, size, rgb, width, height, dw, dh, rotate, margin, glyph_h, face
+    pdf, text, position, size, rgb, width, height, dw, dh, rotate, margin, glyph_h, uni
 ):
     """A form XObject drawing `text` at `position`, upright in the displayed
-    orientation. `face` non-empty → embed a subsetted Unicode font for it."""
-    if face:
-        from engine.font_fallback import build_fallback_font
-
-        font_obj, encode, width_1000 = build_fallback_font(pdf, face, text)
-        em_width = width_1000(text) / 1000.0
-        show = b"<" + encode(text).hex().encode("ascii") + b"> Tj"
+    orientation. `uni` non-None → the embedded-Unicode show built by `_embed`;
+    None → the standard-14 WinAnsi path."""
+    if uni is not None:
+        font_obj, em_width, show = uni
     else:
         em_width = _text_width_em(text)
         show = b"(" + _escape_pdf_text(text).encode("latin-1") + b") Tj"
@@ -230,7 +304,7 @@ def _stamp_form(
             Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica,
                        Encoding=Name.WinAnsiEncoding))
     text_w = em_width * size
-    dx, dy = _anchor(position, text_w, size, dw, dh, margin)
+    dx, dy = _anchor(position, text_w, size, dw, dh, margin, glyph_h)
     ux, uy = _display_to_user(dx, dy, width, height, rotate)
     rad = math.radians(rotate % 360)
     c, s = math.cos(rad), math.sin(rad)

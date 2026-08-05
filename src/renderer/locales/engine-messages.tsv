@@ -259,6 +259,7 @@ recognize.tessdataBesideRunScripts	pattern	recognize	No tessdata beside {{exe}};
 recover.cannotOpenFileRecovery	pattern	recover	Cannot open file for recovery: {{e}}. File may be completely unreadable.
 recover.pagesCouldRecoveredFile	exact	recover	No pages could be recovered. File is completely unreadable.
 recover.pdfEncryptedDecryptBefore	exact	recover	PDF is encrypted -- decrypt before recovery
+redact_marks.redactionMarkSDocument	pattern	redact_marks	{{count}} redaction mark(s) in this document cannot be read (page(s) {{location}}). A mark whose annotation or /Rect will not resolve is neither shown nor applied, so redacting now would leave marked content in place. Repair the document first.
 repair.pdfEncryptedDecryptBefore	exact	repair	PDF is encrypted -- decrypt before repairing
 repair.pdfTooDamagedTier	pattern	repair	PDF is too damaged for Tier 1 repair: {{e2}}. Try 'rebuild' (Tier 2) or 'recover' (Tier 3).
 rtl_text.textContainsDirectionalFormatting	exact	rtl_text	text contains directional formatting characters that cannot be laid out

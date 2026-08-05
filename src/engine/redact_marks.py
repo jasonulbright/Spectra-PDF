@@ -14,8 +14,14 @@ The annotations carry an appearance (red outline box) so OTHER viewers show
 the marks; /F stays 0 — a pending redaction mark must never PRINT as if it
 were content. Saving onto a SIGNED document lands as an incremental append
 like the rest of the annotation tier (O5b).
+
+F12: a mark this module cannot ACCOUNT FOR refuses, loudly, naming how many
+and where. Both entry points read the file through one scanner (`_scan`), so
+the listing the canvas seeds from and the save that replaces the stored set
+cannot disagree about what the document carries.
 """
 
+import math
 import shutil
 import tempfile
 from pathlib import Path
@@ -26,27 +32,119 @@ from .incremental import finalize_preserving_signatures
 from .validate import validate_pdf
 
 
-def _strip_redact_annots(pdf: pikepdf.Pdf) -> int:
-    removed = 0
-    for page in pdf.pages:
+def _page_annots(page) -> tuple[list, bool]:
+    """The page's /Annots entries, and whether the ARRAY itself resolved.
+
+    A `/Annots` that will not resolve is not an empty page: its contents are
+    unaccountable, and under F12 that is reported rather than assumed to hold
+    no marks.
+    """
+    try:
         annots = page.obj.get("/Annots")
         if annots is None:
-            continue
-        kept = []
-        for a in annots:
-            try:
-                is_redact = a.get("/Subtype") == pikepdf.Name("/Redact")
-            except Exception:
-                is_redact = False
-            if is_redact:
-                removed += 1
+            return [], True
+        return list(annots), True
+    except Exception:
+        return [], False
+
+
+def _entry_kind(entry) -> str:
+    """`redact` / `other` / `unreadable`, for one /Annots entry.
+
+    A NULL or otherwise non-dictionary entry is `other`, not `unreadable`:
+    producers do leave nulls in /Annots, and an entry that is not a dictionary
+    carries no /Subtype at all, so it cannot be a redaction mark — a proof,
+    not a guess. What is UNREADABLE is a dictionary whose /Subtype will not
+    resolve: it might be a mark, and a mark that cannot be accounted for is
+    reported, never skipped.
+    """
+    try:
+        if not isinstance(entry, pikepdf.Dictionary):
+            return "other"
+        return "redact" if entry.get("/Subtype") == pikepdf.Name("/Redact") else "other"
+    except Exception:
+        return "unreadable"
+
+
+def _mark_rect(annot) -> list[float] | None:
+    """A mark's /Rect as four finite floats, or None when it will not read.
+
+    None is a REFUSAL trigger, never a skip. A non-finite value counts as
+    unreadable: it coerces to a float but names no region, so seeding it
+    would put a mark nowhere and applying it would redact nothing.
+    """
+    try:
+        raw = [float(v) for v in annot.get("/Rect")]
+    except Exception:
+        return None
+    if len(raw) != 4 or not all(math.isfinite(v) for v in raw):
+        return None
+    return raw
+
+
+def _scan(pdf: pikepdf.Pdf) -> list[dict]:
+    """Per page: the non-/Redact entries to KEEP, the marks' rects, and how
+    many entries could not be accounted for."""
+    pages: list[dict] = []
+    for page in pdf.pages:
+        entries, resolved = _page_annots(page)
+        rec = {"kept": [], "marks": [], "unreadable": 0 if resolved else 1}
+        for entry in entries:
+            kind = _entry_kind(entry)
+            if kind == "unreadable":
+                rec["unreadable"] += 1
+            elif kind == "other":
+                rec["kept"].append(entry)
             else:
-                kept.append(a)
-        if removed:
-            if kept:
-                page.obj["/Annots"] = pikepdf.Array(kept)
-            elif "/Annots" in page.obj:
-                del page.obj["/Annots"]
+                rect = _mark_rect(entry)
+                if rect is None:
+                    rec["unreadable"] += 1
+                else:
+                    rec["marks"].append(rect)
+        pages.append(rec)
+    return pages
+
+
+def _refuse_unreadable(pages: list[dict]) -> None:
+    """F12 — REFUSE when the document carries marks we cannot account for.
+
+    This is R2's shape one module over. `_annot_overlaps` was made to fail
+    CLOSED because a redaction tool's only tolerable error is removing too
+    much; a LISTING has no "too much" available to it, so its fail-closed is
+    the refusal. Skipping was the entire defect: the reply's `count` counted
+    survivors, so nothing downstream could notice a mark had gone missing —
+    a user who saved marks, reopened and applied would permanently keep the
+    content they marked, and be told it succeeded.
+    """
+    where = [str(i + 1) for i, rec in enumerate(pages) if rec["unreadable"]]
+    if not where:
+        return
+    count = sum(int(rec["unreadable"]) for rec in pages)
+    # A bare page LIST, not a phrase: the renderer inserts a captured value
+    # verbatim, so wording that has to read in eight languages belongs in the
+    # message (and its catalog entries), never in the interpolation.
+    location = ", ".join(where)
+    raise ValueError(
+        f"{count} redaction mark(s) in this document cannot be read (page(s) "
+        f"{location}). A mark whose annotation or /Rect will not resolve is neither "
+        "shown nor applied, so redacting now would leave marked content in place. "
+        "Repair the document first."
+    )
+
+
+def _strip_redact_annots(pdf: pikepdf.Pdf, pages: list[dict]) -> int:
+    """Replace each page's /Annots with its non-/Redact entries. `pages` is
+    `_scan`'s result, already checked by `_refuse_unreadable` — so nothing is
+    dropped here that was not classified first."""
+    removed = 0
+    for page, rec in zip(pdf.pages, pages):
+        if not rec["marks"]:
+            continue  # per PAGE: an untouched page keeps its own array object
+        removed += len(rec["marks"])
+        if rec["kept"]:
+            page.obj["/Annots"] = pikepdf.Array(rec["kept"])
+        elif "/Annots" in page.obj:
+            del page.obj["/Annots"]
     return removed
 
 
@@ -63,7 +161,12 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
     same_file = input_path.resolve() == output_path.resolve()
 
     with pikepdf.open(file) as pdf:
-        removed = _strip_redact_annots(pdf)
+        scanned = _scan(pdf)
+        # BEFORE any mutation: a replace over a set we cannot read would drop
+        # or keep marks arbitrarily, which is the same silence from the other
+        # direction (F12).
+        _refuse_unreadable(scanned)
+        removed = _strip_redact_annots(pdf, scanned)
         added = 0
         for spec in regions or []:
             page_no = int(spec["page"])
@@ -121,22 +224,19 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
 
 
 def list_redact_annotations(file: str) -> dict:
-    """The file's /Redact set — what re-seeds the canvas marks on open."""
+    """The file's /Redact set — what re-seeds the canvas marks on open.
+
+    Refuses when any mark cannot be accounted for (F12): `count` counts
+    survivors, so a partial listing is indistinguishable from a complete one
+    at every layer above this — the caller must be told, not handed fewer
+    marks than the document holds.
+    """
     validate_pdf(file)
     marks = []
     with pikepdf.open(file) as pdf:
-        for i, page in enumerate(pdf.pages):
-            annots = page.obj.get("/Annots")
-            if annots is None:
-                continue
-            for a in annots:
-                try:
-                    if a.get("/Subtype") != pikepdf.Name("/Redact"):
-                        continue
-                    rect = [float(v) for v in a.get("/Rect")]
-                except Exception:
-                    continue
-                if len(rect) != 4:
-                    continue
+        scanned = _scan(pdf)
+        _refuse_unreadable(scanned)
+        for i, rec in enumerate(scanned):
+            for rect in rec["marks"]:
                 marks.append({"page": i + 1, "rect": rect})
     return {"marks": marks, "count": len(marks)}

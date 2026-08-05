@@ -2084,9 +2084,18 @@ export function WorkspaceCanvasView({
         if (!listed.marks?.length) return;
         const pages = docsRef.current.filter((d) => d.path === path).flatMap((d) => d.pages);
         const seeded: RedactionMark[] = [];
+        let orphaned = 0;
         for (const entry of listed.marks) {
           const pageRef = pages[entry.page - 1];
-          if (!pageRef) continue;
+          if (!pageRef) {
+            // F12, renderer half: a stored mark whose page this view cannot
+            // resolve is a mark the user will not see and will not apply.
+            // Counting it and saying so is the whole point — the engine's
+            // refusal would be pointless if the seed silently dropped marks
+            // one layer further up.
+            orphaned += 1;
+            continue;
+          }
           const proxy = await getDocumentProxy(pageRef.sourceDocId, f.buffer);
           const p = await proxy.getPage(pageRef.sourcePageIndex + 1);
           const [vx0, vy0, vx1, vy1] = p.view;
@@ -2107,9 +2116,25 @@ export function WorkspaceCanvasView({
         if (seedSeqRef.current.get(path) !== seq) return;
         markPathsEverRef.current.add(path);
         setMarks((prev) => [...prev.filter((m) => m.path !== path), ...seeded]);
-      } catch {
-        // A file that cannot be listed simply seeds nothing — drawing and
-        // applying still work; only persistence round-trip is unavailable.
+        if (orphaned > 0) {
+          setRedactError(
+            tChromeCount('canvas.redact.seedOrphaned', orphaned, {
+              name: path.split(/[\\/]/).pop() || path,
+            }),
+          );
+        }
+      } catch (err) {
+        if (seedSeqRef.current.get(path) !== seq) return; // superseded
+        // F12: the listing REFUSES when the file carries marks it cannot
+        // account for. Swallowing that put the silence back one layer up —
+        // the user would draw over a document whose stored marks were only
+        // partly shown and apply a redaction that misses bands they marked.
+        setRedactError(
+          tChrome('canvas.redact.seedFailed', {
+            name: path.split(/[\\/]/).pop() || path,
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        );
       }
     },
     [engineCallRaw],

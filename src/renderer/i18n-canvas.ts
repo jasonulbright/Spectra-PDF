@@ -455,6 +455,16 @@ export const CANVAS_STRINGS = {
   'canvas.redact.failed': 'Redaction failed — {{reasons}}. Those marks are still pending.',
   'canvas.redact.failedSingle': 'Redaction failed — {{reasons}}. The marks are still pending.',
   'canvas.redact.saveMarksFailed': 'Saving marks failed — {{reasons}}.',
+  // F12: the stored /Redact set could not be read back in full. Both of these
+  // exist so a PARTIAL seed can never look like a complete one — the engine
+  // refuses when a mark will not resolve, and the seed itself counts marks
+  // whose page this view no longer has.
+  'canvas.redact.seedFailed':
+    "{{name}}: the saved redaction marks could not be read — {{message}} Marks you draw now still apply; the file's stored ones are not shown.",
+  'canvas.redact.seedOrphaned_one':
+    '{{name}}: {{count}} saved redaction mark is not shown — its page is no longer in this document.',
+  'canvas.redact.seedOrphaned_other':
+    '{{name}}: {{count}} saved redaction marks are not shown — their pages are no longer in this document.',
   'canvas.doc.mergedCannotClose':
     '"{{name}}" is merged into another document — Apply changes first, then close it.',
 
