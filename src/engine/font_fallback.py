@@ -91,8 +91,8 @@ def _descriptors_of(font_dict) -> list:
     (Type0 keeps the descriptor there). Malformed /DescendantFonts (a
     plain dict, or an array holding an int/Null) makes `.get` raise on a
     non-dict element — a damaged/hand-built PDF this app's repair engines
-    exist for. Degrade to whatever was collectable, never abort the edit
-    with a raw error (review-caught in 9.B1)."""
+    exist for. Degrade to whatever was collectable rather than aborting the
+    edit with a raw error."""
     descriptors = []
     desc = font_dict.get("/FontDescriptor")
     if desc is not None:
@@ -425,18 +425,11 @@ def resolve_vertical_font(font_path: str, text: str, style: str = "regular") -> 
 
 def face_has_vertical_metrics(face_path: str) -> bool:
     """Whether the face's own program STATES vertical advances — `vmtx`
-    with its `vhea` header (T12/T13 recon, brief 39 § 1.5b).
+    with its `vhea` header.
 
-    This is a METRICS test, not a shaping test, and the difference was a
-    live defect: HarfBuzz SYNTHESIZES a `y_advance` from the face's extents
-    when `vmtx` is absent, so a shaping probe answers "yes, vertically" for
-    any face whose cmap covers the text — Liberation Sans included. The
-    synthesized number is the same for every glyph (measured: −1117.2 for
-    Liberation Sans, −1063.5 for Mongolian Baiti against real per-letter
-    lengths of 237–570), so it is not a metric at all; embedding it as
-    `/W2` under `/Identity-V` marches horizontal letterforms down a column
-    with an invented pitch. Absence of the table is the CAUSE, so absence
-    of the table is what the gate reads."""
+    This is a metrics test, not a shaping test. HarfBuzz synthesizes a
+    `y_advance` when `vmtx` is absent, but that value is not a font-supplied
+    vertical metric and must not be embedded as `/W2` under `/Identity-V`."""
     try:
         tt = TTFont(face_path, fontNumber=0, lazy=True)
     except Exception:
@@ -721,7 +714,7 @@ def _embed_identity_h(pdf, ttf_bytes, font, font_path, metrics, widths, tounicod
     )
 
     # Real UTF-16BE per entry: an f'{ord(ch):04x}' of an astral char emits
-    # FIVE nibbles — a malformed CMap hex string (review-caught, latent:
+    # five nibbles, producing a malformed CMap hex string. This is latent when
     # Liberation is BMP-only so the coverage refusal fires first, but a
     # future supplementary-plane fallback font must not ship this).
     entries = "\n".join(
@@ -776,11 +769,7 @@ def build_vertical_font(pdf: "pikepdf.Pdf", font_path: str, text: str):
 
     if not Path(font_path).is_file():
         raise ValueError(f"bundled fallback font not found: {font_path}")
-    # Defence in depth for the § 1.5b class (brief 39): NOTHING reaches an
-    # /Identity-V embed without the `vmtx` that fills /W2. The resolver and
-    # the T6 installed-face gate both check this, so a face arriving here
-    # without it means a new caller skipped the gate — refuse rather than
-    # write invented advances into a document.
+    # `/Identity-V` requires the `vmtx` values used to populate `/W2`.
     if not face_has_vertical_metrics(font_path):
         raise ValueError("that font has no vertical metrics — pick one that does")
     drawn = [ch for ch in dict.fromkeys(text) if ch not in ("\n", "\r", "\t")]
@@ -887,8 +876,7 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
     # for a CFF face and the CID must simply BE the glyph index (exactly the
     # scheme `build_fallback_font` already ships for both flavours).
     #
-    # Found the hard way (9.T27): T3 only ever reached here with TrueType RTL
-    # faces, so a CFF face silently lost its mapping and drew whatever glyph
+    # CFF faces must retain their mapping; otherwise they draw whatever glyph
     # the arbitrary code happened to hit. Libertinus and Noto Sans CJK — the
     # two bundled faces that actually carry `liga` — are both OTF, so the
     # ligature capability was landing on precisely the fonts this broke.

@@ -15,11 +15,8 @@ import { TEST_HARNESS_ENABLED, registerScheduledRuns } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tOcrLanguage, tStepTitle } from '../i18n';
 
-// Tools ▸ Scheduled Batch Runs (Phase 12, issue #1 request 5).
-//
-// The owner's ruling: scheduling is a GUI feature, not a documentation page —
-// "so the user never has to touch task scheduler". This is the whole lifecycle:
-// create, list, run-now, enable/disable, DELETE. Windows Task Scheduler does
+// Tools ▸ Scheduled Batch Runs owns the complete lifecycle: create, list, run
+// now, enable, disable, and delete. Windows Task Scheduler performs
 // the timing, which is why a run fires with the app CLOSED; an in-app timer
 // would silently not run on any morning nobody opened the app.
 //

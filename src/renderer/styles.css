@@ -80,7 +80,7 @@
    oklch, judged its text against a white fallback). */
 :root .bg-neutral-850 { background-color: #1f1f1f; }
 
-/* ── Dark-theme status tints, muted (owner direction, 2026-08-02) ────────
+/* ── Muted dark-theme status tints ──────────────────────────────────────
    Tailwind's green-400/amber-400 pastels are saturated enough to BE the
    focus on a dark shell; the palette's job is to draw the eye to elements,
    not to itself. Desaturated equivalents, all ≥7:1 on #171717 so the AA
@@ -237,9 +237,8 @@
 [data-theme="light"] .signatures-nav-recheck-btn { color: #4b5563; }
 [data-theme="light"] .signatures-nav-recheck-btn:hover:not(:disabled) { color: #111827; }
 
-/* The docked status bar + properties bar — dark literals that had no theme
-   rows at all (owner screenshot, 2026-08-02: a black bar across a light
-   app). White-on-black PASSES the contrast gate, which is why the axe sweep
+/* The docked status bar and properties bar require explicit theme rows.
+   White-on-black passes the contrast gate, so an accessibility sweep
    could not see this class of bug: it is a theme-consistency defect, not a
    ratio one. */
 [data-theme="light"] .canvas-status-bar { background: #f3f4f6; border-top-color: #e5e7eb; }
@@ -272,8 +271,7 @@
    the dark shell would sit under 3:1. --accent-text is the accent lifted to
    AA on #171717 (accent.ts). */
 :root[style*="--accent"] .text-blue-300 { color: var(--accent-text, var(--accent-hover)); }
-/* The REST of the blue family (owner catch, 2026-08-02: tools still mixed
-   the system accent with default blues) — every blue-* utility in use
+/* The rest of the blue family follows the system accent. Every blue-* utility
    follows the accent, including the accent-color of range/checkbox inputs
    and the info-banner wash. */
 :root[style*="--accent"] .text-blue-400 { color: var(--accent-text, var(--accent-hover)); }
@@ -298,8 +296,7 @@
    follows the accent like every other selection surface. */
 :root[style*="--accent"] .canvas-view { --select: var(--accent); }
 
-/* Disabled buttons drop their semantic/accent color entirely — a dimmed
-   green CTA still reads as a green CTA (owner, 2026-08-02). The tokens keep
+/* Disabled buttons drop their semantic or accent color entirely. The tokens keep
    this right in every theme; placed after the accent rules so it wins the
    equal-specificity tie against them. */
 :root .bg-blue-600:disabled, :root .bg-blue-500:disabled,
@@ -791,7 +788,7 @@
      controls in PageCell are z-index:auto siblings that come LATER in the DOM,
      so an explicitly-stacked layer here would paint (and hit-test) OVER them and
      swallow their clicks — and they only render under the Select tool, which is
-     exactly when this layer is pointer-interactive (review-caught: the delete ×
+     exactly when this layer is pointer-interactive (regression: the delete ×
      and recolor swatches went dead in Read view). At 0 the tie breaks on tree
      order: above the raster (earlier), below the overlays (later). */
   z-index: 0;
@@ -832,7 +829,7 @@
    `data-main-rotation` attribute that TextLayer's constructor stamps on the
    container, and pdf.js's own stylesheet is what actually turns it — so
    omitting these rules leaves the text unrotated over a rotated raster and
-   selection grabs the wrong glyphs (review-caught by running the real
+   selection grabs the wrong glyphs (regression by running the real
    TextLayer: same span coords at rotation 0 and 90, differing only in the
    attribute). Copied verbatim from pdf_viewer.css — part of the same external
    contract as the rules above. */
@@ -957,9 +954,8 @@
   gap: 2px;
   margin-left: auto;
   align-self: center;
-  /* Always faintly visible — full hover-reveal (opacity 0) made the actions
-     effectively undiscoverable (Phase 3 polish; missed in the owner's first
-     smoke test). Hover brightens to full. */
+  /* Keep actions faintly visible so they remain discoverable; hover brightens
+     them to full opacity. */
   opacity: 0.35;
   transition: opacity 0.15s ease;
 }
@@ -2748,8 +2744,7 @@
   position: relative;
 }
 
-/* Home (Phase 10 slice E) — the king's-bar redesign: quick actions, a quiet
-   drop target, recents with real hierarchy, the tools grid as a section. */
+/* Home: quick actions, a quiet drop target, hierarchical recents, and tools. */
 .home-shell {
   max-width: 880px;
   margin: 0 auto;

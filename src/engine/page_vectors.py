@@ -269,12 +269,9 @@ def _emit_placement(out: list, xobj, ctm, clips, depth: int, do_chain) -> None:
     paints into, as a `"placement"` entry.
 
     An IMAGE fills the unit square by definition (§8.9.5.2), so its quad is
-    the unit square's four corners under the CTM. A FORM does NOT — its extent
-    is its own `/BBox` through its `/Matrix` (§8.10.2), and using the unit
-    square for it would put snap targets on a rectangle that has nothing to do
-    with what is drawn. (The brief says "unit square"; that is right for the
-    image case it was written about and wrong for a form, so the form takes
-    its BBox — the as-built delta is recorded in brief 38.)
+    the unit square's four corners under the CTM. A FORM instead uses its own
+    `/BBox` through its `/Matrix` (§8.10.2), which keeps snap targets aligned
+    with the rendered content.
     """
     corners = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
     m = ctm
@@ -524,9 +521,9 @@ def _walk_vectors(
                     geometry=geometry,
                 )
         if operator == "sh":
-            # P8 slice D: a shading paint is an OBJECT (the king selects
-            # gradient fills). Its extent is the ambient clip at the op —
-            # the frame's own clip already fed the tracker, so `clips.clip`
+            # A shading paint is an object whose extent is the ambient clip at
+            # the operation. The frame's own clip already fed the tracker, so
+            # `clips.clip`
             # IS the visible box (None = unclipped: the lister substitutes
             # the page box). Frame recognition gates transform + whole-frame
             # delete: the enclosing q-frame is CLEAN (pure state + this one

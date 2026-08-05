@@ -84,7 +84,7 @@ function Thumbnail({
       const page = await proxy.getPage(pageNumber);
       if (cancelled) return;
       // Scale from the natural (rotation-correct) dims — NOT page.view, the raw
-      // MediaBox, which doesn't reflect an intrinsic /Rotate (review-caught:
+      // MediaBox, which doesn't reflect an intrinsic /Rotate (regression:
       // wrong density on scanned/faxed pages). Render offscreen, then blit.
       const scale = (RENDER_TARGET * dprCap()) / Math.max(natW, natH);
       const viewport = page.getViewport({ scale });
@@ -176,7 +176,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
   // The panel stays mounted across doc-tab switches, so reset the scroll when
   // the subject file changes — otherwise a deep scroll offset carried into a
   // shorter file leaves the virtualization window past the end (empty panel,
-  // review-caught).
+  // regression).
   useEffect(() => {
     setScrollTop(0);
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
@@ -269,7 +269,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       // Abort if the active file changed mid-drag, or any moving page is no
       // longer in the current file's items — else the reducer (which searches
       // ALL workspace docs) would move them into whatever file is now shown
-      // (review-caught HIGH; the single-page path already self-guards via the
+      // (regression; the single-page path already self-guards via the
       // `from` lookup below, this covers the multi path too).
       if (s.filePath !== activeFilePathRef.current) return;
       const currentIds = new Set(itemsRef.current.map((it) => it.page.id));
@@ -310,7 +310,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       window.addEventListener('pointerup', onUp);
       window.addEventListener('pointercancel', cancel);
       // Match usePageDrag's safety nets: window blur and Escape abort the drag
-      // (review-caught — otherwise a focus loss strands the window listeners
+      // (regression — otherwise a focus loss strands the window listeners
       // and a later unrelated click resolves the stale session).
       window.addEventListener('blur', cancel);
       const unEscape = pushEscapeInterceptor(() => {
@@ -338,7 +338,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       // jumpToPage, not canvas().centerOn: this list shows EVERY partition of
       // the active file, so a thumbnail can name a page the reading view isn't
       // showing — centring would select it and then silently not move
-      // (review-caught).
+      // (regression).
       getCanvasServices()?.jumpToPage(item.page.id);
     },
     [dispatch],

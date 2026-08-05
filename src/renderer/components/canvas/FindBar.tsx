@@ -1,4 +1,4 @@
-// Adapted from PDFx src/renderer/src/components/FindBar.tsx (same owner):
+// Adapted from PDFx src/renderer/src/components/FindBar.tsx:
 // same search/OCR-progress/language surface, restyled to this app's Tailwind
 // idiom, plus match navigation (↑/↓/Enter) and the "Make searchable" action
 // (persist OCR text via the engine — the 2m addition PDFx doesn't have).

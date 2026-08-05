@@ -8,8 +8,7 @@
 // toolbar-side view gating needed. The icon rides on the item (not a side map)
 // so a new entry can't compile without one (the GLYPHS precedent).
 //
-// Customization is per-item VISIBILITY over this fixed grouped order — the
-// king's own classic-toolbar model (show/hide toolbar items; order stays).
+// Customization changes per-item visibility while preserving grouped order.
 // Offering an item costs a registered command + a glyph; the optional
 // nav-panel/tools entries below ship default-off, so the shipped look is
 // unchanged until the user opts in.
@@ -67,8 +66,8 @@ export const TOOLBAR_CATALOG: readonly ToolbarCatalogGroup[] = [
       item('view.navPanel.layers', 'layers', false),
       item('view.navPanel.tags', 'tags', false),
       item('view.navPanel.signatures', 'signatures', false),
-      // Ships VISIBLE (2026-07-25, owner-directed): the tool dock's header has
-      // a close X and nothing visible reopened it — a one-way door out of the
+      // This ships visible because the tool dock's header has a close button;
+      // hiding the entry would create a one-way door out of the
       // pane, reachable back only by knowing Shift+F4 or the View menu. The
       // top icon row is where a pane toggle belongs, and the catalog entry
       // already existed; only this default was hiding it.

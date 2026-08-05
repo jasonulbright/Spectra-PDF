@@ -764,8 +764,8 @@ export interface TestHarness {
   consumeLastError: () => string | null;
   /**
    * Add an annotation to the active file's first workspace page, bypassing
-   * pointer-drag simulation (the canvas tools are pointer-capture based —
-   * see CLAUDE.md — which WebDriver can't reliably drive). Polls for the
+   * pointer-drag simulation because WebDriver cannot reliably drive the
+   * canvas tools' pointer-capture behavior. Polls for the
    * workspace indexer to finish since it runs async after OPEN_FILE.
    * Exercises the exact reducer path the real tools use.
    */

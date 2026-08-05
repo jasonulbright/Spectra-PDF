@@ -8,8 +8,7 @@
 //
 // Two built-in sets ship (the U.S. FOIA exemptions and the Privacy Act
 // exemptions) plus USER-DEFINED sets, which persist and import/export as JSON.
-// A firm's own code set is the common case in the work this tool is for, and
-// refusing it would be a boundary invented out of "the king ships two lists".
+// User-defined sets support organization-specific redaction codes.
 //
 // Storage mirrors `symbol-library.ts` / `stamp-library.ts`: its own
 // localStorage key, pure functions around it, a subscription so every open

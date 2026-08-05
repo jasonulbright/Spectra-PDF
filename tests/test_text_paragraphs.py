@@ -380,7 +380,7 @@ class TestGrouping:
         assert listing["paragraphs"][0]["clipped"] is False
 
     def test_mixed_visibility_paragraph_refused(self, tmp_dir):
-        # 9-§I.0-S8 (gauntlet): a clip cutting THROUGH a paragraph — some
+        # 9-§I.0-S8 (regression): a clip cutting THROUGH a paragraph — some
         # members visible, one clipped away — must NOT list as a single
         # editable paragraph (its whole-para `clipped` flag is all-members, so
         # False here, but reflow would re-lay text INTO the clipped region).
@@ -515,9 +515,8 @@ class TestGrouping:
         assert "Type3" in paras[0]["reason"]
 
     def test_rtl_text_reflows(self, tmp_dir):
-        # 9.T3 INVERTED: this pinned "right-to-left text does not reflow"
-        # from Phase 7.5 until 2026-08-01. RTL now reorders through UAX #9,
-        # so the paragraph is editable and reports its base direction.
+        # RTL reorders through UAX #9, so the paragraph is editable and reports
+        # its base direction.
         src = os.path.join(tmp_dir, "rtl.pdf")
         pdf = pikepdf.new()
         _page(pdf, b"BT /F1 12 Tf 72 700 Td (A) Tj ET", {"/F1": _hebrew(pdf)})
@@ -996,7 +995,7 @@ class TestReplaceParagraphText:
         assert relisted[0]["text"] == "B A"  # kern-gap round-trips as a space
 
     def test_single_line_paragraph_wraps_at_the_symmetric_page_margin(self, tmp_dir):
-        # Review-caught CRITICAL: leading=None collapsed the measure to ∞
+        # regression: leading=None collapsed the measure to ∞
         # and a grown title ran to 1.8× the page width. The rule now: a
         # single line extends right to the mirrored left inset (72 → limit
         # 540 on a 612pt page), then wraps downward at 1.2em leading.
@@ -1191,7 +1190,7 @@ class TestReplaceParagraphText:
         not os.path.isfile(FALLBACK_FONT), reason="bundled fallback font not provisioned"
     )
     def test_convert_of_nested_form_paragraph_uses_form_scoped_family(self, tmp_dir):
-        # 9.B1 review-caught: the paragraph living in a nested form must
+        # 9.B1 regression: the paragraph living in a nested form must
         # classify its family from the FORM'S resources, not the page's —
         # a form's `F1` (serif Times here) differs from the page's `F1`
         # (Helvetica). Converting must embed the SERIF fallback face.
@@ -1304,7 +1303,7 @@ class TestStyleControls:
         assert _color_repr(run["style"]["fill_color"])[1] == ("rg", (0.0, 0.0, 1.0))
 
     def test_size_is_clamped_so_text_cannot_fly_off_page(self, tmp_dir):
-        # Review-caught HIGH: an unbounded size pushed most of the
+        # regression: an unbounded size pushed most of the
         # paragraph off the page. A fat-fingered 9999 clamps to the
         # editor max (1638) and the text stays on the mediabox.
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Clamp this size please) Tj ET")
@@ -1315,7 +1314,7 @@ class TestStyleControls:
         assert any(abs(r["font_size"] - 1638) < 0.1 for r in after)
 
     def test_color_recolors_stroke_rendered_text(self, tmp_dir):
-        # Review-caught: Tr 1 (stroke) text shows its STROKE colour, so a
+        # regression: Tr 1 (stroke) text shows its STROKE colour, so a
         # fill-only recolour was a silent no-op. The override must reach
         # stroke_color for stroke/fill-stroke render modes.
         src = _build(
@@ -1330,7 +1329,7 @@ class TestStyleControls:
         assert _color_repr(run["style"]["stroke_color"])[1] == ("RG", (1.0, 0.0, 0.0))
 
     def test_size_seed_is_the_dominant_member_not_a_lead_in(self, tmp_dir):
-        # Review-caught: the seed shown to the user (font_size) must match
+        # regression: the seed shown to the user (font_size) must match
         # the member the leading-scale reasons from — the widest of line 0,
         # not a small first-by-index marker.
         src = _build(
@@ -1390,7 +1389,7 @@ FONTS_DIR = os.path.dirname(FALLBACK_FONT)
 # The COMPLETE vendored bundle (sync-edit-fonts.ps1's $Faces): the guard
 # must cover every face any test here embeds, or a stale local cache
 # (pre-A3b: Regulars only) runs the style tests against the degrade
-# ladder and FAILS them instead of skipping (review-caught, repro'd).
+# ladder and FAILS them instead of skipping (regression, repro'd).
 _ALL_FACES = [
     f"Liberation{fam}-{style}.ttf"
     for fam in ("Sans", "Serif", "Mono")
@@ -1872,7 +1871,7 @@ class TestSplitMerge:
         assert not os.path.exists(out)
 
     def test_split_survives_condensed_leading(self, tmp_dir):
-        # Review-caught HIGH: 2×leading alone rejoined GARBLED when
+        # regression: 2×leading alone rejoined GARBLED when
         # leading ≤ 0.8×eff (a single-line first block joins under the
         # 1.6-em cap, not the drift window). The 2×eff floor defeats it.
         src = _build(
@@ -1892,7 +1891,7 @@ class TestSplitMerge:
         ]
 
     def test_merge_different_scale_refuses(self, tmp_dir):
-        # Review-caught: merging across a CTM-scale boundary silently
+        # regression: merging across a CTM-scale boundary silently
         # resized cur's text to prev's scale. The lkey guard refuses.
         src = _build(
             tmp_dir,
@@ -2620,13 +2619,8 @@ class TestVerticalParagraphs:
         assert horiz_name not in drawn, "the HORIZONTAL comma is on the page"
 
     def test_vertical_refuses_a_font_with_no_vertical_metrics(self, tmp_dir):
-        # Brief 39 § 1.5b — THE DEFECT'S EPITAPH. An INSTALLED face (T6) is
-        # allowed on a column only if it actually has vertical machinery,
-        # and "has" now means `vmtx`, not "the shaper returned something":
-        # HarfBuzz synthesizes a y_advance from the face's extents when
-        # `vmtx` is absent, so the shipped shaping gate passed Liberation
-        # Sans and an /Identity-V embed of horizontal letterforms with an
-        # invented uniform /W2 was reachable through this very call.
+        # Vertical embedding requires real `vmtx` metrics. A synthesized
+        # HarfBuzz y_advance is not sufficient for `/W2` under `/Identity-V`.
         latin = os.path.join(FONTS_DIR, "LiberationSans-Regular.ttf")
         if not os.path.isfile(latin):
             pytest.skip("bundled fonts not provisioned")
@@ -2906,7 +2900,7 @@ class TestLigatureParagraphs:
         _assert_non_members_unmoved(src, out, target["runs"])
 
     def test_noncoalesced_same_run_spans_never_form_a_cross_entry_ligature(self, tmp_dir):
-        # Review-caught HIGH (round 26): the joined-buffer re-encode could
+        # regression (round 26): the joined-buffer re-encode could
         # ligature-match ACROSS styled-entry boundaries — 'f','i' arriving
         # as separate single entries (adjacent same-run spans, widths
         # summed as singles) emitted as the LIG code (4.2pt drift repro,

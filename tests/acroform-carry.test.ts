@@ -331,7 +331,7 @@ describe('multi-source rebuilds (the import machinery)', () => {
     // Source B renames F1 -> F1_1 while ALSO owning a pre-existing F1_1 that
     // renames to F1_1_1 — the natural shape of a document that already went
     // through one merge. The old sequential rewrite re-matched its own
-    // output and landed fa on fb's font (verified live by the reviewer).
+    // output and landed fa on fb's font.
     const a = await withDrFonts([{ key: 'F1', base: 'Helvetica', fieldName: 'base' }]);
     const b = await withDrFonts([
       { key: 'F1', base: 'Times-Roman', fieldName: 'fa' },
@@ -516,11 +516,9 @@ describe('AcroForm flags and boundaries', () => {
     return new TextEncoder().encode(body + xref + trailer);
   }
 
-  it('F11 INVERSION — an XFA document REFUSES the rebuild instead of silently dropping the packet', async () => {
-    // This pinned the old behavior: rebuild anyway, /XFA silently gone. A
-    // restructured page tree and a carried XFA packet describe two different
-    // documents, so the honest move — and the industry-standard editor's —
-    // is refusing page surgery on XFA forms outright.
+  it('refuses an XFA rebuild instead of silently dropping the packet', async () => {
+    // A restructured page tree and a carried XFA packet describe different
+    // documents, so page surgery on XFA forms must refuse.
     await expect(
       buildPdf(pagesOf(rawFormWithXfaAndNeedAppearances(), 'a', [0])),
     ).rejects.toThrow(/XML form/);

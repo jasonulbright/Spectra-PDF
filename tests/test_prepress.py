@@ -39,7 +39,7 @@ class TestConvertCmyk:
 
     def test_render_intents_produce_distinct_output(self, tmp_dir, gs_path):
         # The intents the UI offers must actually DIFFER, or a picker option is
-        # a silent no-op (round-42 gauntlet). Perceptual / relative / absolute
+        # a silent no-op (regression). Perceptual / relative / absolute
         # are distinct with the bundled profile; "saturation" is documented to
         # collapse to perceptual (that profile has no Saturation table) and is
         # deliberately absent from the picker — pinned here so a future profile
@@ -65,7 +65,7 @@ class TestConvertCmyk:
     def test_separation_spot_colours_survive(self, tmp_dir, gs_path):
         # gs's CMYK conversion PRESERVES Separation/spot colours (does not
         # flatten them to process) — a plus for prepress, verified by the
-        # gauntlet. Pin it so a strategy change can't silently start flattening.
+        # regression. Pin it so a strategy change can't silently start flattening.
         src = os.path.join(tmp_dir, "spot.pdf")
         pdf = pikepdf.new()
         page = pdf.add_blank_page(page_size=(200, 200))

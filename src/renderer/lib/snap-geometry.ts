@@ -9,7 +9,7 @@
 // read that refetches on every workspace change, and an ANNOTATION is a
 // pending page edit, so gating it would flush the user's markup to disk the
 // instant they drew it (the documented `get_pdf_version`/`measure_text_box`
-// hazard — e2e-caught in specs 87 and 88, which lost their page-tier
+// hazard — e2e regression in specs 87 and 88, which lost their page-tier
 // annotations mid-suite).
 //
 // What makes that SAFE rather than a stale read: the caller addresses the

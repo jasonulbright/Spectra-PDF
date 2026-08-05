@@ -83,7 +83,7 @@ describe('navigation pane — Bookmarks panel', () => {
   });
 
   it('keeps a rename when a pending page edit commits mid-save (reload-vs-save race)', async () => {
-    // Regression for the review-caught HIGH: with an UNCOMMITTED page-tier edit
+    // Regression: with an UNCOMMITTED page-tier edit
     // pending, the bookmark save's `file.snapshot` runs the commit gate FIRST,
     // which flushes the page edit and swaps the working buffer BEFORE
     // `set_outline` — that swap used to fire a reload that landed a stale tree

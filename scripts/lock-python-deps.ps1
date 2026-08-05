@@ -22,12 +22,9 @@ if (-not (Test-Path "$DestDir\python.exe")) {
 }
 
 # The probe MUST NOT be fatal. `$ErrorActionPreference = "Stop"` above turns a
-# native command's stderr / non-zero exit into a TERMINATING error, so this
-# line used to kill the script before the exit-code check below could run --
-# and it did so precisely in the case the check exists for: no pip. Since
-# setup-python-embed.ps1 deliberately uninstalls pip, that meant the documented
-# flow ("edit the .in, run this script") failed every time on a freshly
-# provisioned runtime. try/catch keeps the probe non-fatal; $LASTEXITCODE is
+# native command's stderr or non-zero exit into a terminating error. Because
+# setup-python-embed.ps1 deliberately uninstalls pip, try/catch keeps this
+# expected probe failure non-fatal; $LASTEXITCODE is
 # still the real signal.
 $hadPip = $true
 try {

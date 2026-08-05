@@ -3,15 +3,14 @@ import type { CanvasTool } from '../state/types';
 
 // The workbench's TOOLS (Phase 4 M5, § 7) — the data the Tools Center tiles,
 // the task panes and the secondary toolbars all read. Like the menu tree and the
-// keymap, this is DATA over the command registry, not hand-placed UI: that is
-// what makes "Acrobat-like" a configuration we can test rather than pixels.
+// keymap, this is data over the command registry rather than hand-placed UI,
+// which makes the configuration directly testable.
 //
 // The shape of the change: 19 operations, grouped into 12 tools by the JOB the
 // user came to do. The old rail's groups (Pages / Transform / Repair / Security
 // / Content) were a taxonomy of the ENGINE — they named what the code does. A
 // forms author does not think "I need a Content operation"; they think "I'm
-// preparing a form". Acrobat's own tool names are the industry's vocabulary for
-// those jobs, and this persona already has them in muscle memory.
+// preparing a form". Tool titles use familiar, task-oriented vocabulary.
 //
 // Every operation the app has is reachable through exactly one tool — checked by
 // a totality test, so an operation can't be orphaned by a future edit.
@@ -45,8 +44,7 @@ export type ToolId =
 
 export interface ToolDef {
   id: ToolId;
-  /** Tile + task-pane heading. Acrobat's vocabulary where it fits (§ 1: names
-   * are descriptive terms in common industry use — no Adobe branding). */
+  /** Tile and task-pane heading using descriptive industry terminology. */
   title: string;
   /** One line, shown on the tile. Says what the tool is FOR, not how it works. */
   description: string;
@@ -63,8 +61,8 @@ export interface ToolDef {
    * Ownership, not just "what to arm": it answers both "which mode does opening
    * this tool arm?" (the first) and, on a document tab, "which tool is armed?"
    * (`toolForCanvasTool`) — the question the secondary toolbar exists to answer
-   * and the reason a flat pill cluster of eight modes couldn't. Comment owns
-   * four; that IS the tool, in Acrobat's model and now in ours.
+   * and the reason a flat pill cluster of eight modes could not. Comment owns
+   * four modes that together form the tool.
    *
    * Deliberately the state slice's own `CanvasTool`, not a copy of its members:
    * a re-spelled union here would let a tool name a mode the canvas doesn't
@@ -78,8 +76,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'organize',
     title: 'Organize Pages',
-    // Discoverability copy (owner directive, 2026-07-18, from launch-thread
-    // feedback): name the verbs users search for — "merge" especially,
+    // Name the verbs users search for, especially "merge",
     // whose only surface is the board's direct manipulation.
     description: 'Reorder, rotate, delete, split, extract — and merge pages between open files.',
     ops: ['rotate', 'delete', 'split'],
@@ -98,8 +95,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // Comment still lands you ON the page, with its pane seated one dock-click
     // away rather than grabbing horizontal space.
     ops: ['comments'],
-    // Six modes, one tool — the pill listed them flat and made the user infer
-    // the grouping; Acrobat's Comment toolbar states it. 'shape' fans out via
+    // Six modes belong to one tool. 'shape' fans out through
     // the secondary toolbar's figure picker (rect/ellipse/line/arrow/polygon/
     // polyline/cloud — rung 2); 'callout' is the leadered text box.
     canvasTools: ['highlight', 'freetext', 'ink', 'stamp', 'shape', 'callout', 'note', 'inkerase'],
@@ -107,8 +103,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'edit',
     title: 'Edit',
-    // The full 7.1–7.5 surface (stale "images only" copy caught in the
-    // 2026-07-18 discoverability pass), plus 9.A2 Add Text authoring.
+    // Name text, paragraph, image, and text-authoring capabilities explicitly.
     description: 'Edit text, whole paragraphs, and images — or add new text — right on the page.',
     ops: [],
     // Three modes: 'edit' (click existing content to edit), 'addtext' (drag a

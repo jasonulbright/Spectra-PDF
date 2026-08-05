@@ -69,8 +69,7 @@ export interface ImportedAnnotationFingerprint {
 // /Highlight + /QuadPoints, never be converted to a Square.
 export type TextMarkupType = 'highlight' | 'underline' | 'strikeout' | 'squiggly';
 
-// The drawing-shape figures (rung 2 — the king's comment-toolbar shapes and
-// the rival's shape set). rect/ellipse are box-defined (x/y/w/h alone);
+// Drawing-shape figures. Rectangles and ellipses are box-defined (x/y/w/h);
 // line/arrow are two-point; polygon/polyline/cloud carry a vertex list in
 // `points` (open vertices — polygon/cloud close implicitly, UNLIKE measure's
 // stored-closed area ring). Each commits as its REAL subtype (/Square
@@ -82,9 +81,8 @@ export interface PageAnnotation {
   // 'note' is a native /Text sticky note — a comment icon at a point, with its
   // text in `note`. Rect-based like the box kinds (no quads/points).
   // 'measure' is a finished measurement (points-based like ink): commits as a
-  // REAL /Line //PolyLine //Polygon carrying /IT + /Measure, so other tools
-  // can re-measure it (the king's dimension-annotation class).
-  // 'shape' is a drawing figure (rung 2): shapeType picks the geometry, and
+  // /Line, /PolyLine, or /Polygon carrying /IT + /Measure so other tools can
+  // re-measure it. For 'shape', shapeType picks the geometry and
   // it commits as that real subtype. 'callout' is a text box with a leader
   // line (/FreeText + /IT /FreeTextCallout + /CL): x/y/w/h span the FULL
   // extent (box + leader) so selection and manipulation cover everything;
@@ -284,8 +282,8 @@ export type CanvasTool =
   // at the box via the engine's add_page_image, undoable — an ordinary
   // placement afterward (movable/resizable via C1).
   | 'addimage'
-  // Measuring (parity map § 2 — the king's Measuring Tool). Three modes, one
-  // tool: distance is a drag, perimeter/area are click-a-vertex sequences
+  // Measuring uses three modes in one tool: distance is a drag, while
+  // perimeter and area are click-a-vertex sequences
   // (double-click finishes; area closes the ring). Values are computed in the
   // DISPLAYED frame (lengths are rotation-invariant); a completed measurement
   // lands as an ordinary 'ink' annotation whose note carries the value.
@@ -306,12 +304,12 @@ export type CanvasTool =
   // its editor. Comment's mode; the note keeps its fixed icon size (rung 1's
   // kind rule) so placement is the only geometry.
   | 'note'
-  // Ink eraser (N5b): drag cuts stroke segments out of ink annotations —
-  // partial, like the king's pencil eraser (a mid-stroke cut SPLITS the
+  // The ink eraser cuts stroke segments out of ink annotations. A mid-stroke
+  // cut splits the
   // stroke, which the per-stroke model holds exactly). Comment's mode.
   | 'inkerase'
-  // Zoom marquee (N3, Acrobat's Z): band a region, the reading view zooms to
-  // it. The THIRD ownerless mode beside select/hand — pure navigation, no
+  // Zoom marquee bands a region and zooms the reading view to it. It is a pure
+  // navigation mode beside Select and Hand, with no
   // tool, commits nothing.
   | 'zoommarquee'
   // Count (N11 slice C): click places a takeoff mark of the armed group at
@@ -400,9 +398,9 @@ export const TOOL_DOCK_MIN_WIDTH = 300;
 export const TOOL_DOCK_MAX_WIDTH = 640;
 export const TOOL_DOCK_DEFAULT_WIDTH = 400;
 /**
- * The all-tools LIST view's width — deliberately BELOW `TOOL_DOCK_MIN_WIDTH`
- * and deliberately NOT the user's resizable width (U1, owner-directed
- * 2026-07-25). The list is a fixed-width index of tool names; a panel is a
+ * The all-tools list width is deliberately below `TOOL_DOCK_MIN_WIDTH` and is
+ * not the user's resizable width. The list is a fixed-width index of tool names;
+ * a panel is a
  * working surface. The dock contracts to this when showing the list and
  * expands back to the user's width when a tool opens, so the pane is sized to
  * what it currently holds rather than to the widest thing it might hold.
@@ -433,18 +431,18 @@ export interface UiState {
   // around the document. Menu bar stays (the discoverable exit); Esc/Ctrl+H
   // leave; leaving the doc tab clears it (chrome must exist on Home/Tools).
   readingMode: boolean;
-  // Properties bar (I.6, Acrobat's Ctrl+E): a contextual strip under the
+  // Properties bar: a contextual strip under the
   // secondary toolbar showing the selected annotation's properties (or the
   // armed comment tool's defaults). Session-scoped like navPane.open.
   propertiesBar: boolean;
-  // Split view (I.6, the king's Window ▸ Split): the reading view divides
+  // Split view divides the reading view
   // over the SAME document. 'two' = stacked panes with independent
-  // scroll/zoom (DocumentView state is per-instance already). 'quad' = the
-  // king's SPREADSHEET split: a 2×2 grid with frozen-pane semantics — panes
+  // scroll and zoom state. 'quad' is a 2×2 grid with frozen-pane semantics:
+  // panes
   // in a row share vertical scroll, panes in a column share horizontal
   // scroll, and zoom is broadcast (linked positions under unequal zooms
-  // would misalign the frozen rows). Session-scoped like propertiesBar —
-  // the king doesn't persist split either. The organize board never splits
+  // would misalign the frozen rows). This state is session-scoped. The
+  // organize board never splits
   // (one d3 world; both commands are document-mode-gated).
   splitView: 'off' | 'two' | 'quad';
   // Toolbar customization (I.6): the user's show/hide overrides against the

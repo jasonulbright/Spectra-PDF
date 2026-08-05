@@ -6,7 +6,7 @@ import { mkdtempSync } from 'node:fs';
 import { expect } from '@wdio/globals';
 import { waitForHarness, openByPaths, getState, invokeAppCommand } from '../support/harness.js';
 
-// File ▸ Send To ▸ Email (owner-ruled in scope 2026-07-31). The STAGING half
+// File ▸ Send To ▸ Email. The staging half
 // is fully machine-independent and is proven end-to-end: a copy of the
 // working file lands in the send-to scratch under the document's REAL name,
 // byte-identical to the working state, and a second send never overwrites a

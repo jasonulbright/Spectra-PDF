@@ -73,9 +73,8 @@ pub(crate) fn is_managed_member_path(base: &std::path::Path, canonical: &std::pa
     canonical.starts_with(base) && canonical != base
 }
 
-/// Shell-open an EXTRACTED portfolio member with the OS default handler.
-/// The 2026-07-30 shell-scope deferral, resolved by the owner's queue ruling:
-/// the scope is the MANAGED portfolio-members dir ONLY — the path is
+/// Shell-open an extracted portfolio member with the OS default handler.
+/// The scope is the managed portfolio-members directory only: the path is
 /// re-canonicalized and must sit inside it, so this command can never open
 /// (or probe) an arbitrary path. Extraction happens first through the
 /// engine; this only ever launches what that flow just wrote.
@@ -176,16 +175,15 @@ fn allow_picked_path(app: &AppHandle, path: &str) {
     }
 }
 
-/// Pick one or more Create PDF sources (P22). Separate from the PDF picker
+/// Pick one or more Create PDF sources. Separate from the PDF picker
 /// (much wider filter, and MULTI-select); window-parented for modality.
 #[tauri::command]
 pub async fn pick_create_pdf_sources(
     app: AppHandle,
     window: tauri::WebviewWindow,
 ) -> Result<Vec<String>, String> {
-    // P22: Create PDF used to accept PostScript and nothing else. The filter
-    // is now every kind the engine's four arms convert, and the pick is
-    // MULTIPLE — the dialog builds an ordered list, not a single source.
+    // The filter covers every kind converted by the engine, and multi-select
+    // builds an ordered source list.
     // The set itself lives in `create_pdf_sources` so this picker and the
     // CLI's `batch --operation create-pdf` walk share ONE Rust copy.
     use crate::create_pdf_sources::{IMAGES, OFFICE, POSTSCRIPT};
@@ -844,8 +842,8 @@ pub async fn get_app_version() -> Result<String, String> {
 
 /// Opens the project's releases page in the user's browser.
 ///
-/// Takes NO argument on purpose. The update check is notify-only (owner
-/// ruling 2026-07-25): the app never downloads or installs a release itself,
+/// Takes no argument on purpose. The update check is notify-only: the app
+/// never downloads or installs a release itself,
 /// and the destination is compiled in rather than read from the update
 /// manifest. So even a forged `latest.json` can only lie about a version
 /// NUMBER — it cannot point a user anywhere, and there is no install path for
@@ -1096,11 +1094,10 @@ pub async fn append_operation_log(app: AppHandle, line: String) -> Result<(), St
 
 // ── Batch run logs ───────────────────────────────────────────────────────
 //
-// Phase 12 (issue #1 request 4): one log file per batch run, swept by age.
+// One log file per batch run, swept by age.
 //
-// The location is USER-CONFIGURABLE (owner requirement, 2026-07-26) and
-// defaults to the app's own data folder. It has to be configurable for a real
-// reason, not for taste: a scheduled run under an alternate account or an MSA
+// The location is user-configurable and defaults to the app data folder. A
+// scheduled run under an alternate account or an MSA
 // resolves `app_data_dir()` inside THAT account's profile, so the audit trail
 // for the runs nobody watched would land somewhere the person who set them up
 // cannot see. A shared, explicitly chosen folder is the fix — and when a

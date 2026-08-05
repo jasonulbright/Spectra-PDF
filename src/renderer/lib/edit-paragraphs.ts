@@ -1039,7 +1039,7 @@ export function computeEditSpans(
   // `fallbackRun` (the paragraph's first member) covers the empty-spans
   // edge: listed paragraphs always carry spans today, but a span-less
   // call must still produce covering spans, not a silently-empty mapping
-  // the engine would reject on every retry (review-caught).
+  // the engine would reject on every retry (regression).
   const inherit =
     oldSpans.find((sp) => inheritAt >= sp.start && inheritAt < sp.end)?.run ??
     oldSpans[0]?.run ??

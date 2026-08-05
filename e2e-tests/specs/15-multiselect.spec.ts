@@ -172,7 +172,7 @@ describe('multi-select page ops (2n.1)', () => {
 
   it('the selection SURVIVES an authored commit — its ids are adopted by the reindex (Phase 5 § F)', async () => {
     // FLIPPED from the historic clear-on-reindex pin. That pin guarded the
-    // review-caught HIGH where surviving positional ids could re-bind to a
+    // regression where surviving positional ids could re-bind to a
     // DIFFERENT physical page after the rebuild. Phase 5 killed the hazard
     // structurally: positional ids are generation-tagged (a rebuild can
     // never re-serve an old id) and the AUTHORED commit publishes its

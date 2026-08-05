@@ -106,7 +106,7 @@ describe('dialog keyboard model (M6.5)', () => {
 
   it('…and survives F5 pressed while a MENU is open (the step-aside path)', async () => {
     // The Radix-menu branch stepped aside without suppression — F5 over an
-    // open File menu reloaded the whole app (review-caught HIGH). Post-I.6
+    // open File menu reloaded the whole app (regression). Post-I.6
     // the suppressed key DISPATCHES (presentation opens); the reload-survival
     // discriminator is unchanged.
     await $('[data-testid="menu-file"]').click();
@@ -164,7 +164,7 @@ describe('dialog keyboard model (M6.5)', () => {
 
   it('the tab stop RE-DERIVES when the remembered button disables', async () => {
     // Focus memory landing on a button that then disables stranded the
-    // whole toolbar out of Tab (review-caught): make Undo the roving stop,
+    // whole toolbar out of Tab (regression): make Undo the roving stop,
     // exhaust it, and require a live tab stop to remain.
     await browser.keys(['Control', 'Shift', 't']); // one undoable edit
     await browser.waitUntil(async () => (await getWorkspacePageIds()).length === 6);

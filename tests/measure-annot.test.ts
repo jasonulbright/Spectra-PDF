@@ -1,4 +1,4 @@
-// Real dimension annotations (the resolved 2026-07-30 /Measure deferral):
+// Real dimension annotations:
 // kind 'measure' commits as /Line //PolyLine //Polygon carrying /IT and a
 // /Measure dict with the NumberFormat /C factors other tools re-measure
 // with. The value in /Contents is a convenience; the geometry + factors are

@@ -3,7 +3,7 @@
 Sets one of the four page boundary boxes — /CropBox, /BleedBox, /TrimBox,
 /ArtBox — by insetting the page's current effective box by per-edge margins
 (points) across a page range. "Crop pages" is exactly this on /CropBox; the
-other three are the prepress boxes the king's page-boxes editor exposes.
+other three are standard prepress boxes.
 
 Insets are clamped so the result stays inside the /MediaBox and never
 degenerates (a crop that would invert or collapse is refused for that page,

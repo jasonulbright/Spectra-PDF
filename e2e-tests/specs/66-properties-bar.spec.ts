@@ -11,7 +11,7 @@ import {
 
 const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// The Properties Bar (I.6, Acrobat's Ctrl+E): toggled via view.propertiesBar,
+// The Properties Bar toggles through view.propertiesBar,
 // it shows the click-selected annotation's properties with quick recolor +
 // delete. Selection is Select-tool click on the annotation body — new
 // interaction surface, so the spec drives the REAL click path, not a harness

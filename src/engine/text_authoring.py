@@ -861,9 +861,8 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
             270: [0, -1, 1, 0, round(left, 4), round(top, 4)],
         }[rot]
     else:
-        # T19 free rotation: the layout fills the DRAWN box's own
-        # dimensions and the frame turns that box about its own CENTER —
-        # the king's text-box rotation semantic. Layout, wrap, and measure
+        # The layout fills the drawn box's own dimensions and the frame turns
+        # that box about its center. Layout, wrap, and measure
         # stay local and angle-blind; only this frame differs.
         l_left, l_right, l_top = 0.0, l_w, l_h
         theta = math.radians(angle)
@@ -891,14 +890,13 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
             left, right, top, bottom, angle,
         )
 
-    # A2-tail-2: compose the A3b style into the SAME resolve ladder (both
-    # face seats). style_key(False, False) == "regular" == the shipped
+    # Compose style into the same resolution ladder for both face slots.
+    # style_key(False, False) == "regular" == the shipped
     # default, so the no-style path stays byte-identical.
     sk = style_key(bold, italic)
-    # 9.K2: an OpenType feature request (small caps / alternates) forces the
-    # bundled feature-bearing face — Libertinus Serif — because Liberation
-    # carries none of these features. This is the owner's "explicit switch to
-    # Libertinus Serif" for authoring: the author asked for small caps, and
+    # An OpenType feature request such as small caps or alternates forces the
+    # bundled feature-bearing Libertinus Serif because Liberation carries none
+    # of these features. The author explicitly requested the feature, and
     # this is the only bundled face that can do it. No feature => the shipped
     # Liberation path, byte-identical.
     feats = _normalize_features(features)

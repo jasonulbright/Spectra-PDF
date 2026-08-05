@@ -80,8 +80,8 @@ export function MainToolbar(): React.ReactElement {
   // N12: re-render on language change; labels resolve via tChrome/tCommandTitle.
   useTranslation();
   const state = useAppState(); // re-render on state change so enablement stays live
-  // The Hand/Select pair are MODES (M6.2) — the armed one reads pressed, the
-  // way Acrobat's own pair does. Select is "pressed" for any non-hand mode
+  // Hand and Select are modes, so the armed one reads pressed. Select is
+  // pressed for any non-hand mode
   // only when nothing more specific is armed: an armed Highlight shows in the
   // secondary toolbar, not here.
   const pressedFor = (command: CommandId): boolean | undefined => {
@@ -107,7 +107,7 @@ export function MainToolbar(): React.ReactElement {
   // remembered button can be DISABLED by state it doesn't control (Save
   // after saving, Undo at the bottom of its stack) — and a disabled button
   // is excluded from Tab regardless of tabIndex, which left the whole
-  // toolbar Tab-unreachable (review-caught). The tab stop is re-derived
+  // toolbar Tab-unreachable (regression). The tab stop is re-derived
   // against live enablement every render.
   // (Customization can SHRINK the list, so the remembered index may now be
   // past the end — an out-of-range command must read as "not enabled", not

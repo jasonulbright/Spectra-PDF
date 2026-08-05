@@ -5,8 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { loadSettings } from '../lib/app-settings';
 import { tChrome } from '../i18n';
 
-// NOTIFY-ONLY updates (owner ruling 2026-07-25: "no self respecting enterprise
-// allows auto-updates"). This bar tells you a newer release exists and hands
+// Updates are notify-only. This bar tells the user a newer release exists and hands
 // you to the releases page. It NEVER downloads or installs anything.
 //
 // Why that is the safer design, not just the preferred one: an updater that

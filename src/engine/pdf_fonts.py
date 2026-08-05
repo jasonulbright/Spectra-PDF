@@ -1151,12 +1151,11 @@ def font_capability(font_obj) -> FontCapability:
     # 9.B3: declared /Widths entries stay authoritative PER CODE; the
     # embedded program's own hmtx (1000/em-scaled, keyed by the derived
     # codes) fills every code /Widths does not cover — a wholesale
-    # either/or here dropped real program advances to the 500 default for
-    # any code outside a partial /Widths range (review-caught, repro'd
-    # via decoded_width on an under-declared subset).
+    # An either/or merge drops real program advances to the 500 default for
+    # codes outside a partial /Widths range.
     if program_widths:
         widths = {**program_widths, **widths}
-    # Subset-coverage guard (review-caught; the phase doc's stated design):
+    # Subset-coverage guard:
     # /Encoding is a fixed 256-slot table that says nothing about which
     # glyphs an EMBEDDED SUBSET actually contains — encode() succeeding for
     # a never-subsetted character writes .notdef boxes into the output with
@@ -1172,9 +1171,9 @@ def font_capability(font_obj) -> FontCapability:
     # len(w) > 0: an EMPTY declared /Widths carries no subset-boundary
     # information — treating it as one inverted the range (last < first)
     # and collapsed the encodable set to nothing on a font whose glyphs
-    # are all present, while char_width silently fell to the default
-    # (review-caught HIGH, repro'd: editable=True with encodable()=="" and
-    # every advance wrong — the silent-corruption class the completeness
+    # are all present, while char_width can silently fall to the default,
+    # yielding editable=True with encodable()=="" and every advance wrong.
+    # This is the silent-corruption class the completeness
     # rule forbids).
     if w is not None and len(w) > 0 and len(widths) > 0:
         try:

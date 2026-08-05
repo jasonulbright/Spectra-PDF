@@ -130,7 +130,7 @@ describe('valueShapeMatches', () => {
   });
 });
 
-describe('resolveFillTargets (review-caught: fills must follow renamed fields)', () => {
+describe('resolveFillTargets (regression: fills must follow renamed fields)', () => {
   const field = (name: string, rect: [number, number, number, number], over: Partial<FormField> = {}): FormField =>
     textField({ name, widgets: [{ pageIndex: 0, rect, hidden: false }], ...over });
 
@@ -203,7 +203,7 @@ describe('resolveFillTargets (review-caught: fills must follow renamed fields)',
     expect(r.skipped[0]).toMatchObject({ name: 'ghost' });
   });
 
-  it('end to end: the reviewer misfile scenario resolves onto the renamed field', async () => {
+  it('resolves a pending value onto the renamed field end to end', async () => {
     // Two real form files with a colliding 'name' at DIFFERENT rects, merged
     // through the real rebuild (the carry renames one), resolved through the
     // real reader — the exact sequence handleFillFormValues runs.

@@ -235,8 +235,8 @@ describe('two-up spread layout (I.6 page display)', () => {
   // row fewer, the stale scrollTop then exceeds the new max, the browser clamp
   // moves it, and the anchor drops for the WRONG reason (geometry, not the
   // fix), leaving the mutation invisible. Order is load-bearing.
-  it('a jump anchor does not survive a layout switch (review-caught HIGH)', async () => {
-    // Repro (reviewer's shape, needs a doc long enough that the stale page's
+  it('a jump anchor does not survive a layout switch (regression)', async () => {
+    // Needs a document long enough that the stale page's
     // row falls OUT of the viewport): jump to page 5 of 10 in single layout,
     // switch to two-up without scrolling. The layout remaps rows under the
     // unchanged scrollTop; a surviving anchor kept the box saying "5" while

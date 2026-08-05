@@ -4,10 +4,9 @@
 // F11). Same loss class as the /AcroForm
 // and /Names /EmbeddedFiles drops (acroform-carry.ts, embedded-files-carry.ts):
 // pdf-lib's copyPages copies page subtrees only, so before this module ONE
-// committed page edit silently deleted every bookmark, page label, the
-// layers configuration, the document language, and the viewer preferences.
-// Found by inspection while scoping the tags-carry (2026-07-31); each key is
-// pinned red-first in catalog-carry.test.ts.
+// Without this carry, a committed page edit would silently delete bookmarks,
+// page labels, layer configuration, document language, and viewer preferences.
+// catalog-carry.test.ts pins every carried key.
 //
 // OWN SOURCE ONLY, the embedded-files rule: these are properties of the
 // DOCUMENT, and a page inserted from a donor must not import the donor's

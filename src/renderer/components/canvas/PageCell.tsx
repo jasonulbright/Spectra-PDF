@@ -175,7 +175,7 @@ function SnapGlyph({ type }: { type: SnapType }): React.JSX.Element {
       return <polyline points="4,4 11,8 4,12" {...common} />;
   }
 }
-// Drawing shapes default to review red (the king's shape default).
+// Drawing shapes default to review red.
 const SHAPE_COLOR = '#e0393e';
 
 export interface AnnotationRect {
@@ -637,7 +637,7 @@ interface PageCellProps {
     pos: number,
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
-  /** Dragged past the page's edge — the king's "drag it back to the ruler". */
+  /** Remove a guide when it is dragged past the page edge. */
   onRemoveGuide?: (guideId: string) => void;
   // Pending redaction marks on this page (transient view state — see
   // lib/redaction.ts); undefined when none.
@@ -1090,7 +1090,7 @@ function PageCellImpl({
   //    past thumbnail size, and scaling an already-rounded width amplifies that
   //    rounding linearly with zoom — which the text layer (whose geometry comes
   //    from the page's real points, via pdf.js) then disagrees with, drifting
-  //    selection off the glyphs (review-caught, measured: ~20px at 16x). The
+  //    selection off the glyphs (regression, measured: ~20px at 16x). The
   //    reading view is exactly where a page must be a page, to the pixel.
   // `textLayer` marks the reading view; raster, overlays and font all key off
   // pageHeight/displayWidth, so the whole cell stays consistent either way.
@@ -1101,7 +1101,7 @@ function PageCellImpl({
   // let-the-board-have-it branch as select, or a hand drag on the board
   // preventDefaults the pointerdown (suppressing the derived mouse events d3
   // pans with) and falls through to the band — painting a HIGHLIGHT instead
-  // of panning (review-caught, CRITICAL).
+  // of panning (regression, CRITICAL).
   const annotateMode = tool !== 'select' && tool !== 'hand';
   // Rubber band for the annotation tools, in display-normalized coords.
   // Driven by window-level native listeners for the drag's duration — the
@@ -1182,9 +1182,8 @@ function PageCellImpl({
   }, [takeoffSettings, page.annotations]);
 
   const snapArmed = snapSettings?.enabled === true;
-  // The grid exists independently of whether it is DRAWN: "snap to a grid you
-  // cannot see" is an ordinary way to draft, and the king separates Show Grid
-  // from Snap to Grid for exactly that reason. `types.grid` gates the snap;
+  // The grid exists independently of whether it is drawn because snapping to a
+  // hidden grid is a valid drafting workflow. `types.grid` gates the snap;
   // `showGrid` gates the ink.
   const gridCfg = snapSettings?.grid;
   const grid = useMemo(
@@ -1285,8 +1284,8 @@ function PageCellImpl({
       closed: p.closed,
     }));
   }, [snapArmed, snapGeometry, page.rotation]);
-  // Live markup is a snap source too — the king snaps to page content only,
-  // and snapping to the markup you already placed is a plus-extra that costs
+  // Live markup is also a snap source, allowing new geometry to align with
+  // markup already placed on the page. This costs
   // nothing (no engine call, the geometry is already in hand). Keyed by
   // annotation id so a DRAGGED object can be excluded from its own targets.
   const markupSnapPaths = useMemo<Map<string, SnapPath>>(() => {
@@ -1380,8 +1379,7 @@ function PageCellImpl({
     suspend?: boolean;
     /** Shift holds the segment to the nearest angle increment, measured from
      * `constrainAnchor`. Independent of the snap MASTER toggle: a drawing
-     * constraint is not a snap, and the king's Shift works with snapping off
-     * exactly as it does with it on. */
+     * constraint is not a snap and works whether snapping is on or off. */
     constrain?: boolean;
     /** A manipulation gesture's own index (the object excluded). */
     index?: SnapIndex;
@@ -1391,9 +1389,8 @@ function PageCellImpl({
     unclamped?: boolean;
   }
 
-  /** Shift's constraint, applied to a point that did NOT snap. An explicit
-   * geometric target beats a constraint when both are available (the king's
-   * precedence), which is why every caller runs the snap first. */
+  /** Shift constraint applied to a point that did not snap. An explicit
+   * geometric target takes precedence, so every caller runs snapping first. */
   const constrained = (p: { x: number; y: number }, on: boolean | undefined): { x: number; y: number } => {
     const from = constrainAnchor.current;
     if (!on || !from) return p;
@@ -1452,8 +1449,8 @@ function PageCellImpl({
     constrain = false,
   ): { dx: number; dy: number } => {
     // Shift on a MOVE constrains the TRAVEL, so the anchor is the origin of
-    // the delta rather than a page point — same math, same increment, and it
-    // gives the king's axis-locked drag at 90°.
+    // the delta rather than a page point: same math and same increment, with
+    // an axis-locked drag at 90 degrees.
     const held = (d: { dx: number; dy: number }): { dx: number; dy: number } => {
       if (!constrain) return d;
       const p = constrainAngle(
@@ -1565,8 +1562,8 @@ function PageCellImpl({
 
   /** Press on an annotation body (Select tool): selection on the press, a
    * move gesture past a 3px threshold. Dragging a selected member moves the
-   * whole same-page selection; dragging an unselected one selects it first
-   * (ctrl adds instead of replacing, Acrobat's model). */
+   * whole same-page selection; dragging an unselected one selects it first,
+   * while Ctrl adds it instead of replacing the selection. */
   const handleAnnotMoveDown = (a: PageAnnotation, e: React.PointerEvent<HTMLElement>): void => {
     if (tool !== 'select' || e.button !== 0 || editing || manipActive.current) return;
     e.stopPropagation();
@@ -1650,8 +1647,8 @@ function PageCellImpl({
       endSnapGesture();
       if (!activated) {
         // A plain press-release. Ctrl-click on an already-selected member
-        // TOGGLES it off; a plain click on one COLLAPSES the selection to
-        // just it (both Acrobat) — either way only now, when it provably
+        // toggles it off; a plain click collapses the selection to just that
+        // item. Apply either change only now, when it provably
         // wasn't the start of a group drag.
         if (commit && wasSelected) onSelectAnnotation(docId, page.id, a.id, additive);
         return;
@@ -2295,8 +2292,8 @@ function PageCellImpl({
   const measureValueFor = (pts: number[]): string => {
     if (tool === 'measurearea') {
       const area = formatArea(ringAreaPts2(pts, measDispW, measDispH), measScale);
-      // The king reports the ring's perimeter beside its area; close the ring
-      // for the length.
+      // Report the ring's perimeter beside its area, closing the ring for the
+      // length calculation.
       const ring = [...pts, pts[0], pts[1]];
       return `${area} · perimeter ${formatDistance(polylineLengthPts(ring, measDispW, measDispH), measScale)}`;
     }
@@ -2476,7 +2473,7 @@ function PageCellImpl({
     // mode that bands, which is why the two are separate modes rather than one
     // mode and a boolean (2n.4c). Edit (7.1) is click-to-select the same way
     // — without this, a drag on empty page area fell through to the generic
-    // band and silently created a HIGHLIGHT annotation (review-caught, the
+    // band and silently created a HIGHLIGHT annotation (regression, the
     // same class as the 'hand' fix above).
     if (tool === 'forms' || tool === 'edit') return;
     e.preventDefault();
@@ -2510,8 +2507,8 @@ function PageCellImpl({
     }
     if (tool === 'note') {
       // N3: click places a native /Text sticky note at the point (fixed icon
-      // size — rung 1's kind rule) and opens its text editor immediately,
-      // the king's gesture. An editor left empty removes the note.
+      // size and opens its text editor immediately. An editor left empty
+      // removes the note.
       const { x: cx, y: cy } = pagePoint(e.currentTarget, e.clientX, e.clientY, {
         suspend: e.altKey,
       });
@@ -2782,7 +2779,7 @@ function PageCellImpl({
   // the Document view's virtualization a big scroll (wheel/Page Down) with the
   // button still held can unmount the dragged page while its listeners keep
   // running — the trailing pointerup would then commit a rect for a cell that's
-  // gone. Harmless on the always-mounted board (review-caught).
+  // gone. Harmless on the always-mounted board (regression).
   useEffect(() => () => cancelBand.current?.(), []);
 
   const finishEditing = (annotation: PageAnnotation, value: string): void => {
@@ -3025,9 +3022,8 @@ function PageCellImpl({
                         ? {} // the raster / the symbol alone — no box chrome
                         : { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
                       : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
-            // Select tool: every annotation body is clickable (the properties
-            // bar's selection gesture — an object on top of the page, Acrobat's
-            // model) and movable (rung 1). Other modes keep pointer-events:
+            // In Select mode, every annotation body is clickable and movable.
+            // Other modes keep pointer-events:
             // none, so bands, strokes and page pickup behave exactly as before.
             ...(tool === 'select'
               ? { pointerEvents: 'auto', cursor: isTransformable(a) ? 'move' : 'pointer' }
@@ -3408,9 +3404,8 @@ function PageCellImpl({
                         height: `${da.h > 0 ? (da.calloutBox[3] / da.h) * 100 : 100}%`,
                       }
                     : {}),
-                  // A sticky note's box is its ICON — the editor pops out
-                  // beside it at a typable size instead (N3), like the
-                  // king's note popup.
+                  // A sticky note's box is its icon; the editor opens beside it
+                  // at a practical typing size.
                   ...(a.kind === 'note'
                     ? {
                         position: 'absolute' as const,
@@ -3754,7 +3749,7 @@ function PageCellImpl({
                 rect={r}
                 // The line's THICKNESS, rotation-proof: a 90°-turned page
                 // swaps w/h, and sizing off the swapped h produced a ~300px
-                // font (review-caught). min(w,h) is the line thickness
+                // font (regression). min(w,h) is the line thickness
                 // under any quarter-turn; the editor renders horizontal
                 // (not counter-rotated) at a readable size — the v1 call.
                 heightPx={Math.min(r.h, r.w) * pageHeight}
@@ -4546,7 +4541,7 @@ function ParagraphEditor({
   };
   // ONE outcome per editor instance: Enter-commit, Escape-cancel, blur,
   // and the convert button all race through here — whichever fires first
-  // wins and any refire is a no-op (review-caught HIGH; the unmount-blur
+  // wins and any refire is a no-op (regression; the unmount-blur
   // refire otherwise turns an Escape-cancel into a commit).
   const settledRef = useRef(false);
   const settle = (fn: () => void): void => {
@@ -4850,7 +4845,7 @@ function ParagraphEditor({
       onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         // Enter/Escape at the WRAPPER so they work from EVERY control
-        // (the size/colour inputs, not just the textarea — review-caught
+        // (the size/colour inputs, not just the textarea — regression
         // that Escape did nothing while a control had focus).
         if (e.key === 'Enter') {
           e.preventDefault(); // also stops a newline in the textarea
@@ -5081,13 +5076,9 @@ function ParagraphEditor({
             }}
           >
             <option value="">{tChrome('canvas.editpara.keepFont')}</option>
-            {/* 9.T4 + brief 39 § 3.4: the three bundled families are
-                HORIZONTAL, and a vertical paragraph's substitution resolves
-                the bundled CJK face regardless of which one is picked — so
-                on a column they are disabled and say why, rather than
-                silently resolving to something else. An INSTALLED face is a
-                real choice for a column (T6) and refuses by name when it
-                lacks the vertical machinery. */}
+            {/* Bundled horizontal families are disabled for vertical text;
+                installed faces remain selectable and are validated for
+                vertical metrics and forms. */}
             <optgroup
               label={tChrome('canvas.editpara.bundled')}
               disabled={para.vertical}
@@ -5193,14 +5184,11 @@ function ParagraphEditor({
         >
           {tChrome('canvas.editpara.italic')}
         </button>
-        {/* 9.K2 OpenType features — dual role like B/I. A partial selection
+        {/* OpenType features have the same dual role as B/I. A partial selection
             applies the feature to that range (per span, riding the face
             entry); a caret or whole-text selection applies it to the whole
-            paragraph. Still disabled for vertical text after T4/brief 39 —
-            but for the REAL reason, not the family one: a column's embed
-            goes through `build_vertical_font`, which carries the face's
-            upright forms and no feature request at all, so a feature toggle
-            would be a control that quietly did nothing. */}
+            paragraph. They are disabled for vertical text because
+            `build_vertical_font` does not carry feature requests. */}
         <button
           type="button"
           data-testid="edit-para-smallcaps"
@@ -5445,13 +5433,9 @@ function ParagraphEditor({
           {tChrome('canvas.editpara.missingGlyphs', {
             chars: missing.map((c) => `'${c}'`).join(' '),
           })}
-          {/* 9.T4 lifted the vertical convert refusal (a column converts
-              into the bundled CJK face, which carries `vert`/`vrt2` and
-              `vmtx`), so the offer is live in every writing mode. It was
-              still hidden for columns until brief 39 — the same stale
-              pre-T4 reason the restyle controls carried. A character even
-              the vertical face cannot draw refuses BY NAME, which is an
-              honest notice rather than a hidden control. */}
+          {/* Vertical conversion uses the bundled CJK face with `vert`,
+              `vrt2`, and `vmtx`; unsupported characters are reported by
+              name. */}
           <button
             type="button"
             data-testid="edit-para-convert"
@@ -5535,7 +5519,7 @@ function TextRunEditor({
         // A press on the editor's own chrome (the error line under the
         // input) must not blur the input — blur means commit-or-cancel,
         // and clicking the error to READ it discarded the edit
-        // (review-caught).
+        // (regression).
         if (e.target !== inputRef.current) e.preventDefault();
       }}
       onClick={(e) => e.stopPropagation()}

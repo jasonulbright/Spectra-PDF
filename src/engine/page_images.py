@@ -444,8 +444,8 @@ class _EditState:
         # Original form names whose Do was rewritten to a copy — their
         # entries must be DROPPED when nothing still draws them (qpdf's GC
         # removes orphaned images/fonts but LEAVES forms; without the drop
-        # the superseded form keeps the "deleted" image bytes reachable —
-        # review-caught, and redact.py's exact precedent).
+        # the superseded form keeps the deleted image bytes reachable. This
+        # follows redact.py's resource-pruning precedent.
         self.superseded_forms: set = set()
 
     def take(self, ordinal: int) -> dict | None:
@@ -816,9 +816,9 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
     `new_forms` ({name: stream}) are copies created AT THIS LEVEL, for the
     CALLER to register into its own fresh resources — the redact.py
     new_forms pattern. Registering into the passed-in `resources` directly
-    mutated the ENCLOSING form's ORIGINAL, shared resources for 2-level
-    nesting (review-caught by object-identity trace: a letterhead form
-    reused across pages gained stray edit-copy references).
+    mutating an enclosing form's original shared resources makes reused forms
+    gain stray edit-copy references. Every nesting level therefore gets its
+    own resource dictionary.
 
     Ordinal counting (`state.seen`) is untouched by the C3-tail frame
     bookkeeping: q/Q only ride the open_q/skip_q locals, draws increment
@@ -1597,8 +1597,8 @@ def _jpeg_info(data: bytes) -> tuple[int, int, int]:
             i += 1
             continue
         # Collapse 0xFF fill runs — spec-legal padding before any marker
-        # (T.81 B.1.1.2); reading a fill byte as the marker code misparsed
-        # the following payload bytes as a segment length (review-caught).
+        # (T.81 B.1.1.2); reading a fill byte as the marker code misparses the
+        # following payload bytes as a segment length.
         while i + 1 < len(data) and data[i + 1] == 0xFF:
             i += 1
         if i + 4 > len(data):
@@ -1782,9 +1782,8 @@ def replace_page_image(
         p.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
         if state.replacement_name in _names_drawn(kept):
             _register_xobject(pdf, resources, state.replacement_name, image_obj)
-        # The superseded ORIGINAL (image or form) must not stay embedded —
-        # replace previously never pruned at all (review-caught): a replaced
-        # image's full bytes rode along in every output forever.
+        # The superseded original image or form must not stay embedded, or the
+        # replaced image bytes remain reachable in every output.
         _finalize_page_rewrite(p, kept, state.superseded_forms)
         _save(pdf, input_path, output_path)
         return {"output": str(output_path), "page": int(page), "index": int(index)}

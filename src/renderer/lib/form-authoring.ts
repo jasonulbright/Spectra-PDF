@@ -82,7 +82,7 @@ export class FieldSpecError extends Error {
 // The /T of every TOP-LEVEL /AcroForm /Fields entry — including non-terminal
 // hierarchy parents, which pdf-lib's getFields() (terminal-only) cannot see.
 // Every field this module creates is a new top-level root, so top level is
-// the only place a collision can occur; the review-caught gap was exactly a
+// the only place a collision can occur; the regression gap was exactly a
 // signature field (the hand-rolled path, which bypasses pdf-lib's own
 // FieldAlreadyExistsError machinery) landing beside a same-named parent node
 // — two same-/T siblings, which the spec forbids.
@@ -133,7 +133,7 @@ function validateSpec(doc: PDFDocument, spec: NewFieldSpec): void {
     // Duplicate names would make readers treat two fields as one logical
     // field (or violate sibling /T uniqueness outright). Checked against the
     // RAW top-level /Fields — not getFields(), whose terminal-only view
-    // misses non-terminal hierarchy parents (review-caught: the hand-rolled
+    // misses non-terminal hierarchy parents (regression: the hand-rolled
     // signature path has no pdf-lib backstop and would have created a
     // same-/T sibling next to such a parent).
     if (topLevelFieldNames(doc).has(name)) {

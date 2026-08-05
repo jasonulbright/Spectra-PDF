@@ -123,7 +123,7 @@ describe('hand tool (M6.2)', () => {
       await browser.execute(() => document.querySelector('.page-drag-ghost, [class*="drag-ghost"]') !== null),
     ).toBe(false);
     // …and nothing was PAINTED: hand fell through PageCell's annotate branch
-    // once, drawing a highlight instead of panning (review-caught CRITICAL —
+    // once, drawing a highlight instead of panning (regression —
     // this exact real drag is the repro).
     expect(await getFirstAnnotation(1_500)).toBeNull();
   });
@@ -160,7 +160,7 @@ describe('hand tool (M6.2)', () => {
   it('double-click page THREE on the board reads PAGE THREE — the inspector is gone', async () => {
     await $('[data-testid="toolbar-select"]').click();
     // Page 1 is the wrong-behavior fallback (the stale-ref jump landed there,
-    // review-caught HIGH) — only a non-first page discriminates.
+    // regression) — only a non-first page discriminates.
     const targetId = (await getWorkspacePageIds())[2];
     const cells = await $$('[data-page-id]');
     let target: WebdriverIO.Element | null = null;

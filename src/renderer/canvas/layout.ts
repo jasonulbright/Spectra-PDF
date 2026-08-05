@@ -72,7 +72,7 @@ export function displayWidthOf(page: PageLike): number {
  * ~79px at 64x). The raster fills whatever box it's given, so it just looks very
  * slightly off-aspect — but the pdf.js text layer computes its own geometry from
  * the page's REAL points, so the two disagree and selection hit-boxes drift off
- * the glyphs, worst at the trailing edge (review-caught, measured). Anything
+ * the glyphs, worst at the trailing edge (regression, measured). Anything
  * overlaying a page at reading scale must size it from the true aspect.
  */
 export function displayWidthAt(page: PageLike, displayHeight: number): number {

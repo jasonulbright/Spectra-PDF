@@ -21,7 +21,7 @@ export const NAV_PANEL_DEFS = [
   { id: 'attachments', title: NAV_PANEL_TITLES.attachments, icon: 'attachments', Component: toolPanelNav(AttachmentsPanel) },
   { id: 'layers', title: NAV_PANEL_TITLES.layers, icon: 'layers', Component: toolPanelNav(LayersPanel) },
   { id: 'tags', title: NAV_PANEL_TITLES.tags, icon: 'tags', Component: toolPanelNav(TagsPanel) },
-  // Reuses the magnifier glyph — Acrobat marks both Find and Search with one.
+  // Find and Search intentionally share the magnifier glyph.
   { id: 'search', title: NAV_PANEL_TITLES.search, icon: 'find', Component: SearchPanel },
   { id: 'signatures', title: NAV_PANEL_TITLES.signatures, icon: 'signatures', Component: SignaturesNavPanel },
 ] as const satisfies readonly NavPanelDef[];

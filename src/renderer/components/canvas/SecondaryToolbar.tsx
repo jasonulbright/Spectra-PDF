@@ -60,7 +60,7 @@ async function importStampImage(path: string): Promise<{ dataUrl: string; aspect
 
 // The secondary toolbar (§ 3.1): "a contextual strip that appears while a tool
 // mode is active, hosting that tool's actions". It sits at the top of the
-// document pane, under the tab strip — Acrobat's placement, and § 3's layout.
+// document pane, under the tab strip.
 //
 // It replaces the floating pill, which listed all eight canvas modes flat, at
 // all times, and made the user infer which belonged together. This shows ONE

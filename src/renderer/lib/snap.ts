@@ -367,8 +367,8 @@ function priorityOf(type: SnapType): number {
  * Every candidate inside the radius, in the order Tab cycles them: priority
  * first, then distance, then derivation order.
  *
- * The full list — not just the winner — because cycling is the king's
- * disambiguation gesture and priority alone cannot express "no, the OTHER
+ * Return the full list rather than only the winner so callers can cycle among
+ * overlapping candidates; priority alone cannot express "use the other
  * one". Callers that do not cycle simply take `[0]`.
  */
 export function snapCandidates(
@@ -539,8 +539,8 @@ export function snapDelta(
 
 // ── Angle constrain (N11 slice B) ────────────────────────────────────────
 // Shift, while a drag is live, holds the segment to the nearest increment.
-// Applied AFTER the point snap at the choke point, so an explicit geometric
-// target beats a constraint when both are available — the king's precedence.
+// Apply this after point snapping so an explicit geometric target takes
+// precedence over a constraint.
 
 /** Increment bounds, in degrees. 90 is the ortho case; below 1 the constraint
  * stops constraining anything. */

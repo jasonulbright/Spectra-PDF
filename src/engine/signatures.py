@@ -11,8 +11,8 @@ validate the signer's certificate against any trust store, nor check
 revocation, nor timestamp/LTV. So ``trusted`` is reported but is
 DETERMINISTICALLY False — the UI must present a valid result as
 "cryptographically valid, signer identity NOT verified against a trusted
-authority", never as fully trusted. PAdES/LTV/TSA remain owner-locked out of
-v1 (arm's-length AGPL subprocess is the documented future path). See
+authority", never as fully trusted. PAdES/LTV/TSA are not implemented; an
+arm's-length AGPL subprocess is the documented integration path. See
 docs/architecture/10-phase2h-signatures.md.
 
 Signing (``sign_pdf``) is shipped — Phase 2h signing + Phase 2k completeness:
@@ -330,8 +330,8 @@ def _load_signer_from_pem(key_path: str, cert_path: str, password: str) -> "sign
     key — never positional. A PEM bundle has no structural key↔cert pairing
     (unlike PKCS#12), and real-world chain files come in both orders
     (leaf-first fullchain.pem AND root-first CA bundles); trusting certs[0]
-    signed with the right key but claimed the WRONG identity on a root-first
-    file, producing an invalid-yet-written signature (review-caught). The
+    signed with the right key but claimed the wrong identity on a root-first
+    file, producing an invalid signature. The
     non-matching certificates are registered as the supplied chain."""
     if not Path(key_path).is_file():
         raise ValueError("Signer key file not found.")
@@ -409,8 +409,8 @@ def _free_field_name(file: str, requested: str) -> str:
     """A signature-field name not already present in the file: `requested` if
     free, else the lowest free ``Signature{N}``.
 
-    9.F5 (round-42 gauntlet, HIGH): the default is "Signature1", and the in-place
-    flow re-reads the SAME working copy — so a second sign would collide on that
+    The default is "Signature1", and the in-place flow re-reads the same working
+    copy, so a second signature would collide on that
     name and pyHanko refuses ("field appears to be filled already"), breaking
     in-place signing after one use AND the Save-a-copy flow on that document.
     Rotating to the next free name makes counter-signing Just Work with no UI
@@ -612,8 +612,8 @@ def sign_pdf(
     # explicitly opts in (`allow_in_place`, set by the undoable in-place flow).
     # Left global, removing the refusal would silently exempt the Save-a-copy
     # and canvas sign flows too, letting a save-dialog path that happens to
-    # equal the working copy overwrite it outside the snapshot/undo flow
-    # (round-42 gauntlet, LOW). pyHanko's IncrementalPdfFileWriter APPENDS a
+    # equal the working copy overwrite it outside the snapshot/undo flow.
+    # pyHanko's IncrementalPdfFileWriter appends a
     # revision — `signed.getvalue()` is the original bytes verbatim + the
     # signature, never a re-serialization — and the input read handle is closed
     # before the write below, so writing back is byte-safe. The write is atomic
@@ -638,8 +638,8 @@ def sign_pdf(
         field_name = existing_field
     else:
         # A NEW signature field — rotate the name off any already-present field
-        # so signing a document that already carries "Signature1" (the default)
-        # cannot collide (round-42 gauntlet). Does not touch the existing-field
+        # so signing a document that already carries "Signature1" cannot
+        # collide. This does not touch the existing-field
         # path, which targets a specific named field on purpose.
         field_name = _free_field_name(file, field_name)
 
@@ -648,9 +648,8 @@ def sign_pdf(
     # B-T  = + tsa_url (RFC 3161 timestamp from the user's chosen TSA)
     # B-LT = + embed_revocation (certs + revocation data into the /DSS)
     # B-LTA= + lta (a document timestamp sealing the DSS; needs the TSA)
-    # The TSA and any revocation fetching are network calls to endpoints the
-    # USER configured — inherent to the capability (Acrobat does the same),
-    # never a bundled service (DECISIONS 2026-07-24).
+    # The TSA and revocation fetches are network calls only to endpoints the
+    # user configured; they never use a bundled service.
     tsa_url = (tsa_url or "").strip() or None
     if lta and not pades:
         raise ValueError("PAdES B-LTA requires PAdES mode.")
@@ -707,8 +706,8 @@ def sign_pdf(
             else:
                 signed = signers.sign_pdf(writer, meta, signer=signer, timestamper=timestamper)
     # Fail closed + atomic: write the signed bytes to a temp beside the output,
-    # SELF-VERIFY the temp, and only then replace. Verifying BEFORE the replace
-    # (round-42 gauntlet, HIGH) keeps the in-place case honest: a transient
+    # Self-verify the temporary file before replacement. This keeps the
+    # in-place case honest: a transient
     # verify failure (e.g. an AV scanner briefly locking the just-written file)
     # discards the temp and leaves the original untouched — never "reported
     # failure while the working copy is already signed". The returned dict

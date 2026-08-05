@@ -277,7 +277,7 @@ describe('the ghost import-source hazard (2n.3)', () => {
     // The tab guard survives its own belt-and-braces status: the active-id
     // fallback only runs when the CLOSED file was the active one, so a ghost
     // that is already active when an unrelated file closes flows straight
-    // through — and the tab must still not try to focus it. The reviewer showed
+    // through, and the tab must still not try to focus it. This case uses
     // no test reached this clause (it could be deleted with the suite green);
     // this is that test.
     let s = appReducer(initialState, {
@@ -951,9 +951,8 @@ describe('registry smoke', () => {
   });
 });
 
-// M4.2 — Ctrl+A selects PAGES in BOTH views, and must NOT fall through to the
-// browser's select-all in the reading view. § 9.2 originally specified TEXT
-// there (Acrobat's behaviour); it was tried and reverted, because the reading
+// Ctrl+A selects pages in both views and must not fall through to the browser's
+// select-all in the reading view because the reading
 // view is VIRTUALIZED — only mounted pages have text spans — so native
 // select-all can reach only the on-screen pages and Ctrl+C would silently copy
 // a fraction of the document. These pin the reverted decision so it isn't
@@ -1035,7 +1034,7 @@ describe('Space temporary hand (M6.2)', () => {
 
   it('auto-repeat keydowns keep suppressing the browser default', () => {
     // The OS repeats keydown while held; each one must preventDefault or the
-    // native Space scroll fights the pan (review-caught).
+    // native Space scroll fights the pan (regression).
     wireState(docTabState('select'));
     const first = key(true);
     dispatchKeyEvent(first);
@@ -1069,7 +1068,7 @@ describe('Space temporary hand (M6.2)', () => {
 describe('single-key accelerators at the DISPATCHER (M6.4)', () => {
   // resolveBinding is pure and never consults settings; THIS is the gate the
   // milestone is about, and deleting it passed the whole suite before these
-  // (review-caught). localStorage stub = the workbench-ui.test idiom.
+  // (regression). localStorage stub = the workbench-ui.test idiom.
   function letter(key: string, repeat = false): KeyboardEvent {
     return {
       key, repeat, target: null,
@@ -1121,7 +1120,7 @@ describe('single-key accelerators at the DISPATCHER (M6.4)', () => {
 
   it('a HELD key does not parity-toggle the mode (auto-repeat refused)', () => {
     // The tool commands are toggles; without the repeat gate a held H flips
-    // hand on/off at the OS repeat rate (review-caught HIGH).
+    // hand on/off at the OS repeat rate (regression).
     stubPref(true);
     const { finalState } = wireState(docTab());
     dispatchKeyEvent(letter('h'));

@@ -84,8 +84,8 @@ export const initialUiState: UiState = {
   activeOp: 'split',
   activeToolId: null,
   tool: 'select',
-  // A document opens in the READING view (M4.1g, the end of M4). This is the
-  // Acrobat model and § 6.1's stated default: a PDF is something you read; the
+  // A document opens in the reading view because reading is the default task;
+  // the
   // strips board is the tool you switch to when you want to REARRANGE it — which
   // is also why the board survives untouched as an equal, one-click peer rather
   // than being replaced.
@@ -188,7 +188,7 @@ function clearSelection(state: AppState): AppState {
  *     leave the workspace too. Without this a cross-file-moved page's id
  *     became a PHANTOM after closing its source — never prunable again
  *     (generations!) and silently poisoning every batched rotate's
- *     all-or-nothing guard (review-caught HIGH, reducer-level repro).
+ *     all-or-nothing guard (regression, reducer-level repro).
  * Multiple paths at once serve the gate-bypass defensive branches, whose
  * invalidation spans every dirty path. */
 function pruneSelectionForPaths(
@@ -468,7 +468,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // survives (§ F — and a later reopen can no longer collide anyway:
       // reindex mints a fresh generation). includeSourced: CLOSE also
       // strips this path's SOURCED pages out of other documents below, so
-      // their ids leave the workspace with it (review-caught phantom).
+      // their ids leave the workspace with it (regression phantom).
       const base = pruneSelectionForPaths(state, [action.path], true);
       const files = new Map(state.files);
       files.delete(action.path);
@@ -480,9 +480,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // DIFFERENT file while the panels operate on the ghost.
       //
       // The tab fallback below already skipped ghosts; only the tab. Fixing the
-      // active id at the source makes that guard belt-and-braces instead of the
-      // thing holding the invariant up — the M5.1 lesson (see CLAUDE.md § Design
-      // invariants: activeFileId !== null is NOT "a document the user can see").
+      // active id at the source makes that guard defense in depth rather than
+      // the only mechanism enforcing the visible-document invariant.
       // All ghosts left = nothing to be active; null is the honest answer.
       const nextActive =
         [...files.values()].find((f) => !f.importOnly)?.path ?? null;
@@ -554,7 +553,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // A per-doc focus names a partition of the file being left — like
       // focusTab, drop it so the reading view can't keep rendering the old
       // file's document while the tab strip says another file is active
-      // (review-caught: reopening an already-open file dispatches only
+      // (regression: reopening an already-open file dispatches only
       // SET_ACTIVE_FILE, so the stale id survived and won the resolution).
       const cleared =
         action.path !== state.activeFileId &&
@@ -583,7 +582,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // Buffer replaced (engine op) — this path's ids die at its reindex
       // (fresh generation); other files' selection survives (§ F). The
       // defensive gate-bypass branch below invalidates EVERY dirty path's
-      // docs, so its prune spans the same set (review-caught).
+      // docs, so its prune spans the same set (regression).
       const base = pruneSelectionForPaths(
         state,
         tierEmpty ? [action.path] : [action.path, ...state.pageDirtyPaths],
@@ -721,7 +720,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       // were REUSED, so a surviving focus/selection could silently
       // re-bind to different content, and comparing content was proven
       // UNSOUND (equal-count partition swaps re-derive bit-identical id
-      // arrays — review-caught). Both hazards are now structurally dead:
+      // arrays — regression). Both hazards are now structurally dead:
       // positional ids are GENERATION-TAGGED (a rebuild mints ids no
       // stale holder can match), and an id that DOES come back is the
       // authored-adoption case, where the same id IS the same logical
@@ -734,7 +733,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       //    behavior, now enforced by id impossibility instead of by
       //    every consumer remembering to clear.
       // Ownership is still tested against the real documents, never a
-      // string prefix (paths may contain '#' — review-caught).
+      // string prefix (paths may contain '#' — regression).
       const incomingDocIds = new Set(action.documents.map((d) => d.id));
       const incomingPageIds = new Set(
         action.documents.flatMap((d) => d.pages.map((p) => p.id)),
@@ -1572,8 +1571,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_TOGGLE_PROPERTIES_BAR':
       return { ...state, ui: { ...state.ui, propertiesBar: !state.ui.propertiesBar } };
     case 'UI_TOGGLE_SPLIT_VIEW':
-      // Two-pane toggles against ITSELF; from the quad it switches shape
-      // (the king's menu model: the two split modes replace each other).
+      // Two-pane toggles against itself; from quad mode it switches shape
+      // because the split modes replace each other.
       return {
         ...state,
         ui: { ...state.ui, splitView: state.ui.splitView === 'two' ? 'off' : 'two' },
@@ -1695,7 +1694,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_NAV_PANE_WIDTH': {
       // Clamp both ends — an overshooting drag (or a pointer leaving the window
       // mid-drag) must not set a width that buries the board off-screen and
-      // then persists (review-caught).
+      // then persists (regression).
       const width = Math.min(NAV_PANE_MAX_WIDTH, Math.max(NAV_PANE_MIN_WIDTH, Math.round(action.width)));
       if (width === state.ui.navPane.width) return state;
       return { ...state, ui: { ...state.ui, navPane: { ...state.ui.navPane, width } } };

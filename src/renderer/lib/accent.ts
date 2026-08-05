@@ -4,8 +4,8 @@
  * that stays white fails contrast on light accents, and a flat lighten
  * makes hover invisible on them. Pure math — unit-tested.
  *
- * The derivation is a function of (accent, THEME), not of the accent alone.
- * One accent still serves every theme (owner direction 2026-08-02), but the
+ * The derivation is a function of (accent, theme), not of the accent alone.
+ * One accent serves every theme, but the
  * shell it is drawn against is not the same in all three: an accent lifted
  * for the dark shell is the WRONG direction on white, and the contrast theme
  * needs a floor no arbitrary system accent is guaranteed to clear. Deriving

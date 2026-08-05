@@ -12,7 +12,7 @@ import { tChrome, tChromeCount } from '../../i18n';
 
 // Signatures nav panel (Phase 4 M3.3b, § 5) — a compact READ view over the same
 // verify_signatures data the Tools ▸ Signatures panel shows. The Tools panel is
-// where you SIGN; this is the persistent status readout (Acrobat's split).
+// where signing occurs; this panel is the persistent status readout.
 // Shares the verify types + the valid/modified/invalid classifier
 // (lib/signatures) so the two surfaces can't disagree on validity.
 //
@@ -43,7 +43,7 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
   // (undo/redo themselves only move snapshot stacks). So editing a signed file
   // flips the badge; the buffer is UNCHANGED by Save (MARK_SAVED only clears
   // dirty/undoStack — the on-disk bytes are the same), so Save no longer
-  // triggers a pointless re-verify (review-caught). `nonce` is the manual
+  // triggers a pointless re-verify (regression). `nonce` is the manual
   // Re-check trigger.
   //
   // Known, accepted: opening the panel while the active file has UNCOMMITTED

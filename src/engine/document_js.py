@@ -22,7 +22,7 @@ import pikepdf
 
 # The PDF text-string UTF-16BE byte-order mark. `/JS` is a "text string or
 # stream" (PDF 32000 §12.6.4.16): PDFDocEncoding, or UTF-16 with a BOM. We WRITE
-# UTF-16BE+BOM so any Unicode in a script round-trips and Acrobat reads it.
+# UTF-16BE+BOM so Unicode scripts round-trip and conforming readers decode them.
 _BOM_BE = b"\xfe\xff"
 _BOM_LE = b"\xff\xfe"
 
@@ -46,8 +46,8 @@ def _decode_js(action) -> str | None:
         # No BOM. Try strict UTF-8 first: some third-party producers write /JS
         # as UTF-8 without a BOM, and genuine PDFDocEncoding text carrying a
         # non-ASCII byte essentially never ALSO decodes as valid multi-byte
-        # UTF-8 — so this recovers that common interop case without mangling the
-        # spec case (round-42 gauntlet). Fall back to PDFDocEncoding, then a
+        # UTF-8, recovering that common interop case without mangling the
+        # specified encoding. Fall back to PDFDocEncoding, then a
         # permissive Latin-1.
         try:
             return raw.decode("utf-8")
@@ -78,8 +78,8 @@ def list_document_js(file: str) -> dict:
         # A hostile/corrupt file can carry `/Names << /JavaScript 42 >>` (any
         # scalar), which pikepdf auto-unwraps to a native int/bool/Decimal and
         # `NameTree(...)` then rejects with a TypeError. Treat a non-dict tree
-        # as "no scripts" instead of surfacing a raw exception (round-42
-        # gauntlet) — matching how a non-dict /Names and a non-dict action are
+        # as "no scripts" instead of surfacing a raw exception, matching how a
+        # non-dict /Names and a non-dict action are
         # already skipped.
         if isinstance(tree, pikepdf.Dictionary):
             for name, action in pikepdf.NameTree(tree).items():
@@ -100,9 +100,7 @@ def set_document_js(file: str, output: str, scripts: list | None = None) -> dict
     unique. An empty/omitted list REMOVES the `/JavaScript` name tree (leaving
     any other `/Names` entries — /Dests, /EmbeddedFiles — untouched). The JS is
     stored as a UTF-16BE (BOM) stream, so arbitrary Unicode survives. The text
-    is NEVER parsed or executed — a syntactically broken script saves as-is,
-    exactly as the industry editor stores it (it validates at run time, which
-    is not us).
+    is never parsed or executed, so a syntactically broken script saves as-is.
 
     Args:
         file: Input PDF path.

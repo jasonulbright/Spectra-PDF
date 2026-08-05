@@ -9,12 +9,8 @@ import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 import type { ChromeKey } from '../i18n-chrome';
 
-// Home (Phase 10 slice E — the redesign the owner asked for: "much cleaner
-// and prettier - even in darkmode", the king's bar). A landing surface you
-// leave the moment a document opens, not a product identity: quick actions,
-// the drop target, recents with real hierarchy, and the all-tools grid
-// (Home is the docless tools surface since slice C). All original testids
-// preserved; additions only.
+// Home is a landing surface that disappears when a document opens: quick actions,
+// the drop target, recents with real hierarchy, and the document-free tools grid.
 
 interface HomeTabProps {
   recentFiles: RecentEntry[];
@@ -32,8 +28,8 @@ function folderOf(path: string): string {
   return parts.slice(-2).join('\\') || path;
 }
 
-// The king's "recommended tools" strip, from our own command registry — the
-// same ids the menus run, so enablement can never disagree.
+// Recommended tools come from the command registry, using the same ids as the
+// menus so enablement cannot disagree.
 const QUICK_ACTIONS: ReadonlyArray<{ command: CommandId; label: ChromeKey; icon: Parameters<typeof ChromeIcon>[0]['icon'] }> = [
   { command: 'document.combineFiles', label: 'chrome.home.combineFiles', icon: 'pages' },
   { command: 'file.createPdf', label: 'chrome.home.createPdf', icon: 'document' },

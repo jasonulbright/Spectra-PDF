@@ -1,4 +1,4 @@
-// Custom stamp library (parity map § 2 — the king's custom/dynamic stamps).
+// Custom and dynamic stamp library.
 // A LEAF module: localStorage + pure helpers only, so the token resolver and
 // the shape validation are unit-testable (no DOM test environment — the
 // breakable part must be the testable part).

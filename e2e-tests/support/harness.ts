@@ -84,10 +84,7 @@ export async function setView(view: TestStateSnapshot['view']): Promise<void> {
 /**
  * Open a menubar menu and wait for one of its items — RETRYING the trigger.
  *
- * Hardening for the recorded `menuitem-tool-* still not displayed after
- * 10000ms` class (dev-notes flake ledger, first seen 2026-08-02 on
- * `91-ink-strokes`). A single `.click()` on the trigger is not a reliable
- * open: the specs that flake click the menubar immediately after
+ * A single `.click()` on a menubar trigger is not reliable immediately after
  * `openByPaths` + `setView('canvas')`, so the click can land while the
  * canvas is still mounting and the menu either never opens or is dismissed
  * by the focus change that follows. Waiting longer cannot fix that — the
@@ -428,7 +425,7 @@ async function editParagraphCount(pageId: string): Promise<number> {
  * into a reproducible `never stayed open for …pdf#g4#p0 paragraph 0` — twenty
  * seconds of re-opening a RETIRED id. The reindex that fires between the
  * caller's listing read and the open publishes generation g+1 and drops g, and
- * by design a stale id can never re-bind (see CLAUDE.md, Phase 5 identity). So
+ * by design a stale id can never re-bind. Therefore
  * the id is re-read inside the predicate, exactly as spec 43's convert case had
  * already learned to do locally.
  *

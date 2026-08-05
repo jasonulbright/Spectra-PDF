@@ -1,8 +1,6 @@
-"""O8 slice B — the MRC layer codecs.
+"""MRC layer codec regression coverage.
 
-The pins here are the ones that would have caught the four rules the recon
-earned, every one of which was a live bug first and every one of which passed
-a naive size-and-renders check:
+These cases verify four constraints that a size-and-renders check cannot prove:
 
   1. multi-strip group 4 (decodes progressively wrong, LOOKS like erosion)
   2. stencil polarity (renders solid black; OCR still returns words from it)

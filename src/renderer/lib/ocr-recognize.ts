@@ -1,14 +1,14 @@
-// The renderer's single door to OCR recognition (Phase 12 step 3).
+// The renderer's single door to OCR recognition.
 //
 // Recognition is the ENGINE's job now — native Tesseract as a subprocess, the
 // same recognizer the CLI and every scheduled run use. tesseract.js is retired:
 // two recognizers can disagree about the same page, and a headless run has no
 // WebView to host a WASM one in.
 //
-// This is a LEAF module on purpose. The first cut imported `ensureGsPath` from
-// SettingsPanel and broke every consumer at RENDER time, which is the exact
-// trap already recorded for `app-settings.ts` (M6.4): pulling in the panel
-// component drags its module-level theme/Ghostscript side effects into
+// This is a leaf module on purpose. Importing `ensureGsPath` from SettingsPanel
+// creates a render-time dependency that breaks every non-panel consumer, the
+// same dependency trap avoided by `app-settings.ts`: pulling in a panel
+// component drags module-level theme and Ghostscript side effects into
 // whatever imports it. Nothing here may touch React, the DOM, or a component —
 // only the bridge and the leaf settings module.
 
