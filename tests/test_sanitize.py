@@ -802,6 +802,155 @@ class TestHiddenLayerRemoval:
         assert body.count(b"q") - body.count(b"Q") == 0
 
 
+class TestHiddenTextRemoval:
+    def test_the_four_removable_kinds_go_and_partial_coverage_stays(
+        self, hidden_pdf, tmp_dir
+    ):
+        out, result = sanitized(hidden_pdf, tmp_dir, ["hidden_text"])
+        assert removed_counts(result)["hidden_text"] == 4
+        body = _page_content(out)
+        for gone in (
+            b"HIDDEN LAYER TEXT",
+            b"INVISIBLE RENDER MODE TEXT",
+            b"WHITE ON WHITE TEXT",
+            b"TEXT UNDER A BOX",
+        ):
+            assert gone not in body
+        assert b"PARTLY COVERED TEXT" in body
+        assert b"Visible paragraph one." in body
+        assert b"Visible paragraph two." in body
+        after = row(audit_hidden_information(out), "hidden_text")
+        assert [d["kind"] for d in after["detail"]] == ["partially_covered"]
+
+    def test_a_recognition_layer_survives_unless_it_is_asked_for(self, scan_pdf, tmp_dir):
+        kept, _result = sanitized(scan_pdf, tmp_dir, ["hidden_text"], name="kept.pdf")
+        assert b"recognized words" in _page_content(kept)
+        gone, result = sanitized(
+            scan_pdf, tmp_dir, ["hidden_text"], name="gone.pdf", hidden_text_ocr=True
+        )
+        assert removed_counts(result)["hidden_text"] == 1
+        assert b"recognized words" not in _page_content(gone)
+
+    def test_surviving_text_does_not_move(self, tmp_dir):
+        """A removed run's advance is re-emitted as one displacement, so a
+        later show on the same line arrives where it always did."""
+        path = os.path.join(tmp_dir, "sameline.pdf")
+        pdf = pikepdf.new()
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Font,
+                Subtype=Name.Type1,
+                BaseFont=Name("/Helvetica"),
+                Encoding=Name.WinAnsiEncoding,
+            )
+        )
+        content = (
+            b"BT /F1 12 Tf 72 700 Td (KEEP-A ) Tj 3 Tr (INVISIBLE ) Tj 0 Tr (KEEP-B) Tj ET\n"
+        )
+        page = Dictionary(
+            Type=Name.Page,
+            MediaBox=Array([0, 0, 612, 792]),
+            Resources=Dictionary(Font=Dictionary(F1=font)),
+            Contents=pdf.make_stream(content),
+        )
+        pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
+        pdf.save(path)
+
+        from engine.text_runs import list_text_runs
+
+        before = {r["text"]: r["rect"] for r in list_text_runs(path, 1)["runs"]}
+        out, _result = sanitized(path, tmp_dir, ["hidden_text"], name="sameline-out.pdf")
+        after = {r["text"]: r["rect"] for r in list_text_runs(out, 1)["runs"]}
+        assert "INVISIBLE " not in after
+        for text in ("KEEP-A ", "KEEP-B"):
+            for b, a in zip(before[text], after[text]):
+                assert abs(float(a) - float(b)) < 1e-6
+
+    def test_a_run_inside_a_form_is_removed_at_that_placement_only(self, tmp_dir):
+        path = os.path.join(tmp_dir, "twice.pdf")
+        pdf = pikepdf.new()
+        font = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Font,
+                Subtype=Name.Type1,
+                BaseFont=Name("/Helvetica"),
+                Encoding=Name.WinAnsiEncoding,
+            )
+        )
+        form = pikepdf.Stream(pdf, b"BT /F1 12 Tf 0 0 Td (FORM WORDS) Tj ET\n")
+        form[Name.Type] = Name.XObject
+        form[Name.Subtype] = Name("/Form")
+        form[Name("/BBox")] = Array([0, 0, 120, 20])
+        form[Name("/Resources")] = Dictionary(Font=Dictionary(F1=font))
+        # The first placement sits under an opaque box; the second does not.
+        content = (
+            b"q 1 0 0 1 72 700 cm /Fx Do Q\n"
+            b"1 1 1 rg 60 690 300 40 re f\n0 0 0 rg\n"
+            b"q 1 0 0 1 72 400 cm /Fx Do Q\n"
+        )
+        page = Dictionary(
+            Type=Name.Page,
+            MediaBox=Array([0, 0, 612, 792]),
+            Resources=Dictionary(Font=Dictionary(F1=font), XObject=Dictionary(Fx=form)),
+            Contents=pdf.make_stream(content),
+        )
+        pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
+        pdf.save(path)
+
+        found = row(audit_hidden_information(path), "hidden_text")
+        assert [d["kind"] for d in found["detail"]] == ["covered"]
+        out, result = sanitized(path, tmp_dir, ["hidden_text"], name="twice-out.pdf")
+        assert removed_counts(result)["hidden_text"] == 1
+        from engine.extract_text import extract_text
+
+        body = extract_text(out)
+        text = body.get("text", "") if isinstance(body, dict) else str(body)
+        assert text.count("FORM WORDS") == 1
+
+    def test_layers_and_text_together_do_not_fight(self, hidden_pdf, tmp_dir):
+        out, result = sanitized(hidden_pdf, tmp_dir, ["hidden_text", "hidden_layers"])
+        assert removed_counts(result)["hidden_layers"] == 1
+        # The layer's block goes first, so its run is not looked for again.
+        assert removed_counts(result)["hidden_text"] == 3
+        body = _page_content(out)
+        assert b"HIDDEN LAYER TEXT" not in body
+        assert b"INVISIBLE RENDER MODE TEXT" not in body
+        assert b"Visible paragraph two." in body
+
+
+class TestIdempotence:
+    def test_a_second_audit_reports_zero_for_everything_checked(self, hidden_pdf, tmp_dir):
+        selection = [
+            "metadata",
+            "embedded_files",
+            "bookmarks",
+            "comments",
+            "form_fields",
+            "javascript",
+            "hidden_layers",
+            "hidden_text",
+            "links_and_actions",
+            "thumbnails",
+            "attached_structure",
+        ]
+        out, _result = sanitized(hidden_pdf, tmp_dir, selection)
+        after = counts(audit_hidden_information(out))
+        for category in selection:
+            if category == "hidden_text":
+                # Partial coverage is reported and never removed.
+                assert [
+                    d["kind"] for d in row(audit_hidden_information(out), "hidden_text")["detail"]
+                ] == ["partially_covered"]
+                continue
+            assert after[category] == 0, category
+
+    def test_sanitizing_twice_changes_nothing_the_second_time(self, hidden_pdf, tmp_dir):
+        once, _first = sanitized(hidden_pdf, tmp_dir, ["metadata", "comments"], name="a.pdf")
+        _twice, second = sanitized(once, tmp_dir, ["metadata", "comments"], name="b.pdf")
+        assert removed_counts(second)["metadata"] == 0
+        assert removed_counts(second)["comments"] == 0
+
+
 class TestInPlaceOutput:
     def test_output_may_be_the_input(self, hidden_pdf):
         result = sanitize_pdf(hidden_pdf, hidden_pdf, categories=["thumbnails"])

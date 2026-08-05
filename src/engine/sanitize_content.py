@@ -47,9 +47,14 @@ from engine.content_walk import (
 )
 from engine.redact import (
     MAX_FORM_DEPTH,
+    _copy_resources_for_write,
+    _drop_replaced_forms,
     _lookup_xobject,
+    _referenced_xobject_names,
     _resolve_resources,
     _span_bbox,
+    _split_instructions,
+    _state_only_instructions,
 )
 from engine.text_metrics import (
     _child_state,
@@ -57,6 +62,8 @@ from engine.text_metrics import (
     _run_metrics,
     measurable,
     show_bytes,
+    show_clusters,
+    show_items,
     wide_width,
 )
 
@@ -855,6 +862,177 @@ def remove_hidden_layer_content(pdf, off_set: set) -> int:
         elif "/Annots" in page.obj:
             del page.obj["/Annots"]
     return stats["blocks"]
+
+
+class _Removal:
+    """The run ids still to remove, and what happened to them.
+
+    Ids are the depth-first show-operator encounter order — the same counter
+    the analysis walk assigns, which is what makes an id from one addressable
+    by the other. Both walks recurse into a Form XObject at its `Do`, so the
+    agreement is a property of the traversal rather than of two lists that have
+    to be kept in step.
+    """
+
+    def __init__(self, targets: set):
+        self.targets = targets
+        self.index = 0
+        self.removed = 0
+        self.whole = 0
+        self.fonts = _FontCache()
+        self.name_counter = 0
+
+    def fresh_name(self, taken: set) -> str:
+        while True:
+            name = f"/SanFm{self.name_counter}"
+            self.name_counter += 1
+            if name not in taken:
+                taken.add(name)
+                return name
+
+
+def _remove_show(operator: str, operands: list, cap, state, removal: _Removal) -> list:
+    """Re-emit one show operator with nothing drawn and the pen left exactly
+    where it was.
+
+    Every cluster is marked removed, so the split emits a single displacement
+    carrying the run's whole advance: surviving text later on the line keeps its
+    position to the point. A run whose font cannot measure it has no advance to
+    carry, so it goes whole and says so.
+    """
+    data = show_bytes(operator, operands)
+    if not measurable(cap, data) or state.font_size <= 0:
+        removal.whole += 1
+        return _state_only_instructions(operator, operands)
+    items = show_items(operator, operands, cap, state)
+    clusters = show_clusters(items)
+    if not clusters:
+        removal.whole += 1
+        return _state_only_instructions(operator, operands)
+    return _split_instructions(
+        operator, operands, items, clusters, set(range(len(clusters))), state
+    )
+
+
+def _rewrite_runs(
+    pdf, instructions, resources, fallback, base_ctm, depth, removal, parent_state=None
+) -> tuple:
+    """(kept, changed, new form copies). The walk mirrors the analysis walk's
+    show-op counting exactly, so a target id addresses the run the analysis
+    named."""
+    state = _child_state(base_ctm, parent_state)
+    kept: list = []
+    changed = False
+    new_forms: dict = {}
+    replaced: set = set()
+    taken = {str(k) for k in (resources.get("/XObject") or {}).keys()} if resources else set()
+
+    for instruction in instructions:
+        operator = str(instruction.operator)
+        operands = list(instruction.operands)
+
+        if state.feed(operator, operands):
+            kept.append(instruction)
+            continue
+
+        if operator in SHOW_OPS:
+            if operator in ("'", '"'):
+                state.next_line()
+                if operator == '"' and len(operands) >= 2:
+                    try:
+                        state.word_spacing = float(operands[0])
+                        state.char_spacing = float(operands[1])
+                    except (TypeError, ValueError):
+                        pass
+            cap = removal.fonts.capability(resources, fallback, state.font_name)
+            data = show_bytes(operator, operands)
+            if measurable(cap, data):
+                _text, raw_width = _run_metrics(operator, operands, cap, state)
+            else:
+                raw_width = wide_width(operator, operands, cap, state)
+            if removal.index in removal.targets:
+                kept.extend(_remove_show(operator, operands, cap, state, removal))
+                removal.removed += 1
+                changed = True
+            else:
+                kept.append(instruction)
+            removal.index += 1
+            state.advance_after_show(raw_width, bool(cap is not None and cap.writes_vertical))
+            continue
+
+        if operator == "Do":
+            name = str(operands[0]) if operands else None
+            xobj = _lookup_xobject(name, resources, fallback)
+            if (
+                xobj is not None
+                and str(xobj.get("/Subtype", "")) == "/Form"
+                and depth < MAX_FORM_DEPTH
+            ):
+                form_matrix = as_matrix(xobj.get("/Matrix")) or IDENTITY
+                form_res = xobj.get("/Resources")
+                read_res = form_res if form_res is not None else resources
+                inner, inner_changed, inner_forms = _rewrite_runs(
+                    pdf,
+                    pikepdf.parse_content_stream(xobj),
+                    read_res,
+                    resources,
+                    mat_mult(form_matrix, state.ctm),
+                    depth + 1,
+                    removal,
+                    parent_state=state,
+                )
+                if inner_changed:
+                    changed = True
+                    # A COPY per placement: the same form can be drawn twice,
+                    # and a run hidden at one placement is not hidden at the
+                    # other. Rewriting the original would remove both.
+                    copy = pdf.make_stream(pikepdf.unparse_content_stream(inner))
+                    for key in xobj.keys():
+                        if key in ("/Length", "/Filter", "/DecodeParms", "/Resources"):
+                            continue
+                        copy[key] = xobj[key]
+                    copy_res = _copy_resources_for_write(pdf, read_res)
+                    for nested_name, nested in inner_forms.items():
+                        copy_res["/XObject"][Name(nested_name)] = nested
+                    copy["/Resources"] = copy_res
+                    fresh = removal.fresh_name(taken)
+                    new_forms[fresh] = copy
+                    if name:
+                        replaced.add(name)
+                    kept.append(
+                        pikepdf.ContentStreamInstruction(
+                            [Name(fresh)], pikepdf.Operator("Do")
+                        )
+                    )
+                    continue
+            kept.append(instruction)
+            continue
+
+        kept.append(instruction)
+    if replaced and isinstance(resources, pikepdf.Dictionary):
+        _drop_replaced_forms(resources.get("/XObject"), _referenced_xobject_names(kept), replaced)
+    return kept, changed, new_forms
+
+
+def remove_runs(pdf, page, targets: set) -> int:
+    """Remove the named runs from one page, leaving every surviving glyph where
+    it was."""
+    resources = _resolve_resources(page)
+    removal = _Removal(targets)
+    kept, changed, new_forms = _rewrite_runs(
+        pdf, pikepdf.parse_content_stream(page), resources, None, IDENTITY, 0, removal
+    )
+    if not changed:
+        return 0
+    if new_forms:
+        table = resources.get("/XObject")
+        if table is None:
+            table = pikepdf.Dictionary()
+            resources["/XObject"] = table
+        for name, stream in new_forms.items():
+            table[Name(name)] = stream
+    page.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+    return removal.removed
 
 
 def drop_optional_content_groups(pdf, off_set: set) -> int:
