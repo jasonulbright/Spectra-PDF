@@ -4,16 +4,22 @@ actual content stream, then paint a black box over it — not just an overlay.
 Approach (per page, per requested region):
   1. Walk the page's content stream, tracking the graphics state (CTM via
      q/Q/cm) and text state (Tm/Td/TD/T*/TL/Tf via BT..ET) closely enough to
-     compute an approximate axis-aligned bounding box for every text-showing
-     operator (Tj/TJ/'/") and every directly-placed raster image (Do).
-     Text width is estimated the same way the frontend's own annotation
-     appearance-stream writer does (~0.5em average advance) — pikepdf has no
-     font-metrics API, and exact glyph widths aren't needed for redaction:
-     over-including a sliver of intersecting text and dropping the whole
-     instruction is the SAFE direction here (a false negative — text that
-     should have been redacted but wasn't — is the dangerous failure mode
-     for a redaction tool; a false positive just removes slightly more than
-     asked).
+     compute the axis-aligned bounding box of every text-showing operator
+     (Tj/TJ/'/") and every directly-placed raster image (Do).
+     Text is MEASURED THROUGH ITS FONT (`text_metrics.py`, shared with the
+     text-run lister): real glyph advances plus TJ kerns, Tc, Tw and Tz, and
+     a vertical extent taken from the font's own descriptor. Until F15 slice A
+     this was a flat 0.5 em per BYTE guess, and the guess was a REDACTION
+     FALSE NEGATIVE — on Courier it covered 0.83× the real line, so the last
+     ~9 characters of every line sat outside the box the region was tested
+     against and survived, with `regions_applied: 1` reported as success.
+     Its mirror was over-removal: a 2-byte CID run estimated 2.00× too wide,
+     so a mark 10 pt clear of a CJK column deleted it. Both are measured in
+     `text_metrics.py`'s docstring. Where the font CANNOT measure a run
+     (no font resolvable, a refused capability, or a code whose advance is
+     only a placeholder) the bbox falls WIDE — 1 em per code — because
+     over-removal is the tolerable error for a redaction tool and a narrow
+     guess is not.
   2. Any instruction whose bbox intersects ANY requested region on that page
      is dropped entirely from the rebuilt stream (not blanked, not made
      invisible — removed from the instruction list that gets re-serialized).
@@ -35,10 +41,12 @@ Approach (per page, per requested region):
      just invisible but genuinely absent from the saved file.
 
 Remaining limitations (documented; over-redaction, never under-redaction):
-  - Word/char spacing (Tw/Tc) and exact glyph widths are not modeled in the
-    width estimate — they only ever make real advances SMALLER than the ~0.5em
-    heuristic, so omitting them errs wide (the safe direction). Horizontal
-    scaling (Tz), which can make text WIDER, IS folded into the bbox.
+  - A glyph's bbox is its ADVANCE box. Ink can overhang the advance by a side
+    bearing (an italic `f`, a swash), so a region touching ONLY that overhang
+    and no part of the advance box does not remove the glyph. Bounding each
+    glyph by the font's /FontBBox instead would be exact and useless — for
+    Helvetica that box is 1.166 em wide, four times the advance of an `i`, so
+    every mark would take several neighbouring glyphs with it.
   - Form-XObject recursion is depth-capped (MAX_FORM_DEPTH). Beyond the cap an
     intersecting `Do` is DROPPED WHOLE (over-redaction, safe) rather than left
     intact. Only reachable on pathological/cyclic nesting; real documents do
@@ -66,10 +74,14 @@ from engine.content_walk import (
     mat_mult,
     transform_point,
 )
-
-# Rough Helvetica-ish average glyph advance, matching the heuristic already
-# used for wrapping freetext/stamp appearance text in the frontend builder.
-AVG_CHAR_ADVANCE_EM = 0.5
+from engine.text_metrics import (
+    _child_state,
+    _FontCache,
+    _run_metrics,
+    measurable,
+    show_bytes,
+    wide_width,
+)
 
 # Depth cap for Form-XObject recursion — only there to terminate on malformed
 # cyclic forms; real documents never approach it.
@@ -96,21 +108,6 @@ def _intersects(a: Rect, b: Rect) -> bool:
 
 def _intersects_any(bbox: Rect, regions: list[Rect]) -> bool:
     return any(_intersects(bbox, r) for r in regions)
-
-
-def _text_show_strings(operator: str, operands: list) -> list[str]:
-    """Extract the literal string operands of a text-showing operator, for a
-    rough width estimate. TJ's array mixes strings and numeric kerning."""
-    if operator in ("Tj", "'", '"'):
-        return [str(operands[-1])] if operands else []
-    if operator == "TJ":
-        arr = operands[0] if operands else []
-        try:
-            return [str(el) for el in arr if not isinstance(el, (int, float))]
-        except TypeError:
-            # Malformed TJ (operand not an array) — treat as zero-width.
-            return []
-    return []
 
 
 def _lookup_xobject(name, resources, fallback_resources):
@@ -142,6 +139,41 @@ def _resolve_resources(page: "pikepdf.Page"):
     pdf_tree.walk_inheritable."""
     resources = walk_inheritable(page, "/Resources")
     return resources if resources is not None else {}
+
+
+def _run_bbox(
+    combined: Matrix,
+    raw_width: float,
+    slack: float,
+    vertical: bool,
+    state: GraphicsTextState,
+    ink: tuple[float, float],
+) -> Rect:
+    """The device-space box of one show operator's INK (F15-A).
+
+    Horizontal: the pen sweeps `raw_width × Tz` forward from the origin, and
+    the ink reaches `below` under the baseline and `above` over it — the
+    font's own descent/ascent, not the em box. `Ts` (rise) lifts the whole
+    run. `slack` grows the box BACKWARD by however far an earlier unmeasurable
+    run on this line may have over-advanced.
+
+    Vertical (9.B4a): the run occupies one em-wide column centred on the pen
+    and spans its advance sum DOWNWARD, the lister's convention; Tz never
+    applies vertically, and the slack grows the column UPWARD.
+    """
+    below, above = ink
+    size = max(state.font_size, 0.01)
+    if vertical:
+        half = size / 2.0
+        return _bbox_of_corners_under_matrix(
+            combined, -half, -max(raw_width, 0.01), half, slack
+        )
+    x1 = max(raw_width * state.h_scale, 0.01)
+    y0 = state.rise - below * size
+    y1 = state.rise + above * size
+    if y1 - y0 < 0.01:
+        y1 = y0 + 0.01
+    return _bbox_of_corners_under_matrix(combined, -slack, y0, x1, y1)
 
 
 class WalkResult(NamedTuple):
@@ -181,27 +213,27 @@ def _walk(
     base_ctm: Matrix,
     depth: int,
     name_counter: list,
-    base_font_size: float = 12.0,
-    base_leading: float = 0.0,
-    base_h_scale: float = 1.0,
+    fonts: "_FontCache",
+    parent_state: "GraphicsTextState | None" = None,
     fallback_resources=None,
 ) -> WalkResult:
     """Redact one content-stream instruction list, recursing into Form
     XObjects. `base_ctm` is the device CTM in effect at the start of this
     stream (IDENTITY for a page; form-matrix∘Do-CTM for a form), so every
     computed bbox is in page/device space where `regions` live.
-    `base_font_size`/`base_leading`/`base_h_scale` are the text-state values in
-    effect at the invoking `Do` (text state is part of the graphics state a
-    form inherits). `fallback_resources` are the invoker's resources, consulted
-    for an XObject name a form's own /Resources omits (a lenient per-name
-    fallback)."""
+    `parent_state` is the text state in effect at the invoking `Do` (text
+    state — font, size, leading, Tz, Tc/Tw, Ts — is part of the graphics state
+    a form inherits; `_child_state` is the shared inheritance rule the lister
+    uses). `fonts` is the per-call capability cache; `fallback_resources` are
+    the invoker's resources, consulted for an XObject name a form's own
+    /Resources omits (a lenient per-name fallback)."""
     # The state machine moved to content_walk.GraphicsTextState at 7.2 (the
     # one-interpreter consolidation): q/Q save/restore CTM AND text-state
     # parameters — all elements of the graphics state per the PDF spec;
     # restoring only the CTM left a stale font size after `q .. Tf .. Q`,
     # under-sizing a later bbox → an under-redaction leak (that comment and
     # its fix now live in the shared machine).
-    state = GraphicsTextState(base_ctm, base_font_size, base_leading, base_h_scale)
+    state = _child_state(base_ctm, parent_state)
 
     # ── clip tracking (for `sh`) ──────────────────────────────────────────
     # `sh` paints a shading across the CURRENT CLIP, so bounding it needs the
@@ -217,6 +249,17 @@ def _walk(
     # whole page, so it genuinely covers any region and MUST go — correctness,
     # not over-removal.
     clips = ClipTracker()
+
+    # F15-A: how far the pen position may LAG what we have tracked, in scaled
+    # text-space units, accumulated since the last repositioning operator.
+    # A run whose font cannot measure it advances the text matrix by the WIDE
+    # estimate, so everything after it on the same line may really sit up to
+    # that much to the LEFT of where the walk thinks. Rather than pretend, the
+    # following runs' boxes are grown leftward by the accumulated slack — the
+    # same fail-wide direction as the width itself. Any operator that re-anchors
+    # the pen (Td/TD/Tm/T*/BT/'/") clears it, because the position then comes
+    # from the line matrix rather than from an accumulated advance.
+    slack = 0.0
 
     kept: list = []
     text_runs_removed = 0
@@ -238,6 +281,9 @@ def _walk(
         # save/restore the clip, W/W* arm it until the path-ending op.
         clips.feed(operator, operands, state.ctm)
 
+        if operator in ("Td", "TD", "Tm", "T*", "BT", "ET"):
+            slack = 0.0
+
         if state.feed(operator, operands):
             kept.append(instruction)
         elif operator == "sh":
@@ -248,19 +294,33 @@ def _walk(
             else:
                 kept.append(instruction)
         elif operator in ("Tj", "'", '"', "TJ"):
-            # ' and " implicitly advance to the next line BEFORE showing.
+            # ' and " implicitly advance to the next line BEFORE showing, and
+            # " sets Tw/Tc BEFORE showing — both affect this run's own width.
             if operator in ("'", '"'):
                 state.next_line()
-            strings = _text_show_strings(operator, operands)
-            raw_width = sum(len(s) for s in strings) * state.font_size * AVG_CHAR_ADVANCE_EM
-            # Tz>100 (expanded text) makes the real rendered width WIDER than the
-            # flat 0.5em estimate — fold it into the bbox so we still err wide
-            # (Tz<100 only shrinks real glyphs, which the estimate already
-            # over-covers, so never scale the bbox DOWN). The tm advance uses
-            # the actual scale so subsequent runs stay positioned correctly.
-            bbox_width = raw_width * max(state.h_scale, 1.0)
+                slack = 0.0
+                if operator == '"' and len(operands) >= 2:
+                    try:
+                        state.word_spacing = float(operands[0])
+                        state.char_spacing = float(operands[1])
+                    except (TypeError, ValueError):
+                        pass
+            cap = fonts.capability(resources, fallback_resources, state.font_name)
+            data = show_bytes(operator, operands)
+            measured = measurable(cap, data)
+            if measured:
+                _text, raw_width = _run_metrics(operator, operands, cap, state)
+            else:
+                raw_width = wide_width(operator, operands, cap, state)
+            # `writes_vertical`, not `vertical`: a REFUSED Identity-V font
+            # still draws its column downward, and measuring it on the
+            # horizontal axis would leave that column unprotected.
+            vertical = bool(cap is not None and cap.writes_vertical)
             combined = _mat_mult(state.tm, state.ctm)
-            bbox = _bbox_of_rect_under_matrix(combined, max(bbox_width, 0.01), max(state.font_size, 0.01))
+            bbox = _run_bbox(
+                combined, raw_width, slack, vertical, state,
+                fonts.ink_extent(resources, fallback_resources, state.font_name),
+            )
             if _intersects_any(bbox, regions):
                 text_runs_removed += 1
             else:
@@ -268,7 +328,9 @@ def _walk(
             # Advance the text matrix so subsequent same-line Tj/TJ calls
             # (common when a generator emits one call per word/run) don't
             # all collapse onto the same origin point.
-            state.advance_after_show(raw_width)
+            state.advance_after_show(raw_width, vertical)
+            if not measured:
+                slack += raw_width if vertical else raw_width * state.h_scale
         elif operator == "INLINE IMAGE":
             # A BI/ID/EI object draws the unit square under the live CTM
             # exactly as an image `Do` does (page_images.py treats them as
@@ -331,8 +393,8 @@ def _walk(
                         replaced_form_names.add(name)
                 else:
                     copy, sub = _redact_form(
-                        pdf, xobj, resources, regions, form_ctm, depth + 1, name_counter,
-                        state.font_size, state.leading, state.h_scale,
+                        pdf, xobj, resources, regions, form_ctm, depth + 1,
+                        name_counter, fonts, state,
                     )
                     if copy is not None:
                         new_name = _new_form_name(name_counter, taken_names)
@@ -401,11 +463,11 @@ def _copy_resources_for_write(pdf: "pikepdf.Pdf", resources):
     return new
 
 
-def _redact_form(pdf, form, parent_resources, regions, form_ctm, depth, name_counter, font_size=12.0, leading=0.0, h_scale=1.0):
+def _redact_form(pdf, form, parent_resources, regions, form_ctm, depth, name_counter, fonts, parent_state=None):
     """Build a redacted COPY of a Form XObject, or return (None, None) if
     nothing inside it intersects a region (caller then keeps the original Do).
-    `font_size`/`leading`/`h_scale` are the text state active at the invoking
-    Do (forms inherit it). Returns (copy_stream, (text_removed, images_removed))."""
+    `parent_state` is the text state active at the invoking Do (forms inherit
+    it). Returns (copy_stream, (text_removed, images_removed))."""
     form_res = form.get("/Resources")
     read_res = form_res if form_res is not None else parent_resources
     result = _walk(
@@ -416,9 +478,8 @@ def _redact_form(pdf, form, parent_resources, regions, form_ctm, depth, name_cou
         form_ctm,
         depth,
         name_counter,
-        base_font_size=font_size,
-        base_leading=leading,
-        base_h_scale=h_scale,
+        fonts,
+        parent_state=parent_state,
         fallback_resources=parent_resources,
     )
     if (
@@ -577,7 +638,10 @@ def _strip_annotations(page: "pikepdf.Page", regions: list[Rect]) -> int:
 def _redact_page(pdf: "pikepdf.Pdf", page: "pikepdf.Page", regions: list[Rect]) -> dict:
     resources = _resolve_resources(page)
     name_counter = [0]
-    result = _walk(pdf, pikepdf.parse_content_stream(page), resources, regions, IDENTITY, 0, name_counter)
+    result = _walk(
+        pdf, pikepdf.parse_content_stream(page), resources, regions, IDENTITY, 0,
+        name_counter, _FontCache(),
+    )
 
     new_bytes = pikepdf.unparse_content_stream(result.kept)
     overlay = b"".join(

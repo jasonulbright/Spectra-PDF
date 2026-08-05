@@ -8,8 +8,16 @@ page_images.py, proven there and pinned here by the same style of tests.
 Listing decodes each run through its font's capability (pdf_fonts.py) and
 computes REAL geometry: glyph advances from the font's widths (+ TJ kern,
 Tc char spacing, Tw word spacing on the single-byte space code, Tz), so
-run rects are accurate and the Δwidth math is honest — unlike redaction's
-deliberately-wide estimate, editing must know actual widths.
+run rects are accurate and the Δwidth math is honest. That measurement now
+lives in `text_metrics.py` and REDACTION calls it too (F15 slice A) — the
+flat-estimate era, when the two walkers disagreed about a run's width, ended
+with a measured false negative; see that module's docstring.
+
+The listing rect stays the EM box (baseline → baseline + font size): it is
+the box the user clicks, and its top/bottom are where a caret belongs. The
+INK box (`text_metrics.ink_extent_em`) is a different question and is what
+redaction tests against — a lister rect misses 2.48 pt of descender at 12 pt
+Helvetica, which is a click-target nicety and a redaction leak.
 
 Replacement (`replace_text_run`) rewrites exactly one show op:
   - the new text re-encoded in the run's own font (ValueError names the
@@ -42,7 +50,6 @@ import pikepdf
 from pikepdf import Dictionary, Name
 
 from engine.content_walk import ClipTracker, GraphicsTextState
-from engine.pdf_fonts import FontCapability, font_capability
 from engine.page_images import (
     _finalize_page_rewrite,
     _fresh_name,
@@ -61,139 +68,25 @@ from engine.redact import (
     _resolve_resources,
 )
 
+# F15 slice A: the measurement half of this module MOVED to text_metrics.py so
+# redaction reads the same advances the lister does — one geometry authority,
+# not two (redact.py's flat 0.5-em-per-byte estimate was a false negative; the
+# module docstring there carries the measurements). Re-exported here because
+# text_paragraphs.py and the pytest suite import these names from this module.
+from engine.text_metrics import (  # noqa: F401  (_operand_bytes is a re-export)
+    _child_state,
+    _FontCache,
+    _lookup_font,
+    _operand_bytes,
+    _run_metrics,
+    _show_segments,
+    _spaces_in,
+)
+
 SHOW_OPS = ("Tj", "'", '"', "TJ")
 
 
-# ── font resolution (cached per call) ─────────────────────────────────────
-
-
-class _FontCache:
-    def __init__(self):
-        self._by_key: dict = {}
-
-    def capability(self, resources, fallback_resources, name) -> FontCapability | None:
-        if not name:
-            return None
-        font_obj = _lookup_font(name, resources, fallback_resources)
-        if font_obj is None:
-            return None
-        # Key on stable identity ONLY. `objgen` is value-based for indirect
-        # fonts; a DIRECT font dict's wrapper is a fresh pikepdf object per
-        # access, so id(font_obj) recycles across GC and served a STALE
-        # OTHER FONT's capability — review-measured at 22.6% wrong lookups
-        # in an alternating-font walk, and on replace it would encode the
-        # user's text with the wrong font's table into the saved file. The
-        # resources dicts are stable Python references for the whole walk
-        # scope, so (resources ids + name) is a sound direct-font key.
-        try:
-            is_indirect = bool(font_obj.is_indirect)
-        except AttributeError:
-            is_indirect = False
-        key = (
-            ("obj", font_obj.objgen)
-            if is_indirect
-            else ("direct", id(resources), id(fallback_resources), str(name))
-        )
-        if key not in self._by_key:
-            try:
-                self._by_key[key] = font_capability(font_obj)
-            except Exception as exc:  # a malformed font dict refuses, never crashes
-                self._by_key[key] = FontCapability(
-                    False, f"unreadable font ({exc})", {}, {}, {}, 500.0, 1
-                )
-        return self._by_key[key]
-
-
-def _lookup_font(name, resources, fallback_resources):
-    for res in (resources, fallback_resources):
-        if res is None:
-            continue
-        fonts = res.get("/Font")
-        if fonts is not None and Name(name) in fonts:
-            return fonts[Name(name)]
-    return None
-
-
-# ── show-op decoding + width ──────────────────────────────────────────────
-
-
-def _operand_bytes(el) -> bytes:
-    try:
-        return bytes(el)
-    except (TypeError, ValueError):
-        return b""
-
-
-def _show_segments(operator: str, operands: list) -> list:
-    """The show op's content as [bytes | float] — strings and (for TJ)
-    kern numbers, in order."""
-    if operator == "TJ":
-        arr = operands[0] if operands else []
-        out: list = []
-        try:
-            for el in arr:
-                try:
-                    out.append(float(el))
-                except (TypeError, ValueError):
-                    out.append(_operand_bytes(el))
-        except TypeError:
-            return []
-        return out
-    return [_operand_bytes(operands[-1])] if operands else []
-
-
-def _spaces_in(data: bytes, cap: FontCapability) -> int:
-    # Tw applies to the SINGLE-BYTE code 32 only (spec) — never CID fonts,
-    # and never a multi-byte code that merely CONTAINS 0x20 (9.T10: a
-    # Shift-JIS trail byte can be 0x20-adjacent, so counting raw bytes would
-    # invent word spacing mid-character).
-    if not cap.single_byte_codes():
-        return 0
-    return data.count(0x20)
-
-
-def _run_metrics(
-    operator: str, operands: list, cap: FontCapability | None, state: GraphicsTextState
-) -> tuple[str, float]:
-    """(decoded_text, raw_width) where raw_width is in TEXT-SPACE units
-    BEFORE Tz (advance_after_show applies h_scale)."""
-    text_parts: list[str] = []
-    width = 0.0
-    for seg in _show_segments(operator, operands):
-        if isinstance(seg, float):
-            width -= seg / 1000.0 * state.font_size
-            continue
-        if cap is not None:
-            text_parts.append(cap.decode(seg))
-            width += cap.decoded_width(seg) / 1000.0 * state.font_size
-            n_codes = cap.code_count(seg)
-            width += state.char_spacing * n_codes
-            width += state.word_spacing * _spaces_in(seg, cap)
-        else:
-            width += len(seg) * state.font_size * 0.5  # redact's estimate
-    return "".join(text_parts), width
-
-
 # ── listing ───────────────────────────────────────────────────────────────
-
-
-def _child_state(base_ctm, parent: GraphicsTextState | None) -> GraphicsTextState:
-    """A form's stream starts with the INVOKING stream's text parameters —
-    font, size, leading, Tz, Tc/Tw (and 7.5's Tr/Ts/colors) are graphics
-    state a form inherits at its Do (the _redact_form rule); tm/tlm reset
-    per stream."""
-    if parent is None:
-        return GraphicsTextState(base_ctm)
-    child = GraphicsTextState(
-        base_ctm, parent.font_size, parent.leading, parent.h_scale, parent.font_name
-    )
-    child.char_spacing = parent.char_spacing
-    child.word_spacing = parent.word_spacing
-    child.render_mode = parent.render_mode
-    child.rise = parent.rise
-    child.fill_color = parent.fill_color
-    child.stroke_color = parent.stroke_color
-    return child
 
 
 def _style_of(state: GraphicsTextState) -> dict:

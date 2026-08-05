@@ -127,6 +127,8 @@ class FontCapability:
         sequences: Optional[dict[str, int]] = None,
         vertical: bool = False,
         code_trie: Optional[dict] = None,
+        default_declared: bool = False,
+        writes_vertical: Optional[bool] = None,
     ):
         self.editable = editable
         self.reason = reason
@@ -134,6 +136,13 @@ class FontCapability:
         self._uni2code = uni2code
         self._widths = widths
         self._default_width = default_width
+        # F15-A: is `default_width` DECLARED by the document, or a placeholder?
+        # A composite font's /DW (default 1000 per spec) genuinely states the
+        # advance of every CID its /W omits, so a code outside /W is measured,
+        # not guessed. The simple/Type3 paths have no such declaration — their
+        # default is the 500 placeholder, and a placeholder that comes out
+        # NARROW is a redaction false negative. `measures()` is the only reader.
+        self._default_declared = default_declared
         self._code_bytes = code_bytes  # 1 (simple) or 2 (Identity-H CID)
         # 9.T10/T11: a VARIABLE-WIDTH codespace, as pdfminer's CMap trie —
         # `{byte: cid | {byte: ...}}`, so a code is 1..4 bytes and its length
@@ -157,7 +166,15 @@ class FontCapability:
         # ARE the vertical advances (|w1y| from /W2//DW2, 1000/em), so
         # char_width/text_width/decoded_width return the vertical advance
         # magnitude unchanged — callers apply the downward direction.
+        # `vertical` describes the GEOMETRY THIS CAPABILITY COMPUTES, so a
+        # refused vertical font reports False (the run listing's documented
+        # contract — the field describes what was actually computed).
+        # `writes_vertical` describes the FONT: a -V encoding writes downward
+        # whether or not its text can be re-entered. F15-A: a walker measuring
+        # INK must ask this one — a refused Identity-V run measured on the
+        # horizontal axis leaves its whole column unprotected.
         self.vertical = vertical
+        self.writes_vertical = vertical if writes_vertical is None else writes_vertical
 
     # -- decode ------------------------------------------------------------
     def decode_units(self, data: bytes) -> list[str]:
@@ -288,13 +305,53 @@ class FontCapability:
             total += self._widths.get(code, self._default_width)
         return total
 
+    def measures(self, data: bytes) -> bool:
+        """True when `decoded_width(data)` is DECLARED rather than defaulted
+        (F15-A). Redaction asks this before trusting a width: the placeholder
+        default is 0.5 em, which is exactly the estimate whose narrowness left
+        the tail of every monospace line unprotected. A composite font's /DW is
+        a real declaration and answers for every code its /W omits; a simple
+        font's placeholder answers for none."""
+        if self._default_declared:
+            return True
+        if not self._widths:
+            return False
+        return all(code in self._widths for code, _n in self.codes(data))
 
-def _refused(reason: str, code_bytes: int = 1) -> FontCapability:
+
+def _refused(
+    reason: str,
+    code_bytes: int = 1,
+    widths: Optional[dict[int, float]] = None,
+    default_width: float = DEFAULT_WIDTH,
+    default_declared: bool = False,
+    writes_vertical: bool = False,
+) -> FontCapability:
     """A non-editable capability. `code_bytes` must still be RIGHT (2 for
     composite fonts): the run LISTER measures refused runs' widths for
     their locked overlays, and 1-byte iteration over 2-byte CIDs doubled
-    every refused-Type0 rect (review-measured)."""
-    return FontCapability(False, reason, {}, {}, {}, DEFAULT_WIDTH, code_bytes)
+    every refused-Type0 rect (review-measured).
+
+    F15-A: the WIDTHS are right too wherever the document declares them.
+    Whether text can be DECODED and how wide it is are independent questions —
+    /Widths and /W//DW state the advance of every code regardless of whether
+    any /ToUnicode names it — and throwing them away meant every refused run
+    measured at the 0.5 em placeholder. For redaction that is the same false
+    negative the flat estimate was (narrow) or its over-removing mirror
+    (2× on an Identity-H subset of Latin glyphs). Callers pass them wherever
+    the codespace is known; where it is not, the placeholder stands and the
+    caller falls wide."""
+    return FontCapability(
+        False,
+        reason,
+        {},
+        {},
+        widths or {},
+        default_width,
+        code_bytes,
+        default_declared=default_declared,
+        writes_vertical=writes_vertical,
+    )
 
 
 def _reverse(code2uni: dict[int, str]) -> dict[str, int]:
@@ -611,21 +668,29 @@ def _program_encoding_map(font_obj) -> tuple[dict[int, str], dict[int, float]]:
     return {}, {}
 
 
+def _declared_simple_widths(font_obj) -> dict[int, float]:
+    """code → advance straight from /Widths + /FirstChar. Needs no encoding,
+    so it is readable even for a font whose text cannot be decoded (F15-A)."""
+    widths: dict[int, float] = {}
+    w = font_obj.get("/Widths")
+    if w is None:
+        return widths
+    try:
+        first = int(font_obj.get("/FirstChar", 0))
+        for offset, val in enumerate(w):
+            try:
+                widths[first + offset] = float(val)
+            except (TypeError, ValueError):
+                continue
+    except (TypeError, ValueError):
+        return {}
+    return widths
+
+
 def _simple_widths(font_obj, code2uni: dict[int, str]) -> tuple[dict[int, float], float]:
     """code → advance for a simple font: /Widths + /FirstChar, else base-14
     AFM metrics via /BaseFont (AFM widths are keyed by unicode CHAR)."""
-    widths: dict[int, float] = {}
-    w = font_obj.get("/Widths")
-    if w is not None:
-        try:
-            first = int(font_obj.get("/FirstChar", 0))
-            for offset, val in enumerate(w):
-                try:
-                    widths[first + offset] = float(val)
-                except (TypeError, ValueError):
-                    continue
-        except (TypeError, ValueError):
-            widths = {}
+    widths = _declared_simple_widths(font_obj)
     if widths:
         return widths, DEFAULT_WIDTH
     base = _strip_subset_prefix(str(font_obj.get("/BaseFont", "")).lstrip("/"))
@@ -905,6 +970,35 @@ def font_capability(font_obj) -> FontCapability:
         # encodings stay refused with a reason.
         named_cmap = None
         vertical = enc.endswith("-V")
+
+        def _refuse_composite(reason: str) -> FontCapability:
+            """A composite refusal carrying whatever the document DECLARES
+            (F15-A). Under Identity-H/V the byte code IS the CID, so /W (or
+            /W2) is code-keyed as it stands and /DW answers for the rest —
+            real advances, available with no /ToUnicode in sight. Under a
+            named CMap the codes would have to be remapped through the whole
+            trie to be code-keyed, which is neither cheap nor needed here, so
+            only the WRITING MODE and the 2-byte codespace ride along and a
+            measuring caller falls wide."""
+            widths_r: dict[int, float] = {}
+            default_r = DEFAULT_WIDTH
+            declared_r = False
+            descendants_r = font_obj.get("/DescendantFonts")
+            if named_cmap is None and descendants_r is not None and len(descendants_r) > 0:
+                if vertical:
+                    widths_r, default_r = _cid_vertical_advances(descendants_r[0])
+                else:
+                    widths_r, default_r = _cid_widths(descendants_r[0])
+                declared_r = True
+            return _refused(
+                reason,
+                code_bytes=2,
+                widths=widths_r,
+                default_width=default_r,
+                default_declared=declared_r,
+                writes_vertical=vertical,
+            )
+
         if enc not in ("Identity-H", "Identity-V"):
             # 9.T10/T11: ANY predefined CMap the bundled tables carry, not
             # just the -UCS2- family. B2 admitted UCS-2 alone because UCS-2
@@ -929,13 +1023,12 @@ def font_capability(font_obj) -> FontCapability:
             # the name's -H/-V suffix (a disagreement is malformed) —
             # for -H names this is B2's is_vertical() gate unchanged.
             if cm is None or getattr(cm, "code2cid", None) is None:
-                return _refused(
-                    f"unsupported composite-font encoding ({enc or 'embedded CMap'})",
-                    code_bytes=2,
+                return _refuse_composite(
+                    f"unsupported composite-font encoding ({enc or 'embedded CMap'})"
                 )
             if cm.is_vertical() != vertical:
-                return _refused(
-                    f"unsupported composite-font encoding ({enc})", code_bytes=2
+                return _refuse_composite(
+                    f"unsupported composite-font encoding ({enc})"
                 )
             named_cmap = cm
         tou = font_obj.get("/ToUnicode")
@@ -961,23 +1054,21 @@ def font_capability(font_obj) -> FontCapability:
                 if vertical:
                     # 9.B4a: the reason keeps naming the vertical class
                     # (the zoo pins the "vertical" substring).
-                    return _refused(
+                    return _refuse_composite(
                         "no ToUnicode map and no recoverable mapping — "
-                        "vertical text cannot be re-entered",
-                        code_bytes=2,
+                        "vertical text cannot be re-entered"
                     )
-                return _refused(
+                return _refuse_composite(
                     "no ToUnicode map and no recoverable mapping — "
-                    "this text cannot be re-entered",
-                    code_bytes=2,
+                    "this text cannot be re-entered"
                 )
         else:
             try:
                 code2uni = _parse_tounicode(tou.read_bytes())
             except Exception:
-                return _refused("unreadable ToUnicode map", code_bytes=2)
+                return _refuse_composite("unreadable ToUnicode map")
             if not code2uni:
-                return _refused("empty ToUnicode map", code_bytes=2)
+                return _refuse_composite("empty ToUnicode map")
         desc_fonts = font_obj.get("/DescendantFonts")
         cid_widths: dict[int, float] = {}
         default = 1000.0
@@ -1017,6 +1108,9 @@ def font_capability(font_obj) -> FontCapability:
             # 9.T10/T11: a named CMap's own code→CID trie IS the codespace.
             # Identity-H/V pass None and keep the fixed 2-byte walk exactly.
             code_trie=getattr(named_cmap, "code2cid", None) if named_cmap else None,
+            # F15-A: /DW (or its spec default of 1000) declares the advance of
+            # every CID /W omits, so this default is measured, not guessed.
+            default_declared=True,
         )
 
     # Simple fonts (Type1, MMType1, TrueType).
@@ -1040,7 +1134,12 @@ def font_capability(font_obj) -> FontCapability:
             # (never accept a font that would decode as garbage).
             derived, program_widths = _program_encoding_map(font_obj)
             if not derived:
-                return _refused("no resolvable encoding (symbolic font without ToUnicode)")
+                # F15-A: /Widths is code-keyed and needs no encoding, so the
+                # advances survive the refusal even though the text does not.
+                return _refused(
+                    "no resolvable encoding (symbolic font without ToUnicode)",
+                    widths=_declared_simple_widths(font_obj),
+                )
             code2uni = derived
     elif tou_map:
         # ToUnicode refines decoding where present (it is authoritative for
