@@ -57,12 +57,12 @@ runs every `specs/*.spec.ts` file.
 
 ## What's covered
 
-> The suite has grown to **61 specs** (`specs/*.spec.ts`, all run by the config).
-> The table below is a hand-maintained sample of the foundational specs and has
-> fallen behind — it does not list 14–61 (content editing, per-span styling,
-> vector graphics, kerning, etc.). Treat `ls specs/` as the source of truth for
-> coverage; this table is orientation, not an inventory. (Flagged in the
-> 2026-07-21 doc review; a full regeneration is roadmap § I doc-hygiene work.)
+> The suite is **122 specs** (`specs/*.spec.ts`, all run by the config). The
+> table below is a hand-maintained sample of the foundational specs and is
+> deliberately partial — it stops at 13 and does not list the later ones
+> (content editing, per-span styling, vector graphics, kerning, and the rest).
+> Treat `ls specs/` as the source of truth for coverage; this table is
+> orientation, not an inventory, and a full regeneration is outstanding work.
 
 | Spec | Verifies |
 |---|---|
