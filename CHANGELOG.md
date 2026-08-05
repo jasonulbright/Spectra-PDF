@@ -93,6 +93,46 @@
   puts it. A header in one script and a footer in another are handled in a
   single pass. Latin stamps are unchanged.
 
+### Creating a PDF
+- **Create PDF now takes Word, Excel, PowerPoint, images and more — not just
+  PostScript.** File ▸ Create PDF opens on a list you build: add Word,
+  OpenDocument, RTF, plain text, CSV, Excel, PowerPoint, HTML, PostScript and
+  EPS files, images in PNG, JPEG, TIFF, BMP, GIF, WebP, JPEG 2000, AVIF and
+  HEIC, PDFs you already have, and blank pages. Reorder them by dragging or
+  with the arrow buttons, remove the ones you did not mean, and convert the
+  whole list into one PDF. Every row shows what it is and how it will be
+  converted before you start, and a file nothing can convert is marked as such
+  instead of being quietly dropped. Dropping any of these onto the window
+  offers to convert them too.
+- **Pages come out the size they should be.** By default every source keeps
+  its own geometry — a photograph keeps its physical size, a presentation
+  keeps its widescreen slides, a spreadsheet keeps its printing setup. Or
+  choose a paper size (Letter, Legal, Tabloid, A3, A4, A5) with an
+  orientation and a margin, and every page is placed on it, centred, at its
+  original proportions. Nothing is ever stretched, and form fields, links and
+  bookmarks survive the change.
+- **Scanned images become correctly sized pages.** A 300-dpi scan of a letter
+  becomes a letter-sized page rather than a page two feet tall, because the
+  image's own resolution is read and used.
+- **Every page of a multi-page TIFF is now kept.** A fax or a departmental
+  scanner writes several pages into one TIFF file, and until now everything
+  after the first page was silently discarded — both here and in Batch OCR,
+  where a three-page fax was recognised as one page and filed as complete.
+  Every frame is now its own page, at its own size.
+- **HEIC photos can be turned into PDFs.** The format phones use by default is
+  now read directly, along with WebP, JPEG 2000 and AVIF.
+- **Converted documents never reach the network.** A Word or HTML file can
+  reference an image on a web server, and converting one used to fetch it —
+  which let a document somebody sent you signal that you had opened it.
+  Conversion is now sealed off from the network entirely, and macros are never
+  run.
+- **A converted document says when a font was missing.** If the original asks
+  for a typeface this machine does not have, the substitution is named in the
+  result rather than left to be discovered as a layout that moved.
+- **A conversion that produces nothing now says so.** An empty or damaged
+  Office file used to convert "successfully" into a meaningless one-page
+  document. Every conversion is now checked by reading what was produced.
+
 ## 1.0.19 — Vertical writing, scans that shrink, and seven languages
 
 Text set in columns finishes the job it started. Mongolian — and the Todo,

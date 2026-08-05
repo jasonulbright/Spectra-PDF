@@ -64,6 +64,11 @@ const notCatalog = (text: string): boolean => {
   if (!/[A-Za-z]/.test(text)) return true;
   // Document content the fixtures put on screen.
   if (/sample|\.pdf|\.json|Untitled/i.test(text)) return true;
+  // A FILE PATH is content, whatever it ends in. Create PDF's source rows
+  // carry the full path as their `title`, and those sources are deliberately
+  // not PDFs — so the rule has to be about being a path, not about which
+  // extensions the fixtures happen to use.
+  if (/^[A-Za-z]:[\\/]/.test(text) || /^[\\/]{1,2}[^\\/]/.test(text)) return true;
   // A colour VALUE: a swatch's tooltip is its own hex.
   if (/^#[0-9a-f]{3,8}$/i.test(text)) return true;
   const exact = new Set([
@@ -340,6 +345,39 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       });
       await sweep('[data-testid="properties-dialog"]', leaks);
       await $('[data-testid="props-close"]').click();
+
+      // ── DIALOG 3: Create PDF (P22). 33 new strings in one dialog, and two
+      // of its surfaces only exist once the LIST does — the per-row kind
+      // badge and the unsupported-row message. So the empty state is swept
+      // first, then rows are injected through the harness (a refused source,
+      // which leaves the rows on screen) and it is swept again.
+      expect(await invokeAppCommand('file.createPdf')).toBe(true);
+      await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({
+        timeout: 10_000,
+        timeoutMsg: 'the Create PDF dialog never opened',
+      });
+      await $('[data-testid="create-pdf-empty"]').waitForDisplayed({ timeout: 10_000 });
+      await sweep('[data-testid="create-pdf-dialog"]', leaks);
+
+      // Scratch inside the app's static fs scope ($TEMP/spectrapdf/**) — the
+      // harness injects the path without a native dialog, so the runtime
+      // scope extension a real pick gets never runs for it.
+      const scoped = resolve(tmpdir(), 'spectrapdf');
+      mkdirSync(scoped, { recursive: true });
+      const bogus = resolve(mkdtempSync(resolve(scoped, 'e2e-createpdf-')), 'thing.zip');
+      writeFileSync(bogus, Buffer.from('PKnot a document'));
+      await browser.executeAsync<null, [string[], string]>(
+        function (srcs, out, done) {
+          (window as any).__SPECTRA_TEST__.createPdfRun(srcs, out)
+            .then(() => done(null))
+            .catch(() => done(null));
+        },
+        [bogus, SAMPLE_PDF],
+        resolve(mkdtempSync(resolve(tmpdir(), 'spectrapdf', 'e2e-createpdf-out-')), 'never.pdf'),
+      );
+      await $('[data-testid="create-pdf-unsupported"]').waitForDisplayed({ timeout: 15_000 });
+      await sweep('[data-testid="create-pdf-dialog"]', leaks);
+      await $('[data-testid="create-pdf-close"]').click();
 
       expect(leaks).toEqual([]);
     } finally {
