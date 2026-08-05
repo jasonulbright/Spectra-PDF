@@ -25,8 +25,11 @@ skipped: a sweep whose purpose is to say what is in a file may not pass
 silently over a structure it failed to parse.
 """
 
+from pathlib import Path
+
 import pikepdf
 
+from engine.inplace import finish_staged, is_same_file, staging_target
 from engine.sanitize_content import analyze_page, off_ocg_set
 
 # Every category, in report order. `signatures` is reported and never removed.
@@ -49,6 +52,12 @@ CATEGORY_IDS = (
 
 # Categories a sanitize pass will not remove however they are selected.
 UNREMOVABLE = frozenset({"signatures"})
+
+# Categories a full save clears on its own: writing one revision is what drops
+# the earlier ones, and a writer will not emit an object the trailer cannot
+# reach. They are still selected explicitly and still counted, because a
+# report that omits a class it silently fixed is a report nobody can check.
+FREE_FROM_SAVE = frozenset({"prior_revisions", "unreferenced_objects"})
 
 # Categories that cost the document something a reader may want, so no surface
 # offers them pre-selected.
@@ -767,3 +776,320 @@ def audit_hidden_information(file: str, pages="all", deep_text: bool = True) -> 
             "pages": len(pdf.pages),
             "unreadable": report.unreadable,
         }
+
+
+# ── removers ──────────────────────────────────────────────────────────────
+
+
+def _remove_metadata(pdf) -> int:
+    """Every metadata surface, not only the two a docinfo sweep reaches.
+
+    The document identifier is deliberately DELETED rather than cleared: a
+    writer mints a fresh pair when the trailer carries none, so the identifier
+    the file arrived with stops being in it. Clearing the XMP packet instead of
+    deleting it leaves a packet behind, which is what makes a second audit
+    still report the surface.
+    """
+    removed = 0
+    info = pdf.trailer.get("/Info")
+    if isinstance(info, pikepdf.Dictionary) and len(info.keys()):
+        removed += 1
+    if "/Info" in pdf.trailer:
+        del pdf.trailer["/Info"]
+    for key in ("/Metadata", "/PieceInfo"):
+        if key in pdf.Root:
+            del pdf.Root[key]
+            removed += 1
+    for page in pdf.pages:
+        for key in ("/Metadata", "/PieceInfo"):
+            if key in page.obj:
+                del page.obj[key]
+                removed += 1
+    if "/ID" in pdf.trailer:
+        del pdf.trailer["/ID"]
+    return removed
+
+
+def _remove_embedded_files(pdf) -> int:
+    """Both reachability routes in one pass. An embedded file reached through
+    an annotation is not in the name tree, so dropping the tree alone leaves
+    the payload in the file."""
+    specs = _filespec_routes(pdf, list(range(1, len(pdf.pages) + 1)))
+    names = pdf.Root.get("/Names")
+    if isinstance(names, pikepdf.Dictionary) and "/EmbeddedFiles" in names:
+        del names["/EmbeddedFiles"]
+        if not len(names.keys()):
+            del pdf.Root["/Names"]
+    if "/Collection" in pdf.Root:
+        del pdf.Root["/Collection"]
+    for page in pdf.pages:
+        annots = page.obj.get("/Annots")
+        if not isinstance(annots, pikepdf.Array):
+            continue
+        kept = [
+            a
+            for a in annots
+            if not (
+                isinstance(a, pikepdf.Dictionary)
+                and (a.get("/FS") is not None or a.get("/RichMediaContent") is not None)
+            )
+        ]
+        _write_annots(page, kept)
+    return len(specs)
+
+
+def _write_annots(page, kept: list) -> None:
+    if kept:
+        page.obj["/Annots"] = pikepdf.Array(kept)
+    elif "/Annots" in page.obj:
+        del page.obj["/Annots"]
+
+
+def _remove_bookmarks(pdf) -> int:
+    removed = len(_outline_rows(pdf))
+    if "/Outlines" in pdf.Root:
+        del pdf.Root["/Outlines"]
+    return removed
+
+
+def _remove_comments(pdf) -> int:
+    sweep = MARKUP_SUBTYPES | {"/Popup"}
+    removed = 0
+    for page in pdf.pages:
+        annots = page.obj.get("/Annots")
+        if not isinstance(annots, pikepdf.Array):
+            continue
+        kept = []
+        for annot in annots:
+            subtype = (
+                str(annot.get("/Subtype", "")) if isinstance(annot, pikepdf.Dictionary) else ""
+            )
+            if subtype in sweep:
+                removed += 1
+                continue
+            kept.append(annot)
+        _write_annots(page, kept)
+    return removed
+
+
+def _remove_form_fields(pdf, mode: str) -> int:
+    from engine.forms import _flatten_fields
+
+    removed = len(_field_rows(_acroform(pdf)))
+    if mode == "flatten":
+        _flatten_fields(pdf)
+        return removed
+    for page in pdf.pages:
+        annots = page.obj.get("/Annots")
+        if not isinstance(annots, pikepdf.Array):
+            continue
+        kept = [
+            a
+            for a in annots
+            if not (
+                isinstance(a, pikepdf.Dictionary) and str(a.get("/Subtype", "")) == "/Widget"
+            )
+        ]
+        _write_annots(page, kept)
+    if "/AcroForm" in pdf.Root:
+        del pdf.Root["/AcroForm"]
+    return removed
+
+
+def _remove_document_scripts(pdf) -> int:
+    """The catalog's named script tree. The other four script sites are
+    action dictionaries and are swept with them."""
+    names = pdf.Root.get("/Names")
+    if not isinstance(names, pikepdf.Dictionary):
+        return 0
+    tree = names.get("/JavaScript")
+    if not isinstance(tree, pikepdf.Dictionary):
+        return 0
+    removed = sum(1 for _n, action in pikepdf.NameTree(tree).items() if _is_js_action(action))
+    del names["/JavaScript"]
+    if not len(names.keys()):
+        del pdf.Root["/Names"]
+    return removed
+
+
+def _remove_links(pdf) -> int:
+    removed = 0
+    for page in pdf.pages:
+        annots = page.obj.get("/Annots")
+        if not isinstance(annots, pikepdf.Array):
+            continue
+        kept = []
+        for annot in annots:
+            if isinstance(annot, pikepdf.Dictionary) and str(annot.get("/Subtype", "")) == "/Link":
+                removed += 1
+                continue
+            kept.append(annot)
+        _write_annots(page, kept)
+    return removed
+
+
+def _remove_thumbnails(pdf) -> int:
+    removed = 0
+    for page in pdf.pages:
+        if "/Thumb" in page.obj:
+            del page.obj["/Thumb"]
+            removed += 1
+    return removed
+
+
+def _remove_attached_structure(pdf) -> int:
+    removed = 0
+    for key in ("/StructTreeRoot", "/Lang"):
+        if key in pdf.Root:
+            del pdf.Root[key]
+            removed += 1
+    threads = pdf.Root.get("/Threads")
+    if isinstance(threads, pikepdf.Array):
+        removed += len(threads)
+        del pdf.Root["/Threads"]
+    if "/MarkInfo" in pdf.Root:
+        del pdf.Root["/MarkInfo"]
+    for page in pdf.pages:
+        if "/StructParents" in page.obj:
+            del page.obj["/StructParents"]
+        annots = page.obj.get("/Annots")
+        if not isinstance(annots, pikepdf.Array):
+            continue
+        for annot in annots:
+            if isinstance(annot, pikepdf.Dictionary) and "/StructParent" in annot:
+                del annot["/StructParent"]
+    return removed
+
+
+# One remover per category, keyed by the id the audit reports. A category with
+# no entry here is one whose removal does not exist, and looking it up fails
+# rather than reporting a removal that never happened.
+REMOVERS = {
+    "metadata": lambda pdf, audit, options: _remove_metadata(pdf),
+    "embedded_files": lambda pdf, audit, options: _remove_embedded_files(pdf),
+    "bookmarks": lambda pdf, audit, options: _remove_bookmarks(pdf),
+    "comments": lambda pdf, audit, options: _remove_comments(pdf),
+    "form_fields": lambda pdf, audit, options: _remove_form_fields(
+        pdf, options["form_fields_mode"]
+    ),
+    "javascript": lambda pdf, audit, options: _remove_document_scripts(pdf),
+    "links_and_actions": lambda pdf, audit, options: _remove_links(pdf),
+    "thumbnails": lambda pdf, audit, options: _remove_thumbnails(pdf),
+    "attached_structure": lambda pdf, audit, options: _remove_attached_structure(pdf),
+}
+
+
+# ── the sanitize door ─────────────────────────────────────────────────────
+
+
+def _selection(categories) -> list:
+    if not categories:
+        raise ValueError(
+            "Choose at least one category to remove — sanitize never removes "
+            "everything by default."
+        )
+    chosen = []
+    for entry in categories:
+        name = str(entry)
+        if name not in CATEGORY_IDS:
+            raise ValueError(
+                f"Unknown category {name!r}. The categories are: {', '.join(CATEGORY_IDS)}."
+            )
+        if name in UNREMOVABLE:
+            raise ValueError(
+                f"{name} is reported and never removed — take it out of the selection."
+            )
+        if name not in chosen:
+            chosen.append(name)
+    return chosen
+
+
+def _refuse_unreadable(audit: dict) -> None:
+    """A sweep whose purpose is to say what is in a file may not pass silently
+    over a structure it failed to parse. The two messages are separate rather
+    than one message with an optional fragment: adjacent placeholders cannot be
+    told apart when the refusal is matched back to its catalog entry."""
+    for entry in audit["unreadable"]:
+        if entry.get("page"):
+            raise ValueError(
+                f"The audit could not read {entry['category']} on page {entry['page']}, "
+                f"so this document cannot be sanitized: {entry['reason']}"
+            )
+        raise ValueError(
+            f"The audit could not read {entry['category']}, so this document cannot "
+            f"be sanitized: {entry['reason']}"
+        )
+
+
+def sanitize_pdf(
+    file: str,
+    output: str,
+    categories: list | None = None,
+    form_fields_mode: str = "remove",
+    hidden_text_ocr: bool = False,
+) -> dict:
+    """Remove exactly the selected categories and write the result.
+
+    Scope is the whole document. Sanitize is a document-level guarantee, and a
+    per-page sweep would produce a file the user believes is clean and is not.
+
+    The save is an ordinary FULL save, never an incremental append: collapsing
+    prior revisions is what removes content the newest revision deleted, and an
+    append would add a revision instead of dropping one. On a signed document
+    that invalidates the signatures, which is why the surfaces warn first.
+
+    Args:
+        file: Input PDF path.
+        output: Output PDF path (may equal `file`).
+        categories: The category ids to remove. Never defaulted.
+        form_fields_mode: "remove" drops the fields outright; "flatten" bakes
+            their appearances into the page first, keeping the look.
+        hidden_text_ocr: Also remove invisible text that is a recognition
+            layer. Off by default: removing it makes a scan unsearchable.
+    """
+    chosen = _selection(categories)
+    if form_fields_mode not in ("remove", "flatten"):
+        raise ValueError("form_fields_mode must be 'remove' or 'flatten'.")
+
+    before = audit_hidden_information(file)
+    _refuse_unreadable(before)
+    counts = {row["id"]: row["count"] for row in before["categories"]}
+    fields_row = next(r for r in before["categories"] if r["id"] == "form_fields")
+    if "form_fields" in chosen and fields_row.get("xfa"):
+        raise ValueError(
+            "This document contains an XML form (XFA). Removing its fields would leave "
+            "the XFA packet describing a form the document no longer has, so form_fields "
+            "cannot be sanitized here. Flatten the form with another tool first."
+        )
+
+    output_path = Path(output)
+    same_file = is_same_file(file, output)
+    removed = {cid: 0 for cid in CATEGORY_IDS}
+
+    options = {"form_fields_mode": form_fields_mode, "hidden_text_ocr": bool(hidden_text_ocr)}
+    with pikepdf.open(file) as pdf:
+        for category in chosen:
+            if category in FREE_FROM_SAVE:
+                removed[category] = counts[category]
+                continue
+            removed[category] = REMOVERS[category](pdf, before, options)
+
+        if same_file:
+            staged = staging_target(output_path)
+            pdf.save(staged)
+        else:
+            pdf.save(output_path)
+    if same_file:
+        finish_staged(staged, output_path)
+
+    return {
+        "output": str(output_path),
+        "selected": chosen,
+        "form_fields_mode": form_fields_mode,
+        "hidden_text_ocr": bool(hidden_text_ocr),
+        "categories": [
+            {"id": cid, "removed": removed[cid], "selected": cid in chosen}
+            for cid in CATEGORY_IDS
+        ],
+        "signatures_invalidated": before["signatures"]["count"] > 0,
+    }
