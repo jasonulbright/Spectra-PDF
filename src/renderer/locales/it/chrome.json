@@ -43,7 +43,7 @@
   "canvas.addtext.pageGone": "La pagina su cui è stato collocato questo testo non esiste più.",
   "canvas.addtext.pickAStyleFirst": "Scegliere prima una dimensione, un colore o uno stile per il segmento.",
   "canvas.addtext.placeholder": "Digitare il testo da aggiungere…",
-  "canvas.addtext.rotateDegTitle": "Rotazione in gradi — qualsiasi angolo (T19); i quarti di giro mantengono l’impaginazione del senso di lettura",
+  "canvas.addtext.rotateDegTitle": "Rotazione in gradi — qualsiasi angolo; i quarti di giro mantengono l’impaginazione del senso di lettura",
   "canvas.addtext.rotateTitle": "Rotazione — scorre i quarti di giro (il campo accanto accetta qualsiasi angolo)",
   "canvas.addtext.selectTextFirst": "Selezionare prima del testo qui sopra, poi applicare lo stile del segmento.",
   "canvas.addtext.size": "Dimensione",

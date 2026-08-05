@@ -43,7 +43,7 @@
   "canvas.addtext.pageGone": "La página donde se colocó este texto ya no existe.",
   "canvas.addtext.pickAStyleFirst": "Elija primero un tamaño, un color o un estilo para el tramo.",
   "canvas.addtext.placeholder": "Escriba el texto que quiere añadir…",
-  "canvas.addtext.rotateDegTitle": "Rotación en grados: cualquier ángulo (T19); los cuartos de vuelta conservan la disposición según la dirección de lectura",
+  "canvas.addtext.rotateDegTitle": "Rotación en grados: cualquier ángulo; los cuartos de vuelta conservan la disposición según la dirección de lectura",
   "canvas.addtext.rotateTitle": "Rotación: recorre los cuartos de vuelta (el campo de al lado admite cualquier ángulo)",
   "canvas.addtext.selectTextFirst": "Seleccione primero algo de texto arriba y aplique después el estilo del tramo.",
   "canvas.addtext.size": "Tamaño",

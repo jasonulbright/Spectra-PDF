@@ -43,7 +43,7 @@
   "canvas.addtext.pageGone": "The page this text was placed on no longer exists.",
   "canvas.addtext.pickAStyleFirst": "Pick a size, colour, or style for the span first.",
   "canvas.addtext.placeholder": "Type the text to add…",
-  "canvas.addtext.rotateDegTitle": "Rotation in degrees — any angle (T19); quarter turns keep the reading-direction layout",
+  "canvas.addtext.rotateDegTitle": "Rotation in degrees — any angle; quarter turns keep the reading-direction layout",
   "canvas.addtext.rotateTitle": "Rotation — cycle the quarter turns (the field beside takes any angle)",
   "canvas.addtext.selectTextFirst": "Select some text above first, then apply the span style.",
   "canvas.addtext.size": "Size",

@@ -43,7 +43,7 @@
   "canvas.addtext.pageGone": "Die Seite, auf der dieser Text platziert wurde, existiert nicht mehr.",
   "canvas.addtext.pickAStyleFirst": "Wählen Sie zuerst eine Größe, eine Farbe oder einen Stil für den Abschnitt.",
   "canvas.addtext.placeholder": "Geben Sie den hinzuzufügenden Text ein…",
-  "canvas.addtext.rotateDegTitle": "Drehung in Grad – beliebiger Winkel (T19); Vierteldrehungen behalten das Layout der Leserichtung bei",
+  "canvas.addtext.rotateDegTitle": "Drehung in Grad – beliebiger Winkel; Vierteldrehungen behalten das Layout der Leserichtung bei",
   "canvas.addtext.rotateTitle": "Drehung – schaltet durch die Vierteldrehungen (das Feld daneben nimmt jeden Winkel an)",
   "canvas.addtext.selectTextFirst": "Markieren Sie zuerst oben Text und wenden Sie dann den Abschnittsstil an.",
   "canvas.addtext.size": "Größe",
